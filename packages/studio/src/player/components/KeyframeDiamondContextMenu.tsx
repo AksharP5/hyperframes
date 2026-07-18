@@ -7,6 +7,8 @@ import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
 export interface KeyframeDiamondContextMenuState {
   x: number;
   y: number;
+  /** Timeline project session that created this portaled target. */
+  sessionEpoch?: number;
   element: TimelineElement;
   elementId: string;
   percentage: number;
@@ -20,7 +22,9 @@ interface KeyframeDiamondContextMenuProps {
   state: KeyframeDiamondContextMenuState;
   onClose: () => void;
   onDelete: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
-  onDeleteAll: (element: TimelineElement) => void;
+  onDeleteAll: (element: TimelineElement, animationId?: string) => void;
+  onChangeEase?: (elementId: string, percentage: number, ease: string) => void;
+  onCopyProperties?: (elementId: string, percentage: number) => void;
   /** Retime the keyframe to the current playhead, preserving its value + ease. */
   onMoveToPlayhead?: (element: TimelineElement, keyframe: TimelineKeyframeTarget) => void;
 }
@@ -86,7 +90,7 @@ export const KeyframeDiamondContextMenu = memo(function KeyframeDiamondContextMe
         type="button"
         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-neutral-800 cursor-pointer text-left"
         onClick={() => {
-          onDeleteAll(state.element);
+          onDeleteAll(state.element, state.animationId);
           onClose();
         }}
       >
