@@ -110,7 +110,11 @@ export type DragState = {
  * the other, and would strip the animation id the retime/delete mutations use to
  * pick between two animations that collide at one percentage.
  */
-export function keyframeTarget(keyframe: TimelineDiamondKeyframe): TimelineKeyframeTarget {
+export function keyframeTarget(
+  // The identity fields only, so callers holding a narrower keyframe row (the
+  // retime coordinator's) build the same key instead of re-listing the shape.
+  keyframe: Omit<TimelineDiamondKeyframe, "properties">,
+): TimelineKeyframeTarget {
   return {
     percentage: keyframe.percentage,
     tweenPercentage: keyframe.tweenPercentage,
