@@ -408,6 +408,7 @@ export const Timeline = memo(function Timeline({
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
+    handlePointerCancel,
   } = useTimelineRangeSelection({
     scrollRef,
     ppsRef,
@@ -420,10 +421,11 @@ export const Timeline = memo(function Timeline({
     isDragging,
     setShowPopover,
     elementsRef: expandedElementsRef,
-    trackOrderRef,
+    clipIndex,
     rowGeometryRef,
     onSelectElement,
     contentOrigin,
+    sessionEpoch,
   });
   setRangeSelectionRef.current = setRangeSelection; // stable ref consumed by useTimelineClipDrag
 
@@ -491,7 +493,8 @@ export const Timeline = memo(function Timeline({
         }}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onLostPointerCapture={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onLostPointerCapture={handlePointerCancel}
       >
         <TimelineCanvas
           major={major}
