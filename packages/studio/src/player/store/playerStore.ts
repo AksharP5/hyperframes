@@ -3,7 +3,11 @@ import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { BeatEditState } from "../../utils/beatEditing";
 import type { ClipManifestClip } from "../lib/playbackTypes";
-import { readStudioUiPreferences, writeStudioUiPreferences } from "../../utils/studioUiPreferences";
+import {
+  readStudioUiPreferences,
+  writeStudioUiPreferences,
+  type TimelineTimeDisplayMode,
+} from "../../utils/studioUiPreferences";
 import { computePinnedZoomPercent } from "../components/timelineZoom";
 import { createKeyframeSlice, type KeyframeCacheEntry, type KeyframeSlice } from "./keyframeSlice";
 
@@ -156,8 +160,8 @@ interface PlayerState extends KeyframeSlice {
   timelineSnapEnabled: boolean;
   setTimelineSnapEnabled: (enabled: boolean) => void;
   /** Transport + ruler readout: timecode ("time") or frame number ("frame"). */
-  timeDisplayMode: "time" | "frame";
-  setTimeDisplayMode: (mode: "time" | "frame") => void;
+  timeDisplayMode: TimelineTimeDisplayMode;
+  setTimeDisplayMode: (mode: TimelineTimeDisplayMode) => void;
   /**
    * Pin the timeline zoom to its current visual scale before a duration-changing
    * edit, so a subsequent duration change (which recomputes fit-pps) stops

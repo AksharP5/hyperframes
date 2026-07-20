@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { TimelineTheme } from "./timelineTheme";
-import { RULER_H, formatTimelineTickLabel } from "./timelineLayout";
+import { RULER_H } from "./timelineLayout";
+import { formatTimelineTickLabel } from "./timelineRulerGeometry";
 import { usePlayerStore } from "../store/playerStore";
 import { secondsToFrame } from "../lib/time";
 import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
