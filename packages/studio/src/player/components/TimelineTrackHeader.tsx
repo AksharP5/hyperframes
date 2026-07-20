@@ -16,6 +16,7 @@ import {
 } from "./trackHeaderLaneState";
 import { valueReadout } from "./trackHeaderLaneValues";
 import { trackDisplaySuffix } from "./timelineTrackDisplay";
+import { timelineLogicalRowCellId, timelinePropertyRowId } from "./timelineNavigationIdentity";
 
 interface TimelineTrackHeaderProps {
   /** The track's real key: a FRACTIONAL z-order sort value. Routes callbacks;
@@ -221,6 +222,10 @@ function PropertyGroupHeaderRow({
 
   return (
     <div
+      id={timelineLogicalRowCellId(
+        timelinePropertyRowId(expandedElement.key ?? expandedElement.id, lane.group),
+        "header",
+      )}
       data-property-group={lane.group}
       data-timeline-lane-top={getTimelineLaneTop(laneIndex)}
       className="absolute left-0 flex items-center gap-1 overflow-hidden px-1.5 text-[10px] text-white/65"
@@ -314,6 +319,7 @@ export function TimelineTrackHeader({
 
   return (
     <div
+      role="rowheader"
       className={`sticky left-0 z-[12] shrink-0 ${
         !isKeyframeLayer
           ? showTrackLabel

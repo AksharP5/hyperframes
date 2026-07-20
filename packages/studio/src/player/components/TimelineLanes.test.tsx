@@ -26,6 +26,17 @@ afterEach(() => {
 const TRACK_A = 1 / 6;
 const TRACK_B = 0.5;
 
+/** Every string a screen reader or a sighted user actually reads. */
+function visibleText(host: HTMLElement): string {
+  return host.textContent ?? "";
+}
+
+function ariaLabels(host: HTMLElement): string {
+  return Array.from(host.querySelectorAll("[aria-label]"))
+    .map((el) => el.getAttribute("aria-label") ?? "")
+    .join(" ");
+}
+
 function element(id: string, track: number): TimelineElement {
   return { id, label: id, tag: "div", start: 0, duration: 2, track };
 }
@@ -151,7 +162,11 @@ describe("TimelineLanes track numbering", () => {
     });
 
     expect(visibilityLabels(view.host)).toEqual(["Hide track 1", "Hide track 2"]);
-    expect(view.host.innerHTML).not.toContain("0.16666666666666666");
+    // Only what a user reads. The fractional key still identifies the row in
+    // `id` / `data-` attributes, which is exactly where an opaque sort key
+    // belongs.
+    expect(visibleText(view.host)).not.toContain("0.16666666666666666");
+    expect(ariaLabels(view.host)).not.toContain("0.16666666666666666");
     act(() => view.root.unmount());
   });
 
@@ -178,11 +193,12 @@ describe("TimelineLanes track numbering", () => {
       onContextMenuLane,
     });
 
-    // Row children: [sticky header column, time-mapped track content]. The rows
-    // sit inside the lanes list, which is what carries the virtualization
-    // positioning context.
-    const rows = Array.from(view.host.querySelectorAll('[role="listitem"]'));
-    const secondTrackContent = rows[1]?.children.item(1);
+    // The lane's own content cell: the track row's second child, after the
+    // sticky header column.
+    const secondTrackContent = view.host
+      .querySelectorAll("[data-timeline-row]")[1]
+      ?.querySelector('[role="row"]')
+      ?.children.item(1);
     act(() => {
       secondTrackContent?.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 100 }),
