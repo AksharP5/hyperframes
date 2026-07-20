@@ -686,12 +686,12 @@ describe("TimelineClipDiamonds", () => {
     return { host, root };
   };
 
-  it("hides the inline ease button on a colliding merged segment", () => {
-    // The 50->100 segment ends on a keyframe shared by two animations, so one
-    // button cannot honestly stand for the several curves that meet there. Only
-    // the unambiguous 0->50 segment keeps its button.
+  it("shows the inline ease button on a colliding merged segment (bulk edit)", () => {
+    // Both segments (0->50, 50->100) render their ease button; the 50->100
+    // segment ends on a keyframe shared by two animations and the button now
+    // bulk-edits both rather than being hidden.
     const { host, root } = renderSegmentLane(true);
-    expect(host.querySelectorAll("[data-keyframe-ease-segment]").length).toBe(1);
+    expect(host.querySelectorAll("[data-keyframe-ease-segment]").length).toBe(2);
     act(() => root.unmount());
   });
 

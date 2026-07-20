@@ -13,6 +13,7 @@ import { usePlayerStore } from "../../player";
 import { GsapAddAnimationControl } from "./GsapAddAnimationControl";
 
 interface GsapAnimationSectionProps extends GsapAnimationEditCallbacks {
+  elementId: string;
   animations: GsapAnimation[];
   multipleTimelines?: boolean;
   unsupportedTimelinePattern?: boolean;
@@ -21,6 +22,7 @@ interface GsapAnimationSectionProps extends GsapAnimationEditCallbacks {
 
 export const GsapAnimationSection = memo(function GsapAnimationSection({
   animations,
+  elementId,
   multipleTimelines,
   unsupportedTimelinePattern,
   onAddAnimation,
@@ -55,7 +57,10 @@ export const GsapAnimationSection = memo(function GsapAnimationSection({
               animation={anim}
               defaultExpanded={index === 0}
               focusedSegment={
-                focusedEaseSegment?.animationId === anim.id ? focusedEaseSegment : null
+                focusedEaseSegment?.elementId === elementId &&
+                focusedEaseSegment.animationId === anim.id
+                  ? focusedEaseSegment
+                  : null
               }
               onFocusSegmentConsumed={clearFocusedEaseSegment}
             />

@@ -156,6 +156,20 @@ export function pruneKeyframeCacheToFiles(files: readonly string[]): void {
   }
 }
 
+/**
+ * The source-scoped key that names one element across panels and the store
+ * (focused ease segment, keyframe cache reads). Four call sites built this
+ * string by hand and two of them omitted the index.html fallback, so an element
+ * with no sourceFile was addressed as `#box` by one panel and `index.html#box`
+ * by another and the two never matched. One builder keeps them on one key.
+ */
+export function scopedElementKey(element: {
+  sourceFile?: string | null;
+  id?: string | null;
+}): string {
+  return `${element.sourceFile || "index.html"}#${element.id}`;
+}
+
 /** Every cache key a write for this element sets, in read-preference order. */
 export function elementCacheKeys(sourceFile: string, elementId: string): string[] {
   return sourceFile === "index.html"

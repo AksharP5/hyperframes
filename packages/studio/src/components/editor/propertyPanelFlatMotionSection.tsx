@@ -1,3 +1,4 @@
+import { scopedElementKey } from "../../hooks/gsapKeyframeCacheHelpers";
 import { useState } from "react";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { useTrackDesignInput } from "../../contexts/DesignPanelInputContext";
@@ -143,7 +144,7 @@ export function FlatMotionSection({
   // the store's selectedElementId, which flips synchronously during async
   // selection resolution), so a shared class-selector animation id can't open
   // the wrong element's editor.
-  const renderedElementId = `${element.sourceFile}#${element.id}`;
+  const renderedElementId = scopedElementKey(element);
   const focusedHere =
     focusedEaseSegment && focusedEaseSegment.elementId === renderedElementId
       ? focusedEaseSegment
