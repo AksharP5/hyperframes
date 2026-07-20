@@ -70,6 +70,6 @@ export interface TimelineEditCallbacks {
     elementId: string,
     fromClipPercentage: number,
     toClipPercentage: number,
-  ) => void;
+  ) => Promise<boolean>;
   onToggleKeyframeAtPlayhead?: (element: TimelineElement) => void;
 }

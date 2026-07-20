@@ -152,13 +152,13 @@ export function useTimelineEditCallbacks({
       // resizes the tween — position/duration grow so the dragged keyframe lands at
       // the drop while every other keyframe keeps its absolute time (value+ease too).
       // fallow-ignore-next-line complexity
-      onMoveKeyframe: (_elId: string, fromClipPct: number, toClipPct: number) => {
+      onMoveKeyframe: async (_elId: string, fromClipPct: number, toClipPct: number) => {
         const target = resolveKeyframeTarget(fromClipPct);
         const sel = domEditSelection;
-        if (!target || !sel) return;
+        if (!target || !sel) return false;
         const anim = selectedGsapAnimations.find((a) => a.id === target.animId);
         const tweenStart = anim ? resolveTweenStart(anim) : null;
-        if (!anim || tweenStart === null) return;
+        if (!anim || tweenStart === null) return false;
         const tweenDuration = anim.duration ?? resolveTweenDuration(anim);
         const sourceFile = sel.sourceFile || activeCompPath || "index.html";
         const { elements, domClipChildren } = usePlayerStore.getState();
@@ -200,7 +200,10 @@ export function useTimelineEditCallbacks({
               duration: decision.duration,
             });
           }
+        } else {
+          return false;
         }
+        return true;
       },
       onChangeKeyframeEase: (_elId: string, _pct: number, ease: string) => {
         for (const anim of selectedGsapAnimations) {
