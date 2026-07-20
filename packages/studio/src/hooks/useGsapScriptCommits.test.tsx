@@ -298,6 +298,27 @@ describe("runCommit — instantPatch wiring", () => {
     expect(deps.showToast).toHaveBeenCalledWith("A keyframe already exists at that time", "info");
   });
 
+  it("publishes the server mutation outcome to callers", async () => {
+    mockFetchResult({ changed: false });
+    const deps = renderCommitHook();
+    let commitResult: MutationResult | undefined;
+
+    await act(async () => {
+      await deps.api.commitMutation(
+        selection,
+        { type: "move-keyframe", fromPercentage: 50, toPercentage: 75 },
+        {
+          label: "Move keyframe",
+          onResult: (result) => {
+            commitResult = result;
+          },
+        },
+      );
+    });
+
+    expect(commitResult).toEqual(expect.objectContaining({ ok: true, changed: false }));
+  });
+
   it("no-op commit with an instantPatch still patches the runtime (paired x/y commits)", async () => {
     patchRuntimeTweenInPlace.mockReturnValue(true);
     mockFetchResult({ changed: false });
