@@ -6,6 +6,11 @@ export interface TimelineTimeRange {
   readonly end: number;
 }
 
+export interface TimelineClipQueryWindow {
+  readonly range: TimelineTimeRange;
+  readonly identities: ReadonlySet<string>;
+}
+
 interface TimelineClipInterval {
   readonly element: TimelineElement;
   readonly identity: string;
@@ -38,9 +43,14 @@ function clipInterval(element: TimelineElement, ordinal: number): TimelineClipIn
   });
 }
 
+function timelineClipTreeLeafCount(intervalCount: number): number {
+  let leafCount = 1;
+  while (leafCount < intervalCount) leafCount *= 2;
+  return leafCount;
+}
+
 function createTimelineClipMaxTrees(intervals: readonly TimelineClipInterval[]) {
-  let treeLeafCount = 1;
-  while (treeLeafCount < intervals.length) treeLeafCount *= 2;
+  const treeLeafCount = timelineClipTreeLeafCount(intervals.length);
   const maxPositiveEndTree = Array<number>(treeLeafCount * 2).fill(Number.NEGATIVE_INFINITY);
   const maxPointStartTree = Array<number>(treeLeafCount * 2).fill(Number.NEGATIVE_INFINITY);
   for (let index = 0; index < intervals.length; index += 1) {
@@ -122,6 +132,7 @@ function collectTimelineClipOverlaps(
   candidateCount: number,
   range: TimelineTimeRange,
   selected: Set<TimelineClipInterval>,
+  identities?: ReadonlySet<string>,
 ): void {
   const visit = (node: number, left: number, right: number) => {
     if (
@@ -133,7 +144,7 @@ function collectTimelineClipOverlaps(
     }
     if (right - left === 1) {
       const interval = row.byStart[left];
-      if (interval && overlaps(interval, range)) selected.add(interval);
+      if (interval) selectTimelineClipOverlap(interval, range, selected, identities);
       return;
     }
     const middle = Math.floor((left + right) / 2);
@@ -143,25 +154,48 @@ function collectTimelineClipOverlaps(
   visit(1, 0, row.treeLeafCount);
 }
 
+function selectTimelineClipOverlap(
+  interval: TimelineClipInterval,
+  range: TimelineTimeRange,
+  selected: Set<TimelineClipInterval>,
+  identities: ReadonlySet<string> | undefined,
+): void {
+  if (!overlaps(interval, range)) return;
+  if (identities !== undefined && !identities.has(interval.identity)) return;
+  selected.add(interval);
+}
+
 /**
  * Query one display row. The overlap set and explicit actor pins are returned
  * in the row's original projection order, so windowing never changes z/DOM order.
  * The start lookup is O(log n). Balanced max trees prune both children whose
  * positive intervals and point clips cannot reach the window. The overlap walk
- * is O((k + 1) log n) for k matches; pin lookup is O(p), followed by the
- * projection-order sort of the unique result set.
+ * is O((k + 1) log n) for k candidates across the primary and actor windows;
+ * pin lookup is O(p), followed by the projection-order sort of the unique
+ * result set.
  */
 export function queryTimelineClipIndex(
   index: TimelineClipIndex,
   rowKey: number,
   range: TimelineTimeRange,
   pinnedIdentities: ReadonlySet<string> = new Set(),
+  actorWindows: readonly TimelineClipQueryWindow[] = [],
 ): readonly TimelineElement[] {
   const row = index.rows.get(rowKey);
   if (!row) return Object.freeze([]);
   const selected = new Set<TimelineClipInterval>();
   if (range.end > range.start) {
     collectTimelineClipOverlaps(row, upperBoundStart(row.byStart, range.end), range, selected);
+  }
+  for (const actorWindow of actorWindows) {
+    if (actorWindow.range.end <= actorWindow.range.start) continue;
+    collectTimelineClipOverlaps(
+      row,
+      upperBoundStart(row.byStart, actorWindow.range.end),
+      actorWindow.range,
+      selected,
+      actorWindow.identities,
+    );
   }
   for (const identity of pinnedIdentities) {
     for (const interval of row.byIdentity.get(identity) ?? []) selected.add(interval);

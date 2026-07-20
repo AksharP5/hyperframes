@@ -57,6 +57,22 @@ describe("timelineClipIndex", () => {
     ]);
   });
 
+  it("queries a shifted multi-drag window on a 50k-clip row without a row scan", () => {
+    const elements = Array.from({ length: 50_000 }, (_, index) =>
+      clip(`clip-${index}`, index, 0.25),
+    );
+    const index = createTimelineClipIndex([[1, elements]]);
+    const selected = new Set(["clip-10", "clip-49"]);
+
+    expect(
+      ids(
+        queryTimelineClipIndex(index, 1, { start: 60_000, end: 60_001 }, new Set(), [
+          { range: { start: 10, end: 11 }, identities: selected },
+        ]),
+      ),
+    ).toEqual(["clip-10"]);
+  });
+
   it("uses half-open render boundaries and retains zero-duration points", () => {
     const index = createTimelineClipIndex([
       [

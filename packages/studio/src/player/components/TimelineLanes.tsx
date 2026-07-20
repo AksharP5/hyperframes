@@ -11,9 +11,11 @@ import { getTimelineEditCapabilities, resolveBlockedTimelineEditIntent } from ".
 import { CLIP_Y, CLIP_HANDLE_W, TRACK_H } from "./timelineLayout";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import {
+  isMultiDragActive,
   isMultiDragPassenger,
-  multiDragPassengerOffsetPx,
+  multiDragDeltaSeconds,
   type MultiDragPreviewInput,
+  multiDragPassengerOffsetPx,
 } from "./timelineMultiDragPreview";
 import type { TimelineLaneBaseProps } from "./timelineLaneProps";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
@@ -22,6 +24,9 @@ import { SPLIT_BOUNDARY_EPSILON_S } from "../../utils/timelineElementSplit";
 import { isAudioTimelineElement, isMusicTrack } from "../../utils/timelineInspector";
 import { renderClipChildren } from "./timelineClipChildren";
 import { TimelineTrackRow } from "./TimelineTrackRow";
+import { isTimelineClipActive } from "./useTimelineActiveClips";
+import { queryTimelineClipIndex } from "../lib/timelineClipIndex";
+import { getTimelineElementIdentity } from "../lib/timelineElementHelpers";
 
 interface TimelineLanesProps extends TimelineLaneBaseProps {
   /** Live-derived by TimelineCanvas from {@link TimelineLaneBaseProps.draggedClip}. */
@@ -45,6 +50,9 @@ export function TimelineLanes({
   rowGeometry,
   virtualRows,
   rowsVirtualized,
+  clipIndex,
+  renderTimeRange,
+  pinnedClipIdentities,
   trackOrder,
   tracks,
   trackStyles,
@@ -105,6 +113,22 @@ export function TimelineLanes({
     trackStudioKeyframeLaneExpand({ expanded: willExpand });
     toggleClipExpanded(key);
   };
+  const multiDragDelta =
+    multiDragPreview && isMultiDragActive(multiDragPreview)
+      ? multiDragDeltaSeconds(multiDragPreview)
+      : 0;
+  const actorWindows =
+    rowsVirtualized && multiDragPreview && multiDragDelta !== 0
+      ? [
+          {
+            range: {
+              start: renderTimeRange.start - multiDragDelta,
+              end: renderTimeRange.end - multiDragDelta,
+            },
+            identities: multiDragPreview.selectedKeys,
+          },
+        ]
+      : [];
   return (
     <div
       role="list"
@@ -119,6 +143,15 @@ export function TimelineLanes({
           const displayNumber = trackDisplayNumber(displayTrackOrder, trackNum);
           const rowHeight = rowGeometry.getRowHeight(row);
           const els = tracks.find(([t]) => t === trackNum)?.[1] ?? [];
+          const renderElements = rowsVirtualized
+            ? queryTimelineClipIndex(
+                clipIndex,
+                trackNum,
+                renderTimeRange,
+                pinnedClipIdentities,
+                actorWindows,
+              )
+            : els;
           const ts = trackStyles.get(trackNum) ?? getTrackStyle("");
           const isPendingTrack =
             draggedClip?.started === true && !trackOrder.includes(trackNum) && els.length === 0;
@@ -224,6 +257,7 @@ export function TimelineLanes({
                       ? draggedClip.snapTime
                       : null
                   }
+                  renderTimeRange={rowsVirtualized ? renderTimeRange : undefined}
                 />
                 {/* Beat dots on the active track (the one holding the selection),
                     falling back to the music track when nothing is selected. */}
@@ -232,6 +266,7 @@ export function TimelineLanes({
                     beatTimes={beatAnalysis?.beatTimes}
                     beatStrengths={beatAnalysis?.beatStrengths}
                     pps={pps}
+                    renderTimeRange={rowsVirtualized ? renderTimeRange : undefined}
                   />
                 )}
                 {isPendingTrack && (
@@ -251,9 +286,9 @@ export function TimelineLanes({
                 )}
                 {
                   // fallow-ignore-next-line complexity
-                  els.map((el) => {
+                  renderElements.map((el) => {
                     const clipStyle = getTrackStyle(el.tag);
-                    const elementKey = el.key ?? el.id;
+                    const elementKey = getTimelineElementIdentity(el);
                     // Only the track's active keyframe clip shows expanded lanes;
                     // other clips (incl. siblings on a shared track) show compact
                     // diamonds on their own bar instead.
@@ -269,7 +304,8 @@ export function TimelineLanes({
                     const clipKey = elementKey;
                     const isDraggingClip =
                       draggedClip?.started === true &&
-                      (draggedElement?.key ?? draggedElement?.id) === elementKey;
+                      draggedElement != null &&
+                      getTimelineElementIdentity(draggedElement) === elementKey;
                     if (isDraggingClip) return null;
                     const previewElement = getPreviewElement(el);
                     // Passenger of a live multi-drag: slide by the SAME formation
@@ -296,6 +332,7 @@ export function TimelineLanes({
                         isSelected={isSelected}
                         isHovered={hoveredClip === clipKey}
                         isDragging={false}
+                        isActive={isTimelineClipActive(previewElement, currentTime)}
                         hasCustomContent={!!renderClipContent}
                         capabilities={capabilities}
                         theme={theme}
