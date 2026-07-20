@@ -12,6 +12,7 @@ const {
   trackStudioRenderStart,
   trackStudioRazorSplit,
   trackStudioExpandedClipEdit,
+  trackStudioKeyframeLaneExpand,
   trackStudioSegmentEaseEdit,
   trackStudioFeedback,
 } = await import("./events");
@@ -72,8 +73,13 @@ describe("studio telemetry events", () => {
     expect(trackEvent).toHaveBeenCalledWith("studio_expanded_clip_edit", { action: "resize" });
   });
 
+  it("trackStudioKeyframeLaneExpand emits 'studio_keyframe_lane_expand' with expanded", () => {
+    trackStudioKeyframeLaneExpand({ expanded: true });
+    expect(trackEvent).toHaveBeenCalledWith("studio_keyframe_lane_expand", { expanded: true });
+  });
+
   it("trackStudioSegmentEaseEdit emits 'studio_segment_ease_edit' with action and ease", () => {
-    trackStudioSegmentEaseEdit({ ease: "power2.out" });
+    trackStudioSegmentEaseEdit({ action: "commit", ease: "power2.out" });
     expect(trackEvent).toHaveBeenCalledWith("studio_segment_ease_edit", {
       action: "commit",
       ease: "power2.out",
