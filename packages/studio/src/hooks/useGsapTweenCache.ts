@@ -5,6 +5,7 @@ import { readRuntimeKeyframes, scanAllRuntimeKeyframes } from "./gsapRuntimeBrid
 import {
   clearKeyframeCacheForElement,
   pruneKeyframeCacheToFiles,
+  publishKeyframeCache,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
 import { resolveClipTimingBasis, toAbsoluteTime, toClipPercentage } from "./gsapShared";
@@ -313,11 +314,15 @@ export function useGsapAnimationsForElement(
       ...(ease ? { ease } : {}),
       ...(easeEach ? { easeEach } : {}),
     };
-    const { setKeyframeCache } = usePlayerStore.getState();
-    setKeyframeCache(`${sourceFile}#${elementId}`, merged);
-    // PropertyPanel reads the cache by bare elementId (without sourceFile prefix),
-    // so write a duplicate entry under the bare key for cross-component lookups.
-    setKeyframeCache(elementId, merged);
+    // PropertyPanel reads the cache by bare elementId (without sourceFile
+    // prefix), so the same entry is written under the bare key for
+    // cross-component lookups. Both keys land in one publish: a reader that woke
+    // between two separate writes saw the prefixed key updated and the bare one
+    // still stale.
+    publishKeyframeCache((draft) => {
+      draft.keyframeCache.set(`${sourceFile}#${elementId}`, merged);
+      draft.keyframeCache.set(elementId, merged);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elementId, sourceFile, animations, domClipChildrenKey]);
 
@@ -416,29 +421,35 @@ export function usePopulateKeyframeCacheForFile(
       }
       const scanned = scanAllRuntimeKeyframes(iframe, clipById);
       if (scanned.size === 0) return false;
-      const { setKeyframeCache, keyframeCache } = usePlayerStore.getState();
-      for (const [id, data] of scanned) {
-        const cacheKey = `${sf}#${id}`;
-        const fallbackKey = `index.html#${id}`;
-        const alreadyCached =
-          keyframeCache.has(cacheKey) || keyframeCache.has(fallbackKey) || keyframeCache.has(id);
-        if (alreadyCached) continue;
-        // Skip position-only set tweens from runtime too — same filter as AST path
-        const isPosOnly =
-          data.keyframes.length === 1 &&
-          Object.keys(data.keyframes[0].properties).every((k) => k === "x" || k === "y");
-        if (isPosOnly) {
-          continue;
+      // One publish for the whole scan: a scan of a 120-clip composition used to
+      // emit up to three store notifications per element, and every subscriber
+      // in between re-rendered against a cache only partly filled in.
+      publishKeyframeCache((draft) => {
+        for (const [id, data] of scanned) {
+          const cacheKey = `${sf}#${id}`;
+          const fallbackKey = `index.html#${id}`;
+          const alreadyCached =
+            draft.keyframeCache.has(cacheKey) ||
+            draft.keyframeCache.has(fallbackKey) ||
+            draft.keyframeCache.has(id);
+          if (alreadyCached) continue;
+          // Skip position-only set tweens from runtime too, same filter as AST path
+          const isPosOnly =
+            data.keyframes.length === 1 &&
+            Object.keys(data.keyframes[0].properties).every((k) => k === "x" || k === "y");
+          if (isPosOnly) {
+            continue;
+          }
+          const entry = {
+            format: "percentage" as const,
+            keyframes: data.keyframes,
+            ...(data.easeEach ? { easeEach: data.easeEach } : {}),
+          };
+          draft.keyframeCache.set(cacheKey, entry);
+          if (sf !== "index.html") draft.keyframeCache.set(fallbackKey, entry);
+          draft.keyframeCache.set(id, entry);
         }
-        const entry = {
-          format: "percentage" as const,
-          keyframes: data.keyframes,
-          ...(data.easeEach ? { easeEach: data.easeEach } : {}),
-        };
-        setKeyframeCache(cacheKey, entry);
-        if (sf !== "index.html") setKeyframeCache(fallbackKey, entry);
-        setKeyframeCache(id, entry);
-      }
+      });
       runtimeScanDoneRef.current = `kf-cache:${projectId}:${sf}:${version}`;
       return true;
     };

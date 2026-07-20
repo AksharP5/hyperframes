@@ -6,11 +6,7 @@
 import type { GsapAnimation, GsapKeyframesData, ParsedGsap } from "@hyperframes/core/gsap-parser";
 import { isStudioHoldSet } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore } from "../player/store/playerStore";
-import {
-  clearKeyframeCacheForFile,
-  elementCacheKeys,
-  writeGsapAnimationsForElement,
-} from "./gsapKeyframeCacheHelpers";
+import { replaceKeyframeCacheForFile } from "./gsapKeyframeCacheHelpers";
 import { resolveClipTimingBasis, resolveSelectorElementIds, toClipKeyframes } from "./gsapShared";
 import {
   deduplicateKeyframes,
@@ -81,8 +77,6 @@ export async function populateKeyframeCacheFromAst(
 ): Promise<void> {
   const parsed = await fetchParsedAnimations(projectId, sf);
   if (!parsed) return;
-  const { setKeyframeCache } = usePlayerStore.getState();
-  clearKeyframeCacheForFile(sf);
   const { elements, domClipChildren } = usePlayerStore.getState();
   const mergedByElement = new Map<string, GsapKeyframesData<MergeableKeyframe>>();
   const sourceByElement = new Map<string, GsapAnimation[]>();
@@ -109,8 +103,5 @@ export async function populateKeyframeCacheFromAst(
       }
     }
   }
-  for (const [id, kfData] of mergedByElement) {
-    for (const key of elementCacheKeys(sf, id)) setKeyframeCache(key, kfData);
-    writeGsapAnimationsForElement(sf, id, sourceByElement.get(id));
-  }
+  replaceKeyframeCacheForFile(sf, mergedByElement, sourceByElement);
 }

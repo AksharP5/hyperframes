@@ -11,6 +11,47 @@ import {
   type MergeableKeyframe,
 } from "./gsapTweenSynth";
 
+/** Both cache maps mid-edit, before the single store publish. */
+export interface KeyframeCacheDraft {
+  keyframeCache: Map<string, KeyframeCacheEntry>;
+  gsapAnimations: Map<string, GsapAnimation[]>;
+}
+
+function sameEntries<V>(before: ReadonlyMap<string, V>, after: ReadonlyMap<string, V>): boolean {
+  if (before.size !== after.size) return false;
+  for (const [key, value] of before) {
+    if (after.get(key) !== value) return false;
+  }
+  return true;
+}
+
+/**
+ * Every multi-key cache writer publishes through here: clone both maps once,
+ * let the caller edit the drafts, publish once. The per-key store setters turned
+ * one logical refresh into N notifications, and every subscriber that rendered
+ * in between saw a cache that was half the old file and half the new one. The
+ * identity check keeps an edit that changed nothing from allocating fresh maps
+ * and re-rendering every subscriber, which is the guard the per-key setters used
+ * to carry individually.
+ */
+export function publishKeyframeCache(edit: (draft: KeyframeCacheDraft) => void): void {
+  const { keyframeCache, gsapAnimations } = usePlayerStore.getState();
+  const draft: KeyframeCacheDraft = {
+    keyframeCache: new Map(keyframeCache),
+    gsapAnimations: new Map(gsapAnimations),
+  };
+  edit(draft);
+  if (
+    sameEntries(keyframeCache, draft.keyframeCache) &&
+    sameEntries(gsapAnimations, draft.gsapAnimations)
+  )
+    return;
+  usePlayerStore.setState({
+    keyframeCache: draft.keyframeCache,
+    gsapAnimations: draft.gsapAnimations,
+  });
+}
+
 export function updateKeyframeCacheFromParsed(
   animations: GsapAnimation[],
   targetPath: string,
@@ -18,7 +59,7 @@ export function updateKeyframeCacheFromParsed(
   mutation: Record<string, unknown>,
   doc?: Document | null,
 ): void {
-  const { setKeyframeCache, elements, domClipChildren } = usePlayerStore.getState();
+  const { elements, domClipChildren } = usePlayerStore.getState();
   const idsWithKeyframes = new Set<string>();
   // Attributed keyframes only: everything in here came from a parsed tween via
   // toClipKeyframes, so the merge can rely on the source identity. It widens
@@ -70,15 +111,41 @@ export function updateKeyframeCacheFromParsed(
       }
     }
   }
-  for (const [id, entry] of merged) {
-    for (const key of elementCacheKeys(targetPath, id)) setKeyframeCache(key, entry);
-    writeGsapAnimationsForElement(targetPath, id, sourceAnimations.get(id));
-  }
   const mutationSelector = (mutation as { targetSelector?: string }).targetSelector;
   const mutated = mutationSelector ? resolveSelectorElementIds(mutationSelector, doc) : [];
   const targetIds = mutated.length > 0 ? mutated : selectionId ? [selectionId] : [];
-  for (const targetId of targetIds) {
-    if (!idsWithKeyframes.has(targetId)) clearKeyframeCacheForElement(targetPath, targetId);
+  publishKeyframeCache((draft) => {
+    for (const [id, entry] of merged) {
+      writeElementIntoDraft(draft, targetPath, id, entry, sourceAnimations.get(id));
+    }
+    for (const targetId of targetIds) {
+      if (!idsWithKeyframes.has(targetId)) deleteElementFromDraft(draft, targetPath, targetId);
+    }
+  });
+}
+
+function writeElementIntoDraft(
+  draft: KeyframeCacheDraft,
+  sourceFile: string,
+  elementId: string,
+  entry: KeyframeCacheEntry,
+  animations: GsapAnimation[] | undefined,
+): void {
+  for (const key of elementCacheKeys(sourceFile, elementId)) {
+    draft.keyframeCache.set(key, entry);
+    if (animations) draft.gsapAnimations.set(key, animations);
+    else draft.gsapAnimations.delete(key);
+  }
+}
+
+function deleteElementFromDraft(
+  draft: KeyframeCacheDraft,
+  sourceFile: string,
+  elementId: string,
+): void {
+  for (const key of elementCacheKeys(sourceFile, elementId)) {
+    draft.keyframeCache.delete(key);
+    draft.gsapAnimations.delete(key);
   }
 }
 
@@ -91,50 +158,37 @@ export function updateKeyframeCacheFromParsed(
  * preview overlay) fall back to the bare id when an element has no
  * source-prefixed key — so a clear that drops only the prefixed keys leaves the
  * bare entry behind and those readers keep showing keyframes the element no
- * longer has. Each delete is guarded by `has` so an absent key doesn't allocate
- * a new cache map and re-render every subscriber.
+ * longer has. publishKeyframeCache skips the store write entirely when none of
+ * the keys were present, so an absent element doesn't re-render every
+ * subscriber.
  */
 export function clearKeyframeCacheForElement(sourceFile: string, elementId: string): void {
-  const { keyframeCache, setKeyframeCache, gsapAnimations, setGsapAnimations } =
-    usePlayerStore.getState();
-  const keys = elementCacheKeys(sourceFile, elementId);
-  for (const key of keys) {
-    if (keyframeCache.has(key)) setKeyframeCache(key, undefined);
-    if (gsapAnimations.has(key)) setGsapAnimations(key, undefined);
-  }
+  publishKeyframeCache((draft) => deleteElementFromDraft(draft, sourceFile, elementId));
 }
 
-/**
- * Clear every cached element of `sourceFile` before a full re-scan repopulates
- * it. Only the file's OWN prefixed keys name the ids to clear: every write sets
- * the prefixed key (see elementCacheKeys), so the file's elements are all
- * reachable that way, and clearKeyframeCacheForElement then takes the
- * index.html alias and the bare key with them — an element whose keyframes were
- * removed (and so is absent from the re-scan) leaves no stale bare entry
- * behind. Reading the alias prefix here instead would collect ids owned by
- * OTHER files, and several files re-scan concurrently, so this file's clear
- * would wipe the entries a sibling file had just written.
- */
-export function clearKeyframeCacheForFile(sourceFile: string): void {
-  const { keyframeCache, gsapAnimations } = usePlayerStore.getState();
+function cachedElementIdsForFile(
+  sourceFile: string,
+  keyframeCache: ReadonlyMap<string, KeyframeCacheEntry>,
+  gsapAnimations: ReadonlyMap<string, GsapAnimation[]>,
+): Set<string> {
   const sfPrefix = `${sourceFile}#`;
   const ids = new Set<string>();
   for (const key of [...keyframeCache.keys(), ...gsapAnimations.keys()]) {
     if (!key.startsWith(sfPrefix)) continue;
     ids.add(key.slice(sfPrefix.length));
   }
-  for (const id of ids) {
-    clearKeyframeCacheForElement(sourceFile, id);
-  }
+  return ids;
 }
 
 /**
  * Drop every cached element owned by a file that is no longer on screen. Each
- * file only ever clears its OWN entries (see clearKeyframeCacheForFile), so
+ * file only ever writes its OWN prefixed entries (see elementCacheKeys), so
  * switching composition left the previous composition's elements cached forever
- * — 240 entries per switch on a 120-clip comp, in both keyframeCache and
- * gsapAnimations, with nothing to evict them. Called once before a re-scan, with
- * the full set of files that scan covers.
+ * (240 entries per switch on a 120-clip comp, in both keyframeCache and
+ * gsapAnimations, with nothing to evict them). Called once before a re-scan,
+ * with the full set of files that scan covers, and it publishes once: the prune
+ * runs immediately before the atomic repopulate, so a per-element publish here
+ * would reintroduce the empty-cache flash that repopulate was made to avoid.
  */
 export function pruneKeyframeCacheToFiles(files: readonly string[]): void {
   const keep = new Set(files);
@@ -142,8 +196,8 @@ export function pruneKeyframeCacheToFiles(files: readonly string[]): void {
   const stale = new Map<string, Set<string>>();
   for (const key of [...keyframeCache.keys(), ...gsapAnimations.keys()]) {
     const hash = key.indexOf("#");
-    // Bare-id aliases carry no owner; clearKeyframeCacheForElement takes them
-    // with their prefixed key, so skipping them here loses nothing.
+    // Bare-id aliases carry no owner; deleteElementFromDraft takes them with
+    // their prefixed key, so skipping them here loses nothing.
     if (hash < 0) continue;
     const sourceFile = key.slice(0, hash);
     if (keep.has(sourceFile)) continue;
@@ -151,9 +205,11 @@ export function pruneKeyframeCacheToFiles(files: readonly string[]): void {
     ids.add(key.slice(hash + 1));
     stale.set(sourceFile, ids);
   }
-  for (const [sourceFile, ids] of stale) {
-    for (const id of ids) clearKeyframeCacheForElement(sourceFile, id);
-  }
+  publishKeyframeCache((draft) => {
+    for (const [sourceFile, ids] of stale) {
+      for (const id of ids) deleteElementFromDraft(draft, sourceFile, id);
+    }
+  });
 }
 
 /**
@@ -177,15 +233,37 @@ export function elementCacheKeys(sourceFile: string, elementId: string): string[
     : [`${sourceFile}#${elementId}`, `index.html#${elementId}`, elementId];
 }
 
+/** Replace one file's complete cache snapshot with one atomic store publish. */
+export function replaceKeyframeCacheForFile(
+  sourceFile: string,
+  entries: ReadonlyMap<string, KeyframeCacheEntry>,
+  animationsByElement: ReadonlyMap<string, GsapAnimation[]>,
+): void {
+  publishKeyframeCache((draft) => {
+    for (const id of cachedElementIdsForFile(
+      sourceFile,
+      draft.keyframeCache,
+      draft.gsapAnimations,
+    )) {
+      deleteElementFromDraft(draft, sourceFile, id);
+    }
+    for (const [id, entry] of entries) {
+      writeElementIntoDraft(draft, sourceFile, id, entry, animationsByElement.get(id));
+    }
+  });
+}
+
 export function writeGsapAnimationsForElement(
   sourceFile: string,
   elementId: string,
   animations: GsapAnimation[] | undefined,
 ): void {
-  const { setGsapAnimations } = usePlayerStore.getState();
-  for (const key of elementCacheKeys(sourceFile, elementId)) {
-    setGsapAnimations(key, animations);
-  }
+  publishKeyframeCache((draft) => {
+    for (const key of elementCacheKeys(sourceFile, elementId)) {
+      if (animations) draft.gsapAnimations.set(key, animations);
+      else draft.gsapAnimations.delete(key);
+    }
+  });
 }
 
 function buildCacheKey(sourceFile: string, elementId: string): string {
