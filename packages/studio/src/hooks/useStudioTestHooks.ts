@@ -7,6 +7,7 @@ import {
 } from "../player/lib/timelinePerformanceDiagnostics";
 import {
   createTimelinePerformanceFixture,
+  setTimelinePerformanceFixtureLease,
   type TimelinePerformanceFixtureSpec,
   type TimelinePerformanceFixtureSummary,
 } from "../player/lib/timelinePerformanceFixture";
@@ -71,6 +72,7 @@ export function useStudioTestHooks({
       },
       loadTimelinePerformanceFixture: (spec) => {
         const fixture = createTimelinePerformanceFixture(spec);
+        setTimelinePerformanceFixtureLease(true);
         usePlayerStore.setState({
           ...createTimelineResetState(),
           currentTime: 0,
@@ -97,6 +99,7 @@ export function useStudioTestHooks({
     };
     window.__studioTest = api;
     return () => {
+      setTimelinePerformanceFixtureLease(false);
       // delete, not `= undefined`: an own key holding undefined keeps
       // `"__studioTest" in window` true, which defeats feature detection.
       delete window.__studioTest;
