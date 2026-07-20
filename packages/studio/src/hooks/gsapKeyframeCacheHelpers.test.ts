@@ -3,8 +3,8 @@ import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerStore";
 import {
   clearKeyframeCacheForElement,
-  clearKeyframeCacheForFile,
   pruneKeyframeCacheToFiles,
+  replaceKeyframeCacheForFile,
   updateKeyframeCacheFromParsed,
 } from "./gsapKeyframeCacheHelpers";
 
@@ -70,48 +70,6 @@ describe("clearKeyframeCacheForElement", () => {
   });
 });
 
-describe("clearKeyframeCacheForFile", () => {
-  it("clears the prefixed, fallback, and bare keys for every element of the file", () => {
-    seed("comp.html#a");
-    seed("index.html#a");
-    seed("a");
-    seed("comp.html#b");
-    seed("b");
-
-    clearKeyframeCacheForFile("comp.html");
-
-    for (const key of ["comp.html#a", "index.html#a", "a", "comp.html#b", "b"]) {
-      expect(cache().has(key)).toBe(false);
-    }
-  });
-
-  // Several composition files re-scan concurrently, so a clear that walked the
-  // index.html alias would delete rows a sibling file had just written.
-  it("leaves an index.html-owned element alone when another file re-scans", () => {
-    seed("index.html#title");
-    seed("title");
-    seed("comp.html#a");
-
-    clearKeyframeCacheForFile("comp.html");
-
-    expect(cache().has("index.html#title")).toBe(true);
-    expect(cache().has("title")).toBe(true);
-    expect(cache().has("comp.html#a")).toBe(false);
-  });
-
-  it("leaves entries that belong to a different source file", () => {
-    seed("comp.html#a");
-    seed("a");
-    seed("other.html#z");
-    seed("z");
-
-    clearKeyframeCacheForFile("comp.html");
-
-    expect(cache().has("other.html#z")).toBe(true);
-    expect(cache().has("z")).toBe(true);
-  });
-});
-
 describe("pruneKeyframeCacheToFiles", () => {
   // Switching composition leaves the previous comp's elements cached with no
   // owner left to clear them: each file only ever clears its own entries.
@@ -151,6 +109,99 @@ describe("pruneKeyframeCacheToFiles", () => {
 
     expect(cache().has("index.html#hero")).toBe(true);
     expect(cache().has("comp.html#a")).toBe(true);
+  });
+
+  // The prune runs immediately before the atomic repopulate on every
+  // composition switch. One notification per stale element put every subscriber
+  // through a cache that was progressively emptier, which is the flash the
+  // atomic repopulate exists to avoid.
+  it("drops every stale file in one notification", () => {
+    seed("old.html#a");
+    seed("old.html#b");
+    seed("older.html#c");
+    seed("kept.html#k");
+    let notifications = 0;
+    const unsubscribe = usePlayerStore.subscribe(() => {
+      notifications += 1;
+    });
+
+    pruneKeyframeCacheToFiles(["kept.html"]);
+    unsubscribe();
+
+    expect(notifications).toBe(1);
+    expect([...cache().keys()]).toEqual(["kept.html#k"]);
+  });
+
+  // A prune that finds nothing stale must not hand subscribers a fresh Map
+  // identity: every keyframe consumer re-renders on cache identity alone.
+  it("does not publish when nothing is stale", () => {
+    seed("kept.html#k");
+    const before = cache();
+    let notifications = 0;
+    const unsubscribe = usePlayerStore.subscribe(() => {
+      notifications += 1;
+    });
+
+    pruneKeyframeCacheToFiles(["kept.html"]);
+    unsubscribe();
+
+    expect(notifications).toBe(0);
+    expect(cache()).toBe(before);
+  });
+});
+
+describe("replaceKeyframeCacheForFile", () => {
+  it("publishes complete keyframe and animation maps in one notification", () => {
+    const staleEntry = entry();
+    const otherEntry = entry();
+    const staleAnimation = animWithKeyframes("stale");
+    const freshAnimation = animWithKeyframes("fresh");
+    usePlayerStore.setState({
+      keyframeCache: new Map([
+        ["scene.html#stale", staleEntry],
+        ["index.html#stale", staleEntry],
+        ["stale", staleEntry],
+        ["other.html#other", otherEntry],
+        ["other", otherEntry],
+      ]),
+      gsapAnimations: new Map([
+        ["scene.html#stale", [staleAnimation]],
+        ["index.html#stale", [staleAnimation]],
+        ["stale", [staleAnimation]],
+        ["other.html#other", [staleAnimation]],
+        ["other", [staleAnimation]],
+      ]),
+    });
+    const snapshots: Array<{ cacheKeys: string[]; animationKeys: string[] }> = [];
+    const unsubscribe = usePlayerStore.subscribe((state) => {
+      snapshots.push({
+        cacheKeys: [...state.keyframeCache.keys()].sort(),
+        animationKeys: [...state.gsapAnimations.keys()].sort(),
+      });
+    });
+
+    replaceKeyframeCacheForFile(
+      "scene.html",
+      new Map([["fresh", entry()]]),
+      new Map([["fresh", [freshAnimation]]]),
+    );
+    unsubscribe();
+
+    expect(snapshots).toEqual([
+      {
+        cacheKeys: ["fresh", "index.html#fresh", "other", "other.html#other", "scene.html#fresh"],
+        animationKeys: [
+          "fresh",
+          "index.html#fresh",
+          "other",
+          "other.html#other",
+          "scene.html#fresh",
+        ],
+      },
+    ]);
+    expect(usePlayerStore.getState().gsapAnimations.get("scene.html#fresh")).toEqual([
+      freshAnimation,
+    ]);
   });
 });
 
