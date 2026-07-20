@@ -101,6 +101,7 @@ describe("AnimationCard ease editing", () => {
 
     expect(onUpdateKeyframeEase).toHaveBeenCalledExactlyOnceWith(animation.id, 50, ease);
     expect(trackStudioSegmentEaseEdit).toHaveBeenCalledExactlyOnceWith({
+      action: "commit",
       ease,
     });
     act(() => view.root.unmount());
