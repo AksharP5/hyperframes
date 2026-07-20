@@ -5,7 +5,11 @@
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerStore";
 import { resolveClipTimingBasis, resolveSelectorElementIds, toClipKeyframes } from "./gsapShared";
-import { deduplicateKeyframes, synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
+import {
+  deduplicateKeyframes,
+  synthesizeFlatTweenKeyframes,
+  type MergeableKeyframe,
+} from "./gsapTweenSynth";
 
 export function updateKeyframeCacheFromParsed(
   animations: GsapAnimation[],
@@ -16,7 +20,11 @@ export function updateKeyframeCacheFromParsed(
 ): void {
   const { setKeyframeCache, elements, domClipChildren } = usePlayerStore.getState();
   const idsWithKeyframes = new Set<string>();
-  const merged = new Map<string, KeyframeCacheEntry>();
+  // Attributed keyframes only: everything in here came from a parsed tween via
+  // toClipKeyframes, so the merge can rely on the source identity. It widens
+  // back into KeyframeCacheEntry on the way to the store, which also holds the
+  // runtime scan's unattributed keyframes.
+  const merged = new Map<string, KeyframeCacheEntry & { keyframes: MergeableKeyframe[] }>();
   const sourceAnimations = new Map<string, GsapAnimation[]>();
   for (const anim of animations) {
     const kfSource =
@@ -49,9 +57,9 @@ export function updateKeyframeCacheFromParsed(
 
       const existing = merged.get(id);
       if (existing) {
-        // deduplicateKeyframes owns the same-% merge (including the easeAmbiguous
-        // flag downstream lanes read); a second copy of that rule here is how the
-        // two writers drift.
+        // deduplicateKeyframes owns the same-% merge (including the colliding
+        // animation targets downstream lanes read); a second copy of that rule
+        // here is how the two writers drift.
         existing.keyframes = deduplicateKeyframes([...existing.keyframes, ...clipKeyframes]);
       } else {
         merged.set(id, {

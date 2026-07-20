@@ -12,6 +12,7 @@ import {
   deduplicateKeyframes,
   isStaticPositionHold,
   synthesizeFlatTweenKeyframes,
+  type MergeableKeyframe,
 } from "./gsapTweenSynth";
 import { fetchParsedAnimations, populateKeyframeCacheFromAst } from "./keyframeCacheAstLoad";
 
@@ -266,13 +267,7 @@ export function useGsapAnimationsForElement(
       domClipChildren,
     );
 
-    const allKeyframes: Array<
-      GsapKeyframesData["keyframes"][0] & {
-        tweenPercentage?: number;
-        propertyGroup?: string;
-        animationId?: string;
-      }
-    > = [];
+    const allKeyframes: MergeableKeyframe[] = [];
     let format: GsapKeyframesData["format"] = "percentage";
     let ease: string | undefined;
     let easeEach: string | undefined;

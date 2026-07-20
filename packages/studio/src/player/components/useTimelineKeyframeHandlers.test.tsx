@@ -36,32 +36,69 @@ const FLAT_TWEEN_TARGET: TimelineKeyframeTarget = {
   animationId: "position-tween",
 };
 
+const COLLIDING_TARGET: TimelineKeyframeTarget = {
+  ...FLAT_TWEEN_TARGET,
+  collidingAnimationTargets: [
+    { animationId: "position-tween", tweenPercentage: 100 },
+    { animationId: "scale-tween", tweenPercentage: 75 },
+  ],
+};
+
 afterEach(() => {
   document.body.innerHTML = "";
   trackStudioSegmentEaseEdit.mockClear();
   usePlayerStore.setState({ focusedEaseSegment: null });
 });
 
-describe("useTimelineKeyframeHandlers", () => {
-  it("tracks opening the segment ease editor when a timeline segment is selected", () => {
-    let onSelectSegment: ((elementId: string, target: TimelineKeyframeTarget) => void) | undefined;
+/**
+ * Mount the hook on its own and hand back the handlers it returned, with the
+ * options every test shares already filled in. Each test overrides only the
+ * inputs its assertion is about.
+ */
+function mountHandlers(options: Partial<Parameters<typeof useTimelineKeyframeHandlers>[0]> = {}) {
+  const handlers: Partial<ReturnType<typeof useTimelineKeyframeHandlers>> = {};
 
-    function Harness() {
-      ({ onSelectSegment } = useTimelineKeyframeHandlers({
+  function Harness() {
+    Object.assign(
+      handlers,
+      useTimelineKeyframeHandlers({
         expandedElements: [ELEMENT],
         keyframeCache: new Map(),
         setSelectedElementId: vi.fn(),
         setKfContextMenu: vi.fn(),
         toggleSelectedKeyframe: vi.fn(),
-      }));
-      return null;
-    }
+        ...options,
+      }),
+    );
+    return null;
+  }
 
-    const root = mountReactHarness(<Harness />);
-    act(() => onSelectSegment?.(ELEMENT.id, TARGET));
+  return { root: mountReactHarness(<Harness />), handlers };
+}
+
+describe("useTimelineKeyframeHandlers", () => {
+  it("tracks opening the segment ease editor when a timeline segment is selected", () => {
+    const { root, handlers } = mountHandlers();
+    act(() => handlers.onSelectSegment?.(ELEMENT.id, TARGET));
 
     expect(trackStudioSegmentEaseEdit).toHaveBeenCalledOnce();
     expect(trackStudioSegmentEaseEdit).toHaveBeenCalledWith({ action: "open" });
+    act(() => root.unmount());
+  });
+
+  it("focuses a merged segment with its colliding animation targets", () => {
+    const { root, handlers } = mountHandlers();
+    act(() => handlers.onSelectSegment?.(ELEMENT.id, COLLIDING_TARGET));
+
+    expect(usePlayerStore.getState().focusedEaseSegment).toEqual({
+      animationId: "position-tween",
+      collidingAnimationTargets: [
+        { animationId: "position-tween", tweenPercentage: 100 },
+        { animationId: "scale-tween", tweenPercentage: 75 },
+      ],
+      tweenPercentage: 100,
+      elementId: ELEMENT.id,
+    });
     act(() => root.unmount());
   });
 
@@ -69,39 +106,22 @@ describe("useTimelineKeyframeHandlers", () => {
     const onSeek = vi.fn();
     const onSelectElement = vi.fn();
     const setSelectedElementId = vi.fn();
-    let onClickKeyframe:
-      | ((el: TimelineElement, target: TimelineKeyframeTarget) => void)
-      | undefined;
-    let onSelectSegment: ((elementId: string, target: TimelineKeyframeTarget) => void) | undefined;
-
-    function Harness() {
-      ({ onClickKeyframe, onSelectSegment } = useTimelineKeyframeHandlers({
-        expandedElements: [ELEMENT],
-        keyframeCache: new Map(),
-        onSelectElement,
-        onSeek,
-        setSelectedElementId,
-        setKfContextMenu: vi.fn(),
-        toggleSelectedKeyframe: vi.fn(),
-      }));
-      return null;
-    }
-
-    const root = mountReactHarness(<Harness />);
+    const { root, handlers } = mountHandlers({ onSelectElement, onSeek, setSelectedElementId });
 
     // Selecting a segment must NOT move the playhead.
-    act(() => onSelectSegment?.(ELEMENT.id, FLAT_TWEEN_TARGET));
+    act(() => handlers.onSelectSegment?.(ELEMENT.id, FLAT_TWEEN_TARGET));
     expect(onSeek).not.toHaveBeenCalled();
     expect(usePlayerStore.getState().focusedEaseSegment).toEqual({
       animationId: "position-tween",
       tweenPercentage: 100,
       elementId: ELEMENT.id,
     });
+    expect(usePlayerStore.getState().focusedEaseSegment?.collidingAnimationTargets).toBeUndefined();
     expect(setSelectedElementId).toHaveBeenCalledWith(ELEMENT.id);
     expect(onSelectElement).toHaveBeenCalledWith(ELEMENT);
 
     // Clicking the keyframe itself still seeks to it (start 1 + 50% of 2 = 2).
-    act(() => onClickKeyframe?.(ELEMENT, TARGET));
+    act(() => handlers.onClickKeyframe?.(ELEMENT, TARGET));
     expect(onSeek).toHaveBeenCalledExactlyOnceWith(2);
     act(() => root.unmount());
   });
