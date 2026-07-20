@@ -1,10 +1,11 @@
 import { create } from "zustand";
 import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
+import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { BeatEditState } from "../../utils/beatEditing";
 import type { ClipManifestClip } from "../lib/playbackTypes";
 import { readStudioUiPreferences, writeStudioUiPreferences } from "../../utils/studioUiPreferences";
 import { computePinnedZoomPercent } from "../components/timelineZoom";
-import { createKeyframeSlice, type KeyframeSlice } from "./keyframeSlice";
+import { createKeyframeSlice, type KeyframeCacheEntry, type KeyframeSlice } from "./keyframeSlice";
 
 export type { KeyframeCacheEntry } from "./keyframeSlice";
 
@@ -283,6 +284,42 @@ export const liveTime = {
   },
 };
 
+export function createTimelineResetState() {
+  return {
+    isPlaying: false,
+    currentTime: 0,
+    duration: 0,
+    timelineReady: false,
+    beatDragging: false,
+    elements: [],
+    selectedElementId: null,
+    zEditVersion: 0,
+    inPoint: null,
+    outPoint: null,
+    activeTool: "select" as const,
+    activeKeyframePct: null,
+    motionPathArmed: false,
+    motionPathCreateAvailable: false,
+    selectedKeyframes: new Set<string>(),
+    expandedClipIds: new Set<string>(),
+    focusedEaseSegment: null,
+    selectedElementIds: new Set<string>(),
+    requestedSeekTime: null,
+    clipRevealRequest: null,
+    lintFindingsByElement: new Map<string, { count: number; messages: string[] }>(),
+    keyframeCache: new Map<string, KeyframeCacheEntry>(),
+    gsapAnimations: new Map<string, GsapAnimation[]>(),
+    beatAnalysis: null,
+    beatEdits: null,
+    beatUndo: [],
+    beatRedo: [],
+    beatPersist: null,
+    clipManifest: null,
+    clipParentMap: new Map<string, string>(),
+    domClipChildren: [],
+  };
+}
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   isPlaying: false,
   currentTime: 0,
@@ -517,34 +554,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   // Resets project-specific state when switching compositions.
   // playbackRate, audioMuted, loopEnabled, zoomMode, and manualZoomPercent are intentionally preserved
   // because they are user preferences that should survive project switches.
-  reset: () =>
-    set({
-      isPlaying: false,
-      currentTime: 0,
-      duration: 0,
-      timelineReady: false,
-      beatDragging: false,
-      elements: [],
-      selectedElementId: null,
-      inPoint: null,
-      outPoint: null,
-      activeTool: "select",
-      selectedKeyframes: new Set(),
-      expandedClipIds: new Set(),
-      focusedEaseSegment: null,
-      selectedElementIds: new Set(),
-      clipRevealRequest: null,
-      keyframeCache: new Map(),
-      gsapAnimations: new Map(),
-      beatAnalysis: null,
-      beatEdits: null,
-      beatUndo: [],
-      beatRedo: [],
-      beatPersist: null,
-      clipManifest: null,
-      clipParentMap: new Map(),
-      domClipChildren: [],
-    }),
+  reset: () => set(createTimelineResetState()),
 }));
 
 // Bug-bash aid: expose the store so a reproduction can dump live state from the

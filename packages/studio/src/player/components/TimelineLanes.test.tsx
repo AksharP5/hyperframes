@@ -144,6 +144,7 @@ describe("TimelineLanes track numbering", () => {
     });
 
     expect(visibilityLabels(view.host)).toEqual(["Hide track 1", "Hide track 2"]);
+    expect(view.host.querySelectorAll("[data-timeline-row]")).toHaveLength(2);
     expect(view.host.innerHTML).not.toContain("0.16666666666666666");
     act(() => view.root.unmount());
   });

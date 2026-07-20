@@ -150,6 +150,7 @@ export function TimelineLanes({
           return (
             <div
               key={trackNum}
+              data-timeline-row
               className="relative flex"
               style={{
                 height: rowHeight,
