@@ -405,8 +405,8 @@ export function StudioRightPanel({
         onUpdateArcSegment={handleUpdateArcSegment}
         onUnroll={handleUnroll}
         onUpdateKeyframeEase={handleUpdateKeyframeEase}
-        onSetAllKeyframeEases={handleSetAllKeyframeEases}
         onUpdateSegmentEase={handleUpdateSegmentEase}
+        onSetAllKeyframeEases={handleSetAllKeyframeEases}
         recordingState={recordingState}
         recordingDuration={recordingDuration}
         onToggleRecording={onToggleRecording}

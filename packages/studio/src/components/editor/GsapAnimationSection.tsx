@@ -6,10 +6,10 @@ import { AnimationCard } from "./AnimationCard";
 import {
   type GsapAnimationEditCallbacks,
   withTrackedGsapAnimationCallbacks,
-  clearFocusedEaseSegment,
 } from "./gsapAnimationCallbacks";
 import { useTrackDesignInput } from "../../contexts/DesignPanelInputContext";
 import { usePlayerStore } from "../../player";
+import { isFocusedEaseRequestCurrent } from "../../player/store/keyframeSlice";
 import { GsapAddAnimationControl } from "./GsapAddAnimationControl";
 
 interface GsapAnimationSectionProps extends GsapAnimationEditCallbacks {
@@ -21,8 +21,8 @@ interface GsapAnimationSectionProps extends GsapAnimationEditCallbacks {
 }
 
 export const GsapAnimationSection = memo(function GsapAnimationSection({
-  animations,
   elementId,
+  animations,
   multipleTimelines,
   unsupportedTimelinePattern,
   onAddAnimation,
@@ -32,6 +32,24 @@ export const GsapAnimationSection = memo(function GsapAnimationSection({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const trackedCallbacks = withTrackedGsapAnimationCallbacks(callbacks, track);
   const focusedEaseSegment = usePlayerStore((s) => s.focusedEaseSegment);
+  const clearFocusedEaseSegment = usePlayerStore((s) => s.clearFocusedEaseSegment);
+  const timelineProjectId = usePlayerStore((s) => s.timelineProjectId);
+  const timelineSessionEpoch = usePlayerStore((s) => s.timelineSessionEpoch);
+  const selectedElementId = usePlayerStore((s) => s.selectedElementId);
+  const focusedRequestIsCurrent =
+    focusedEaseSegment !== null &&
+    isFocusedEaseRequestCurrent(focusedEaseSegment, {
+      timelineProjectId,
+      timelineSessionEpoch,
+      selectedElementId,
+    });
+  const focusedAnimationExists =
+    focusedEaseSegment !== null &&
+    animations.some((animation) => animation.id === focusedEaseSegment.animationId);
+  const focusedHere =
+    focusedRequestIsCurrent && focusedEaseSegment.elementId === elementId && focusedAnimationExists
+      ? focusedEaseSegment
+      : null;
 
   return (
     <Section title="Animation" icon={<Film size={15} />}>
@@ -56,13 +74,12 @@ export const GsapAnimationSection = memo(function GsapAnimationSection({
               key={anim.id}
               animation={anim}
               defaultExpanded={index === 0}
-              focusedSegment={
-                focusedEaseSegment?.elementId === elementId &&
-                focusedEaseSegment.animationId === anim.id
-                  ? focusedEaseSegment
-                  : null
-              }
-              onFocusSegmentConsumed={clearFocusedEaseSegment}
+              focusedSegment={focusedHere?.animationId === anim.id ? focusedHere : null}
+              onFocusSegmentConsumed={() => {
+                if (focusedHere?.animationId === anim.id) {
+                  clearFocusedEaseSegment(focusedHere.nonce);
+                }
+              }}
             />
           ))}
 
