@@ -118,6 +118,7 @@ function renderLanes(options: RenderLanesOptions = {}): {
           })}
           clipIndex={createTimelineClipIndex(tracks)}
           renderTimeRange={{ start: 0, end: Number.POSITIVE_INFINITY }}
+          visibleTimeRange={{ start: 0, end: Number.POSITIVE_INFINITY }}
           pinnedClipIdentities={new Set()}
           trackOrder={displayTrackOrder}
           tracks={tracks}
