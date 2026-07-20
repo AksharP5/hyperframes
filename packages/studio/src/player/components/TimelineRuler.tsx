@@ -1,10 +1,11 @@
 import { memo } from "react";
 import type { TimelineTheme } from "./timelineTheme";
-import { RULER_H } from "./timelineLayout";
+import { RULER_H, getTimelineBeatEntries } from "./timelineLayout";
 import { formatTimelineTickLabel } from "./timelineRulerGeometry";
 import { usePlayerStore } from "../store/playerStore";
 import { secondsToFrame } from "../lib/time";
 import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
+import type { TimelineTimeRange } from "../lib/timelineClipIndex";
 
 interface TimelineRulerProps {
   major: number[];
@@ -17,6 +18,7 @@ interface TimelineRulerProps {
   theme: TimelineTheme;
   beatAnalysis?: MusicBeatAnalysis | null;
   contentOrigin: number;
+  renderTimeRange?: TimelineTimeRange;
 }
 
 export const TimelineRuler = memo(function TimelineRuler({
@@ -30,10 +32,12 @@ export const TimelineRuler = memo(function TimelineRuler({
   theme,
   beatAnalysis,
   contentOrigin,
+  renderTimeRange,
 }: TimelineRulerProps) {
   const timeDisplayMode = usePlayerStore((s) => s.timeDisplayMode);
   const beatTimes = beatAnalysis?.beatTimes ?? [];
   const beatStrengths = beatAnalysis?.beatStrengths ?? [];
+  const beatEntries = getTimelineBeatEntries(beatTimes, beatStrengths, renderTimeRange);
 
   // Only draw beat lines when they'd be at least 5px apart
   const avgBeatInterval =
@@ -52,13 +56,14 @@ export const TimelineRuler = memo(function TimelineRuler({
         height={totalH}
       >
         {showBeats &&
-          beatTimes.map((t, i) => {
+          beatEntries.map(({ time: t, index: i, strength: beatStrength }) => {
             const x = t * pps;
             // Louder beats → brighter line. Gamma curve widens the contrast.
-            const strength = Math.pow(Math.min(1, beatStrengths[i] ?? 0.5), 2.2);
+            const strength = Math.pow(Math.min(1, beatStrength ?? 0.5), 2.2);
             const opacity = 0.08 + strength * 0.62;
             return (
               <line
+                data-timeline-grid-cell="beat"
                 key={`b-${t}-${i}`}
                 x1={x}
                 y1={0}
@@ -104,13 +109,23 @@ export const TimelineRuler = memo(function TimelineRuler({
               contentOrigin + t * pps (see getTimelinePlayheadLeft). Without the shift
               a tick spans [x, x+1) and its center is half a pixel right. */}
           {minor.map((t) => (
-            <div key={`m-${t}`} className="absolute bottom-0" style={{ left: t * pps - 0.5 }}>
+            <div
+              key={`m-${t}`}
+              data-timeline-grid-cell="minor"
+              className="absolute bottom-0"
+              style={{ left: t * pps - 0.5 }}
+            >
               <div className="w-px h-2" style={{ background: theme.tickMinor }} />
             </div>
           ))}
 
           {major.map((t) => (
-            <div key={`M-${t}`} className="absolute top-0" style={{ left: t * pps - 0.5 }}>
+            <div
+              key={`M-${t}`}
+              data-timeline-grid-cell="major"
+              className="absolute top-0"
+              style={{ left: t * pps - 0.5 }}
+            >
               <span
                 className="absolute font-mono tabular-nums leading-none whitespace-nowrap"
                 style={{

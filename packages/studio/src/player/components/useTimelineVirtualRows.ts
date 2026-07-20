@@ -25,7 +25,7 @@ export function extractTimelineVirtualRowRange(
   return [...indexes].sort((left, right) => left - right);
 }
 
-export function extractTimelineVirtualRowSeed(
+function extractTimelineVirtualRowSeed(
   count: number,
   pinnedRowIndexes: readonly number[],
 ): number[] {
