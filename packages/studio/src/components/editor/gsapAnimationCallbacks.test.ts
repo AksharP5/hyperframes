@@ -26,7 +26,6 @@ describe("withTrackedGsapAnimationCallbacks", () => {
     const onLivePreviewEnd = vi.fn();
     callbacks.onLivePreview = onLivePreview;
     callbacks.onLivePreviewEnd = onLivePreviewEnd;
-
     const tracked = withTrackedGsapAnimationCallbacks(callbacks, vi.fn());
 
     expect(tracked.onUpdateFromProperty).toBeUndefined();
@@ -37,6 +36,7 @@ describe("withTrackedGsapAnimationCallbacks", () => {
     expect(tracked.onUpdateKeyframeEase).toBeUndefined();
     expect(tracked.onSetAllKeyframeEases).toBeUndefined();
     expect(tracked.onUnroll).toBeUndefined();
+    expect(tracked.onUpdateSegmentEase).toBeUndefined();
     expect(tracked.onLivePreview).toBe(onLivePreview);
     expect(tracked.onLivePreviewEnd).toBe(onLivePreviewEnd);
   });
@@ -57,6 +57,7 @@ describe("withTrackedGsapAnimationCallbacks", () => {
       onUpdateArcSegment: mutation("arc-segment"),
       onUpdateKeyframeEase: mutation("keyframe-ease"),
       onSetAllKeyframeEases: mutation("all-eases"),
+      onUpdateSegmentEase: mutation("segment-ease"),
       onUnroll: mutation("unroll"),
     };
     const tracked = withTrackedGsapAnimationCallbacks(callbacks, (control, name) => {
@@ -79,6 +80,10 @@ describe("withTrackedGsapAnimationCallbacks", () => {
     requireCallback(tracked.onUpdateArcSegment)("a1", 1, { curviness: 0.5 });
     requireCallback(tracked.onUpdateKeyframeEase)("a1", 50, "power2.out");
     requireCallback(tracked.onSetAllKeyframeEases)("a1", "none");
+    requireCallback(tracked.onUpdateSegmentEase)(
+      [{ animationId: "a1", tweenPercentage: 50 }],
+      "none",
+    );
     requireCallback(tracked.onUnroll)("a1");
 
     expect(events).toEqual([
@@ -115,6 +120,8 @@ describe("withTrackedGsapAnimationCallbacks", () => {
       "mutate:keyframe-ease",
       "track:select:All keyframe eases",
       "mutate:all-eases",
+      "track:select:Segment ease",
+      "mutate:segment-ease",
       "track:button:Unroll animation",
       "mutate:unroll",
     ]);

@@ -1,3 +1,4 @@
+import { scopedElementKey } from "../../hooks/gsapKeyframeCacheHelpers";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { resolveEditingSections } from "@hyperframes/core/editing";
 import { DesignPanelInputProvider } from "../../contexts/DesignPanelInputContext";
@@ -135,6 +136,7 @@ export function PropertyPanelFlat({
   onUpdateArcSegment,
   onUnroll,
   onUpdateKeyframeEase,
+  onUpdateSegmentEase,
   onSetAllKeyframeEases,
 }: Pick<
   PropertyPanelProps,
@@ -180,6 +182,7 @@ export function PropertyPanelFlat({
   | "onUnroll"
   | "onUpdateKeyframeEase"
   | "onSetAllKeyframeEases"
+  | "onUpdateSegmentEase"
   | "recordingState"
   | "recordingDuration"
   | "onToggleRecording"
@@ -253,7 +256,7 @@ export function PropertyPanelFlat({
   // flips synchronously while the panel still renders its predecessor, so a
   // stale panel would consume a request meant for its successor whenever the
   // two share a class-selector animation id.
-  const renderedElementId = `${element.sourceFile}#${element.id}`;
+  const renderedElementId = scopedElementKey(element);
   // Adjusted during render (not an effect) so the card mounts on the same
   // commit the request lands on. Keyed on request identity: a group the user
   // closes afterwards stays closed.
@@ -330,6 +333,7 @@ export function PropertyPanelFlat({
           onUpdateArcSegment,
           onUnroll,
           onUpdateKeyframeEase,
+          onUpdateSegmentEase,
           onSetAllKeyframeEases,
         }
       : null;

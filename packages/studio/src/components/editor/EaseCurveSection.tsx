@@ -10,6 +10,7 @@ import { holdCurvePath, MiniCurveSvg, sampledPath } from "./easeCurveSvg";
 import { EaseBezierField, SpringBounceField, WiggleField } from "./EaseParamFields";
 import { EASE_CURVES, EASE_LABELS, resolveEaseCurveTuple } from "./gsapAnimationConstants";
 import { roundToCenti } from "../../utils/rounding";
+import type { AnimationKeyframeTarget } from "../../hooks/gsapTweenSynth";
 
 export { MiniCurveSvg } from "./easeCurveSvg";
 
@@ -323,9 +324,11 @@ function EaseParameterField({
 export function EaseCurveSection({
   ease,
   onCustomEaseCommit,
+  collidingAnimationTargets,
 }: {
   ease: string;
   onCustomEaseCommit: (ease: string) => void;
+  collidingAnimationTargets?: AnimationKeyframeTarget[];
 }) {
   const springBounce = parseSpringBounce(ease);
   const isSpring = springBounce !== null;
@@ -419,6 +422,11 @@ export function EaseCurveSection({
   return (
     <div className="rounded-lg bg-neutral-900/50 p-2">
       <EaseTypeDropdown kind={mode} ease={ease} label={label} onSelect={onCustomEaseCommit} />
+      {collidingAnimationTargets && collidingAnimationTargets.length > 1 && (
+        <p className="mb-1 text-[9px] text-neutral-500">
+          Applies to {collidingAnimationTargets.length} animations
+        </p>
+      )}
       <EaseModeToggle mode={mode} onCommit={onCustomEaseCommit} />
       <span className="sr-only" aria-live="polite">
         {MODE_LABELS[mode]} ease editor selected

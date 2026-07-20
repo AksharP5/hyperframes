@@ -1,3 +1,4 @@
+import { scopedElementKey } from "../../hooks/gsapKeyframeCacheHelpers";
 import { memo, useEffect, useRef, useState, type RefObject } from "react";
 import type { DomEditSelection } from "./domEditing";
 import { useDomEditContext } from "../../contexts/DomEditContext";
@@ -103,7 +104,7 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
   const activeKeyframePct = usePlayerStore((s) => s.activeKeyframePct);
   const timelineElement = usePlayerStore((state) => {
     if (!selection) return undefined;
-    const sourceScopedId = `${selection.sourceFile || "index.html"}#${selection.id}`;
+    const sourceScopedId = scopedElementKey(selection);
     return state.elements.find(
       (element) => (element.key ?? element.id) === sourceScopedId || element.id === selection.id,
     );
