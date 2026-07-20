@@ -294,7 +294,7 @@ export const Timeline = memo(function Timeline({
       lastScrollLeftRef,
       contentOrigin,
     });
-  const { logicalRows, pinnedElementId, rowVirtualizationActive, virtualRows } =
+  const { logicalRows, focusedTargetId, pinnedElementId, rowVirtualizationActive, virtualRows } =
     useTimelineLogicalFocus({
       scrollRef,
       tracks,
@@ -479,7 +479,6 @@ export const Timeline = memo(function Timeline({
         onDragLeave={assetDrop.handleAssetDragLeave}
         onDrop={assetDrop.handleAssetDrop}
         onPointerDown={(e) => {
-          // Interactive controls own their clicks; scrubbing would preventDefault and eat them.
           if (e.target instanceof Element && e.target.closest("button, input, select, a")) return;
           if (splitAllAtPointer(e)) return;
           handlePointerDown(e);
@@ -508,6 +507,7 @@ export const Timeline = memo(function Timeline({
           rowGeometry={displayLayout.rowGeometry}
           virtualRows={virtualRows}
           logicalRows={logicalRows}
+          focusedTargetId={focusedTargetId}
           rowsVirtualized={rowVirtualizationActive}
           clipIndex={clipIndex}
           renderTimeRange={renderTimeRange}

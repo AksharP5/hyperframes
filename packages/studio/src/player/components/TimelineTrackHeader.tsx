@@ -42,6 +42,7 @@ interface TimelineTrackHeaderProps {
   currentTime: number;
   isTrackHidden: boolean;
   isAudioTrack: boolean;
+  rovingTargetId?: string | null;
   theme: TimelineTheme;
   onToggleClipExpanded: () => void;
   onToggleTrackHidden: TimelineEditCallbacks["onToggleTrackHidden"];
@@ -202,6 +203,7 @@ function PropertyGroupHeaderRow({
   columnWidth,
   onTogglePropertyGroupKeyframe,
   onSeek,
+  rovingTargetId = null,
 }: {
   lane: TimelinePropertyLane;
   laneIndex: number;
@@ -213,6 +215,7 @@ function PropertyGroupHeaderRow({
   columnWidth: number;
   onTogglePropertyGroupKeyframe?: TimelineEditCallbacks["onTogglePropertyGroupKeyframe"];
   onSeek?: (time: number) => void;
+  rovingTargetId: string | null;
 }) {
   const elementId = expandedElement.key ?? expandedElement.id;
   const { navigation, values, label, toggleTarget } = resolveLaneHeaderState(
@@ -226,7 +229,7 @@ function PropertyGroupHeaderRow({
       id={timelineLogicalRowCellId(timelinePropertyRowId(elementId, lane.group), "header")}
       data-timeline-focus-id={timelinePropertyRowId(elementId, lane.group)}
       data-timeline-element-id={elementId}
-      tabIndex={-1}
+      tabIndex={rovingTargetId === timelinePropertyRowId(elementId, lane.group) ? 0 : -1}
       data-property-group={lane.group}
       data-timeline-lane-top={getTimelineLaneTop(laneIndex)}
       className="absolute left-0 flex items-center gap-1 overflow-hidden px-1.5 text-[10px] text-white/65"
@@ -304,6 +307,7 @@ export function TimelineTrackHeader({
   onToggleTrackHidden,
   onTogglePropertyGroupKeyframe,
   onSeek,
+  rovingTargetId = null,
 }: TimelineTrackHeaderProps) {
   const clipPercentage = keyframeClip
     ? ((currentTime - keyframeClip.start) / keyframeClip.duration) * 100
@@ -391,6 +395,7 @@ export function TimelineTrackHeader({
                 columnWidth={showTrackLabel ? LABEL_COL_W : contentOrigin}
                 onTogglePropertyGroupKeyframe={onTogglePropertyGroupKeyframe}
                 onSeek={onSeek}
+                rovingTargetId={rovingTargetId}
               />
             ))}
         </>

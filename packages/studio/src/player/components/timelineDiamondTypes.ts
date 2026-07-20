@@ -36,7 +36,12 @@ export interface TimelineClipDiamondsProps {
   isSelected: boolean;
   currentPercentage: number;
   elementId: string;
+  /** Absolute clip bounds, used only to voice a keyframe's time in its label. */
+  clipStart?: number;
+  clipDuration?: number;
   selectedKeyframes: ReadonlySet<string>;
+  /** Focus id of the one timeline control currently in the tab order. */
+  rovingTargetId?: string | null;
   onClickKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
   onShiftClickKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
   onContextMenuKeyframe?: (
@@ -81,12 +86,6 @@ export interface TimelineDiamondLaneProps extends Omit<
 }
 
 export const DIAMOND_RATIO = 0.8;
-// Percentage tolerance for rendering keyframes near clip boundaries. Keyframes
-// slightly outside [0, 100] (from rounding or stale cache during the async
-// persist → reload cycle) are still rendered (the clip is overflow-visible) at
-// their true position rather than hidden.
-export const KF_MIN_PCT = -5;
-export const KF_MAX_PCT = 105;
 
 export type DragState = {
   kfKey: string;
