@@ -102,12 +102,10 @@ export function TimelineOverlays({
         <KeyframeDiamondContextMenu
           state={kfContextMenu}
           onClose={() => setKfContextMenu(null)}
-          onDelete={(elId, target) => onDeleteKeyframe?.(elId, target)}
-          onDeleteAll={(elId) => onDeleteAllKeyframes?.(elId)}
+          onDelete={(elId, keyframe) => onDeleteKeyframe?.(elId, keyframe)}
+          onDeleteAll={(element) => onDeleteAllKeyframes?.(element)}
           onMoveToPlayhead={
-            onMoveKeyframeToPlayhead
-              ? (element, target) => onMoveKeyframeToPlayhead(element, target)
-              : undefined
+            onMoveKeyframeToPlayhead ? (...args) => onMoveKeyframeToPlayhead(...args) : undefined
           }
         />
       )}

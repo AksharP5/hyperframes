@@ -19,10 +19,10 @@ export interface KeyframeDiamondContextMenuState {
 interface KeyframeDiamondContextMenuProps {
   state: KeyframeDiamondContextMenuState;
   onClose: () => void;
-  onDelete: (elementId: string, target: TimelineKeyframeTarget) => void;
+  onDelete: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
   onDeleteAll: (element: TimelineElement) => void;
   /** Retime the keyframe to the current playhead, preserving its value + ease. */
-  onMoveToPlayhead?: (element: TimelineElement, target: TimelineKeyframeTarget) => void;
+  onMoveToPlayhead?: (element: TimelineElement, keyframe: TimelineKeyframeTarget) => void;
 }
 
 export const KeyframeDiamondContextMenu = memo(function KeyframeDiamondContextMenu({
@@ -33,11 +33,9 @@ export const KeyframeDiamondContextMenu = memo(function KeyframeDiamondContextMe
   onMoveToPlayhead,
 }: KeyframeDiamondContextMenuProps) {
   const menuRef = useContextMenuDismiss(onClose);
-  // One target object for every action: passing the identity as loose positional
-  // arguments let an adapter forward the percentage alone, which drops the menu
-  // back to first-match-by-percentage and picks the wrong animation whenever two
-  // collide at the same percentage.
-  const target: TimelineKeyframeTarget = {
+  // The clicked diamond's identity, built once: the menu's two mutating entries
+  // both act on it, and they must not disagree about which keyframe was clicked.
+  const keyframe: TimelineKeyframeTarget = {
     percentage: state.percentage,
     tweenPercentage: state.tweenPercentage,
     propertyGroup: state.propertyGroup,
@@ -64,7 +62,7 @@ export const KeyframeDiamondContextMenu = memo(function KeyframeDiamondContextMe
             // Pass clip-% — resolveKeyframeTarget keys the cache lookup on clip-%
             // and returns the tween-% for the mutation. Passing tween-% here would
             // miss the lookup on any tween whose window is shorter than the clip.
-            onMoveToPlayhead(state.element, target);
+            onMoveToPlayhead(state.element, keyframe);
             onClose();
           }}
         >
@@ -77,7 +75,7 @@ export const KeyframeDiamondContextMenu = memo(function KeyframeDiamondContextMe
         type="button"
         className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-neutral-800 cursor-pointer text-left"
         onClick={() => {
-          onDelete(state.elementId, target);
+          onDelete(state.elementId, keyframe);
           onClose();
         }}
       >

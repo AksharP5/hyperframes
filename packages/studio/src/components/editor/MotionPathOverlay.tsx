@@ -520,12 +520,12 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
         <KeyframeDiamondContextMenu
           state={kfMenu}
           onClose={() => setKfMenu(null)}
-          onDelete={(_elId, target) =>
-            animId && handleGsapRemoveKeyframe(animId, target.percentage)
+          onDelete={(_elId, keyframe) =>
+            animId && handleGsapRemoveKeyframe(animId, keyframe.percentage)
           }
           onDeleteAll={() => animId && handleGsapRemoveAllKeyframes(animId)}
-          onMoveToPlayhead={(_element, target) =>
-            animId && handleGsapMoveKeyframeToPlayhead(animId, target.percentage)
+          onMoveToPlayhead={(_element, keyframe) =>
+            animId && handleGsapMoveKeyframeToPlayhead(animId, keyframe.percentage)
           }
         />
       )}
