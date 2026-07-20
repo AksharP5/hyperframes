@@ -38,8 +38,8 @@ function makeParams(overrides: Partial<Params> = {}): Params {
     addKeyframe: vi.fn(),
     addKeyframeBatch: resolved(),
     removeKeyframe: vi.fn(),
-    moveKeyframe: vi.fn(),
-    resizeKeyframedTween: vi.fn(),
+    moveKeyframe: vi.fn().mockResolvedValue(true),
+    resizeKeyframedTween: vi.fn().mockResolvedValue(true),
     convertToKeyframes: resolved(),
     removeAllKeyframes: resolved(),
     handleDomManualEditsReset: vi.fn(),
@@ -142,5 +142,24 @@ describe("useGsapSelectionHandlers selection override", () => {
 
     expect(moveKeyframe).toHaveBeenCalledWith(selection, "anim-1", 50, expect.any(Number));
     rendered.unmount();
+  });
+});
+
+describe("useGsapSelectionHandlers retime settlement", () => {
+  it("returns false without a selection and forwards the mutation result with one", async () => {
+    const moveKeyframe = vi.fn().mockResolvedValue(true);
+    const withoutSelection = renderHandlers(makeParams({ domEditSelection: null, moveKeyframe }));
+    await expect(
+      withoutSelection.handlers().handleGsapMoveKeyframe("anim-1", 50, 75),
+    ).resolves.toBe(false);
+    expect(moveKeyframe).not.toHaveBeenCalled();
+    withoutSelection.unmount();
+
+    const withSelection = renderHandlers(makeParams({ moveKeyframe }));
+    await expect(withSelection.handlers().handleGsapMoveKeyframe("anim-1", 50, 75)).resolves.toBe(
+      true,
+    );
+    expect(moveKeyframe).toHaveBeenCalledOnce();
+    withSelection.unmount();
   });
 });

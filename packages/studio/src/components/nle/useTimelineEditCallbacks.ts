@@ -15,7 +15,10 @@ import { elementCacheKeys } from "../../hooks/gsapKeyframeCacheHelpers";
 import { resolveKeyframeRetime } from "../editor/keyframeRetime";
 import type { DomEditSelection } from "../editor/domEditingTypes";
 import type { TimelineMoveOperation } from "../../hooks/timelineMoveAdapter";
-import { splitTimelineElementKey } from "../../player/lib/timelineElementHelpers";
+import {
+  getTimelineElementIdentity,
+  splitTimelineElementKey,
+} from "../../player/lib/timelineElementHelpers";
 import type { TimelineKeyframeTarget } from "../../player/components/timelineKeyframeIdentity";
 
 export interface TimelineEditCallbackDeps {
@@ -139,27 +142,28 @@ export function useTimelineEditCallbacks({
   // anim in the keyframe's property group, falling back to the first keyframed one.
   const resolveKeyframeTarget = useCallback(
     (
+      elementKey: string,
       target: TimelineKeyframeTarget,
       animations: GsapAnimation[] = selectedGsapAnimations,
-      elementKey?: string,
     ): { animId: string; tweenPct: number } | null => {
       const carriesIdentity =
         target.propertyGroup !== undefined ||
         target.tweenPercentage !== undefined ||
         target.animationId !== undefined;
-      // The clicked element's own cache when the caller knows it: the diamond
-      // context menu can open on an element that is not the selected one, and
-      // reading the selection's cache there resolves against the wrong element.
-      const cached = usePlayerStore
-        .getState()
-        .keyframeCache.get(elementKey ?? domEditSelection?.id ?? "");
+      // The clicked element's own cache: the diamond context menu can open on an
+      // element that is not the selected one, and reading the selection's cache
+      // there resolves against the wrong element.
+      const keyframeCache = usePlayerStore.getState().keyframeCache;
+      const cached =
+        keyframeCache.get(elementKey) ??
+        keyframeCache.get(splitTimelineElementKey(elementKey).domId);
       return resolveTimelineKeyframeTarget(
         target.percentage,
         carriesIdentity ? [target] : (cached?.keyframes ?? []),
         animations,
       );
     },
-    [domEditSelection?.id, selectedGsapAnimations],
+    [selectedGsapAnimations],
   );
 
   const removeKeyframeTarget = useCallback(
@@ -190,17 +194,20 @@ export function useTimelineEditCallbacks({
       onSplitElement: handleTimelineElementSplit,
       onRazorSplit: handleRazorSplit,
       onRazorSplitAll: handleRazorSplitAll,
-      onDeleteAllKeyframes: () => {
+      onDeleteAllKeyframes: (element) => {
         // Hold the element where it is (collapse keyframes to a static set) rather
         // than deleting the whole animation — deleting strands a stale GSAP base
         // that the next drag adds to, flinging the element off-screen.
-        const anim = selectedGsapAnimations.find((a) => a.keyframes);
+        const elementKey = getTimelineElementIdentity(element);
+        const anim = resolveElementAnimations(elementKey).find((animation) => animation.keyframes);
         if (!anim) return;
-        handleGsapRemoveAllKeyframes(anim.id);
+        void buildDomSelectionForTimelineElement(element).then((selection) => {
+          if (selection) handleGsapRemoveAllKeyframes(anim.id, selection);
+        });
       },
       onDeleteKeyframe: (elId, keyframe) => {
         const animations = resolveElementAnimations(elId);
-        const target = resolveKeyframeTarget(keyframe, animations, elId);
+        const target = resolveKeyframeTarget(elId, keyframe, animations);
         if (!target) return;
         const element = usePlayerStore.getState().elements.find((el) => (el.key ?? el.id) === elId);
         if (!element) {
@@ -211,7 +218,8 @@ export function useTimelineEditCallbacks({
         // non-selected element (especially one in a different source file) commits
         // against the right element instead of the current domEditSelection.
         void buildDomSelectionForTimelineElement(element).then((selection) => {
-          removeKeyframeTarget(target.animId, target.tweenPct, animations, selection);
+          if (selection)
+            removeKeyframeTarget(target.animId, target.tweenPct, animations, selection);
         });
       },
       // Retime the keyframe to the playhead, preserving its value + ease. The
@@ -219,15 +227,14 @@ export function useTimelineEditCallbacks({
       // its selection commits it, and its animation computes the playhead
       // percentage. Mixing frames here retimed against the selected element's
       // tween and wrote the result into the clicked element's file.
-      onMoveKeyframeToPlayhead: (elId, keyframe) => {
-        const animations = resolveElementAnimations(elId);
-        const target = resolveKeyframeTarget(keyframe, animations, elId);
+      onMoveKeyframeToPlayhead: (element, keyframe) => {
+        const elementKey = getTimelineElementIdentity(element);
+        const animations = resolveElementAnimations(elementKey);
+        const target = resolveKeyframeTarget(elementKey, keyframe, animations);
         const animation = target
           ? animations.find((candidate) => candidate.id === target.animId)
           : undefined;
         if (!target || !animation) return;
-        const element = usePlayerStore.getState().elements.find((el) => (el.key ?? el.id) === elId);
-        if (!element) return;
         void buildDomSelectionForTimelineElement(element).then((selection) => {
           if (selection) {
             handleGsapMoveKeyframeToPlayhead(target.animId, target.tweenPct, selection, animation);
@@ -244,7 +251,7 @@ export function useTimelineEditCallbacks({
       // fallow-ignore-next-line complexity
       onMoveKeyframe: async (elId, keyframe, toClipPct) => {
         const animations = resolveElementAnimations(elId);
-        const target = resolveKeyframeTarget(keyframe, animations, elId);
+        const target = resolveKeyframeTarget(elId, keyframe, animations);
         if (!target) return false;
         // The dragged diamond's OWN element, not the selected one: a drag on a
         // non-selected clip has to read that clip's animations and commit
@@ -254,12 +261,11 @@ export function useTimelineEditCallbacks({
         if (!sel) return false;
         const anim = animations.find((a) => a.id === target.animId);
         const tweenStart = anim ? resolveTweenStart(anim) : null;
-        if (!anim || tweenStart === null) return false;
+        if (!anim || tweenStart === null) return Promise.resolve(false);
         // Synthesized flat endpoints are clip boundaries, not authored keyframes.
         // Boundary-to-clip resize wiring is intentionally deferred; ignore the
         // drag rather than dispatching a free keyframe move that cannot be written.
-        if (!anim.keyframes) return false;
-        const tweenDuration = anim.duration ?? resolveTweenDuration(anim);
+        if (!anim.keyframes) return Promise.resolve(false);
         const sourceFile = sel.sourceFile || activeCompPath || "index.html";
         const { elements, domClipChildren } = usePlayerStore.getState();
         const { elStart, elDuration } = resolveClipTimingBasis(
@@ -268,6 +274,7 @@ export function useTimelineEditCallbacks({
           elements,
           domClipChildren,
         );
+        const tweenDuration = resolveTweenDuration(anim, elDuration);
         const dropAbsTime = elStart + (toClipPct / 100) * elDuration;
         const decision = resolveKeyframeRetime({
           keyframes: anim.keyframes?.keyframes ?? [],
@@ -277,35 +284,22 @@ export function useTimelineEditCallbacks({
           dropAbsTime,
         });
         if (decision.kind === "move" && decision.toTweenPct != null) {
-          handleGsapMoveKeyframe(target.animId, target.tweenPct, decision.toTweenPct, sel);
+          return handleGsapMoveKeyframe(target.animId, target.tweenPct, decision.toTweenPct, sel);
         } else if (
           decision.kind === "resize" &&
           decision.pctRemap &&
           decision.position != null &&
           decision.duration != null
         ) {
-          if (anim.keyframes) {
-            handleGsapResizeKeyframedTween(
-              target.animId,
-              decision.position,
-              decision.duration,
-              decision.pctRemap,
-              sel,
-            );
-          } else {
-            // resize-keyframed-tween requires an authored `keyframes` AST node
-            // and intentionally no-ops for a flat tween. Update its real tween
-            // window through the metadata writer (and SDK cutover path) instead.
-            handleGsapUpdateMeta(
-              target.animId,
-              { position: decision.position, duration: decision.duration },
-              sel,
-            );
-          }
-        } else {
-          return false;
+          return handleGsapResizeKeyframedTween(
+            target.animId,
+            decision.position,
+            decision.duration,
+            decision.pctRemap,
+            sel,
+          );
         }
-        return true;
+        return Promise.resolve(false);
       },
       onChangeKeyframeEase: (elId: string, _pct: number, ease: string) => {
         // The edited element's own animations + selection, not the selection's:

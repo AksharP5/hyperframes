@@ -10,6 +10,16 @@ interface StudioTestHookDeps {
   ) => void;
 }
 
+interface StudioTestApi {
+  selectByDomId: (id: string) => Promise<boolean>;
+}
+
+declare global {
+  interface Window {
+    __studioTest?: StudioTestApi;
+  }
+}
+
 /**
  * Dev-only headless-QA shortcut. Selecting an element normally requires a
  * pixel-precise click inside the preview iframe, which automated verification
@@ -33,7 +43,7 @@ export function useStudioTestHooks({
       isDev = false;
     }
     if (!isDev || typeof window === "undefined") return;
-    const api = {
+    const api: StudioTestApi = {
       selectByDomId: async (id: string): Promise<boolean> => {
         const element = previewIframeRef.current?.contentDocument?.getElementById(id) ?? null;
         if (!element) return false;
@@ -43,11 +53,11 @@ export function useStudioTestHooks({
         return true;
       },
     };
-    (window as unknown as { __studioTest?: typeof api }).__studioTest = api;
+    window.__studioTest = api;
     return () => {
       // delete, not `= undefined`: an own key holding undefined keeps
       // `"__studioTest" in window` true, which defeats feature detection.
-      delete (window as unknown as { __studioTest?: typeof api }).__studioTest;
+      delete window.__studioTest;
     };
   }, [applyDomSelection, buildDomSelectionFromTarget, previewIframeRef]);
 }
