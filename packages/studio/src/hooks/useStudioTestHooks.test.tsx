@@ -112,6 +112,15 @@ describe("timeline performance fixture", () => {
     expect(usePlayerStore.getState().lintFindingsByElement.size).toBe(0);
     expect(usePlayerStore.getState().elements).toHaveLength(1_000);
     expect(usePlayerStore.getState().expandedClipIds.size).toBe(1_000);
+
+    api.resetTimelinePerformanceFixture();
+    expect(notifications).toBe(2);
+    expect(usePlayerStore.getState()).toMatchObject({
+      isPlaying: false,
+      duration: 0,
+      timelineReady: false,
+      elements: [],
+    });
     unsubscribe();
     act(() => root.unmount());
     expect(window.__studioTest).toBeUndefined();

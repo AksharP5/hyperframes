@@ -26,6 +26,7 @@ interface StudioTestApi {
   loadTimelinePerformanceFixture: (
     spec: TimelinePerformanceFixtureSpec,
   ) => TimelinePerformanceFixtureSummary;
+  resetTimelinePerformanceFixture: () => void;
   readTimelinePerformanceDiagnostics: () => Readonly<TimelinePerformanceDiagnostics>;
   timelineViewportBudgets: typeof TIMELINE_VIEWPORT_BUDGETS;
 }
@@ -87,6 +88,9 @@ export function useStudioTestHooks({
           expandedClipIds: fixture.expandedClipIds,
         });
         return fixture.summary;
+      },
+      resetTimelinePerformanceFixture: () => {
+        usePlayerStore.getState().reset();
       },
       readTimelinePerformanceDiagnostics: () => readTimelinePerformanceDiagnostics(),
       timelineViewportBudgets: TIMELINE_VIEWPORT_BUDGETS,
