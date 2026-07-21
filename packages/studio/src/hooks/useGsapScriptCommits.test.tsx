@@ -283,6 +283,21 @@ function mockFetchResult(over: Partial<MutationResult> = {}): void {
 }
 
 describe("runCommit — instantPatch wiring", () => {
+  it("explains a deliberate mutation that the server safely rejected as unchanged", async () => {
+    mockFetchResult({ changed: false });
+    const deps = renderCommitHook();
+
+    await act(async () => {
+      await deps.api.commitMutation(
+        selection,
+        { type: "move-keyframe", fromPercentage: 50, toPercentage: 100 },
+        { label: "Move keyframe" },
+      );
+    });
+
+    expect(deps.showToast).toHaveBeenCalledWith("A keyframe already exists at that time", "info");
+  });
+
   it("no-op commit with an instantPatch still patches the runtime (paired x/y commits)", async () => {
     patchRuntimeTweenInPlace.mockReturnValue(true);
     mockFetchResult({ changed: false });
