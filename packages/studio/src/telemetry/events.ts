@@ -63,6 +63,11 @@ export function trackStudioExpandedClipEdit(props: {
   trackEvent("studio_expanded_clip_edit", { action: props.action });
 }
 
+// Adoption signal for committing an edit to a segment's ease.
+export function trackStudioSegmentEaseEdit(props: { ease: string }): void {
+  trackEvent("studio_segment_ease_edit", { action: "commit", ease: props.ease });
+}
+
 export function trackStudioFeedback(props: { rating: number; comment?: string }): void {
   trackEvent("survey sent", {
     $survey_id: "studio_experience",
