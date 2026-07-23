@@ -1744,10 +1744,21 @@
   // short strokes are filtered out so only real diagram connectors count.
   const CONNECTOR_MIN_SVG_PX = 100;
   const CONNECTOR_MIN_LEN_PX = 60;
+  // Gauge needles/pointers/ticks are one-end-anchored indicators, not node-to-node
+  // connectors — a separate (gauge) check owns them. Skip by id/class of the line
+  // or any group ancestor up to the SVG.
+  const CONNECTOR_INDICATOR_NAME = /needle|pointer|gauge|tick|indicator/i;
   const CONNECTOR_NODE_MIN_AREA = 400;
   // SVG dots/markers are small; keep the floor low but above sub-pixel decoration.
   const CONNECTOR_NODE_MIN_DOT_AREA = 16;
   const CONNECTOR_NODE_CAP = 300;
+
+  function isIndicatorConnector(line, svg) {
+    for (let node = line; node && node !== svg.parentElement; node = node.parentElement) {
+      if (CONNECTOR_INDICATOR_NAME.test(connectorNameFor(node))) return true;
+    }
+    return false;
+  }
 
   function lineScreenEndpoints(svg, line) {
     if (typeof line.getScreenCTM !== "function" || typeof svg.createSVGPoint !== "function") {
@@ -1826,6 +1837,7 @@
       for (const line of Array.from(svg.querySelectorAll("line, path"))) {
         if (line.closest(CONNECTOR_SKIP_CONTAINERS)) continue;
         if (!isVisibleElement(line, 0.05)) continue;
+        if (isIndicatorConnector(line, svg)) continue;
         const ends =
           line.tagName.toLowerCase() === "line"
             ? lineScreenEndpoints(svg, line)
