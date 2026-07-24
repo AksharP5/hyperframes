@@ -42,6 +42,11 @@ test("removed preset phrases resolve to surviving looks", () => {
   assert.equal(matchColorLook("cool clean").preset, "clean-studio");
 });
 
+test("complete-filter intent aliases resolve deterministically", () => {
+  assert.equal(matchColorLook("analog tape").preset, "vhs-playback");
+  assert.equal(matchColorLook("creator video").preset, "creator-camcorder");
+});
+
 test("library look freezes a validated cube from params offline (--local-only)", async () => {
   const projectDir = mkdtempSync(join(tmpdir(), "mu-lut-provider-"));
   try {

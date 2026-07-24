@@ -27,6 +27,11 @@ export const RESOLVABLE_PRESET_IDS = [
   "soft-boost",
   "bright-pop",
   "deep-contrast",
+  "creator-camcorder",
+  "vhs-playback",
+  "home-movie-8mm",
+  "editorial-halftone",
+  "two-ink-print",
 ];
 
 const PRESET_SYNONYMS = {
@@ -76,6 +81,11 @@ const PRESET_SYNONYMS = {
     "clean colorful",
   ],
   "deep-contrast": ["deep contrast", "high contrast punchy", "punchy contrast", "bold contrast"],
+  "creator-camcorder": ["creator camcorder", "creator video", "ugc camera", "handheld creator"],
+  "vhs-playback": ["vhs playback", "vhs tape", "analog tape", "degraded tape"],
+  "home-movie-8mm": ["8mm home movie", "8mm film", "family film", "small gauge film"],
+  "editorial-halftone": ["editorial halftone", "halftone", "print dots", "newsprint"],
+  "two-ink-print": ["two ink print", "two ink editorial", "duotone print", "poster print"],
 };
 
 function presetCandidates() {
@@ -122,10 +132,8 @@ export function matchColorLook(intent) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
-  for (const candidate of presetCandidates()) {
-    if (candidate.preset === normalized) {
-      return { kind: "preset", preset: candidate.preset, score: 99 };
-    }
+  if (RESOLVABLE_PRESET_IDS.includes(normalized)) {
+    return { kind: "preset", preset: normalized, score: 99 };
   }
 
   const candidates = [...presetCandidates(), ...libraryCandidates()]

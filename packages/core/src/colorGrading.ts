@@ -575,6 +575,127 @@ export const HF_COLOR_GRADING_ACTIVE_EFFECT_KEYS = [
 
 export type HfColorGradingActiveEffectKey = (typeof HF_COLOR_GRADING_ACTIVE_EFFECT_KEYS)[number];
 
+const EFFECT_FAMILIES = [
+  {
+    id: "essentials",
+    label: "Essentials",
+    description: "Common optical, focus, and privacy-oriented primitives.",
+  },
+  {
+    id: "retro-glitch",
+    label: "Retro & Glitch",
+    description: "Tape, film, CRT, channel separation, and digital disruption.",
+  },
+  {
+    id: "print",
+    label: "Print",
+    description: "Halftone, limited-ink, dither, and screen-print rendering.",
+  },
+  {
+    id: "art",
+    label: "Art",
+    description: "ASCII, engraved, crosshatched, and painterly rendering.",
+  },
+] as const;
+
+type EffectFamilyId = (typeof EFFECT_FAMILIES)[number]["id"];
+
+const EFFECT_METADATA = {
+  blur: {
+    family: "essentials",
+    label: "Blur",
+    description: "Defocus or soften a full media layer.",
+  },
+  pixelate: {
+    family: "essentials",
+    label: "Pixelate",
+    description: "Turn a media layer into a block mosaic.",
+  },
+  bloom: {
+    family: "essentials",
+    label: "Bloom",
+    description: "Add thresholded glow around bright image regions.",
+  },
+  chromaBleed: {
+    family: "retro-glitch",
+    label: "Chroma Softening",
+    description: "Smear color like low-bandwidth video.",
+  },
+  tapeDamage: {
+    family: "retro-glitch",
+    label: "Tape Damage",
+    description: "Add moving tracking errors and tape noise.",
+  },
+  filmArtifacts: {
+    family: "retro-glitch",
+    label: "Film Artifacts",
+    description: "Add deterministic dust and film wear.",
+  },
+  scanlines: {
+    family: "retro-glitch",
+    label: "Scanlines",
+    description: "Overlay configurable horizontal display lines.",
+  },
+  crtCurvature: {
+    family: "retro-glitch",
+    label: "CRT Curvature",
+    description: "Warp media toward curved CRT geometry.",
+  },
+  chromaticAberration: {
+    family: "retro-glitch",
+    label: "Channel Separation",
+    description: "Offset color channels by angle.",
+  },
+  digitalGlitch: {
+    family: "retro-glitch",
+    label: "Digital Glitch",
+    description: "Compose tears, blocks, and color splits.",
+  },
+  halftone: {
+    family: "print",
+    label: "Halftone",
+    description: "Render source color through a print-dot raster.",
+  },
+  twoInkPrint: {
+    family: "print",
+    label: "Two-Ink Print",
+    description: "Reduce media to a two-ink print treatment.",
+  },
+  dither: {
+    family: "print",
+    label: "Ordered Dither",
+    description: "Quantize media into an ordered limited palette.",
+  },
+  monoScreen: {
+    family: "print",
+    label: "Mono Screen",
+    description: "Build monochrome dot, shape, or line artwork.",
+  },
+  ascii: {
+    family: "art",
+    label: "ASCII",
+    description: "Render media as configurable procedural glyph cells.",
+  },
+  engraving: {
+    family: "art",
+    label: "Engraving",
+    description: "Translate luminance into directional engraved lines.",
+  },
+  crosshatch: {
+    family: "art",
+    label: "Crosshatch",
+    description: "Translate media into layered hand-hatched lines.",
+  },
+  kuwahara: {
+    family: "art",
+    label: "Kuwahara Paint",
+    description: "Apply edge-preserving painterly smoothing.",
+  },
+} as const satisfies Record<
+  HfColorGradingActiveEffectKey,
+  { family: EffectFamilyId; label: string; description: string }
+>;
+
 export const HF_COLOR_GRADING_EFFECT_PRESETS = HF_COLOR_GRADING_PRESETS.filter((preset) =>
   HF_COLOR_GRADING_ACTIVE_EFFECT_KEYS.some((key) => preset.effects[key] > 0.0001),
 );
@@ -714,6 +835,7 @@ export function getHfColorGradingCapabilities() {
       identity: ADJUST_ZERO[key],
       ...ADJUST_LIMITS[key],
     })),
+    effectFamilies: EFFECT_FAMILIES,
     finishing: HF_COLOR_GRADING_DETAIL_KEYS.map((key) => ({
       key,
       identity: DETAIL_DEFAULTS[key],
@@ -723,6 +845,7 @@ export function getHfColorGradingCapabilities() {
       const apply = HF_COLOR_GRADING_EFFECT_APPLY_DEFAULTS[key];
       return {
         key,
+        ...EFFECT_METADATA[key],
         apply: { ...apply },
         supportsPalette: PALETTE_EFFECT_KEYS.has(key),
         renderLane: MULTIPASS_EFFECT_KEYS.has(key) ? "multipass" : "single-pass",
