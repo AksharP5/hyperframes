@@ -1002,6 +1002,11 @@ const CONNECTOR_HELD_START_FRAC = 0.45;
 const CONNECTOR_MIN_HELD_FRAMES = 2;
 // Fraction of held frames on which the loose end must be detached to flag.
 const CONNECTOR_HELD_DETACH_FRAC = 0.8;
+// Fraction of held frames an endpoint must stay within attach tolerance to
+// count as ANCHORED. A single-frame graze is not attachment: a genuinely
+// detached endpoint that merely touches a node once must not read as anchored
+// (else its dangling partner escapes the finding). Sustained, not instantaneous.
+const CONNECTOR_HELD_ATTACH_FRAC = 0.8;
 
 interface ConnectorObservation {
   time: number;
@@ -1057,14 +1062,15 @@ function groupConnectorsBySelector(frames: ConnectorFrame[]): Map<string, Connec
 }
 
 interface EndpointHeldGaps {
-  minGap: number;
+  attachedFraction: number;
   detachedFraction: number;
   danglingGap: number;
 }
 
-/** Per-endpoint held-frame gap summary: closest it ever gets to a node, the
- * fraction of held frames it sits beyond the detach threshold, and the gap it
- * settles at when detached. */
+/** Per-endpoint held-frame gap summary: the fraction of held frames it sits
+ * within attach tolerance of a node (sustained attachment, not a lone graze),
+ * the fraction it sits beyond the detach threshold, and the gap it settles at
+ * when detached. */
 function endpointHeldGaps(
   group: ConnectorObservation[],
   pick: (o: ConnectorObservation) => { x: number; y: number },
@@ -1078,16 +1084,17 @@ function endpointHeldGaps(
     heldGaps.push(nearestNodeGap(point.x, point.y, observation.nodes));
   }
   if (heldGaps.length < CONNECTOR_MIN_HELD_FRAMES) return null;
+  const attached = heldGaps.filter((gap) => gap <= CONNECTOR_ATTACH_PX);
   const detached = heldGaps.filter((gap) => gap > detachThreshold);
   return {
-    minGap: Math.min(...heldGaps),
+    attachedFraction: attached.length / heldGaps.length,
     detachedFraction: detached.length / heldGaps.length,
     danglingGap: detached.length > 0 ? Math.min(...detached) : 0,
   };
 }
 
 function isAnchored(gaps: EndpointHeldGaps): boolean {
-  return gaps.minGap <= CONNECTOR_ATTACH_PX;
+  return gaps.attachedFraction >= CONNECTOR_HELD_ATTACH_FRAC;
 }
 
 function isDangling(gaps: EndpointHeldGaps): boolean {

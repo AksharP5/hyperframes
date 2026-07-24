@@ -87,6 +87,31 @@ describe("detectConnectorMotionDetached", () => {
     expect(detectConnectorMotionDetached(danglingFrames().slice(0, 3), CANVAS)).toHaveLength(0);
   });
 
+  it("flags a loose end that only touches a node in ONE held frame then detaches the rest", () => {
+    // End A stays pinned to the hub; end B lands on the satellite for a single
+    // held frame (t=4) then dangles ~120px away for the rest of the held window.
+    // A lone graze is NOT sustained attachment, so B must read as dangling and
+    // the connector must be flagged — not cleared by the single touch.
+    const held: ConnectorFrame[] = [0, 2, 4, 5, 6, 7, 8].map((time) => {
+      const bx = time === 4 ? 820 : 640; // on satellite once, dangling otherwise
+      return frame(time, { selector: "#spoke", ax: 500, ay: 500, bx, by: 500 }, [HUB, SATELLITE]);
+    });
+    const findings = detectConnectorMotionDetached(held, CANVAS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.selector).toBe("#spoke");
+  });
+
+  it("keeps an endpoint anchored when it stays within tolerance across the held window", () => {
+    // The mirror case: B sits on the satellite for every held frame but one — a
+    // single-frame graze OFF a node does not turn a sustained anchor into a
+    // dangle, so nothing fires.
+    const held: ConnectorFrame[] = [0, 2, 4, 5, 6, 7, 8].map((time) => {
+      const bx = time === 6 ? 640 : 820; // off-node once, on the satellite otherwise
+      return frame(time, { selector: "#spoke", ax: 500, ay: 500, bx, by: 500 }, [HUB, SATELLITE]);
+    });
+    expect(detectConnectorMotionDetached(held, CANVAS)).toHaveLength(0);
+  });
+
   // Hollow ring centred at 900,500; bbox left stroke is at x=700.
   const RING: ConnectorNodeBox = {
     selector: "#ring",

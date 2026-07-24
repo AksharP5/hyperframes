@@ -1233,10 +1233,18 @@
       const mapped = point.matrixTransform(matrix);
       return { x: mapped.x, y: mapped.y };
     };
-    return {
-      start: toScreen(path.getPointAtLength(0)),
-      end: toScreen(path.getPointAtLength(total)),
-    };
+    // getPointAtLength can still throw on a degenerate/malformed path even after
+    // getTotalLength succeeded. This sampler runs once PER seeked frame, so one
+    // bad path must degrade to "no endpoints" (skip this path), not abort the
+    // whole check for every remaining path and frame.
+    try {
+      return {
+        start: toScreen(path.getPointAtLength(0)),
+        end: toScreen(path.getPointAtLength(total)),
+      };
+    } catch {
+      return null;
+    }
   }
 
   function distanceToRect(point, rect) {
@@ -1752,6 +1760,13 @@
   // SVG dots/markers are small; keep the floor low but above sub-pixel decoration.
   const CONNECTOR_NODE_MIN_DOT_AREA = 16;
   const CONNECTOR_NODE_CAP = 300;
+  // A stroke-drawn dial/hub ring may be an <path> arc (M...A...), not a <circle>.
+  // Recognize near-circular stroke paths as ring nodes so connectors attaching
+  // to them aren't false-flagged as detached, and so the gauge-indicator geometry
+  // exclusion (which keys on ring nodes) can see arc-drawn dials too.
+  const CONNECTOR_RING_MIN_LEN = 120;
+  const CONNECTOR_RING_MIN_RADIUS = 20;
+  const CONNECTOR_RING_MAX_RESIDUAL_FRAC = 0.15;
 
   function isIndicatorConnector(line, svg) {
     for (let node = line; node && node !== svg.parentElement; node = node.parentElement) {
@@ -1783,6 +1798,46 @@
   // bearing HTML elements plus SVG hub/ring/dot shapes. A shape drawn stroke-only
   // (fill:none) is a ring — the connector attaches to its stroke, so it is marked
   // `ring` and matched by perimeter, not hollow interior (see pointToNodeGap).
+  // A near-circular stroke <path> read as a ring/hub node. Returns a node box
+  // (ring flag from fill) or null when the path is not a resolvable circular hub.
+  // getPointAtLength is guarded — one malformed path must not abort the sampler.
+  function ringPathBox(path, rootRect) {
+    if (typeof path.getTotalLength !== "function" || typeof path.getPointAtLength !== "function") {
+      return null;
+    }
+    let total;
+    try {
+      total = path.getTotalLength();
+    } catch {
+      return null;
+    }
+    if (!Number.isFinite(total) || total < CONNECTOR_RING_MIN_LEN) return null;
+    const points = [];
+    try {
+      for (let i = 0; i < 16; i++) {
+        const local = path.getPointAtLength((total * i) / 16);
+        points.push({ x: local.x, y: local.y });
+      }
+    } catch {
+      return null;
+    }
+    const fit = fitCirclePoints(points);
+    if (!fit || fit.radius < CONNECTOR_RING_MIN_RADIUS) return null;
+    if (fit.residual > CONNECTOR_RING_MAX_RESIDUAL_FRAC * fit.radius) return null;
+    const rect = toRect(path.getBoundingClientRect());
+    const area = rectArea(rect);
+    if (area < CONNECTOR_NODE_MIN_DOT_AREA || area >= rectArea(rootRect) * 0.5) return null;
+    const fill = getComputedStyle(path).fill;
+    return {
+      selector: selectorFor(path),
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      ring: fill === "none" || fill === "transparent" || path.getAttribute("fill") === "none",
+    };
+  }
+
   function connectorNodeBoxes(root, rootRect) {
     const boxes = [];
     const rootArea = rectArea(rootRect);
@@ -1819,6 +1874,13 @@
         bottom: rect.bottom,
         ring: fill === "none" || fill === "transparent" || shape.getAttribute("fill") === "none",
       });
+    }
+    for (const path of Array.from(root.querySelectorAll("path"))) {
+      if (boxes.length >= CONNECTOR_NODE_CAP) break;
+      if (path.closest(CONNECTOR_SKIP_CONTAINERS)) continue;
+      if (!isVisibleElement(path, 0.05)) continue;
+      const box = ringPathBox(path, rootRect);
+      if (box) boxes.push(box);
     }
     return boxes;
   }
