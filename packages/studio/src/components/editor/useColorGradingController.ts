@@ -542,6 +542,13 @@ export function useColorGradingController({
     commitCompare,
     setApplyScope,
     applyToScope,
-    resetGrading: () => commitColorGrading(defaultColorGrading()),
+    resetGrading: () => {
+      const neutral = defaultColorGrading();
+      commitColorGrading({
+        ...neutral,
+        effects: latestGradingRef.current.effects,
+        palette: latestGradingRef.current.palette,
+      });
+    },
   };
 }

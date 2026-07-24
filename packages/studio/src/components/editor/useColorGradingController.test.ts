@@ -490,15 +490,27 @@ describe("useColorGradingController", () => {
     vi.useRealTimers();
   });
 
-  it("resetGrading returns to the neutral preset", () => {
+  it("resetGrading resets Grade fields without clearing Effects or Palette", () => {
     const { root, getState } = renderHook(vi.fn());
+    const grading = normalizeHfColorGrading({
+      preset: "bright-pop",
+      lut: { src: "assets/luts/custom.cube", intensity: 0.6 },
+      effects: { pixelate: 0.5 },
+      palette: ["#112233", "#ffffff"],
+    });
+    if (!grading) throw new Error("expected grading to normalize");
     act(() => {
-      getState().commitColorGrading(brightPopGrading());
+      getState().commitColorGrading(grading);
     });
     act(() => {
       getState().resetGrading();
     });
-    expect(getState().grading.preset).toBe("neutral");
+    expect(getState().grading).toMatchObject({
+      preset: "neutral",
+      lut: null,
+      effects: { pixelate: 0.5 },
+      palette: ["#112233", "#ffffff"],
+    });
     act(() => root.unmount());
   });
 
