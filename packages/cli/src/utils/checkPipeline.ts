@@ -426,12 +426,15 @@ async function collectGridSamples(
 // mid-orbit text-on-text crossing that only overlaps for a fraction of a
 // second: an in-corpus orbit (samples/fuzz016) collides at 28% area for ~0.4s,
 // entirely between two adjacent base samples. 8fps (~0.125s spacing) lands
-// >= 2 samples inside a window that narrow, which is what persistence tiering
-// needs to promote the finding to error. Overlap collection is text-only
-// (collectSolidTextBlocks), far cheaper than a full layout audit, so a fine
-// grid here is affordable where densifying every detector would not be.
+// enough samples inside a window that narrow to observe it. Overlap collection
+// is text-only (collectSolidTextBlocks), far cheaper than a full layout audit,
+// so a fine grid here is affordable where densifying every detector would not.
 const OVERLAP_SAMPLE_FPS = 8;
-const OVERLAP_MAX_SAMPLES = 120;
+// Absolute ceiling on dense seeks so the pass stays bounded. This holds a true
+// 8fps grid for compositions up to OVERLAP_MAX_SAMPLES / OVERLAP_SAMPLE_FPS
+// (~75s); longer compositions degrade below 8fps rather than growing the seek
+// budget without limit. (Corpus compositions run 7-8s, well inside 8fps.)
+const OVERLAP_MAX_SAMPLES = 600;
 
 function buildOverlapSampleTimes(duration: number): number[] {
   if (!Number.isFinite(duration) || duration <= 0) return [];
@@ -449,19 +452,24 @@ function buildOverlapSampleTimes(duration: number): number[] {
  * Dense motion-overlap re-sampling. Reruns ONLY content_overlap on a fine time
  * grid so transient text collisions during continuous motion are observed at
  * all — the detector itself is unchanged (same 0.2-area threshold), only the
- * sampling density is. Gated on the composition actually animating (the
- * frozen-sweep geometry fingerprints differ across the base grid): a static
- * card produces no new work and no new findings. Findings feed the existing
- * collapse/persistence tiering, so a one-sample graze stays info while a held
- * collision (samples/fuzz016) re-promotes to error. Skips times already in the
- * base grid to avoid double-collecting the overlaps collectLayout already found.
+ * sampling density is.
+ *
+ * This runs UNCONDITIONALLY (bounded + text-only), NOT gated on sparse-grid
+ * geometry fingerprints changing. That gate was the motivating false-negative:
+ * an animation aliased to the sparse grid (the same pose sampled at every base
+ * point) has identical fingerprints yet still collides *between* those samples,
+ * so gating on fingerprint change skipped the exact transient this pass exists
+ * to catch. A static composition simply yields no overlaps at the extra times,
+ * so the only cost of running always is a bounded set of cheap text-only seeks.
+ * Findings feed the existing collapse/persistence tiering (a graze stays info,
+ * a held collision re-promotes to error). Skips times already in the base grid
+ * to avoid double-collecting overlaps collectLayout already found.
  */
 async function collectMotionOverlapSamples(
   driver: CheckAuditDriver,
   grid: SampleGrid,
   collected: GridSamples,
 ): Promise<void> {
-  if (new Set(collected.geometrySignatures).size <= 1) return;
   const baseTimes = new Set(grid.layoutSamples);
   for (const time of buildOverlapSampleTimes(grid.duration)) {
     if (baseTimes.has(time)) continue;

@@ -183,19 +183,17 @@ export function dedupeLayoutIssues(issues: LayoutIssue[]): LayoutIssue[] {
 
 // Persistence-tier thresholds (#U10, adapted from Adam Rosler's visual-linter
 // design). The approach doc frames these as held-duration floors — ignore
-// under ~250ms, re-promote content_overlap at >= ~500ms — measured against
-// the SAME firstSeen/lastSeen span this collapse step already tracks. At the
-// default 9-sample grid over a multi-second composition, a single collapsed
-// occurrence is held 0ms (one entrance/exit transient sample) and two
-// collapsed occurrences are already >= one sample-to-sample gap, which is
-// well past 500ms — so "held under 250ms" reduces to `occurrences <= 1` and
-// "held >= 500ms" reduces to `occurrences >= 2`. Tiering below is written in
-// those sample-count terms (the mapping the approach doc asks to document),
-// with the literal ms span (CONTENT_OVERLAP_HELD_ERROR_MS) kept as a fallback
-// for callers whose samples really are spaced close enough together for the
-// ms floor to matter on its own (dense `--at`/`--at-transitions` runs). The
-// ~250ms ignore floor needs no separate constant — see the occurrences <= 1
-// branch below.
+// under ~250ms, re-promote content_overlap at >= ~500ms — measured against the
+// SAME firstSeen/lastSeen span this collapse step already tracks. `occurrences`
+// is a NECESSARY guard (one sample can't span any duration), but it is NOT a
+// sufficient proxy for the 500ms floor: the dense content_overlap re-pass
+// (checkPipeline collectMotionOverlapSamples) samples at 8fps, so two adjacent
+// occurrences there span only ~125ms — the old "occurrences >= 2 => held >=
+// 500ms" shortcut held only for the coarse ~1s-spaced base grid and breaks
+// under dense sampling. content_overlap promotion therefore requires BOTH
+// occurrences >= 2 AND a literal firstSeen..lastSeen span >= 500ms, so the
+// wall-clock floor is honored regardless of sampling density. The ~250ms
+// ignore floor needs no separate constant — see the occurrences <= 1 branch.
 const CONTENT_OVERLAP_HELD_ERROR_MS = 500;
 const HELD_ACROSS_SAMPLES_MIN_OCCURRENCES = 2;
 
@@ -317,11 +315,14 @@ function isCanvasBreachHeldLarge(issue: LayoutIssue, occurrences: number): boole
   return overlapX > 0 && overlapY > 0;
 }
 
-// Split out of applyPersistenceTier so the two independent "held long enough"
-// signals (sample count vs. wall-clock span) read as one boolean question
-// instead of adding a third compound branch to the tiering ladder above.
+// Split out of applyPersistenceTier so the compound "held long enough" test
+// (>= 2 samples AND wall-clock span >= the ms floor) reads as one boolean
+// question instead of adding a compound branch to the tiering ladder above.
 function isContentOverlapHeldLongEnough(issue: LayoutIssue, occurrences: number): boolean {
-  if (occurrences >= HELD_ACROSS_SAMPLES_MIN_OCCURRENCES) return true;
+  // Need at least two samples to measure a span at all, AND that span must
+  // clear the wall-clock floor — dense 8fps re-sampling makes occurrences>=2
+  // alone (potentially ~125ms) too weak to imply a genuinely held collision.
+  if (occurrences < HELD_ACROSS_SAMPLES_MIN_OCCURRENCES) return false;
   const firstSeen = issue.firstSeen ?? issue.time;
   const lastSeen = issue.lastSeen ?? issue.time;
   const heldMs = (lastSeen - firstSeen) * 1000;

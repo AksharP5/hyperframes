@@ -1346,30 +1346,44 @@ describe("contrast candidate round-trip", () => {
 });
 
 describe("dense motion-overlap re-sampling", () => {
-  it("surfaces a held content_overlap that only the dense grid observes", async () => {
-    // collectLayout (sparse base grid) sees nothing; collectOverlap (dense
-    // grid) reports the collision — as it would for a mid-motion crossing the
-    // base samples seek past. Held across the dense grid, it promotes to error.
+  // The default grid is 9 base samples at index+0.5 (0.5,1.5,...,8.5) over a 9s
+  // composition; the collision below lives entirely inside (3.5, 4.5), a gap
+  // the sparse grid seeks straight past. Only the 8fps dense pass observes it.
+  const inBetweenGridWindow = (time: number): boolean => time >= 3.6 && time <= 4.4;
+
+  it("detects a content_overlap that occurs ONLY between two sparse grid samples", async () => {
     const driver = fakeDriver({
+      // Sparse base grid sees nothing at any base sample time.
       collectLayout: vi.fn(async (_time: number) => []),
-      collectOverlap: vi.fn(async (time: number) => [
-        layoutIssue("warning", { time, code: "content_overlap" }),
-      ]),
+      // The transient exists only strictly between base samples 3.5 and 4.5.
+      collectOverlap: vi.fn(async (time: number) =>
+        inBetweenGridWindow(time)
+          ? [layoutIssue("warning", { time, code: "content_overlap" })]
+          : [],
+      ),
     });
     const { report } = await runScenario(driver);
     expect(driver.collectOverlap).toHaveBeenCalled();
     expect(report.layout.findings.some((f) => f.code === "content_overlap")).toBe(true);
+    // Held ~750ms across the dense grid (>= the 500ms floor) -> promoted.
     expect(report.layout.errorCount).toBeGreaterThan(0);
   });
 
-  it("skips the dense overlap pass when the composition never animates", async () => {
-    // A constant geometry fingerprint means the timeline never advanced — no
-    // transient crossing is possible, so the dense pass must not run.
+  it("runs the dense pass even when sparse fingerprints are identical (aliased motion)", async () => {
+    // A constant geometry fingerprint no longer suppresses the pass: an
+    // animation aliased to the sparse grid has identical fingerprints yet still
+    // collides between samples — the false-negative the removed gate caused.
     const driver = fakeDriver({
       collectLayoutGeometry: vi.fn(async () => "static"),
-      collectOverlap: vi.fn(async (_time: number) => []),
+      collectLayout: vi.fn(async (_time: number) => []),
+      collectOverlap: vi.fn(async (time: number) =>
+        inBetweenGridWindow(time)
+          ? [layoutIssue("warning", { time, code: "content_overlap" })]
+          : [],
+      ),
     });
-    await runScenario(driver);
-    expect(driver.collectOverlap).not.toHaveBeenCalled();
+    const { report } = await runScenario(driver);
+    expect(driver.collectOverlap).toHaveBeenCalled();
+    expect(report.layout.findings.some((f) => f.code === "content_overlap")).toBe(true);
   });
 });

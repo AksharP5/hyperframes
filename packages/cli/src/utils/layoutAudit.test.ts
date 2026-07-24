@@ -227,6 +227,21 @@ describe("persistence-tiered severity (#U10)", () => {
     expect(collapsed[0]).toMatchObject({ severity: "error", occurrences: 2 });
   });
 
+  it("keeps a content_overlap that spans under the 500ms floor as a warning, even with 2 occurrences", () => {
+    // Two occurrences from the dense 8fps re-pass span only ~125ms — under the
+    // held-duration floor, so occurrences>=2 alone must NOT promote to error.
+    const collapsed = collapseStaticLayoutIssues(
+      [
+        { ...issue("content_overlap", "warning"), time: 4.0 },
+        { ...issue("content_overlap", "warning"), time: 4.125 },
+      ],
+      73,
+    );
+
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]).toMatchObject({ severity: "warning", occurrences: 2 });
+  });
+
   it("promotes a held, canvas-scale canvas_overflow breach from info to warning", () => {
     const breach = {
       ...issue("canvas_overflow", "info"),
