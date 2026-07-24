@@ -242,6 +242,35 @@ describe("persistence-tiered severity (#U10)", () => {
     expect(collapsed[0]).toMatchObject({ severity: "warning", occurrences: 2 });
   });
 
+  it("does NOT promote content_overlap whose two occurrences span exactly 499ms (under the floor)", () => {
+    // Boundary: a two-occurrence span one millisecond short of the 500ms floor
+    // stays a warning. Guards the AND-tighten for sparse callers (--samples 20,
+    // --at, short comps) whose two samples can land <500ms apart.
+    const collapsed = collapseStaticLayoutIssues(
+      [
+        { ...issue("content_overlap", "warning"), time: 4.0 },
+        { ...issue("content_overlap", "warning"), time: 4.499 },
+      ],
+      73,
+    );
+
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]).toMatchObject({ severity: "warning", occurrences: 2 });
+  });
+
+  it("promotes content_overlap whose two occurrences span exactly 500ms (at the floor)", () => {
+    const collapsed = collapseStaticLayoutIssues(
+      [
+        { ...issue("content_overlap", "warning"), time: 4.0 },
+        { ...issue("content_overlap", "warning"), time: 4.5 },
+      ],
+      73,
+    );
+
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]).toMatchObject({ severity: "error", occurrences: 2 });
+  });
+
   it("promotes a held, canvas-scale canvas_overflow breach from info to warning", () => {
     const breach = {
       ...issue("canvas_overflow", "info"),

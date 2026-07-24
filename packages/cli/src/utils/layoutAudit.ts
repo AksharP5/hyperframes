@@ -194,6 +194,12 @@ export function dedupeLayoutIssues(issues: LayoutIssue[]): LayoutIssue[] {
 // occurrences >= 2 AND a literal firstSeen..lastSeen span >= 500ms, so the
 // wall-clock floor is honored regardless of sampling density. The ~250ms
 // ignore floor needs no separate constant — see the occurrences <= 1 branch.
+//
+// SEMANTICS CHANGE (intentional): this is stricter than the prior
+// occurrences >= 2 => error rule for SPARSE callers too, not only the dense
+// pass. Under `--samples 20`, `--at`, or a short composition, two adjacent
+// samples can land < 500ms apart; such a pair now stays a warning instead of
+// auto-promoting to error. Only a genuinely held (>= 500ms) collision promotes.
 const CONTENT_OVERLAP_HELD_ERROR_MS = 500;
 const HELD_ACROSS_SAMPLES_MIN_OCCURRENCES = 2;
 
