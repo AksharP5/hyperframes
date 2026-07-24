@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { Page } from "puppeteer-core";
 import {
   AUDIT_SEEK_OPTIONS,
+  DENSE_GEOMETRY_SEEK_OPTIONS,
   DEFAULT_ZOOM_PADDING_PX,
   DEFAULT_ZOOM_SCALE,
   captureRegionCrop,
@@ -347,6 +348,10 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
     seek: async (time) => {
       setTime(time);
       await seekCompositionTimeline(page, time, AUDIT_SEEK_OPTIONS);
+    },
+    seekGeometry: async (time) => {
+      setTime(time);
+      await seekCompositionTimeline(page, time, DENSE_GEOMETRY_SEEK_OPTIONS);
     },
     collectLayout: (time, tolerance) => collectLayout(page, time, tolerance),
     collectOverlap: (time) => collectOverlap(page, time),

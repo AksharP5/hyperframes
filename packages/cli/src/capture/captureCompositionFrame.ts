@@ -18,6 +18,18 @@ export const AUDIT_SEEK_OPTIONS = {
   settleMs: 120,
 } as const;
 
+// Settle-free variant for geometry-only audit passes (the dense content_overlap
+// re-sampling grid). It keeps the timeline setTime + preferred-target seek
+// cascade, but drops the 120ms paint-settle sleep: getBoundingClientRect
+// geometry is valid synchronously once GSAP has written the inline transforms
+// at setTime, so a geometry-only reader never needs to wait for paint. At up to
+// OVERLAP_MAX_SAMPLES seeks that 120ms sleep is ~72s of pure sleep with no DOM
+// work, which this variant eliminates.
+export const DENSE_GEOMETRY_SEEK_OPTIONS = {
+  ...AUDIT_SEEK_OPTIONS,
+  settleMs: 0,
+} as const;
+
 export interface SeekCompositionTimelineOptions {
   fallbackToBridgeAndTimelines?: boolean;
   waitForPreferredSeekTargetMs?: number;

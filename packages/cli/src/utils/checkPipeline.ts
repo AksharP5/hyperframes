@@ -473,7 +473,13 @@ async function collectMotionOverlapSamples(
   const baseTimes = new Set(grid.layoutSamples);
   for (const time of buildOverlapSampleTimes(grid.duration)) {
     if (baseTimes.has(time)) continue;
-    await driver.seek(time);
+    // Settle-free seek: collectOverlap reads getBoundingClientRect geometry
+    // only, which is valid synchronously after the timeline setTime (GSAP
+    // writes inline transforms synchronously). The dense pass makes up to
+    // OVERLAP_MAX_SAMPLES seeks, so skipping the 120ms per-seek paint settle
+    // here (vs. the full-settle driver.seek the base grid uses to feed
+    // contrast/rotation/frame checks) removes ~72s of pure sleep at the ceiling.
+    await driver.seekGeometry(time);
     collected.layoutIssues.push(...(await driver.collectOverlap(time)));
   }
 }
