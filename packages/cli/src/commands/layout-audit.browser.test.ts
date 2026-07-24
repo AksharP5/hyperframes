@@ -877,6 +877,46 @@ describe("layout-audit.browser coordinate-frame findings", () => {
     // "knowledge-overflow" contains conn-family substrings only across word boundaries — no match.
     expect(runAudit().filter((issue) => issue.code === "connector_detached")).toEqual([]);
   });
+
+  it("rejects a shallow-curvature arc as a phantom ring node but keeps a genuine near-circular arc", () => {
+    document.body.innerHTML = `
+      <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+        <svg id="dial-svg">
+          <path id="genuine-ring" fill="none" d="ring" />
+          <path id="shallow-arc" fill="none" d="arc" />
+        </svg>
+      </div>
+    `;
+    // A near-full circle (diameter tracks its bbox) vs a shallow arc on a huge
+    // circle: the arc's Kåsa residual normalized by its enormous radius is tiny
+    // (passes the residual gate) yet its fitted diameter is ~10x its drawn box.
+    const genuine = { cx: 500, cy: 500, radius: 100, startDeg: 0, endDeg: 360 };
+    const shallow = { cx: 500, cy: 2500, radius: 2000, startDeg: 264, endDeg: 276 };
+    installGeometry(
+      {
+        root: rect({ left: 0, top: 0, width: 1920, height: 1080 }),
+        "dial-svg": rect({ left: 200, top: 200, width: 700, height: 700 }),
+        "genuine-ring": arcBBox(genuine),
+        "shallow-arc": arcBBox(shallow),
+      },
+      {
+        "genuine-ring": { fill: "none" },
+        "shallow-arc": { fill: "none" },
+      },
+    );
+    installArcSampling("genuine-ring", genuine);
+    installArcSampling("shallow-arc", shallow);
+    installAuditScript();
+
+    const sample = (
+      window as unknown as {
+        __hyperframesConnectorSample: () => { nodes: Array<{ selector: string }> };
+      }
+    ).__hyperframesConnectorSample();
+    const nodeSelectors = sample.nodes.map((node) => node.selector);
+    expect(nodeSelectors).toContain("#genuine-ring");
+    expect(nodeSelectors).not.toContain("#shallow-arc");
+  });
 });
 
 describe("layout-audit.browser content overlap", () => {
@@ -1977,6 +2017,53 @@ function installConnectorGeometry(translate: CtmTranslate): void {
       Object.defineProperty(path, "getScreenCTM", { value: () => matrix });
     }
   }
+}
+
+interface ArcSpec {
+  cx: number;
+  cy: number;
+  radius: number;
+  startDeg: number;
+  endDeg: number;
+}
+
+// The point ringPathBox reads at arc-length `length` (local SVG user units).
+function arcPointAt(spec: ArcSpec, length: number, total: number): { x: number; y: number } {
+  const frac = total === 0 ? 0 : length / total;
+  const rad = ((spec.startDeg + (spec.endDeg - spec.startDeg) * frac) * Math.PI) / 180;
+  return { x: spec.cx + spec.radius * Math.cos(rad), y: spec.cy + spec.radius * Math.sin(rad) };
+}
+
+function arcTotalLength(spec: ArcSpec): number {
+  return (spec.radius * Math.abs(spec.endDeg - spec.startDeg) * Math.PI) / 180;
+}
+
+// The bounding box of the 16 samples ringPathBox takes (i/16 of total, i=0..15).
+function arcBBox(spec: ArcSpec): DOMRect {
+  const total = arcTotalLength(spec);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < 16; i++) {
+    const point = arcPointAt(spec, (total * i) / 16, total);
+    xs.push(point.x);
+    ys.push(point.y);
+  }
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  return rect({ left, top, width: Math.max(...xs) - left, height: Math.max(...ys) - top });
+}
+
+// happy-dom has no SVG path geometry: mock getTotalLength/getPointAtLength so
+// ringPathBox samples the given circular arc in local user units.
+function installArcSampling(pathId: string, spec: ArcSpec): void {
+  const path = document.getElementById(pathId);
+  if (!path) throw new Error(`no path #${pathId}`);
+  const total = arcTotalLength(spec);
+  Object.defineProperty(path, "getTotalLength", { value: () => total, configurable: true });
+  Object.defineProperty(path, "getPointAtLength", {
+    value: (length: number) => arcPointAt(spec, length, total),
+    configurable: true,
+  });
 }
 
 function installAuditScript(): void {

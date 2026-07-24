@@ -1767,6 +1767,11 @@
   const CONNECTOR_RING_MIN_LEN = 120;
   const CONNECTOR_RING_MIN_RADIUS = 20;
   const CONNECTOR_RING_MAX_RESIDUAL_FRAC = 0.15;
+  // Phantom-radius guard: a real ring/hub's fitted diameter tracks its bounding
+  // box (full circle 1x, quarter arc ~2x). A shallow-curvature arc fits an
+  // enormous circle with a tiny normalized residual, so the diameter runs many×
+  // the box — reject beyond this factor.
+  const CONNECTOR_RING_MAX_DIAMETER_BBOX_FRAC = 3;
 
   function isIndicatorConnector(line, svg) {
     for (let node = line; node && node !== svg.parentElement; node = node.parentElement) {
@@ -1825,6 +1830,18 @@
     if (!fit || fit.radius < CONNECTOR_RING_MIN_RADIUS) return null;
     if (fit.residual > CONNECTOR_RING_MAX_RESIDUAL_FRAC * fit.radius) return null;
     const rect = toRect(path.getBoundingClientRect());
+    // Reject the shallow-curvature phantom fit: normalized residual is small at
+    // any radius, so a nearly-straight arc masquerades as a huge ring. The
+    // fitted diameter must stay within a sane factor of the drawn bounding box.
+    const bboxSpan = Math.max(rect.width, rect.height);
+    if (bboxSpan <= 0 || fit.radius * 2 > CONNECTOR_RING_MAX_DIAMETER_BBOX_FRAC * bboxSpan) {
+      return null;
+    }
+    // Scoped-known seams (left as-is — narrow and not phantom-radius): a short
+    // genuine partial arc under-samples its parent circle's box so a real hub
+    // drawn as a sliver can still miss the span gate; and a curved connector
+    // that is itself near-circular can be read as its own ring node. Both are
+    // rare vs. the shallow-curvature false ring this gate closes.
     const area = rectArea(rect);
     if (area < CONNECTOR_NODE_MIN_DOT_AREA || area >= rectArea(rootRect) * 0.5) return null;
     const fill = getComputedStyle(path).fill;
