@@ -1426,7 +1426,7 @@
   };
 
   // content_overlap only, for the dense motion re-sampling grid (checkPipeline
-  // detectMotionTextOverlap). Two free-positioned text blocks crossing mid-orbit
+  // collectMotionOverlapSamples). Two free-positioned text blocks crossing mid-orbit
   // collide for a fraction of a second the sparse layout grid seeks straight
   // past; this reruns just the overlap detector — same collectSolidTextBlocks /
   // overlapIssue 0.2-area threshold, no new detection surface — on a fine grid.
