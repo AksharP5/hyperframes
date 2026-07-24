@@ -411,10 +411,13 @@ export class ParentMediaManager {
 
   private _observeDynamicMedia(doc: Document): void {
     this.teardownObserver();
-    if (typeof MutationObserver === "undefined" || !doc.body) return;
+    const Observer =
+      doc.defaultView?.MutationObserver ??
+      (typeof MutationObserver !== "undefined" ? MutationObserver : undefined);
+    if (!Observer || !doc.body) return;
 
     // fallow-ignore-next-line complexity
-    const obs = new MutationObserver((mutations) => {
+    const obs = new Observer((mutations) => {
       for (const m of mutations) {
         if (m.type === "attributes" && m.attributeName === "preload") {
           const target = m.target;

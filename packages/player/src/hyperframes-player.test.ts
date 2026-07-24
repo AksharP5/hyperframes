@@ -744,6 +744,39 @@ describe("HyperframesPlayer media MutationObserver scoping", () => {
     expect(observeSpy).toHaveBeenCalledTimes(1);
     expect(observeSpy.mock.calls[0]?.[0]).toBe(fakeDoc.body);
   });
+
+  it("constructs the observer in the iframe document realm", () => {
+    const globalObserveSpy = vi.spyOn(MutationObserver.prototype, "observe");
+    const realmObserve = vi.fn();
+
+    class RealmMutationObserver {
+      constructor(_callback: MutationCallback) {}
+
+      observe = realmObserve;
+      disconnect = vi.fn();
+      takeRecords = vi.fn(() => []);
+    }
+
+    const player = document.createElement("hyperframes-player") as PlayerInternal;
+    document.body.appendChild(player);
+    globalObserveSpy.mockClear();
+
+    const fakeDoc = document.implementation.createHTMLDocument("iframe");
+    fakeDoc.body.innerHTML = `<div data-composition-id="root"></div>`;
+    Object.defineProperty(fakeDoc, "defaultView", {
+      configurable: true,
+      value: { MutationObserver: RealmMutationObserver },
+    });
+
+    player._observeDynamicMedia?.(fakeDoc);
+
+    expect(realmObserve).toHaveBeenCalledTimes(1);
+    expect(realmObserve).toHaveBeenCalledWith(
+      fakeDoc.querySelector("[data-composition-id]"),
+      expect.objectContaining({ childList: true, subtree: true }),
+    );
+    expect(globalObserveSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ── Parent-proxy time-mirror coalescing ──
