@@ -18,15 +18,7 @@ export const AUDIT_SEEK_OPTIONS = {
   settleMs: 120,
 } as const;
 
-// Genuinely geometry-only variant for the dense content_overlap re-sampling
-// grid. It keeps only the timeline setTime + preferred-target seek cascade and
-// drops EVERY post-seek wait — no rAF settle, no font wait, no paint-settle
-// sleep — because getBoundingClientRect geometry is valid synchronously once
-// GSAP has written the inline transforms at setTime; a geometry-only reader
-// never paints, so it needs none of the visual-stability waits. At up to
-// OVERLAP_MAX_SAMPLES seeks the full AUDIT settle (double rAF + up to 500ms
-// font wait + 120ms sleep) is ~30s of frame waits + ~72s of sleep with no DOM
-// work; this variant eliminates all of it.
+// Geometry-only seek for the dense content_overlap grid: getBoundingClientRect is valid synchronously after setTime, so drop all post-seek waits (rAF/font/sleep) that would multiply across the dense grid.
 export const DENSE_GEOMETRY_SEEK_OPTIONS = {
   ...AUDIT_SEEK_OPTIONS,
   animationFrameSettle: "none",

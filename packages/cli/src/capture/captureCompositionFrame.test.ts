@@ -379,10 +379,7 @@ describe("installPageFunctionGuard", () => {
 
 describe("DENSE_GEOMETRY_SEEK_OPTIONS", () => {
   it("is genuinely geometry-only — no post-seek settle waits at the 600-sample cap", () => {
-    // Regression for the dense content_overlap grid: geometry (getBoundingClientRect)
-    // is valid synchronously after setTime, so the dense pass must NOT inherit AUDIT's
-    // rAF settle / font wait / paint sleep — those multiply by sample count into tens of
-    // seconds. Any future edit that reintroduces a wait here must fail this test.
+    // Dense pass must not inherit AUDIT's post-seek waits — geometry is valid synchronously after setTime, and waits multiply by sample count.
     expect(DENSE_GEOMETRY_SEEK_OPTIONS.animationFrameSettle).toBe("none");
     expect(DENSE_GEOMETRY_SEEK_OPTIONS.waitForFontsMs).toBe(0);
     expect(DENSE_GEOMETRY_SEEK_OPTIONS.settleMs).toBe(0);

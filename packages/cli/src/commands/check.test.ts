@@ -1347,9 +1347,7 @@ describe("contrast candidate round-trip", () => {
 });
 
 describe("dense motion-overlap re-sampling", () => {
-  // The default grid is 9 base samples at index+0.5 (0.5,1.5,...,8.5) over a 9s
-  // composition; the collision below lives entirely inside (3.5, 4.5), a gap
-  // the sparse grid seeks straight past. Only the 8fps dense pass observes it.
+  // Collision lives inside (3.5, 4.5), a gap the sparse base grid seeks past; only the 8fps dense pass observes it.
   const inBetweenGridWindow = (time: number): boolean => time >= 3.6 && time <= 4.4;
 
   it("detects a content_overlap that occurs ONLY between two sparse grid samples", async () => {
@@ -1371,9 +1369,7 @@ describe("dense motion-overlap re-sampling", () => {
   });
 
   it("runs the dense pass even when sparse fingerprints are identical (aliased motion)", async () => {
-    // A constant geometry fingerprint no longer suppresses the pass: an
-    // animation aliased to the sparse grid has identical fingerprints yet still
-    // collides between samples — the false-negative the removed gate caused.
+    // Aliased motion has identical fingerprints yet still collides between samples — the false-negative the removed gate caused.
     const driver = fakeDriver({
       collectLayoutGeometry: vi.fn(async () => "static"),
       collectLayout: vi.fn(async (_time: number) => []),

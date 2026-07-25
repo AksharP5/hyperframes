@@ -173,15 +173,10 @@ export interface CheckAuditDriver {
   getCanvas(): Promise<Canvas>;
   findAmbiguousSelectors(selectors: string[]): Promise<AnchoredLayoutIssue[]>;
   seek(time: number): Promise<void>;
-  /** Cheap settle-free seek for the geometry-only dense content_overlap pass:
-   * setTime + timeline seek with no paint-settle sleep. Only collectOverlap
-   * (getBoundingClientRect geometry) consumes the result, which is valid
-   * synchronously after setTime — see checkPipeline collectMotionOverlapSamples. */
+  /** Settle-free seek for the geometry-only dense content_overlap pass; only collectOverlap consumes it, and getBoundingClientRect is valid synchronously after setTime. */
   seekGeometry(time: number): Promise<void>;
   collectLayout(time: number, tolerance: number): Promise<AnchoredLayoutIssue[]>;
-  /** content_overlap only, for the dense motion re-sampling grid — catches
-   * transient text-on-text collisions the sparse layout grid seeks past. See
-   * checkPipeline detectMotionTextOverlap. */
+  /** content_overlap only, for the dense re-sampling grid — catches transient text collisions the sparse grid seeks past. */
   collectOverlap(time: number): Promise<AnchoredLayoutIssue[]>;
   /** Frozen-sweep guard (#U10): an opaque per-sample geometry+opacity
    * fingerprint of the current seeked state, for detecting a timeline that

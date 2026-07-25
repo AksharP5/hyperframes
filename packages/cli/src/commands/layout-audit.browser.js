@@ -1425,11 +1425,7 @@
     return issues;
   };
 
-  // content_overlap only, for the dense motion re-sampling grid (checkPipeline
-  // collectMotionOverlapSamples). Two free-positioned text blocks crossing mid-orbit
-  // collide for a fraction of a second the sparse layout grid seeks straight
-  // past; this reruns just the overlap detector — same collectSolidTextBlocks /
-  // overlapIssue 0.2-area threshold, no new detection surface — on a fine grid.
+  // Reruns only the overlap detector (same threshold, no new surface) on a fine grid for the dense motion re-sampling pass.
   window.__hyperframesOverlapAudit = function auditOverlap(options) {
     const time = options && typeof options.time === "number" ? options.time : 0;
     const root =

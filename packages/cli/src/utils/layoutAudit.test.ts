@@ -228,8 +228,7 @@ describe("persistence-tiered severity (#U10)", () => {
   });
 
   it("keeps a content_overlap that spans under the 500ms floor as a warning, even with 2 occurrences", () => {
-    // Two occurrences from the dense 8fps re-pass span only ~125ms — under the
-    // held-duration floor, so occurrences>=2 alone must NOT promote to error.
+    // Two dense-pass occurrences ~125ms apart are under the held-duration floor, so occurrences>=2 alone must not promote to error.
     const collapsed = collapseStaticLayoutIssues(
       [
         { ...issue("content_overlap", "warning"), time: 4.0 },
@@ -243,9 +242,7 @@ describe("persistence-tiered severity (#U10)", () => {
   });
 
   it("does NOT promote content_overlap whose two occurrences span exactly 499ms (under the floor)", () => {
-    // Boundary: a two-occurrence span one millisecond short of the 500ms floor
-    // stays a warning. Guards the AND-tighten for sparse callers (--samples 20,
-    // --at, short comps) whose two samples can land <500ms apart.
+    // Boundary: a span one millisecond short of the 500ms floor stays a warning — guards the AND-tighten for sparse callers.
     const collapsed = collapseStaticLayoutIssues(
       [
         { ...issue("content_overlap", "warning"), time: 4.0 },
