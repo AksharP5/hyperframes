@@ -195,6 +195,30 @@ describe("updateKeyframeCacheFromParsed", () => {
     expect(usePlayerStore.getState().gsapAnimations.get("scene.html#box")).toEqual([animation]);
   });
 
+  it("records an ungrouped tween in gsapAnimations too, so the two stores agree", () => {
+    // `{ x, opacity }` spans two property groups, so the parser leaves
+    // propertyGroup undefined. Skipping it here used to cache diamonds with no
+    // source animation behind them: the collapsed row drew keyframes the
+    // expanded lanes could not render.
+    const animation: GsapAnimation = {
+      id: "mixed-box",
+      targetSelector: "#box",
+      method: "to",
+      position: 0,
+      properties: { x: 100, opacity: 0 },
+      duration: 1,
+      resolvedStart: 0,
+    };
+    usePlayerStore.setState({
+      elements: [{ id: "box-clip", domId: "box", tag: "div", start: 0, duration: 1, track: 0 }],
+    });
+
+    updateKeyframeCacheFromParsed([animation], "scene.html", "box", {});
+
+    expect(cache().has("scene.html#box")).toBe(true);
+    expect(usePlayerStore.getState().gsapAnimations.get("scene.html#box")).toEqual([animation]);
+  });
+
   it("does not cache a flat tween without animatable numeric properties", () => {
     const animation: GsapAnimation = {
       id: "flat-box",

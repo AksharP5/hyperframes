@@ -5,7 +5,7 @@
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerStore";
 import { toAbsoluteTime } from "./gsapShared";
-import { synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
+import { deduplicateKeyframes, synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
 
 export function updateKeyframeCacheFromParsed(
   animations: GsapAnimation[],
@@ -23,9 +23,12 @@ export function updateKeyframeCacheFromParsed(
       anim.keyframes?.keyframes ?? synthesizeFlatTweenKeyframes(anim)?.keyframes ?? [];
     if (!id || kfSource.length === 0) continue;
     idsWithKeyframes.add(id);
-    if (anim.propertyGroup) {
-      sourceAnimations.set(id, [...(sourceAnimations.get(id) ?? []), anim]);
-    }
+    // Every tween that fed keyframeCache also lands in gsapAnimations, group or
+    // not: a mixed-group tween (`{ x, opacity }` classifies to undefined) used to
+    // cache diamonds with no source animation behind them, so the collapsed row
+    // drew keyframes the expanded lanes couldn't render. Lane consumers do the
+    // group filtering themselves (animationContributesLane).
+    sourceAnimations.set(id, [...(sourceAnimations.get(id) ?? []), anim]);
 
     // Convert tween-relative percentages to clip-relative so diamonds
     // render at the correct position within the timeline clip.
@@ -51,28 +54,10 @@ export function updateKeyframeCacheFromParsed(
 
     const existing = merged.get(id);
     if (existing) {
-      const byPct = new Map<number, (typeof existing.keyframes)[0]>();
-      for (const kf of [...existing.keyframes, ...clipKeyframes]) {
-        const prev = byPct.get(kf.percentage);
-        if (prev) {
-          prev.properties = { ...prev.properties, ...kf.properties };
-          // Mirror deduplicateKeyframes: a same-% collision across different
-          // source animations is an ambiguous merged segment (the button can
-          // only target one arbitrary animation). Flag it so the collapsed row
-          // suppresses the inline ease button there.
-          if (
-            prev.animationId !== undefined &&
-            kf.animationId !== undefined &&
-            prev.animationId !== kf.animationId
-          ) {
-            prev.easeAmbiguous = true;
-          }
-          if (kf.ease) prev.ease = kf.ease;
-        } else {
-          byPct.set(kf.percentage, { ...kf, properties: { ...kf.properties } });
-        }
-      }
-      existing.keyframes = Array.from(byPct.values()).sort((a, b) => a.percentage - b.percentage);
+      // deduplicateKeyframes owns the same-% merge (including the easeAmbiguous
+      // flag downstream lanes read); a second copy of that rule here is how the
+      // two writers drift.
+      existing.keyframes = deduplicateKeyframes([...existing.keyframes, ...clipKeyframes]);
     } else {
       merged.set(id, {
         ...anim.keyframes,
