@@ -267,7 +267,7 @@ export const AnimationCard = memo(function AnimationCard({
                     onToggle={setExpandedKfPct}
                     onEaseCommit={(pct, ease) => {
                       onUpdateKeyframeEase(animation.id, pct, ease);
-                      trackStudioSegmentEaseEdit({ ease });
+                      trackStudioSegmentEaseEdit({ action: "commit", ease });
                     }}
                     onApplyAll={
                       onSetAllKeyframeEases
