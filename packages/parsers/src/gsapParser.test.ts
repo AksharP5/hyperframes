@@ -1557,10 +1557,9 @@ describe("native GSAP keyframes parsing", () => {
     const kfs = expectKeyframesFormat(anim, "object-array", 3);
 
     // Total duration = 0.5 + 1 + 0.8 = 2.3
-    // First: cumulative = 0.5, pct = round(0.5/2.3 * 100) = 22
-    expectKeyframe(kfs[0], 22, { x: 0, opacity: 1 });
-    // Second: cumulative = 1.5, pct = round(1.5/2.3 * 100) = 65
-    expectKeyframe(kfs[1], 65, { x: 100 }, "power2.out");
+    // Preserve one decimal of authored timing precision.
+    expectKeyframe(kfs[0], 21.7, { x: 0, opacity: 1 });
+    expectKeyframe(kfs[1], 65.2, { x: 100 }, "power2.out");
     // Third: cumulative = 2.3, pct = round(2.3/2.3 * 100) = 100
     expectKeyframe(kfs[2], 100, { x: 200 });
   });

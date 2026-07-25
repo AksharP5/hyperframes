@@ -882,8 +882,8 @@ describe("native GSAP keyframes parsing", () => {
     const anim = parseSingleAnimation(script);
     const kfs = expectKeyframesFormat(anim, "object-array", 3);
 
-    expectKeyframe(kfs[0], 22, { x: 0, opacity: 1 });
-    expectKeyframe(kfs[1], 65, { x: 100 }, "power2.out");
+    expectKeyframe(kfs[0], 21.7, { x: 0, opacity: 1 });
+    expectKeyframe(kfs[1], 65.2, { x: 100 }, "power2.out");
     expectKeyframe(kfs[2], 100, { x: 200 });
   });
 
