@@ -167,7 +167,16 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     const view = renderCallbacks();
 
     act(() => {
-      view.callbacks.onMoveKeyframe?.("box", 0, 25, "position", 0, flatAnimation.id);
+      view.callbacks.onMoveKeyframe?.(
+        "box",
+        {
+          percentage: 0,
+          propertyGroup: "position",
+          tweenPercentage: 0,
+          animationId: flatAnimation.id,
+        },
+        25,
+      );
     });
 
     expect(mocks.actions.handleGsapMoveKeyframe).not.toHaveBeenCalled();
@@ -189,13 +198,12 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     const view = renderCallbacks();
 
     await act(async () => {
-      view.callbacks.onDeleteKeyframe?.(
-        "scenes/main.html#circle",
-        0,
-        "position",
-        0,
-        otherFlatAnimation.id,
-      );
+      view.callbacks.onDeleteKeyframe?.("scenes/main.html#circle", {
+        percentage: 0,
+        propertyGroup: "position",
+        tweenPercentage: 0,
+        animationId: otherFlatAnimation.id,
+      });
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -223,13 +231,12 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     const view = renderCallbacks();
 
     await act(async () => {
-      view.callbacks.onDeleteKeyframe?.(
-        "scenes/main.html#circle",
-        100,
-        "position",
-        100,
-        otherKeyframedAnimation.id,
-      );
+      view.callbacks.onDeleteKeyframe?.("scenes/main.html#circle", {
+        percentage: 100,
+        propertyGroup: "position",
+        tweenPercentage: 100,
+        animationId: otherKeyframedAnimation.id,
+      });
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -287,7 +294,7 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     const view = renderCallbacks();
 
     act(() => {
-      view.callbacks.onMoveKeyframeToPlayhead?.("scenes/main.html#circle", 100);
+      view.callbacks.onMoveKeyframeToPlayhead?.("scenes/main.html#circle", { percentage: 100 });
     });
 
     expect(mocks.actions.handleGsapMoveKeyframeToPlayhead).toHaveBeenCalledWith(
@@ -301,7 +308,12 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     const view = renderCallbacks();
 
     act(() => {
-      view.callbacks.onDeleteKeyframe?.("box", 0, "position", 0, flatAnimation.id);
+      view.callbacks.onDeleteKeyframe?.("box", {
+        percentage: 0,
+        propertyGroup: "position",
+        tweenPercentage: 0,
+        animationId: flatAnimation.id,
+      });
     });
 
     expect(mocks.actions.handleGsapDeleteAnimation).toHaveBeenCalledWith(flatAnimation.id);
@@ -371,7 +383,12 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     const view = renderCallbacks();
 
     act(() => {
-      view.callbacks.onDeleteKeyframe?.("box", 50, "position", 50, flatAnimation.id);
+      view.callbacks.onDeleteKeyframe?.("box", {
+        percentage: 50,
+        propertyGroup: "position",
+        tweenPercentage: 50,
+        animationId: flatAnimation.id,
+      });
     });
 
     expect(mocks.actions.handleGsapRemoveKeyframe).toHaveBeenCalledWith(flatAnimation.id, 50);
@@ -379,16 +396,74 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     view.unmount();
   });
 
-  it("keeps an authored interior drag on the per-keyframe move path", () => {
-    mocks.animations = [authoredInteriorAnimation()];
+  it("keeps an authored interior drag on the per-keyframe move path", async () => {
+    const authored = authoredInteriorAnimation();
+    mocks.animations = [authored];
+    usePlayerStore.setState({ gsapAnimations: new Map([["box", [authored]]]) });
     const view = renderCallbacks();
 
-    act(() => {
-      view.callbacks.onMoveKeyframe?.("box", 50, 75, "position", 50, flatAnimation.id);
+    await act(async () => {
+      await view.callbacks.onMoveKeyframe?.(
+        "box",
+        {
+          percentage: 50,
+          propertyGroup: "position",
+          tweenPercentage: 50,
+          animationId: authored.id,
+        },
+        75,
+      );
     });
 
-    expect(mocks.actions.handleGsapMoveKeyframe).toHaveBeenCalledWith(flatAnimation.id, 50, 75);
+    expect(mocks.actions.handleGsapMoveKeyframe).toHaveBeenCalledWith(
+      authored.id,
+      50,
+      75,
+      mocks.selection,
+    );
     expect(mocks.actions.handleGsapResizeKeyframedTween).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  // A drag starts on whatever diamond the pointer is over, which need not be the
+  // selected element. Resolving against the selection would retime the selected
+  // element's tween and commit it through the selected element's file.
+  it("retimes a non-selected element's keyframe through that element's own selection", async () => {
+    const circle: TimelineElement = {
+      ...element,
+      id: "circle",
+      key: "scenes/main.html#circle",
+      domId: "circle",
+      sourceFile: "scenes/main.html",
+    };
+    const circleSelection = { id: "circle", selector: "#circle", sourceFile: "scenes/main.html" };
+    const circleAnimation = { ...authoredInteriorAnimation(), id: "circle-to-0-position" };
+    usePlayerStore.setState({
+      elements: [element, circle],
+      gsapAnimations: new Map([["scenes/main.html#circle", [circleAnimation]]]),
+    });
+    mocks.actions.buildDomSelectionForTimelineElement.mockResolvedValue(circleSelection);
+    const view = renderCallbacks();
+
+    await act(async () => {
+      await view.callbacks.onMoveKeyframe?.(
+        "scenes/main.html#circle",
+        {
+          percentage: 50,
+          propertyGroup: "position",
+          tweenPercentage: 50,
+          animationId: circleAnimation.id,
+        },
+        75,
+      );
+    });
+
+    expect(mocks.actions.handleGsapMoveKeyframe).toHaveBeenCalledWith(
+      circleAnimation.id,
+      50,
+      75,
+      circleSelection,
+    );
     view.unmount();
   });
 });

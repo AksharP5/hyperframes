@@ -48,12 +48,13 @@ interface TimelineClipDiamondsProps {
   onShiftClickKeyframe?: (elementId: string, percentage: number) => void;
   onContextMenuKeyframe?: (e: React.MouseEvent, elementId: string, percentage: number) => void;
   /** Drag-to-retime: move a keyframe to a new time, preserving its value + ease.
-   *  Both percentages are clip-relative: `fromClipPercentage` identifies the
-   *  dragged keyframe, `toClipPercentage` is the neighbour-clamped drop position.
-   *  The handler decides move (within the tween) vs resize (past its boundary). */
+   *  `keyframe` identifies the dragged keyframe (clip-relative percentage plus
+   *  whatever animation identity the row carries); `toClipPercentage` is the
+   *  neighbour-clamped drop position, also clip-relative. The handler decides
+   *  move (within the tween) vs resize (past its boundary). */
   onMoveKeyframe?: (
     elementId: string,
-    fromClipPercentage: number,
+    keyframe: TimelineKeyframeTarget,
     toClipPercentage: number,
   ) => Promise<boolean>;
   /** Open the segment ease editor for the hovered mid-point button — available on
@@ -549,7 +550,7 @@ export const TimelineClipDiamonds = memo(function TimelineClipDiamonds(
       onMoveKeyframe={
         props.onMoveKeyframe
           ? (target, toClipPercentage) =>
-              props.onMoveKeyframe?.(props.elementId, target.percentage, toClipPercentage) ??
+              props.onMoveKeyframe?.(props.elementId, target, toClipPercentage) ??
               Promise.resolve(false)
           : undefined
       }

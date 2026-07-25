@@ -4,6 +4,7 @@ import type { TimelineElement } from "../store/playerStore";
 import type { TimelineMoveOperation } from "../../hooks/timelineMoveAdapter";
 import type { BlockedTimelineEditIntent } from "./timelineEditing";
 import type { PropertyGroupName } from "@hyperframes/core/gsap-parser";
+import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
 
 export interface TimelinePropertyGroupKeyframeToggle {
   animationId: string;
@@ -71,29 +72,16 @@ export interface TimelineEditCallbacks {
   onSplitElement?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplit?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplitAll?: (splitTime: number) => Promise<void> | void;
-  onDeleteKeyframe?: (
-    elementId: string,
-    percentage: number,
-    propertyGroup?: string,
-    tweenPercentage?: number,
-    animationId?: string,
-  ) => void;
+  onDeleteKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
   onDeleteAllKeyframes?: (elementId: string) => void;
   onChangeKeyframeEase?: (elementId: string, percentage: number, ease: string) => void;
-  onMoveKeyframeToPlayhead?: (
-    elementId: string,
-    percentage: number,
-    propertyGroup?: string,
-    tweenPercentage?: number,
-    animationId?: string,
-  ) => void;
+  onMoveKeyframeToPlayhead?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
+  /** Drag-to-retime: `keyframe` identifies the dragged keyframe (its percentage
+   *  is clip-relative), `toClipPercentage` is the neighbour-clamped drop. */
   onMoveKeyframe?: (
     elementId: string,
-    fromClipPercentage: number,
+    keyframe: TimelineKeyframeTarget,
     toClipPercentage: number,
-    propertyGroup?: string,
-    tweenPercentage?: number,
-    animationId?: string,
   ) => Promise<boolean>;
   onToggleKeyframeAtPlayhead?: (element: TimelineElement) => void;
   onTogglePropertyGroupKeyframe?: (

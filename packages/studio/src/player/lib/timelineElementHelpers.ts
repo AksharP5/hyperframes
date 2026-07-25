@@ -298,6 +298,20 @@ export function buildTimelineElementKey(params: {
   return `${scope}:${params.id}:${params.fallbackIndex}`;
 }
 
+/**
+ * Inverse of {@link buildTimelineElementKey} for the `sourceFile#domId` form.
+ * A key with no `#` is a bare dom id and carries no source file of its own, so
+ * the caller supplies the scope it wants to look that id up in.
+ */
+export function splitTimelineElementKey(key: string): {
+  sourceFile: string | null;
+  domId: string;
+} {
+  const hashIndex = key.lastIndexOf("#");
+  if (hashIndex < 0) return { sourceFile: null, domId: key };
+  return { sourceFile: key.slice(0, hashIndex), domId: key.slice(hashIndex + 1) };
+}
+
 export function buildTimelineElementIdentity(params: {
   preferredId?: string | null;
   label: string;

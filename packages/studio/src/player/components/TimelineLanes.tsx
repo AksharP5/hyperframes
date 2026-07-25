@@ -3,6 +3,7 @@ import { Eye, EyeSlash } from "@phosphor-icons/react";
 import { BeatStrip, BeatBackgroundLines } from "./BeatStrip";
 import { TimelineClip } from "./TimelineClip";
 import { TimelineClipDiamonds } from "./TimelineClipDiamonds";
+import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
 import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
 import { getTimelineEditCapabilities, resolveBlockedTimelineEditIntent } from "./timelineEditing";
 import type { TimelineTheme } from "./timelineTheme";
@@ -76,7 +77,7 @@ export interface TimelineLaneBaseProps {
   onContextMenuKeyframe?: (e: React.MouseEvent, elementId: string, percentage: number) => void;
   onMoveKeyframe?: (
     elementId: string,
-    fromClipPercentage: number,
+    keyframe: TimelineKeyframeTarget,
     toClipPercentage: number,
   ) => Promise<boolean>;
   onContextMenuClip?: (e: React.MouseEvent, element: TimelineElement) => void;

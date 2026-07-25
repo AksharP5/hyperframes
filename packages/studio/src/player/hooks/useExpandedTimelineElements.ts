@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { usePlayerStore, type TimelineElement, type DomClipChild } from "../store/playerStore";
 import type { ClipManifestClip } from "../lib/playbackTypes";
 import { createTimelineElementFromManifestClip } from "../lib/timelineDOM";
-import { buildTimelineElementKey } from "../lib/timelineElementHelpers";
+import { buildTimelineElementKey, splitTimelineElementKey } from "../lib/timelineElementHelpers";
 
 function findTopLevelAncestor(id: string, parentMap: Map<string, string>): string | null {
   let current = parentMap.get(id);
@@ -19,18 +19,13 @@ function findTopLevelAncestor(id: string, parentMap: Map<string, string>): strin
   return current;
 }
 
-function extractDomId(key: string): string {
-  const hashIdx = key.lastIndexOf("#");
-  return hashIdx >= 0 ? key.slice(hashIdx + 1) : key;
-}
-
 function resolveRawId(
   selectedId: string | null,
   manifest: ClipManifestClip[],
   parentMap: Map<string, string>,
 ): string | null {
   if (!selectedId) return null;
-  const rawId = extractDomId(selectedId);
+  const rawId = splitTimelineElementKey(selectedId).domId;
   if (parentMap.has(rawId)) return rawId;
   if (parentMap.has(selectedId)) return selectedId;
   const clip = manifest.find((c) => c.label === selectedId || c.label === rawId);
