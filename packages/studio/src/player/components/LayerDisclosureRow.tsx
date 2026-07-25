@@ -1,16 +1,19 @@
 import { CaretRight } from "@phosphor-icons/react";
 import type { TimelineElement } from "../store/playerStore";
 import { LABEL_COL_W, TRACK_H } from "./timelineLayout";
+import { TrackClipCount } from "./TrackClipCount";
 
 // Layer row (Figma order: disclosure ▸/▾, diamond, name) — the disclosure lives
 // here, not on the clip bar, and re-expands a collapsed layer.
 export function LayerDisclosureRow({
   keyframeClip,
+  clipCount,
   isExpanded,
   gutterBackground,
   onToggleClipExpanded,
 }: {
   keyframeClip: TimelineElement;
+  clipCount: number;
   isExpanded: boolean;
   gutterBackground: string;
   onToggleClipExpanded: () => void;
@@ -53,6 +56,7 @@ export function LayerDisclosureRow({
       <span className="min-w-0 flex-1 truncate font-medium" title={name}>
         {name}
       </span>
+      <TrackClipCount clipCount={clipCount} />
     </div>
   );
 }

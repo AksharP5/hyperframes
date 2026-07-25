@@ -60,6 +60,7 @@ const OPACITY = animation("opacity-tween", "visual", [
 
 interface RenderHeaderOptions {
   animations?: GsapAnimation[];
+  clipCount?: number;
   currentTime?: number;
   expanded?: boolean;
   onSeek?: (time: number) => void;
@@ -82,6 +83,7 @@ function renderHeader(options: RenderHeaderOptions = {}): {
           trackLabel="Hero card"
           contentOrigin={LABEL_COL_W}
           keyframeClip={ELEMENT}
+          clipCount={next.clipCount ?? 1}
           isExpanded={next.expanded !== false}
           animations={next.animations ?? [POSITION, OPACITY]}
           currentTime={next.currentTime ?? 0}
@@ -109,6 +111,17 @@ function click(host: HTMLElement, label: string) {
 }
 
 describe("TimelineTrackHeader", () => {
+  // The header shows one clip's lanes, so how many clips the track holds is
+  // otherwise invisible from the label column. A single-clip track stays silent.
+  it("shows the track's clip count only once the track holds more than one clip", () => {
+    const view = renderHeader({ clipCount: 1 });
+    expect(view.host.querySelector('[aria-label="1 clips"]')).toBeNull();
+
+    view.rerender({ clipCount: 3 });
+    expect(view.host.querySelector('[aria-label="3 clips"]')?.textContent).toBe("3");
+    act(() => view.root.unmount());
+  });
+
   it("adds and removes a keyframe on the explicitly targeted property-group tween", () => {
     const onTogglePropertyGroupKeyframe = vi.fn();
     const view = renderHeader({ currentTime: 0.5, onTogglePropertyGroupKeyframe });

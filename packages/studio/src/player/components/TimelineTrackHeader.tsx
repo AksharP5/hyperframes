@@ -1,30 +1,20 @@
 import { useState } from "react";
 import { Eye, EyeSlash } from "@phosphor-icons/react";
-import {
-  classifyPropertyGroup,
-  type GsapAnimation,
-  type PropertyGroupName,
-} from "@hyperframes/core/gsap-parser";
-import {
-  clipToTweenPercentage,
-  getKeyframeNavigationState,
-} from "../../components/editor/KeyframeNavigation";
+import type { GsapAnimation, PropertyGroupName } from "@hyperframes/core/gsap-parser";
 import { Music } from "../../icons/SystemIcons";
-import {
-  absoluteToPercentageForAnimation,
-  isTimeWithinTween,
-  resolveTweenDuration,
-  resolveTweenStart,
-} from "../../utils/globalTimeCompiler";
 import type { TimelineElement } from "../store/playerStore";
-import type {
-  TimelineEditCallbacks,
-  TimelinePropertyGroupKeyframeToggle,
-} from "./timelineCallbacks";
+import type { TimelineEditCallbacks } from "./timelineCallbacks";
 import { getTimelinePropertyLanes } from "./TimelinePropertyLanes";
 import { LayerDisclosureRow } from "./LayerDisclosureRow";
+import { TrackClipCount } from "./TrackClipCount";
 import { LABEL_COL_W, LANE_H, getTimelineLaneTop } from "./timelineLayout";
 import type { TimelineTheme } from "./timelineTheme";
+import {
+  resolveLaneHeaderState,
+  type KeyframeNavigationState,
+  type TimelinePropertyLane,
+} from "./trackHeaderLaneState";
+import { valueReadout } from "./trackHeaderLaneValues";
 
 interface TimelineTrackHeaderProps {
   trackNumber: number;
@@ -33,6 +23,8 @@ interface TimelineTrackHeaderProps {
   /** The track's active keyframe clip (selected, else primary) — the one whose
    *  disclosure + property rows this header shows, whether expanded or not. */
   keyframeClip: TimelineElement | null;
+  /** Clips on this track, so the header can say how many the row holds. */
+  clipCount: number;
   isExpanded: boolean;
   animations: readonly GsapAnimation[];
   currentTime: number;
@@ -45,104 +37,6 @@ interface TimelineTrackHeaderProps {
   onToggleTrackHidden: TimelineEditCallbacks["onToggleTrackHidden"];
   onTogglePropertyGroupKeyframe?: TimelineEditCallbacks["onTogglePropertyGroupKeyframe"];
   onSeek?: (time: number) => void;
-}
-
-function roundValue(value: number): string {
-  return String(Math.round(value * 100) / 100);
-}
-
-function propertyValueAt(
-  animation: GsapAnimation,
-  property: string,
-  tweenPercentage: number,
-): number | string | undefined {
-  const keyframes = animation.keyframes?.keyframes ?? [];
-  const values = keyframes
-    .filter((keyframe) => property in keyframe.properties)
-    .map((keyframe) => ({
-      percentage: keyframe.percentage,
-      value: keyframe.properties[property],
-    }));
-  const before = values.filter((value) => value.percentage <= tweenPercentage).at(-1);
-  const after = values.find((value) => value.percentage >= tweenPercentage);
-  if (!before) return after?.value;
-  if (!after) return before.value;
-  if (
-    typeof before.value !== "number" ||
-    typeof after.value !== "number" ||
-    before.percentage === after.percentage
-  ) {
-    return before.value;
-  }
-  const progress = (tweenPercentage - before.percentage) / (after.percentage - before.percentage);
-  return before.value + (after.value - before.value) * progress;
-}
-
-function valuesAt(
-  animation: GsapAnimation,
-  group: PropertyGroupName,
-  tweenPercentage: number,
-): Record<string, number | string> {
-  const propertyNames = new Set<string>();
-  for (const keyframe of animation.keyframes?.keyframes ?? []) {
-    for (const property of Object.keys(keyframe.properties)) {
-      if (classifyPropertyGroup(property) === group) propertyNames.add(property);
-    }
-  }
-  const values: Record<string, number | string> = {};
-  for (const property of propertyNames) {
-    const value = propertyValueAt(animation, property, tweenPercentage);
-    if (value !== undefined) values[property] = value;
-  }
-  return values;
-}
-
-function groupLabel(group: PropertyGroupName, properties: Record<string, number | string>): string {
-  if (group === "visual" && ("opacity" in properties || "autoAlpha" in properties)) {
-    return "Opacity";
-  }
-  if (group !== "other") return `${group[0]?.toUpperCase() ?? ""}${group.slice(1)}`;
-  const property = Object.keys(properties)[0];
-  return property ? `${property[0]?.toUpperCase() ?? ""}${property.slice(1)}` : "Other";
-}
-
-type LaneValues = Record<string, number | string>;
-
-function defaultValueReadout(values: LaneValues): string {
-  return Object.values(values)
-    .map((value) => (typeof value === "number" ? roundValue(value) : value))
-    .join(", ");
-}
-
-function positionValueReadout(values: LaneValues): string | null {
-  const x = values.x;
-  const y = values.y;
-  return typeof x === "number" && typeof y === "number"
-    ? `${roundValue(x)}, ${roundValue(y)}`
-    : null;
-}
-
-function rotationValueReadout(values: LaneValues): string | null {
-  return typeof values.rotation === "number" ? `${roundValue(values.rotation)}°` : null;
-}
-
-function visualValueReadout(values: LaneValues): string | null {
-  const opacity = values.opacity ?? values.autoAlpha;
-  return typeof opacity === "number"
-    ? `${roundValue(Math.abs(opacity) <= 1 ? opacity * 100 : opacity)}%`
-    : null;
-}
-
-const GROUP_VALUE_READOUTS: Partial<
-  Record<PropertyGroupName, (values: LaneValues) => string | null>
-> = {
-  position: positionValueReadout,
-  rotation: rotationValueReadout,
-  visual: visualValueReadout,
-};
-
-function valueReadout(group: PropertyGroupName, values: Record<string, number | string>): string {
-  return GROUP_VALUE_READOUTS[group]?.(values) ?? defaultValueReadout(values);
 }
 
 function VisibilityButton({
@@ -184,13 +78,19 @@ function VisibilityButton({
 function LegacyTrackHeader({
   trackNumber,
   trackLabel,
+  clipCount,
   showTrackLabel,
   isTrackHidden,
   isAudioTrack,
   onToggleTrackHidden,
 }: Pick<
   TimelineTrackHeaderProps,
-  "trackNumber" | "trackLabel" | "isTrackHidden" | "isAudioTrack" | "onToggleTrackHidden"
+  | "trackNumber"
+  | "trackLabel"
+  | "clipCount"
+  | "isTrackHidden"
+  | "isAudioTrack"
+  | "onToggleTrackHidden"
 > & { showTrackLabel: boolean }) {
   return (
     <>
@@ -202,6 +102,7 @@ function LegacyTrackHeader({
           {trackLabel}
         </span>
       )}
+      {showTrackLabel && <TrackClipCount clipCount={clipCount} />}
       <VisibilityButton
         hidden={isTrackHidden}
         trackNumber={trackNumber}
@@ -210,115 +111,6 @@ function LegacyTrackHeader({
       />
     </>
   );
-}
-
-type TimelinePropertyLane = ReturnType<typeof getTimelinePropertyLanes>[number];
-type KeyframeNavigationState = ReturnType<
-  typeof getKeyframeNavigationState<TimelinePropertyLane["keyframes"][number]>
->;
-
-function findNearestLaneKeyframe(lane: TimelinePropertyLane, clipPercentage: number) {
-  return lane.keyframes.reduce<(typeof lane.keyframes)[number] | null>(
-    (nearest, keyframe) =>
-      !nearest ||
-      Math.abs(keyframe.percentage - clipPercentage) < Math.abs(nearest.percentage - clipPercentage)
-        ? keyframe
-        : nearest,
-    null,
-  );
-}
-
-function findAnimationAtTime(animations: TimelinePropertyLane["animations"], currentTime: number) {
-  return animations.find((candidate) => {
-    const start = resolveTweenStart(candidate);
-    return start !== null && isTimeWithinTween(currentTime, start, resolveTweenDuration(candidate));
-  });
-}
-
-function resolveLaneAnimation(
-  lane: TimelinePropertyLane,
-  navigation: KeyframeNavigationState,
-  nearestKeyframe: TimelinePropertyLane["keyframes"][number] | null,
-  animationAtPlayhead: GsapAnimation | undefined,
-) {
-  const animationId = navigation.currentKeyframe?.animationId ?? nearestKeyframe?.animationId;
-  return animationAtPlayhead ?? lane.animations.find((candidate) => candidate.id === animationId);
-}
-
-function resolveLaneTweenPercentage(
-  navigation: KeyframeNavigationState,
-  animation: GsapAnimation | undefined,
-  animationKeyframes: TimelinePropertyLane["keyframes"],
-  currentTime: number,
-  clipPercentage: number,
-) {
-  return (
-    navigation.currentKeyframe?.tweenPercentage ??
-    (animation ? absoluteToPercentageForAnimation(currentTime, animation) : null) ??
-    clipToTweenPercentage(animationKeyframes, clipPercentage)
-  );
-}
-
-function valuesForLaneAnimation(
-  animation: GsapAnimation | undefined,
-  lane: TimelinePropertyLane,
-  tweenPercentage: number,
-) {
-  return animation ? valuesAt(animation, lane.group, tweenPercentage) : {};
-}
-
-function createLaneToggleTarget(
-  animation: GsapAnimation | undefined,
-  lane: TimelinePropertyLane,
-  tweenPercentage: number,
-  values: LaneValues,
-  navigation: KeyframeNavigationState,
-): TimelinePropertyGroupKeyframeToggle | null {
-  return animation
-    ? {
-        animationId: animation.id,
-        propertyGroup: lane.group,
-        tweenPercentage,
-        properties: values,
-        remove: navigation.currentKeyframe !== null,
-      }
-    : null;
-}
-
-function resolveLaneHeaderState(
-  lane: TimelinePropertyLane,
-  currentTime: number,
-  clipPercentage: number,
-) {
-  const navigation = getKeyframeNavigationState(lane.keyframes, clipPercentage);
-  const nearestKeyframe = findNearestLaneKeyframe(lane, clipPercentage);
-  const animationAtPlayhead = findAnimationAtTime(lane.animations, currentTime);
-  const animation = resolveLaneAnimation(lane, navigation, nearestKeyframe, animationAtPlayhead);
-  const animationKeyframes = lane.keyframes.filter(
-    (keyframe) => keyframe.animationId === animation?.id,
-  );
-  const tweenPercentage = resolveLaneTweenPercentage(
-    navigation,
-    animation,
-    animationKeyframes,
-    currentTime,
-    clipPercentage,
-  );
-  const values = valuesForLaneAnimation(animation, lane, tweenPercentage);
-  const label = groupLabel(lane.group, values);
-  const toggleTarget = createLaneToggleTarget(animation, lane, tweenPercentage, values, navigation);
-
-  return {
-    navigation,
-    nearestKeyframe,
-    animationAtPlayhead,
-    animation,
-    animationKeyframes,
-    tweenPercentage,
-    values,
-    label,
-    toggleTarget,
-  };
 }
 
 // Figma layout: prev-keyframe ‹, the add/remove toggle (children), next ›.
@@ -484,6 +276,7 @@ export function TimelineTrackHeader({
   trackLabel,
   contentOrigin,
   keyframeClip,
+  clipCount,
   isExpanded,
   animations,
   currentTime,
@@ -528,6 +321,7 @@ export function TimelineTrackHeader({
         <LegacyTrackHeader
           trackNumber={trackNumber}
           trackLabel={trackLabel}
+          clipCount={clipCount}
           showTrackLabel={showTrackLabel}
           isTrackHidden={isTrackHidden}
           isAudioTrack={isAudioTrack}
@@ -537,6 +331,7 @@ export function TimelineTrackHeader({
         <>
           <LayerDisclosureRow
             keyframeClip={keyframeClip}
+            clipCount={clipCount}
             isExpanded={isExpanded}
             gutterBackground={theme.gutterBackground}
             onToggleClipExpanded={onToggleClipExpanded}
