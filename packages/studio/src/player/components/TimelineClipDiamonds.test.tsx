@@ -379,6 +379,53 @@ describe("TimelineClipDiamonds", () => {
     act(() => root.unmount());
   });
 
+  it("cancels an in-flight retime on Escape without committing or selecting", () => {
+    const onClickKeyframe = vi.fn();
+    const onMoveKeyframe = vi.fn().mockResolvedValue(true);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    act(() => {
+      root.render(
+        <TimelineDiamondLane
+          keyframesData={{
+            format: "percentage",
+            keyframes: [
+              { percentage: 20, tweenPercentage: 0, properties: { x: 0 } },
+              { percentage: 40, tweenPercentage: 50, properties: { x: 100 } },
+              { percentage: 60, tweenPercentage: 100, properties: { x: 200 } },
+            ],
+          }}
+          clipWidthPx={200}
+          clipHeightPx={48}
+          accentColor="#4ba3d2"
+          isSelected
+          currentPercentage={0}
+          elementId="clip-1"
+          selectedKeyframes={new Set()}
+          onClickKeyframe={onClickKeyframe}
+          onMoveKeyframe={onMoveKeyframe}
+        />,
+      );
+    });
+    const diamond = host.querySelector<HTMLButtonElement>('button[title="40%"]');
+    expect(diamond).not.toBeNull();
+
+    act(() => {
+      diamond!.dispatchEvent(
+        pointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 80 }),
+      );
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      diamond!.dispatchEvent(pointerEvent("pointerup", { bubbles: true, button: 0, clientX: 100 }));
+    });
+
+    // Escape ends the gesture: no retime is written, and the release is not
+    // reinterpreted as a click that would park the playhead on the keyframe.
+    expect(onMoveKeyframe).not.toHaveBeenCalled();
+    expect(onClickKeyframe).not.toHaveBeenCalled();
+    act(() => root.unmount());
+  });
+
   // Regression: onClickKeyframe's state updates can re-render the diamond
   // button out from under the gesture before the browser auto-synthesizes the
   // "click" event that follows a button's pointerdown+pointerup. That orphaned

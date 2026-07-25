@@ -95,6 +95,13 @@ type DragState = {
   startX: number;
   fromClipPct: number;
   moved: boolean;
+  /** Latest pointer x, flushed to the preview once per frame. */
+  lastX: number;
+  /** Index in the sorted row, needed by the neighbour clamp off the render path. */
+  index: number;
+  /** Escape was pressed: the drag is dead, and the pointerup that follows is
+   *  swallowed rather than falling through to the click branch. */
+  cancelled?: boolean;
 };
 
 function keyframeTarget(
@@ -150,6 +157,31 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
   // (that optimistic hold was the #1763 flake). The atomic move-keyframe commit
   // on drop re-keys the diamond from source.
   const [preview, setPreview] = useState<{ kfKey: string; clipPct: number } | null>(null);
+  // One preview render per frame: a 120Hz trackpad fires pointermove far faster
+  // than the lane can repaint, and every diamond in the row re-evaluates its
+  // memo on each of those renders.
+  const previewFrameRef = useRef<number | null>(null);
+  const cancelPreviewFrame = () => {
+    if (previewFrameRef.current === null) return;
+    cancelAnimationFrame(previewFrameRef.current);
+    previewFrameRef.current = null;
+  };
+  // Escape backs out of an in-flight retime, the way clip and element drags
+  // already do. Nothing was written yet (the commit happens on pointerup), so
+  // dropping the preview is the whole undo.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !dragRef.current || dragRef.current.cancelled) return;
+      dragRef.current.cancelled = true;
+      cancelPreviewFrame();
+      setPreview(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      cancelPreviewFrame();
+    };
+  }, []);
   // Index of the segment whose mid-point ease button is revealed on hover, like
   // Figma. Null = no segment hovered → no button shown (resting state is just
   // the connector line + diamonds).
@@ -310,6 +342,8 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
             dragRef.current = {
               kfKey,
               startX: e.clientX,
+              lastX: e.clientX,
+              index: i,
               fromClipPct: pendingRetimeRef.current.get(kfKey)?.clipPct ?? kf.percentage,
               moved: false,
             };
@@ -317,26 +351,38 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
         };
         const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
           const d = dragRef.current;
-          if (!d || d.kfKey !== kfKey) return;
+          if (!d || d.kfKey !== kfKey || d.cancelled) return;
+          d.lastX = e.clientX;
           if (!d.moved && Math.abs(e.clientX - d.startX) >= KEYFRAME_DRAG_THRESHOLD_PX) {
             d.moved = true;
           }
-          if (d.moved) {
+          if (!d.moved || previewFrameRef.current !== null) return;
+          previewFrameRef.current = requestAnimationFrame(() => {
+            previewFrameRef.current = null;
+            const live = dragRef.current;
+            if (!live || live.kfKey !== kfKey || live.cancelled) return;
             setPreview({
               kfKey,
               clipPct: previewClipPct({
-                pointerDownX: d.startX,
-                pointerMoveX: e.clientX,
+                pointerDownX: live.startX,
+                pointerMoveX: live.lastX,
                 clipWidthPx,
-                draggedClipPct: d.fromClipPct,
-                draggedIndex: i,
+                draggedClipPct: live.fromClipPct,
+                draggedIndex: live.index,
                 sortedClipPcts,
               }),
             });
-          }
+          });
         };
         const onPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
           const d = dragRef.current;
+          if (d?.kfKey === kfKey && d.cancelled) {
+            // Escape already ended this drag; the release is not a click.
+            dragRef.current = null;
+            e.currentTarget.releasePointerCapture?.(e.pointerId);
+            suppressNextClick();
+            return;
+          }
           // No drag armed (canDrag false / non-primary press) → treat as a click.
           if (!d || d.kfKey !== kfKey) {
             if (e.button !== 0) return;
@@ -347,9 +393,14 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
           }
           e.stopPropagation();
           dragRef.current = null;
+          cancelPreviewFrame();
           setPreview(null);
           e.currentTarget.releasePointerCapture?.(e.pointerId);
           suppressNextClick();
+          // Single-diamond retime by design: a multi-select drag would have to
+          // move every selected keyframe as one mutation, which the script ops
+          // do not express yet. Selecting several and dragging one moves only
+          // the dragged one.
           const res = resolveKeyframeDrag({
             pointerDownX: d.startX,
             pointerUpX: e.clientX,
@@ -447,6 +498,7 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
               // stays stuck at the last previewed position.
               if (dragRef.current?.kfKey !== kfKey) return;
               dragRef.current = null;
+              cancelPreviewFrame();
               setPreview(null);
               e.currentTarget.releasePointerCapture?.(e.pointerId);
             }}
