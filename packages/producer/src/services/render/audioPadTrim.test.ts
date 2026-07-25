@@ -30,7 +30,8 @@ describe("buildPadTrimAudioArgs", () => {
     expect(plan.steps).toHaveLength(1);
     const args = plan.steps[0]!.args;
     expect(args[args.indexOf("-i") + 1]).toBe("/tmp/in.aac");
-    expect(args[args.indexOf("-af") + 1]).toBe("apad=whole_dur=5.000000");
+    expect(args[args.indexOf("-af") + 1]).toBe("apad,atrim=0:5.000000");
+    expect(args.join(" ")).not.toContain("whole_dur");
     expect(args[args.indexOf("-t") + 1]).toBe("5.000000");
     expect(args[args.indexOf("-c:a") + 1]).toBe("aac");
     // The single-step filter plan has no intermediate artifacts to clean up.
@@ -92,13 +93,9 @@ describe("buildPadTrimAudioArgs", () => {
     expect(trimNeeded.operation).toBe("trim");
   });
 
-  it("uses apad for Windows-safe duration normalization", () => {
-    // Regression pin for field-signal reports ts=1784169914 / 1784177061 /
-    // ts=1784177375 (win32/x64, CLI 0.7.59, ffmpeg 8.1.1-full_build). The
-    // concat demuxer's file open on Windows in FFmpeg 8.x rejects
-    // `file:///C:/…` URLs with "Impossible to open …". The concat script
-    // MUST use bare paths. Match sibling `assemble.ts` /
-    // `chunkEncoder.ts` conventions.
+  it("uses the portable apad/atrim filter for Windows duration normalization", () => {
+    // Bundled Windows FFmpeg builds reject `apad=whole_dur`. Match the
+    // portable finite-padding shape used by the main audio mixer.
     const winPlan = buildPadTrimAudioPlan(
       "C:\\Users\\alice\\AppData\\Local\\Temp\\hf-render-abc\\audio.aac",
       "C:\\Users\\alice\\AppData\\Local\\Temp\\hf-render-abc\\audio-padded.aac",
@@ -108,7 +105,8 @@ describe("buildPadTrimAudioArgs", () => {
     expect(winPlan.operation).toBe("pad");
     const args = winPlan.steps[0]!.args;
     expect(args).toContain("-af");
-    expect(args[args.indexOf("-af") + 1]).toBe("apad=whole_dur=5.000000");
+    expect(args[args.indexOf("-af") + 1]).toBe("apad,atrim=0:5.000000");
+    expect(args.join(" ")).not.toContain("whole_dur");
   });
 });
 

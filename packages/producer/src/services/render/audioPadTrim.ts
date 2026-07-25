@@ -142,7 +142,7 @@ export function buildPadTrimAudioPlan(
             "-i",
             audioPath,
             "-af",
-            `apad=whole_dur=${targetSec}`,
+            `apad,atrim=0:${targetSec}`,
             "-t",
             targetSec,
             "-c:a",
@@ -280,10 +280,6 @@ export async function padOrTrimAudioToVideoFrameCount(
 
   try {
     for (const step of plan.steps) {
-      // Materialize the concat-demuxer script to a real file when the step
-      // needs one. Doing this here (instead of piping via `pipe:0` in the
-      // runner) is what makes the demuxer's URL resolution treat
-      // absolute paths as absolute — see `concatFileLine` for context.
       const ffmpegResult = await runner(step.args);
       if (!ffmpegResult.success) {
         return {
