@@ -5,6 +5,13 @@ export interface TimelineKeyframeTarget {
   animationId?: string;
 }
 
+/**
+ * Note the asymmetry: `tweenPercentage` is optional here and defaults to
+ * `percentage`, but the reader treats both slots as authoritative. Callers must
+ * therefore keep the pair consistent — writing a new `tweenPercentage` without
+ * the matching `percentage` hashes two logically-equal selections to different
+ * keys.
+ */
 export function timelineKeyframeSelectionKey(
   elementId: string,
   target: TimelineKeyframeTarget,

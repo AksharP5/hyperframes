@@ -77,11 +77,22 @@ export function animatedProps(anim: GsapAnimation | null): string[] {
  * Whether the playhead sits inside an animation's tween range. When the tween's
  * start can't be resolved we don't block (the percentage falls back to clip range,
  * preserving prior behavior for elements without explicit timing).
+ *
+ * Pass the selection whenever the caller has one: a duration-less tween spans
+ * its clip, and answering from GSAP's 0.5s default reports the playhead outside
+ * a window the edit paths treat as clip-wide.
  */
-export function isPlayheadWithinTween(anim: GsapAnimation, currentTime: number): boolean {
+export function isPlayheadWithinTween(
+  anim: GsapAnimation,
+  currentTime: number,
+  selection?: DomEditSelection | null,
+): boolean {
   const start = resolveTweenStart(anim);
   if (start === null) return true;
-  return isTimeWithinTween(currentTime, start, resolveTweenDuration(anim));
+  const duration = selection
+    ? resolveEditableTweenDuration(anim, selection)
+    : resolveTweenDuration(anim);
+  return isTimeWithinTween(currentTime, start, duration);
 }
 
 /**

@@ -108,6 +108,19 @@ describe("isPlayheadWithinTween", () => {
   it("does not block when the start can't be resolved", () => {
     expect(isPlayheadWithinTween(anim({ position: "+=1" }), 99)).toBe(true);
   });
+
+  // The toolbar's "extends animation" tooltip has to agree with what the edit
+  // paths do. Those span a duration-less tween across its clip, so answering
+  // from GSAP's 0.5s default reported the playhead outside a window the click
+  // then treated as clip-wide.
+  it("spans the clip for a duration-less tween when given the selection", () => {
+    const durationless = anim({ position: 0 });
+    const selection = { dataAttributes: { duration: "16" } } as unknown as DomEditSelection;
+
+    expect(isPlayheadWithinTween(durationless, 5)).toBe(false);
+    expect(isPlayheadWithinTween(durationless, 5, selection)).toBe(true);
+    expect(isPlayheadWithinTween(durationless, 20, selection)).toBe(false);
+  });
 });
 
 describe("buildExtendedKeyframes", () => {

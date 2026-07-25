@@ -4,6 +4,7 @@ import { usePlayerStore } from "../player/store/playerStore";
 import { resolveTweenStart, resolveTweenDuration } from "../utils/globalTimeCompiler";
 import { roundTo3 } from "../utils/rounding";
 import { computeDraggedGsapPosition } from "./draggedGsapPosition";
+import { resolveEditableTweenDuration } from "./gsapShared";
 import {
   type GsapDragCommitCallbacks,
   computeCurrentPercentage,
@@ -297,7 +298,9 @@ export async function commitGsapPositionFromDrag(
     }
 
     const tweenStart = resolveTweenStart(anim);
-    const tweenDuration = resolveTweenDuration(anim);
+    // Clip-wide, same as applyArcKeyframeAtPlayhead: authoring GSAP's 0.5s
+    // default here would collapse a duration-less arc's window on drag.
+    const tweenDuration = resolveEditableTweenDuration(anim, selection);
     if (tweenStart === null || tweenDuration <= 0 || keyframes.length < 2) return;
     const temporalKeyframes = buildTemporalArcKeyframes(anim, pct, { x: newX, y: newY });
     await callbacks.commitMutation(
