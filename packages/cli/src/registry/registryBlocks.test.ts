@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { bundleToSingleHtml } from "@hyperframes/core/compiler";
+import { parseHTML } from "linkedom";
 import { describe, expect, it } from "vitest";
 
 const blocksDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../registry/blocks");
@@ -29,7 +31,7 @@ function findMissingLocalScripts(itemDir: string, manifest: RegistryManifest): s
   return missing;
 }
 
-describe("registry block manifests", () => {
+describe("registry blocks", () => {
   it("installs every local script referenced by a block composition", () => {
     const missing: string[] = [];
 
@@ -47,5 +49,19 @@ describe("registry block manifests", () => {
     }
 
     expect(missing).toEqual([]);
+  });
+
+  it("keeps the Camcorder HUD seekable inside a differently named host composition", async () => {
+    const bundled = await bundleToSingleHtml(resolve(blocksDir, "camcorder-hud"), {
+      entryFile: "demo.html",
+    });
+    const { document } = parseHTML(bundled);
+    const demo = document.getElementById("camcorder-hud-demo");
+    const hud = document.getElementById("ch-demo-overlay");
+
+    expect(demo?.getAttribute("data-composition-id")).toBe("camcorder-hud-demo");
+    expect(hud?.getAttribute("data-composition-id")).toBe("camcorder-hud");
+    expect(hud?.hasAttribute("data-composition-src")).toBe(false);
+    expect(bundled).toContain('var __hfTimelineCompId = "camcorder-hud";');
   });
 });
