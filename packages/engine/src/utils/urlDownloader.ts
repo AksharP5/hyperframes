@@ -347,6 +347,7 @@ async function downloadWithRetry(
   localPath: string,
   timeoutMs: number,
   signal?: AbortSignal,
+  onTransientRetry?: (error: UrlDownloadError) => void,
 ): Promise<string> {
   const maxTransientRetries = 1;
   for (let attempt = 0; ; attempt += 1) {
@@ -355,6 +356,7 @@ async function downloadWithRetry(
     } catch (error) {
       const classified = classifyDownloadFailure(error);
       if (!classified.retryable || attempt >= maxTransientRetries) throw classified;
+      onTransientRetry?.(classified);
     }
   }
 }
@@ -364,6 +366,7 @@ export async function downloadToTemp(
   destDir: string,
   timeoutMs: number = 300000,
   signal?: AbortSignal,
+  onTransientRetry?: (error: UrlDownloadError) => void,
 ): Promise<string> {
   // Reject non-HTTPS URLs and private/reserved address ranges before
   // touching the cache or filesystem — customer-supplied compositions must
@@ -389,7 +392,7 @@ export async function downloadToTemp(
 
   if (hasCompleteFile(localPath)) return localPath;
 
-  const downloadPromise = downloadWithRetry(url, localPath, timeoutMs, signal);
+  const downloadPromise = downloadWithRetry(url, localPath, timeoutMs, signal, onTransientRetry);
   const trackedDownload = downloadPromise.finally(() => {
     inFlightDownloads.delete(inFlightKey);
   });

@@ -118,6 +118,23 @@ interface PreparedRenderInput {
 }
 
 const DEFAULT_SERVER_FPS = { num: 30, den: 1 } as const;
+const SAFE_RENDER_ERROR_CODES = new Set([
+  "VIDEO_SOURCE_UNRENDERABLE",
+  "VIDEO_EXTRACTION_FAILED",
+] as const);
+
+/**
+ * Preserve only bounded producer error codes across JSON/SSE. Never derive a
+ * code from the message: it may contain local paths or signed source URLs.
+ */
+export function extractSafeRenderErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" &&
+    SAFE_RENDER_ERROR_CODES.has(code as "VIDEO_SOURCE_UNRENDERABLE" | "VIDEO_EXTRACTION_FAILED")
+    ? code
+    : undefined;
+}
 
 function parseServerFps(value: unknown): RenderInput["fps"] {
   if (typeof value !== "number" && typeof value !== "string") return DEFAULT_SERVER_FPS;
@@ -524,6 +541,7 @@ async function writeRenderStreamFailure(input: {
     return;
   }
   const errorMsg = error instanceof Error ? error.message : String(error);
+  const errorCode = extractSafeRenderErrorCode(error);
   const elapsedMs = Date.now() - startedAtMs;
   log.error("render-stream failed", {
     requestId,
@@ -536,6 +554,7 @@ async function writeRenderStreamFailure(input: {
       type: "error",
       requestId,
       error: errorMsg,
+      errorCode,
       stage: job.currentStage,
       elapsedMs,
       errorDetails: job.errorDetails ?? null,
@@ -684,6 +703,7 @@ export function createRenderHandlers(options: HandlerOptions = {}): RenderHandle
     } catch (error) {
       const durationMs = Date.now() - t0;
       const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorCode = extractSafeRenderErrorCode(error);
       log.error("render failed", {
         requestId,
         durationMs,
@@ -695,6 +715,7 @@ export function createRenderHandlers(options: HandlerOptions = {}): RenderHandle
           success: false,
           requestId,
           error: errorMsg,
+          errorCode,
           stage: job.currentStage,
           durationMs,
           errorDetails: job.errorDetails ?? null,

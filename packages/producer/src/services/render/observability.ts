@@ -109,6 +109,8 @@ export interface RenderExtractionObservability {
   vfrPreflightCount?: number;
   cacheHits?: number;
   cacheMisses?: number;
+  /** Per-source transient download/metadata/FFmpeg retries performed during extraction. */
+  transientRetries?: number;
   /**
    * Per-clip captured-vs-expected-frame gauges. Emitted by the parity gate
    * at extract finalization (see `videoFrameCoverage.ts`). Undefined when

@@ -996,6 +996,7 @@ export async function plan(
     assertNotAborted,
     materializeSymlinks: true,
   });
+  if (extractResult.failureToEnforce) throw extractResult.failureToEnforce;
   // Skip `extractResult.frameLookup.cleanup()`: it would rm-rf each
   // video's outputDir, but in `plan()` those directories ARE the source
   // material the renames below move into `planDir/video-frames/`.

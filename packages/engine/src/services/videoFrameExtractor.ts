@@ -17,7 +17,7 @@ import {
   isHdrColorSpace as isHdrColorSpaceUtil,
   type HdrTransfer,
 } from "../utils/hdr.js";
-import { downloadToTemp, isHttpUrl } from "../utils/urlDownloader.js";
+import { downloadToTemp, isHttpUrl, UrlDownloadError } from "../utils/urlDownloader.js";
 import { runFfmpeg } from "../utils/runFfmpeg.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { unwrapTemplate } from "../utils/htmlTemplate.js";
@@ -83,6 +83,17 @@ export interface ExtractionOptions {
   quality?: number;
   format?: VideoFrameFormat;
   sdrToHdrTransfer?: HdrTransfer;
+  /**
+   * Bounded per-source FFmpeg retries. Default 0 preserves stable behavior;
+   * the producer may canary at most one retry after observing typed failures.
+   */
+  maxTransientRetries?: number;
+  /**
+   * Collect metadata-probe failures into `ExtractionResult.errors` instead
+   * of preserving the legacy Promise rejection. Default false; only the
+   * candidate enforce lane may opt into typed aggregation.
+   */
+  collectProbeFailures?: boolean;
 }
 
 const EXTRACT_CACHE_MIN_AGE_MS = 60 * 60 * 1000;
@@ -136,12 +147,267 @@ export interface ExtractionPhaseBreakdown {
   extractMs: number;
   cacheHits: number;
   cacheMisses: number;
+  /** Number of per-source transient failures retried inside this extraction. */
+  transientRetries?: number;
+}
+
+export type VideoExtractionFailureKind =
+  | "cancelled"
+  | "source_missing"
+  | "source_rejected"
+  | "download_not_found"
+  | "download_transient"
+  | "invalid_media"
+  | "media_start_out_of_range"
+  | "ffmpeg_unavailable"
+  | "ffmpeg_timeout"
+  | "ffmpeg_transient"
+  | "ffmpeg_failed"
+  | "zero_output"
+  | "internal";
+
+export interface VideoExtractionFailure {
+  videoId: string;
+  /** Always populated by this engine version; optional for source compatibility with older consumers. */
+  kind?: VideoExtractionFailureKind;
+  /** Always populated by this engine version; absent legacy values fail closed. */
+  retryable?: boolean;
+  /**
+   * Operator diagnostic retained inside the engine result. Producer-facing
+   * errors must summarize `kind`/counts and must not forward this field: it
+   * can contain a local path or a signed source URL.
+   */
+  error: string;
+}
+
+export class VideoSourceExtractionError extends Error {
+  readonly hyperframesVideoSourceExtractionError = true as const;
+
+  constructor(
+    readonly kind: VideoExtractionFailureKind,
+    readonly retryable: boolean,
+    message: string,
+    readonly diagnostic: string = message,
+  ) {
+    super(message);
+    this.name = "VideoSourceExtractionError";
+  }
+}
+
+export function isVideoSourceExtractionError(error: unknown): error is VideoSourceExtractionError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { hyperframesVideoSourceExtractionError?: unknown })
+      .hyperframesVideoSourceExtractionError === true
+  );
+}
+
+function boundedTransientRetryBudget(value: number | undefined): 0 | 1 {
+  return Number.isFinite(value) && (value ?? 0) >= 1 ? 1 : 0;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Convert legacy/raw downloader and filesystem errors into the bounded
+ * extraction taxonomy. New extraction code should throw
+ * `VideoSourceExtractionError` directly; this classifier keeps older utility
+ * boundaries safe while they migrate.
+ */
+export function classifyVideoExtractionError(error: unknown): VideoSourceExtractionError {
+  if (isVideoSourceExtractionError(error)) return error;
+  const diagnostic = errorText(error);
+  const lowered = diagnostic.toLowerCase();
+
+  if (error instanceof UrlDownloadError) {
+    if (error.kind === "cancelled") {
+      return new VideoSourceExtractionError(
+        "cancelled",
+        false,
+        "Video extraction cancelled",
+        diagnostic,
+      );
+    }
+    if (error.kind === "http_not_found") {
+      return new VideoSourceExtractionError(
+        "download_not_found",
+        false,
+        "Video source was not found",
+        diagnostic,
+      );
+    }
+    if (error.kind === "http_rejected") {
+      return new VideoSourceExtractionError(
+        "source_rejected",
+        false,
+        "Video source download was rejected",
+        diagnostic,
+      );
+    }
+    if (error.retryable) {
+      return new VideoSourceExtractionError(
+        "download_transient",
+        true,
+        "Video source download failed transiently",
+        diagnostic,
+      );
+    }
+    return new VideoSourceExtractionError(
+      "internal",
+      false,
+      "Video source download failed internally",
+      diagnostic,
+    );
+  }
+  if (lowered.includes("cancelled") || lowered.includes("aborted")) {
+    return new VideoSourceExtractionError(
+      "cancelled",
+      false,
+      "Video extraction cancelled",
+      diagnostic,
+    );
+  }
+  if (lowered.includes("video file not found")) {
+    return new VideoSourceExtractionError(
+      "source_missing",
+      false,
+      "Video source is missing",
+      diagnostic,
+    );
+  }
+  if (
+    lowered.includes("only https urls are permitted") ||
+    lowered.includes("private/reserved address") ||
+    lowered.includes("invalid url")
+  ) {
+    return new VideoSourceExtractionError(
+      "source_rejected",
+      false,
+      "Video source URL is not permitted",
+      diagnostic,
+    );
+  }
+  const httpStatus = diagnostic.match(/\bHTTP\s+(\d{3})\b/i)?.[1];
+  if (httpStatus) {
+    const status = Number(httpStatus);
+    if (status === 404 || status === 410) {
+      return new VideoSourceExtractionError(
+        "download_not_found",
+        false,
+        "Video source was not found",
+        diagnostic,
+      );
+    }
+    if (status === 408 || status === 429 || status >= 500) {
+      return new VideoSourceExtractionError(
+        "download_transient",
+        true,
+        "Video source download failed transiently",
+        diagnostic,
+      );
+    }
+    return new VideoSourceExtractionError(
+      "source_rejected",
+      false,
+      "Video source download was rejected",
+      diagnostic,
+    );
+  }
+  if (
+    lowered.includes("[urldownloader] download timeout") ||
+    lowered.includes("[urldownloader] download failed") ||
+    lowered.includes("fetch failed") ||
+    lowered.includes("network")
+  ) {
+    return new VideoSourceExtractionError(
+      "download_transient",
+      true,
+      "Video source download failed transiently",
+      diagnostic,
+    );
+  }
+  if (lowered.includes("ffprobe not found")) {
+    return new VideoSourceExtractionError(
+      "ffmpeg_unavailable",
+      false,
+      "FFprobe is unavailable",
+      diagnostic,
+    );
+  }
+  if (lowered.includes("ffprobe deadline")) {
+    return new VideoSourceExtractionError(
+      "ffmpeg_timeout",
+      true,
+      "Video inspection timed out",
+      diagnostic,
+    );
+  }
+  if (
+    lowered.includes("ffprobe") ||
+    lowered.includes("failed to parse ffprobe output") ||
+    lowered.includes("no video stream found")
+  ) {
+    return new VideoSourceExtractionError(
+      "invalid_media",
+      false,
+      "Video source could not be inspected",
+      diagnostic,
+    );
+  }
+  return new VideoSourceExtractionError(
+    "internal",
+    false,
+    "Video extraction failed internally",
+    diagnostic,
+  );
+}
+
+export async function runVideoExtractionWithRetry<T>(
+  operation: () => Promise<T>,
+  options: {
+    signal?: AbortSignal;
+    onRetry?: () => Promise<void> | void;
+    maxTransientRetries?: number;
+  } = {},
+): Promise<{ result: T; retries: number }> {
+  const maxTransientRetries = boundedTransientRetryBudget(options.maxTransientRetries);
+  let retries = 0;
+  for (;;) {
+    if (options.signal?.aborted) {
+      throw new VideoSourceExtractionError("cancelled", false, "Video extraction cancelled");
+    }
+    try {
+      return { result: await operation(), retries };
+    } catch (error) {
+      const classified = classifyVideoExtractionError(error);
+      if (options.signal?.aborted) {
+        throw new VideoSourceExtractionError(
+          "cancelled",
+          false,
+          "Video extraction cancelled",
+          classified.diagnostic,
+        );
+      }
+      if (
+        classified.kind === "cancelled" ||
+        !classified.retryable ||
+        retries >= maxTransientRetries
+      ) {
+        throw classified;
+      }
+      retries += 1;
+      await options.onRetry?.();
+    }
+  }
 }
 
 export interface ExtractionResult {
   success: boolean;
   extracted: ExtractedFrames[];
-  errors: Array<{ videoId: string; error: string }>;
+  errors: VideoExtractionFailure[];
   totalFramesExtracted: number;
   durationMs: number;
   phaseBreakdown: ExtractionPhaseBreakdown;
@@ -270,7 +536,28 @@ export async function extractVideoFramesRange(
   const videoOutputDir = outputDirOverride ?? join(outputDir, videoId);
   if (!existsSync(videoOutputDir)) mkdirSync(videoOutputDir, { recursive: true });
 
-  const metadata = await extractMediaMetadata(videoPath);
+  let metadata: VideoMetadata;
+  try {
+    metadata = await extractMediaMetadata(videoPath);
+  } catch (error) {
+    throw classifyVideoExtractionError(error);
+  }
+  if (!(metadata.durationSeconds > 0)) {
+    throw new VideoSourceExtractionError(
+      "invalid_media",
+      false,
+      "Video source has no positive duration",
+      `Video source duration is ${metadata.durationSeconds}s`,
+    );
+  }
+  if (startTime >= metadata.durationSeconds) {
+    throw new VideoSourceExtractionError(
+      "media_start_out_of_range",
+      false,
+      "Video media start is outside the source duration",
+      `Video media start ${startTime}s is outside source duration ${metadata.durationSeconds}s`,
+    );
+  }
   const format = resolveFrameFormat(metadata, options.format);
   const framePattern = `${FRAME_FILENAME_PREFIX}%05d.${format}`;
   const outputPattern = join(videoOutputDir, framePattern);
@@ -328,13 +615,24 @@ export async function extractVideoFramesRange(
 
   const processResult = await runFfmpeg(args, { signal, timeout: ffmpegProcessTimeout });
   if (processResult.terminationReason === "abort") {
-    throw new Error("Video frame extraction cancelled");
+    throw new VideoSourceExtractionError("cancelled", false, "Video extraction cancelled");
   }
   if (processResult.terminationReason === "spawn_error") {
     if ((processResult.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-      throw new Error("[FFmpeg] ffmpeg not found");
+      throw new VideoSourceExtractionError(
+        "ffmpeg_unavailable",
+        false,
+        "FFmpeg is unavailable",
+        "[FFmpeg] ffmpeg not found",
+      );
     }
-    throw processResult.error ?? new Error(processResult.stderr);
+    const diagnostic = processResult.error?.message || processResult.stderr;
+    throw new VideoSourceExtractionError(
+      "ffmpeg_transient",
+      true,
+      "FFmpeg could not be started",
+      diagnostic,
+    );
   }
   if (!processResult.success) {
     // With the SDR-to-HDR remap folded into this pass, a filter failure
@@ -344,12 +642,30 @@ export async function extractVideoFramesRange(
     const hdrPrefix = options.sdrToHdrTransfer
       ? `SDR→HDR conversion failed (colorspace filter in extract pass, target ${options.sdrToHdrTransfer}): `
       : "";
-    const timeoutSuffix =
-      processResult.terminationReason === "deadline"
-        ? ` (timed out after ${ffmpegProcessTimeout} ms)`
-        : "";
-    throw new Error(
-      `${hdrPrefix}FFmpeg exited with code ${processResult.exitCode}${timeoutSuffix}: ${processResult.stderr.slice(-500)}`,
+    const timedOut = processResult.terminationReason === "deadline";
+    const timeoutSuffix = timedOut ? ` (timed out after ${ffmpegProcessTimeout} ms)` : "";
+    const diagnostic =
+      `${hdrPrefix}FFmpeg exited with code ${processResult.exitCode}${timeoutSuffix}: ` +
+      processResult.stderr.slice(-500);
+    if (timedOut) {
+      throw new VideoSourceExtractionError(
+        "ffmpeg_timeout",
+        true,
+        "Video frame extraction timed out",
+        diagnostic,
+      );
+    }
+    const transientIo =
+      /resource temporarily unavailable|device or resource busy|input\/output error/i.test(
+        processResult.stderr,
+      );
+    throw new VideoSourceExtractionError(
+      transientIo ? "ffmpeg_transient" : "ffmpeg_failed",
+      transientIo,
+      transientIo
+        ? "Video frame extraction hit a transient I/O failure"
+        : "Video source could not be decoded",
+      diagnostic,
     );
   }
 
@@ -360,6 +676,14 @@ export async function extractVideoFramesRange(
   files.forEach((file, index) => {
     framePaths.set(index, join(videoOutputDir, file));
   });
+  if (framePaths.size === 0 && duration > 0) {
+    throw new VideoSourceExtractionError(
+      "zero_output",
+      false,
+      "Video source produced no decodable frames",
+      `FFmpeg exited successfully but produced no frames (start=${startTime}, duration=${duration})`,
+    );
+  }
 
   return {
     videoId,
@@ -694,7 +1018,7 @@ export async function extractAllVideoFrames(
 ): Promise<ExtractionResult> {
   const startTime = Date.now();
   const extracted: ExtractedFrames[] = [];
-  const errors: Array<{ videoId: string; error: string }> = [];
+  const errors: VideoExtractionFailure[] = [];
   let totalFramesExtracted = 0;
   const breakdown: ExtractionPhaseBreakdown = {
     resolveMs: 0,
@@ -711,6 +1035,10 @@ export async function extractAllVideoFrames(
     extractMs: 0,
     cacheHits: 0,
     cacheMisses: 0,
+    transientRetries: 0,
+  };
+  const recordTransientRetries = (count: number): void => {
+    breakdown.transientRetries = (breakdown.transientRetries ?? 0) + count;
   };
 
   // Phase 1: Resolve paths and download remote videos
@@ -730,7 +1058,9 @@ export async function extractAllVideoFrames(
       if (isHttpUrl(videoPath)) {
         const downloadDir = join(options.outputDir, "_downloads");
         mkdirSync(downloadDir, { recursive: true });
-        videoPath = await downloadToTemp(videoPath, downloadDir, undefined, signal);
+        videoPath = await downloadToTemp(videoPath, downloadDir, undefined, signal, () =>
+          recordTransientRetries(1),
+        );
       }
 
       if (!existsSync(videoPath)) {
@@ -747,12 +1077,23 @@ export async function extractAllVideoFrames(
               `(e.g. src="assets/foo.mp4") over "../assets/foo.mp4".\n`,
           );
         }
-        errors.push({ videoId: video.id, error: `Video file not found: ${videoPath}` });
+        errors.push({
+          videoId: video.id,
+          kind: "source_missing",
+          retryable: false,
+          error: `Video file not found: ${videoPath}`,
+        });
         continue;
       }
       resolvedVideos.push({ video, videoPath });
     } catch (err) {
-      errors.push({ videoId: video.id, error: err instanceof Error ? err.message : String(err) });
+      const classified = classifyVideoExtractionError(err);
+      errors.push({
+        videoId: video.id,
+        kind: classified.kind,
+        retryable: classified.retryable,
+        error: classified.diagnostic,
+      });
     }
   }
 
@@ -782,9 +1123,46 @@ export async function extractAllVideoFrames(
 
   // Phase 2: Probe color spaces and normalize if mixed HDR/SDR
   const phase2ProbeStart = Date.now();
-  const videoMetadata = await Promise.all(
-    resolvedVideos.map(({ videoPath }) => extractMediaMetadata(videoPath)),
+  const metadataResults = await Promise.all(
+    resolvedVideos.map(async ({ video, videoPath }, index) => {
+      try {
+        // Keep the default/off path byte-for-byte compatible with the legacy
+        // Promise.all rejection. Classification is introduced only when a
+        // bounded retry or explicit typed aggregation is enabled.
+        const attempted =
+          !options.collectProbeFailures &&
+          boundedTransientRetryBudget(options.maxTransientRetries) === 0
+            ? { result: await extractMediaMetadata(videoPath), retries: 0 }
+            : await runVideoExtractionWithRetry(() => extractMediaMetadata(videoPath), {
+                signal,
+                maxTransientRetries: options.maxTransientRetries,
+                onRetry: () => recordTransientRetries(1),
+              });
+        return {
+          video,
+          videoPath,
+          metadata: attempted.result,
+          cacheKeyInput: cacheKeyInputs[index] ?? null,
+        };
+      } catch (error) {
+        if (!options.collectProbeFailures) throw error;
+        errors.push(extractionError(video.id, error));
+        return null;
+      }
+    }),
   );
+  const probedVideos = metadataResults.filter((entry) => entry !== null);
+  resolvedVideos.splice(
+    0,
+    resolvedVideos.length,
+    ...probedVideos.map(({ video, videoPath }) => ({ video, videoPath })),
+  );
+  cacheKeyInputs.splice(
+    0,
+    cacheKeyInputs.length,
+    ...probedVideos.map(({ cacheKeyInput }) => cacheKeyInput),
+  );
+  const videoMetadata = probedVideos.map(({ metadata }) => metadata);
   const videoColorSpaces = videoMetadata.map((m) => m.colorSpace);
   // Canonical per-index record of the SDR-to-HDR transform decision. BOTH the
   // cache key (transform discriminator) and the extraction options read from
@@ -829,6 +1207,8 @@ export async function extractAllVideoFrames(
         if (entry.video.mediaStart >= metadata.durationSeconds) {
           errors.push({
             videoId: entry.video.id,
+            kind: "media_start_out_of_range",
+            retryable: false,
             error: `SDR→HDR conversion skipped: mediaStart (${entry.video.mediaStart}s) ≥ source duration (${metadata.durationSeconds}s)`,
           });
           hdrSkippedIndices.add(i);
@@ -865,12 +1245,10 @@ export async function extractAllVideoFrames(
   const vfrPreflightStart = Date.now();
   for (let i = 0; i < resolvedVideos.length; i++) {
     if (signal?.aborted) break;
-    const entry = resolvedVideos[i];
-    if (!entry) continue;
     const vfrProbeStart = Date.now();
-    const metadata = await extractMediaMetadata(entry.videoPath);
+    const metadata = videoMetadata[i];
     breakdown.vfrProbeMs += Date.now() - vfrProbeStart;
-    if (metadata.isVFR) breakdown.vfrPreflightCount += 1;
+    if (metadata?.isVFR) breakdown.vfrPreflightCount += 1;
   }
   breakdown.vfrPreflightMs = Date.now() - vfrPreflightStart;
 
@@ -888,17 +1266,19 @@ export async function extractAllVideoFrames(
     }
   }
 
-  function extractionError(videoId: string, err: unknown): { videoId: string; error: string } {
-    return { videoId, error: err instanceof Error ? err.message : String(err) };
+  function extractionError(videoId: string, err: unknown): VideoExtractionFailure {
+    const classified = classifyVideoExtractionError(err);
+    return {
+      videoId,
+      kind: classified.kind,
+      retryable: classified.retryable,
+      error: classified.diagnostic,
+    };
   }
 
-  type PreparedExtractionResult =
-    | { work: PreparedExtraction }
-    | { error: { videoId: string; error: string } };
+  type PreparedExtractionResult = { work: PreparedExtraction } | { error: VideoExtractionFailure };
 
-  type ExtractionOutcome =
-    | { result: ExtractedFrames }
-    | { error: { videoId: string; error: string } };
+  type ExtractionOutcome = { result: ExtractedFrames } | { error: VideoExtractionFailure };
 
   function scopedExtractionOptions(work: PreparedExtraction): ExtractionOptions {
     return { ...options, format: work.format, sdrToHdrTransfer: work.sdrToHdrTransfer };
@@ -951,32 +1331,62 @@ export async function extractAllVideoFrames(
     };
   }
 
-  async function extractDirectMiss(miss: UniqueExtractionMiss): Promise<ExtractedFrames> {
+  async function extractDirectMiss(
+    miss: UniqueExtractionMiss,
+    maxTransientRetries = options.maxTransientRetries ?? 0,
+  ): Promise<ExtractedFrames> {
     const { work, cacheTarget } = miss;
     if (!cacheTarget) {
-      return extractVideoFramesRange(
-        work.videoPath,
-        work.video.id,
-        work.video.mediaStart,
-        work.videoDuration,
-        scopedExtractionOptions(work),
-        signal,
-        config,
+      const outputDir = join(options.outputDir, work.video.id);
+      const attempted = await runVideoExtractionWithRetry(
+        () =>
+          extractVideoFramesRange(
+            work.videoPath,
+            work.video.id,
+            work.video.mediaStart,
+            work.videoDuration,
+            scopedExtractionOptions(work),
+            signal,
+            config,
+          ),
+        {
+          signal,
+          maxTransientRetries,
+          onRetry: () => {
+            recordTransientRetries(1);
+            rmSync(outputDir, { recursive: true, force: true });
+          },
+        },
       );
+      return attempted.result;
     }
 
     const partialDir = partialCacheEntryDir(cacheTarget.entry);
+    rmSync(partialDir, { recursive: true, force: true });
     mkdirSync(partialDir, { recursive: true });
-    const result = await extractVideoFramesRange(
-      work.videoPath,
-      work.video.id,
-      work.video.mediaStart,
-      work.videoDuration,
-      scopedExtractionOptions(work),
-      signal,
-      config,
-      partialDir,
+    const attempted = await runVideoExtractionWithRetry(
+      () =>
+        extractVideoFramesRange(
+          work.videoPath,
+          work.video.id,
+          work.video.mediaStart,
+          work.videoDuration,
+          scopedExtractionOptions(work),
+          signal,
+          config,
+          partialDir,
+        ),
+      {
+        signal,
+        maxTransientRetries,
+        onRetry: () => {
+          recordTransientRetries(1);
+          rmSync(partialDir, { recursive: true, force: true });
+          mkdirSync(partialDir, { recursive: true });
+        },
+      },
     );
+    const result = attempted.result;
     const published = publishCacheEntry(cacheTarget.entry, partialDir);
     if (!published.published) {
       breakdown.cachePublishFailures += 1;
@@ -985,9 +1395,12 @@ export async function extractAllVideoFrames(
     return rehydratePublishedCache(work, cacheTarget);
   }
 
-  async function executeDirectMiss(miss: UniqueExtractionMiss): Promise<ExtractionOutcome> {
+  async function executeDirectMiss(
+    miss: UniqueExtractionMiss,
+    maxTransientRetries = options.maxTransientRetries ?? 0,
+  ): Promise<ExtractionOutcome> {
     try {
-      return { result: await extractDirectMiss(miss) };
+      return { result: await extractDirectMiss(miss, maxTransientRetries) };
     } catch (err) {
       return { error: extractionError(miss.work.video.id, err) };
     }
@@ -1036,6 +1449,10 @@ export async function extractAllVideoFrames(
 
     try {
       rmSync(tempDir, { recursive: true, force: true });
+      // A long union can hit the fixed FFmpeg deadline even when each shorter
+      // member range succeeds. Do not retry the optimization itself; preserve
+      // the established grouped→direct fallback and apply bounded retries only
+      // to the individual source ranges below.
       const superset = await extractVideoFramesRange(
         first.videoPath,
         group.groupId,
@@ -1164,7 +1581,14 @@ export async function extractAllVideoFrames(
       const message = isFollower
         ? `[shared extraction, leader ${outcome.error.videoId}] ${outcome.error.error}`
         : outcome.error.error;
-      return { error: { videoId: prepared.work.video.id, error: message } };
+      return {
+        error: {
+          videoId: prepared.work.video.id,
+          kind: outcome.error.kind,
+          retryable: outcome.error.retryable,
+          error: message,
+        },
+      };
     }
     return { result: { ...outcome.result, videoId: prepared.work.video.id } };
   });
