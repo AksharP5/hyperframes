@@ -167,6 +167,37 @@ describe("TimelineTrackHeader", () => {
     act(() => view.root.unmount());
   });
 
+  // The lane header sits inside the track row, whose own click handler selects
+  // the track. Every control in the label column has to own its click, or
+  // seeking to a keyframe also reselects whatever is behind the header.
+  it("keeps lane-header control clicks off the ancestor track row", () => {
+    const onAncestorClick = vi.fn();
+    const view = renderHeader({
+      currentTime: 1,
+      onSeek: vi.fn(),
+      onTogglePropertyGroupKeyframe: vi.fn(),
+    });
+    // React 18 delegates from the root container, so an ancestor of it is where
+    // a leaked click actually shows up.
+    document.body.addEventListener("click", onAncestorClick);
+
+    // Every control in the lane's label column, found by row rather than by
+    // label, so a wording change to one button can't silently drop it here.
+    const controls = view.host.querySelectorAll<HTMLButtonElement>(
+      '[data-property-group="position"] button',
+    );
+    expect(controls.length).toBeGreaterThanOrEqual(3);
+    for (const button of controls) {
+      act(() => {
+        button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    }
+
+    document.body.removeEventListener("click", onAncestorClick);
+    expect(onAncestorClick).not.toHaveBeenCalled();
+    act(() => view.root.unmount());
+  });
+
   it("fills the toggle diamond exactly at that group's keyframe", () => {
     const view = renderHeader({ currentTime: 0.5 });
     const positionToggle = view.host.querySelector<HTMLButtonElement>(

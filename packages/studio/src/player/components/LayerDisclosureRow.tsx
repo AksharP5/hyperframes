@@ -50,7 +50,9 @@ export function LayerDisclosureRow({
       >
         ◇
       </span>
-      <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+      <span className="min-w-0 flex-1 truncate font-medium" title={name}>
+        {name}
+      </span>
     </div>
   );
 }

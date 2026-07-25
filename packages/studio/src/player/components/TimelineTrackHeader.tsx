@@ -197,7 +197,11 @@ function LegacyTrackHeader({
       {isAudioTrack && (
         <Music size={12} weight="fill" aria-hidden="true" className="text-white/35" />
       )}
-      {showTrackLabel && <span className="min-w-0 flex-1 truncate text-[11px]">{trackLabel}</span>}
+      {showTrackLabel && (
+        <span className="min-w-0 flex-1 truncate text-[11px]" title={trackLabel}>
+          {trackLabel}
+        </span>
+      )}
       <VisibilityButton
         hidden={isTrackHidden}
         trackNumber={trackNumber}
@@ -343,7 +347,10 @@ function PropertyGroupNavigation({
         aria-label={`Previous ${label} keyframe`}
         disabled={!navigation.prevKeyframe}
         className="h-5 w-3 border-0 bg-transparent p-0 text-white/55 hover:text-white disabled:text-white/15"
-        onClick={() => seekTo(navigation.prevKeyframe)}
+        onClick={(event) => {
+          event.stopPropagation();
+          seekTo(navigation.prevKeyframe);
+        }}
       >
         ‹
       </button>
@@ -353,7 +360,10 @@ function PropertyGroupNavigation({
         aria-label={`Next ${label} keyframe`}
         disabled={!navigation.nextKeyframe}
         className="h-5 w-3 border-0 bg-transparent p-0 text-white/55 hover:text-white disabled:text-white/15"
-        onClick={() => seekTo(navigation.nextKeyframe)}
+        onClick={(event) => {
+          event.stopPropagation();
+          seekTo(navigation.nextKeyframe);
+        }}
       >
         ›
       </button>
@@ -427,7 +437,9 @@ function PropertyGroupHeaderRow({
         />
         <span className="absolute left-1.5 top-1/2 h-px w-1.5 bg-white/15" />
       </span>
-      <span className="w-[46px] shrink-0 truncate text-white">{label}</span>
+      <span className="w-[46px] shrink-0 truncate text-white" title={label}>
+        {label}
+      </span>
       <PropertyGroupNavigation
         navigation={navigation}
         label={label}
@@ -439,7 +451,10 @@ function PropertyGroupHeaderRow({
           aria-label={`Toggle ${label} keyframe`}
           title={`${navigation.currentKeyframe ? "Remove" : "Add"} ${label} keyframe`}
           className="flex h-5 w-4 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-[11px] text-[#3CE6AC] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#3CE6AC]"
-          onClick={() => {
+          onClick={(event) => {
+            // Same as the disclosure caret and the eye: a control in the label
+            // column owns its click, it does not also hit the track row behind it.
+            event.stopPropagation();
             if (expandedElement && toggleTarget) {
               void onTogglePropertyGroupKeyframe?.(expandedElement, toggleTarget);
             }
@@ -448,7 +463,10 @@ function PropertyGroupHeaderRow({
           {navigation.currentKeyframe ? "◆" : "◇"}
         </button>
       </PropertyGroupNavigation>
-      <span className="min-w-0 flex-1 truncate text-right tabular-nums text-white/45">
+      <span
+        className="min-w-0 flex-1 truncate text-right tabular-nums text-white/45"
+        title={valueReadout(lane.group, values)}
+      >
         {valueReadout(lane.group, values)}
       </span>
       <VisibilityButton
