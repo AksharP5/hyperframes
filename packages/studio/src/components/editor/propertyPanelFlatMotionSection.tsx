@@ -9,6 +9,7 @@ import { AnimationCard } from "./AnimationCard";
 import {
   type GsapAnimationEditCallbacks,
   withTrackedGsapAnimationCallbacks,
+  clearFocusedEaseSegment,
 } from "./gsapAnimationCallbacks";
 import { deriveElementTiming } from "./propertyPanelFlatTimingDerivation";
 import { usePlayerStore } from "../../player";
@@ -138,7 +139,6 @@ export function FlatMotionSection({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const trackedCallbacks = withTrackedGsapAnimationCallbacks(callbacks, track);
   const focusedEaseSegment = usePlayerStore((s) => s.focusedEaseSegment);
-  const setFocusedEaseSegment = usePlayerStore((s) => s.setFocusedEaseSegment);
   // Only consume a focus request aimed at the element THIS panel renders (not
   // the store's selectedElementId, which flips synchronously during async
   // selection resolution), so a shared class-selector animation id can't open
@@ -182,7 +182,7 @@ export function FlatMotionSection({
                   defaultExpanded={index === 0}
                   flat
                   focusedSegment={focusedHere?.animationId === anim.id ? focusedHere : null}
-                  onFocusSegmentConsumed={() => setFocusedEaseSegment(null)}
+                  onFocusSegmentConsumed={clearFocusedEaseSegment}
                 />
               ))}
               <GsapAddAnimationControl

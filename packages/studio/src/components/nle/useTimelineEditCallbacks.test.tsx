@@ -244,6 +244,59 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     view.unmount();
   });
 
+  // The diamond context menu opens on whatever diamond was clicked, which need
+  // not belong to the selected element, and it passes no explicit target — so
+  // the resolve falls back to the cache. Reading the SELECTED element's cache
+  // there resolves against the wrong element's keyframes.
+  it("resolves a cache fallback against the clicked element, not the selected one", () => {
+    const circle: TimelineElement = {
+      ...element,
+      id: "circle",
+      key: "scenes/main.html#circle",
+      domId: "circle",
+    };
+    usePlayerStore.setState({
+      elements: [element, circle],
+      gsapAnimations: new Map([["scenes/main.html#circle", [otherKeyframedAnimation]]]),
+      keyframeCache: new Map([
+        // Decoy at the same clip-% under the selected element's key.
+        [
+          "box",
+          {
+            format: "percentage",
+            keyframes: [{ percentage: 100, tweenPercentage: 100, properties: { x: 420 } }],
+          },
+        ],
+        [
+          "scenes/main.html#circle",
+          {
+            format: "percentage",
+            keyframes: [
+              {
+                percentage: 100,
+                tweenPercentage: 100,
+                propertyGroup: "position",
+                animationId: otherKeyframedAnimation.id,
+                properties: { x: 420 },
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+    const view = renderCallbacks();
+
+    act(() => {
+      view.callbacks.onMoveKeyframeToPlayhead?.("scenes/main.html#circle", 100);
+    });
+
+    expect(mocks.actions.handleGsapMoveKeyframeToPlayhead).toHaveBeenCalledWith(
+      otherKeyframedAnimation.id,
+      100,
+    );
+    view.unmount();
+  });
+
   it("keeps selected-element flat boundary deletion on the animation delete path", () => {
     const view = renderCallbacks();
 

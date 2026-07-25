@@ -143,12 +143,18 @@ export function useTimelineEditCallbacks({
       tweenPercentage?: number,
       animationId?: string,
       animations: GsapAnimation[] = selectedGsapAnimations,
+      elementKey?: string,
     ): { animId: string; tweenPct: number } | null => {
       const explicitTarget =
         propertyGroup !== undefined || tweenPercentage !== undefined || animationId !== undefined
           ? [{ percentage: pct, propertyGroup, tweenPercentage, animationId }]
           : undefined;
-      const cached = usePlayerStore.getState().keyframeCache.get(domEditSelection?.id ?? "");
+      // The clicked element's own cache when the caller knows it: the diamond
+      // context menu can open on an element that is not the selected one, and
+      // reading the selection's cache there resolves against the wrong element.
+      const cached = usePlayerStore
+        .getState()
+        .keyframeCache.get(elementKey ?? domEditSelection?.id ?? "");
       return resolveTimelineKeyframeTarget(
         pct,
         explicitTarget ?? cached?.keyframes ?? [],
@@ -198,7 +204,7 @@ export function useTimelineEditCallbacks({
       },
       onDeleteKeyframe: (elId, pct, group, tweenPct, animationId) => {
         const animations = resolveElementAnimations(elId);
-        const target = resolveKeyframeTarget(pct, group, tweenPct, animationId, animations);
+        const target = resolveKeyframeTarget(pct, group, tweenPct, animationId, animations, elId);
         if (!target) return;
         const element = usePlayerStore.getState().elements.find((el) => (el.key ?? el.id) === elId);
         if (!element) {
@@ -213,8 +219,15 @@ export function useTimelineEditCallbacks({
         });
       },
       // Retime the keyframe to the playhead, preserving its value + ease.
-      onMoveKeyframeToPlayhead: (_elId, pct, group, tweenPct, animationId) => {
-        const target = resolveKeyframeTarget(pct, group, tweenPct, animationId);
+      onMoveKeyframeToPlayhead: (elId, pct, group, tweenPct, animationId) => {
+        const target = resolveKeyframeTarget(
+          pct,
+          group,
+          tweenPct,
+          animationId,
+          resolveElementAnimations(elId),
+          elId,
+        );
         if (target) handleGsapMoveKeyframeToPlayhead(target.animId, target.tweenPct);
       },
       // Drag-to-retime. The diamond reports clip-%s; resolveKeyframeTarget gives

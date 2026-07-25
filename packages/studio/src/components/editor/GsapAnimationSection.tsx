@@ -6,6 +6,7 @@ import { AnimationCard } from "./AnimationCard";
 import {
   type GsapAnimationEditCallbacks,
   withTrackedGsapAnimationCallbacks,
+  clearFocusedEaseSegment,
 } from "./gsapAnimationCallbacks";
 import { useTrackDesignInput } from "../../contexts/DesignPanelInputContext";
 import { usePlayerStore } from "../../player";
@@ -29,7 +30,6 @@ export const GsapAnimationSection = memo(function GsapAnimationSection({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const trackedCallbacks = withTrackedGsapAnimationCallbacks(callbacks, track);
   const focusedEaseSegment = usePlayerStore((s) => s.focusedEaseSegment);
-  const setFocusedEaseSegment = usePlayerStore((s) => s.setFocusedEaseSegment);
 
   return (
     <Section title="Animation" icon={<Film size={15} />}>
@@ -57,7 +57,7 @@ export const GsapAnimationSection = memo(function GsapAnimationSection({
               focusedSegment={
                 focusedEaseSegment?.animationId === anim.id ? focusedEaseSegment : null
               }
-              onFocusSegmentConsumed={() => setFocusedEaseSegment(null)}
+              onFocusSegmentConsumed={clearFocusedEaseSegment}
             />
           ))}
 

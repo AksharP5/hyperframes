@@ -249,18 +249,22 @@ export function PropertyPanelFlat({
   // force the Motion group open so its AnimationCard (which only mounts while
   // the group is expanded) can consume the focus and reveal the ease editor.
   const focusedEaseSegment = usePlayerStore((s) => s.focusedEaseSegment);
-  // Identity of the element THIS panel actually renders (not the store's
-  // selectedElementId, which flips synchronously on selection while the panel
-  // still renders the previous element during async DOM-selection resolution):
-  // a stale panel would otherwise consume a focus request meant for its
-  // successor when both share a class-selector animation id.
+  // The element THIS panel renders, not the store's selectedElementId: that
+  // flips synchronously while the panel still renders its predecessor, so a
+  // stale panel would consume a request meant for its successor whenever the
+  // two share a class-selector animation id.
   const renderedElementId = `${element.sourceFile}#${element.id}`;
-  useEffect(() => {
-    if (!focusedEaseSegment || focusedEaseSegment.elementId !== renderedElementId) return;
-    if (gsapAnimations.some((a) => a.id === focusedEaseSegment.animationId)) {
-      setOpenGroupId("motion");
-    }
-  }, [focusedEaseSegment, gsapAnimations, renderedElementId]);
+  // Adjusted during render (not an effect) so the card mounts on the same
+  // commit the request lands on. Keyed on request identity: a group the user
+  // closes afterwards stays closed.
+  const [consumedFocus, setConsumedFocus] = useState(focusedEaseSegment);
+  if (focusedEaseSegment !== consumedFocus) {
+    setConsumedFocus(focusedEaseSegment);
+    const focusesThisPanel =
+      focusedEaseSegment?.elementId === renderedElementId &&
+      gsapAnimations.some((a) => a.id === focusedEaseSegment.animationId);
+    if (focusesThisPanel) setOpenGroupId("motion");
+  }
 
   const [justToggledIds, setJustToggledIds] = useState<string[]>([]);
   const justToggledTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
