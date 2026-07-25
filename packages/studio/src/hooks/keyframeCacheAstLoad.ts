@@ -137,10 +137,10 @@ export async function populateKeyframeCacheFromAst(
     // group / descendant selectors, not just `#id`).
     for (const id of resolveSelectorElementIds(anim.targetSelector, doc)) {
       // kfData is already resolved (real keyframes OR a synthesized flat
-      // tween), so a grouped flat tween joins the store like a keyframed one.
-      if (anim.propertyGroup) {
-        sourceByElement.set(id, [...(sourceByElement.get(id) ?? []), anim]);
-      }
+      // tween), so a flat tween joins the store like a keyframed one. No
+      // property-group filter: this map must cover every tween the cache
+      // below records, or expanded lanes have nothing to render.
+      sourceByElement.set(id, [...(sourceByElement.get(id) ?? []), anim]);
       const { elStart, elDuration } = resolveClipTimingBasis(id, sf, elements, domClipChildren);
       const clipKeyframes = kfData.keyframes.map((kf) => {
         const absTime = toAbsoluteTime(tweenPos, tweenDur, kf.percentage);
