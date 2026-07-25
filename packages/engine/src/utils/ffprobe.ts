@@ -1,15 +1,54 @@
 // fallow-ignore-file code-duplication complexity
 import { spawn } from "child_process";
 import { readFileSync } from "fs";
-import { extname } from "path";
+import { basename, extname } from "path";
+import { redactTelemetryString } from "@hyperframes/core";
 import { FFPROBE_PATH_ENV, getFfprobeBinary } from "./ffmpegBinaries.js";
 import { ManagedChildProcess } from "./managedChildProcess.js";
 import { trackChildProcess } from "./processTracker.js";
 
+const FFPROBE_STDERR_MAX_BYTES = 8 * 1024;
+const FFPROBE_ERROR_MAX_CHARS = 4 * 1024;
+
+function redactFfprobeInput(stderr: string, filePath: string): string {
+  if (!filePath) return stderr;
+
+  let redacted = stderr.split(filePath).join("[input]");
+  const inputBasename = basename(filePath);
+  if (inputBasename) redacted = redacted.split(inputBasename).join("[input]");
+
+  // ManagedChildProcess retains an 8 KiB byte tail. When that boundary lands
+  // inside the input path, stderr starts with only a suffix of the path, so
+  // neither exact-path nor generic absolute-path redaction can recognize it.
+  if (!redacted.startsWith("[input]")) {
+    for (let offset = 1; offset < filePath.length; offset += 1) {
+      const suffix = filePath.slice(offset);
+      if (suffix.length < 4 || !redacted.startsWith(suffix)) continue;
+      const boundary = redacted[suffix.length];
+      if (boundary !== undefined && !/[\s:'")\]}]/.test(boundary)) continue;
+      redacted = `[input]${redacted.slice(suffix.length)}`;
+      break;
+    }
+  }
+
+  return redacted;
+}
+
+function sanitizeFfprobeDiagnostic(stderr: string, filePath: string): string {
+  const stderrWithoutInput = redactFfprobeInput(stderr, filePath);
+  const redacted = redactTelemetryString(stderrWithoutInput, FFPROBE_STDERR_MAX_BYTES);
+  if (redacted.length <= FFPROBE_ERROR_MAX_CHARS) return redacted;
+  return `…${redacted.slice(-(FFPROBE_ERROR_MAX_CHARS - 1))}`;
+}
+
 /** Spawn ffprobe with given args, return stdout. Throws on non-zero exit or missing binary. */
-async function runFfprobe(args: string[], signal?: AbortSignal): Promise<string> {
+async function runFfprobe(
+  filePath: string,
+  argsWithoutInput: string[],
+  signal?: AbortSignal,
+): Promise<string> {
   const command = getFfprobeBinary();
-  const proc = spawn(command, args);
+  const proc = spawn(command, ["-v", "error", ...argsWithoutInput, filePath]);
   trackChildProcess(proc);
   let stdout = "";
   proc.stdout.on("data", (data) => {
@@ -18,6 +57,7 @@ async function runFfprobe(args: string[], signal?: AbortSignal): Promise<string>
   const managed = new ManagedChildProcess(proc, {
     signal,
     deadlineAtMs: Date.now() + 30_000,
+    stderrMaxBytes: FFPROBE_STDERR_MAX_BYTES,
   });
   const outcome = await managed.wait();
   if (outcome.reason === "spawn_error") {
@@ -32,8 +72,9 @@ async function runFfprobe(args: string[], signal?: AbortSignal): Promise<string>
     throw outcome.error ?? new Error(outcome.stderr);
   }
   if (outcome.reason !== "exit" || outcome.exitCode !== 0) {
+    const diagnostic = sanitizeFfprobeDiagnostic(outcome.stderr, filePath);
     throw new Error(
-      `[FFmpeg] ffprobe ${outcome.reason} with code ${outcome.exitCode}: ${outcome.stderr}`,
+      `[FFmpeg] ffprobe ${outcome.reason} with code ${outcome.exitCode}: ${diagnostic}`,
     );
   }
   return stdout;
@@ -263,14 +304,11 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
 
     let output: FFProbeOutput | null = null;
     try {
-      const stdout = await runFfprobe([
-        "-v",
-        "quiet",
+      const stdout = await runFfprobe(filePath, [
         "-print_format",
         "json",
         "-show_format",
         "-show_streams",
-        filePath,
       ]);
       output = parseProbeJson(stdout);
     } catch (error) {
@@ -361,7 +399,8 @@ export async function extractAudioMetadata(
 
   const probePromise = (async (): Promise<AudioMetadata> => {
     const stdout = await runFfprobe(
-      ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", filePath],
+      filePath,
+      ["-print_format", "json", "-show_format", "-show_streams"],
       options?.signal,
     );
     const output = parseProbeJson(stdout);
@@ -373,9 +412,7 @@ export async function extractAudioMetadata(
     const sampleRate = audioStream.sample_rate ? parseInt(audioStream.sample_rate) : 44100;
     const audioCodec = audioStream.codec_name || "unknown";
     if (audioCodec === "aac" && sampleRate > 0) {
-      const packetStdout = await runFfprobe([
-        "-v",
-        "quiet",
+      const packetStdout = await runFfprobe(filePath, [
         "-select_streams",
         "a:0",
         "-count_packets",
@@ -383,7 +420,6 @@ export async function extractAudioMetadata(
         "stream=nb_read_packets",
         "-print_format",
         "json",
-        filePath,
       ]);
       const packetOutput = parseProbeJson(packetStdout);
       const packetCount = Number(packetOutput.streams[0]?.nb_read_packets);
@@ -441,9 +477,7 @@ export async function analyzeKeyframeIntervals(filePath: string): Promise<Keyfra
 }
 
 async function analyzeKeyframeIntervalsUncached(filePath: string): Promise<KeyframeAnalysis> {
-  const stdout = await runFfprobe([
-    "-v",
-    "quiet",
+  const stdout = await runFfprobe(filePath, [
     "-select_streams",
     "v:0",
     "-skip_frame",
@@ -452,7 +486,6 @@ async function analyzeKeyframeIntervalsUncached(filePath: string): Promise<Keyfr
     "frame=pts_time",
     "-of",
     "csv=p=0",
-    filePath,
   ]);
 
   const timestamps = stdout
