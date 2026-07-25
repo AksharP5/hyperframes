@@ -324,10 +324,13 @@ export function useTimelineEditCallbacks({
         const selection = await buildDomSelectionForTimelineElement(element);
         if (!selection) return;
         if (target.remove) {
+          // The clicked element's animations, not the selected element's: this
+          // lookup decides delete-the-flat-tween vs remove-one-keyframe, and a
+          // miss silently takes the keyframe branch, stranding the flat tween.
           removeKeyframeTarget(
             target.animationId,
             target.tweenPercentage,
-            selectedGsapAnimations,
+            resolveElementAnimations(element.key ?? element.id),
             selection,
           );
           return;

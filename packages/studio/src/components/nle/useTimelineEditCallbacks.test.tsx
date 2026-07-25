@@ -330,6 +330,41 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     view.unmount();
   });
 
+  // The lane-header toggle fires on whichever element owns the lane, which need
+  // not be the selected one. Looking the flat tween up in the selected element's
+  // animations misses, and the miss silently takes the remove-one-keyframe
+  // branch, which strands the flat tween instead of deleting it.
+  it("removes a non-selected element's flat tween through that element's own animations", async () => {
+    const circle: TimelineElement = {
+      ...element,
+      id: "circle",
+      key: "scenes/main.html#circle",
+      domId: "circle",
+    };
+    usePlayerStore.setState({
+      elements: [element, circle],
+      gsapAnimations: new Map([["scenes/main.html#circle", [otherFlatAnimation]]]),
+    });
+    const view = renderCallbacks();
+
+    await act(async () => {
+      await view.callbacks.onTogglePropertyGroupKeyframe?.(circle, {
+        animationId: otherFlatAnimation.id,
+        propertyGroup: "position",
+        tweenPercentage: 0,
+        properties: { x: 0 },
+        remove: true,
+      });
+    });
+
+    expect(mocks.actions.handleGsapDeleteAnimation).toHaveBeenCalledWith(
+      otherFlatAnimation.id,
+      mocks.selection,
+    );
+    expect(mocks.actions.handleGsapRemoveKeyframe).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it("keeps authored interior deletion on the per-keyframe path", () => {
     mocks.animations = [authoredInteriorAnimation()];
     usePlayerStore.setState({ gsapAnimations: new Map([["box", mocks.animations]]) });
