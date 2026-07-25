@@ -30,8 +30,7 @@ function frame(
   return { time, connectors: [connector], nodes };
 }
 
-/** A dangling connector: end A stays on the hub, end B sits ~180px from every
- * node across all held frames — the half-attached signature (fuzz011). */
+/** A dangling connector: end A stays on the hub, end B sits ~180px from every node across held frames — the half-attached signature (fuzz011). */
 function danglingFrames(): ConnectorFrame[] {
   return [0, 2, 4, 6, 8].map((time) =>
     frame(time, { selector: "#spoke", ax: 500, ay: 500, bx: 640, by: 500 }, [HUB, SATELLITE]),
@@ -88,10 +87,7 @@ describe("detectConnectorMotionDetached", () => {
   });
 
   it("flags a loose end that only touches a node in ONE held frame then detaches the rest", () => {
-    // End A stays pinned to the hub; end B lands on the satellite for a single
-    // held frame (t=4) then dangles ~120px away for the rest of the held window.
-    // A lone graze is NOT sustained attachment, so B must read as dangling and
-    // the connector must be flagged — not cleared by the single touch.
+    // A lone graze (B touches the satellite once at t=4, dangles the rest) is not sustained attachment, so B must still read as dangling and the connector be flagged.
     const held: ConnectorFrame[] = [0, 2, 4, 5, 6, 7, 8].map((time) => {
       const bx = time === 4 ? 820 : 640; // on satellite once, dangling otherwise
       return frame(time, { selector: "#spoke", ax: 500, ay: 500, bx, by: 500 }, [HUB, SATELLITE]);
@@ -102,9 +98,7 @@ describe("detectConnectorMotionDetached", () => {
   });
 
   it("keeps an endpoint anchored when it stays within tolerance across the held window", () => {
-    // The mirror case: B sits on the satellite for every held frame but one — a
-    // single-frame graze OFF a node does not turn a sustained anchor into a
-    // dangle, so nothing fires.
+    // Mirror case: a single-frame graze OFF a node doesn't turn a sustained anchor into a dangle, so nothing fires.
     const held: ConnectorFrame[] = [0, 2, 4, 5, 6, 7, 8].map((time) => {
       const bx = time === 6 ? 640 : 820; // off-node once, on the satellite otherwise
       return frame(time, { selector: "#spoke", ax: 500, ay: 500, bx, by: 500 }, [HUB, SATELLITE]);
@@ -131,8 +125,7 @@ describe("detectConnectorMotionDetached", () => {
   });
 
   it("does not fire on a gauge needle: anchored at the arc centre, loose end radially outward", () => {
-    // Arc ring centred at 900,500; needle base on the hub near centre, tip out
-    // past the arc — a pointer, not a broken connector.
+    // Arc ring at 900,500 with the needle base near centre and tip past the arc — a pointer, not a broken connector.
     const hub: ConnectorNodeBox = {
       selector: "#hub",
       left: 890,
@@ -156,8 +149,7 @@ describe("detectConnectorMotionDetached", () => {
   });
 
   it("still fires on a radial connector drifting toward the centre (not outward)", () => {
-    // Anchored on a peripheral node; loose end drifts inward to empty space near
-    // a ring centre — the fuzz011 shape, opposite of a gauge pointer.
+    // Anchored on a peripheral node with the loose end drifting inward to empty space near a ring centre — the fuzz011 shape, opposite of a gauge pointer.
     const peripheral: ConnectorNodeBox = {
       selector: "#panel",
       left: 120,

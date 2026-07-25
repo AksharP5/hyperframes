@@ -1233,10 +1233,7 @@
       const mapped = point.matrixTransform(matrix);
       return { x: mapped.x, y: mapped.y };
     };
-    // getPointAtLength can still throw on a degenerate/malformed path even after
-    // getTotalLength succeeded. This sampler runs once PER seeked frame, so one
-    // bad path must degrade to "no endpoints" (skip this path), not abort the
-    // whole check for every remaining path and frame.
+    // getPointAtLength can throw on a degenerate path even after getTotalLength; skip that path instead of aborting the whole per-frame check.
     try {
       return {
         start: toScreen(path.getPointAtLength(0)),
@@ -1743,34 +1740,20 @@
     return samples;
   };
 
-  // connector_motion_detached sampling. Per seeked frame, report every diagram
-  // connector's two screen-space endpoints AND every plausible node/box bbox.
-  // Node accumulates these across the grid and flags an endpoint that stays
-  // anchored to a node while the other endpoint sits in empty space on the held
-  // frames — a connector whose coordinates were frozen (wrong rotation pivot, or
-  // measured once at build) while its target kept moving. Icon-sized SVGs and
-  // short strokes are filtered out so only real diagram connectors count.
+  // connector_motion_detached sampling: per frame, report each connector's screen endpoints and every node bbox; icon-sized SVGs and short strokes are filtered out.
   const CONNECTOR_MIN_SVG_PX = 100;
   const CONNECTOR_MIN_LEN_PX = 60;
-  // Gauge needles/pointers/ticks are one-end-anchored indicators, not node-to-node
-  // connectors — a separate (gauge) check owns them. Skip by id/class of the line
-  // or any group ancestor up to the SVG.
+  // Gauge needles/pointers/ticks are one-end-anchored indicators owned by a separate check; skip by id/class of the line or any group ancestor.
   const CONNECTOR_INDICATOR_NAME = /needle|pointer|gauge|tick|indicator/i;
   const CONNECTOR_NODE_MIN_AREA = 400;
   // SVG dots/markers are small; keep the floor low but above sub-pixel decoration.
   const CONNECTOR_NODE_MIN_DOT_AREA = 16;
   const CONNECTOR_NODE_CAP = 300;
-  // A stroke-drawn dial/hub ring may be an <path> arc (M...A...), not a <circle>.
-  // Recognize near-circular stroke paths as ring nodes so connectors attaching
-  // to them aren't false-flagged as detached, and so the gauge-indicator geometry
-  // exclusion (which keys on ring nodes) can see arc-drawn dials too.
+  // Recognize near-circular stroke <path> arcs as ring nodes so connectors attaching to them aren't false-flagged and the gauge exclusion sees arc-drawn dials.
   const CONNECTOR_RING_MIN_LEN = 120;
   const CONNECTOR_RING_MIN_RADIUS = 20;
   const CONNECTOR_RING_MAX_RESIDUAL_FRAC = 0.15;
-  // Phantom-radius guard: a real ring/hub's fitted diameter tracks its bounding
-  // box (full circle 1x, quarter arc ~2x). A shallow-curvature arc fits an
-  // enormous circle with a tiny normalized residual, so the diameter runs many×
-  // the box — reject beyond this factor.
+  // Phantom-radius guard: a shallow arc fits an enormous circle with a tiny residual, so reject when the fitted diameter runs past this factor of the bbox.
   const CONNECTOR_RING_MAX_DIAMETER_BBOX_FRAC = 3;
 
   function isIndicatorConnector(line, svg) {
@@ -1799,13 +1782,7 @@
     };
   }
 
-  // Node/box candidates a connector could anchor to: sized, opaque or text-
-  // bearing HTML elements plus SVG hub/ring/dot shapes. A shape drawn stroke-only
-  // (fill:none) is a ring — the connector attaches to its stroke, so it is marked
-  // `ring` and matched by perimeter, not hollow interior (see pointToNodeGap).
-  // A near-circular stroke <path> read as a ring/hub node. Returns a node box
-  // (ring flag from fill) or null when the path is not a resolvable circular hub.
-  // getPointAtLength is guarded — one malformed path must not abort the sampler.
+  // Read a near-circular stroke <path> as a ring/hub node box (ring flag from fill), or null if not a resolvable hub; getPointAtLength is guarded so one bad path can't abort the sampler.
   function ringPathBox(path, rootRect) {
     if (typeof path.getTotalLength !== "function" || typeof path.getPointAtLength !== "function") {
       return null;
@@ -1830,18 +1807,12 @@
     if (!fit || fit.radius < CONNECTOR_RING_MIN_RADIUS) return null;
     if (fit.residual > CONNECTOR_RING_MAX_RESIDUAL_FRAC * fit.radius) return null;
     const rect = toRect(path.getBoundingClientRect());
-    // Reject the shallow-curvature phantom fit: normalized residual is small at
-    // any radius, so a nearly-straight arc masquerades as a huge ring. The
-    // fitted diameter must stay within a sane factor of the drawn bounding box.
+    // Reject the shallow-curvature phantom fit: a nearly-straight arc masquerades as a huge ring, so the fitted diameter must stay within a sane factor of the bbox.
     const bboxSpan = Math.max(rect.width, rect.height);
     if (bboxSpan <= 0 || fit.radius * 2 > CONNECTOR_RING_MAX_DIAMETER_BBOX_FRAC * bboxSpan) {
       return null;
     }
-    // Scoped-known seams (left as-is — narrow and not phantom-radius): a short
-    // genuine partial arc under-samples its parent circle's box so a real hub
-    // drawn as a sliver can still miss the span gate; and a curved connector
-    // that is itself near-circular can be read as its own ring node. Both are
-    // rare vs. the shallow-curvature false ring this gate closes.
+    // Known narrow seams left as-is: a sliver partial arc can miss the span gate, and a near-circular connector can read as its own ring node — both rare vs. the false ring this gate closes.
     const area = rectArea(rect);
     if (area < CONNECTOR_NODE_MIN_DOT_AREA || area >= rectArea(rootRect) * 0.5) return null;
     const fill = getComputedStyle(path).fill;

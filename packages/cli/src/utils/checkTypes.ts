@@ -170,8 +170,7 @@ export interface ConnectorLineSample {
   by: number;
 }
 
-/** Screen bbox of one plausible node/box a connector could anchor to. `ring`
- * marks a stroke-only SVG shape matched by perimeter, not hollow interior. */
+/** Screen bbox of a node a connector could anchor to; `ring` marks a stroke-only SVG shape matched by perimeter, not hollow interior. */
 export interface ConnectorNodeBox {
   selector: string;
   left: number;
@@ -181,9 +180,7 @@ export interface ConnectorNodeBox {
   ring: boolean;
 }
 
-/** All connectors + node boxes at one seeked sample, produced by
- * `__hyperframesConnectorSample` and accumulated across the grid to detect
- * `connector_motion_detached`. */
+/** All connectors + node boxes at one seeked sample, accumulated across the grid to detect connector_motion_detached. */
 export interface ConnectorFrame {
   time: number;
   connectors: ConnectorLineSample[];
@@ -218,8 +215,7 @@ export interface CheckAuditDriver {
    * geometry + resolved dial hub at the current seeked state, as a time-hoisted
    * frame envelope. */
   collectOffPivotRotationSample(time: number): Promise<OffPivotFrame>;
-  /** connector_motion_detached: every connector's endpoints + every node bbox
-   * at the current seeked state. Accumulated across the grid — see checkPipeline. */
+  /** connector_motion_detached: every connector's endpoints + every node bbox at the current seeked state, accumulated across the grid. */
   collectConnectorSample(time: number): Promise<ConnectorFrame>;
   collectGeometryCandidates(
     time: number,

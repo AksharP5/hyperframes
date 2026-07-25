@@ -201,8 +201,7 @@ interface GridSamples {
    * material-point geometry + dial hub per layout sample; flattened by selector
    * to detect off_pivot_rotation. */
   indicatorFrames: OffPivotFrame[];
-  /** Connector endpoints + node boxes at each layout sample; correlated after
-   * the run to detect connector_motion_detached. */
+  /** Connector endpoints + node boxes per layout sample; correlated after the run to detect connector_motion_detached. */
   connectorFrames: ConnectorFrame[];
 }
 
@@ -985,16 +984,11 @@ export function detectOffPivotRotation(frames: OffPivotFrame[]): AnchoredLayoutI
   return selectHubFindings(candidates);
 }
 
-// connector_motion_detached thresholds. Corpus timings: entrances settle by
-// ~2s of a 7-8s composition, so held/steady state starts well before half.
+// connector_motion_detached thresholds.
 const CONNECTOR_MIN_FRAMES = 4;
 // An endpoint within this of a node counts as anchored (well under a node's size).
 const CONNECTOR_ATTACH_PX = 24;
-// The dangling end must clear this to flag. Set high, and measured against a
-// dense node-candidate set, so only an endpoint sitting in genuinely empty space
-// fires — a slow drift that still lands near a box, or a snug residual gap, does
-// not. Corpus: fuzz011's detached spokes dangle ~185-190px from every node;
-// legitimate lead-lines to a nearby label stay well under this.
+// Detach floor: set high and measured against a dense node set, so only an endpoint in genuinely empty space fires (not a snug gap or lead-line).
 const CONNECTOR_DETACH_FLOOR_PX = 80;
 const CONNECTOR_DETACH_VIEWPORT_FRACTION = 0.06;
 // Held/steady frames begin at this fraction of the timeline (past entrances).
@@ -1002,10 +996,7 @@ const CONNECTOR_HELD_START_FRAC = 0.45;
 const CONNECTOR_MIN_HELD_FRAMES = 2;
 // Fraction of held frames on which the loose end must be detached to flag.
 const CONNECTOR_HELD_DETACH_FRAC = 0.8;
-// Fraction of held frames an endpoint must stay within attach tolerance to
-// count as ANCHORED. A single-frame graze is not attachment: a genuinely
-// detached endpoint that merely touches a node once must not read as anchored
-// (else its dangling partner escapes the finding). Sustained, not instantaneous.
+// Fraction of held frames within attach tolerance to count as anchored — sustained, so a single-frame graze doesn't let a dangling partner escape.
 const CONNECTOR_HELD_ATTACH_FRAC = 0.8;
 
 interface ConnectorObservation {
@@ -1021,8 +1012,7 @@ function pointToNodeGap(x: number, y: number, node: ConnectorNodeBox): number {
   const dx = Math.max(node.left - x, 0, x - node.right);
   const dy = Math.max(node.top - y, 0, y - node.bottom);
   if (dx > 0 || dy > 0) return Math.hypot(dx, dy);
-  // Inside the bbox: a solid node anchors anywhere; a hollow ring only near its
-  // stroke, so measure distance to the bbox perimeter (its hole is not attached).
+  // Inside the bbox: a solid node anchors anywhere; a hollow ring only near its stroke, so measure distance to the perimeter.
   if (!node.ring) return 0;
   return Math.min(x - node.left, node.right - x, y - node.top, node.bottom - y);
 }
@@ -1033,9 +1023,7 @@ function nearestNodeGap(x: number, y: number, nodes: ConnectorNodeBox[]): number
   return min;
 }
 
-/** Group observations by connector selector, dropping any selector that maps to
- * more than one connector in a single frame — those endpoints can't be tracked
- * across seeks without aliasing (the false-association risk). */
+/** Group observations by connector selector, dropping any selector that aliases multiple connectors in one frame (untrackable across seeks). */
 function groupConnectorsBySelector(frames: ConnectorFrame[]): Map<string, ConnectorObservation[]> {
   const bySelector = new Map<string, ConnectorObservation[]>();
   const ambiguous = new Set<string>();
@@ -1067,10 +1055,7 @@ interface EndpointHeldGaps {
   danglingGap: number;
 }
 
-/** Per-endpoint held-frame gap summary: the fraction of held frames it sits
- * within attach tolerance of a node (sustained attachment, not a lone graze),
- * the fraction it sits beyond the detach threshold, and the gap it settles at
- * when detached. */
+/** Per-endpoint held-frame gap summary: fractions within attach tolerance and beyond the detach threshold, plus the settled dangling gap. */
 function endpointHeldGaps(
   group: ConnectorObservation[],
   pick: (o: ConnectorObservation) => { x: number; y: number },
@@ -1101,11 +1086,7 @@ function isDangling(gaps: EndpointHeldGaps): boolean {
   return gaps.detachedFraction >= CONNECTOR_HELD_DETACH_FRAC;
 }
 
-// Gauge-indicator geometry: the anchored end pivots near a ring/arc centre and
-// the loose end extends radially outward. That is a needle/pointer (owned by a
-// separate gauge check), not a broken node connector. A defective radial
-// connector points the other way — anchored on a peripheral node, loose end
-// drifting toward the centre — so this only excludes true centre-pivot pointers.
+// Gauge indicator: anchored end pivots near a ring centre, loose end extends outward — a needle (owned by a separate gauge check), so exclude only true centre-pivot pointers.
 const GAUGE_HUB_CENTRE_FRACTION = 0.25;
 
 function isGaugeIndicator(
@@ -1154,32 +1135,14 @@ function connectorDetachFinding(
   };
 }
 
-/**
- * connector_motion_detached: a connector (SVG <line>/<path>) that stays anchored
- * to a node at ONE endpoint while its OTHER endpoint sits in empty space — far
- * from every node — across the held (steady) frames. This is the sibling of the
- * per-frame `connector_detached` check, which requires BOTH endpoints far from
- * anchors on a single frame and so deliberately ignores the half-attached case.
- * But that half-attached case is the dominant real failure under motion: a
- * spoke/edge whose one end stays pinned (e.g. at a hub) while the other drifts
- * off a node that kept moving — rotated about a wrong pivot, or with a path
- * measured once at build then never updated as the target animated.
- *
- * FP-guarded, deliberately strict: one endpoint must be genuinely anchored
- * (structural, not a name match); the loose end must clear a high detach
- * threshold on ~all held frames (measured against a dense node-candidate set, so
- * only an endpoint in truly empty space fires — snug residual gaps and lead
- * lines to a nearby label do not); and a selector that aliases multiple
- * connectors in one frame is dropped.
- */
+/** connector_motion_detached: the half-attached case connector_detached ignores — one endpoint pinned while the other drifts into empty space across held frames (wrong pivot, or coords measured once at build). Strict + FP-guarded. */
 interface DanglePick {
   anchored: { x: number; y: number };
   dangling: { x: number; y: number };
   gap: number;
 }
 
-/** If exactly one endpoint is anchored and the other persistently dangles, name
- * the anchored/dangling points and the dangling gap; else null. */
+/** If exactly one endpoint is anchored and the other persistently dangles, name the anchored/dangling points and the gap; else null. */
 function danglingEndpoint(
   last: ConnectorObservation,
   gapsA: EndpointHeldGaps,
@@ -1196,9 +1159,7 @@ function danglingEndpoint(
   return null;
 }
 
-/** One connector's held trajectory → a finding, or null. A finding needs one
- * endpoint anchored to a node and the other persistently in empty space, and is
- * suppressed for gauge-indicator geometry (see isGaugeIndicator). */
+/** One connector's held trajectory → a finding, or null; needs one anchored endpoint and one persistently in empty space, suppressed for gauge-indicator geometry. */
 function connectorGroupFinding(
   selector: string,
   group: ConnectorObservation[],

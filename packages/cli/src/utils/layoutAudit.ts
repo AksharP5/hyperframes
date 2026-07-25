@@ -23,8 +23,7 @@ export type LayoutIssueCode =
   | "escaped_container"
   | "panel_out_of_canvas"
   | "connector_detached"
-  // Cross-sample connector finding — one endpoint anchored to a node while the
-  // other dangles in empty space on held frames (frozen coords while target moved).
+  // Cross-sample finding — one endpoint anchored while the other dangles in empty space on held frames (frozen coords while target moved).
   | "connector_motion_detached"
   // Cross-sample rotation finding — a spinning element whose bbox center drifts
   // because it pivots about the wrong point (bad transformOrigin/svgOrigin).

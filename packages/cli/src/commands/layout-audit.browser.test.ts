@@ -887,9 +887,7 @@ describe("layout-audit.browser coordinate-frame findings", () => {
         </svg>
       </div>
     `;
-    // A near-full circle (diameter tracks its bbox) vs a shallow arc on a huge
-    // circle: the arc's Kåsa residual normalized by its enormous radius is tiny
-    // (passes the residual gate) yet its fitted diameter is ~10x its drawn box.
+    // Shallow arc on a huge circle passes the residual gate yet its fitted diameter is ~10x its drawn box — the phantom-radius case, vs a genuine near-full circle.
     const genuine = { cx: 500, cy: 500, radius: 100, startDeg: 0, endDeg: 360 };
     const shallow = { cx: 500, cy: 2500, radius: 2000, startDeg: 264, endDeg: 276 };
     installGeometry(
@@ -2053,8 +2051,7 @@ function arcBBox(spec: ArcSpec): DOMRect {
   return rect({ left, top, width: Math.max(...xs) - left, height: Math.max(...ys) - top });
 }
 
-// happy-dom has no SVG path geometry: mock getTotalLength/getPointAtLength so
-// ringPathBox samples the given circular arc in local user units.
+// happy-dom has no SVG path geometry: mock getTotalLength/getPointAtLength so ringPathBox can sample the given arc.
 function installArcSampling(pathId: string, spec: ArcSpec): void {
   const path = document.getElementById(pathId);
   if (!path) throw new Error(`no path #${pathId}`);
