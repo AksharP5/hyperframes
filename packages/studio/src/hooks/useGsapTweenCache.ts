@@ -330,9 +330,14 @@ export function useGsapAnimationsForElement(
   // fallow-ignore-next-line complexity
   useEffect(() => {
     if (!elementId) return;
-    // No property-group filter: ungrouped tweens are recorded here as well.
+    // Same admission rule as the keyframe cache below (hold skip included) and
+    // no property-group filter: the two stores must agree, or a hold draws an
+    // expanded property lane with no collapsed diamond behind it and an
+    // ungrouped tween draws diamonds with no lane source.
     const sourceAnimations = animations.filter(
-      (animation) => animation.keyframes || synthesizeFlatTweenKeyframes(animation),
+      (animation) =>
+        !isStaticPositionHold(animation) &&
+        (animation.keyframes || synthesizeFlatTweenKeyframes(animation)),
     );
     if (sourceAnimations.length > 0)
       writeGsapAnimationsForElement(sourceFile, elementId, sourceAnimations);

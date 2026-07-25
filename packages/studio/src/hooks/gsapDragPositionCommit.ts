@@ -2,9 +2,9 @@ import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { usePlayerStore } from "../player/store/playerStore";
 import { resolveTweenStart, resolveTweenDuration } from "../utils/globalTimeCompiler";
+import { resolveEditableTweenDuration } from "./gsapShared";
 import { roundTo3 } from "../utils/rounding";
 import { computeDraggedGsapPosition } from "./draggedGsapPosition";
-import { resolveEditableTweenDuration } from "./gsapShared";
 import {
   type GsapDragCommitCallbacks,
   computeCurrentPercentage,
@@ -159,7 +159,7 @@ async function commitFlatViaKeyframes(
 ): Promise<void> {
   const ct = usePlayerStore.getState().currentTime;
   const ts = resolveTweenStart(anim);
-  const td = resolveTweenDuration(anim);
+  const td = resolveEditableTweenDuration(anim, selection);
   const { activeKeyframePct, setActiveKeyframePct } = usePlayerStore.getState();
   const outsideRange =
     activeKeyframePct == null && ts !== null && td > 0 && (ct < ts - 0.01 || ct > ts + td + 0.01);
@@ -324,7 +324,7 @@ export async function commitGsapPositionFromDrag(
     const dragProps: Record<string, number> = { x: newX, y: newY };
 
     const ts = resolveTweenStart(effectiveAnim);
-    const td = resolveTweenDuration(effectiveAnim);
+    const td = resolveEditableTweenDuration(effectiveAnim, selection);
     const outsideRange = ts !== null && td > 0 && (ct < ts - 0.01 || ct > ts + td + 0.01);
     const hasSelectedKeyframe = usePlayerStore.getState().activeKeyframePct != null;
     if (outsideRange && !hasSelectedKeyframe) {
@@ -352,7 +352,7 @@ export async function commitGsapPositionFromDrag(
   } else if (anim.method === "from" || anim.method === "fromTo") {
     const ct = usePlayerStore.getState().currentTime;
     const ts = resolveTweenStart(anim);
-    const td = resolveTweenDuration(anim);
+    const td = resolveEditableTweenDuration(anim, selection);
     const hasSelectedKeyframe = usePlayerStore.getState().activeKeyframePct != null;
     const outsideRange =
       !hasSelectedKeyframe && ts !== null && td > 0 && (ct < ts - 0.01 || ct > ts + td + 0.01);
@@ -372,7 +372,7 @@ export async function commitGsapPositionFromDrag(
 
       if (existingPosAnim?.keyframes) {
         const posTs = resolveTweenStart(existingPosAnim);
-        const posTd = resolveTweenDuration(existingPosAnim);
+        const posTd = resolveEditableTweenDuration(existingPosAnim, selection);
         if (posTs !== null) {
           await extendTweenAndAddKeyframe(
             selection,

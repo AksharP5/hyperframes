@@ -4,6 +4,7 @@
  * reads to a human. Kept apart from the header's JSX so a formatting change and
  * a layout change never touch the same file.
  */
+import gsap from "gsap";
 import {
   classifyPropertyGroup,
   type GsapAnimation,
@@ -16,31 +17,59 @@ function roundValue(value: number): string {
   return String(Math.round(value * 100) / 100);
 }
 
+/** GSAP applies a keyframe's `ease` to the segment ARRIVING at it, so the curve
+ *  between two keyframes is named by the later one (with the tween-level
+ *  `easeEach`/`ease` as the fallback). Sampling linearly would report a value the
+ *  element never has at that time, and stamp that wrong value onto a keyframe
+ *  added from the track header. Unknown ease names parse to undefined -> linear. */
+function easedProgress(progress: number, animation: GsapAnimation, ease?: string): number {
+  const resolved = ease ?? animation.keyframes?.easeEach ?? animation.ease;
+  if (!resolved || resolved === "none") return progress;
+  return gsap.parseEase(resolved)?.(progress) ?? progress;
+}
+
+interface PropertyStop {
+  percentage: number;
+  value: number | string;
+  ease?: string;
+}
+
+function propertyStops(animation: GsapAnimation, property: string): PropertyStop[] {
+  return (animation.keyframes?.keyframes ?? [])
+    .filter((keyframe) => property in keyframe.properties)
+    .map((keyframe) => ({
+      percentage: keyframe.percentage,
+      value: keyframe.properties[property],
+      ease: keyframe.ease,
+    }));
+}
+
+/** A pair only interpolates when both ends are numeric and actually span time;
+ *  string values (colors, keywords) and zero-width pairs hold the earlier value.
+ *  Returns the numeric ends so the caller needs no cast to use them. */
+function interpolableEnds(
+  before: PropertyStop,
+  after: PropertyStop,
+): { from: number; to: number } | null {
+  if (typeof before.value !== "number" || typeof after.value !== "number") return null;
+  if (before.percentage === after.percentage) return null;
+  return { from: before.value, to: after.value };
+}
+
 function propertyValueAt(
   animation: GsapAnimation,
   property: string,
   tweenPercentage: number,
 ): number | string | undefined {
-  const keyframes = animation.keyframes?.keyframes ?? [];
-  const values = keyframes
-    .filter((keyframe) => property in keyframe.properties)
-    .map((keyframe) => ({
-      percentage: keyframe.percentage,
-      value: keyframe.properties[property],
-    }));
-  const before = values.filter((value) => value.percentage <= tweenPercentage).at(-1);
-  const after = values.find((value) => value.percentage >= tweenPercentage);
+  const stops = propertyStops(animation, property);
+  const before = stops.filter((stop) => stop.percentage <= tweenPercentage).at(-1);
+  const after = stops.find((stop) => stop.percentage >= tweenPercentage);
   if (!before) return after?.value;
   if (!after) return before.value;
-  if (
-    typeof before.value !== "number" ||
-    typeof after.value !== "number" ||
-    before.percentage === after.percentage
-  ) {
-    return before.value;
-  }
+  const ends = interpolableEnds(before, after);
+  if (!ends) return before.value;
   const progress = (tweenPercentage - before.percentage) / (after.percentage - before.percentage);
-  return before.value + (after.value - before.value) * progress;
+  return ends.from + (ends.to - ends.from) * easedProgress(progress, animation, after.ease);
 }
 
 /** Every property of `group` this animation touches, sampled at `tweenPercentage`. */
