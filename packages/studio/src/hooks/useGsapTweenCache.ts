@@ -1,56 +1,29 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import type { GsapAnimation, GsapKeyframesData, ParsedGsap } from "@hyperframes/core/gsap-parser";
-import { isStudioHoldSet } from "@hyperframes/core/gsap-parser";
+import type { GsapAnimation, GsapKeyframesData } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore } from "../player/store/playerStore";
 import { readRuntimeKeyframes, scanAllRuntimeKeyframes } from "./gsapRuntimeBridge";
 import {
   clearKeyframeCacheForElement,
-  clearKeyframeCacheForFile,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
-import { idFromSelector, toAbsoluteTime, toClipPercentage, toClipKeyframes } from "./gsapShared";
+import { toAbsoluteTime, toClipPercentage } from "./gsapShared";
 import {
   deduplicateKeyframes,
   isStaticPositionHold,
   synthesizeFlatTweenKeyframes,
 } from "./gsapTweenSynth";
+import {
+  fetchParsedAnimations,
+  populateKeyframeCacheFromAst,
+  resolveClipTimingBasis,
+} from "./keyframeCacheAstLoad";
 
-/**
- * Resolve a tween's target selector to the ids of the element(s) it animates.
- * A bare `#id` resolves directly; anything else (a class like `.dot`, a group
- * `.a, .b`, or a descendant selector) is matched against the live preview DOM so
- * class/selector tweens (e.g. `gsap.from(".dot", {stagger})`) attribute to every
- * element they animate — not just one parsed from the string. Falls back to the
- * leading id when there's no DOM (so the cache still populates pre-iframe);
- * `idFromSelector` reads both `#id` and the `[id="…"]` form writers emit for
- * CSS-unsafe ids, so those elements resolve pre-iframe too.
- */
-// fallow-ignore-next-line complexity
-export function resolveSelectorElementIds(
-  selector: string,
-  doc: Document | null | undefined,
-): string[] {
-  const bareId = selector.match(/^#([\w-]+)$/);
-  if (bareId) return [bareId[1]];
-  if (!doc) {
-    const lead = idFromSelector(selector);
-    return lead ? [lead] : [];
-  }
-  const ids = new Set<string>();
-  for (const part of selector.split(",")) {
-    const sel = part.trim();
-    if (!sel) continue;
-    try {
-      for (const el of Array.from(doc.querySelectorAll(sel))) {
-        if (el.id) ids.add(el.id);
-      }
-    } catch {
-      const lead = idFromSelector(sel);
-      if (lead) ids.add(lead);
-    }
-  }
-  return Array.from(ids);
-}
+// Re-exported so callers keep importing the GSAP cache surface from one module.
+export {
+  fetchParsedAnimations,
+  resolveClipTimingBasis,
+  resolveSelectorElementIds,
+} from "./keyframeCacheAstLoad";
 
 /** The selected element's identity for matching tweens to it. */
 export interface GsapElementTarget {
@@ -98,59 +71,6 @@ export function getAnimationsForElement(
       return false;
     }),
   );
-}
-
-export async function fetchParsedAnimations(
-  projectId: string,
-  sourceFile: string,
-): Promise<ParsedGsap | null> {
-  try {
-    const res = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/gsap-animations/${encodeURIComponent(sourceFile)}`,
-      // Always re-read the freshly-parsed source; no per-call timestamp (which
-      // would defeat caching forever and is a deterministic-render no-no).
-      { cache: "no-store" },
-    );
-    if (!res.ok) return null;
-    const parsed = (await res.json()) as ParsedGsap;
-    // Studio-emitted pre-keyframe hold `set`s are an internal runtime detail (they
-    // hold an element's first keyframe before its tween). They must not surface as
-    // user animations — otherwise they pollute the keyframe cache / timeline diamonds.
-    return { ...parsed, animations: parsed.animations.filter((a) => !isStudioHoldSet(a)) };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Clip-relative timing basis for an element. Sub-composition internals (e.g. pills
- * inside a scene) aren't timeline clips themselves — they're derived at expand time
- * — so they're absent from `elements`. Without a basis, elDuration defaulted to 1
- * and clip-relative keyframe percentages blew past 100% (rendering off the clip).
- * Fall back to the sub-comp HOST's bounds, resolved via domClipChildren (the host's
- * data-composition-src is stripped in the rendered DOM, so we can't query it).
- */
-export function resolveClipTimingBasis(
-  elementId: string,
-  sourceFile: string,
-  elements: ReadonlyArray<{
-    domId?: string;
-    key?: string;
-    id: string;
-    start: number;
-    duration: number;
-  }>,
-  domClipChildren: ReadonlyArray<{ id: string; hostId: string }>,
-): { elStart: number; elDuration: number } {
-  const direct = elements.find(
-    (el) => el.domId === elementId || (el.key ?? el.id) === `${sourceFile}#${elementId}`,
-  );
-  if (direct) return { elStart: direct.start, elDuration: direct.duration };
-  const hostId = domClipChildren.find((c) => c.id === elementId)?.hostId;
-  const host = hostId
-    ? elements.find((el) => el.domId === hostId || (el.key ?? el.id) === `index.html#${hostId}`)
-    : undefined;
-  return { elStart: host?.start ?? 0, elDuration: host?.duration ?? 1 };
 }
 
 export function useGsapAnimationsForElement(
@@ -426,6 +346,7 @@ export function useGsapCacheVersion() {
  * elements. Called from the Timeline component so diamonds show without
  * requiring a selection.
  */
+
 export function usePopulateKeyframeCacheForFile(
   projectId: string | null,
   sourceFile: string,
@@ -433,6 +354,16 @@ export function usePopulateKeyframeCacheForFile(
   iframeRef?: React.RefObject<HTMLIFrameElement | null>,
 ): void {
   const elementCount = usePlayerStore((s) => s.elements.length);
+  // Every sub-composition file the timeline shows rows for. The cache is loaded
+  // for all of them up front, so keyframe lanes are populated on open instead of
+  // only once a clip from that file is selected (which is what switches
+  // `sourceFile`). Only files reachable from the store's elements are covered;
+  // a composition nested inside another still loads on first selection.
+  const compositionSrcKey = usePlayerStore((s) =>
+    Array.from(new Set(s.elements.map((el) => el.compositionSrc).filter((src) => !!src)))
+      .sort()
+      .join("|"),
+  );
   // Re-run when sub-comp DOM children appear (they supply the host bounds the
   // clip-relative keyframe percentages are computed against; without this the
   // cache is computed once before they exist and the percentages stay wrong).
@@ -445,52 +376,21 @@ export function usePopulateKeyframeCacheForFile(
   const astFetchDoneRef = useRef("");
 
   useEffect(() => {
-    const fetchKey = `kf-cache:${projectId}:${sourceFile}:${version}:${elementCount}:${domClipChildrenKey}`;
+    const fetchKey = `kf-cache:${projectId}:${sourceFile}:${version}:${elementCount}:${domClipChildrenKey}:${compositionSrcKey}`;
     if (fetchKey === lastFetchKeyRef.current) return;
     lastFetchKeyRef.current = fetchKey;
     runtimeScanDoneRef.current = "";
     astFetchDoneRef.current = "";
     if (!projectId) return;
 
-    const sf = sourceFile;
-    // fallow-ignore-next-line complexity
-    fetchParsedAnimations(projectId, sf).then((parsed) => {
-      if (!parsed) return;
-      const { setKeyframeCache } = usePlayerStore.getState();
-      clearKeyframeCacheForFile(sf);
-      const { elements, domClipChildren } = usePlayerStore.getState();
-      const doc = iframeRef?.current?.contentDocument;
-      const mergedByElement = new Map<string, GsapKeyframesData>();
-      const sourceByElement = new Map<string, GsapAnimation[]>();
-      for (const anim of parsed.animations) {
-        if (anim.hasUnresolvedKeyframes) continue;
-        if (isStaticPositionHold(anim)) continue;
-        const kfData = anim.keyframes ?? synthesizeFlatTweenKeyframes(anim);
-        if (!kfData) continue;
-        // Attribute the tween to every element it animates (handles class /
-        // group / descendant selectors, not just `#id`).
-        for (const id of resolveSelectorElementIds(anim.targetSelector, doc)) {
-          // kfData is already resolved (real keyframes OR a synthesized flat
-          // tween), so a flat tween joins the store like a keyframed one. No
-          // property-group filter: this map must cover every tween the cache
-          // below records, or expanded lanes have nothing to render.
-          sourceByElement.set(id, [...(sourceByElement.get(id) ?? []), anim]);
-          const { elStart, elDuration } = resolveClipTimingBasis(id, sf, elements, domClipChildren);
-          const clipKeyframes = toClipKeyframes(kfData.keyframes, anim, elStart, elDuration);
-          const existing = mergedByElement.get(id);
-          if (existing) {
-            existing.keyframes = deduplicateKeyframes([...existing.keyframes, ...clipKeyframes]);
-          } else {
-            mergedByElement.set(id, { ...kfData, keyframes: clipKeyframes });
-          }
-        }
-      }
-      for (const [id, kfData] of mergedByElement) {
-        setKeyframeCache(`${sf}#${id}`, kfData);
-        setKeyframeCache(id, kfData);
-        if (sf !== "index.html") setKeyframeCache(`index.html#${id}`, kfData);
-        writeGsapAnimationsForElement(sf, id, sourceByElement.get(id));
-      }
+    // The active file first: it owns the selection, and each file clears only
+    // its own cache entries, so the order just decides who writes the bare
+    // `id` alias last.
+    const files = Array.from(
+      new Set([sourceFile, ...(compositionSrcKey ? compositionSrcKey.split("|") : [])]),
+    );
+    const doc = iframeRef?.current?.contentDocument;
+    Promise.all(files.map((sf) => populateKeyframeCacheFromAst(projectId, sf, doc))).then(() => {
       astFetchDoneRef.current = fetchKey;
     });
     // elementCount is in the deps because new timeline elements (e.g. after a
@@ -499,7 +399,7 @@ export function usePopulateKeyframeCacheForFile(
     // iframeRef is read for DOM selector resolution but intentionally not a dep
     // (it's a stable ref; the separate runtime-scan effect owns iframe timing).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, sourceFile, version, elementCount, domClipChildrenKey]);
+  }, [projectId, sourceFile, version, elementCount, domClipChildrenKey, compositionSrcKey]);
 
   // Separate effect for runtime keyframe discovery — polls until the iframe
   // has loaded GSAP timelines, independent of the AST fetch lifecycle.
