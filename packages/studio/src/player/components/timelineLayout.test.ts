@@ -16,6 +16,9 @@ import {
   resolveTimelineAssetDrop,
 } from "./timelineLayout";
 
+/** N collapsed rows, the shape every caller passes when nothing is expanded. */
+const baseRows = (count: number) => Array.from({ length: count }, () => TRACK_H);
+
 describe("variable timeline row geometry", () => {
   const tracks = [
     [{ clipId: "a", laneCount: 0 }],
@@ -25,7 +28,7 @@ describe("variable timeline row geometry", () => {
 
   it("resolves every row to the base height when no clip is expanded", () => {
     expect(trackHeights(tracks)).toEqual([TRACK_H, TRACK_H, TRACK_H]);
-    expect(trackHeights(3)).toEqual([TRACK_H, TRACK_H, TRACK_H]);
+    expect(trackHeights([[], [], []])).toEqual([TRACK_H, TRACK_H, TRACK_H]);
   });
 
   it("adds one lane height per lane on an expanded clip", () => {
@@ -84,7 +87,7 @@ describe("collapsed timeline row geometry characterization", () => {
     [3, 290],
     [5, 386],
   ])("keeps the %i-track canvas height at %i", (trackCount, expectedHeight) => {
-    expect(getTimelineCanvasHeight(trackCount)).toBe(expectedHeight);
+    expect(getTimelineCanvasHeight(baseRows(trackCount))).toBe(expectedHeight);
   });
 });
 
@@ -129,20 +132,16 @@ describe("track-area breathing pad y-math", () => {
 
   describe("getTimelineCanvasHeight", () => {
     it("reserves ruler + top pad + lanes + bottom pad", () => {
-      expect(getTimelineCanvasHeight(0)).toBe(RULER_H + TRACKS_TOP_PAD + TRACKS_BOTTOM_PAD);
-      expect(getTimelineCanvasHeight(3)).toBe(
+      expect(getTimelineCanvasHeight([])).toBe(RULER_H + TRACKS_TOP_PAD + TRACKS_BOTTOM_PAD);
+      expect(getTimelineCanvasHeight(baseRows(3))).toBe(
         RULER_H + TRACKS_TOP_PAD + 3 * TRACK_H + TRACKS_BOTTOM_PAD,
       );
-    });
-
-    it("clamps a negative track count to zero lanes", () => {
-      expect(getTimelineCanvasHeight(-4)).toBe(RULER_H + TRACKS_TOP_PAD + TRACKS_BOTTOM_PAD);
     });
 
     it("leaves room below the last lane for a drag-into-void new track", () => {
       // The gap below the final lane must be at least a full track height so a
       // clip can be dropped there to create a new bottom track.
-      const oneLane = getTimelineCanvasHeight(1);
+      const oneLane = getTimelineCanvasHeight(baseRows(1));
       const lastLaneBottom = getTimelineRowTop(0) + TRACK_H;
       expect(oneLane - lastLaneBottom).toBeGreaterThanOrEqual(TRACK_H);
     });
@@ -157,7 +156,7 @@ describe("track-area breathing pad y-math", () => {
       contentOrigin: GUTTER,
       pixelsPerSecond: 100,
       duration: 60,
-      rowHeights: trackHeights(3),
+      rowHeights: baseRows(3),
       trackOrder: [0, 1, 2],
     };
 

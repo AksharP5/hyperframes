@@ -55,12 +55,9 @@ type TimelineTrackHeightInput = readonly (readonly TimelineTrackHeightClip[])[];
  * the shared row height.
  */
 export function trackHeights(
-  tracks: number | TimelineTrackHeightInput,
+  tracks: TimelineTrackHeightInput,
   expandedClipIds?: ReadonlySet<string>,
 ): number[] {
-  if (typeof tracks === "number") {
-    return Array.from({ length: Math.max(0, Math.trunc(tracks)) }, () => TRACK_H);
-  }
   return tracks.map((clips) => {
     let laneCount = 0;
     if (expandedClipIds) {
@@ -473,15 +470,11 @@ export function getTimelineScrubTime(input: {
   return Math.max(0, Math.min(duration, x / pixelsPerSecond));
 }
 
-export function getTimelineCanvasHeight(trackCountOrHeights: number | readonly number[]): number {
+export function getTimelineCanvasHeight(rowHeights: readonly number[]): number {
   // RULER_H + top pad + lanes + bottom pad. The old TIMELINE_SCROLL_BUFFER is
   // subsumed by TRACKS_BOTTOM_PAD (which is larger), so the drag-into-void space
   // below the last lane is real scrollable surface, not a hidden buffer.
-  const heights =
-    typeof trackCountOrHeights === "number"
-      ? trackHeights(trackCountOrHeights)
-      : trackCountOrHeights;
-  const rowsHeight = getTimelineRowOffsets(heights).at(-1) ?? 0;
+  const rowsHeight = getTimelineRowOffsets(rowHeights).at(-1) ?? 0;
   return RULER_H + TRACKS_TOP_PAD + rowsHeight + TRACKS_BOTTOM_PAD;
 }
 

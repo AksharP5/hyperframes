@@ -8,9 +8,10 @@ import { isStudioHoldSet } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore } from "../player/store/playerStore";
 import {
   clearKeyframeCacheForFile,
+  elementCacheKeys,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
-import { toAbsoluteTime } from "./gsapShared";
+import { toClipKeyframes } from "./gsapShared";
 import {
   deduplicateKeyframes,
   isStaticPositionHold,
@@ -56,10 +57,35 @@ export function resolveSelectorElementIds(
   }
   return Array.from(ids);
 }
+/**
+ * The slice of the parse response callers actually read. The endpoint returns
+ * the full `ParsedGsap` (preamble/postamble and all), but nothing downstream of
+ * this fetch touches the source-text fields, so the guard below only has to
+ * vouch for what gets used.
+ */
+type ParsedGsapAnimations = Pick<
+  ParsedGsap,
+  "animations" | "multipleTimelines" | "unsupportedTimelinePattern"
+>;
+
+/**
+ * A proxy, an error page, or a stale server can answer 200 with something that
+ * has no `animations` array — the case where the old blind cast crashed on
+ * `.animations.filter`.
+ */
+function hasAnimations(value: unknown): value is ParsedGsapAnimations {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "animations" in value &&
+    Array.isArray(value.animations)
+  );
+}
+
 export async function fetchParsedAnimations(
   projectId: string,
   sourceFile: string,
-): Promise<ParsedGsap | null> {
+): Promise<ParsedGsapAnimations | null> {
   try {
     const res = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/gsap-animations/${encodeURIComponent(sourceFile)}`,
@@ -68,7 +94,8 @@ export async function fetchParsedAnimations(
       { cache: "no-store" },
     );
     if (!res.ok) return null;
-    const parsed = (await res.json()) as ParsedGsap;
+    const parsed: unknown = await res.json();
+    if (!hasAnimations(parsed)) return null;
     // Studio-emitted pre-keyframe hold `set`s are an internal runtime detail (they
     // hold an element's first keyframe before its tween). They must not surface as
     // user animations — otherwise they pollute the keyframe cache / timeline diamonds.
@@ -131,8 +158,6 @@ export async function populateKeyframeCacheFromAst(
     if (isStaticPositionHold(anim)) continue;
     const kfData = anim.keyframes ?? synthesizeFlatTweenKeyframes(anim);
     if (!kfData) continue;
-    const tweenPos = anim.resolvedStart ?? (typeof anim.position === "number" ? anim.position : 0);
-    const tweenDur = anim.duration ?? 1;
     // Attribute the tween to every element it animates (handles class /
     // group / descendant selectors, not just `#id`).
     for (const id of resolveSelectorElementIds(anim.targetSelector, doc)) {
@@ -142,22 +167,7 @@ export async function populateKeyframeCacheFromAst(
       // below records, or expanded lanes have nothing to render.
       sourceByElement.set(id, [...(sourceByElement.get(id) ?? []), anim]);
       const { elStart, elDuration } = resolveClipTimingBasis(id, sf, elements, domClipChildren);
-      const clipKeyframes = kfData.keyframes.map((kf) => {
-        const absTime = toAbsoluteTime(tweenPos, tweenDur, kf.percentage);
-        // 0.001% precision (see useGsapAnimationsForElement) so a beat-snapped
-        // keyframe centers on the beat dot and both caches agree.
-        const clipPct =
-          elDuration > 0
-            ? Math.round(((absTime - elStart) / elDuration) * 100000) / 1000
-            : kf.percentage;
-        return {
-          ...kf,
-          percentage: clipPct,
-          tweenPercentage: kf.percentage,
-          propertyGroup: anim.propertyGroup,
-          animationId: anim.id, // parity with other cache writers; inline ease needs it
-        };
-      });
+      const clipKeyframes = toClipKeyframes(kfData.keyframes, anim, elStart, elDuration);
       const existing = mergedByElement.get(id);
       if (existing) {
         existing.keyframes = deduplicateKeyframes([...existing.keyframes, ...clipKeyframes]);
@@ -167,9 +177,7 @@ export async function populateKeyframeCacheFromAst(
     }
   }
   for (const [id, kfData] of mergedByElement) {
-    setKeyframeCache(`${sf}#${id}`, kfData);
-    setKeyframeCache(id, kfData);
-    if (sf !== "index.html") setKeyframeCache(`index.html#${id}`, kfData);
+    for (const key of elementCacheKeys(sf, id)) setKeyframeCache(key, kfData);
     writeGsapAnimationsForElement(sf, id, sourceByElement.get(id));
   }
 }

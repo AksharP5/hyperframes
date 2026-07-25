@@ -38,9 +38,10 @@ export function resolveTrackKeyframeClip(
     return key === selectedElementId || selectedElementIds.has(key);
   });
   if (selected) return selected;
-  return [...keyframed].sort(
-    (a, b) => (laneCounts.get(b.key ?? b.id) ?? 0) - (laneCounts.get(a.key ?? a.id) ?? 0),
-  )[0]!;
+  // Most lanes wins, first one on a tie (same as the old stable sort), but as a
+  // reduce over the already non-empty list so there's no index to assert on.
+  const lanesOf = (element: TimelineElement) => laneCounts.get(element.key ?? element.id) ?? 0;
+  return keyframed.reduce((best, element) => (lanesOf(element) > lanesOf(best) ? element : best));
 }
 
 /** Lanes per clip: the count of distinct property groups whose tween contributes

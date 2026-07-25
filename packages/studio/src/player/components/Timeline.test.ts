@@ -954,11 +954,13 @@ describe("getTimelinePlayheadLeft", () => {
 
 describe("getTimelineCanvasHeight", () => {
   it("includes bottom scroll buffer below the last track", () => {
-    expect(getTimelineCanvasHeight(3)).toBeGreaterThan(RULER_H + 3 * TRACK_H);
+    expect(getTimelineCanvasHeight([TRACK_H, TRACK_H, TRACK_H])).toBeGreaterThan(
+      RULER_H + 3 * TRACK_H,
+    );
   });
 
   it("still keeps ruler space when there are no tracks", () => {
-    expect(getTimelineCanvasHeight(0)).toBeGreaterThan(24);
+    expect(getTimelineCanvasHeight([])).toBeGreaterThan(24);
   });
 });
 
