@@ -8,7 +8,7 @@ import {
   clearKeyframeCacheForFile,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
-import { toAbsoluteTime } from "./gsapShared";
+import { toAbsoluteTime, toClipPercentage, toClipKeyframes } from "./gsapShared";
 import { deduplicateKeyframes, synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
 
 function extractIdFromSelector(selector: string): string | null {
@@ -378,12 +378,7 @@ export function useGsapAnimationsForElement(
       const tweenDur = anim.duration ?? elDuration;
       for (const k of kf.keyframes) {
         const absTime = toAbsoluteTime(tweenPos, tweenDur, k.percentage);
-        // 0.001% precision (was 0.1%) so a beat-snapped keyframe centers exactly
-        // on the beat dot, which is rendered at the true beat time.
-        const clipPct =
-          elDuration > 0
-            ? Math.round(((absTime - elStart) / elDuration) * 100000) / 1000
-            : k.percentage;
+        const clipPct = toClipPercentage(absTime, elStart, elDuration, k.percentage);
         allKeyframes.push({
           ...k,
           percentage: clipPct,
@@ -486,9 +481,6 @@ export function usePopulateKeyframeCacheForFile(
         }
         const kfData = anim.keyframes ?? synthesizeFlatTweenKeyframes(anim);
         if (!kfData) continue;
-        const tweenPos =
-          anim.resolvedStart ?? (typeof anim.position === "number" ? anim.position : 0);
-        const tweenDur = anim.duration ?? 1;
         // Attribute the tween to every element it animates (handles class /
         // group / descendant selectors, not just `#id`).
         for (const id of resolveSelectorElementIds(anim.targetSelector, doc)) {
@@ -498,22 +490,7 @@ export function usePopulateKeyframeCacheForFile(
           // below records, or expanded lanes have nothing to render.
           sourceByElement.set(id, [...(sourceByElement.get(id) ?? []), anim]);
           const { elStart, elDuration } = resolveClipTimingBasis(id, sf, elements, domClipChildren);
-          const clipKeyframes = kfData.keyframes.map((kf) => {
-            const absTime = toAbsoluteTime(tweenPos, tweenDur, kf.percentage);
-            // 0.001% precision (see useGsapAnimationsForElement) so a beat-snapped
-            // keyframe centers on the beat dot and both caches agree.
-            const clipPct =
-              elDuration > 0
-                ? Math.round(((absTime - elStart) / elDuration) * 100000) / 1000
-                : kf.percentage;
-            return {
-              ...kf,
-              percentage: clipPct,
-              tweenPercentage: kf.percentage,
-              propertyGroup: anim.propertyGroup,
-              animationId: anim.id, // parity with other cache writers; inline ease needs it
-            };
-          });
+          const clipKeyframes = toClipKeyframes(kfData.keyframes, anim, elStart, elDuration);
           const existing = mergedByElement.get(id);
           if (existing) {
             existing.keyframes = deduplicateKeyframes([...existing.keyframes, ...clipKeyframes]);

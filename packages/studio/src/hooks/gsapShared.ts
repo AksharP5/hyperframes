@@ -216,3 +216,54 @@ export function parsePercentageKeyframes(
 export function toAbsoluteTime(tweenPos: number, tweenDur: number, percentage: number): number {
   return tweenPos + (percentage / 100) * tweenDur;
 }
+
+/**
+ * An absolute time as a percentage of a timeline clip, at the one precision every
+ * keyframe-cache writer must share. 0.001% keeps a beat-snapped keyframe centered
+ * on the beat dot, and because selection keys embed this number, a writer that
+ * rounds coarser would orphan a live selection the moment it rewrites the cache.
+ * A zero-length clip has no percentage to give, so the tween-% passes through.
+ */
+export function toClipPercentage(
+  absoluteTime: number,
+  clipStart: number,
+  clipDuration: number,
+  fallbackPercentage: number,
+): number {
+  if (clipDuration <= 0) return fallbackPercentage;
+  return Math.round(((absoluteTime - clipStart) / clipDuration) * 100000) / 1000;
+}
+
+/**
+ * One keyframe-cache row per tween keyframe: the percentage re-based onto the
+ * clip, the original tween percentage kept alongside it, and the animation
+ * identity every lane and selection key needs. Shared by the cache writers so
+ * they cannot drift in precision or in which identity fields they record.
+ */
+export function toClipKeyframes<T extends { percentage: number }>(
+  source: readonly T[],
+  anim: GsapAnimation,
+  clipStart: number,
+  clipDuration: number,
+): Array<
+  T & {
+    tweenPercentage: number;
+    propertyGroup: GsapAnimation["propertyGroup"];
+    animationId: string;
+  }
+> {
+  const tweenStart = anim.resolvedStart ?? (typeof anim.position === "number" ? anim.position : 0);
+  const tweenDuration = anim.duration ?? 1;
+  return source.map((keyframe) => ({
+    ...keyframe,
+    percentage: toClipPercentage(
+      toAbsoluteTime(tweenStart, tweenDuration, keyframe.percentage),
+      clipStart,
+      clipDuration,
+      keyframe.percentage,
+    ),
+    tweenPercentage: keyframe.percentage,
+    propertyGroup: anim.propertyGroup,
+    animationId: anim.id,
+  }));
+}

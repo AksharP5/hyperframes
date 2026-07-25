@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
-import { idSelector, isInstantHold, parsePercentageKeyframes } from "./gsapShared";
+import {
+  idSelector,
+  isInstantHold,
+  parsePercentageKeyframes,
+  toClipPercentage,
+} from "./gsapShared";
 
 describe("isInstantHold", () => {
   const animation = (method: GsapAnimation["method"], duration?: number) =>
@@ -101,5 +106,19 @@ describe("idSelector", () => {
       if (sel.startsWith("#")) expect(sel).toBe(`#${id}`);
       else expect(sel.startsWith('[id="')).toBe(true);
     }
+  });
+});
+
+describe("toClipPercentage", () => {
+  // Selection keys embed this number, so every keyframe-cache writer has to round
+  // it identically: a coarser writer rewrites the cache with a different value and
+  // orphans the live selection key built from the finer one.
+  it("keeps three decimals so a beat-snapped keyframe lands on its beat", () => {
+    expect(toClipPercentage(1 / 3, 0, 1, 0)).toBe(33.333);
+    expect(toClipPercentage(2.5, 2, 4, 0)).toBe(12.5);
+  });
+
+  it("passes the tween percentage through for a zero-length clip", () => {
+    expect(toClipPercentage(5, 0, 0, 42)).toBe(42);
   });
 });

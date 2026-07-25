@@ -4,7 +4,7 @@
  */
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerStore";
-import { toAbsoluteTime } from "./gsapShared";
+import { toClipKeyframes } from "./gsapShared";
 import { deduplicateKeyframes, synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
 
 export function updateKeyframeCacheFromParsed(
@@ -32,25 +32,15 @@ export function updateKeyframeCacheFromParsed(
 
     // Convert tween-relative percentages to clip-relative so diamonds
     // render at the correct position within the timeline clip.
-    const tweenPos = anim.resolvedStart ?? (typeof anim.position === "number" ? anim.position : 0);
-    const tweenDur = anim.duration ?? 1;
     const timelineEl = elements.find(
       (el) => el.domId === id || (el.key ?? el.id) === `${targetPath}#${id}`,
     );
-    const elStart = timelineEl?.start ?? 0;
-    const elDuration = timelineEl?.duration ?? 1;
-    const clipKeyframes = kfSource.map((kf) => {
-      const absTime = toAbsoluteTime(tweenPos, tweenDur, kf.percentage);
-      const clipPct =
-        elDuration > 0 ? Math.round(((absTime - elStart) / elDuration) * 1000) / 10 : kf.percentage;
-      return {
-        ...kf,
-        percentage: clipPct,
-        tweenPercentage: kf.percentage,
-        propertyGroup: anim.propertyGroup,
-        animationId: anim.id,
-      };
-    });
+    const clipKeyframes = toClipKeyframes(
+      kfSource,
+      anim,
+      timelineEl?.start ?? 0,
+      timelineEl?.duration ?? 1,
+    );
 
     const existing = merged.get(id);
     if (existing) {
@@ -67,9 +57,7 @@ export function updateKeyframeCacheFromParsed(
     }
   }
   for (const [id, entry] of merged) {
-    setKeyframeCache(`${targetPath}#${id}`, entry);
-    setKeyframeCache(id, entry);
-    if (targetPath !== "index.html") setKeyframeCache(`index.html#${id}`, entry);
+    for (const key of elementCacheKeys(targetPath, id)) setKeyframeCache(key, entry);
     writeGsapAnimationsForElement(targetPath, id, sourceAnimations.get(id));
   }
   const targetId =
