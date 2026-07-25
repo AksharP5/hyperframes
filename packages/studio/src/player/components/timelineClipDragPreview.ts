@@ -139,22 +139,18 @@ export function computeDragPreview(
     ctx.rowHeights,
   );
   const currentRow = getTimelineRowFromY(clientY - scrollRectTop + scrollTop, ctx.rowHeights);
-  // resolveTimelineMove's vertical axis is expressed in track-height units.
-  // Feeding cumulative row coordinates with a unit height preserves its existing
-  // threshold/create-track behavior while supporting variable pixel heights.
+  // resolveTimelineMove's vertical axis is row indices, which is why the pointer
+  // and scroll pixels are folded into originRow/currentRow above.
   const nextMove = resolveTimelineMove(
     {
       start: drag.element.start,
       track: drag.element.track,
       duration: drag.element.duration,
       originClientX: drag.originClientX,
-      originClientY: originRow,
+      originRow,
       originScrollLeft: drag.originScrollLeft,
-      originScrollTop: 0,
       currentScrollLeft: scroll?.scrollLeft ?? drag.originScrollLeft,
-      currentScrollTop: 0,
       pixelsPerSecond: pps,
-      trackHeight: 1,
       maxStart: dragMaxStart,
       trackOrder,
     },
