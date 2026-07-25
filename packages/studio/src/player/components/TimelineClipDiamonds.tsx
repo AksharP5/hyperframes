@@ -239,8 +239,8 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
       }}
     >
       {sorted.map((kf, i) => {
-        if (i === 0) return null;
-        const prev = sorted[i - 1]!;
+        const prev = sorted[i - 1];
+        if (!prev) return null;
         const x1 = Math.max(0, Math.min(clipWidthPx, (prev.percentage / 100) * clipWidthPx));
         const x2 = Math.max(0, Math.min(clipWidthPx, (kf.percentage / 100) * clipWidthPx));
         if (x2 - x1 < 1) return null;
