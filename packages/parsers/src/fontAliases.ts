@@ -102,10 +102,13 @@ export const FONT_ALIAS_KEYS: ReadonlySet<string> = new Set(Object.keys(FONT_ALI
  * name used to build its injected @font-face rules.
  */
 export const GOOGLE_FONT_FAMILY_ALIASES: Readonly<Record<string, string>> = {
+  frederickthegreat: "Fredericka the Great",
   pretendard: "Noto Sans KR",
+  pyidaungsu: "Noto Sans Myanmar",
   "yantra manav": "Yantramanav",
   "noto serif arabic": "Noto Naskh Arabic",
   "noto serif urdu": "Noto Nastaliq Urdu",
+  "noto serif vi": "Noto Serif",
   "noto sans greek": "Noto Sans",
   "noto sans odia": "Noto Sans Oriya",
   "noto sans urdu": "Noto Sans Arabic",

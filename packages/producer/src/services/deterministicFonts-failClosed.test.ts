@@ -143,10 +143,13 @@ describe("injectDeterministicFontFaces — failClosedFontFetch: true", () => {
   }
 
   for (const [authoredFamily, googleFamily] of [
+    ["FredericktheGreat", "Fredericka the Great"],
     ["Pretendard", "Noto Sans KR"],
+    ["Pyidaungsu", "Noto Sans Myanmar"],
     ["Yantra Manav", "Yantramanav"],
     ["Noto Serif Arabic", "Noto Naskh Arabic"],
     ["Noto Serif Urdu", "Noto Nastaliq Urdu"],
+    ["Noto Serif VI", "Noto Serif"],
     ["Noto Sans Greek", "Noto Sans"],
     ["Noto Sans Odia", "Noto Sans Oriya"],
     ["Noto Sans Urdu", "Noto Sans Arabic"],

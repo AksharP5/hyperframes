@@ -212,10 +212,13 @@ describe("font rules", () => {
     });
 
     for (const family of [
+      "FredericktheGreat",
       "Pretendard",
+      "Pyidaungsu",
       "Yantra Manav",
       "Noto Serif Arabic",
       "Noto Serif Urdu",
+      "Noto Serif VI",
       "Noto Sans Greek",
       "Noto Sans Odia",
       "Noto Sans Urdu",
