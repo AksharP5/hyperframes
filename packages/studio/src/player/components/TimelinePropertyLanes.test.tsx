@@ -424,7 +424,10 @@ describe("TimelinePropertyLanes", () => {
     act(() => {
       diamonds[1]?.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
     });
-    expect(onClickKeyframe).toHaveBeenCalledWith(50);
+    expect(onClickKeyframe).toHaveBeenCalledWith(
+      "clip-1",
+      expect.objectContaining({ percentage: 50 }),
+    );
     act(() => root.unmount());
   });
 });

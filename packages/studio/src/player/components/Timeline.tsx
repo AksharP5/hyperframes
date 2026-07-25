@@ -28,6 +28,7 @@ import { useResolvedTimelineEditCallbacks } from "./useResolvedTimelineEditCallb
 import type { TimelineProps } from "./TimelineTypes";
 import { useTrackGapMenu } from "./useTrackGapMenu";
 import { useTimelineGapHighlights } from "./useTimelineGapHighlights";
+import { useTimelineKeyframeHandlers } from "./useTimelineKeyframeHandlers";
 import { useStudioPlaybackContextOptional } from "../../contexts/StudioContext";
 
 // Re-export pure utilities so existing imports from "./Timeline" still resolve.
@@ -261,6 +262,17 @@ export const Timeline = memo(function Timeline({
   const keyframeCache = usePlayerStore((s) => s.keyframeCache);
   const selectedKeyframes = usePlayerStore((s) => s.selectedKeyframes);
   const toggleSelectedKeyframe = usePlayerStore((s) => s.toggleSelectedKeyframe);
+
+  const { onClickKeyframe, onShiftClickKeyframe, onContextMenuKeyframe } =
+    useTimelineKeyframeHandlers({
+      expandedElements,
+      keyframeCache,
+      onSelectElement,
+      onSeek,
+      setSelectedElementId,
+      setKfContextMenu,
+      toggleSelectedKeyframe,
+    });
 
   const selectedElement = useMemo(
     () =>
@@ -496,40 +508,10 @@ export const Timeline = memo(function Timeline({
           selectedKeyframes={selectedKeyframes}
           currentTime={currentTime}
           beatAnalysis={adjustedBeatAnalysis}
-          onClickKeyframe={(el, pct) => {
-            usePlayerStore.getState().clearSelectedKeyframes();
-            const elKey = el.key ?? el.id;
-            setSelectedElementId(elKey);
-            onSelectElement?.(el);
-            // Select the clicked diamond (matches shift-click); cleared above so this single-selects.
-            toggleSelectedKeyframe(`${elKey}:${pct}`);
-            const absTime = el.start + (pct / 100) * el.duration;
-            onSeek?.(absTime);
-            const kfData = keyframeCache?.get(elKey);
-            const kf = kfData?.keyframes.find((k) => Math.abs(k.percentage - pct) < 0.5);
-            usePlayerStore.getState().setActiveKeyframePct(kf?.tweenPercentage ?? null);
-          }}
-          onShiftClickKeyframe={(elId, pct) => {
-            toggleSelectedKeyframe(`${elId}:${pct}`);
-          }}
+          onClickKeyframe={onClickKeyframe}
+          onShiftClickKeyframe={onShiftClickKeyframe}
           onMoveKeyframe={onMoveKeyframe}
-          onContextMenuKeyframe={(e, elId, pct) => {
-            const el = expandedElements.find((x) => (x.key ?? x.id) === elId);
-            if (!el) return;
-            setSelectedElementId(elId);
-            onSelectElement?.(el);
-            const kfData = keyframeCache.get(elId);
-            const kf = kfData?.keyframes.find((k) => Math.abs(k.percentage - pct) < 0.2);
-            setKfContextMenu({
-              x: e.clientX + 4,
-              y: e.clientY + 2,
-              element: el,
-              elementId: elId,
-              percentage: pct,
-              tweenPercentage: kf?.tweenPercentage,
-              currentEase: kf?.ease ?? kfData?.ease,
-            });
-          }}
+          onContextMenuKeyframe={onContextMenuKeyframe}
           onContextMenuClip={(e, el) => {
             e.preventDefault();
             setSelectedElementId(el.key ?? el.id);

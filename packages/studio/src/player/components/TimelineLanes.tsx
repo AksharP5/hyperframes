@@ -72,9 +72,13 @@ export interface TimelineLaneBaseProps {
   keyframeCache?: Map<string, KeyframeCacheEntry>;
   selectedKeyframes: Set<string>;
   currentTime: number;
-  onClickKeyframe?: (element: TimelineElement, percentage: number) => void;
-  onShiftClickKeyframe?: (elementId: string, percentage: number) => void;
-  onContextMenuKeyframe?: (e: React.MouseEvent, elementId: string, percentage: number) => void;
+  onClickKeyframe?: (element: TimelineElement, keyframe: TimelineKeyframeTarget) => void;
+  onShiftClickKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
+  onContextMenuKeyframe?: (
+    e: React.MouseEvent,
+    elementId: string,
+    keyframe: TimelineKeyframeTarget,
+  ) => void;
   onMoveKeyframe?: (
     elementId: string,
     keyframe: TimelineKeyframeTarget,
@@ -474,7 +478,9 @@ export function TimelineLanes({
                             }
                             elementId={elementKey}
                             selectedKeyframes={selectedKeyframes}
-                            onClickKeyframe={(pct) => onClickKeyframe?.(previewElement, pct)}
+                            onClickKeyframe={(_elId, keyframe) =>
+                              onClickKeyframe?.(previewElement, keyframe)
+                            }
                             onShiftClickKeyframe={onShiftClickKeyframe}
                             onContextMenuKeyframe={onContextMenuKeyframe}
                             onMoveKeyframe={onMoveKeyframe}

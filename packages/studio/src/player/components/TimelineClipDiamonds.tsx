@@ -44,9 +44,13 @@ interface TimelineClipDiamondsProps {
   currentPercentage: number;
   elementId: string;
   selectedKeyframes: ReadonlySet<string>;
-  onClickKeyframe?: (percentage: number) => void;
-  onShiftClickKeyframe?: (elementId: string, percentage: number) => void;
-  onContextMenuKeyframe?: (e: React.MouseEvent, elementId: string, percentage: number) => void;
+  onClickKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
+  onShiftClickKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
+  onContextMenuKeyframe?: (
+    e: React.MouseEvent,
+    elementId: string,
+    keyframe: TimelineKeyframeTarget,
+  ) => void;
   /** Drag-to-retime: move a keyframe to a new time, preserving its value + ease.
    *  `keyframe` identifies the dragged keyframe (clip-relative percentage plus
    *  whatever animation identity the row carries); `toClipPercentage` is the
@@ -105,18 +109,21 @@ type DragState = {
   cancelled?: boolean;
 };
 
-function keyframeTarget(
-  keyframe: TimelineDiamondKeyframe,
-  groupAware: boolean,
-): TimelineKeyframeTarget {
-  return groupAware
-    ? {
-        percentage: keyframe.percentage,
-        tweenPercentage: keyframe.tweenPercentage,
-        propertyGroup: keyframe.propertyGroup,
-        animationId: keyframe.animationId,
-      }
-    : { percentage: keyframe.percentage };
+/**
+ * The full identity of a diamond, used by every callback and by the selection
+ * key. Collapsed clip rows and expanded property lanes read the same cache, so
+ * they must hash a shared keyframe to the same key: dropping the group here for
+ * the collapsed row would leave a diamond selected in one view and unselected in
+ * the other, and would strip the animation id the retime/delete mutations use to
+ * pick between two animations that collide at one percentage.
+ */
+function keyframeTarget(keyframe: TimelineDiamondKeyframe): TimelineKeyframeTarget {
+  return {
+    percentage: keyframe.percentage,
+    tweenPercentage: keyframe.tweenPercentage,
+    propertyGroup: keyframe.propertyGroup,
+    animationId: keyframe.animationId,
+  };
 }
 
 export const TimelineDiamondLane = memo(function TimelineDiamondLane({
@@ -216,16 +223,21 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
   // Clip-%s of the sorted keyframes — the neighbour clamp (preview + drop) needs
   // the whole row to bound the dragged diamond between its immediate siblings.
   const sortedClipPcts = sorted.map((k) => k.percentage);
-  const sortedCenterXs = sorted.map((keyframe) =>
-    Math.max(0, Math.min(clipWidthPx, (keyframe.percentage / 100) * clipWidthPx)),
-  );
-  const markerMetrics = sortedCenterXs.map((centerX, index) => {
-    const previousGap = index > 0 ? centerX - sortedCenterXs[index - 1]! : Infinity;
-    const nextGap =
-      index < sortedCenterXs.length - 1 ? sortedCenterXs[index + 1]! - centerX : Infinity;
+  const centerXOf = (percentage: number) =>
+    Math.max(0, Math.min(clipWidthPx, (percentage / 100) * clipWidthPx));
+  // One record per diamond, carrying its own geometry, so the connector and
+  // button passes below read neighbours as values instead of index lookups.
+  const markers = sorted.map((keyframe, index) => {
+    const centerX = centerXOf(keyframe.percentage);
+    const previous = sorted[index - 1];
+    const next = sorted[index + 1];
+    const previousGap = previous ? centerX - centerXOf(previous.percentage) : Infinity;
+    const nextGap = next ? centerXOf(next.percentage) - centerX : Infinity;
     const nearestGap = Math.max(1, Math.min(previousGap, nextGap));
     const hitWidth = Math.min(diamondSize, nearestGap);
     return {
+      keyframe,
+      centerX,
       hitWidth,
       visualSize: hitWidth === diamondSize ? diamondSize : Math.max(2, hitWidth - 2),
     };
@@ -248,25 +260,24 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
         pointerEvents: "none",
       }}
     >
-      {sorted.map((kf, i) => {
-        if (i === 0) return null;
-        const prev = sorted[i - 1]!;
-        const x1 = sortedCenterXs[i - 1]!;
-        const x2 = sortedCenterXs[i]!;
+      {markers.map((marker, i) => {
+        const previous = markers[i - 1];
+        if (!previous) return null;
+        const kf = marker.keyframe;
+        const x1 = previous.centerX;
+        const x2 = marker.centerX;
         if (x2 - x1 < 1) return null;
-        const connectorLeft = x1 + markerMetrics[i - 1]!.visualSize / 2;
-        const connectorWidth =
-          x2 - x1 - markerMetrics[i - 1]!.visualSize / 2 - markerMetrics[i]!.visualSize / 2;
-        // Group-aware target for the ease button: the segment ease is
-        // per-keyframe (each keyframe carries its own animationId/tweenPercentage).
-        // On a merged inline row the button is hidden where the segment is
-        // ambiguous (two source animations collide at this % with different
-        // eases; see easeAmbiguous) or the keyframe has no source animation id
-        // (runtime-scanned) so there is no tween to target.
-        const target = keyframeTarget(kf, true);
+        const connectorLeft = x1 + previous.visualSize / 2;
+        const connectorWidth = x2 - x1 - previous.visualSize / 2 - marker.visualSize / 2;
+        // The ease button targets one segment, so it needs the keyframe's own
+        // animationId/tweenPercentage. On a merged inline row the button is
+        // hidden where the segment is ambiguous (two source animations collide
+        // at this % with different eases; see easeAmbiguous) or the keyframe has
+        // no source animation id (runtime-scanned) so there is no tween to target.
+        const target = keyframeTarget(kf);
         const ease = kf.ease ?? globalEase;
         return (
-          <Fragment key={`line-${i}-${prev.percentage}-${kf.percentage}`}>
+          <Fragment key={`line-${i}-${previous.keyframe.percentage}-${kf.percentage}`}>
             <div
               className="absolute"
               data-keyframe-connector={groupAware ? "" : undefined}
@@ -334,8 +345,9 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
         );
       })}
 
-      {sorted.map((kf, i) => {
-        const target = keyframeTarget(kf, groupAware);
+      {markers.map((marker, i) => {
+        const kf = marker.keyframe;
+        const target = keyframeTarget(kf);
         const kfKey = timelineKeyframeSelectionKey(elementId, target);
         // While dragging this diamond, render it at the live preview clip-%.
         const renderPct = preview?.kfKey === kfKey ? preview.clipPct : kf.percentage;
@@ -344,7 +356,6 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
         // The 0% diamond's left half lands in the reserved left gutter (the
         // content origin is inset past the label column, Figma-style) so it stays
         // fully visible instead of being clipped by the sticky label column.
-        const marker = markerMetrics[i]!;
         const leftPx = (renderPct / 100) * clipWidthPx - marker.hitWidth / 2;
         const isKfSelected = selectedKeyframes.has(kfKey);
         const atPlayhead = isSelected && Math.abs(kf.percentage - currentPercentage) < 0.5;
@@ -565,12 +576,10 @@ export const TimelineClipDiamonds = memo(function TimelineClipDiamonds(
     <TimelineDiamondLane
       {...props}
       globalEase={props.keyframesData.ease}
-      onClickKeyframe={(target) => props.onClickKeyframe?.(target.percentage)}
-      onShiftClickKeyframe={(target) =>
-        props.onShiftClickKeyframe?.(props.elementId, target.percentage)
-      }
+      onClickKeyframe={(target) => props.onClickKeyframe?.(props.elementId, target)}
+      onShiftClickKeyframe={(target) => props.onShiftClickKeyframe?.(props.elementId, target)}
       onContextMenuKeyframe={(e, target) =>
-        props.onContextMenuKeyframe?.(e, props.elementId, target.percentage)
+        props.onContextMenuKeyframe?.(e, props.elementId, target)
       }
       onMoveKeyframe={
         props.onMoveKeyframe

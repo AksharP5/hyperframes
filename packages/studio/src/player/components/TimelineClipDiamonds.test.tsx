@@ -4,6 +4,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TimelineClipDiamonds, TimelineDiamondLane } from "./TimelineClipDiamonds";
+import { timelineKeyframeSelectionKey } from "./timelineKeyframeIdentity";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -90,7 +91,57 @@ describe("TimelineClipDiamonds", () => {
       diamond!.dispatchEvent(pointerEvent("pointerup", { bubbles: true, button: 0 }));
     });
 
-    expect(onClickKeyframe).toHaveBeenCalledWith(50);
+    expect(onClickKeyframe).toHaveBeenCalledWith(
+      "clip-1",
+      expect.objectContaining({ percentage: 50 }),
+    );
+    act(() => root.unmount());
+  });
+
+  // The collapsed clip row and the expanded property lanes read the same cache,
+  // so a keyframe that carries a property group has to hash to the same key in
+  // both — otherwise collapsing a track silently drops the selection.
+  it("keys a grouped keyframe the same way collapsed as expanded", () => {
+    const groupedKeyframe = {
+      percentage: 50,
+      tweenPercentage: 25,
+      propertyGroup: "position",
+      animationId: "anim-1",
+      properties: { x: 100 },
+    };
+    const sharedKey = timelineKeyframeSelectionKey("clip-1", groupedKeyframe);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const onClickKeyframe = vi.fn();
+    act(() => {
+      root.render(
+        <TimelineClipDiamonds
+          keyframesData={{ format: "percentage", keyframes: [groupedKeyframe] }}
+          clipWidthPx={200}
+          clipHeightPx={48}
+          accentColor="#4ba3d2"
+          isSelected
+          currentPercentage={-10}
+          elementId="clip-1"
+          selectedKeyframes={new Set([sharedKey])}
+          onClickKeyframe={onClickKeyframe}
+        />,
+      );
+    });
+    const diamond = host.querySelector<HTMLButtonElement>('button[title="50%"]');
+    // Highlighted from the shared key alone (the playhead is off-clip here).
+    expect(diamond?.querySelector("path:last-child")?.getAttribute("fill")).toBe("#4ba3d2");
+
+    act(() => {
+      diamond?.dispatchEvent(pointerEvent("pointerup", { bubbles: true, button: 0 }));
+    });
+    expect(onClickKeyframe).toHaveBeenCalledWith("clip-1", {
+      percentage: 50,
+      tweenPercentage: 25,
+      propertyGroup: "position",
+      animationId: "anim-1",
+    });
     act(() => root.unmount());
   });
 
