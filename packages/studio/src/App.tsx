@@ -401,6 +401,7 @@ export function StudioApp() {
     panelLayout.rightInspectorPanes,
     panelLayout.rightCollapsed,
     isPlaying,
+    domEditSession.domEditSelection,
     gestureState === "recording",
   );
   useStudioUrlState({
