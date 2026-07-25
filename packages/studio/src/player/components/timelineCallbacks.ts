@@ -78,10 +78,10 @@ export interface TimelineEditCallbacks {
     tweenPercentage?: number,
     animationId?: string,
   ) => void;
-  onDeleteAllKeyframes?: (elementId: string) => void;
+  onDeleteAllKeyframes?: (element: TimelineElement) => void;
   onChangeKeyframeEase?: (elementId: string, percentage: number, ease: string) => void;
   onMoveKeyframeToPlayhead?: (
-    elementId: string,
+    element: TimelineElement,
     percentage: number,
     propertyGroup?: string,
     tweenPercentage?: number,
