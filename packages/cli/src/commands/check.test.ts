@@ -147,7 +147,9 @@ function fakeDriver(overrides: Partial<CheckAuditDriver> = {}): CheckAuditDriver
     getCanvas: vi.fn(async () => ({ width: 1920, height: 1080 })),
     findAmbiguousSelectors: vi.fn(async (_selectors: string[]) => []),
     seek: vi.fn(async (_time: number) => undefined),
+    seekGeometry: vi.fn(async (_time: number) => undefined),
     collectLayout: vi.fn(async (_time: number, _tolerance: number) => []),
+    collectOverlap: vi.fn(async (_time: number) => []),
     collectLayoutGeometry: vi.fn(async () => `geometry-${geometryCallCount++}`),
     collectRotationSample: vi.fn(async (_time: number) => []),
     collectOffPivotRotationSample: vi.fn(async (time: number) => ({ time, samples: [] })),
@@ -1341,5 +1343,44 @@ describe("contrast candidate round-trip", () => {
     expect(source).toMatch(/prepared\.map\(\(entry\) => entry\.raw\)/);
     expect(source).toMatch(/raw: unknown;/);
     expect(source).not.toMatch(/prepared\.map\(\(entry\) => entry\.candidate\)/);
+  });
+});
+
+describe("dense motion-overlap re-sampling", () => {
+  // Collision lives inside (3.5, 4.5), a gap the sparse base grid seeks past; only the 8fps dense pass observes it.
+  const inBetweenGridWindow = (time: number): boolean => time >= 3.6 && time <= 4.4;
+
+  it("detects a content_overlap that occurs ONLY between two sparse grid samples", async () => {
+    const driver = fakeDriver({
+      // Sparse base grid sees nothing at any base sample time.
+      collectLayout: vi.fn(async (_time: number) => []),
+      // The transient exists only strictly between base samples 3.5 and 4.5.
+      collectOverlap: vi.fn(async (time: number) =>
+        inBetweenGridWindow(time)
+          ? [layoutIssue("warning", { time, code: "content_overlap" })]
+          : [],
+      ),
+    });
+    const { report } = await runScenario(driver);
+    expect(driver.collectOverlap).toHaveBeenCalled();
+    expect(report.layout.findings.some((f) => f.code === "content_overlap")).toBe(true);
+    // Held ~750ms across the dense grid (>= the 500ms floor) -> promoted.
+    expect(report.layout.errorCount).toBeGreaterThan(0);
+  });
+
+  it("runs the dense pass even when sparse fingerprints are identical (aliased motion)", async () => {
+    // Aliased motion has identical fingerprints yet still collides between samples — the false-negative the removed gate caused.
+    const driver = fakeDriver({
+      collectLayoutGeometry: vi.fn(async () => "static"),
+      collectLayout: vi.fn(async (_time: number) => []),
+      collectOverlap: vi.fn(async (time: number) =>
+        inBetweenGridWindow(time)
+          ? [layoutIssue("warning", { time, code: "content_overlap" })]
+          : [],
+      ),
+    });
+    const { report } = await runScenario(driver);
+    expect(driver.collectOverlap).toHaveBeenCalled();
+    expect(report.layout.findings.some((f) => f.code === "content_overlap")).toBe(true);
   });
 });

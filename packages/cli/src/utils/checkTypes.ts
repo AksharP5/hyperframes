@@ -173,7 +173,11 @@ export interface CheckAuditDriver {
   getCanvas(): Promise<Canvas>;
   findAmbiguousSelectors(selectors: string[]): Promise<AnchoredLayoutIssue[]>;
   seek(time: number): Promise<void>;
+  /** Settle-free seek for the geometry-only dense content_overlap pass; only collectOverlap consumes it, and getBoundingClientRect is valid synchronously after setTime. */
+  seekGeometry(time: number): Promise<void>;
   collectLayout(time: number, tolerance: number): Promise<AnchoredLayoutIssue[]>;
+  /** content_overlap only, for the dense re-sampling grid — catches transient text collisions the sparse grid seeks past. */
+  collectOverlap(time: number): Promise<AnchoredLayoutIssue[]>;
   /** Frozen-sweep guard (#U10): an opaque per-sample geometry+opacity
    * fingerprint of the current seeked state, for detecting a timeline that
    * never advances under seek. See layout-audit.browser.js. */

@@ -417,7 +417,40 @@ async function collectGridSamples(
       collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
     }
   }
+  await collectMotionOverlapSamples(driver, grid, collected);
   return collected;
+}
+
+// Dense grid catches mid-motion text collisions the sparse layout grid seeks past; text-only overlap collection is cheap enough to afford it.
+const OVERLAP_SAMPLE_FPS = 8;
+// Ceiling that bounds dense seeks; past ~75s the grid degrades below 8fps rather than growing the seek budget without limit.
+const OVERLAP_MAX_SAMPLES = 600;
+
+function buildOverlapSampleTimes(duration: number): number[] {
+  if (!Number.isFinite(duration) || duration <= 0) return [];
+  const count = Math.min(
+    OVERLAP_MAX_SAMPLES,
+    Math.max(2, Math.ceil(duration * OVERLAP_SAMPLE_FPS) + 1),
+  );
+  const step = duration / (count - 1);
+  return mergeSampleTimes(
+    Array.from({ length: count }, (_, index) => Math.round(index * step * 1000) / 1000),
+  );
+}
+
+/** Reruns content_overlap on a fine grid, unconditionally rather than gated on fingerprint change, since an animation aliased to the sparse grid collides between identical-fingerprint samples. */
+async function collectMotionOverlapSamples(
+  driver: CheckAuditDriver,
+  grid: SampleGrid,
+  collected: GridSamples,
+): Promise<void> {
+  const baseTimes = new Set(grid.layoutSamples);
+  for (const time of buildOverlapSampleTimes(grid.duration)) {
+    if (baseTimes.has(time)) continue;
+    // Settle-free seek: collectOverlap reads getBoundingClientRect geometry, valid synchronously after setTime, so the dense pass skips the per-seek paint settle.
+    await driver.seekGeometry(time);
+    collected.layoutIssues.push(...(await driver.collectOverlap(time)));
+  }
 }
 
 // Frozen-sweep guard (#U10): compositions this short can legitimately hold a

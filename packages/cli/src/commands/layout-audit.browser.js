@@ -1425,6 +1425,16 @@
     return issues;
   };
 
+  // Reruns only the overlap detector (same threshold, no new surface) on a fine grid for the dense motion re-sampling pass.
+  window.__hyperframesOverlapAudit = function auditOverlap(options) {
+    const time = options && typeof options.time === "number" ? options.time : 0;
+    const root =
+      document.querySelector("[data-composition-id][data-width][data-height]") ||
+      document.querySelector("[data-composition-id]") ||
+      document.body;
+    return contentOverlapIssues(root, time);
+  };
+
   // Frozen-sweep guard (#U10, checkPipeline.ts): a compact per-sample
   // fingerprint of every visible element's box + opacity, in DOM order. Node
   // calls this once per seeked grid point and compares the strings across the

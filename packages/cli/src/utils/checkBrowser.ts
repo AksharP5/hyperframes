@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { Page } from "puppeteer-core";
 import {
   AUDIT_SEEK_OPTIONS,
+  DENSE_GEOMETRY_SEEK_OPTIONS,
   DEFAULT_ZOOM_PADDING_PX,
   DEFAULT_ZOOM_SCALE,
   captureRegionCrop,
@@ -348,7 +349,12 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
       setTime(time);
       await seekCompositionTimeline(page, time, AUDIT_SEEK_OPTIONS);
     },
+    seekGeometry: async (time) => {
+      setTime(time);
+      await seekCompositionTimeline(page, time, DENSE_GEOMETRY_SEEK_OPTIONS);
+    },
     collectLayout: (time, tolerance) => collectLayout(page, time, tolerance),
+    collectOverlap: (time) => collectOverlap(page, time),
     collectLayoutGeometry: () => collectLayoutGeometry(page),
     collectRotationSample: (time) => collectRotationSample(page, time),
     collectOffPivotRotationSample: (time) => collectOffPivotRotationSample(page, time),
@@ -460,6 +466,19 @@ async function collectLayout(
       return Array.isArray(result) ? result : [];
     },
     { time, tolerance },
+  );
+  return anchorLayoutIssues(page, raw.flatMap(parseLayoutIssue));
+}
+
+async function collectOverlap(page: Page, time: number): Promise<AnchoredLayoutIssue[]> {
+  const raw = await page.evaluate(
+    (options: { time: number }) => {
+      const audit = Reflect.get(window, "__hyperframesOverlapAudit");
+      if (typeof audit !== "function") return [];
+      const result = Reflect.apply(audit, window, [options]);
+      return Array.isArray(result) ? result : [];
+    },
+    { time },
   );
   return anchorLayoutIssues(page, raw.flatMap(parseLayoutIssue));
 }
