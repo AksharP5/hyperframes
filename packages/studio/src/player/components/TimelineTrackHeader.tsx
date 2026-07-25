@@ -75,7 +75,9 @@ function VisibilityButton({
   );
 }
 
-function LegacyTrackHeader({
+// The header a track gets when it has no keyframe clip to disclose: label, clip
+// count, eye. Not deprecated — it is the live path for every track without lanes.
+function PlainTrackHeader({
   trackNumber,
   trackLabel,
   clipCount,
@@ -318,7 +320,7 @@ export function TimelineTrackHeader({
       }}
     >
       {!keyframeClip || lanes.length === 0 ? (
-        <LegacyTrackHeader
+        <PlainTrackHeader
           trackNumber={trackNumber}
           trackLabel={trackLabel}
           clipCount={clipCount}
