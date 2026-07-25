@@ -13,9 +13,9 @@ function brightPopGrading() {
   return next;
 }
 
-function warmDaylightGrading() {
-  const next = normalizeHfColorGrading({ preset: "warm-daylight", intensity: 1 });
-  if (!next) throw new Error("expected warm-daylight preset to normalize");
+function cleanStudioGrading() {
+  const next = normalizeHfColorGrading({ preset: "clean-studio", intensity: 1 });
+  if (!next) throw new Error("expected clean-studio preset to normalize");
   return next;
 }
 
@@ -60,14 +60,17 @@ function HookHost({
   onState,
   onSetAttributeLive,
   element,
+  previewIframeRef,
 }: {
   onState: (state: ReturnType<typeof useColorGradingController>) => void;
   onSetAttributeLive: (attr: string, value: string | null) => void;
   element: DomEditSelection;
+  previewIframeRef?: React.RefObject<HTMLIFrameElement | null>;
 }) {
   const state = useColorGradingController({
     projectId: "proj",
     element,
+    previewIframeRef,
     onSetAttributeLive,
   });
   onState(state);
@@ -77,6 +80,7 @@ function HookHost({
 function renderHook(
   onSetAttributeLive: (attr: string, value: string | null) => void,
   initialElement: DomEditSelection = makeElement(),
+  previewIframeRef?: React.RefObject<HTMLIFrameElement | null>,
 ) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -89,6 +93,7 @@ function renderHook(
           onState: (s: ReturnType<typeof useColorGradingController>) => (latest = s),
           onSetAttributeLive,
           element,
+          previewIframeRef,
         }),
       );
     });
@@ -107,12 +112,120 @@ function renderHook(
   };
 }
 
+type PreviewWindow = Window & {
+  __hf?: {
+    colorGrading?: {
+      renderPreviews?: ReturnType<typeof vi.fn>;
+      startPreviewPlayback?: ReturnType<typeof vi.fn>;
+    };
+  };
+  __player?: { play: ReturnType<typeof vi.fn> };
+};
+
+function createPreviewFrame() {
+  const iframe = document.body.appendChild(document.createElement("iframe"));
+  const contentWindow = iframe.contentWindow as PreviewWindow | null;
+  if (!contentWindow) throw new Error("expected iframe contentWindow");
+  return { contentWindow, iframe };
+}
+
+async function flushPreviewRequest() {
+  act(() => vi.advanceTimersByTime(0));
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+function colorGradingMessages(calls: ReadonlyArray<ReadonlyArray<unknown>>) {
+  return calls
+    .map(([message]) => message)
+    .filter(
+      (message): message is { action: string; grading: unknown } =>
+        typeof message === "object" &&
+        message !== null &&
+        "action" in message &&
+        message.action === "set-color-grading",
+    );
+}
+
 describe("useColorGradingController", () => {
   it("starts with the neutral (inactive) grading and idle compare state", () => {
     const { root, getState } = renderHook(vi.fn());
     expect(getState().grading.preset).toBe("neutral");
     expect(getState().compareEnabled).toBe(false);
     act(() => root.unmount());
+  });
+
+  it("requests one exact preset batch from the selected media runtime", async () => {
+    vi.useFakeTimers();
+    const devicePixelRatio = vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+    const { contentWindow, iframe } = createPreviewFrame();
+    const renderPreviews = vi.fn().mockResolvedValue({
+      width: 160,
+      height: 90,
+      images: [{ id: "bright-pop", dataUrl: "data:image/png;base64,bright" }],
+    });
+    contentWindow.__hf = { colorGrading: { renderPreviews } };
+    const { root, getState } = renderHook(vi.fn(), makeElement(), { current: iframe });
+
+    act(() => getState().requestPresetPreviews());
+    await flushPreviewRequest();
+
+    expect(renderPreviews).toHaveBeenCalledTimes(1);
+    expect(renderPreviews.mock.calls[0]?.[1]).toHaveLength(18);
+    expect(renderPreviews.mock.calls[0]?.[2]).toEqual({ maxDimension: 320 });
+    expect(getState().presetPreviews).toEqual({
+      status: "ready",
+      images: { "bright-pop": "data:image/png;base64,bright" },
+      width: 160,
+      height: 90,
+    });
+    act(() => root.unmount());
+    devicePixelRatio.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("requests exact effect families and retains earlier family images", async () => {
+    vi.useFakeTimers();
+    const { contentWindow, iframe } = createPreviewFrame();
+    const renderPreviews = vi
+      .fn()
+      .mockImplementation(async (_target: unknown, candidates: Array<{ id: string }>) => ({
+        width: 160,
+        height: 90,
+        images: candidates.map(({ id }) => ({ id, dataUrl: `data:image/png;base64,${id}` })),
+      }));
+    contentWindow.__hf = { colorGrading: { renderPreviews } };
+    const { root, getState } = renderHook(vi.fn(), makeElement(), { current: iframe });
+
+    act(() => getState().requestEffectPreviews(["blur", "pixelate", "bloom"]));
+    await flushPreviewRequest();
+
+    expect(renderPreviews).toHaveBeenCalledTimes(1);
+    expect(renderPreviews.mock.calls[0]?.[1].map(({ id }: { id: string }) => id)).toEqual([
+      "blur",
+      "pixelate",
+      "bloom",
+    ]);
+
+    act(() => getState().requestEffectPreviews(["kuwahara"]));
+    await flushPreviewRequest();
+
+    expect(renderPreviews).toHaveBeenCalledTimes(2);
+    expect(getState().effectPreviews).toEqual({
+      status: "ready",
+      images: {
+        blur: "data:image/png;base64,blur",
+        pixelate: "data:image/png;base64,pixelate",
+        bloom: "data:image/png;base64,bloom",
+        kuwahara: "data:image/png;base64,kuwahara",
+      },
+      width: 160,
+      height: 90,
+    });
+    act(() => root.unmount());
+    vi.useRealTimers();
   });
 
   it("commitColorGrading updates grading state synchronously and schedules a debounced persist", async () => {
@@ -131,6 +244,86 @@ describe("useColorGradingController", () => {
     const [attr, value] = onSetAttributeLive.mock.calls[0] as [string, string];
     expect(attr).toBe("color-grading");
     expect(value).toContain("bright-pop");
+    act(() => root.unmount());
+    vi.useRealTimers();
+  });
+
+  it("previews through the runtime only and restores the committed grade without persisting", () => {
+    vi.useFakeTimers();
+    const onSetAttributeLive = vi.fn();
+    const { contentWindow, iframe } = createPreviewFrame();
+    const postMessage = vi.spyOn(contentWindow, "postMessage");
+    const { root, getState } = renderHook(onSetAttributeLive, makeElement(), {
+      current: iframe,
+    });
+
+    act(() => getState().previewColorGrading(brightPopGrading()));
+    act(() => getState().previewColorGrading(null));
+    const gradingMessages = colorGradingMessages(postMessage.mock.calls);
+    expect(gradingMessages).toHaveLength(2);
+    expect(gradingMessages[0]?.grading).toMatchObject({ preset: "bright-pop" });
+    expect(gradingMessages[1]?.grading).toBeNull();
+    expect(getState().grading.preset).toBe("neutral");
+    act(() => vi.advanceTimersByTime(500));
+    expect(onSetAttributeLive).not.toHaveBeenCalled();
+
+    act(() => root.unmount());
+    vi.useRealTimers();
+  });
+
+  it("animates only the selected video card without starting the project player", async () => {
+    vi.useFakeTimers();
+    const { contentWindow, iframe } = createPreviewFrame();
+    const stopPlayback = vi.fn();
+    const renderPreviews = vi.fn().mockResolvedValue({
+      width: 320,
+      height: 180,
+      images: [{ id: "bright-pop", dataUrl: "data:image/png;base64,animated" }],
+    });
+    const startPreviewPlayback = vi.fn(() => stopPlayback);
+    contentWindow.__hf = { colorGrading: { renderPreviews, startPreviewPlayback } };
+    contentWindow.__player = { play: vi.fn() };
+    const { root, getState } = renderHook(vi.fn(), makeElement(), { current: iframe });
+
+    act(() =>
+      getState().previewColorGrading(brightPopGrading(), {
+        animatedPreview: { kind: "presets", id: "bright-pop" },
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(startPreviewPlayback).toHaveBeenCalledTimes(1);
+    expect(renderPreviews).toHaveBeenCalledWith(
+      expect.anything(),
+      [{ id: "bright-pop", grading: expect.objectContaining({ preset: "bright-pop" }) }],
+      { maxDimension: 160, useMediaTime: true },
+    );
+    expect(contentWindow.__player.play).not.toHaveBeenCalled();
+    expect(getState().presetPreviews.images["bright-pop"]).toBe("data:image/png;base64,animated");
+
+    act(() => getState().previewColorGrading(null));
+    expect(stopPlayback).toHaveBeenCalledTimes(1);
+
+    act(() => root.unmount());
+    vi.useRealTimers();
+  });
+
+  it("restores a just-committed look even before React renders the new state", () => {
+    vi.useFakeTimers();
+    const { contentWindow, iframe } = createPreviewFrame();
+    const postMessage = vi.spyOn(contentWindow, "postMessage");
+    const { root, getState } = renderHook(vi.fn(), makeElement(), { current: iframe });
+    const brightPop = brightPopGrading();
+
+    act(() => {
+      getState().commitColorGrading(brightPop);
+      getState().previewColorGrading(null);
+    });
+    const gradingMessages = colorGradingMessages(postMessage.mock.calls);
+    expect(gradingMessages.at(-1)?.grading).toMatchObject({ preset: "bright-pop" });
+
     act(() => root.unmount());
     vi.useRealTimers();
   });
@@ -253,7 +446,7 @@ describe("useColorGradingController", () => {
           });
         },
       )
-      // Edit B (warm-daylight): settles immediately and successfully.
+      // Edit B (clean-studio): settles immediately and successfully.
       .mockImplementationOnce(
         (_attr: string, _value: string | null, onSettled?: (ok: boolean) => void) => {
           onSettled?.(true);
@@ -272,13 +465,13 @@ describe("useColorGradingController", () => {
 
     // B commits on the SAME element before A's persist has settled.
     act(() => {
-      getState().commitColorGrading(warmDaylightGrading());
+      getState().commitColorGrading(cleanStudioGrading());
     });
     act(() => {
       vi.advanceTimersByTime(400);
     });
     expect(onSetAttributeLive).toHaveBeenCalledTimes(2); // B's persist has already settled (mock resolves sync)
-    expect(getState().grading.preset).toBe("warm-daylight");
+    expect(getState().grading.preset).toBe("clean-studio");
 
     // NOW A's stale persist finally settles as a FAILURE — must not revert
     // `grading` (which now correctly shows B's newer edit) back to the
@@ -292,20 +485,32 @@ describe("useColorGradingController", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(getState().grading.preset).toBe("warm-daylight");
+    expect(getState().grading.preset).toBe("clean-studio");
     act(() => root.unmount());
     vi.useRealTimers();
   });
 
-  it("resetGrading returns to the neutral preset", () => {
+  it("resetGrading resets Grade fields without clearing Effects or Palette", () => {
     const { root, getState } = renderHook(vi.fn());
+    const grading = normalizeHfColorGrading({
+      preset: "bright-pop",
+      lut: { src: "assets/luts/custom.cube", intensity: 0.6 },
+      effects: { pixelate: 0.5 },
+      palette: ["#112233", "#ffffff"],
+    });
+    if (!grading) throw new Error("expected grading to normalize");
     act(() => {
-      getState().commitColorGrading(brightPopGrading());
+      getState().commitColorGrading(grading);
     });
     act(() => {
       getState().resetGrading();
     });
-    expect(getState().grading.preset).toBe("neutral");
+    expect(getState().grading).toMatchObject({
+      preset: "neutral",
+      lut: null,
+      effects: { pixelate: 0.5 },
+      palette: ["#112233", "#ffffff"],
+    });
     act(() => root.unmount());
   });
 
