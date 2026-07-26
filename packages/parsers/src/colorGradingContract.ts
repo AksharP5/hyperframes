@@ -1,11 +1,17 @@
-export const COLOR_GRADING_CONTRACT_VERSION = 1;
+export const COLOR_GRADING_CONTRACT_VERSION = 2;
 export const COLOR_GRADING_COLOR_SPACE = "rec709";
+export const COLOR_GRADING_MAX_CURVE_POINTS = 16;
+export const COLOR_GRADING_MAX_SECONDARIES = 4;
 
 export const COLOR_GRADING_TOP_LEVEL_KEYS = [
   "enabled",
   "preset",
   "intensity",
   "adjust",
+  "wheels",
+  "curves",
+  "hueCurves",
+  "secondaries",
   "details",
   "effects",
   "palette",
@@ -24,6 +30,23 @@ export const COLOR_GRADING_ADJUST_KEYS = [
   "tint",
   "vibrance",
   "saturation",
+] as const;
+
+export const COLOR_GRADING_WHEEL_KEYS = ["shadows", "midtones", "highlights"] as const;
+export const COLOR_GRADING_CURVE_KEYS = ["master", "red", "green", "blue"] as const;
+export const COLOR_GRADING_HUE_CURVE_KEYS = ["hueVsHue", "hueVsSaturation", "hueVsLuma"] as const;
+
+const COLOR_GRADING_WHEEL_CONTROL_KEYS = ["hue", "amount", "level"] as const;
+const COLOR_GRADING_SECONDARY_KEYS = ["enabled", "key", "correction"] as const;
+const COLOR_GRADING_SECONDARY_KEY_KEYS = ["hue", "saturation", "luma"] as const;
+const COLOR_GRADING_HUE_RANGE_KEYS = ["center", "range", "softness"] as const;
+const COLOR_GRADING_SOFT_RANGE_KEYS = ["min", "max", "softness"] as const;
+const COLOR_GRADING_SECONDARY_CORRECTION_KEYS = [
+  "hueShift",
+  "saturation",
+  "luma",
+  "temperature",
+  "tint",
 ] as const;
 
 export const COLOR_GRADING_DETAIL_KEYS = [
@@ -176,26 +199,104 @@ function validateObject(
   return value;
 }
 
+function isNumberInRange(value: unknown, limit: NumericLimit, inclusiveMax: boolean): boolean {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < limit.min) return false;
+  return inclusiveMax ? value <= limit.max : value < limit.max;
+}
+
 function validateNumericField(
   value: Record<string, unknown>,
   key: string,
   path: string,
   limit: NumericLimit,
   issues: ColorGradingContractIssue[],
+  inclusiveMax = true,
 ): void {
   const candidate = value[key];
   if (candidate === undefined || isColorGradingVariableRef(candidate)) return;
-  if (
-    typeof candidate !== "number" ||
-    !Number.isFinite(candidate) ||
-    candidate < limit.min ||
-    candidate > limit.max
-  ) {
+  if (isNumberInRange(candidate, limit, inclusiveMax)) return;
+  issues.push({
+    path: path ? `${path}.${key}` : key,
+    message: `must be a finite number from ${limit.min} ${inclusiveMax ? "through" : "up to"} ${limit.max}`,
+  });
+}
+
+function isFiniteTuple(value: unknown): value is readonly [number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate))
+  );
+}
+
+function validateCurve(value: unknown, path: string, issues: ColorGradingContractIssue[]): void {
+  if (isColorGradingVariableRef(value)) return;
+  if (!Array.isArray(value) || value.length < 2 || value.length > COLOR_GRADING_MAX_CURVE_POINTS) {
     issues.push({
-      path: path ? `${path}.${key}` : key,
-      message: `must be a finite number from ${limit.min} through ${limit.max}`,
+      path,
+      message: `must contain 2 to ${COLOR_GRADING_MAX_CURVE_POINTS} [input, output] points`,
+    });
+    return;
+  }
+
+  const inputs = new Set<number>();
+  value.forEach((point, index) => {
+    if (!isFiniteTuple(point)) {
+      issues.push({ path: `${path}[${index}]`, message: "must be a finite [input, output] tuple" });
+      return;
+    }
+    const [input, output] = point;
+    if (input < 0 || input > 1 || output < 0 || output > 1) {
+      issues.push({ path: `${path}[${index}]`, message: "coordinates must be between 0 and 1" });
+    }
+    if (inputs.has(input)) issues.push({ path, message: `contains duplicate input ${input}` });
+    inputs.add(input);
+  });
+
+  const inferredPointCount = value.length + (inputs.has(0) ? 0 : 1) + (inputs.has(1) ? 0 : 1);
+  if (inferredPointCount > COLOR_GRADING_MAX_CURVE_POINTS) {
+    issues.push({
+      path,
+      message: `must contain at most ${COLOR_GRADING_MAX_CURVE_POINTS} points including inferred 0 and 1 endpoints`,
     });
   }
+}
+
+function validateHueCurve(
+  value: unknown,
+  path: string,
+  outputMin: number,
+  outputMax: number,
+  issues: ColorGradingContractIssue[],
+): void {
+  if (isColorGradingVariableRef(value)) return;
+  if (!Array.isArray(value) || value.length < 3 || value.length > COLOR_GRADING_MAX_CURVE_POINTS) {
+    issues.push({
+      path,
+      message: `must contain 3 to ${COLOR_GRADING_MAX_CURVE_POINTS} [hueDegrees, delta] points`,
+    });
+    return;
+  }
+
+  const hues = new Set<number>();
+  value.forEach((point, index) => {
+    if (!isFiniteTuple(point)) {
+      issues.push({ path: `${path}[${index}]`, message: "must be a finite [hue, delta] tuple" });
+      return;
+    }
+    const [hue, delta] = point;
+    if (hue < 0 || hue >= 360) {
+      issues.push({ path: `${path}[${index}][0]`, message: "must be from 0 up to 360 degrees" });
+    }
+    if (delta < outputMin || delta > outputMax) {
+      issues.push({
+        path: `${path}[${index}][1]`,
+        message: `must be between ${outputMin} and ${outputMax}`,
+      });
+    }
+    if (hues.has(hue)) issues.push({ path, message: `contains duplicate hue ${hue}` });
+    hues.add(hue);
+  });
 }
 
 function validateNumericSection(
@@ -338,6 +439,138 @@ function validateSections(
   for (const [key, keys] of OBJECT_SECTIONS) validateSection(grading, key, keys, issues);
 }
 
+function validateWheels(value: unknown, issues: ColorGradingContractIssue[]): void {
+  if (value === undefined || isColorGradingVariableRef(value)) return;
+  const wheels = validateObject(value, "wheels", COLOR_GRADING_WHEEL_KEYS, issues);
+  if (!wheels) return;
+
+  for (const wheel of COLOR_GRADING_WHEEL_KEYS) {
+    if (wheels[wheel] === undefined) continue;
+    const path = `wheels.${wheel}`;
+    const controls = validateObject(wheels[wheel], path, COLOR_GRADING_WHEEL_CONTROL_KEYS, issues);
+    if (!controls) continue;
+    validateNumericField(controls, "hue", path, { min: 0, max: 360 }, issues, false);
+    validateNumericField(controls, "amount", path, UNIT_LIMIT, issues);
+    validateNumericField(controls, "level", path, SIGNED_UNIT_LIMIT, issues);
+  }
+}
+
+function validateCurves(value: unknown, issues: ColorGradingContractIssue[]): void {
+  if (value === undefined || isColorGradingVariableRef(value)) return;
+  const curves = validateObject(value, "curves", COLOR_GRADING_CURVE_KEYS, issues);
+  if (!curves) return;
+  for (const key of COLOR_GRADING_CURVE_KEYS) {
+    if (curves[key] !== undefined) validateCurve(curves[key], `curves.${key}`, issues);
+  }
+}
+
+function validateHueCurves(value: unknown, issues: ColorGradingContractIssue[]): void {
+  if (value === undefined || isColorGradingVariableRef(value)) return;
+  const curves = validateObject(value, "hueCurves", COLOR_GRADING_HUE_CURVE_KEYS, issues);
+  if (!curves) return;
+  const limits = {
+    hueVsHue: [-180, 180],
+    hueVsSaturation: [-1, 1],
+    hueVsLuma: [-1, 1],
+  } as const;
+  for (const key of COLOR_GRADING_HUE_CURVE_KEYS) {
+    if (curves[key] !== undefined) {
+      validateHueCurve(curves[key], `hueCurves.${key}`, limits[key][0], limits[key][1], issues);
+    }
+  }
+}
+
+function validateSoftRange(
+  value: unknown,
+  path: string,
+  issues: ColorGradingContractIssue[],
+): void {
+  const range = validateObject(value, path, COLOR_GRADING_SOFT_RANGE_KEYS, issues);
+  if (!range) return;
+  validateNumericField(range, "min", path, UNIT_LIMIT, issues);
+  validateNumericField(range, "max", path, UNIT_LIMIT, issues);
+  validateNumericField(range, "softness", path, { min: 0, max: 0.5 }, issues);
+  if (typeof range.min === "number" && typeof range.max === "number" && range.min >= range.max) {
+    issues.push({ path, message: "min must be smaller than max" });
+  }
+}
+
+function validateSecondaryHue(
+  value: unknown,
+  path: string,
+  issues: ColorGradingContractIssue[],
+): void {
+  const hue = validateObject(value, path, COLOR_GRADING_HUE_RANGE_KEYS, issues);
+  if (!hue) return;
+  validateNumericField(hue, "center", path, { min: 0, max: 360 }, issues, false);
+  validateNumericField(hue, "range", path, { min: 0, max: 180 }, issues);
+  validateNumericField(hue, "softness", path, { min: 0, max: 180 }, issues);
+  if (
+    typeof hue.range === "number" &&
+    typeof hue.softness === "number" &&
+    hue.range + hue.softness > 180
+  ) {
+    issues.push({ path, message: "range plus softness must not exceed 180 degrees" });
+  }
+}
+
+function validateSecondaryKey(
+  value: unknown,
+  path: string,
+  issues: ColorGradingContractIssue[],
+): void {
+  const key = validateObject(value, path, COLOR_GRADING_SECONDARY_KEY_KEYS, issues);
+  if (!key) return;
+  if (key.hue !== undefined) validateSecondaryHue(key.hue, `${path}.hue`, issues);
+  if (key.saturation !== undefined) validateSoftRange(key.saturation, `${path}.saturation`, issues);
+  if (key.luma !== undefined) validateSoftRange(key.luma, `${path}.luma`, issues);
+}
+
+function validateSecondaryCorrection(
+  value: unknown,
+  path: string,
+  issues: ColorGradingContractIssue[],
+): void {
+  const correction = validateObject(value, path, COLOR_GRADING_SECONDARY_CORRECTION_KEYS, issues);
+  if (!correction) return;
+  validateNumericField(correction, "hueShift", path, { min: -180, max: 180 }, issues);
+  for (const key of ["saturation", "luma", "temperature", "tint"] as const) {
+    validateNumericField(correction, key, path, SIGNED_UNIT_LIMIT, issues);
+  }
+}
+
+function validateSecondary(
+  value: unknown,
+  index: number,
+  issues: ColorGradingContractIssue[],
+): void {
+  const path = `secondaries[${index}]`;
+  const secondary = validateObject(value, path, COLOR_GRADING_SECONDARY_KEYS, issues);
+  if (!secondary) return;
+  if (
+    secondary.enabled !== undefined &&
+    typeof secondary.enabled !== "boolean" &&
+    !isColorGradingVariableRef(secondary.enabled)
+  ) {
+    issues.push({ path: `${path}.enabled`, message: "must be a boolean" });
+  }
+  validateSecondaryKey(secondary.key, `${path}.key`, issues);
+  validateSecondaryCorrection(secondary.correction, `${path}.correction`, issues);
+}
+
+function validateSecondaries(value: unknown, issues: ColorGradingContractIssue[]): void {
+  if (value === undefined || isColorGradingVariableRef(value)) return;
+  if (!Array.isArray(value) || value.length > COLOR_GRADING_MAX_SECONDARIES) {
+    issues.push({
+      path: "secondaries",
+      message: `must be an array of at most ${COLOR_GRADING_MAX_SECONDARIES} selections`,
+    });
+    return;
+  }
+
+  value.forEach((secondary, index) => validateSecondary(secondary, index, issues));
+}
+
 /** Browser-safe structural validation shared by Lint, CLI, and Core consumers. */
 export function validateColorGradingContract(value: unknown): ColorGradingContractIssue[] {
   if (typeof value === "string") {
@@ -350,6 +583,10 @@ export function validateColorGradingContract(value: unknown): ColorGradingContra
 
   validateTopLevel(grading, issues);
   validateSections(grading, issues);
+  validateWheels(grading.wheels, issues);
+  validateCurves(grading.curves, issues);
+  validateHueCurves(grading.hueCurves, issues);
+  validateSecondaries(grading.secondaries, issues);
   validatePalette(grading.palette, issues);
   return issues;
 }

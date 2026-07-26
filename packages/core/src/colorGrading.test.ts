@@ -8,6 +8,7 @@ import {
   HF_COLOR_GRADING_PALETTES,
   HF_COLOR_GRADING_PRESETS,
   getHfColorGradingCapabilities,
+  hasHfColorGradingAuthoredValues,
   isHfColorGradingActive,
   normalizeHfColorGrading,
   normalizeHfColorGradingWithVariables,
@@ -123,6 +124,7 @@ describe("color grading", () => {
   it("publishes a complete capability catalog for agent-built treatments", () => {
     const capabilities = getHfColorGradingCapabilities();
 
+    expect(capabilities.version).toBe(2);
     expect(capabilities.colorSpace).toBe("rec709");
     expect(capabilities.adjustments.map(({ key }) => key)).toEqual([
       "exposure",
@@ -158,6 +160,23 @@ describe("color grading", () => {
     expect(capabilities.effects.find(({ key }) => key === "kuwahara")?.renderLane).toBe(
       "multipass",
     );
+    expect(capabilities.wheels.zones).toEqual(["shadows", "midtones", "highlights"]);
+    expect(capabilities.curves).toMatchObject({
+      channels: ["master", "red", "green", "blue"],
+      minPoints: 2,
+      maxPoints: 16,
+      implicitEndpoints: true,
+    });
+    expect(capabilities.hueCurves.channels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "hueVsHue",
+          input: expect.objectContaining({ unit: "degrees", wrap: true }),
+          output: { min: -180, max: 180 },
+        }),
+      ]),
+    );
+    expect(capabilities.secondaries.max).toBe(4);
   });
 
   it("merges manual adjustments over preset values", () => {
@@ -616,5 +635,182 @@ describe("color grading", () => {
 
     expect(grading?.adjust.contrast).toBe(0.2);
     expect(grading?.lut).toEqual({ src: "assets/luts/natural-boost.cube", intensity: 0.75 });
+  });
+
+  it("resolves scalar variable references inside secondary arrays", () => {
+    const grading = normalizeHfColorGradingWithVariables(
+      {
+        secondaries: [
+          {
+            key: {
+              hue: { center: "$skinHue", range: 18 },
+              saturation: { min: 0.1, max: 1 },
+            },
+            correction: { saturation: "${skinSaturation}" },
+          },
+        ],
+      },
+      { skinHue: 24, skinSaturation: -0.12 },
+    );
+
+    expect(grading?.secondaries[0]).toMatchObject({
+      key: { hue: { center: 24, range: 18 } },
+      correction: { saturation: -0.12 },
+    });
+  });
+
+  it("normalizes advanced controls defensively", () => {
+    const grading = normalizeHfColorGrading({
+      colorSpace: "display-p3",
+      wheels: {
+        shadows: { hue: -30, amount: 2, level: -2 },
+        highlights: { hue: 750, amount: 0.15, level: 0.05 },
+      },
+      curves: {
+        master: [
+          [0.75, 0.82],
+          [0.25, 0.18],
+        ],
+      },
+      hueCurves: {
+        hueVsHue: [
+          [330, -20],
+          [-10, 15],
+          [120, 0],
+        ],
+      },
+      secondaries: [
+        {
+          enabled: false,
+          key: {
+            hue: { center: -10, range: 30, softness: 200 },
+            saturation: { min: 0.8, max: 0.2, softness: 1 },
+          },
+          correction: { hueShift: 250, saturation: 2, luma: -2 },
+        },
+      ],
+    });
+
+    expect(grading?.colorSpace).toBe("display-p3");
+    expect(grading?.wheels.shadows).toEqual({ hue: 330, amount: 1, level: -1 });
+    expect(grading?.wheels.highlights).toEqual({ hue: 30, amount: 0.15, level: 0.05 });
+    expect(grading?.curves.master).toEqual([
+      [0, 0],
+      [0.25, 0.18],
+      [0.75, 0.82],
+      [1, 1],
+    ]);
+    expect(grading?.hueCurves.hueVsHue).toEqual([
+      [120, 0],
+      [330, -20],
+      [350, 15],
+    ]);
+    expect(grading?.secondaries[0]).toMatchObject({
+      enabled: false,
+      key: {
+        hue: { center: 350, range: 30, softness: 150 },
+        saturation: { min: 0.2, max: 0.8, softness: 0.5 },
+      },
+      correction: { hueShift: 180, saturation: 1, luma: -1 },
+    });
+  });
+
+  it("keeps disabled secondaries authored but pixel-inactive", () => {
+    const grading = normalizeHfColorGrading({
+      secondaries: [
+        {
+          enabled: false,
+          key: { hue: { center: 24, range: 18 } },
+          correction: { saturation: 0.5 },
+        },
+      ],
+    });
+
+    expect(grading?.secondaries[0]?.enabled).toBe(false);
+    expect(isHfColorGradingActive(grading)).toBe(false);
+    expect(hasHfColorGradingAuthoredValues(grading)).toBe(true);
+    expect(serializeHfColorGrading(grading)).toContain('"enabled":false');
+  });
+
+  it("omits identity advanced controls while retaining authored secondary selectors", () => {
+    const grading = normalizeHfColorGrading({
+      wheels: { shadows: { hue: 200 } },
+      curves: {
+        master: [
+          [0, 0],
+          [0.5, 0.5],
+          [1, 1],
+        ],
+      },
+      hueCurves: {
+        hueVsSaturation: [
+          [0, 0],
+          [120, 0],
+          [240, 0],
+        ],
+      },
+      secondaries: [
+        {
+          key: { hue: { center: 20, range: 10, softness: 5 } },
+          correction: {},
+        },
+      ],
+    });
+
+    expect(isHfColorGradingActive(grading)).toBe(false);
+    expect(hasHfColorGradingAuthoredValues(grading)).toBe(true);
+    const serialized = serializeHfColorGrading(grading);
+    expect(serialized).not.toContain('"wheels"');
+    expect(serialized).not.toContain('"curves"');
+    expect(serialized).not.toContain('"hueCurves"');
+    expect(serialized).toContain('"secondaries"');
+  });
+
+  it("round-trips advanced grading byte-identically", () => {
+    const grading = normalizeHfColorGrading({
+      wheels: { shadows: { hue: 205, amount: 0.08 } },
+      curves: {
+        red: [
+          [0, 0],
+          [0.5, 0.55],
+          [1, 1],
+        ],
+      },
+      hueCurves: {
+        hueVsSaturation: [
+          [180, 0],
+          [215, 0.15],
+          [250, 0],
+        ],
+      },
+      secondaries: [
+        {
+          key: { hue: { center: 215, range: 25, softness: 10 } },
+          correction: { saturation: 0.15 },
+        },
+      ],
+    });
+    const first = serializeHfColorGrading(grading);
+    expect(serializeHfColorGrading(normalizeHfColorGrading(first))).toBe(first);
+  });
+
+  it("gates advanced grading with intensity while keeping effects independent", () => {
+    expect(
+      isHfColorGradingActive(
+        normalizeHfColorGrading({
+          intensity: 0,
+          wheels: { shadows: { hue: 205, amount: 0.2 } },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isHfColorGradingActive(
+        normalizeHfColorGrading({
+          intensity: 0,
+          wheels: { shadows: { hue: 205, amount: 0.2 } },
+          effects: { blur: 0.2 },
+        }),
+      ),
+    ).toBe(true);
   });
 });

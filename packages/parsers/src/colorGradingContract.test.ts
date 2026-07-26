@@ -3,8 +3,10 @@ import {
   COLOR_GRADING_ADJUST_KEYS,
   COLOR_GRADING_DETAIL_KEYS,
   COLOR_GRADING_EFFECT_KEYS,
+  COLOR_GRADING_HUE_CURVE_KEYS,
   COLOR_GRADING_LUT_KEYS,
   COLOR_GRADING_TOP_LEVEL_KEYS,
+  COLOR_GRADING_WHEEL_KEYS,
   isColorGradingVariableRef,
   validateColorGradingContract,
 } from "./colorGradingContract";
@@ -15,6 +17,8 @@ describe("color grading contract", () => {
     expect(COLOR_GRADING_ADJUST_KEYS).toContain("exposure");
     expect(COLOR_GRADING_DETAIL_KEYS).toContain("grain");
     expect(COLOR_GRADING_EFFECT_KEYS).toContain("kuwahara");
+    expect(COLOR_GRADING_WHEEL_KEYS).toEqual(["shadows", "midtones", "highlights"]);
+    expect(COLOR_GRADING_HUE_CURVE_KEYS).toContain("hueVsSaturation");
     expect(COLOR_GRADING_LUT_KEYS).toEqual(["src", "intensity"]);
   });
 
@@ -59,5 +63,105 @@ describe("color grading contract", () => {
         expect.objectContaining({ path: "colorSpace" }),
       ]),
     );
+  });
+
+  it("accepts wheels, color curves, hue curves, and HSL secondaries", () => {
+    expect(
+      validateColorGradingContract({
+        wheels: {
+          shadows: { hue: 205, amount: 0.08, level: -0.02 },
+          highlights: { hue: 35, amount: 0.06 },
+        },
+        curves: {
+          master: [
+            [0, 0],
+            [0.25, 0.18],
+            [0.75, 0.82],
+            [1, 1],
+          ],
+        },
+        hueCurves: {
+          hueVsSaturation: [
+            [180, 0],
+            [215, 0.15],
+            [250, 0],
+          ],
+        },
+        secondaries: [
+          {
+            enabled: false,
+            key: {
+              hue: { center: 215, range: 25, softness: 10 },
+              saturation: { min: 0.2, max: 1, softness: 0.08 },
+              luma: { min: 0.1, max: 0.9, softness: 0.08 },
+            },
+            correction: { saturation: 0.15, luma: 0.03 },
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("rejects malformed advanced controls instead of normalizing them", () => {
+    const points = Array.from({ length: 16 }, (_, index) => [(index + 1) / 17, (index + 1) / 17]);
+    const issues = validateColorGradingContract({
+      wheels: { shadows: { hue: 360, mystery: 1 } },
+      curves: {
+        master: points,
+        red: [
+          [0, 0],
+          [0, 1],
+        ],
+      },
+      hueCurves: {
+        hueVsHue: [
+          [0, 0],
+          [120, 20],
+        ],
+      },
+      secondaries: [
+        {
+          enabled: "yes",
+          key: {
+            hue: { center: 360, range: 20, softness: 170 },
+            saturation: { min: 0.8, max: 0.2, softness: 0.6 },
+          },
+          correction: { hueShift: 200 },
+        },
+      ],
+    });
+
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "wheels.shadows" }),
+        expect.objectContaining({ path: "wheels.shadows.hue" }),
+        expect.objectContaining({
+          path: "curves.master",
+          message: expect.stringContaining("including inferred 0 and 1 endpoints"),
+        }),
+        expect.objectContaining({ path: "curves.red", message: "contains duplicate input 0" }),
+        expect.objectContaining({ path: "hueCurves.hueVsHue" }),
+        expect.objectContaining({ path: "secondaries[0].enabled" }),
+        expect.objectContaining({ path: "secondaries[0].key.hue.center" }),
+        expect.objectContaining({ path: "secondaries[0].key.saturation" }),
+        expect.objectContaining({ path: "secondaries[0].correction.hueShift" }),
+      ]),
+    );
+  });
+
+  it("allows advanced sections to be supplied by variables", () => {
+    expect(
+      validateColorGradingContract({
+        wheels: "$wheels",
+        curves: "${curves}",
+        hueCurves: "$hueCurves",
+        secondaries: "$secondaries",
+      }),
+    ).toEqual([]);
+    expect(
+      validateColorGradingContract({
+        secondaries: [{ enabled: "$secondaryEnabled", key: {}, correction: {} }],
+      }),
+    ).toEqual([]);
   });
 });

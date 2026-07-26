@@ -1,12 +1,26 @@
 import { DEFAULT_MAX_CUBE_LUT_SIZE } from "./colorLuts";
+import type { HfColorCurvePoint, HfHueCurvePoint } from "./colorGradingCurves";
 import {
   COLOR_GRADING_ADJUST_KEYS,
   COLOR_GRADING_COLOR_SPACE,
+  COLOR_GRADING_CONTRACT_VERSION,
+  COLOR_GRADING_CURVE_KEYS,
   COLOR_GRADING_DETAIL_KEYS,
   COLOR_GRADING_EFFECT_KEYS,
+  COLOR_GRADING_HUE_CURVE_KEYS,
   COLOR_GRADING_LUT_KEYS,
+  COLOR_GRADING_MAX_CURVE_POINTS,
+  COLOR_GRADING_MAX_SECONDARIES,
   COLOR_GRADING_TOP_LEVEL_KEYS,
+  COLOR_GRADING_WHEEL_KEYS,
 } from "@hyperframes/parsers/color-grading-contract";
+
+export type { HfColorCurvePoint, HfHueCurvePoint } from "./colorGradingCurves";
+export {
+  compileHfColorCurve,
+  compileHfHueCurve,
+  HF_COLOR_CURVE_MAX_POINTS,
+} from "./colorGradingCurves";
 
 export const HF_COLOR_GRADING_ATTR = "data-color-grading";
 
@@ -62,6 +76,80 @@ const ADJUST_ZERO = {
 } satisfies Record<HfColorGradingAdjustKey, number>;
 
 export type HfColorGradingAdjust = Partial<Record<HfColorGradingAdjustKey, number>>;
+
+export type HfColorGradingWheelKey = (typeof COLOR_GRADING_WHEEL_KEYS)[number];
+
+export interface HfColorGradingTonalWheel {
+  hue?: number;
+  amount?: number;
+  level?: number;
+}
+
+export type HfColorGradingWheels = Partial<
+  Record<HfColorGradingWheelKey, HfColorGradingTonalWheel>
+>;
+
+export type NormalizedHfColorGradingWheels = Record<
+  HfColorGradingWheelKey,
+  Required<HfColorGradingTonalWheel>
+>;
+
+export type HfColorGradingCurveKey = (typeof COLOR_GRADING_CURVE_KEYS)[number];
+export type HfColorGradingHueCurveKey = (typeof COLOR_GRADING_HUE_CURVE_KEYS)[number];
+export type HfColorGradingCurves = Partial<
+  Record<HfColorGradingCurveKey, readonly HfColorCurvePoint[]>
+>;
+export type HfColorGradingHueCurves = Partial<
+  Record<HfColorGradingHueCurveKey, readonly HfHueCurvePoint[]>
+>;
+export type NormalizedHfColorGradingCurves = Record<
+  HfColorGradingCurveKey,
+  readonly HfColorCurvePoint[]
+>;
+export type NormalizedHfColorGradingHueCurves = Record<
+  HfColorGradingHueCurveKey,
+  readonly HfHueCurvePoint[]
+>;
+
+export interface HfColorGradingHueRange {
+  center?: number;
+  range?: number;
+  softness?: number;
+}
+
+export interface HfColorGradingSoftRange {
+  min?: number;
+  max?: number;
+  softness?: number;
+}
+
+export interface HfColorGradingSecondaryCorrection {
+  hueShift?: number;
+  saturation?: number;
+  luma?: number;
+  temperature?: number;
+  tint?: number;
+}
+
+export interface HfColorGradingSecondary {
+  enabled?: boolean;
+  key: {
+    hue?: HfColorGradingHueRange;
+    saturation?: HfColorGradingSoftRange;
+    luma?: HfColorGradingSoftRange;
+  };
+  correction: HfColorGradingSecondaryCorrection;
+}
+
+export interface NormalizedHfColorGradingSecondary {
+  enabled: boolean;
+  key: {
+    hue: Required<HfColorGradingHueRange>;
+    saturation: Required<HfColorGradingSoftRange>;
+    luma: Required<HfColorGradingSoftRange>;
+  };
+  correction: Required<HfColorGradingSecondaryCorrection>;
+}
 
 // Sub-controls use useful identity defaults rather than raw mathematical zeroes.
 export type HfColorGradingDetailKey = (typeof COLOR_GRADING_DETAIL_KEYS)[number];
@@ -159,6 +247,10 @@ export interface HfColorGrading {
   preset?: HfColorGradingPresetId | string | null;
   intensity?: number;
   adjust?: HfColorGradingAdjust;
+  wheels?: HfColorGradingWheels;
+  curves?: HfColorGradingCurves;
+  hueCurves?: HfColorGradingHueCurves;
+  secondaries?: readonly HfColorGradingSecondary[];
   details?: HfColorGradingDetails;
   effects?: HfColorGradingEffects;
   palette?: readonly string[] | null;
@@ -177,11 +269,22 @@ export interface NormalizedHfColorGrading {
   preset: HfColorGradingPresetId | string | null;
   intensity: number;
   adjust: Record<HfColorGradingAdjustKey, number>;
+  wheels?: NormalizedHfColorGradingWheels;
+  curves?: NormalizedHfColorGradingCurves;
+  hueCurves?: NormalizedHfColorGradingHueCurves;
+  secondaries?: readonly NormalizedHfColorGradingSecondary[];
   details: Record<HfColorGradingDetailKey, number>;
   effects: Record<HfColorGradingEffectKey, number>;
   palette: readonly string[] | null;
   lut: HfColorGradingLutRef | null;
   colorSpace: typeof HF_COLOR_GRADING_COLOR_SPACE | string;
+}
+
+export interface ResolvedHfColorGrading extends NormalizedHfColorGrading {
+  wheels: NormalizedHfColorGradingWheels;
+  curves: NormalizedHfColorGradingCurves;
+  hueCurves: NormalizedHfColorGradingHueCurves;
+  secondaries: readonly NormalizedHfColorGradingSecondary[];
 }
 
 export interface HfColorGradingTarget {
@@ -292,6 +395,15 @@ export type HfColorGradingVariableMap = Record<string, unknown>;
 
 export const HF_COLOR_GRADING_ADJUST_KEYS =
   COLOR_GRADING_ADJUST_KEYS satisfies readonly HfColorGradingAdjustKey[];
+
+export const HF_COLOR_GRADING_WHEEL_KEYS =
+  COLOR_GRADING_WHEEL_KEYS satisfies readonly HfColorGradingWheelKey[];
+
+export const HF_COLOR_GRADING_CURVE_KEYS =
+  COLOR_GRADING_CURVE_KEYS satisfies readonly HfColorGradingCurveKey[];
+
+export const HF_COLOR_GRADING_HUE_CURVE_KEYS =
+  COLOR_GRADING_HUE_CURVE_KEYS satisfies readonly HfColorGradingHueCurveKey[];
 
 export const HF_COLOR_GRADING_DETAIL_KEYS =
   COLOR_GRADING_DETAIL_KEYS satisfies readonly HfColorGradingDetailKey[];
@@ -532,6 +644,35 @@ const ADJUST_LIMITS: Record<HfColorGradingAdjustKey, { min: number; max: number 
   saturation: { min: -1, max: 1 },
 };
 
+const TONAL_WHEEL_DEFAULT: Required<HfColorGradingTonalWheel> = {
+  hue: 0,
+  amount: 0,
+  level: 0,
+};
+const WHEEL_LIMITS = {
+  amount: { min: 0, max: 1 },
+  level: { min: -1, max: 1 },
+};
+const RGB_CURVE_IDENTITY: readonly HfColorCurvePoint[] = [
+  [0, 0],
+  [1, 1],
+];
+const HUE_CURVE_IDENTITY: readonly HfHueCurvePoint[] = [];
+const HUE_CURVE_LIMITS: Record<HfColorGradingHueCurveKey, { min: number; max: number }> = {
+  hueVsHue: { min: -180, max: 180 },
+  hueVsSaturation: { min: -1, max: 1 },
+  hueVsLuma: { min: -1, max: 1 },
+};
+const SECONDARY_HUE_DEFAULT: Required<HfColorGradingHueRange> = {
+  center: 0,
+  range: 180,
+  softness: 0,
+};
+const SECONDARY_SOFT_RANGE_DEFAULT: Required<HfColorGradingSoftRange> = {
+  min: 0,
+  max: 1,
+  softness: 0.05,
+};
 const DETAIL_LIMITS: Record<HfColorGradingDetailKey, { min: number; max: number }> = {
   vignette: { min: 0, max: 1 },
   vignetteMidpoint: { min: 0, max: 1 },
@@ -813,7 +954,7 @@ const MULTIPASS_EFFECT_KEYS = new Set<HfColorGradingActiveEffectKey>(["blur", "b
 /** Agent-readable view of the canonical grading and effect contracts. */
 export function getHfColorGradingCapabilities() {
   return {
-    version: 1,
+    version: COLOR_GRADING_CONTRACT_VERSION,
     targetTags: ["img", "video"],
     colorSpace: HF_COLOR_GRADING_COLOR_SPACE,
     intensity: { identity: 1, min: 0, max: 1 },
@@ -835,6 +976,60 @@ export function getHfColorGradingCapabilities() {
       identity: ADJUST_ZERO[key],
       ...ADJUST_LIMITS[key],
     })),
+    wheels: {
+      zones: HF_COLOR_GRADING_WHEEL_KEYS,
+      controls: {
+        hue: { identity: 0, unit: "degrees", wrap: true, min: 0, maxExclusive: 360 },
+        amount: { identity: 0, ...WHEEL_LIMITS.amount },
+        level: { identity: 0, ...WHEEL_LIMITS.level },
+      },
+    },
+    curves: {
+      channels: HF_COLOR_GRADING_CURVE_KEYS,
+      input: { min: 0, max: 1 },
+      output: { min: 0, max: 1 },
+      minPoints: 2,
+      maxPoints: COLOR_GRADING_MAX_CURVE_POINTS,
+      implicitEndpoints: true,
+      endpointsCountTowardMax: true,
+    },
+    hueCurves: {
+      channels: HF_COLOR_GRADING_HUE_CURVE_KEYS.map((key) => ({
+        key,
+        input: { min: 0, maxExclusive: 360, unit: "degrees", wrap: true },
+        output: HUE_CURVE_LIMITS[key],
+      })),
+      minPoints: 3,
+      maxPoints: COLOR_GRADING_MAX_CURVE_POINTS,
+    },
+    secondaries: {
+      max: COLOR_GRADING_MAX_SECONDARIES,
+      hue: {
+        center: { min: 0, maxExclusive: 360, unit: "degrees", wrap: true },
+        range: { min: 0, max: 180, unit: "degrees" },
+        softness: { min: 0, max: 180, unit: "degrees" },
+        rangePlusSoftnessMax: 180,
+      },
+      saturation: {
+        min: { ...UNIT_LIMIT },
+        max: { ...UNIT_LIMIT },
+        relation: "min < max",
+        softness: { min: 0, max: 0.5 },
+      },
+      luma: {
+        min: { ...UNIT_LIMIT },
+        max: { ...UNIT_LIMIT },
+        relation: "min < max",
+        softness: { min: 0, max: 0.5 },
+      },
+      correction: {
+        hueShift: { min: -180, max: 180, unit: "degrees" },
+        saturation: { min: -1, max: 1 },
+        luma: { min: -1, max: 1 },
+        temperature: { min: -1, max: 1 },
+        tint: { min: -1, max: 1 },
+      },
+    },
     effectFamilies: EFFECT_FAMILIES,
     finishing: HF_COLOR_GRADING_DETAIL_KEYS.map((key) => ({
       key,
@@ -902,6 +1097,186 @@ function readLimitedValue(value: unknown, limit: { min: number; max: number }): 
   return clamp(parsed, limit.min, limit.max);
 }
 
+function wrapDegrees(value: unknown, fallback = 0): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return ((parsed % 360) + 360) % 360;
+}
+
+function normalizeWheels(value: unknown): NormalizedHfColorGradingWheels {
+  const wheels = isRecord(value) ? value : {};
+  return HF_COLOR_GRADING_WHEEL_KEYS.reduce<NormalizedHfColorGradingWheels>(
+    (result, key) => {
+      const wheel = isRecord(wheels[key]) ? wheels[key] : {};
+      result[key] = {
+        hue: wrapDegrees(wheel.hue, TONAL_WHEEL_DEFAULT.hue),
+        amount: readLimitedValue(wheel.amount ?? TONAL_WHEEL_DEFAULT.amount, WHEEL_LIMITS.amount),
+        level: readLimitedValue(wheel.level ?? TONAL_WHEEL_DEFAULT.level, WHEEL_LIMITS.level),
+      };
+      return result;
+    },
+    {
+      shadows: { ...TONAL_WHEEL_DEFAULT },
+      midtones: { ...TONAL_WHEEL_DEFAULT },
+      highlights: { ...TONAL_WHEEL_DEFAULT },
+    },
+  );
+}
+
+function normalizeCurvePoint(value: unknown): HfColorCurvePoint | null {
+  if (!Array.isArray(value) || value.length !== 2) return null;
+  const input = Number(value[0]);
+  const output = Number(value[1]);
+  return Number.isFinite(input) && Number.isFinite(output)
+    ? [clamp(input, 0, 1), clamp(output, 0, 1)]
+    : null;
+}
+
+function hasDuplicateCurveInputs(points: readonly HfColorCurvePoint[]): boolean {
+  return points.some((point, index) => index > 0 && point[0] === points[index - 1]?.[0]);
+}
+
+function normalizeCurve(value: unknown): readonly HfColorCurvePoint[] {
+  if (!Array.isArray(value) || value.length < 2) return RGB_CURVE_IDENTITY;
+  const points: HfColorCurvePoint[] = [];
+  for (const valuePoint of value) {
+    const point = normalizeCurvePoint(valuePoint);
+    if (!point) return RGB_CURVE_IDENTITY;
+    points.push(point);
+  }
+  points.sort((a, b) => a[0] - b[0]);
+  if (hasDuplicateCurveInputs(points)) return RGB_CURVE_IDENTITY;
+  if (points[0]![0] > 0) points.unshift([0, 0]);
+  if (points[points.length - 1]![0] < 1) points.push([1, 1]);
+  if (points.length > COLOR_GRADING_MAX_CURVE_POINTS) return RGB_CURVE_IDENTITY;
+  return points;
+}
+
+function normalizeCurves(value: unknown): NormalizedHfColorGradingCurves {
+  const curves = isRecord(value) ? value : {};
+  return HF_COLOR_GRADING_CURVE_KEYS.reduce<NormalizedHfColorGradingCurves>(
+    (result, key) => {
+      result[key] = normalizeCurve(curves[key]);
+      return result;
+    },
+    {
+      master: RGB_CURVE_IDENTITY,
+      red: RGB_CURVE_IDENTITY,
+      green: RGB_CURVE_IDENTITY,
+      blue: RGB_CURVE_IDENTITY,
+    },
+  );
+}
+
+function normalizeHueCurvePoint(
+  value: unknown,
+  limit: { min: number; max: number },
+): HfHueCurvePoint | null {
+  if (!Array.isArray(value) || value.length !== 2) return null;
+  const hue = Number(value[0]);
+  const delta = Number(value[1]);
+  return Number.isFinite(hue) && Number.isFinite(delta)
+    ? [wrapDegrees(hue), clamp(delta, limit.min, limit.max)]
+    : null;
+}
+
+function normalizeHueCurve(
+  value: unknown,
+  limit: { min: number; max: number },
+): readonly HfHueCurvePoint[] {
+  if (!Array.isArray(value) || value.length < 3 || value.length > COLOR_GRADING_MAX_CURVE_POINTS) {
+    return HUE_CURVE_IDENTITY;
+  }
+  const points: HfHueCurvePoint[] = [];
+  for (const candidate of value) {
+    const point = normalizeHueCurvePoint(candidate, limit);
+    if (!point) return HUE_CURVE_IDENTITY;
+    points.push(point);
+  }
+  points.sort((a, b) => a[0] - b[0]);
+  return hasDuplicateCurveInputs(points) ? HUE_CURVE_IDENTITY : points;
+}
+
+function normalizeHueCurves(value: unknown): NormalizedHfColorGradingHueCurves {
+  const curves = isRecord(value) ? value : {};
+  return HF_COLOR_GRADING_HUE_CURVE_KEYS.reduce<NormalizedHfColorGradingHueCurves>(
+    (result, key) => {
+      result[key] = normalizeHueCurve(curves[key], HUE_CURVE_LIMITS[key]);
+      return result;
+    },
+    {
+      hueVsHue: HUE_CURVE_IDENTITY,
+      hueVsSaturation: HUE_CURVE_IDENTITY,
+      hueVsLuma: HUE_CURVE_IDENTITY,
+    },
+  );
+}
+
+function normalizeSoftRange(value: unknown): Required<HfColorGradingSoftRange> {
+  const range = isRecord(value) ? value : {};
+  const first = readLimitedValue(range.min ?? SECONDARY_SOFT_RANGE_DEFAULT.min, UNIT_LIMIT);
+  const second = readLimitedValue(range.max ?? SECONDARY_SOFT_RANGE_DEFAULT.max, UNIT_LIMIT);
+  return {
+    min: Math.min(first, second),
+    max: Math.max(first, second),
+    softness: readLimitedValue(range.softness ?? SECONDARY_SOFT_RANGE_DEFAULT.softness, {
+      min: 0,
+      max: 0.5,
+    }),
+  };
+}
+
+function normalizeSecondaryHue(value: unknown): Required<HfColorGradingHueRange> {
+  const hue = isRecord(value) ? value : {};
+  const range = readLimitedValue(hue.range ?? SECONDARY_HUE_DEFAULT.range, {
+    min: 0,
+    max: 180,
+  });
+  return {
+    center: wrapDegrees(hue.center, SECONDARY_HUE_DEFAULT.center),
+    range,
+    softness: readLimitedValue(hue.softness ?? SECONDARY_HUE_DEFAULT.softness, {
+      min: 0,
+      max: 180 - range,
+    }),
+  };
+}
+
+function normalizeSecondaryCorrection(
+  value: Record<string, unknown>,
+): Required<HfColorGradingSecondaryCorrection> {
+  return {
+    hueShift: readLimitedValue(value.hueShift ?? 0, { min: -180, max: 180 }),
+    saturation: readLimitedValue(value.saturation ?? 0, { min: -1, max: 1 }),
+    luma: readLimitedValue(value.luma ?? 0, { min: -1, max: 1 }),
+    temperature: readLimitedValue(value.temperature ?? 0, { min: -1, max: 1 }),
+    tint: readLimitedValue(value.tint ?? 0, { min: -1, max: 1 }),
+  };
+}
+
+function normalizeSecondary(value: unknown): NormalizedHfColorGradingSecondary | null {
+  if (!isRecord(value) || !isRecord(value.key) || !isRecord(value.correction)) return null;
+  return {
+    enabled: value.enabled !== false,
+    key: {
+      hue: normalizeSecondaryHue(value.key.hue),
+      saturation: normalizeSoftRange(value.key.saturation),
+      luma: normalizeSoftRange(value.key.luma),
+    },
+    correction: normalizeSecondaryCorrection(value.correction),
+  };
+}
+
+function normalizeSecondaries(value: unknown): readonly NormalizedHfColorGradingSecondary[] {
+  if (!Array.isArray(value)) return [];
+  const result: NormalizedHfColorGradingSecondary[] = [];
+  for (const candidate of value.slice(0, COLOR_GRADING_MAX_SECONDARIES)) {
+    const secondary = normalizeSecondary(candidate);
+    if (secondary) result.push(secondary);
+  }
+  return result;
+}
+
 function normalizePresetId(value: unknown): HfColorGradingPresetId | string | null {
   if (value == null) return null;
   const preset = String(value).trim();
@@ -962,6 +1337,9 @@ export function resolveHfColorGradingVariables(
       return raw;
     }
   }
+  if (Array.isArray(raw)) {
+    return raw.map((value) => resolveHfColorGradingVariables(value, variables));
+  }
   if (!isRecord(raw)) return raw;
 
   const resolved: Record<string, unknown> = {};
@@ -976,7 +1354,7 @@ function getHfColorGradingPreset(id: string | null | undefined): HfColorGradingP
   return PRESETS_BY_ID.get(id) ?? null;
 }
 
-export function normalizeHfColorGrading(raw: unknown): NormalizedHfColorGrading | null {
+export function normalizeHfColorGrading(raw: unknown): ResolvedHfColorGrading | null {
   const grading = readColorGradingObject(raw);
   if (!grading) return null;
   if (grading.enabled === false) return null;
@@ -1019,6 +1397,10 @@ export function normalizeHfColorGrading(raw: unknown): NormalizedHfColorGrading 
     preset: presetId,
     intensity: clampUnit(grading.intensity, preset?.intensity ?? 1),
     adjust,
+    wheels: normalizeWheels(grading.wheels),
+    curves: normalizeCurves(grading.curves),
+    hueCurves: normalizeHueCurves(grading.hueCurves),
+    secondaries: normalizeSecondaries(grading.secondaries),
     details,
     effects,
     palette: normalizePalette(grading.palette),
@@ -1033,8 +1415,38 @@ export function normalizeHfColorGrading(raw: unknown): NormalizedHfColorGrading 
 export function normalizeHfColorGradingWithVariables(
   raw: unknown,
   variables: HfColorGradingVariableMap,
-): NormalizedHfColorGrading | null {
+): ResolvedHfColorGrading | null {
   return normalizeHfColorGrading(resolveHfColorGradingVariables(raw, variables));
+}
+
+function hasWheelGrade(wheels: NormalizedHfColorGradingWheels): boolean {
+  return HF_COLOR_GRADING_WHEEL_KEYS.some(
+    (key) => Math.abs(wheels[key].amount) > 0.0001 || Math.abs(wheels[key].level) > 0.0001,
+  );
+}
+
+export function hasHfColorGradingRgbCurveValues(curves: NormalizedHfColorGradingCurves): boolean {
+  return HF_COLOR_GRADING_CURVE_KEYS.some((key) =>
+    curves[key].some(([input, output]) => Math.abs(input - output) > 0.0001),
+  );
+}
+
+export function hasHfColorGradingHueCurveValues(
+  curves: NormalizedHfColorGradingHueCurves,
+): boolean {
+  return HF_COLOR_GRADING_HUE_CURVE_KEYS.some((key) =>
+    curves[key].some(([, delta]) => Math.abs(delta) > 0.0001),
+  );
+}
+
+export function hasHfColorGradingSecondaryValues(
+  secondaries: readonly NormalizedHfColorGradingSecondary[],
+): boolean {
+  return secondaries.some(
+    (secondary) =>
+      secondary.enabled &&
+      Object.values(secondary.correction).some((value) => Math.abs(value) > 0.0001),
+  );
 }
 
 export function serializeHfColorGrading(
@@ -1042,8 +1454,25 @@ export function serializeHfColorGrading(
 ): string {
   const normalized = normalizeHfColorGrading(grading);
   if (!normalized) return "";
-  const { enabled: _enabled, palette, ...serializable } = normalized;
-  return JSON.stringify(palette ? { ...serializable, palette } : serializable);
+  const {
+    enabled: _enabled,
+    wheels,
+    curves,
+    hueCurves,
+    secondaries,
+    palette,
+    ...serializable
+  } = normalized;
+  return JSON.stringify({
+    ...serializable,
+    ...(hasWheelGrade(wheels) ? { wheels } : {}),
+    ...(hasHfColorGradingRgbCurveValues(curves) ? { curves } : {}),
+    ...(hasHfColorGradingHueCurveValues(hueCurves) ? { hueCurves } : {}),
+    // Preserve a keyed secondary even before it changes pixels so Studio and
+    // CLI can author its qualifier and correction in separate transactions.
+    ...(secondaries.length > 0 ? { secondaries } : {}),
+    ...(palette ? { palette } : {}),
+  });
 }
 
 export function isHfColorGradingActive(
@@ -1057,5 +1486,19 @@ export function isHfColorGradingActive(
   if (hasIndependentTreatment) return true;
   if (grading.intensity === 0) return false;
   if (grading.lut && grading.lut.intensity !== 0) return true;
-  return HF_COLOR_GRADING_ADJUST_KEYS.some((key) => Math.abs(grading.adjust[key]) > 0.0001);
+  return (
+    HF_COLOR_GRADING_ADJUST_KEYS.some((key) => Math.abs(grading.adjust[key]) > 0.0001) ||
+    (grading.wheels ? hasWheelGrade(grading.wheels) : false) ||
+    (grading.curves ? hasHfColorGradingRgbCurveValues(grading.curves) : false) ||
+    (grading.hueCurves ? hasHfColorGradingHueCurveValues(grading.hueCurves) : false) ||
+    (grading.secondaries ? hasHfColorGradingSecondaryValues(grading.secondaries) : false)
+  );
+}
+
+export function hasHfColorGradingAuthoredValues(
+  grading: NormalizedHfColorGrading | null,
+): grading is NormalizedHfColorGrading {
+  if (!grading) return false;
+  if (grading.secondaries?.length) return true;
+  return isHfColorGradingActive(grading);
 }

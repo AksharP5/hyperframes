@@ -5,6 +5,9 @@ import {
   HF_COLOR_GRADING_CANVAS_ID_PREFIX,
   HF_COLOR_GRADING_DETAIL_KEYS,
   HF_COLOR_GRADING_EFFECT_KEYS,
+  hasHfColorGradingHueCurveValues,
+  hasHfColorGradingRgbCurveValues,
+  hasHfColorGradingSecondaryValues,
   isHfColorGradingActive,
   normalizeHfColorGrading,
   normalizeHfColorGradingWithVariables,
@@ -13,10 +16,20 @@ import {
   type HfColorGradingDetailKey,
   type HfColorGradingEffectKey,
   type HfColorGradingTarget,
-  type NormalizedHfColorGrading,
+  type NormalizedHfColorGradingCurves,
+  type NormalizedHfColorGradingHueCurves,
+  type NormalizedHfColorGradingSecondary,
+  type NormalizedHfColorGradingWheels,
+  type ResolvedHfColorGrading,
   COLOR_GRADING_SOURCE_HIDDEN_ATTR,
   COLOR_GRADING_AUTHORED_OPACITY_ATTR,
 } from "../colorGrading";
+import {
+  compileHfColorCurve,
+  compileHfHueCurve,
+  HF_COLOR_CURVE_LUT_SIZE,
+  type HfHueCurvePoint,
+} from "../colorGradingCurves";
 import {
   DEFAULT_MAX_CUBE_LUT_SIZE,
   packCubeLutToRgba8,
@@ -53,6 +66,8 @@ interface ProgramInfo {
   program: WebGLProgram;
   texture: WebGLTexture;
   lutTexture: WebGLTexture;
+  advancedTexture: WebGLTexture;
+  advancedSignature: string | null;
   quad: WebGLBuffer;
   position: number;
   source: WebGLUniformLocation | null;
@@ -60,6 +75,7 @@ interface ProgramInfo {
   bloomSource: WebGLUniformLocation | null;
   kuwaharaSource: WebGLUniformLocation | null;
   lut: WebGLUniformLocation | null;
+  advanced: WebGLUniformLocation | null;
   resolution: WebGLUniformLocation | null;
   uvScale: WebGLUniformLocation | null;
   uvOffset: WebGLUniformLocation | null;
@@ -72,6 +88,12 @@ interface ProgramInfo {
   lutDomainMin: WebGLUniformLocation | null;
   lutDomainMax: WebGLUniformLocation | null;
   lutIntensity: WebGLUniformLocation | null;
+  shadowWheel: WebGLUniformLocation | null;
+  midtoneWheel: WebGLUniformLocation | null;
+  highlightWheel: WebGLUniformLocation | null;
+  rgbCurvesEnabled: WebGLUniformLocation | null;
+  hueCurvesEnabled: WebGLUniformLocation | null;
+  secondaryCount: WebGLUniformLocation | null;
   adjustUniforms: readonly FloatUniformBinding<HfColorGradingAdjustKey>[];
   detailUniforms: readonly FloatUniformBinding<HfColorGradingDetailKey>[];
   effectUniforms: readonly FloatUniformBinding<HfColorGradingEffectKey>[];
@@ -171,7 +193,7 @@ interface ColorGradingRenderer extends EffectRenderState {
 
 interface ColorGradingEntry extends ColorGradingRenderer {
   element: ColorGradingMediaElement;
-  grading: NormalizedHfColorGrading;
+  grading: ResolvedHfColorGrading;
   compare: RuntimeColorGradingCompareState;
   lut: RuntimeLutTexture | null;
   lutLoadingSrc: string | null;
@@ -314,8 +336,10 @@ const DEFAULT_COMPARE: RuntimeColorGradingCompareState = {
 };
 const DEFAULT_EFFECT_PALETTE = ["#000000", "#ffffff"] as const;
 const DEFAULT_ART_PALETTE = ["#1a1a1a", "#f5f5dc"] as const;
+const ADVANCED_TEXTURE_HEIGHT = 3;
+const ADVANCED_SECONDARY_TEXELS = 5;
 
-function readColorGradingAttribute(element: Element): NormalizedHfColorGrading | null {
+function readColorGradingAttribute(element: Element): ResolvedHfColorGrading | null {
   const raw = element.getAttribute(HF_COLOR_GRADING_ATTR);
   if (raw == null) return null;
   return normalizeHfColorGradingWithVariables(raw, readVariablesForElement(element));
@@ -342,6 +366,7 @@ const FRAGMENT_SHADER = [
   "uniform sampler2D u_bloomSource;",
   "uniform sampler2D u_kuwaharaSource;",
   "uniform sampler2D u_lut;",
+  "uniform sampler2D u_advanced;",
   "uniform vec2 u_resolution;",
   "uniform vec2 u_uvScale;",
   "uniform vec2 u_uvOffset;",
@@ -354,6 +379,12 @@ const FRAGMENT_SHADER = [
   "uniform vec3 u_lutDomainMin;",
   "uniform vec3 u_lutDomainMax;",
   "uniform float u_lutIntensity;",
+  "uniform vec3 u_shadowWheel;",
+  "uniform vec3 u_midtoneWheel;",
+  "uniform vec3 u_highlightWheel;",
+  "uniform float u_rgbCurvesEnabled;",
+  "uniform float u_hueCurvesEnabled;",
+  "uniform float u_secondaryCount;",
   "uniform float u_exposure;",
   "uniform float u_contrast;",
   "uniform float u_highlights;",
@@ -931,6 +962,135 @@ const FRAGMENT_SHADER = [
   "  if (brightness < 0.83) return mod(slash, 1.5) < 0.5 || mod(backslash, 1.5) < 0.5 ? 1.0 : 0.2;",
   "  return mod(slash, 1.0) < 0.6 || mod(backslash, 1.0) < 0.6 ? 1.0 : 0.5;",
   "}",
+  "vec3 rgbToHsv(vec3 color){",
+  "  float maximum = max(max(color.r, color.g), color.b);",
+  "  float minimum = min(min(color.r, color.g), color.b);",
+  "  float delta = maximum - minimum;",
+  "  float hue = 0.0;",
+  "  if (delta > 0.00001) {",
+  "    if (maximum == color.r) hue = mod((color.g - color.b) / delta, 6.0);",
+  "    else if (maximum == color.g) hue = (color.b - color.r) / delta + 2.0;",
+  "    else hue = (color.r - color.g) / delta + 4.0;",
+  "    hue = fract(hue / 6.0);",
+  "  }",
+  "  return vec3(hue, maximum > 0.00001 ? delta / maximum : 0.0, maximum);",
+  "}",
+  "vec3 hsvToRgb(vec3 color){",
+  "  vec3 bands = abs(fract(color.xxx + vec3(0.0, 0.6666667, 0.3333333)) * 6.0 - 3.0);",
+  "  return color.z * mix(vec3(1.0), clamp(bands - 1.0, 0.0, 1.0), color.y);",
+  "}",
+  "vec4 sampleAdvancedCurve(float coordinate, float row){",
+  "  float position = clamp(coordinate, 0.0, 1.0) * 1023.0;",
+  "  float lower = floor(position);",
+  "  float upper = min(lower + 1.0, 1023.0);",
+  "  float y = (row + 0.5) / 3.0;",
+  "  vec4 before = texture2D(u_advanced, vec2((lower + 0.5) / 1024.0, y));",
+  "  vec4 after = texture2D(u_advanced, vec2((upper + 0.5) / 1024.0, y));",
+  "  return mix(before, after, position - lower);",
+  "}",
+  "vec4 advancedConfig(float index){",
+  "  return texture2D(u_advanced, vec2((index + 0.5) / 1024.0, 0.8333333));",
+  "}",
+  "vec3 wheelDirection(float hue){",
+  "  vec3 direction = hsvToRgb(vec3(fract(hue), 1.0, 1.0));",
+  "  direction -= vec3(lumaOf(direction));",
+  "  return direction / max(max(max(abs(direction.r), abs(direction.g)), abs(direction.b)), 0.0001);",
+  "}",
+  "vec3 applyTonalWheels(vec3 color){",
+  "  float luma = lumaOf(color);",
+  "  float shadows = 1.0 - smoothstep(0.0, 0.6, luma);",
+  "  float highlights = smoothstep(0.4, 1.0, luma);",
+  "  float midtones = max(0.0, 1.0 - shadows - highlights);",
+  "  float total = max(shadows + midtones + highlights, 0.0001);",
+  "  vec3 weights = vec3(shadows, midtones, highlights) / total;",
+  "  color += wheelDirection(u_shadowWheel.x) * u_shadowWheel.y * weights.x * 0.18;",
+  "  color += wheelDirection(u_midtoneWheel.x) * u_midtoneWheel.y * weights.y * 0.18;",
+  "  color += wheelDirection(u_highlightWheel.x) * u_highlightWheel.y * weights.z * 0.18;",
+  "  color += u_shadowWheel.z * weights.x * 0.25;",
+  "  color += u_midtoneWheel.z * weights.y * 0.25;",
+  "  color += u_highlightWheel.z * weights.z * 0.25;",
+  "  return color;",
+  "}",
+  "vec3 applyRgbCurves(vec3 color){",
+  "  if (u_rgbCurvesEnabled < 0.5) return color;",
+  "  vec3 master = vec3(",
+  "    sampleAdvancedCurve(color.r, 0.0).a,",
+  "    sampleAdvancedCurve(color.g, 0.0).a,",
+  "    sampleAdvancedCurve(color.b, 0.0).a",
+  "  );",
+  "  return vec3(",
+  "    sampleAdvancedCurve(master.r, 0.0).r,",
+  "    sampleAdvancedCurve(master.g, 0.0).g,",
+  "    sampleAdvancedCurve(master.b, 0.0).b",
+  "  );",
+  "}",
+  "float decodeSigned(float value){ return (value * 255.0 - 128.0) / 127.0; }",
+  "vec3 applyHueCurves(vec3 color){",
+  "  if (u_hueCurvesEnabled < 0.5) return color;",
+  "  vec3 hsv = rgbToHsv(clamp(color, 0.0, 1.0));",
+  "  vec3 curves = sampleAdvancedCurve(hsv.x, 1.0).rgb;",
+  "  float originalLuma = lumaOf(color);",
+  "  hsv.x = fract(hsv.x + decodeSigned(curves.r) * 0.5);",
+  "  hsv.y = clamp(hsv.y * max(0.0, 1.0 + decodeSigned(curves.g)), 0.0, 1.0);",
+  "  vec3 shifted = hsvToRgb(hsv);",
+  "  shifted += vec3(originalLuma - lumaOf(shifted) + decodeSigned(curves.b));",
+  "  return shifted;",
+  "}",
+  "float softRangeMask(float value, float minimum, float maximum, float softness){",
+  "  if (value < minimum) {",
+  "    if (softness <= 0.0) return 0.0;",
+  "    return smoothstep(minimum - softness, minimum, value);",
+  "  }",
+  "  if (value > maximum) {",
+  "    if (softness <= 0.0) return 0.0;",
+  "    return 1.0 - smoothstep(maximum, maximum + softness, value);",
+  "  }",
+  "  return 1.0;",
+  "}",
+  "float hueRangeMask(float hue, float saturation, vec3 key){",
+  "  float distance = abs(fract(hue - key.x + 0.5) - 0.5) * 360.0;",
+  "  float range = key.y * 180.0;",
+  "  float softness = key.z * 180.0;",
+  "  if (range < 179.999 && saturation < 0.001) return 0.0;",
+  "  if (distance <= range) return 1.0;",
+  "  if (softness <= 0.0) return 0.0;",
+  "  return 1.0 - smoothstep(range, range + softness, distance);",
+  "}",
+  "vec3 applySecondary(vec3 color, float index){",
+  "  float base = index * 5.0;",
+  "  vec4 hueKey = advancedConfig(base);",
+  "  vec4 saturationKey = advancedConfig(base + 1.0);",
+  "  vec4 lumaKey = advancedConfig(base + 2.0);",
+  "  vec4 correction = advancedConfig(base + 3.0);",
+  "  vec4 tintCorrection = advancedConfig(base + 4.0);",
+  "  vec3 hsv = rgbToHsv(clamp(color, 0.0, 1.0));",
+  "  float luma = lumaOf(color);",
+  "  float mask = hueRangeMask(hsv.x, hsv.y, hueKey.rgb);",
+  "  mask *= softRangeMask(hsv.y, saturationKey.x, saturationKey.y, saturationKey.z * 0.5);",
+  "  mask *= softRangeMask(luma, lumaKey.x, lumaKey.y, lumaKey.z * 0.5);",
+  "  if (mask <= 0.0) return color;",
+  "  hsv.x = fract(hsv.x + decodeSigned(correction.x) * 0.5);",
+  "  vec3 corrected = hsvToRgb(hsv);",
+  "  float correctedLuma = lumaOf(corrected);",
+  "  corrected = mix(vec3(correctedLuma), corrected, max(0.0, 1.0 + decodeSigned(correction.y)));",
+  "  corrected += vec3(decodeSigned(correction.z));",
+  "  float temperature = decodeSigned(correction.w);",
+  "  float tint = decodeSigned(tintCorrection.x);",
+  "  corrected.r += temperature * 0.08 + tint * 0.04;",
+  "  corrected.b -= temperature * 0.08 - tint * 0.04;",
+  "  corrected.g -= tint * 0.08;",
+  "  return mix(color, corrected, mask);",
+  "}",
+  "vec3 applyAdvancedGrade(vec3 color){",
+  "  color = applyTonalWheels(color);",
+  "  color = applyRgbCurves(color);",
+  "  color = applyHueCurves(color);",
+  "  if (u_secondaryCount > 0.5) color = applySecondary(color, 0.0);",
+  "  if (u_secondaryCount > 1.5) color = applySecondary(color, 1.0);",
+  "  if (u_secondaryCount > 2.5) color = applySecondary(color, 2.0);",
+  "  if (u_secondaryCount > 3.5) color = applySecondary(color, 3.0);",
+  "  return color;",
+  "}",
   "vec3 sampleLut(float r, float g, float b){",
   "  float size = max(u_lutSize, 2.0);",
   "  float x = (r + b * size + 0.5) / max(u_lutTextureSize.x, 1.0);",
@@ -982,6 +1142,11 @@ const FRAGMENT_SHADER = [
   "  float vibranceWeight = (1.0 - currentSat * 0.72) * mix(1.0, 0.55, skinLike);",
   "  color = mix(vec3(satLuma), color, max(0.0, 1.0 + u_vibrance * vibranceWeight));",
   "  color = mix(vec3(satLuma), color, max(0.0, 1.0 + u_saturation));",
+  "  return color;",
+  "}",
+  "vec3 applyColorGrade(vec3 color){",
+  "  color = applyPrimaryGrade(color);",
+  "  color = applyAdvancedGrade(color);",
   "  return clamp(applyLut(clamp(color, 0.0, 1.0)), 0.0, 1.0);",
   "}",
   "vec3 applyDither(vec3 source, float amount){",
@@ -1021,7 +1186,7 @@ const FRAGMENT_SHADER = [
   "  vec2 cellVuv = (cell + 0.5) * cellSize / max(u_resolution, vec2(1.0));",
   "  vec2 cellUv = (cellVuv - u_uvOffset) / u_uvScale;",
   "  cellUv = applyCrtWarp(cellUv);",
-  "  vec3 cellColor = applyPrimaryGrade(sampleMedia(cellUv).rgb);",
+  "  vec3 cellColor = applyColorGrade(sampleMedia(cellUv).rgb);",
   "  float brightness = bt601Luma(cellColor);",
   "  float invert = step(0.5, u_asciiInvert);",
   "  brightness = mix(brightness, 1.0 - brightness, invert);",
@@ -1060,7 +1225,7 @@ const FRAGMENT_SHADER = [
   "  sampleColor = sampleChromaticMedia(uv, sampleColor);",
   "  sampleColor.rgb = applyDigitalGlitch(uv, sampleColor.rgb);",
   "  vec3 original = originalSample.rgb;",
-  "  vec3 color = mix(sampleColor.rgb, applyPrimaryGrade(sampleColor.rgb), u_intensity);",
+  "  vec3 color = mix(sampleColor.rgb, applyColorGrade(sampleColor.rgb), u_intensity);",
   "  float grainAmount = clamp(u_grain, 0.0, 1.0);",
   "  if (grainAmount > 0.0) {",
   "    float grainPixelSize = mix(1.0, 6.0, clamp(u_grainSize, 0.0, 1.0));",
@@ -1462,6 +1627,17 @@ function createFloatUniformBindings<K extends string>(
   return bindings;
 }
 
+function deleteProgramResources(
+  gl: WebGLRenderingContext,
+  program: WebGLProgram | null,
+  textures: readonly (WebGLTexture | null)[],
+): void {
+  if (program) gl.deleteProgram(program);
+  for (const texture of textures) {
+    if (texture) gl.deleteTexture(texture);
+  }
+}
+
 function createProgramInfo(canvas: HTMLCanvasElement): {
   gl: WebGLRenderingContext;
   program: ProgramInfo;
@@ -1474,17 +1650,14 @@ function createProgramInfo(canvas: HTMLCanvasElement): {
   const program = createProgram(gl);
   const texture = createTexture(gl);
   const lutTexture = createTexture(gl, gl.NEAREST);
-  if (!program || !texture || !lutTexture) {
-    if (program) gl.deleteProgram(program);
-    if (texture) gl.deleteTexture(texture);
-    if (lutTexture) gl.deleteTexture(lutTexture);
+  const advancedTexture = createTexture(gl, gl.NEAREST);
+  if (!program || !texture || !lutTexture || !advancedTexture) {
+    deleteProgramResources(gl, program, [texture, lutTexture, advancedTexture]);
     return null;
   }
   const quad = gl.createBuffer();
   if (!quad) {
-    gl.deleteProgram(program);
-    gl.deleteTexture(texture);
-    gl.deleteTexture(lutTexture);
+    deleteProgramResources(gl, program, [texture, lutTexture, advancedTexture]);
     return null;
   }
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -1496,6 +1669,8 @@ function createProgramInfo(canvas: HTMLCanvasElement): {
       program,
       texture,
       lutTexture,
+      advancedTexture,
+      advancedSignature: null,
       quad,
       position: gl.getAttribLocation(program, "a_pos"),
       source: gl.getUniformLocation(program, "u_source"),
@@ -1503,6 +1678,7 @@ function createProgramInfo(canvas: HTMLCanvasElement): {
       bloomSource: gl.getUniformLocation(program, "u_bloomSource"),
       kuwaharaSource: gl.getUniformLocation(program, "u_kuwaharaSource"),
       lut: gl.getUniformLocation(program, "u_lut"),
+      advanced: gl.getUniformLocation(program, "u_advanced"),
       resolution: gl.getUniformLocation(program, "u_resolution"),
       uvScale: gl.getUniformLocation(program, "u_uvScale"),
       uvOffset: gl.getUniformLocation(program, "u_uvOffset"),
@@ -1515,6 +1691,12 @@ function createProgramInfo(canvas: HTMLCanvasElement): {
       lutDomainMin: gl.getUniformLocation(program, "u_lutDomainMin"),
       lutDomainMax: gl.getUniformLocation(program, "u_lutDomainMax"),
       lutIntensity: gl.getUniformLocation(program, "u_lutIntensity"),
+      shadowWheel: gl.getUniformLocation(program, "u_shadowWheel"),
+      midtoneWheel: gl.getUniformLocation(program, "u_midtoneWheel"),
+      highlightWheel: gl.getUniformLocation(program, "u_highlightWheel"),
+      rgbCurvesEnabled: gl.getUniformLocation(program, "u_rgbCurvesEnabled"),
+      hueCurvesEnabled: gl.getUniformLocation(program, "u_hueCurvesEnabled"),
+      secondaryCount: gl.getUniformLocation(program, "u_secondaryCount"),
       adjustUniforms: createFloatUniformBindings(gl, program, HF_COLOR_GRADING_ADJUST_KEYS),
       detailUniforms: createFloatUniformBindings(gl, program, HF_COLOR_GRADING_DETAIL_KEYS),
       effectUniforms: createFloatUniformBindings(gl, program, HF_COLOR_GRADING_EFFECT_KEYS),
@@ -1738,6 +1920,7 @@ function destroyProgramResources(renderer: ColorGradingRenderer, loseContext = f
 function destroyMainProgramResources(gl: WebGLRenderingContext, program: ProgramInfo): void {
   gl.deleteTexture(program.texture);
   gl.deleteTexture(program.lutTexture);
+  gl.deleteTexture(program.advancedTexture);
   gl.deleteBuffer(program.quad);
   gl.deleteProgram(program.program);
 }
@@ -1965,7 +2148,7 @@ function renderKuwaharaTexture(
   layout: { width: number; height: number },
   uv: { scaleX: number; scaleY: number; offsetX: number; offsetY: number },
   blurReady: boolean,
-  effects: NormalizedHfColorGrading["effects"],
+  effects: ResolvedHfColorGrading["effects"],
 ): void {
   resizeRenderTarget(gl, targets.moments, layout.width, layout.height);
   resizeRenderTarget(gl, targets.output, layout.width, layout.height);
@@ -2065,7 +2248,7 @@ function prepareBloomTexture(
 
 function prepareBlurAndBloomTextures(
   state: EffectRenderState,
-  grading: NormalizedHfColorGrading,
+  grading: ResolvedHfColorGrading,
   layout: { width: number; height: number },
   releaseIdleTargets: boolean,
 ): Pick<PreparedEffectTextures, "blurReady" | "bloomReady" | "blurTexture" | "bloomTexture"> {
@@ -2111,7 +2294,7 @@ function prepareBlurAndBloomTextures(
 
 function prepareKuwaharaTexture(
   state: EffectRenderState,
-  grading: NormalizedHfColorGrading,
+  grading: ResolvedHfColorGrading,
   layout: { width: number; height: number },
   uv: { scaleX: number; scaleY: number; offsetX: number; offsetY: number },
   blurReady: boolean,
@@ -2146,7 +2329,7 @@ function prepareKuwaharaTexture(
 
 function prepareEffectTextures(
   state: EffectRenderState,
-  grading: NormalizedHfColorGrading,
+  grading: ResolvedHfColorGrading,
   layout: { width: number; height: number },
   uv: { scaleX: number; scaleY: number; offsetX: number; offsetY: number },
   options: { preserveKuwahara?: boolean; releaseIdleTargets?: boolean } = {},
@@ -2462,11 +2645,152 @@ function setPaletteColorUniform(
   );
 }
 
+function writeAdvancedTexel(
+  data: Float32Array,
+  row: number,
+  column: number,
+  value: readonly [number, number, number, number],
+): void {
+  data.set(value, (row * HF_COLOR_CURVE_LUT_SIZE + column) * 4);
+}
+
+function signedUnit(value: number, range: number): number {
+  return Math.min(1, Math.max(1 / 255, (value * (127 / range) + 128) / 255));
+}
+
+function compileHueCurveOrIdentity(
+  points: readonly HfHueCurvePoint[],
+  outputMin: number,
+  outputMax: number,
+): Float32Array {
+  return points.length >= 3
+    ? compileHfHueCurve(points, outputMin, outputMax)
+    : new Float32Array(HF_COLOR_CURVE_LUT_SIZE);
+}
+
+function sampleAt(samples: Float32Array, index: number): number {
+  return samples[index] ?? 0;
+}
+
+function writeAdvancedCurveRows(
+  data: Float32Array,
+  curves: NormalizedHfColorGradingCurves,
+  hueCurves: NormalizedHfColorGradingHueCurves,
+): void {
+  const red = compileHfColorCurve(curves.red);
+  const green = compileHfColorCurve(curves.green);
+  const blue = compileHfColorCurve(curves.blue);
+  const master = compileHfColorCurve(curves.master);
+  const hueVsHue = compileHueCurveOrIdentity(hueCurves.hueVsHue, -180, 180);
+  const hueVsSaturation = compileHueCurveOrIdentity(hueCurves.hueVsSaturation, -1, 1);
+  const hueVsLuma = compileHueCurveOrIdentity(hueCurves.hueVsLuma, -1, 1);
+
+  for (let index = 0; index < HF_COLOR_CURVE_LUT_SIZE; index += 1) {
+    writeAdvancedTexel(data, 0, index, [
+      sampleAt(red, index),
+      sampleAt(green, index),
+      sampleAt(blue, index),
+      sampleAt(master, index),
+    ]);
+    writeAdvancedTexel(data, 1, index, [
+      signedUnit(sampleAt(hueVsHue, index), 180),
+      signedUnit(sampleAt(hueVsSaturation, index), 1),
+      signedUnit(sampleAt(hueVsLuma, index), 1),
+      1,
+    ]);
+  }
+}
+
+function writeAdvancedSecondary(
+  data: Float32Array,
+  secondary: NormalizedHfColorGradingSecondary,
+  index: number,
+): void {
+  const base = index * ADVANCED_SECONDARY_TEXELS;
+  writeAdvancedTexel(data, 2, base, [
+    secondary.key.hue.center / 360,
+    secondary.key.hue.range / 180,
+    secondary.key.hue.softness / 180,
+    1,
+  ]);
+  writeAdvancedTexel(data, 2, base + 1, [
+    secondary.key.saturation.min,
+    secondary.key.saturation.max,
+    secondary.key.saturation.softness / 0.5,
+    0,
+  ]);
+  writeAdvancedTexel(data, 2, base + 2, [
+    secondary.key.luma.min,
+    secondary.key.luma.max,
+    secondary.key.luma.softness / 0.5,
+    0,
+  ]);
+  writeAdvancedTexel(data, 2, base + 3, [
+    signedUnit(secondary.correction.hueShift, 180),
+    signedUnit(secondary.correction.saturation, 1),
+    signedUnit(secondary.correction.luma, 1),
+    signedUnit(secondary.correction.temperature, 1),
+  ]);
+  writeAdvancedTexel(data, 2, base + 4, [signedUnit(secondary.correction.tint, 1), 0.5, 0.5, 1]);
+}
+
+function buildAdvancedTextureData(
+  curves: NormalizedHfColorGradingCurves,
+  hueCurves: NormalizedHfColorGradingHueCurves,
+  secondaries: readonly NormalizedHfColorGradingSecondary[],
+): Float32Array {
+  const data = new Float32Array(HF_COLOR_CURVE_LUT_SIZE * ADVANCED_TEXTURE_HEIGHT * 4);
+  writeAdvancedCurveRows(data, curves, hueCurves);
+  secondaries
+    .slice(0, 4)
+    .forEach((secondary, index) => writeAdvancedSecondary(data, secondary, index));
+  return data;
+}
+
+function ensureAdvancedTexture(
+  gl: WebGLRenderingContext,
+  program: ProgramInfo,
+  grading: ResolvedHfColorGrading,
+  secondaries: readonly NormalizedHfColorGradingSecondary[],
+): void {
+  const { curves, hueCurves } = grading;
+  const signature = JSON.stringify([curves, hueCurves, secondaries]);
+  if (program.advancedSignature === signature) return;
+
+  const pixels = Uint8Array.from(
+    buildAdvancedTextureData(curves, hueCurves, secondaries),
+    (value) => Math.round(Math.min(1, Math.max(0, value)) * 255),
+  );
+  gl.activeTexture(gl.TEXTURE5);
+  gl.bindTexture(gl.TEXTURE_2D, program.advancedTexture);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    HF_COLOR_CURVE_LUT_SIZE,
+    ADVANCED_TEXTURE_HEIGHT,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    pixels,
+  );
+  program.advancedSignature = signature;
+}
+
+function setWheelUniform(
+  gl: WebGLRenderingContext,
+  location: WebGLUniformLocation | null,
+  wheel: NormalizedHfColorGradingWheels["shadows"],
+): void {
+  gl.uniform3f(location, wheel.hue / 360, wheel.amount, wheel.level);
+}
+
 // fallow-ignore-next-line complexity
 function applyUniforms(
   gl: WebGLRenderingContext,
   program: ProgramInfo,
-  grading: NormalizedHfColorGrading,
+  grading: ResolvedHfColorGrading,
   lut: RuntimeLutTexture | null,
   blurReady: boolean,
   bloomReady: boolean,
@@ -2482,6 +2806,7 @@ function applyUniforms(
   gl.uniform1i(program.lut, 2);
   gl.uniform1i(program.kuwaharaSource, 3);
   gl.uniform1i(program.bloomSource, 4);
+  gl.uniform1i(program.advanced, 5);
   gl.uniform2f(program.resolution, layout.width, layout.height);
   gl.uniform2f(program.uvScale, uv.scaleX, uv.scaleY);
   gl.uniform2f(program.uvOffset, uv.offsetX, uv.offsetY);
@@ -2504,6 +2829,22 @@ function applyUniforms(
     lut?.domainMax[2] ?? 1,
   );
   gl.uniform1f(program.lutIntensity, grading.lut?.intensity ?? 0);
+  const { curves, hueCurves, secondaries } = grading;
+  const enabledSecondaries = secondaries.filter((secondary) => secondary.enabled);
+  const rgbCurvesEnabled = hasHfColorGradingRgbCurveValues(curves);
+  const hueCurvesEnabled = hasHfColorGradingHueCurveValues(hueCurves);
+  const secondaryCount = hasHfColorGradingSecondaryValues(secondaries)
+    ? enabledSecondaries.length
+    : 0;
+  if (rgbCurvesEnabled || hueCurvesEnabled || secondaryCount > 0) {
+    ensureAdvancedTexture(gl, program, grading, enabledSecondaries);
+  }
+  setWheelUniform(gl, program.shadowWheel, grading.wheels.shadows);
+  setWheelUniform(gl, program.midtoneWheel, grading.wheels.midtones);
+  setWheelUniform(gl, program.highlightWheel, grading.wheels.highlights);
+  gl.uniform1f(program.rgbCurvesEnabled, rgbCurvesEnabled ? 1 : 0);
+  gl.uniform1f(program.hueCurvesEnabled, hueCurvesEnabled ? 1 : 0);
+  gl.uniform1f(program.secondaryCount, secondaryCount);
   for (const [key, location] of program.adjustUniforms) {
     gl.uniform1f(location, grading.adjust[key]);
   }
@@ -2599,8 +2940,8 @@ function readAnimatedValue(element: HTMLElement, property: AnimatedProperty): nu
 
 function isRuntimeColorGradingActive(
   element: ColorGradingMediaElement,
-  grading: NormalizedHfColorGrading | null,
-): grading is NormalizedHfColorGrading {
+  grading: ResolvedHfColorGrading | null,
+): grading is ResolvedHfColorGrading {
   return (
     grading !== null &&
     (isHfColorGradingActive(grading) ||
@@ -2610,9 +2951,9 @@ function isRuntimeColorGradingActive(
 
 function readAnimatedEffects(
   element: HTMLElement,
-  grading: NormalizedHfColorGrading,
-): NormalizedHfColorGrading["effects"] | null {
-  let effects: NormalizedHfColorGrading["effects"] | null = null;
+  grading: ResolvedHfColorGrading,
+): ResolvedHfColorGrading["effects"] | null {
+  let effects: ResolvedHfColorGrading["effects"] | null = null;
   for (const [key, property] of ANIMATED_EFFECT_PROPERTIES) {
     const value = readAnimatedValue(element, property);
     if (value === null) continue;
@@ -2622,7 +2963,7 @@ function readAnimatedEffects(
   return effects;
 }
 
-function readAnimatedGrading(entry: ColorGradingEntry): NormalizedHfColorGrading {
+function readAnimatedGrading(entry: ColorGradingEntry): ResolvedHfColorGrading {
   const { element, grading } = entry;
   const intensity = readAnimatedValue(element, ANIMATED_INTENSITY_PROPERTY);
   const lutIntensity = readAnimatedValue(element, ANIMATED_LUT_INTENSITY_PROPERTY);
@@ -2666,6 +3007,7 @@ function bindProgramTextures(
     program.lutTexture,
     prepared.kuwaharaTexture,
     prepared.bloomTexture,
+    program.advancedTexture,
   ];
   for (const [unit, texture] of textures.entries()) {
     gl.activeTexture(gl.TEXTURE0 + unit);
@@ -2893,7 +3235,7 @@ async function renderPreviewBatch(
 
 function renderPreviewCandidate(
   renderer: ColorGradingPreviewRenderer,
-  grading: NormalizedHfColorGrading,
+  grading: ResolvedHfColorGrading,
   lut: RuntimeLutTexture | null,
   dimensions: { width: number; height: number },
   uv: { scaleX: number; scaleY: number; offsetX: number; offsetY: number },
@@ -3090,11 +3432,12 @@ export function createColorGradingRuntime(): RuntimeColorGradingApi {
   const idleRenderers: ColorGradingRenderer[] = [];
   let observer: MutationObserver | null = null;
   let previewRenderer: ColorGradingPreviewRenderer | null = null;
+  let previewQueue = Promise.resolve();
   let destroyed = false;
 
   const upsert = (
     element: ColorGradingMediaElement,
-    grading: NormalizedHfColorGrading,
+    grading: ResolvedHfColorGrading,
     source: EntrySource,
   ): boolean => {
     const existing = entries.get(element);
@@ -3348,18 +3691,26 @@ export function createColorGradingRuntime(): RuntimeColorGradingApi {
     candidates: readonly RuntimeColorGradingPreviewCandidate[],
     options?: { maxDimension?: number; useMediaTime?: boolean },
   ): Promise<RuntimeColorGradingPreviewBatch | null> => {
-    if (destroyed || candidates.length === 0) return null;
-    const element = resolveTarget(target);
-    if (!element) return null;
-    previewRenderer ??= createPreviewRenderer();
-    if (!previewRenderer) return null;
-    return renderPreviewBatch(
-      previewRenderer,
-      element,
-      candidates,
-      options?.maxDimension,
-      options?.useMediaTime,
+    const run = async () => {
+      if (destroyed || candidates.length === 0) return null;
+      const element = resolveTarget(target);
+      if (!element) return null;
+      previewRenderer ??= createPreviewRenderer();
+      if (!previewRenderer) return null;
+      return renderPreviewBatch(
+        previewRenderer,
+        element,
+        candidates,
+        options?.maxDimension,
+        options?.useMediaTime,
+      );
+    };
+    const result = previewQueue.then(run, run);
+    previewQueue = result.then(
+      () => undefined,
+      () => undefined,
     );
+    return result;
   };
 
   const startPreviewPlayback = (
