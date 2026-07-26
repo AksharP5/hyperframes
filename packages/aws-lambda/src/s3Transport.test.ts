@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication complexity
 /**
  * Unit tests for the S3 URI parser + tar helpers. Real S3 network calls
  * are covered by the dispatch tests in `handler.test.ts` via a fake
@@ -132,6 +133,35 @@ describe("content-addressed v2 artifacts", () => {
     expect(s3.putCount).toBe(0);
   });
 
+  it("reuses a matching object won by a concurrent conditional create", async () => {
+    const source = join(scratchRoot, "artifact-race.bin");
+    writeFileSync(source, "race-safe bytes");
+    const digest = await sha256File(source);
+    const uri = `s3://bucket/v2/artifacts/sha256/${digest.slice(0, 2)}/${digest}`;
+    const s3 = new ContentAddressedFakeS3();
+    s3.raceOnNextPut = { bytes: Buffer.from("race-safe bytes"), sha256: digest };
+
+    expect(await uploadContentAddressedFileToS3(s3.asClient(), source, uri, digest)).toBe("reused");
+    expect(s3.putCount).toBe(0);
+  });
+
+  it("rejects a conflicting object won by a concurrent conditional create", async () => {
+    const source = join(scratchRoot, "artifact-race-conflict.bin");
+    writeFileSync(source, "race-safe bytes");
+    const digest = await sha256File(source);
+    const uri = `s3://bucket/v2/artifacts/sha256/${digest.slice(0, 2)}/${digest}`;
+    const s3 = new ContentAddressedFakeS3();
+    s3.raceOnNextPut = {
+      bytes: Buffer.alloc(Buffer.byteLength("race-safe bytes"), "x"),
+      sha256: "0".repeat(64),
+    };
+
+    await expect(
+      uploadContentAddressedFileToS3(s3.asClient(), source, uri, digest),
+    ).rejects.toMatchObject({ name: "PLAN_ARTIFACT_DIGEST_MISMATCH" });
+    expect(s3.putCount).toBe(0);
+  });
+
   it("deletes a downloaded artifact when digest verification fails", async () => {
     const expectedSource = join(scratchRoot, "artifact-expected.bin");
     const destination = join(scratchRoot, "artifact-download.bin");
@@ -152,6 +182,7 @@ describe("content-addressed v2 artifacts", () => {
 class ContentAddressedFakeS3 {
   readonly objects = new Map<string, { bytes: Buffer; sha256: string }>();
   putCount = 0;
+  raceOnNextPut: { bytes: Buffer; sha256: string } | undefined;
 
   asClient(): import("@aws-sdk/client-s3").S3Client {
     return this as unknown as import("@aws-sdk/client-s3").S3Client;
@@ -193,6 +224,17 @@ class ContentAddressedFakeS3 {
       return { Body: Readable.from([object.bytes]) };
     }
     if (value.constructor.name === "PutObjectCommand") {
+      if (this.raceOnNextPut) {
+        this.objects.set(uri, this.raceOnNextPut);
+        this.raceOnNextPut = undefined;
+        if (value.input.Body && "destroy" in value.input.Body) {
+          value.input.Body.destroy();
+        }
+        const error = new Error("precondition failed");
+        error.name = "PreconditionFailed";
+        Object.assign(error, { $metadata: { httpStatusCode: 412 } });
+        throw error;
+      }
       const chunks: Buffer[] = [];
       for await (const chunk of value.input.Body ?? []) chunks.push(Buffer.from(chunk));
       const bytes = Buffer.concat(chunks);

@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication complexity
 /**
  * Handler dispatch unit tests.
  *
@@ -18,14 +19,15 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   CURRENT_PLAN_PROTOCOL,
-  createPlanV2FromV1,
   type AssembleResult,
   type ChunkResult,
   type PlanResult,
-  type PlanV2Result,
+  type PlanV2ArtifactPublisher,
+  type PlanV2Manifest,
+  publishPlanV2FromV1,
 } from "@hyperframes/producer/distributed";
 import { recomputePlanHashFromPlanDir } from "../../producer/src/services/render/stages/freezePlan.js";
 import type { AssembleEvent, LambdaEvent, PlanEvent, RenderChunkEvent } from "./events.js";
@@ -528,11 +530,19 @@ describe("handler dispatch", () => {
     const s3 = new FakeS3Client();
     s3.objects.set("s3://bucket/project.tar.gz", await makeMinimalProjectTar());
 
-    const planV2Mock = mock(
-      async (_projectDir: string, _config: unknown, planV2Dir: string): Promise<PlanV2Result> => {
+    const planV2WithPublisherMock = mock(
+      async (
+        projectDir: string,
+        _config: unknown,
+        publisher: PlanV2ArtifactPublisher,
+        options: Readonly<{ stagingParentDir?: string }>,
+      ): Promise<PlanV2Manifest> => {
         const v1Dir = join(tmpRoot, `v1-${Date.now()}`);
         makeMinimalV1PlanDir(v1Dir, true);
-        return createPlanV2FromV1(v1Dir, planV2Dir);
+        const manifest = await publishPlanV2FromV1(v1Dir, publisher);
+        expect(options.stagingParentDir).toBe(dirname(projectDir));
+        expect(existsSync(join(dirname(projectDir), "plan-v2"))).toBe(false);
+        return manifest;
       },
     );
     const renderChunkMock = mock(
@@ -568,7 +578,8 @@ describe("handler dispatch", () => {
         plan: mock(async () => {
           throw new Error("v1 plan should not be called");
         }) as unknown as typeof import("@hyperframes/producer/distributed").plan,
-        planV2: planV2Mock as unknown as typeof import("@hyperframes/producer/distributed").planV2,
+        planV2WithPublisher:
+          planV2WithPublisherMock as unknown as typeof import("@hyperframes/producer/distributed").planV2WithPublisher,
         renderChunk:
           renderChunkMock as unknown as typeof import("@hyperframes/producer/distributed").renderChunk,
         assemble:
@@ -597,6 +608,13 @@ describe("handler dispatch", () => {
     if (!("PlanProtocol" in planned) || planned.PlanProtocol !== "v2") {
       throw new Error("expected v2 plan result");
     }
+    const planUploads = s3.ops.filter((operation) => operation.kind === "upload");
+    expect(planUploads.at(-1)?.uri).toBe(planned.PlanV2ManifestS3Uri);
+    expect(
+      planUploads
+        .slice(0, -1)
+        .every((operation) => operation.uri.startsWith(`${planned.PlanV2ArtifactS3Prefix}/`)),
+    ).toBe(true);
 
     const beforeChunk = s3.ops.length;
     const chunk = await handler(
