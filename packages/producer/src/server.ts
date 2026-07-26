@@ -118,10 +118,10 @@ interface PreparedRenderInput {
 }
 
 const DEFAULT_SERVER_FPS = { num: 30, den: 1 } as const;
-const SAFE_RENDER_ERROR_CODES = new Set([
+const SAFE_RENDER_ERROR_CODES = new Set<string>([
   "VIDEO_SOURCE_UNRENDERABLE",
   "VIDEO_EXTRACTION_FAILED",
-] as const);
+]);
 
 /**
  * Preserve only bounded producer error codes across JSON/SSE. Never derive a
@@ -129,11 +129,8 @@ const SAFE_RENDER_ERROR_CODES = new Set([
  */
 export function extractSafeRenderErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === "string" &&
-    SAFE_RENDER_ERROR_CODES.has(code as "VIDEO_SOURCE_UNRENDERABLE" | "VIDEO_EXTRACTION_FAILED")
-    ? code
-    : undefined;
+  const code = error.code;
+  return typeof code === "string" && SAFE_RENDER_ERROR_CODES.has(code) ? code : undefined;
 }
 
 function parseServerFps(value: unknown): RenderInput["fps"] {

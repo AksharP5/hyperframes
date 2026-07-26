@@ -198,8 +198,8 @@ export function isVideoSourceExtractionError(error: unknown): error is VideoSour
   return (
     typeof error === "object" &&
     error !== null &&
-    (error as { hyperframesVideoSourceExtractionError?: unknown })
-      .hyperframesVideoSourceExtractionError === true
+    "hyperframesVideoSourceExtractionError" in error &&
+    error.hyperframesVideoSourceExtractionError === true
   );
 }
 

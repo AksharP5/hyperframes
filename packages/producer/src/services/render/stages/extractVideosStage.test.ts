@@ -193,8 +193,11 @@ describe("assertVideoExtractionSucceeded", () => {
         { kind: "zero_output", count: 1 },
       ],
     });
-    expect((caught as Error).message).not.toContain("/tmp/");
-    expect((caught as Error).message).not.toContain("Signature");
+    if (!(caught instanceof Error)) {
+      throw new Error("expected VideoExtractionStageError");
+    }
+    expect(caught.message).not.toContain("/tmp/");
+    expect(caught.message).not.toContain("Signature");
   });
 
   it("keeps exhausted transient failures retryable and collapses duplicate kinds", () => {
