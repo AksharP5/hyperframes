@@ -58,6 +58,7 @@ function createMockWebGl(
     TEXTURE2: 0x84c2,
     TEXTURE3: 0x84c3,
     TEXTURE4: 0x84c4,
+    TEXTURE5: 0x84c5,
     FLOAT: 0x1406,
     TRIANGLE_STRIP: 0x0005,
     UNPACK_FLIP_Y_WEBGL: 0x9240,
@@ -487,6 +488,48 @@ describe("createColorGradingRuntime", () => {
       { id: "kuwahara", dataUrl: "data:image/png;base64,lut-preview" },
     ]);
     toDataUrl.mockRestore();
+  });
+
+  it("serializes preview batches while a LUT is loading", async () => {
+    const video = makeDrawableVideo();
+    video.removeAttribute(HF_COLOR_GRADING_ATTR);
+    document.body.appendChild(video);
+    let resolveText: ((value: string) => void) | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () =>
+            new Promise<string>((resolve) => {
+              resolveText = resolve;
+            }),
+        }),
+      ),
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(
+      "data:image/png;base64,preview",
+    );
+    runtime = createColorGradingRuntime();
+
+    const first = runtime.renderPreviews(
+      "#hero-video",
+      [{ id: "lut", grading: { lut: { src: "/looks/queued.cube" } } }],
+      { maxDimension: 160 },
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = runtime.renderPreviews("#hero-video", [{ id: "plain", grading: "neutral" }], {
+      maxDimension: 320,
+    });
+    await Promise.resolve();
+
+    expect(texImage2DCalls.filter((args) => args.length === 6)).toHaveLength(1);
+    resolveText?.(IDENTITY_2);
+    await expect(first).resolves.toMatchObject({ width: 160, height: 90 });
+    await expect(second).resolves.toMatchObject({ width: 320, height: 180 });
+    expect(texImage2DCalls.filter((args) => args.length === 6)).toHaveLength(2);
   });
 
   it("resolves grading values from the nearest sub-composition variable scope", () => {
@@ -1099,6 +1142,7 @@ describe("createColorGradingRuntime", () => {
     runtime = createColorGradingRuntime();
 
     const fragment = lastShaderSources.find((source) => source.includes("sampleMedia"));
+    if (!fragment) throw new Error("Expected the media-treatment fragment shader");
     expect(fragment).toContain("vec4 originalSample = sampleSource(uv);");
     expect(fragment).toContain("vec4 sampleColor = sampleMedia(uv);");
     expect(fragment).toContain("uniform sampler2D u_blurSource;");
@@ -1111,9 +1155,34 @@ describe("createColorGradingRuntime", () => {
     expect(fragment).toContain("float blackPoint = clamp(u_blacks * 0.18");
     expect(fragment).toContain("float whitePoint = clamp(1.0 - u_whites * 0.18");
     expect(fragment).toContain("vec3 applyPrimaryGrade(vec3 color)");
+    expect(fragment).toContain("vec3 applyTonalWheels(vec3 color)");
+    expect(fragment).toContain("vec3 applyRgbCurves(vec3 color)");
+    expect(fragment).toContain("vec3 applyHueCurves(vec3 color)");
+    expect(fragment).toContain("vec3 applySecondary(vec3 color, float index)");
+    expect(fragment).toContain("vec3 applyColorGrade(vec3 color)");
     expect(fragment).toContain(
-      "vec3 color = mix(sampleColor.rgb, applyPrimaryGrade(sampleColor.rgb), u_intensity);",
+      "float decodeSigned(float value){ return (value * 255.0 - 128.0) / 127.0; }",
     );
+    expect(fragment).toContain(
+      "vec3 color = mix(sampleColor.rgb, applyColorGrade(sampleColor.rgb), u_intensity);",
+    );
+    expect(fragment).toContain("vec3 cellColor = applyColorGrade(sampleMedia(cellUv).rgb);");
+    const advancedStart = fragment.indexOf("vec3 applyAdvancedGrade");
+    const wheels = fragment.indexOf("color = applyTonalWheels(color);", advancedStart);
+    const rgbCurves = fragment.indexOf("color = applyRgbCurves(color);", advancedStart);
+    const hueCurves = fragment.indexOf("color = applyHueCurves(color);", advancedStart);
+    const secondary = fragment.indexOf("color = applySecondary(color, 0.0);", advancedStart);
+    expect(wheels).toBeGreaterThan(advancedStart);
+    expect(rgbCurves).toBeGreaterThan(wheels);
+    expect(hueCurves).toBeGreaterThan(rgbCurves);
+    expect(secondary).toBeGreaterThan(hueCurves);
+    const gradeStart = fragment.indexOf("vec3 applyColorGrade");
+    const primary = fragment.indexOf("color = applyPrimaryGrade(color);", gradeStart);
+    const advanced = fragment.indexOf("color = applyAdvancedGrade(color);", gradeStart);
+    const lut = fragment.indexOf("applyLut(clamp(color, 0.0, 1.0))", gradeStart);
+    expect(primary).toBeGreaterThan(gradeStart);
+    expect(advanced).toBeGreaterThan(primary);
+    expect(lut).toBeGreaterThan(advanced);
     expect(fragment).not.toContain("mix(original, color, u_intensity)");
     expect(fragment).not.toContain("sampleSoft");
     const blurFragment = lastShaderSources.find((source) =>
@@ -1122,6 +1191,161 @@ describe("createColorGradingRuntime", () => {
     expect(blurFragment).toContain("stepUv * 12.0");
     expect(blurFragment).toContain("color.rgb *= color.a;");
     expect(blurFragment).toContain("color.rgb /= color.a;");
+  });
+
+  it("does not upload the advanced texture for a basic-only grade", () => {
+    const video = makeDrawableVideo();
+    document.body.appendChild(video);
+
+    runtime = createColorGradingRuntime();
+
+    expect(texImage2DCalls.some((args) => args[3] === 1024 && args[4] === 3)).toBe(false);
+    expect(lastUniform1f).toHaveBeenCalledWith("u_rgbCurvesEnabled", 0);
+    expect(lastUniform1f).toHaveBeenCalledWith("u_hueCurvesEnabled", 0);
+    expect(lastUniform1f).toHaveBeenCalledWith("u_secondaryCount", 0);
+  });
+
+  it("does not upload identity curves with redundant diagonal points", () => {
+    const video = makeDrawableVideo();
+    video.setAttribute(
+      HF_COLOR_GRADING_ATTR,
+      serializeHfColorGrading({
+        curves: {
+          master: [
+            [0, 0],
+            [0.5, 0.5],
+            [1, 1],
+          ],
+        },
+        details: { grain: 0.1 },
+      }),
+    );
+    document.body.appendChild(video);
+
+    runtime = createColorGradingRuntime();
+
+    expect(texImage2DCalls.some((args) => args[3] === 1024 && args[4] === 3)).toBe(false);
+    expect(lastUniform1f).toHaveBeenCalledWith("u_rgbCurvesEnabled", 0);
+  });
+
+  it("uploads and enables wheels, curves, hue curves, and ordered secondaries", () => {
+    const video = makeDrawableVideo();
+    video.setAttribute(
+      HF_COLOR_GRADING_ATTR,
+      serializeHfColorGrading({
+        wheels: {
+          shadows: { hue: 180, amount: 0.25, level: -0.1 },
+          midtones: { hue: 30, amount: 0.1, level: 0.05 },
+        },
+        curves: {
+          master: [
+            [0, 0],
+            [0.5, 0.6],
+            [1, 1],
+          ],
+          red: [
+            [0, 0],
+            [0.5, 0.45],
+            [1, 1],
+          ],
+        },
+        hueCurves: {
+          hueVsHue: [
+            [0, 0],
+            [120, 12],
+            [240, 0],
+          ],
+          hueVsSaturation: [
+            [0, 0],
+            [120, 0.2],
+            [240, 0],
+          ],
+        },
+        secondaries: [
+          {
+            key: {
+              hue: { center: 350, range: 20, softness: 10 },
+              saturation: { min: 0.2, max: 0.9, softness: 0.1 },
+              luma: { min: 0.1, max: 0.8, softness: 0.05 },
+            },
+            correction: {
+              hueShift: 8,
+              saturation: 0.15,
+              luma: 0.04,
+              temperature: 0.05,
+              tint: -0.03,
+            },
+          },
+        ],
+      }),
+    );
+    document.body.appendChild(video);
+
+    runtime = createColorGradingRuntime();
+
+    const advancedUpload = texImage2DCalls.find(
+      (args) =>
+        args[3] === 1024 && args[4] === 3 && args[7] === 0x1401 && args[8] instanceof Uint8Array,
+    );
+    expect(advancedUpload).toBeDefined();
+    const pixels = advancedUpload?.[8] as Uint8Array;
+    expect(pixels[1024 * 4]).toBe(128);
+    expect(lastUniform3f).toHaveBeenCalledWith("u_shadowWheel", 0.5, 0.25, -0.1);
+    expect(lastUniform3f).toHaveBeenCalledWith("u_midtoneWheel", 30 / 360, 0.1, 0.05);
+    expect(lastUniform1f).toHaveBeenCalledWith("u_rgbCurvesEnabled", 1);
+    expect(lastUniform1f).toHaveBeenCalledWith("u_hueCurvesEnabled", 1);
+    expect(lastUniform1f).toHaveBeenCalledWith("u_secondaryCount", 1);
+  });
+
+  it("packs only enabled secondaries into the shader lookup", () => {
+    const video = makeDrawableVideo();
+    video.setAttribute(
+      HF_COLOR_GRADING_ATTR,
+      serializeHfColorGrading({
+        secondaries: [
+          {
+            enabled: false,
+            key: { hue: { center: 20, range: 15 } },
+            correction: { saturation: 0.5 },
+          },
+          {
+            key: { hue: { center: 210, range: 20 } },
+            correction: { luma: 0.1 },
+          },
+        ],
+      }),
+    );
+    document.body.appendChild(video);
+
+    runtime = createColorGradingRuntime();
+
+    expect(lastUniform1f).toHaveBeenCalledWith("u_secondaryCount", 1);
+    const advancedUpload = texImage2DCalls.find(
+      (args) =>
+        args[3] === 1024 && args[4] === 3 && args[7] === 0x1401 && args[8] instanceof Uint8Array,
+    );
+    const pixels = advancedUpload?.[8] as Uint8Array;
+    expect(pixels[1024 * 4 * 2]).toBeCloseTo(Math.round((210 / 360) * 255), 0);
+  });
+
+  it("reuses an unchanged advanced texture while basic adjustments change", () => {
+    const video = makeDrawableVideo();
+    const curves = {
+      master: [
+        [0, 0],
+        [0.5, 0.6],
+        [1, 1],
+      ],
+    } as const;
+    video.setAttribute(HF_COLOR_GRADING_ATTR, serializeHfColorGrading({ curves }));
+    document.body.appendChild(video);
+    runtime = createColorGradingRuntime();
+    const uploads = () =>
+      texImage2DCalls.filter((args) => args[3] === 1024 && args[4] === 3).length;
+
+    expect(uploads()).toBe(1);
+    runtime.setGrading(`#${video.id}`, { curves, adjust: { exposure: 0.2 } });
+    expect(uploads()).toBe(1);
   });
 
   it("renders blur passes at media resolution to avoid blocky high-strength blur", () => {
