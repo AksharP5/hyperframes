@@ -20,11 +20,12 @@
  */
 
 import { beforeAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { App, Stack } from "aws-cdk-lib";
 import { Template } from "aws-cdk-lib/assertions";
+import { parse as parseYaml } from "yaml";
 import { HyperframesRenderStack } from "./HyperframesRenderStack.js";
 
 // CDK synth + Template.fromStack is slow on cold start in CI (~5-8s on
@@ -50,22 +51,33 @@ const EXPECTED_RESOURCE_COUNTS: Record<string, number> = {
 // `RenderChunk` task lives nested under `RenderChunks.Iterator.States`,
 // not at this level — we cover it separately in the contract test.
 const EXPECTED_STATE_NAMES = [
+  "SelectPlanProtocol",
   "Plan",
+  "PlanV2",
   "BuildChunkList",
   "AssertChunkCount",
+  "SelectWorkerProtocol",
   "RenderChunks",
+  "RenderChunksV2",
   "Assemble",
+  "AssembleV2",
   "PlanProducedZeroChunks",
+  "UnsupportedPlanProtocol",
 ];
 
 const EXPECTED_NON_RETRYABLE_ERRORS = new Set([
   "FFMPEG_VERSION_MISMATCH",
   "PLAN_HASH_MISMATCH",
+  "S3_URI_NOT_ALLOWED",
   "BROWSER_GPU_NOT_SOFTWARE",
   "FONT_FETCH_FAILED",
   "PLAN_TOO_LARGE",
+  "PlanTooLargeError",
   "PLAN_PROTOCOL_UNSUPPORTED",
   "PlanProtocolUnsupportedError",
+  "PLAN_V2_INTEGRITY_UNRECOVERABLE",
+  "PlanV2IntegrityError",
+  "PLAN_ARTIFACT_DIGEST_MISMATCH",
   "FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED",
   "ChromeBinaryUnavailableError",
 ]);
@@ -130,7 +142,7 @@ describe("HyperframesRenderStack — snapshot", () => {
 
   it("declares the state machine with the expected state names", () => {
     const { definition } = SYNTHED;
-    expect(definition.StartAt).toBe("Plan");
+    expect(definition.StartAt).toBe("SelectPlanProtocol");
     const actualStates = Object.keys(definition.States);
     expect(actualStates.sort()).toEqual([...EXPECTED_STATE_NAMES].sort());
   });
@@ -140,7 +152,7 @@ describe("HyperframesRenderStack — snapshot", () => {
     const collected = new Set<string>();
     // Plan + Assemble are top-level states; RenderChunk is nested inside
     // the Map's Iterator definition.
-    const topLevelStates = ["Plan", "Assemble"] as const;
+    const topLevelStates = ["Plan", "PlanV2", "Assemble", "AssembleV2"] as const;
     for (const stateName of topLevelStates) {
       collectNonRetryableErrors(definition.States[stateName], collected);
     }
@@ -152,6 +164,15 @@ describe("HyperframesRenderStack — snapshot", () => {
       | undefined;
     const innerStates = renderChunks?.Iterator?.States ?? renderChunks?.ItemProcessor?.States ?? {};
     collectNonRetryableErrors(innerStates.RenderChunk, collected);
+    const renderChunksV2 = definition.States.RenderChunksV2 as
+      | {
+          Iterator?: { States?: Record<string, unknown> };
+          ItemProcessor?: { States?: Record<string, unknown> };
+        }
+      | undefined;
+    const innerStatesV2 =
+      renderChunksV2?.Iterator?.States ?? renderChunksV2?.ItemProcessor?.States ?? {};
+    collectNonRetryableErrors(innerStatesV2.RenderChunkV2, collected);
 
     for (const expected of EXPECTED_NON_RETRYABLE_ERRORS) {
       expect({ error: expected, present: collected.has(expected) }).toEqual({
@@ -159,6 +180,52 @@ describe("HyperframesRenderStack — snapshot", () => {
         present: true,
       });
     }
+  });
+
+  it("classifies plan v2 integrity failures as terminal in every v2 Lambda task", () => {
+    const v2TaskStates = Object.values(getV2TaskStates(SYNTHED.definition));
+
+    for (const state of v2TaskStates) {
+      const errors = new Set<string>();
+      collectNonRetryableErrors(state, errors);
+      expect(errors.has("PLAN_V2_INTEGRITY_UNRECOVERABLE")).toBe(true);
+      expect(errors.has("PlanV2IntegrityError")).toBe(true);
+    }
+  });
+
+  it("keeps SAM and CDK terminal classifiers identical for every v2 Lambda task", () => {
+    const cdkTasks = getV2TaskStates(SYNTHED.definition);
+    const samTasks = getV2TaskStates(readSamDefinition());
+
+    for (const taskName of ["PlanV2", "RenderChunkV2", "AssembleV2"] as const) {
+      const cdkErrors = new Set<string>();
+      const samErrors = new Set<string>();
+      collectNonRetryableErrors(cdkTasks[taskName], cdkErrors);
+      collectNonRetryableErrors(samTasks[taskName], samErrors);
+      expect({ taskName, errors: [...samErrors].sort() }).toEqual({
+        taskName,
+        errors: [...cdkErrors].sort(),
+      });
+    }
+  });
+
+  it("keeps v1 and v2 locators disjoint across orchestration branches", () => {
+    const { definition } = SYNTHED;
+    const v1 = JSON.stringify({
+      plan: definition.States.Plan,
+      chunks: definition.States.RenderChunks,
+      assemble: definition.States.Assemble,
+    });
+    const v2 = JSON.stringify({
+      plan: definition.States.PlanV2,
+      chunks: definition.States.RenderChunksV2,
+      assemble: definition.States.AssembleV2,
+    });
+    expect(v1).toContain("PlanS3Uri");
+    expect(v1).not.toContain("PlanV2ManifestS3Uri");
+    expect(v2).toContain("PlanV2ManifestS3Uri");
+    expect(v2).toContain("PlanV2ArtifactS3Prefix");
+    expect(v2).not.toContain("PlanS3Uri");
   });
 });
 
@@ -170,4 +237,67 @@ function collectNonRetryableErrors(state: unknown, out: Set<string>): void {
       for (const err of retry.ErrorEquals) out.add(err);
     }
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  return value;
+}
+
+function requireRecordProperty(
+  record: Record<string, unknown>,
+  property: string,
+  label: string,
+): Record<string, unknown> {
+  return requireRecord(record[property], label);
+}
+
+function getV2TaskStates(definition: {
+  States: Record<string, unknown>;
+}): Record<"PlanV2" | "RenderChunkV2" | "AssembleV2", unknown> {
+  const renderChunksV2 = requireRecord(definition.States.RenderChunksV2, "RenderChunksV2 state");
+  const processor = isRecord(renderChunksV2.Iterator)
+    ? renderChunksV2.Iterator
+    : requireRecord(renderChunksV2.ItemProcessor, "RenderChunksV2 processor");
+  const innerStates = requireRecord(processor.States, "RenderChunksV2 processor states");
+  return {
+    PlanV2: definition.States.PlanV2,
+    RenderChunkV2: innerStates.RenderChunkV2,
+    AssembleV2: definition.States.AssembleV2,
+  };
+}
+
+function readSamDefinition(): { States: Record<string, unknown> } {
+  const source = readFileSync(
+    new URL("../../../../examples/aws-lambda/template.yaml", import.meta.url),
+    "utf8",
+  );
+  // CloudFormation intrinsic tags are irrelevant to classifier parity. The
+  // YAML parser preserves their scalar values while this option suppresses
+  // warnings for the intentionally unresolved `!Ref`/`!GetAtt` tags.
+  const parsed: unknown = parseYaml(source, { logLevel: "silent" });
+  const root = requireRecord(parsed, "SAM template");
+  const resources = requireRecordProperty(root, "Resources", "SAM resources");
+  const stateMachine = requireRecordProperty(
+    resources,
+    "RenderStateMachine",
+    "SAM RenderStateMachine",
+  );
+  const properties = requireRecordProperty(
+    stateMachine,
+    "Properties",
+    "SAM state-machine properties",
+  );
+  const definition = requireRecordProperty(
+    properties,
+    "Definition",
+    "SAM state-machine definition",
+  );
+  return {
+    States: requireRecordProperty(definition, "States", "SAM state-machine states"),
+  };
 }
