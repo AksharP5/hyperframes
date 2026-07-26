@@ -427,6 +427,7 @@ export function PropertyPanelFlat({
           mediaMetadata={colorGradingController.mediaMetadata}
           presetPreviews={colorGradingController.presetPreviews}
           onRequestPresetPreviews={colorGradingController.requestPresetPreviews}
+          captureGradedFrame={colorGradingController.captureGradedFrame}
         />
       ),
     });

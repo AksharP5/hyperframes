@@ -22,6 +22,8 @@ import {
   Gear,
   Scissors as PhScissors,
   Link as PhLink,
+  Eyedropper as PhEyedropper,
+  Trash as PhTrash,
 } from "@phosphor-icons/react";
 import type { Icon as PhosphorIcon, IconProps as PhosphorIconProps } from "@phosphor-icons/react";
 
@@ -71,3 +73,5 @@ export const RotateCw = makeIcon(ArrowClockwise);
 export const Settings = makeIcon(Gear);
 export const Scissors = makeIcon(PhScissors);
 export const Link = makeIcon(PhLink);
+export const Eyedropper = makeIcon(PhEyedropper);
+export const Trash = makeIcon(PhTrash);
