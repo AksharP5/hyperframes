@@ -73,7 +73,10 @@ function classifyDownloadFailure(error: unknown): UrlDownloadError {
     if (isRetryableNetworkCause(current)) {
       return new UrlDownloadError("network", true, `Download failed: ${message}`);
     }
-    current = (current as Error & { cause?: unknown }).cause;
+    current =
+      typeof current === "object" && current !== null && "cause" in current
+        ? current.cause
+        : undefined;
   }
   return new UrlDownloadError("filesystem", false, `Download failed: ${message}`);
 }
@@ -82,7 +85,10 @@ const RETRYABLE_NETWORK_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOU
 
 function isRetryableNetworkCause(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  const code = (error as NodeJS.ErrnoException | undefined)?.code ?? "";
+  const code =
+    typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "";
   return (
     RETRYABLE_NETWORK_CODES.has(code) ||
     code.startsWith("UND_ERR_") ||
