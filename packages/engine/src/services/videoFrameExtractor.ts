@@ -730,7 +730,7 @@ export async function extractAllVideoFrames(
       if (isHttpUrl(videoPath)) {
         const downloadDir = join(options.outputDir, "_downloads");
         mkdirSync(downloadDir, { recursive: true });
-        videoPath = await downloadToTemp(videoPath, downloadDir);
+        videoPath = await downloadToTemp(videoPath, downloadDir, undefined, signal);
       }
 
       if (!existsSync(videoPath)) {
