@@ -113,7 +113,8 @@ export function clearKeyframeCacheForFile(sourceFile: string): void {
   }
 }
 
-function elementCacheKeys(sourceFile: string, elementId: string): string[] {
+/** Every cache key a write for this element sets, in read-preference order. */
+export function elementCacheKeys(sourceFile: string, elementId: string): string[] {
   return sourceFile === "index.html"
     ? [`index.html#${elementId}`, elementId]
     : [`${sourceFile}#${elementId}`, `index.html#${elementId}`, elementId];

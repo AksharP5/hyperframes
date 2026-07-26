@@ -11,6 +11,7 @@ import {
 } from "../../contexts/DomEditContext";
 import { resolveTweenStart, resolveTweenDuration } from "../../utils/globalTimeCompiler";
 import { resolveClipTimingBasis } from "../../hooks/useGsapTweenCache";
+import { elementCacheKeys } from "../../hooks/gsapKeyframeCacheHelpers";
 import { resolveKeyframeRetime } from "../editor/keyframeRetime";
 import type { DomEditSelection } from "../editor/domEditingTypes";
 import type { TimelineMoveOperation } from "../../hooks/timelineMoveAdapter";
@@ -121,12 +122,13 @@ export function useTimelineEditCallbacks({
       const { gsapAnimations } = usePlayerStore.getState();
       const { sourceFile, domId } = splitTimelineElementKey(elementKey);
       const scope = sourceFile ?? activeCompPath ?? "index.html";
-      return (
-        gsapAnimations.get(`${scope}#${domId}`) ??
-        gsapAnimations.get(`index.html#${domId}`) ??
-        gsapAnimations.get(domId) ??
-        []
-      );
+      // elementCacheKeys owns the key-variant list the writers use; reading it
+      // back by hand here is how the two sides drift.
+      for (const key of elementCacheKeys(scope, domId)) {
+        const animations = gsapAnimations.get(key);
+        if (animations) return animations;
+      }
+      return [];
     },
     [activeCompPath],
   );
