@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { COLOR_GRADING_ADVANCED_LIMITS } from "@hyperframes/parsers/color-grading-contract";
+import { unitFloatToByte } from "./colorLuts";
 import {
+  calculateHfColorGradingSecondaryMask,
   HF_COLOR_GRADING_COLOR_SPACE,
   HF_COLOR_GRADING_ACTIVE_EFFECT_KEYS,
   HF_COLOR_GRADING_EFFECT_APPLY_DEFAULTS,
@@ -196,6 +198,37 @@ describe("color grading", () => {
         saturation: COLOR_GRADING_ADVANCED_LIMITS.signedUnit,
       },
     });
+  });
+
+  it("matches the shader's packed secondary-softness convention", () => {
+    for (const axis of ["saturation", "luma"] as const) {
+      const grading = normalizeHfColorGrading({
+        secondaries: [
+          {
+            key: {
+              hue: { center: 0, range: 180, softness: 0 },
+              saturation: { min: axis === "saturation" ? 0.5 : 0, max: 1, softness: 0.4 },
+              luma: { min: axis === "luma" ? 0.5 : 0, max: 1, softness: 0.4 },
+            },
+            correction: {},
+          },
+        ],
+      });
+      const key = grading?.secondaries[0]?.key;
+      if (!key) throw new Error("Expected a normalized secondary key");
+
+      const packedSoftness = unitFloatToByte(key[axis].softness / 0.5);
+      const shaderDecodedSoftness = (packedSoftness / 255) * 0.5;
+      const decodedKey = {
+        ...key,
+        [axis]: { ...key[axis], softness: shaderDecodedSoftness },
+      };
+      const productMask = calculateHfColorGradingSecondaryMask(0, 0.2, 0.2, key);
+      const shaderMask = calculateHfColorGradingSecondaryMask(0, 0.2, 0.2, decodedKey);
+
+      expect(productMask, axis).toBeGreaterThan(0);
+      expect(productMask, axis).toBeCloseTo(shaderMask, 2);
+    }
   });
 
   it("merges manual adjustments over preset values", () => {

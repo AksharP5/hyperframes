@@ -675,24 +675,19 @@ const SECONDARY_SOFT_RANGE_DEFAULT: Required<HfColorGradingSoftRange> = {
   softness: 0.05,
 };
 const DETAIL_LIMITS: Record<HfColorGradingDetailKey, { min: number; max: number }> = {
-  vignette: { min: 0, max: 1 },
-  vignetteMidpoint: { min: 0, max: 1 },
-  vignetteRoundness: { min: -1, max: 1 },
-  vignetteFeather: { min: 0, max: 1 },
-  grain: { min: 0, max: 1 },
-  grainSize: { min: 0, max: 1 },
-  grainRoughness: { min: 0, max: 1 },
+  vignette: COLOR_GRADING_ADVANCED_LIMITS.unit,
+  vignetteMidpoint: COLOR_GRADING_ADVANCED_LIMITS.unit,
+  vignetteRoundness: COLOR_GRADING_ADVANCED_LIMITS.signedUnit,
+  vignetteFeather: COLOR_GRADING_ADVANCED_LIMITS.unit,
+  grain: COLOR_GRADING_ADVANCED_LIMITS.unit,
+  grainSize: COLOR_GRADING_ADVANCED_LIMITS.unit,
+  grainRoughness: COLOR_GRADING_ADVANCED_LIMITS.unit,
 };
 
 const UNIT_LIMIT = COLOR_GRADING_ADVANCED_LIMITS.unit;
 const EFFECT_LIMIT_OVERRIDES: Partial<
   Record<HfColorGradingEffectKey, { min: number; max: number }>
-> = {
-  asciiStyle: { min: 0, max: 7 },
-  bloom: { min: 0, max: 3 },
-  bloomRadius: { min: 1, max: 100 },
-  monoScreenShape: { min: 0, max: 4 },
-};
+> = COLOR_GRADING_ADVANCED_LIMITS.effects;
 
 export const HF_COLOR_GRADING_ACTIVE_EFFECT_KEYS = [
   "blur",
@@ -1113,6 +1108,47 @@ function wrapDegrees(value: unknown, fallback = 0): number {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return ((parsed % 360) + 360) % 360;
+}
+
+function smoothstep(min: number, max: number, value: number): number {
+  const normalized = clamp((value - min) / (max - min), 0, 1);
+  return normalized * normalized * (3 - 2 * normalized);
+}
+
+function softRangeMask(value: number, min: number, max: number, softness: number): number {
+  if (value < min) {
+    return softness <= 0 ? 0 : smoothstep(min - softness, min, value);
+  }
+  if (value > max) {
+    return softness <= 0 ? 0 : 1 - smoothstep(max, max + softness, value);
+  }
+  return 1;
+}
+
+/**
+ * Mirrors the runtime shader's HSL-secondary qualifier for Studio mattes and
+ * other non-WebGL verification surfaces.
+ */
+export function calculateHfColorGradingSecondaryMask(
+  hue: number,
+  saturation: number,
+  luma: number,
+  key: NormalizedHfColorGradingSecondary["key"],
+): number {
+  const hueDistance = Math.abs(((((hue - key.hue.center + 540) % 360) + 360) % 360) - 180);
+  const hueMask =
+    key.hue.range < 179.999 && saturation < 0.001
+      ? 0
+      : hueDistance <= key.hue.range
+        ? 1
+        : key.hue.softness <= 0
+          ? 0
+          : 1 - smoothstep(key.hue.range, key.hue.range + key.hue.softness, hueDistance);
+  return (
+    hueMask *
+    softRangeMask(saturation, key.saturation.min, key.saturation.max, key.saturation.softness) *
+    softRangeMask(luma, key.luma.min, key.luma.max, key.luma.softness)
+  );
 }
 
 function normalizeWheels(value: unknown): NormalizedHfColorGradingWheels {

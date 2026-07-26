@@ -11,6 +11,12 @@ export const COLOR_GRADING_ADVANCED_LIMITS = {
   secondaryHueCombinedMax: 180,
   secondarySoftRangeSoftness: { min: 0, max: 0.5 },
   secondaryHueShift: { min: -180, max: 180 },
+  effects: {
+    asciiStyle: { min: 0, max: 7 },
+    bloom: { min: 0, max: 3 },
+    bloomRadius: { min: 1, max: 100 },
+    monoScreenShape: { min: 0, max: 4 },
+  },
 } as const;
 
 export const COLOR_GRADING_TOP_LEVEL_KEYS = [
@@ -142,12 +148,8 @@ type NumericLimit = Readonly<{ min: number; max: number }>;
 
 const UNIT_LIMIT: NumericLimit = COLOR_GRADING_ADVANCED_LIMITS.unit;
 const SIGNED_UNIT_LIMIT: NumericLimit = COLOR_GRADING_ADVANCED_LIMITS.signedUnit;
-const EFFECT_LIMIT_OVERRIDES: Readonly<Record<string, NumericLimit>> = {
-  asciiStyle: { min: 0, max: 7 },
-  bloom: { min: 0, max: 3 },
-  bloomRadius: { min: 1, max: 100 },
-  monoScreenShape: { min: 0, max: 4 },
-};
+const EFFECT_LIMIT_OVERRIDES: Readonly<Record<string, NumericLimit>> =
+  COLOR_GRADING_ADVANCED_LIMITS.effects;
 const VARIABLE_REF = /^\$(?:\{[A-Za-z0-9_.:-]+\}|[A-Za-z0-9_.:-]+)$/;
 const PALETTE_COLOR = /^#[0-9a-f]{6}$/i;
 

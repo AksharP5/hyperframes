@@ -2764,6 +2764,7 @@ const ADVANCED_SIGNATURES = new WeakMap<
     signature: string;
   }
 >();
+// Identity-keyed: normalized grading objects must be replaced, never mutated.
 
 function advancedTextureSignature(
   curves: NormalizedHfColorGradingCurves,

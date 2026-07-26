@@ -26,6 +26,12 @@ describe("color grading contract", () => {
       secondaryHueRange: { min: 0, max: 180 },
       secondarySoftRangeSoftness: { min: 0, max: 0.5 },
       secondaryHueShift: { min: -180, max: 180 },
+      effects: {
+        asciiStyle: { min: 0, max: 7 },
+        bloom: { min: 0, max: 3 },
+        bloomRadius: { min: 1, max: 100 },
+        monoScreenShape: { min: 0, max: 4 },
+      },
     });
   });
 
