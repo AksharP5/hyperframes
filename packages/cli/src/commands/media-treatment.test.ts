@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { runCommand } from "citty";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -211,11 +211,13 @@ describe("applyMediaTreatmentToHtml", () => {
 
   it("resolves nested composition media through the shared project-root contract", () => {
     const project = mkdtempSync(join(tmpdir(), "hf-media-treatment-assets-"));
+    const escapedAsset = join(project, "..", `${basename(project)}-escape.mp4`);
     mkdirSync(join(project, "capture"), { recursive: true });
     mkdirSync(join(project, "assets"), { recursive: true });
     writeFileSync(join(project, "capture", "talking-head.mp4"), "");
     writeFileSync(join(project, "assets", "photo.webp"), "");
     writeFileSync(join(project, "assets", "My Clip.mp4"), "");
+    writeFileSync(escapedAsset, "");
 
     try {
       expect(
@@ -248,8 +250,16 @@ describe("applyMediaTreatmentToHtml", () => {
       expect(() =>
         resolveMediaTreatmentSource(project, "compositions/scene.html", "missing.mp4"),
       ).toThrow(/Media file not found/);
+      expect(() =>
+        resolveMediaTreatmentSource(
+          project,
+          "compositions/scene.html",
+          `../../${basename(escapedAsset)}`,
+        ),
+      ).toThrow(/Media file not found/);
     } finally {
       rmSync(project, { recursive: true, force: true });
+      rmSync(escapedAsset, { force: true });
     }
   });
 
