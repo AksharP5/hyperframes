@@ -31,11 +31,11 @@ import {
   listPlanV2ArtifactsForTarget,
   materializePlanV2Target,
   plan,
-  planV2,
+  planV2WithPublisher,
   type PlanResult,
   type PlanV2Artifact,
+  type PlanV2Manifest,
   type PlanV2MaterializationTarget,
-  type PlanV2Result,
   readPlanV2Manifest,
   renderChunk,
 } from "@hyperframes/producer/distributed";
@@ -56,12 +56,11 @@ import {
   downloadGcsObjectToFile,
   downloadGcsObjectToFileVerified,
   parseGcsUri,
-  sha256File,
   tarDirectory,
   untarDirectory,
-  uploadContentAddressedFileToGcs,
   uploadFileToGcs,
 } from "./gcsTransport.js";
+import { GcsPlanV2ArtifactPublisher } from "./gcsPlanV2Publisher.js";
 
 /**
  * Lazily-constructed Storage client. Cached at module scope so warm
@@ -84,7 +83,7 @@ export interface HandlerDeps {
   storage?: Storage;
   primitives?: {
     plan: typeof plan;
-    planV2?: typeof planV2;
+    planV2WithPublisher?: typeof planV2WithPublisher;
     renderChunk: typeof renderChunk;
     assemble: typeof assemble;
   };
@@ -352,8 +351,8 @@ async function handlePlan(event: PlanEvent, deps?: HandlerDeps): Promise<PlanRes
 }
 
 /**
- * Stage immutable v2 artifacts, upload them to content-addressed keys, then
- * publish the manifest as the final commit point.
+ * Publish immutable v2 artifacts directly to GCS, with the manifest as the
+ * final commit point. Planner-local paths never cross a worker boundary.
  */
 // fallow-ignore-next-line complexity
 async function handlePlanV2(
@@ -362,61 +361,40 @@ async function handlePlanV2(
 ): Promise<Extract<PlanResultBody, { PlanProtocol: "v2" }>> {
   const started = Date.now();
   const storage = deps?.storage ?? getStorage();
-  const primitive = deps?.primitives?.planV2 ?? planV2;
+  const primitive = deps?.primitives?.planV2WithPublisher ?? planV2WithPublisher;
   primeChrome(deps);
 
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-cr-plan-v2-"));
   const projectArchive = join(work, "project.tar.gz");
   const projectDir = join(work, "project");
-  const planV2Dir = join(work, "plan-v2");
   try {
     await downloadGcsObjectToFile(storage, event.ProjectGcsUri, projectArchive);
     await untarDirectory(projectArchive, projectDir);
-    const result: PlanV2Result = await primitive(projectDir, { ...event.Config }, planV2Dir);
-    const manifest = readPlanV2Manifest(planV2Dir);
-    if (manifest.planHash !== result.planHash) {
-      throwPlanHashMismatch(result.planHash, manifest.planHash);
-    }
-
-    const outputPrefix = `${trimTrailingSlash(event.PlanOutputGcsPrefix)}/v2`;
-    const artifactPrefix = `${outputPrefix}/artifacts/sha256`;
-    const uniqueArtifacts = [
-      ...new Map(manifest.artifacts.map((artifact) => [artifact.sha256, artifact])).values(),
-    ];
-    await mapConcurrent(uniqueArtifacts, 16, async (artifact) => {
-      await uploadContentAddressedFileToGcs(
-        storage,
-        planV2BlobPath(planV2Dir, artifact.sha256),
-        planV2BlobUri(artifactPrefix, artifact.sha256),
-        artifact.sha256,
-      );
-    });
-
-    const manifestUri = `${outputPrefix}/manifest.json`;
-    await uploadContentAddressedFileToGcs(
+    const publisher = new GcsPlanV2ArtifactPublisher({
       storage,
-      result.manifestPath,
-      manifestUri,
-      await sha256File(result.manifestPath),
-      "application/json",
-    );
+      planOutputGcsPrefix: event.PlanOutputGcsPrefix,
+      temporaryRoot: work,
+    });
+    const manifest: PlanV2Manifest = await primitive(projectDir, { ...event.Config }, publisher, {
+      stagingParentDir: work,
+    });
 
     return {
       Action: "plan",
       PlanProtocol: "v2",
-      PlanV2ManifestGcsUri: manifestUri,
-      PlanV2ArtifactGcsPrefix: artifactPrefix,
-      PlanHash: result.planHash,
-      ChunkCount: result.chunkCount,
-      TotalFrames: result.totalFrames,
-      Fps: result.fps,
-      Width: result.width,
-      Height: result.height,
-      Format: result.format,
+      PlanV2ManifestGcsUri: publisher.manifestUri,
+      PlanV2ArtifactGcsPrefix: publisher.artifactPrefix,
+      PlanHash: manifest.planHash,
+      ChunkCount: manifest.chunkCount,
+      TotalFrames: manifest.totalFrames,
+      Fps: manifest.fps,
+      Width: manifest.width,
+      Height: manifest.height,
+      Format: manifest.format,
       HasAudio: manifest.artifacts.some((artifact) => artifact.path === "audio.aac"),
       AudioGcsUri: null,
-      FfmpegVersion: result.ffmpegVersion,
-      ProducerVersion: result.producerVersion,
+      FfmpegVersion: manifest.ffmpegVersion,
+      ProducerVersion: manifest.producerVersion,
       DurationMs: Date.now() - started,
     };
   } finally {
@@ -736,7 +714,16 @@ async function mapConcurrent<T>(
       await fn(values[index]!);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => worker()));
+  const results = await Promise.allSettled(
+    Array.from({ length: Math.min(concurrency, values.length) }, () => worker()),
+  );
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  // Invocation cleanup removes the work directory in `finally`. Drain all
+  // sibling downloads before surfacing an error so a late GCS stream cannot
+  // keep writing into scratch after another artifact fails verification.
+  if (failure) throw failure.reason;
 }
 
 async function downloadChunkObjects(

@@ -18,17 +18,18 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   CURRENT_PLAN_PROTOCOL,
-  createPlanV2FromV1,
   PLAN_V2_INTEGRITY_UNRECOVERABLE,
   PlanV2IntegrityError,
   PlanProtocolUnsupportedError,
   type AssembleResult,
   type ChunkResult,
   type PlanResult,
-  type PlanV2Result,
+  type PlanV2ArtifactPublisher,
+  type PlanV2Manifest,
+  publishPlanV2FromV1,
 } from "@hyperframes/producer/distributed";
 import { recomputePlanHashFromPlanDir } from "../../producer/src/services/render/stages/freezePlan.js";
 import { asStorage, FakeGcs } from "./__fixtures__/fakeGcs.js";
@@ -244,14 +245,18 @@ describe("dispatch", () => {
     const gcs = new FakeGcs();
     await seedProjectTar(gcs, "gs://b/sites/v2/project.tar.gz");
     const root = mkTmp("hf-v2-e2e-");
-    const planV2 = async (
-      _projectDir: string,
+    const planV2WithPublisher = async (
+      projectDir: string,
       _config: unknown,
-      planV2Dir: string,
-    ): Promise<PlanV2Result> => {
+      publisher: PlanV2ArtifactPublisher,
+      options: Readonly<{ stagingParentDir?: string }>,
+    ): Promise<PlanV2Manifest> => {
       const v1Dir = join(root, "v1");
       makeMinimalV1PlanDir(v1Dir, true);
-      return createPlanV2FromV1(v1Dir, planV2Dir);
+      const manifest = await publishPlanV2FromV1(v1Dir, publisher);
+      expect(options.stagingParentDir).toBe(dirname(projectDir));
+      expect(existsSync(join(dirname(projectDir), "plan-v2"))).toBe(false);
+      return manifest;
     };
     const renderChunk = async (
       planDir: string,
@@ -278,7 +283,7 @@ describe("dispatch", () => {
       writeFileSync(finalOutput, "v2-output");
       return { framesEncoded: 30, fileSize: 9 };
     };
-    const deps = depsWith(gcs, { planV2, renderChunk, assemble });
+    const deps = depsWith(gcs, { planV2WithPublisher, renderChunk, assemble });
 
     const planned = await dispatch(
       {
