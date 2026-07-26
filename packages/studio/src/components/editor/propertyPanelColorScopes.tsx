@@ -189,7 +189,14 @@ export function PropertyPanelColorScopes({
   });
 
   useEffect(() => {
-    if (analysis && canvasRef.current) drawScope(canvasRef.current, mode, analysis);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (analysis) {
+      drawScope(canvas, mode, analysis);
+      return;
+    }
+    const context = canvas.getContext("2d");
+    if (context) drawGrid(context, canvas.width, canvas.height);
   }, [analysis, mode]);
 
   return (

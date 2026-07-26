@@ -27,6 +27,7 @@ function Harness({
   return (
     <>
       <span data-status>{scopes.status}</span>
+      <span data-analysis>{scopes.analysis ? "ready" : "empty"}</span>
       <button type="button" onClick={scopes.refresh}>
         Refresh
       </button>
@@ -102,6 +103,41 @@ describe("useColorGradingScopes", () => {
 
     await act(async () => vi.advanceTimersByTimeAsync(180));
     expect(host.querySelector("[data-status]")?.textContent).toBe("unavailable");
+    act(() => root.unmount());
+  });
+
+  it("clears stale analysis while a refresh is pending and when it is unavailable", async () => {
+    vi.useFakeTimers();
+    installPixelDecode();
+    let resolveRefresh: (frame: ColorGradingCapturedFrame | null) => void = () => {};
+    const pendingRefresh = new Promise<ColorGradingCapturedFrame | null>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const captureFrame = vi
+      .fn()
+      .mockResolvedValueOnce({
+        dataUrl: "data:image/png;base64,scope",
+        width: 1,
+        height: 1,
+      })
+      .mockReturnValueOnce(pendingRefresh);
+    const host = document.body.appendChild(document.createElement("div"));
+    const root = createRoot(host);
+    act(() => root.render(<Harness open refreshKey="a" captureFrame={captureFrame} />));
+
+    await act(async () => vi.advanceTimersByTimeAsync(180));
+    expect(host.querySelector("[data-analysis]")?.textContent).toBe("ready");
+
+    act(() => {
+      host.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    act(() => vi.advanceTimersByTime(180));
+    expect(host.querySelector("[data-status]")?.textContent).toBe("loading");
+    expect(host.querySelector("[data-analysis]")?.textContent).toBe("empty");
+
+    await act(async () => resolveRefresh(null));
+    expect(host.querySelector("[data-status]")?.textContent).toBe("unavailable");
+    expect(host.querySelector("[data-analysis]")?.textContent).toBe("empty");
     act(() => root.unmount());
   });
 });

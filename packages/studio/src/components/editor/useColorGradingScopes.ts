@@ -26,11 +26,13 @@ export function useColorGradingScopes({
 
   useEffect(() => {
     if (!open) {
+      setAnalysis(null);
       setStatus("idle");
       return;
     }
     let cancelled = false;
     const timer = window.setTimeout(async () => {
+      setAnalysis(null);
       setStatus("loading");
       try {
         const frame = await captureRef.current();
