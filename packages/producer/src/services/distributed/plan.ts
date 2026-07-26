@@ -839,7 +839,12 @@ export async function plan(
   }
 
   const workDir = join(planDir, ".plan-work");
-  if (!existsSync(workDir)) mkdirSync(workDir, { recursive: true });
+  // `.plan-work` is planner-owned scratch space. A prior attempt can fail
+  // before the end-of-plan cleanup and leave compiled assets behind; cpSync
+  // and compileStage both overlay their outputs, so reusing that directory
+  // would let stale bytes contaminate the new plan and its size check.
+  rmSync(workDir, { recursive: true, force: true });
+  mkdirSync(workDir, { recursive: true });
   const compiledDir = join(workDir, "compiled");
 
   // Pre-seed the compiled directory with `projectDir`'s local assets

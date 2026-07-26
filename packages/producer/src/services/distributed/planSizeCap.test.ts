@@ -320,6 +320,31 @@ describe("plan() early size budget", () => {
 });
 
 describe("plan() reused directory size check", () => {
+  it("clears stale compiled scratch from a failed prior attempt", async () => {
+    const projectDir = mkdtempSync(join(runRoot, "project-reused-work-dir-"));
+    writeFileSync(join(projectDir, "index.html"), FIXTURE_HTML, "utf-8");
+    const planDir = mkdtempSync(join(runRoot, "plandir-reused-work-dir-"));
+    const staleCompiledDir = join(planDir, ".plan-work", "compiled");
+    mkdirSync(staleCompiledDir, { recursive: true });
+    writeFileSync(join(staleCompiledDir, "stale-large-asset.bin"), Buffer.alloc(100_000));
+
+    const result = await plan(
+      projectDir,
+      {
+        fps: 30,
+        width: 320,
+        height: 240,
+        format: "mp4",
+        planDirSizeLimitBytes: 4_096,
+      },
+      planDir,
+    );
+
+    expect(result.planHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(existsSync(join(planDir, "compiled", "stale-large-asset.bin"))).toBe(false);
+    expect(measurePlanDirBytes(planDir)).toBeLessThan(4_096);
+  }, 30_000);
+
   it("ignores stale freeze-owned metadata that the new plan overwrites", async () => {
     const projectDir = mkdtempSync(join(runRoot, "project-reused-plan-dir-"));
     writeFileSync(join(projectDir, "index.html"), FIXTURE_HTML, "utf-8");
