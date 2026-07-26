@@ -23,11 +23,11 @@ import {
   listPlanV2ArtifactsForTarget,
   materializePlanV2Target,
   plan,
-  planV2,
+  planV2WithPublisher,
   type PlanResult,
   type PlanV2Artifact,
+  type PlanV2Manifest,
   type PlanV2MaterializationTarget,
-  type PlanV2Result,
   readPlanV2Manifest,
   renderChunk,
 } from "@hyperframes/producer/distributed";
@@ -48,12 +48,11 @@ import {
   downloadS3ObjectToFile,
   downloadS3ObjectToFileVerified,
   parseS3Uri,
-  sha256File,
   tarDirectory,
   untarDirectory,
-  uploadContentAddressedFileToS3,
   uploadFileToS3,
 } from "./s3Transport.js";
+import { S3PlanV2ArtifactPublisher } from "./s3PlanV2Publisher.js";
 
 /**
  * Lazily-constructed S3 client. Cached at module scope so warm Lambda
@@ -77,7 +76,7 @@ export interface HandlerDeps {
   s3?: S3Client;
   primitives?: {
     plan: typeof plan;
-    planV2?: typeof planV2;
+    planV2WithPublisher?: typeof planV2WithPublisher;
     renderChunk: typeof renderChunk;
     assemble: typeof assemble;
   };
@@ -266,6 +265,8 @@ function primeRuntimeEnv(): void {
 
 // ── Plan ────────────────────────────────────────────────────────────────────
 
+// The v1 handler owns one transactional download, plan, archive, upload, and cleanup lifecycle.
+// fallow-ignore-next-line complexity
 async function handlePlan(event: PlanEvent, deps?: HandlerDeps): Promise<PlanLambdaResult> {
   if (event.PlanProtocol === "v2") {
     return handlePlanV2(event, deps);
@@ -350,7 +351,7 @@ async function handlePlanV2(
 ): Promise<Extract<PlanLambdaResult, { PlanProtocol: "v2" }>> {
   const started = Date.now();
   const s3 = deps?.s3 ?? getS3Client();
-  const primitive = deps?.primitives?.planV2 ?? planV2;
+  const primitive = deps?.primitives?.planV2WithPublisher ?? planV2WithPublisher;
   if (!deps?.skipChromeResolution && !process.env.PRODUCER_HEADLESS_SHELL_PATH) {
     process.env.PRODUCER_HEADLESS_SHELL_PATH = await resolveChromeExecutablePath();
   }
@@ -358,57 +359,34 @@ async function handlePlanV2(
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-plan-v2-"));
   const projectArchive = join(work, "project.tar.gz");
   const projectDir = join(work, "project");
-  const planV2Dir = join(work, "plan-v2");
   try {
     await downloadS3ObjectToFile(s3, event.ProjectS3Uri, projectArchive);
     await untarDirectory(projectArchive, projectDir);
-    const result: PlanV2Result = await primitive(projectDir, { ...event.Config }, planV2Dir);
-    const manifest = readPlanV2Manifest(planV2Dir);
-    if (manifest.planHash !== result.planHash) {
-      throwPlanHashMismatch(result.planHash, manifest.planHash);
-    }
-
-    const outputPrefix = `${trimTrailingSlash(event.PlanOutputS3Prefix)}/v2`;
-    const artifactPrefix = `${outputPrefix}/artifacts/sha256`;
-    const uniqueArtifacts = [
-      ...new Map(manifest.artifacts.map((artifact) => [artifact.sha256, artifact])).values(),
-    ];
-    await mapConcurrent(uniqueArtifacts, 16, async (artifact) => {
-      const localPath = planV2BlobPath(planV2Dir, artifact.sha256);
-      await uploadContentAddressedFileToS3(
-        s3,
-        localPath,
-        planV2BlobUri(artifactPrefix, artifact.sha256),
-        artifact.sha256,
-      );
-    });
-
-    // Publish the manifest only after every referenced blob is durable.
-    const manifestUri = `${outputPrefix}/manifest.json`;
-    await uploadContentAddressedFileToS3(
+    const publisher = new S3PlanV2ArtifactPublisher({
       s3,
-      result.manifestPath,
-      manifestUri,
-      await sha256File(result.manifestPath),
-      "application/json",
-    );
+      planOutputS3Prefix: event.PlanOutputS3Prefix,
+      temporaryRoot: work,
+    });
+    const manifest: PlanV2Manifest = await primitive(projectDir, { ...event.Config }, publisher, {
+      stagingParentDir: work,
+    });
 
     return {
       Action: "plan",
       PlanProtocol: "v2",
-      PlanV2ManifestS3Uri: manifestUri,
-      PlanV2ArtifactS3Prefix: artifactPrefix,
-      PlanHash: result.planHash,
-      ChunkCount: result.chunkCount,
-      TotalFrames: result.totalFrames,
-      Fps: result.fps,
-      Width: result.width,
-      Height: result.height,
-      Format: result.format,
+      PlanV2ManifestS3Uri: publisher.manifestUri,
+      PlanV2ArtifactS3Prefix: publisher.artifactPrefix,
+      PlanHash: manifest.planHash,
+      ChunkCount: manifest.chunkCount,
+      TotalFrames: manifest.totalFrames,
+      Fps: manifest.fps,
+      Width: manifest.width,
+      Height: manifest.height,
+      Format: manifest.format,
       HasAudio: manifest.artifacts.some((artifact) => artifact.path === "audio.aac"),
       AudioS3Uri: null,
-      FfmpegVersion: result.ffmpegVersion,
-      ProducerVersion: result.producerVersion,
+      FfmpegVersion: manifest.ffmpegVersion,
+      ProducerVersion: manifest.producerVersion,
       DurationMs: Date.now() - started,
     };
   } finally {
@@ -728,7 +706,16 @@ async function mapConcurrent<T>(
       await fn(values[index]!);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => worker()));
+  const results = await Promise.allSettled(
+    Array.from({ length: Math.min(concurrency, values.length) }, () => worker()),
+  );
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  // Do not reject while sibling workers may still be writing into invocation
+  // scratch. The caller removes that directory in `finally`; draining the pool
+  // first prevents late S3 streams from racing cleanup after another GET fails.
+  if (failure) throw failure.reason;
 }
 
 async function downloadChunkObjects(

@@ -65,6 +65,10 @@ export {
   uploadContentAddressedFileToS3,
   uploadFileToS3,
 } from "./s3Transport.js";
+export {
+  S3PlanV2ArtifactPublisher,
+  type S3PlanV2ArtifactPublisherOptions,
+} from "./s3PlanV2Publisher.js";
 
 // ── Client-side SDK ─────────────────────────────────────────────────────────
 export { deploySite, type DeploySiteOptions, type SiteHandle } from "./sdk/deploySite.js";

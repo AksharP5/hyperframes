@@ -159,34 +159,42 @@ export async function uploadContentAddressedFileToS3(
 
   const { bucket, key } = parseS3Uri(uri);
   const size = statSync(localPath).size;
-  try {
-    const existing = await client.send(
-      new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: "ENABLED" }),
-    );
-    if (existing.ContentLength === size && existing.Metadata?.sha256 === expectedSha256) {
-      return "reused";
-    }
-    const error = new Error(
-      `[s3Transport] PLAN_ARTIFACT_DIGEST_MISMATCH: immutable object ${uri} already exists with different digest metadata or size`,
-    );
-    error.name = "PLAN_ARTIFACT_DIGEST_MISMATCH";
-    throw error;
-  } catch (error) {
-    if (!isS3NotFound(error)) throw error;
-  }
+  const existing = await inspectContentAddressedObject(client, bucket, key, size, expectedSha256);
+  if (existing === "matching") return "reused";
+  if (existing === "conflict") throwImmutableObjectConflict(uri);
 
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: createReadStream(localPath),
-      ContentType: contentType,
-      ContentLength: size,
-      Metadata: { sha256: expectedSha256 },
-      ChecksumSHA256: Buffer.from(expectedSha256, "hex").toString("base64"),
-    }),
-  );
-  return "uploaded";
+  const body = createReadStream(localPath);
+  try {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        ContentLength: size,
+        Metadata: { sha256: expectedSha256 },
+        ChecksumSHA256: Buffer.from(expectedSha256, "hex").toString("base64"),
+        // HEAD followed by an unconditional PUT can overwrite a conflicting
+        // object published by a concurrent planner. Conditional create makes
+        // immutable CAS and fixed-key manifest publication race-safe.
+        IfNoneMatch: "*",
+      }),
+    );
+    return "uploaded";
+  } catch (error) {
+    if (!isS3PreconditionFailed(error)) throw error;
+    const raced = await inspectContentAddressedObject(client, bucket, key, size, expectedSha256);
+    if (raced === "matching") return "reused";
+    if (raced === "conflict") throwImmutableObjectConflict(uri);
+    // The winning object was deleted between the conditional failure and
+    // verification. Preserve the service error so the orchestrator may retry.
+    throw error;
+  } finally {
+    // A failed conditional request may reject before consuming the stream.
+    // Explicit teardown avoids retaining the source descriptor on a warm
+    // Lambda planner.
+    body.destroy();
+  }
 }
 
 export async function sha256File(path: string): Promise<string> {
@@ -205,17 +213,52 @@ function assertSha256(value: string): void {
   }
 }
 
-function isS3NotFound(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const candidate = error as {
-    name?: string;
-    $metadata?: { httpStatusCode?: number };
-  };
-  return (
-    candidate.name === "NotFound" ||
-    candidate.name === "NoSuchKey" ||
-    candidate.$metadata?.httpStatusCode === 404
+type ContentAddressedObjectState = "missing" | "matching" | "conflict";
+
+async function inspectContentAddressedObject(
+  client: S3Client,
+  bucket: string,
+  key: string,
+  expectedSize: number,
+  expectedSha256: string,
+): Promise<ContentAddressedObjectState> {
+  try {
+    const existing = await client.send(
+      new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: "ENABLED" }),
+    );
+    return existing.ContentLength === expectedSize && existing.Metadata?.sha256 === expectedSha256
+      ? "matching"
+      : "conflict";
+  } catch (error) {
+    if (isS3NotFound(error)) return "missing";
+    throw error;
+  }
+}
+
+function throwImmutableObjectConflict(uri: string): never {
+  const error = new Error(
+    `[s3Transport] PLAN_ARTIFACT_DIGEST_MISMATCH: immutable object ${uri} already exists with different digest metadata or size`,
   );
+  error.name = "PLAN_ARTIFACT_DIGEST_MISMATCH";
+  throw error;
+}
+
+function isS3NotFound(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  const metadata = isRecord(error.$metadata) ? error.$metadata : undefined;
+  return (
+    error.name === "NotFound" || error.name === "NoSuchKey" || metadata?.httpStatusCode === 404
+  );
+}
+
+function isS3PreconditionFailed(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  const metadata = isRecord(error.$metadata) ? error.$metadata : undefined;
+  return error.name === "PreconditionFailed" || metadata?.httpStatusCode === 412;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
