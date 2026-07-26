@@ -53,6 +53,10 @@ export {
   uploadContentAddressedFileToGcs,
   uploadFileToGcs,
 } from "./gcsTransport.js";
+export {
+  GcsPlanV2ArtifactPublisher,
+  type GcsPlanV2ArtifactPublisherOptions,
+} from "./gcsPlanV2Publisher.js";
 
 // ── Client-side SDK ─────────────────────────────────────────────────────────
 export { deploySite, type DeploySiteOptions, type SiteHandle } from "./sdk/deploySite.js";
