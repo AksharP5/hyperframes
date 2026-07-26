@@ -145,9 +145,7 @@ export interface ParsedPercentageKeyframes {
   easeEach?: string;
 }
 
-function collectAnimatableKeyframeProperties(
-  entry: Record<string, unknown>,
-): Record<string, number | string> {
+function collectAnimatableKeyframeProperties(entry: object): Record<string, number | string> {
   const properties: Record<string, number | string> = {};
   for (const [property, value] of Object.entries(entry)) {
     if (property === "ease") continue;
@@ -185,7 +183,7 @@ export function parsePercentageKeyframes(
     steps.forEach((entry, i) => {
       if (!entry || typeof entry !== "object") return;
       const percentage = steps.length > 1 ? Math.round((i / (steps.length - 1)) * 1000) / 10 : 0;
-      const properties = collectAnimatableKeyframeProperties(entry as Record<string, unknown>);
+      const properties = collectAnimatableKeyframeProperties(entry);
       if (Object.keys(properties).length > 0) keyframes.push({ percentage, properties });
     });
     return keyframes.length > 0 ? { keyframes } : null;
@@ -199,7 +197,7 @@ export function parsePercentageKeyframes(
     const pctMatch = key.match(/^(\d+(?:\.\d+)?)%$/);
     if (!pctMatch || !val || typeof val !== "object") continue;
     const percentage = parseFloat(pctMatch[1]);
-    const properties = collectAnimatableKeyframeProperties(val as Record<string, unknown>);
+    const properties = collectAnimatableKeyframeProperties(val);
     if (Object.keys(properties).length > 0) {
       keyframes.push({ percentage, properties });
     }
@@ -253,7 +251,10 @@ export function toClipKeyframes<T extends { percentage: number }>(
   }
 > {
   const tweenStart = anim.resolvedStart ?? (typeof anim.position === "number" ? anim.position : 0);
-  const tweenDuration = anim.duration ?? 1;
+  // A duration-less tween spans the clip, the same rule the edit paths use
+  // (resolveEditableTweenDuration). A fixed 1s here put its keyframes at a
+  // percentage no editor agreed with.
+  const tweenDuration = anim.duration ?? clipDuration;
   return source.map((keyframe) => ({
     ...keyframe,
     percentage: toClipPercentage(

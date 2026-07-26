@@ -4,6 +4,7 @@ import {
   idSelector,
   isInstantHold,
   parsePercentageKeyframes,
+  toClipKeyframes,
   toClipPercentage,
 } from "./gsapShared";
 
@@ -120,5 +121,28 @@ describe("toClipPercentage", () => {
 
   it("passes the tween percentage through for a zero-length clip", () => {
     expect(toClipPercentage(5, 0, 0, 42)).toBe(42);
+  });
+});
+
+describe("toClipKeyframes", () => {
+  const durationless: GsapAnimation = {
+    id: "a1",
+    method: "to",
+    targetSelector: "#box",
+    vars: {},
+    resolvedStart: 0,
+  } as GsapAnimation;
+
+  // A tween with no duration spans its clip everywhere else in Studio
+  // (resolveEditableTweenDuration), so the cache rows have to agree: a fixed 1s
+  // basis put the end keyframe at 25% of a 4s clip instead of 100%.
+  it("spans the clip when the tween has no duration", () => {
+    const rows = toClipKeyframes([{ percentage: 0 }, { percentage: 100 }], durationless, 0, 4);
+    expect(rows.map((row) => row.percentage)).toEqual([0, 100]);
+  });
+
+  it("keeps the tween percentage and the animation identity on every row", () => {
+    const rows = toClipKeyframes([{ percentage: 50 }], durationless, 0, 4);
+    expect(rows[0]).toMatchObject({ tweenPercentage: 50, animationId: "a1" });
   });
 });

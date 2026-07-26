@@ -84,6 +84,20 @@ describe("clearKeyframeCacheForFile", () => {
     }
   });
 
+  // Several composition files re-scan concurrently, so a clear that walked the
+  // index.html alias would delete rows a sibling file had just written.
+  it("leaves an index.html-owned element alone when another file re-scans", () => {
+    seed("index.html#title");
+    seed("title");
+    seed("comp.html#a");
+
+    clearKeyframeCacheForFile("comp.html");
+
+    expect(cache().has("index.html#title")).toBe(true);
+    expect(cache().has("title")).toBe(true);
+    expect(cache().has("comp.html#a")).toBe(false);
+  });
+
   it("leaves entries that belong to a different source file", () => {
     seed("comp.html#a");
     seed("a");

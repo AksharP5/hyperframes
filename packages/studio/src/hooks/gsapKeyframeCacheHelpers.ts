@@ -92,22 +92,22 @@ export function clearKeyframeCacheForElement(sourceFile: string, elementId: stri
 
 /**
  * Clear every cached element of `sourceFile` before a full re-scan repopulates
- * it. Collects the element ids that currently have a prefixed or index.html
- * fallback key for the file and drops each through clearKeyframeCacheForElement
- * so the bare key goes too — an element whose keyframes were removed (and so is
- * absent from the re-scan) leaves no stale bare entry behind.
+ * it. Only the file's OWN prefixed keys name the ids to clear: every write sets
+ * the prefixed key (see elementCacheKeys), so the file's elements are all
+ * reachable that way, and clearKeyframeCacheForElement then takes the
+ * index.html alias and the bare key with them — an element whose keyframes were
+ * removed (and so is absent from the re-scan) leaves no stale bare entry
+ * behind. Reading the alias prefix here instead would collect ids owned by
+ * OTHER files, and several files re-scan concurrently, so this file's clear
+ * would wipe the entries a sibling file had just written.
  */
 export function clearKeyframeCacheForFile(sourceFile: string): void {
   const { keyframeCache, gsapAnimations } = usePlayerStore.getState();
   const sfPrefix = `${sourceFile}#`;
-  const fallbackPrefix = "index.html#";
   const ids = new Set<string>();
   for (const key of [...keyframeCache.keys(), ...gsapAnimations.keys()]) {
-    const matchesFile =
-      key.startsWith(sfPrefix) || (sourceFile !== "index.html" && key.startsWith(fallbackPrefix));
-    if (!matchesFile) continue;
-    const hashIdx = key.indexOf("#");
-    if (hashIdx !== -1) ids.add(key.slice(hashIdx + 1));
+    if (!key.startsWith(sfPrefix)) continue;
+    ids.add(key.slice(sfPrefix.length));
   }
   for (const id of ids) {
     clearKeyframeCacheForElement(sourceFile, id);
