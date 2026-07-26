@@ -129,6 +129,21 @@ function createPreviewFrame() {
   return { contentWindow, iframe };
 }
 
+function installPreviewRenderer(contentWindow: PreviewWindow) {
+  const renderPreviews = vi
+    .fn()
+    .mockImplementation(async (_target: unknown, candidates: Array<{ id: string }>) => ({
+      width: 160,
+      height: 90,
+      images: candidates.map(({ id }) => ({
+        id,
+        dataUrl: `data:image/png;base64,${id}`,
+      })),
+    }));
+  contentWindow.__hf = { colorGrading: { renderPreviews } };
+  return renderPreviews;
+}
+
 async function flushPreviewRequest() {
   act(() => vi.advanceTimersByTime(0));
   await act(async () => {
@@ -161,6 +176,48 @@ describe("useColorGradingController", () => {
     vi.useFakeTimers();
     const devicePixelRatio = vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
     const { contentWindow, iframe } = createPreviewFrame();
+    const renderPreviews = installPreviewRenderer(contentWindow);
+    const initialElement = makeElement({
+      dataAttributes: {
+        "color-grading": JSON.stringify({
+          wheels: { shadows: { hue: 210, amount: 0.2 } },
+          effects: { pixelate: 0.4 },
+          palette: ["#112233", "#ffffff"],
+        }),
+      },
+    });
+    const { root, getState } = renderHook(vi.fn(), initialElement, { current: iframe });
+
+    act(() => getState().requestPresetPreviews());
+    await flushPreviewRequest();
+
+    expect(renderPreviews).toHaveBeenCalledTimes(1);
+    expect(renderPreviews.mock.calls[0]?.[1]).toHaveLength(18);
+    expect(renderPreviews.mock.calls[0]?.[1]).toContainEqual({
+      id: "bright-pop",
+      grading: expect.objectContaining({
+        wheels: expect.objectContaining({
+          shadows: expect.objectContaining({ amount: 0 }),
+        }),
+        effects: expect.objectContaining({ pixelate: 0.4 }),
+        palette: ["#112233", "#ffffff"],
+      }),
+    });
+    expect(renderPreviews.mock.calls[0]?.[2]).toEqual({ maxDimension: 320 });
+    expect(getState().presetPreviews).toEqual({
+      status: "ready",
+      images: expect.objectContaining({ "bright-pop": "data:image/png;base64,bright-pop" }),
+      width: 160,
+      height: 90,
+    });
+    act(() => root.unmount());
+    devicePixelRatio.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("retains partial preset previews and exposes retry after the batch times out", async () => {
+    vi.useFakeTimers();
+    const { contentWindow, iframe } = createPreviewFrame();
     const renderPreviews = vi.fn().mockResolvedValue({
       width: 160,
       height: 90,
@@ -171,32 +228,51 @@ describe("useColorGradingController", () => {
 
     act(() => getState().requestPresetPreviews());
     await flushPreviewRequest();
-
-    expect(renderPreviews).toHaveBeenCalledTimes(1);
-    expect(renderPreviews.mock.calls[0]?.[1]).toHaveLength(18);
-    expect(renderPreviews.mock.calls[0]?.[2]).toEqual({ maxDimension: 320 });
-    expect(getState().presetPreviews).toEqual({
-      status: "ready",
+    expect(getState().presetPreviews).toMatchObject({
+      status: "loading",
       images: { "bright-pop": "data:image/png;base64,bright" },
-      width: 160,
-      height: 90,
     });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1700);
+    });
+    expect(getState().presetPreviews).toMatchObject({
+      status: "unavailable",
+      images: { "bright-pop": "data:image/png;base64,bright" },
+    });
+    expect(renderPreviews.mock.calls.length).toBeGreaterThan(1);
     act(() => root.unmount());
-    devicePixelRatio.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("persists a disabled secondary even though it does not render pixels", () => {
+    vi.useFakeTimers();
+    const onSetAttributeLive = vi.fn();
+    const grading = normalizeHfColorGrading({
+      secondaries: [
+        {
+          enabled: false,
+          key: { hue: { center: 215, range: 25 } },
+          correction: { saturation: 0.15 },
+        },
+      ],
+    });
+    if (!grading) throw new Error("expected secondary grading");
+    const { root, getState } = renderHook(onSetAttributeLive);
+
+    act(() => getState().commitColorGrading(grading));
+    act(() => vi.advanceTimersByTime(400));
+
+    expect(onSetAttributeLive.mock.calls[0]?.[0]).toBe("color-grading");
+    expect(onSetAttributeLive.mock.calls[0]?.[1]).toContain('"enabled":false');
+    act(() => root.unmount());
     vi.useRealTimers();
   });
 
   it("requests exact effect families and retains earlier family images", async () => {
     vi.useFakeTimers();
     const { contentWindow, iframe } = createPreviewFrame();
-    const renderPreviews = vi
-      .fn()
-      .mockImplementation(async (_target: unknown, candidates: Array<{ id: string }>) => ({
-        width: 160,
-        height: 90,
-        images: candidates.map(({ id }) => ({ id, dataUrl: `data:image/png;base64,${id}` })),
-      }));
-    contentWindow.__hf = { colorGrading: { renderPreviews } };
+    const renderPreviews = installPreviewRenderer(contentWindow);
     const { root, getState } = renderHook(vi.fn(), makeElement(), { current: iframe });
 
     act(() => getState().requestEffectPreviews(["blur", "pixelate", "bloom"]));

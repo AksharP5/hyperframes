@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   HF_COLOR_GRADING_ATTR,
+  hasHfColorGradingAuthoredValues,
   isHfColorGradingActive,
   normalizeHfColorGrading,
   serializeHfColorGrading,
@@ -21,6 +22,7 @@ import {
 } from "../../player/lib/runtimeProtocol";
 import {
   useColorGradingPreviews,
+  type ColorGradingCapturedFrame,
   type ColorGradingPresetPreviews,
   type ColorGradingPreviewOptions,
 } from "./useColorGradingPreviews";
@@ -169,6 +171,9 @@ export interface ColorGradingControllerState {
     next: NormalizedHfColorGrading | null,
     options?: ColorGradingPreviewOptions,
   ) => void;
+  captureGradedFrame: (options?: {
+    grading?: NormalizedHfColorGrading;
+  }) => Promise<ColorGradingCapturedFrame | null>;
   commitCompare: (enabled: boolean) => void;
   setApplyScope: (scope: "source-file" | "project") => void;
   applyToScope: () => Promise<void>;
@@ -472,7 +477,7 @@ export function useColorGradingController({
       }
       scheduleRuntimeStatusRefresh();
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-      pendingPersistValueRef.current = isHfColorGradingActive(nextGrading)
+      pendingPersistValueRef.current = hasHfColorGradingAuthoredValues(nextGrading)
         ? serializeHfColorGrading(nextGrading)
         : null;
       pendingPersistGradingRef.current = nextGrading;
@@ -539,6 +544,7 @@ export function useColorGradingController({
     requestEffectPreviews: previewController.requestEffectPreviews,
     commitColorGrading,
     previewColorGrading: previewController.previewColorGrading,
+    captureGradedFrame: previewController.captureGradedFrame,
     commitCompare,
     setApplyScope,
     applyToScope,

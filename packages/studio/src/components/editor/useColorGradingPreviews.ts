@@ -16,6 +16,12 @@ export interface ColorGradingPresetPreviews {
   height: number;
 }
 
+export interface ColorGradingCapturedFrame {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
 type ColorGradingPreviewKind = "presets" | "effects";
 
 export interface ColorGradingPreviewOptions {
@@ -78,12 +84,21 @@ function toPreviewColorGrading(grading: NormalizedHfColorGrading): unknown {
 
 function previewCandidates(
   request: PreviewRequest,
-  lut: NormalizedHfColorGrading["lut"],
+  grading: Pick<NormalizedHfColorGrading, "effects" | "lut" | "palette">,
 ): Array<{ id: string; grading: unknown }> {
   if (request.kind === "presets") {
     return HF_COLOR_GRADING_PRESETS.map((preset) => {
-      const resolved = normalizeHfColorGrading({ preset: preset.id, lut });
-      return { id: preset.id, grading: resolved ? toPreviewColorGrading(resolved) : null };
+      const resolved = normalizeHfColorGrading({ preset: preset.id, lut: grading.lut });
+      return {
+        id: preset.id,
+        grading: resolved
+          ? toPreviewColorGrading({
+              ...resolved,
+              effects: grading.effects,
+              palette: grading.palette,
+            })
+          : null,
+      };
     });
   }
   return (request.effects ?? HF_COLOR_GRADING_ACTIVE_EFFECT_KEYS).map((effect) => {
@@ -98,16 +113,19 @@ async function renderRequestedPreviews(
   runtime: RuntimeColorGradingPreview,
   target: HfColorGradingTarget,
   request: PreviewRequest,
-  lut: NormalizedHfColorGrading["lut"],
+  grading: Pick<NormalizedHfColorGrading, "effects" | "lut" | "palette">,
 ) {
-  const batch = await runtime.renderPreviews(target, previewCandidates(request, lut), {
+  const candidates = previewCandidates(request, grading);
+  const batch = await runtime.renderPreviews(target, candidates, {
     maxDimension: previewMaxDimension(),
   });
   if (!batch) return null;
   const images = Object.fromEntries(
     batch.images.flatMap((image) => (image.dataUrl ? [[image.id, image.dataUrl]] : [])),
   );
-  return Object.keys(images).length ? { ...batch, images } : null;
+  return Object.keys(images).length
+    ? { ...batch, images, complete: Object.keys(images).length === candidates.length }
+    : null;
 }
 
 export function useColorGradingPreviews({
@@ -154,6 +172,7 @@ export function useColorGradingPreviews({
     let cancelled = false;
     let complete = false;
     let inFlight = false;
+    let timedOut = false;
     const timers: number[] = [];
     setState((current) => ({
       ...current,
@@ -169,15 +188,19 @@ export function useColorGradingPreviews({
       if (!runtime) return;
       inFlight = true;
       try {
-        const result = await renderRequestedPreviews(runtime, target, request, grading.lut);
+        const result = await renderRequestedPreviews(runtime, target, request, {
+          effects: grading.effects,
+          lut: grading.lut,
+          palette: grading.palette,
+        });
         if (cancelled || !result) return;
-        complete = true;
+        complete = result.complete;
         setState((current) => ({
           ...current,
           previews: {
             ...current.previews,
             [kind]: {
-              status: "ready",
+              status: result.complete ? "ready" : timedOut ? "unavailable" : "loading",
               images:
                 kind === "effects"
                   ? { ...current.previews[kind].images, ...result.images }
@@ -206,11 +229,12 @@ export function useColorGradingPreviews({
     timers.push(
       window.setTimeout(() => {
         if (cancelled || complete) return;
+        timedOut = true;
         setState((current) => ({
           ...current,
           previews: {
             ...current.previews,
-            [kind]: { status: "unavailable", images: {}, width: 16, height: 9 },
+            [kind]: { ...current.previews[kind], status: "unavailable" },
           },
         }));
       }, 1600),
@@ -221,7 +245,7 @@ export function useColorGradingPreviews({
       iframe.removeEventListener("load", attempt);
       window.removeEventListener("message", onMessage);
     };
-  }, [grading.lut, previewIframeRef, request, target]);
+  }, [grading.effects, grading.lut, grading.palette, previewIframeRef, request, target]);
 
   const stopAnimatedPreview = useCallback(() => {
     const session = animatedRef.current;
@@ -296,6 +320,24 @@ export function useColorGradingPreviews({
     (effects: readonly HfColorGradingActiveEffectKey[]) => requestPreviews("effects", effects),
     [requestPreviews],
   );
+  const captureGradedFrame = useCallback(
+    async ({
+      grading: requestedGrading = gradingRef.current,
+    }: {
+      grading?: NormalizedHfColorGrading;
+    } = {}): Promise<ColorGradingCapturedFrame | null> => {
+      const runtime = readRuntime(previewIframeRef?.current);
+      if (!runtime) return null;
+      const batch = await runtime.renderPreviews(
+        target,
+        [{ id: "capture", grading: toPreviewColorGrading(requestedGrading) }],
+        { maxDimension: 320, useMediaTime: true },
+      );
+      const dataUrl = batch?.images[0]?.dataUrl;
+      return batch && dataUrl ? { dataUrl, width: batch.width, height: batch.height } : null;
+    },
+    [gradingRef, previewIframeRef, target],
+  );
 
   return {
     presetPreviews: previews.presets,
@@ -303,5 +345,6 @@ export function useColorGradingPreviews({
     requestPresetPreviews,
     requestEffectPreviews,
     previewColorGrading,
+    captureGradedFrame,
   };
 }
