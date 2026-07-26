@@ -342,10 +342,16 @@ function staticIssueKey(issue: LayoutIssue): string {
     issue.severity,
     issue.selector,
     issue.containerSelector ?? "",
-    issue.text ?? "",
+    collapseTextKey(issue),
     issue.overflow ? formatOverflow(issue.overflow) : "",
     framePositionKey(issue),
   ].join("|");
+}
+
+/** Text identity for the collapse key, omitted where the code identifies itself by geometry instead. */
+function collapseTextKey(issue: LayoutIssue): string {
+  // content_overlap names its pair by both selectors, so animated text would split one held collision into per-sample groups.
+  return issue.code === "content_overlap" ? "" : (issue.text ?? "");
 }
 
 function framePositionKey(issue: LayoutIssue): string {

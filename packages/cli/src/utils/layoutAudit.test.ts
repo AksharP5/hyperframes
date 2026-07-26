@@ -255,6 +255,42 @@ describe("persistence-tiered severity (#U10)", () => {
     expect(collapsed[0]).toMatchObject({ severity: "warning", occurrences: 2 });
   });
 
+  it("promotes a content_overlap whose text changes every sample (count-up over a label)", () => {
+    // The colliding pair is named by both selectors, so per-sample text must not split one held collision into transient groups.
+    const collapsed = collapseStaticLayoutIssues(
+      [
+        {
+          ...issue("content_overlap", "warning"),
+          time: 4.0,
+          containerSelector: ".num",
+          text: "$1,204",
+        },
+        {
+          ...issue("content_overlap", "warning"),
+          time: 4.5,
+          containerSelector: ".num",
+          text: "$8,930",
+        },
+      ],
+      73,
+    );
+
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]).toMatchObject({ severity: "error", occurrences: 2 });
+  });
+
+  it("still separates two distinct text_box_overflow findings that differ only by text", () => {
+    const collapsed = collapseStaticLayoutIssues(
+      [
+        { ...issue("text_box_overflow", "warning"), time: 4.0, text: "first" },
+        { ...issue("text_box_overflow", "warning"), time: 4.5, text: "second" },
+      ],
+      73,
+    );
+
+    expect(collapsed).toHaveLength(2);
+  });
+
   it("promotes content_overlap whose two occurrences span exactly 500ms (at the floor)", () => {
     const collapsed = collapseStaticLayoutIssues(
       [
