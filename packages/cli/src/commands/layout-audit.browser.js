@@ -198,7 +198,9 @@
       return false;
     }
     const rect = element.getBoundingClientRect();
-    if (rect.width <= 0.5 || rect.height <= 0.5) return false;
+    // Stroke is excluded from an SVG shape's client rect, so axis-aligned geometry measures 0 on one axis.
+    const stroke = typeof element.getBBox === "function" ? parseFloat(style.strokeWidth) || 0 : 0;
+    if (rect.width + stroke <= 0.5 || rect.height + stroke <= 0.5) return false;
     return probeClipPath === false || !isClippedAway(element);
   }
 
@@ -1271,6 +1273,16 @@
     return { compact, painted };
   }
 
+  /** Connector naming for the motion sampler, tolerant of camelCase ids the word-bounded name test would miss. */
+  function isMotionConnectorCandidate(svg, path) {
+    if (isConnectorPath(svg, path)) return true;
+    const spaced = `${connectorNameFor(svg)} ${connectorNameFor(path)}`.replace(
+      /([a-z])([A-Z0-9])/g,
+      "$1 $2",
+    );
+    return CONNECTOR_NAME.test(spaced);
+  }
+
   function isConnectorPath(svg, path) {
     if (path.hasAttribute("marker-start") || path.hasAttribute("marker-end")) return true;
     return (
@@ -1744,7 +1756,8 @@
   const CONNECTOR_MIN_SVG_PX = 100;
   const CONNECTOR_MIN_LEN_PX = 60;
   // Gauge needles/pointers/ticks are one-end-anchored indicators owned by a separate check; skip by id/class of the line or any group ancestor.
-  const CONNECTOR_INDICATOR_NAME = /needle|pointer|gauge|tick|indicator/i;
+  // Word-bounded so `sticky`/`ticker` do not match, and pointer-events is excluded: a Tailwind utility must not mute a whole subtree.
+  const CONNECTOR_INDICATOR_NAME = /\b(needle|pointer(?!-events)|gauge|tick|indicator)\b/i;
   const CONNECTOR_NODE_MIN_AREA = 400;
   // SVG dots/markers are small; keep the floor low but above sub-pixel decoration.
   const CONNECTOR_NODE_MIN_DOT_AREA = 16;
@@ -1884,10 +1897,12 @@
       if (!isVisibleElement(svg, 0.05) || hasAllowOverflowFlag(svg)) continue;
       const svgRect = svg.getBoundingClientRect();
       if (svgRect.width < CONNECTOR_MIN_SVG_PX || svgRect.height < CONNECTOR_MIN_SVG_PX) continue;
-      for (const line of Array.from(svg.querySelectorAll("line, path"))) {
+      for (const line of Array.from(svg.querySelectorAll("line, path, polyline"))) {
         if (line.closest(CONNECTOR_SKIP_CONTAINERS)) continue;
+        // Stroke-inflated: an axis-aligned line has a zero-height/width client rect, so the plain visibility gate drops it.
         if (!isVisibleElement(line, 0.05)) continue;
         if (isIndicatorConnector(line, svg)) continue;
+        if (!isMotionConnectorCandidate(svg, line)) continue;
         const ends =
           line.tagName.toLowerCase() === "line"
             ? lineScreenEndpoints(svg, line)
