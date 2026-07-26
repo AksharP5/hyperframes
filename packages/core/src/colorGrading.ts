@@ -17,7 +17,11 @@ import {
 } from "@hyperframes/parsers/color-grading-contract";
 
 export type { HfColorCurvePoint, HfHueCurvePoint } from "./colorGradingCurves";
-export { HF_COLOR_CURVE_MAX_POINTS } from "./colorGradingCurves";
+export {
+  compileHfColorCurve,
+  compileHfHueCurve,
+  HF_COLOR_CURVE_MAX_POINTS,
+} from "./colorGradingCurves";
 
 export const HF_COLOR_GRADING_ATTR = "data-color-grading";
 
