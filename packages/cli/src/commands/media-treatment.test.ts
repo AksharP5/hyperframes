@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "citty";
@@ -210,21 +210,47 @@ describe("applyMediaTreatmentToHtml", () => {
   });
 
   it("resolves nested composition media through the shared project-root contract", () => {
-    const project = "/tmp/hf-project";
+    const project = mkdtempSync(join(tmpdir(), "hf-media-treatment-assets-"));
+    mkdirSync(join(project, "capture"), { recursive: true });
+    mkdirSync(join(project, "assets"), { recursive: true });
+    writeFileSync(join(project, "capture", "talking-head.mp4"), "");
+    writeFileSync(join(project, "assets", "photo.webp"), "");
+    writeFileSync(join(project, "assets", "My Clip.mp4"), "");
 
-    expect(
-      resolveMediaTreatmentSource(
-        project,
-        "compositions/scene.html",
-        "../capture/talking-head.mp4?v=1#frame",
-      ),
-    ).toBe(join(project, "capture/talking-head.mp4"));
-    expect(
-      resolveMediaTreatmentSource(project, "compositions/scene.html", "assets/photo.webp"),
-    ).toBe(join(project, "assets/photo.webp"));
-    expect(() =>
-      resolveMediaTreatmentSource(project, "compositions/scene.html", "https://example.com/a.mp4"),
-    ).toThrow(/local project asset/);
+    try {
+      expect(
+        resolveMediaTreatmentSource(
+          project,
+          "compositions/scene.html",
+          "../capture/talking-head.mp4?v=1#frame",
+        ),
+      ).toBe(join(project, "capture/talking-head.mp4"));
+      expect(
+        resolveMediaTreatmentSource(project, "compositions/scene.html", "assets/photo.webp"),
+      ).toBe(join(project, "assets/photo.webp"));
+      expect(
+        resolveMediaTreatmentSource(
+          project,
+          "compositions/scene.html",
+          "/assets/My%20Clip.mp4?v=1",
+        ),
+      ).toBe(join(project, "assets/My Clip.mp4"));
+      expect(() =>
+        resolveMediaTreatmentSource(
+          project,
+          "compositions/scene.html",
+          "https://example.com/a.mp4",
+        ),
+      ).toThrow(/local project asset/);
+      expect(() => resolveMediaTreatmentSource(project, "compositions/scene.html", "#")).toThrow(
+        /local project asset/,
+      );
+      expect(() =>
+        resolveMediaTreatmentSource(project, "compositions/scene.html", "missing.mp4"),
+      ).toThrow(/Media file not found/);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
   });
 
   it("merges a validated patch and reports the stored before and after payloads", () => {

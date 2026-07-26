@@ -152,7 +152,7 @@ drops frames. Do not impose or claim a universal hard cap from one machine.
    contact sheet justifies it. Do not invent keys, exceed reported ranges, or
    stack effects without a visual reason. Do not run the generic grade/LUT
    resolver first; it adds irrelevant candidates and may download an unused
-   LUT. Use `media-treatment --selector "<media>" --analyze --json` only when
+   LUT. Use `media-treatment --selector "#hero" --analyze --json` only when
    correction needs measured signal evidence.
 4. Persist pixel settings with `hyperframes media-treatment`; it validates and
    merges a patch into the existing nested `data-color-grading` contract. Use registered

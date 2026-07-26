@@ -12,6 +12,11 @@ import {
   isColorGradingVariableRef,
   validateColorGradingContract,
 } from "@hyperframes/parsers/color-grading-contract";
+import {
+  cleanAssetUrl,
+  isRemoteOrInlineUrl,
+  resolveExistingLocalAsset,
+} from "@hyperframes/parsers/asset-resolution";
 import { rewriteAssetPath } from "@hyperframes/parsers/asset-paths";
 import { patchElementInHtml } from "@hyperframes/studio-server/source-mutation";
 import { defineCommand } from "citty";
@@ -247,7 +252,7 @@ export function getMediaTreatmentCapabilityDetail(id: string): unknown {
       description:
         "Deterministic source measurements for agent decisions; visual scopes remain a Studio display.",
       command:
-        "hyperframes media-treatment --file <composition.html> --selector <media> --analyze --json",
+        "hyperframes media-treatment --file compositions/scene.html --selector '#hero' --analyze --json",
       output: [
         "source color metadata and HDR/LOG warnings",
         "luma percentile and clipping evidence",
@@ -481,34 +486,26 @@ function mediaSourceForElement(element: Element): string {
   return src;
 }
 
-function stripUrlSuffix(value: string): string {
-  const queryIndex = value.indexOf("?");
-  const hashIndex = value.indexOf("#");
-  if (queryIndex < 0 && hashIndex < 0) return value;
-  const end =
-    queryIndex < 0 ? hashIndex : hashIndex < 0 ? queryIndex : Math.min(queryIndex, hashIndex);
-  return value.slice(0, end);
-}
-
 export function resolveMediaTreatmentSource(
   projectDir: string,
   compositionFile: string,
   source: string,
 ): string {
-  const cleanSource = stripUrlSuffix(source.trim());
-  if (/^[a-z][a-z\d+.-]*:/i.test(cleanSource) || cleanSource.startsWith("//")) {
+  const sourceUrl = source.trim();
+  if (!sourceUrl) throw new Error("Selected media has no analyzable local src");
+  if (isRemoteOrInlineUrl(sourceUrl)) {
     throw new Error(
       "Media analysis requires a local project asset; freeze remote media with media-use first",
     );
   }
+  const cleanSource = cleanAssetUrl(sourceUrl);
+  if (!cleanSource) throw new Error("Selected media has no analyzable local src");
   const projectRelative = cleanSource.startsWith("/")
-    ? cleanSource.slice(1)
+    ? cleanSource
     : rewriteAssetPath(compositionFile, cleanSource);
-  const mediaPath = resolve(projectDir, projectRelative);
-  if (!isPathInside(mediaPath, projectDir)) {
-    throw new Error("Selected media resolves outside the project");
-  }
-  return mediaPath;
+  const asset = resolveExistingLocalAsset(projectDir, projectRelative);
+  if (!asset) throw new Error(`Media file not found: ${source}`);
+  return asset.resolved;
 }
 
 function parseGrading(raw: string | undefined, apply: boolean, clear: boolean): unknown {
@@ -604,7 +601,6 @@ function analyzeTarget(args: MediaTreatmentCommandArgs) {
   const source = mediaSourceForElement(element);
   const compositionFile = relative(project.dir, filePath).split("\\").join("/");
   const mediaPath = resolveMediaTreatmentSource(project.dir, compositionFile, source);
-  if (!existsSync(mediaPath)) throw new Error(`Media file not found: ${source}`);
   return {
     ok: true,
     action: "analyze",

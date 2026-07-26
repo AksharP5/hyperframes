@@ -100,6 +100,12 @@
       "import": "./src/colorLuts.ts",
       "types": "./src/colorLuts.ts"
     },
+    "./media-grade-analyzer": {
+      "bun": "./src/mediaGradeAnalyzer.ts",
+      "node": "./dist/mediaGradeAnalyzer.js",
+      "import": "./src/mediaGradeAnalyzer.ts",
+      "types": "./src/mediaGradeAnalyzer.ts"
+    },
     "./storyboard": {
       "bun": "./src/storyboard/index.ts",
       "node": "./dist/storyboard/index.js",
@@ -333,6 +339,10 @@
       "./color-luts": {
         "import": "./dist/colorLuts.js",
         "types": "./dist/colorLuts.d.ts"
+      },
+      "./media-grade-analyzer": {
+        "import": "./dist/mediaGradeAnalyzer.js",
+        "types": "./dist/mediaGradeAnalyzer.d.ts"
       },
       "./storyboard": {
         "import": "./dist/storyboard/index.js",

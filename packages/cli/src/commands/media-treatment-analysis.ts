@@ -1,11 +1,11 @@
 import {
   analyzeMediaGrade,
   type MediaTreatmentAnalysis,
-} from "../../../../skills/media-use/scripts/lib/grade-analyzer.mjs";
+} from "@hyperframes/core/media-grade-analyzer";
 import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg.js";
 
 interface CliMediaTreatmentAnalysis extends Omit<MediaTreatmentAnalysis, "adjust"> {
-  suggestedPatch: { adjust: Record<string, number> };
+  suggestedPatch: { adjust: MediaTreatmentAnalysis["adjust"] };
 }
 
 export function analyzeMediaTreatment(mediaPath: string): CliMediaTreatmentAnalysis {
