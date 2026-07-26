@@ -249,7 +249,7 @@ function PropertyGroupHeaderRow({
             // Same as the disclosure caret and the eye: a control in the label
             // column owns its click, it does not also hit the track row behind it.
             event.stopPropagation();
-            if (expandedElement && toggleTarget) {
+            if (toggleTarget) {
               void onTogglePropertyGroupKeyframe?.(expandedElement, toggleTarget);
             }
           }}
