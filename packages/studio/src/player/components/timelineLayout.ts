@@ -38,13 +38,6 @@ export const TRACKS_BOTTOM_PAD = Math.round(TRACK_H * 1.5);
  */
 export const TRACKS_LEFT_PAD = 48;
 
-/**
- * The y (content-space) of the top edge of track ROW index `row` (0 = first
- * displayed lane). The single source of truth for row→y — the ruler height plus
- * the top breathing pad plus whole track lanes above it. Every clip/ghost/
- * placeholder/insertion top and every pointer-y→row inversion goes through this
- * (or its inverse in {@link getTimelineRowFromY}) so the pad can never drift.
- */
 interface TimelineTrackHeightClip {
   clipId: string;
   laneCount: number;
@@ -105,6 +98,13 @@ function getTimelineRowOffset(row: number, rowHeights: readonly number[]): numbe
   return (offsets[wholeRow] ?? 0) + fraction * getTimelineRowHeight(wholeRow, rowHeights);
 }
 
+/**
+ * The y (content-space) of the top edge of track ROW index `row` (0 = first
+ * displayed lane). The single source of truth for row→y — the ruler height plus
+ * the top breathing pad plus whole track lanes above it. Every clip/ghost/
+ * placeholder/insertion top and every pointer-y→row inversion goes through this
+ * (or its inverse in {@link getTimelineRowFromY}) so the pad can never drift.
+ */
 export function getTimelineRowTop(row: number, rowHeights: readonly number[] = []): number {
   return RULER_H + TRACKS_TOP_PAD + getTimelineRowOffset(row, rowHeights);
 }
