@@ -1,6 +1,14 @@
 // fallow-ignore-file code-duplication
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertPublicHttpsUrl, downloadToTemp, UrlDownloadError } from "./urlDownloader.js";
@@ -83,6 +91,29 @@ describe("assertPublicHttpsUrl — SSRF guard", () => {
     expect(() => assertPublicHttpsUrl("https://[::1]/secret")).toThrow("private/reserved");
   });
 
+  it("rejects normalized reserved IPv6 and IPv4-mapped forms", () => {
+    for (const url of [
+      "https://[::]/secret",
+      "https://[fe80::1]/secret",
+      "https://[fc00::1]/secret",
+      "https://[::ffff:127.0.0.1]/secret",
+      "https://[::ffff:169.254.169.254]/latest/meta-data/",
+    ]) {
+      expect(() => assertPublicHttpsUrl(url), url).toThrow("private/reserved");
+    }
+  });
+
+  it("rejects CGNAT and other non-public IPv4 ranges", () => {
+    for (const url of [
+      "https://100.64.0.1/secret",
+      "https://198.18.0.1/secret",
+      "https://192.0.2.1/secret",
+      "https://224.0.0.1/secret",
+    ]) {
+      expect(() => assertPublicHttpsUrl(url), url).toThrow("private/reserved");
+    }
+  });
+
   it("rejects invalid URLs", () => {
     expect(() => assertPublicHttpsUrl("not-a-url")).toThrow("Invalid URL");
     expect(() => assertPublicHttpsUrl("")).toThrow("Invalid URL");
@@ -132,6 +163,25 @@ describe("downloadToTemp atomic publication and bounded retry", () => {
     } satisfies Partial<UrlDownloadError>);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(temporaryDownloadEntries(dir)).toEqual([]);
+  });
+
+  it("rejects an IPv4-mapped IMDS redirect before issuing the second request", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://[::ffff:169.254.169.254]/latest/meta-data/" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const dir = makeTempDir();
+
+    await expect(
+      downloadToTemp("https://cdn.example/mapped-private-redirect.mp4", dir, 1_000),
+    ).rejects.toMatchObject({
+      kind: "http_rejected",
+      retryable: false,
+    } satisfies Partial<UrlDownloadError>);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("retries one HTTP 503 and publishes only the complete final file", async () => {
@@ -328,6 +378,23 @@ describe("downloadToTemp atomic publication and bounded retry", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(readFileSync(path, "utf8")).toBe("complete");
     expect(temporaryDownloadEntries(dir)).toEqual([]);
+  });
+
+  it("does not trust a nonempty symlink at the final cache path", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("downloaded"));
+    vi.stubGlobal("fetch", fetchMock);
+    const dir = makeTempDir();
+    const target = join(dir, "attacker-controlled.mp4");
+    const cachePath = join(dir, "download_eda0de5dc5a3.mp4");
+    writeFileSync(target, "not-the-download");
+    symlinkSync(target, cachePath);
+
+    const path = await downloadToTemp("https://cdn.example/stale-empty.mp4", dir, 1_000);
+
+    expect(path).toBe(cachePath);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(readFileSync(path, "utf8")).toBe("downloaded");
+    expect(readFileSync(target, "utf8")).toBe("not-the-download");
   });
 
   it("does not retry caller cancellation", async () => {

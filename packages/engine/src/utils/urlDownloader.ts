@@ -5,12 +5,14 @@ import {
   fsyncSync,
   mkdtempSync,
   mkdirSync,
+  lstatSync,
   openSync,
   renameSync,
   rmSync,
   statSync,
 } from "fs";
 import { createHash } from "crypto";
+import { BlockList, isIP } from "node:net";
 import { dirname, extname, join } from "path";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
@@ -96,36 +98,47 @@ function isRetryableNetworkCause(error: unknown): boolean {
   );
 }
 
-// SSRF guard: these prefixes identify non-public address space that
-// compositions (customer-supplied) must never be able to reach via the
-// download path. Blocks AWS IMDS (169.254.169.254), loopback, RFC1918,
-// and unspecified addresses. All comparisons are on the raw hostname
-// string; DNS resolution is NOT performed here, so DNS-rebinding bypasses
-// are not closed by this check — that gap is acceptable for the risk level.
-const BLOCKED_HOST_PREFIXES = [
-  "169.254.", // link-local / AWS IMDS
-  "127.", // loopback IPv4
-  "10.", // RFC1918
-  "192.168.", // RFC1918
-  "0.", // unspecified
-  "[::1]", // loopback IPv6
-  "[fc", // RFC4193 unique-local IPv6
-  "[fd", // RFC4193 unique-local IPv6
-];
-// 172.16.0.0 – 172.31.255.255 (RFC1918)
-const BLOCKED_172_RANGE = { min: 16, max: 31 };
+const NON_PUBLIC_IPV4_ADDRESSES = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.88.99.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+] as const) {
+  NON_PUBLIC_IPV4_ADDRESSES.addSubnet(network, prefix, "ipv4");
+}
+const NON_PUBLIC_IPV6_ADDRESSES = new BlockList();
+for (const [network, prefix] of [
+  ["::", 128],
+  ["::1", 128],
+  ["::ffff:0:0", 96],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["fec0::", 10],
+  ["ff00::", 8],
+  ["2001:db8::", 32],
+] as const) {
+  NON_PUBLIC_IPV6_ADDRESSES.addSubnet(network, prefix, "ipv6");
+}
 
 function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (h === "localhost") return true;
-  if (BLOCKED_HOST_PREFIXES.some((p) => h.startsWith(p))) return true;
-  // 172.16–172.31
-  const m = h.match(/^172\.(\d{1,3})\./);
-  if (m) {
-    const octet = parseInt(m[1] ?? "0", 10);
-    if (octet >= BLOCKED_172_RANGE.min && octet <= BLOCKED_172_RANGE.max) return true;
-  }
-  return false;
+  const addressType = isIP(h);
+  if (addressType === 0) return false;
+  return addressType === 4
+    ? NON_PUBLIC_IPV4_ADDRESSES.check(h, "ipv4")
+    : NON_PUBLIC_IPV6_ADDRESSES.check(h, "ipv6");
 }
 
 /**
@@ -161,10 +174,11 @@ function getFilenameFromUrl(url: string): string {
 
 function hasCompleteFile(path: string): boolean {
   if (!existsSync(path)) return false;
-  if (statSync(path).size > 0) return true;
-  // Old versions wrote directly to the final path and could leave an empty
-  // file behind. Never trust that stale cache entry.
-  rmSync(path, { force: true });
+  const entry = lstatSync(path);
+  if (entry.isFile() && entry.size > 0) return true;
+  // Old versions could leave an empty file behind. Never trust that stale
+  // cache entry—or a symlink/special entry planted at the final path.
+  rmSync(path, { recursive: entry.isDirectory(), force: true });
   return false;
 }
 
