@@ -193,10 +193,21 @@ describe("downloadToTemp atomic publication and bounded retry", () => {
       .mockResolvedValueOnce(new Response("complete"));
     vi.stubGlobal("fetch", fetchMock);
     const dir = makeTempDir();
+    const onTransientRetry = vi.fn();
 
-    const path = await downloadToTemp("https://cdn.example/retry-503.mp4", dir, 1_000);
+    const path = await downloadToTemp(
+      "https://cdn.example/retry-503.mp4",
+      dir,
+      1_000,
+      undefined,
+      onTransientRetry,
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(onTransientRetry).toHaveBeenCalledOnce();
+    expect(onTransientRetry).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "http_transient", retryable: true }),
+    );
     expect(readFileSync(path, "utf8")).toBe("complete");
     expect(temporaryDownloadEntries(dir)).toEqual([]);
   });
