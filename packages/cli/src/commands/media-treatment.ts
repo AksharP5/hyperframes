@@ -3,7 +3,7 @@ import { relative, resolve } from "node:path";
 import {
   HF_COLOR_GRADING_ATTR,
   getHfColorGradingCapabilities,
-  isHfColorGradingActive,
+  hasHfColorGradingAuthoredValues,
   isPathInside,
   normalizeHfColorGrading,
   serializeHfColorGrading,
@@ -12,6 +12,7 @@ import {
   isColorGradingVariableRef,
   validateColorGradingContract,
 } from "@hyperframes/parsers/color-grading-contract";
+import { rewriteAssetPath } from "@hyperframes/parsers/asset-paths";
 import { patchElementInHtml } from "@hyperframes/studio-server/source-mutation";
 import { defineCommand } from "citty";
 import { parseHTML } from "linkedom";
@@ -22,6 +23,7 @@ import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { readOptionalString } from "../utils/pathArgs.js";
 import { resolveProject } from "../utils/project.js";
 import { withMeta } from "../utils/updateCheck.js";
+import { analyzeMediaTreatment } from "./media-treatment-analysis.js";
 
 export function getMediaTreatmentCapabilityOverview() {
   const capabilities = getHfColorGradingCapabilities();
@@ -37,6 +39,11 @@ export function getMediaTreatmentCapabilityOverview() {
     colorSpace: capabilities.colorSpace,
     families: [
       family("correction", "Adjust", "Fix exposure, tonal balance, color casts, and saturation."),
+      family(
+        "grading",
+        "Color Grading",
+        "Shape tonal color with wheels, RGB and hue curves, and selective HSL correction.",
+      ),
       family(
         "presets",
         "Presets",
@@ -157,10 +164,95 @@ export function getMediaTreatmentCapabilityDetail(id: string): unknown {
   if (palette) return { ...palette, apply: { palette: palette.colors } };
 
   const details = {
+    grading: {
+      id,
+      description:
+        "Shape media after primary correction with wheels, curves, HSL secondaries, and an optional user-owned LUT.",
+      order: [
+        "adjust",
+        "wheels",
+        "curves",
+        "hueCurves",
+        "secondaries",
+        "lut",
+        "details",
+        "effects",
+      ],
+      discover: ["wheels", "curves", "hue-curves", "secondary", "scopes", "lut"],
+    },
     correction: {
       id,
       description: "Fix exposure, tonal balance, color casts, and saturation.",
       controls: capabilities.adjustments,
+    },
+    wheels: {
+      id,
+      description: "Shadow, midtone, and highlight color wheels.",
+      contract: capabilities.wheels,
+      apply: {
+        wheels: {
+          shadows: { hue: 205, amount: 0.08, level: 0 },
+          highlights: { hue: 35, amount: 0.06, level: 0 },
+        },
+      },
+    },
+    curves: {
+      id,
+      description: "Master and per-channel curves using normalized [input, output] points.",
+      contract: capabilities.curves,
+      apply: {
+        curves: {
+          master: [
+            [0, 0],
+            [0.25, 0.2],
+            [0.75, 0.82],
+            [1, 1],
+          ],
+        },
+      },
+    },
+    "hue-curves": {
+      id,
+      description: "Hue-selective curves using [hueDegrees, delta] points.",
+      contract: capabilities.hueCurves,
+      apply: {
+        hueCurves: {
+          hueVsSaturation: [
+            [180, 0],
+            [210, 0.15],
+            [240, 0],
+          ],
+        },
+      },
+    },
+    secondary: {
+      id,
+      description: "Up to four ordered HSL selections with bounded color correction.",
+      contract: capabilities.secondaries,
+      apply: {
+        secondaries: [
+          {
+            key: {
+              hue: { center: 215, range: 25, softness: 10 },
+              saturation: { min: 0.2, max: 1, softness: 0.08 },
+              luma: { min: 0.1, max: 0.9, softness: 0.08 },
+            },
+            correction: { saturation: 0.15, luma: 0.03 },
+          },
+        ],
+      },
+    },
+    scopes: {
+      id,
+      description:
+        "Deterministic source measurements for agent decisions; visual scopes remain a Studio display.",
+      command:
+        "hyperframes media-treatment --file <composition.html> --selector <media> --analyze --json",
+      output: [
+        "source color metadata and HDR/LOG warnings",
+        "luma percentile and clipping evidence",
+        "bounded suggested primary correction",
+      ],
     },
     presets: {
       id,
@@ -221,6 +313,10 @@ export const examples: Example[] = [
   [
     "Preview the exact mutation without writing",
     `hyperframes media-treatment --file compositions/scene.html --selector 'video' --grading '{"preset":"warm-daylight"}' --apply --dry-run --json`,
+  ],
+  [
+    "Measure one local media source before choosing a correction",
+    `hyperframes media-treatment --selector '#hero' --analyze --json`,
   ],
   ["Remove a treatment", `hyperframes media-treatment --selector '#hero' --clear`],
 ];
@@ -298,7 +394,7 @@ function serializeGradingPatch(before: unknown, patch: unknown): string | null {
   }
   const normalized = normalizeHfColorGrading(grading);
   if (!normalized) throw new Error("--grading must be valid HyperFrames color-grading JSON");
-  return isHfColorGradingActive(normalized) ? serializeHfColorGrading(normalized) : null;
+  return hasHfColorGradingAuthoredValues(normalized) ? serializeHfColorGrading(normalized) : null;
 }
 
 function queryIncludingTemplates(root: Document | Element, selector: string): Element[] {
@@ -375,6 +471,46 @@ function parseSelectorIndex(raw: string | undefined): number | undefined {
   return value;
 }
 
+function mediaSourceForElement(element: Element): string {
+  const src =
+    element.getAttribute("src") ??
+    (element.tagName.toLowerCase() === "video"
+      ? element.querySelector("source")?.getAttribute("src")
+      : null);
+  if (!src) throw new Error("Selected media has no analyzable src");
+  return src;
+}
+
+function stripUrlSuffix(value: string): string {
+  const queryIndex = value.indexOf("?");
+  const hashIndex = value.indexOf("#");
+  if (queryIndex < 0 && hashIndex < 0) return value;
+  const end =
+    queryIndex < 0 ? hashIndex : hashIndex < 0 ? queryIndex : Math.min(queryIndex, hashIndex);
+  return value.slice(0, end);
+}
+
+export function resolveMediaTreatmentSource(
+  projectDir: string,
+  compositionFile: string,
+  source: string,
+): string {
+  const cleanSource = stripUrlSuffix(source.trim());
+  if (/^[a-z][a-z\d+.-]*:/i.test(cleanSource) || cleanSource.startsWith("//")) {
+    throw new Error(
+      "Media analysis requires a local project asset; freeze remote media with media-use first",
+    );
+  }
+  const projectRelative = cleanSource.startsWith("/")
+    ? cleanSource.slice(1)
+    : rewriteAssetPath(compositionFile, cleanSource);
+  const mediaPath = resolve(projectDir, projectRelative);
+  if (!isPathInside(mediaPath, projectDir)) {
+    throw new Error("Selected media resolves outside the project");
+  }
+  return mediaPath;
+}
+
 function parseGrading(raw: string | undefined, apply: boolean, clear: boolean): unknown {
   if (clear) {
     if (raw !== undefined || apply) {
@@ -398,6 +534,158 @@ function mutationVerb(action: "apply" | "clear", changed: boolean, dryRun: boole
   if (dryRun) return `Would ${action}`;
   if (!changed) return action === "apply" ? "Already applied" : "Already clear";
   return action === "apply" ? "Applied" : "Cleared";
+}
+
+interface MediaTreatmentCommandArgs {
+  capabilities?: boolean;
+  capability?: string;
+  all?: boolean;
+  project?: string;
+  file?: string;
+  selector?: string;
+  "selector-index"?: string;
+  grading?: string;
+  apply?: boolean;
+  analyze?: boolean;
+  clear?: boolean;
+  "dry-run"?: boolean;
+  json?: boolean;
+}
+
+function runCapabilityQuery(args: MediaTreatmentCommandArgs): void {
+  const capability = readOptionalString(args.capability);
+  const hasMutationOption = [
+    readOptionalString(args.selector),
+    readOptionalString(args.grading),
+    args.clear,
+    args["dry-run"],
+    args.apply,
+    args.analyze,
+  ].some(Boolean);
+  if (hasMutationOption) throw new Error("--capabilities cannot be combined with mutation options");
+  if (args.all === true && capability)
+    throw new Error("Use either --all or --capability, not both");
+
+  let capabilities: unknown = getMediaTreatmentCapabilityOverview();
+  if (args.all === true) capabilities = getHfColorGradingCapabilities();
+  else if (capability) capabilities = getMediaTreatmentCapabilityDetail(capability);
+  console.log(JSON.stringify(withMeta({ ok: true, capabilities }), null, 2));
+}
+
+function resolveMutationFile(args: MediaTreatmentCommandArgs) {
+  const project = resolveProject(readOptionalString(args.project));
+  const fileArg = readOptionalString(args.file) ?? "index.html";
+  const filePath = resolve(project.dir, fileArg);
+  if (!isPathInside(filePath, project.dir) || !filePath.toLowerCase().endsWith(".html")) {
+    throw new Error("--file must be an HTML file inside the project");
+  }
+  if (!existsSync(filePath)) throw new Error(`Composition file not found: ${fileArg}`);
+  return { project, filePath };
+}
+
+function analyzeTarget(args: MediaTreatmentCommandArgs) {
+  const { project, filePath } = resolveMutationFile(args);
+  const selector = readOptionalString(args.selector);
+  if (!selector) throw new Error("--selector is required");
+  if (
+    readOptionalString(args.grading) ||
+    args.clear === true ||
+    args.apply === true ||
+    args["dry-run"] === true
+  ) {
+    throw new Error("--analyze cannot be combined with mutation options");
+  }
+  const selectorIndex = parseSelectorIndex(readOptionalString(args["selector-index"]));
+  const { element, tag } = selectMediaElement(
+    readFileSync(filePath, "utf8"),
+    selector,
+    selectorIndex,
+  );
+  const source = mediaSourceForElement(element);
+  const compositionFile = relative(project.dir, filePath).split("\\").join("/");
+  const mediaPath = resolveMediaTreatmentSource(project.dir, compositionFile, source);
+  if (!existsSync(mediaPath)) throw new Error(`Media file not found: ${source}`);
+  return {
+    ok: true,
+    action: "analyze",
+    file: compositionFile || "index.html",
+    selector,
+    selectorIndex: selectorIndex ?? 0,
+    tag,
+    media: source,
+    ...analyzeMediaTreatment(mediaPath),
+  };
+}
+
+function prepareMutation(args: MediaTreatmentCommandArgs) {
+  const { project, filePath } = resolveMutationFile(args);
+  const selector = readOptionalString(args.selector);
+  if (!selector) throw new Error("--selector is required");
+  const clear = args.clear === true;
+  const apply = args.apply === true;
+  const selectorIndex = parseSelectorIndex(readOptionalString(args["selector-index"]));
+  const result = applyMediaTreatmentToHtml(readFileSync(filePath, "utf8"), {
+    selector,
+    selectorIndex,
+    grading: parseGrading(readOptionalString(args.grading), apply, clear),
+    clear,
+  });
+  const dryRun = args["dry-run"] === true;
+  if (result.changed && !dryRun) writeFileSync(filePath, result.html);
+
+  const action: "clear" | "apply" = result.value === null ? "clear" : "apply";
+  return {
+    action,
+    result,
+    selector,
+    payload: {
+      ok: true,
+      action,
+      file: relative(project.dir, filePath) || "index.html",
+      selector,
+      selectorIndex: selectorIndex ?? 0,
+      tag: result.tag,
+      changed: result.changed,
+      dryRun,
+      before: result.before,
+      after: result.after,
+    },
+  };
+}
+
+function isCapabilityQuery(args: MediaTreatmentCommandArgs): boolean {
+  return (
+    args.capabilities === true || Boolean(readOptionalString(args.capability)) || args.all === true
+  );
+}
+
+function printAnalysis(args: MediaTreatmentCommandArgs): void {
+  const result = analyzeTarget(args);
+  if (args.json === true) {
+    console.log(JSON.stringify(withMeta(result), null, 2));
+    return;
+  }
+  console.log(`${c.success("◇")}  Analyzed ${c.accent(result.selector)}`);
+  for (const diagnosis of result.diagnosis) console.log(`   ${diagnosis}`);
+  for (const warning of result.warnings) console.log(`   ${c.warn(warning)}`);
+  console.log(`   suggested patch: ${JSON.stringify(result.suggestedPatch)}`);
+}
+
+function printMutation(args: MediaTreatmentCommandArgs): void {
+  const { action, result, selector, payload } = prepareMutation(args);
+  if (args.json === true) {
+    console.log(JSON.stringify(withMeta(payload), null, 2));
+    return;
+  }
+  const verb = mutationVerb(action, result.changed, payload.dryRun);
+  console.log(`${c.success("◇")}  ${verb} media treatment on ${c.accent(selector)}`);
+}
+
+function printFailure(error: unknown, json: boolean): void {
+  const message = normalizeErrorMessage(error);
+  if (json) console.log(JSON.stringify(withMeta({ ok: false, error: message })));
+  else console.error(`${c.error("✗")} ${message}`);
+  failCommand();
 }
 
 export const mediaTreatmentCommand = defineCommand({
@@ -439,6 +727,11 @@ export const mediaTreatmentCommand = defineCommand({
       description: "Apply the validated grading patch (explicit agent form)",
       default: false,
     },
+    analyze: {
+      type: "boolean",
+      description: "Measure selected local media and suggest a bounded primary correction",
+      default: false,
+    },
     clear: { type: "boolean", description: "Remove color grading from the target", default: false },
     "dry-run": {
       type: "boolean",
@@ -448,90 +741,15 @@ export const mediaTreatmentCommand = defineCommand({
     json: { type: "boolean", description: "Output an agent-friendly JSON result", default: false },
   },
   run({ args }) {
-    const runCapabilityQuery = () => {
-      const capability = readOptionalString(args.capability);
-      const hasMutationOption = [
-        readOptionalString(args.selector),
-        readOptionalString(args.grading),
-        args.clear,
-        args["dry-run"],
-        args.apply,
-      ].some(Boolean);
-      if (hasMutationOption) {
-        throw new Error("--capabilities cannot be combined with mutation options");
-      }
-      if (args.all === true && capability) {
-        throw new Error("Use either --all or --capability, not both");
-      }
-      let capabilities: unknown = getMediaTreatmentCapabilityOverview();
-      if (args.all === true) capabilities = getHfColorGradingCapabilities();
-      else if (capability) capabilities = getMediaTreatmentCapabilityDetail(capability);
-      console.log(JSON.stringify(withMeta({ ok: true, capabilities }), null, 2));
-    };
-
-    const resolveMutationFile = () => {
-      const project = resolveProject(readOptionalString(args.project));
-      const fileArg = readOptionalString(args.file) ?? "index.html";
-      const filePath = resolve(project.dir, fileArg);
-      if (!isPathInside(filePath, project.dir) || !filePath.toLowerCase().endsWith(".html")) {
-        throw new Error("--file must be an HTML file inside the project");
-      }
-      if (!existsSync(filePath)) throw new Error(`Composition file not found: ${fileArg}`);
-      return { project, filePath };
-    };
-
-    const prepareMutation = () => {
-      const { project, filePath } = resolveMutationFile();
-      const selector = readOptionalString(args.selector);
-      if (!selector) throw new Error("--selector is required");
-      const clear = args.clear === true;
-      const apply = args.apply === true;
-      const selectorIndex = parseSelectorIndex(readOptionalString(args["selector-index"]));
-      const result = applyMediaTreatmentToHtml(readFileSync(filePath, "utf8"), {
-        selector,
-        selectorIndex,
-        grading: parseGrading(readOptionalString(args.grading), apply, clear),
-        clear,
-      });
-      const dryRun = args["dry-run"] === true;
-      if (result.changed && !dryRun) writeFileSync(filePath, result.html);
-
-      const action: "clear" | "apply" = result.value === null ? "clear" : "apply";
-      return {
-        action,
-        result,
-        selector,
-        payload: {
-          ok: true,
-          action,
-          file: relative(project.dir, filePath) || "index.html",
-          selector,
-          selectorIndex: selectorIndex ?? 0,
-          tag: result.tag,
-          changed: result.changed,
-          dryRun,
-          before: result.before,
-          after: result.after,
-        },
-      };
-    };
-
     try {
-      if (args.capabilities === true || readOptionalString(args.capability) || args.all === true) {
-        return runCapabilityQuery();
+      if (isCapabilityQuery(args)) return runCapabilityQuery(args);
+      if (args.analyze === true) {
+        printAnalysis(args);
+        return;
       }
-      const { action, result, selector, payload } = prepareMutation();
-      if (args.json === true) {
-        console.log(JSON.stringify(withMeta(payload), null, 2));
-      } else {
-        const verb = mutationVerb(action, result.changed, payload.dryRun);
-        console.log(`${c.success("◇")}  ${verb} media treatment on ${c.accent(selector)}`);
-      }
+      printMutation(args);
     } catch (error) {
-      const message = normalizeErrorMessage(error);
-      if (args.json === true) console.log(JSON.stringify(withMeta({ ok: false, error: message })));
-      else console.error(`${c.error("✗")} ${message}`);
-      failCommand();
+      printFailure(error, args.json === true);
     }
   },
 });
