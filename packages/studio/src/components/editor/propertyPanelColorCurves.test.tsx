@@ -131,4 +131,28 @@ describe("ColorCurves", () => {
     expect(onCommit).toHaveBeenCalledOnce();
     act(() => root.unmount());
   });
+
+  it("does not restore a deleted point when an overlapping key gesture settles", () => {
+    const { host, root, onCommit } = renderCurves();
+    const graph = activate(host, "master");
+    act(() => {
+      graph.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(onCommit.mock.calls.at(-1)?.[0]?.curves.master).toHaveLength(3);
+    onCommit.mockClear();
+
+    act(() => {
+      graph.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    act(() => {
+      graph.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+    });
+    act(() => {
+      graph.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowDown", bubbles: true }));
+    });
+
+    expect(onCommit).toHaveBeenCalledOnce();
+    expect(onCommit.mock.calls[0]?.[0]?.curves.master).toHaveLength(2);
+    act(() => root.unmount());
+  });
 });

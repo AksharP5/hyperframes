@@ -65,18 +65,20 @@ describe("colorGradingFrameAnalysis", () => {
     expect(sampled?.saturation.max).toBeCloseTo(0.2);
   });
 
-  it("matches the shader's half-softness edge convention", () => {
-    const key = secondaryKey({
+  it("matches the runtime softness on saturation and luma feather edges", () => {
+    const saturationKey = secondaryKey({
       hue: { center: 0, range: 180, softness: 0 },
       saturation: { min: 0.5, max: 1, softness: 0.4 },
       luma: { min: 0, max: 1, softness: 0 },
     });
+    const lumaKey = secondaryKey({
+      hue: { center: 0, range: 180, softness: 0 },
+      saturation: { min: 0, max: 1, softness: 0 },
+      luma: { min: 0.5, max: 1, softness: 0.4 },
+    });
 
-    const belowOuterEdge = colorGradingSecondaryMask(77, 77, 77, key);
-    const middleOfFeather = colorGradingSecondaryMask(112, 77, 77, key);
-    expect(belowOuterEdge).toBe(0);
-    expect(middleOfFeather).toBeGreaterThan(0);
-    expect(middleOfFeather).toBeLessThan(1);
+    expect(colorGradingSecondaryMask(255, 204, 204, saturationKey)).toBeCloseTo(0.15625, 5);
+    expect(colorGradingSecondaryMask(51, 51, 51, lumaKey)).toBeCloseTo(0.15625, 5);
   });
 
   it("builds an alpha-preserving black-and-white selection matte", () => {

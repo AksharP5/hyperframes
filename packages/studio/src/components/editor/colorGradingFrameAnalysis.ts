@@ -1,4 +1,7 @@
-import type { NormalizedHfColorGradingSecondary } from "@hyperframes/core/color-grading";
+import {
+  calculateHfColorGradingSecondaryMask,
+  type NormalizedHfColorGradingSecondary,
+} from "@hyperframes/core/color-grading";
 import { clampNumber } from "../../utils/studioHelpers";
 
 const BYTE_MAX = 255;
@@ -53,20 +56,6 @@ function rgbToHsv(red: number, green: number, blue: number) {
   };
 }
 
-function softRangeMask(value: number, min: number, max: number, softness: number): number {
-  if (value < min) {
-    if (softness <= 0 || value <= min - softness) return 0;
-    const t = (value - (min - softness)) / softness;
-    return t * t * (3 - 2 * t);
-  }
-  if (value > max) {
-    if (softness <= 0 || value >= max + softness) return 0;
-    const t = (value - max) / softness;
-    return 1 - t * t * (3 - 2 * t);
-  }
-  return 1;
-}
-
 export function colorGradingSecondaryMask(
   red: number,
   green: number,
@@ -74,32 +63,11 @@ export function colorGradingSecondaryMask(
   key: NormalizedHfColorGradingSecondary["key"],
 ): number {
   const hsv = rgbToHsv(red / BYTE_MAX, green / BYTE_MAX, blue / BYTE_MAX);
-  const hueDistance = Math.abs(((((hsv.hue - key.hue.center + 540) % 360) + 360) % 360) - 180);
-  const hueMask =
-    key.hue.range >= 179.999
-      ? 1
-      : hsv.saturation < 0.001
-        ? 0
-        : softRangeMask(
-            hueDistance,
-            0,
-            key.hue.range,
-            Math.min(key.hue.softness, 180 - key.hue.range),
-          );
-  return (
-    hueMask *
-    softRangeMask(
-      hsv.saturation,
-      key.saturation.min,
-      key.saturation.max,
-      key.saturation.softness * 0.5,
-    ) *
-    softRangeMask(
-      rec709Luma(red / BYTE_MAX, green / BYTE_MAX, blue / BYTE_MAX),
-      key.luma.min,
-      key.luma.max,
-      key.luma.softness * 0.5,
-    )
+  return calculateHfColorGradingSecondaryMask(
+    hsv.hue,
+    hsv.saturation,
+    rec709Luma(red / BYTE_MAX, green / BYTE_MAX, blue / BYTE_MAX),
+    key,
   );
 }
 

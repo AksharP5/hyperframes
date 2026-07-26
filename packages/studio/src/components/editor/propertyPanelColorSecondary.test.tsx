@@ -117,6 +117,24 @@ describe("PropertyPanelColorSecondary", () => {
     act(() => root.unmount());
   });
 
+  it("preserves legal fractional hue centers at the wrap boundary", () => {
+    const grading = normalizeHfColorGrading({
+      secondaries: [
+        {
+          key: { hue: { center: 359.7, range: 20 } },
+          correction: {},
+        },
+      ],
+    });
+    if (!grading?.secondaries) throw new Error("Expected normalized secondaries");
+    const { host, root } = renderSecondary({ secondaries: grading.secondaries });
+    const hue = host.querySelector<HTMLElement>('[role="slider"][aria-label="Hue"]');
+
+    expect(Number(hue?.getAttribute("aria-valuenow"))).toBeCloseTo(359.7);
+    expect(hue?.getAttribute("aria-valuemax")).toBe("359.99");
+    act(() => root.unmount());
+  });
+
   it("shows a useful error when frame capture is unavailable", async () => {
     const { host, root, onCommit } = renderSecondary({
       captureFrame: vi.fn().mockRejectedValue(new Error("capture unavailable")),

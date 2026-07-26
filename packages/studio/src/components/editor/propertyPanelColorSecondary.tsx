@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { COLOR_GRADING_MAX_SECONDARIES } from "@hyperframes/parsers/color-grading-contract";
 import {
+  getHfColorGradingCapabilities,
   normalizeHfColorGrading,
   type NormalizedHfColorGradingSecondary,
 } from "@hyperframes/core/color-grading";
@@ -15,6 +15,25 @@ import {
 } from "./colorGradingFrameAnalysis";
 
 type Secondaries = readonly NormalizedHfColorGradingSecondary[];
+
+const SECONDARY_CAPABILITIES = getHfColorGradingCapabilities().secondaries;
+const PERCENT_SCALE = 100;
+const RANGE_GAP = 0.01;
+const HUE_CENTER_MAX = SECONDARY_CAPABILITIES.hue.center.maxExclusive - RANGE_GAP;
+
+function wrapHueCenter(value: number): number {
+  const { min, maxExclusive } = SECONDARY_CAPABILITIES.hue.center;
+  const span = maxExclusive - min;
+  return ((((value - min) % span) + span) % span) + min;
+}
+
+const CORRECTION_CONTROLS = [
+  ["hueShift", "Hue shift", 1, "°"],
+  ["saturation", "Saturation", PERCENT_SCALE, "%"],
+  ["luma", "Luma", PERCENT_SCALE, "%"],
+  ["temperature", "Warmth", PERCENT_SCALE, "%"],
+  ["tint", "Tint", PERCENT_SCALE, "%"],
+] as const;
 
 function defaultSecondary(): NormalizedHfColorGradingSecondary {
   const secondary = normalizeHfColorGrading({
@@ -84,7 +103,7 @@ export function PropertyPanelColorSecondary({
     onCommit(secondaries.map((secondary, index) => (index === activeIndex ? next : secondary)));
   };
   const addSecondary = () => {
-    if (secondaries.length >= COLOR_GRADING_MAX_SECONDARIES) return;
+    if (secondaries.length >= SECONDARY_CAPABILITIES.max) return;
     onCommit([...secondaries, DEFAULT_SECONDARY]);
     setSelectedIndex(secondaries.length);
   };
@@ -128,7 +147,7 @@ export function PropertyPanelColorSecondary({
             type="button"
             aria-label="Add secondary color selection"
             title="Add secondary color selection"
-            disabled={secondaries.length >= COLOR_GRADING_MAX_SECONDARIES}
+            disabled={secondaries.length >= SECONDARY_CAPABILITIES.max}
             onClick={addSecondary}
             className="text-panel-text-3 hover:text-panel-text-1 disabled:opacity-35"
           >
@@ -261,22 +280,26 @@ export function PropertyPanelColorSecondary({
           <FlatSlider
             label="Hue"
             value={selected.key.hue.center}
-            min={0}
-            max={359}
+            min={SECONDARY_CAPABILITIES.hue.center.min}
+            max={HUE_CENTER_MAX}
+            step={0.1}
             tier="explicitCustom"
             displayValue={`${Math.round(selected.key.hue.center)}°`}
             onCommit={(center) =>
               replaceSelected({
                 ...selected,
-                key: { ...selected.key, hue: { ...selected.key.hue, center } },
+                key: {
+                  ...selected.key,
+                  hue: { ...selected.key.hue, center: wrapHueCenter(center) },
+                },
               })
             }
           />
           <FlatSlider
             label="Hue range"
             value={selected.key.hue.range}
-            min={0}
-            max={180}
+            min={SECONDARY_CAPABILITIES.hue.range.min}
+            max={SECONDARY_CAPABILITIES.hue.range.max}
             tier="explicitCustom"
             displayValue={`${Math.round(selected.key.hue.range)}°`}
             onCommit={(range) =>
@@ -287,7 +310,10 @@ export function PropertyPanelColorSecondary({
                   hue: {
                     ...selected.key.hue,
                     range,
-                    softness: Math.min(selected.key.hue.softness, 180 - range),
+                    softness: Math.min(
+                      selected.key.hue.softness,
+                      SECONDARY_CAPABILITIES.hue.rangePlusSoftnessMax - range,
+                    ),
                   },
                 },
               })
@@ -296,8 +322,11 @@ export function PropertyPanelColorSecondary({
           <FlatSlider
             label="Hue softness"
             value={selected.key.hue.softness}
-            min={0}
-            max={180 - selected.key.hue.range}
+            min={SECONDARY_CAPABILITIES.hue.softness.min}
+            max={Math.min(
+              SECONDARY_CAPABILITIES.hue.softness.max,
+              SECONDARY_CAPABILITIES.hue.rangePlusSoftnessMax - selected.key.hue.range,
+            )}
             tier="explicitCustom"
             displayValue={`${Math.round(selected.key.hue.softness)}°`}
             onCommit={(softness) =>
@@ -310,13 +339,14 @@ export function PropertyPanelColorSecondary({
           {(["saturation", "luma"] as const).flatMap((key) => {
             const label = key === "saturation" ? "Saturation" : "Luma";
             const range = selected.key[key];
+            const capability = SECONDARY_CAPABILITIES[key];
             return [
               <FlatSlider
                 key={`${key}-min`}
                 label={`${label} min`}
-                value={range.min * 100}
-                min={0}
-                max={100}
+                value={range.min * PERCENT_SCALE}
+                min={capability.min.min * PERCENT_SCALE}
+                max={capability.min.max * PERCENT_SCALE}
                 tier="explicitCustom"
                 displayValue={percent(range.min)}
                 onCommit={(value) =>
@@ -326,7 +356,10 @@ export function PropertyPanelColorSecondary({
                       ...selected.key,
                       [key]: {
                         ...range,
-                        min: Math.max(0, Math.min(value / 100, range.max - 0.01)),
+                        min: Math.max(
+                          capability.min.min,
+                          Math.min(value / PERCENT_SCALE, range.max - RANGE_GAP),
+                        ),
                       },
                     },
                   })
@@ -335,9 +368,9 @@ export function PropertyPanelColorSecondary({
               <FlatSlider
                 key={`${key}-max`}
                 label={`${label} max`}
-                value={range.max * 100}
-                min={0}
-                max={100}
+                value={range.max * PERCENT_SCALE}
+                min={capability.max.min * PERCENT_SCALE}
+                max={capability.max.max * PERCENT_SCALE}
                 tier="explicitCustom"
                 displayValue={percent(range.max)}
                 onCommit={(value) =>
@@ -347,7 +380,10 @@ export function PropertyPanelColorSecondary({
                       ...selected.key,
                       [key]: {
                         ...range,
-                        max: Math.min(1, Math.max(value / 100, range.min + 0.01)),
+                        max: Math.min(
+                          capability.max.max,
+                          Math.max(value / PERCENT_SCALE, range.min + RANGE_GAP),
+                        ),
                       },
                     },
                   })
@@ -356,15 +392,18 @@ export function PropertyPanelColorSecondary({
               <FlatSlider
                 key={`${key}-softness`}
                 label={`${label} softness`}
-                value={range.softness * 100}
-                min={0}
-                max={50}
+                value={range.softness * PERCENT_SCALE}
+                min={capability.softness.min * PERCENT_SCALE}
+                max={capability.softness.max * PERCENT_SCALE}
                 tier="explicitCustom"
                 displayValue={percent(range.softness)}
                 onCommit={(value) =>
                   replaceSelected({
                     ...selected,
-                    key: { ...selected.key, [key]: { ...range, softness: value / 100 } },
+                    key: {
+                      ...selected.key,
+                      [key]: { ...range, softness: value / PERCENT_SCALE },
+                    },
                   })
                 }
               />,
@@ -374,29 +413,19 @@ export function PropertyPanelColorSecondary({
           <div className="pt-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-panel-text-5">
             Correction
           </div>
-          {(
-            [
-              ["hueShift", "Hue shift", -180, 180, "degree"],
-              ["saturation", "Saturation", -100, 100, "percent"],
-              ["luma", "Luma", -100, 100, "percent"],
-              ["temperature", "Warmth", -100, 100, "percent"],
-              ["tint", "Tint", -100, 100, "percent"],
-            ] as const
-          ).map(([key, label, min, max, format]) => {
-            const scale = format === "degree" ? 1 : 100;
+          {CORRECTION_CONTROLS.map(([key, label, scale, suffix]) => {
+            const limit = SECONDARY_CAPABILITIES.correction[key];
             const value = selected.correction[key] * scale;
             return (
               <FlatSlider
                 key={key}
                 label={label}
                 value={value}
-                min={min}
-                max={max}
+                min={limit.min * scale}
+                max={limit.max * scale}
                 centerTick
                 tier={Math.abs(value) > 0.0001 ? "explicitCustom" : "default"}
-                displayValue={
-                  format === "degree" ? `${Math.round(value)}°` : `${Math.round(value)}%`
-                }
+                displayValue={`${Math.round(value)}${suffix}`}
                 onCommit={(next) =>
                   replaceSelected({
                     ...selected,

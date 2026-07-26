@@ -56,6 +56,7 @@ export function ColorCurves({
   const deleteSelected = () => {
     if (selectedIndex === null) return;
     if (tab.kind === "rgb" && (selectedIndex === 0 || selectedIndex === points.length - 1)) return;
+    transaction.cancel();
     const nextPoints =
       tab.kind === "hue" && points.length <= 3
         ? []

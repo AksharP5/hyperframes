@@ -1,7 +1,8 @@
 import { useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type {
-  HfColorGradingWheelKey,
-  NormalizedHfColorGradingWheels,
+import {
+  getHfColorGradingCapabilities,
+  type HfColorGradingWheelKey,
+  type NormalizedHfColorGradingWheels,
 } from "@hyperframes/core/color-grading";
 import { RotateCcw } from "../../icons/SystemIcons";
 import { clampNumber } from "../../utils/studioHelpers";
@@ -15,10 +16,19 @@ const WHEELS: ReadonlyArray<{ key: HfColorGradingWheelKey; label: string }> = [
 ];
 type NormalizedTonalWheel = NormalizedHfColorGradingWheels[HfColorGradingWheelKey];
 
-const RESET_WHEEL: NormalizedTonalWheel = { hue: 0, amount: 0, level: 0 };
+const WHEEL_CONTROLS = getHfColorGradingCapabilities().wheels.controls;
+const PERCENT_SCALE = 100;
+const HUE_MAX = WHEEL_CONTROLS.hue.maxExclusive - 0.01;
+const RESET_WHEEL: NormalizedTonalWheel = {
+  hue: WHEEL_CONTROLS.hue.identity,
+  amount: WHEEL_CONTROLS.amount.identity,
+  level: WHEEL_CONTROLS.level.identity,
+};
 
 function wrapHue(value: number): number {
-  return ((value % 360) + 360) % 360;
+  const { min, maxExclusive } = WHEEL_CONTROLS.hue;
+  const span = maxExclusive - min;
+  return ((((value - min) % span) + span) % span) + min;
 }
 
 function formatNumberInput(value: number, decimals: number): string {
@@ -39,7 +49,7 @@ function wheelFromPointer(
   return {
     ...wheel,
     hue: wrapHue((Math.atan2(y, x) * 180) / Math.PI),
-    amount: clampNumber(Math.hypot(x, y), 0, 1),
+    amount: clampNumber(Math.hypot(x, y), WHEEL_CONTROLS.amount.min, WHEEL_CONTROLS.amount.max),
   };
 }
 
@@ -64,13 +74,27 @@ function wheelFromKey(
     case "ArrowRight":
       return { ...wheel, hue: wrapHue(wheel.hue + hueStep) };
     case "ArrowDown":
-      return { ...wheel, amount: clampNumber(wheel.amount - amountStep, 0, 1) };
+      return {
+        ...wheel,
+        amount: clampNumber(
+          wheel.amount - amountStep,
+          WHEEL_CONTROLS.amount.min,
+          WHEEL_CONTROLS.amount.max,
+        ),
+      };
     case "ArrowUp":
-      return { ...wheel, amount: clampNumber(wheel.amount + amountStep, 0, 1) };
+      return {
+        ...wheel,
+        amount: clampNumber(
+          wheel.amount + amountStep,
+          WHEEL_CONTROLS.amount.min,
+          WHEEL_CONTROLS.amount.max,
+        ),
+      };
     case "Home":
-      return { ...wheel, amount: 0 };
+      return { ...wheel, amount: WHEEL_CONTROLS.amount.min };
     case "End":
-      return { ...wheel, amount: 1 };
+      return { ...wheel, amount: WHEEL_CONTROLS.amount.max };
     default:
       return null;
   }
@@ -136,10 +160,12 @@ function TonalWheel({
         role="slider"
         tabIndex={disabled ? -1 : 0}
         aria-label={`${label} color`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(wheel.amount * 100)}
-        aria-valuetext={`${Math.round(wheel.hue)} degrees, ${Math.round(wheel.amount * 100)} percent`}
+        aria-valuemin={WHEEL_CONTROLS.amount.min * PERCENT_SCALE}
+        aria-valuemax={WHEEL_CONTROLS.amount.max * PERCENT_SCALE}
+        aria-valuenow={Math.round(wheel.amount * PERCENT_SCALE)}
+        aria-valuetext={`${Math.round(wheel.hue)} degrees, ${Math.round(
+          wheel.amount * PERCENT_SCALE,
+        )} percent`}
         aria-disabled={disabled}
         data-color-wheel-surface="true"
         onDoubleClick={onReset}
@@ -193,8 +219,8 @@ function TonalWheel({
       <input
         type="range"
         aria-label={`${label} level`}
-        min={-1}
-        max={1}
+        min={WHEEL_CONTROLS.level.min}
+        max={WHEEL_CONTROLS.level.max}
         step={0.01}
         value={wheel.level}
         disabled={disabled}
@@ -218,39 +244,39 @@ function TonalWheel({
         <GradingNumberField
           label="Hue"
           value={wheel.hue}
-          min={0}
-          max={359.99}
+          min={WHEEL_CONTROLS.hue.min}
+          max={HUE_MAX}
           disabled={disabled}
           formatValue={formatIntegerInput}
           labelTextClassName="block text-[8px] uppercase text-panel-text-5"
           onBegin={onBegin}
-          onPreview={(hue) => onPreview({ ...wheel, hue })}
+          onPreview={(hue) => onPreview({ ...wheel, hue: wrapHue(hue) })}
           onSettle={onSettle}
           onCancel={onCancel}
         />
         <GradingNumberField
           label="Amount"
-          value={wheel.amount * 100}
-          min={0}
-          max={100}
+          value={wheel.amount * PERCENT_SCALE}
+          min={WHEEL_CONTROLS.amount.min * PERCENT_SCALE}
+          max={WHEEL_CONTROLS.amount.max * PERCENT_SCALE}
           disabled={disabled}
           formatValue={formatIntegerInput}
           labelTextClassName="block text-[8px] uppercase text-panel-text-5"
           onBegin={onBegin}
-          onPreview={(amount) => onPreview({ ...wheel, amount: amount / 100 })}
+          onPreview={(amount) => onPreview({ ...wheel, amount: amount / PERCENT_SCALE })}
           onSettle={onSettle}
           onCancel={onCancel}
         />
         <GradingNumberField
           label="Level"
-          value={wheel.level * 100}
-          min={-100}
-          max={100}
+          value={wheel.level * PERCENT_SCALE}
+          min={WHEEL_CONTROLS.level.min * PERCENT_SCALE}
+          max={WHEEL_CONTROLS.level.max * PERCENT_SCALE}
           disabled={disabled}
           formatValue={formatIntegerInput}
           labelTextClassName="block text-[8px] uppercase text-panel-text-5"
           onBegin={onBegin}
-          onPreview={(level) => onPreview({ ...wheel, level: level / 100 })}
+          onPreview={(level) => onPreview({ ...wheel, level: level / PERCENT_SCALE })}
           onSettle={onSettle}
           onCancel={onCancel}
         />

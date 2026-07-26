@@ -524,7 +524,9 @@ export function useColorGradingController({
     if (!onApplyScope || applyBusy) return;
     setApplyBusy(true);
     try {
-      const value = isHfColorGradingActive(grading) ? serializeHfColorGrading(grading) : null;
+      const value = hasHfColorGradingAuthoredValues(grading)
+        ? serializeHfColorGrading(grading)
+        : null;
       await onApplyScope(applyScope, value);
     } finally {
       setApplyBusy(false);
@@ -552,6 +554,7 @@ export function useColorGradingController({
       const neutral = defaultColorGrading();
       commitColorGrading({
         ...neutral,
+        lut: latestGradingRef.current.lut,
         effects: latestGradingRef.current.effects,
         palette: latestGradingRef.current.palette,
       });

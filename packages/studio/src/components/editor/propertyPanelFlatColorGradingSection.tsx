@@ -159,6 +159,7 @@ export function FlatColorGradingSection({
     ],
   );
   const actions = createColorGradingActions(grading, onCommitColorGrading);
+  const scopesRefreshKey = useMemo(() => serializeHfColorGrading(grading), [grading]);
 
   useEffect(() => {
     if (presetPreviews.status === "idle") onRequestPresetPreviews();
@@ -206,7 +207,7 @@ export function FlatColorGradingSection({
       <HdrBanner metadata={mediaMetadata} />
       <PropertyPanelColorScopes
         captureFrame={() => captureGradedFrame()}
-        refreshKey={serializeHfColorGrading(grading)}
+        refreshKey={scopesRefreshKey}
       />
       <div data-flat-grade-presets="true" className="space-y-1.5">
         {presetPreviews.status === "unavailable" && (

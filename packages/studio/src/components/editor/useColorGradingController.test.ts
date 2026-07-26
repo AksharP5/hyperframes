@@ -56,22 +56,30 @@ function makeElement(overrides: Partial<DomEditSelection> = {}): DomEditSelectio
   } as DomEditSelection;
 }
 
+type ApplyScope = (
+  scope: "source-file" | "project",
+  value: string | null,
+) => Promise<{ changedFiles: number; changedElements: number }>;
+
 function HookHost({
   onState,
   onSetAttributeLive,
   element,
   previewIframeRef,
+  onApplyScope,
 }: {
   onState: (state: ReturnType<typeof useColorGradingController>) => void;
   onSetAttributeLive: (attr: string, value: string | null) => void;
   element: DomEditSelection;
   previewIframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  onApplyScope?: ApplyScope;
 }) {
   const state = useColorGradingController({
     projectId: "proj",
     element,
     previewIframeRef,
     onSetAttributeLive,
+    onApplyScope,
   });
   onState(state);
   return null;
@@ -81,6 +89,7 @@ function renderHook(
   onSetAttributeLive: (attr: string, value: string | null) => void,
   initialElement: DomEditSelection = makeElement(),
   previewIframeRef?: React.RefObject<HTMLIFrameElement | null>,
+  onApplyScope?: ApplyScope,
 ) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -94,6 +103,7 @@ function renderHook(
           onSetAttributeLive,
           element,
           previewIframeRef,
+          onApplyScope,
         }),
       );
     });
@@ -267,6 +277,36 @@ describe("useColorGradingController", () => {
     expect(onSetAttributeLive.mock.calls[0]?.[1]).toContain('"enabled":false');
     act(() => root.unmount());
     vi.useRealTimers();
+  });
+
+  it("copies a disabled authored secondary to a broader scope", async () => {
+    const onApplyScope = vi.fn<ApplyScope>().mockResolvedValue({
+      changedFiles: 1,
+      changedElements: 1,
+    });
+    const grading = {
+      secondaries: [
+        {
+          enabled: false,
+          key: { hue: { center: 215, range: 25 } },
+          correction: { saturation: 0.15 },
+        },
+      ],
+    };
+    const { root, getState } = renderHook(
+      vi.fn(),
+      makeElement({ dataAttributes: { "color-grading": JSON.stringify(grading) } }),
+      undefined,
+      onApplyScope,
+    );
+
+    await act(async () => getState().applyToScope());
+
+    expect(onApplyScope).toHaveBeenCalledWith(
+      "source-file",
+      expect.stringContaining('"enabled":false'),
+    );
+    act(() => root.unmount());
   });
 
   it("requests exact effect families and retains earlier family images", async () => {
@@ -566,7 +606,7 @@ describe("useColorGradingController", () => {
     vi.useRealTimers();
   });
 
-  it("resetGrading resets Grade fields without clearing Effects or Palette", () => {
+  it("resetGrading resets Grade fields without clearing LUT, Effects, or Palette", () => {
     const { root, getState } = renderHook(vi.fn());
     const grading = normalizeHfColorGrading({
       preset: "bright-pop",
@@ -583,7 +623,7 @@ describe("useColorGradingController", () => {
     });
     expect(getState().grading).toMatchObject({
       preset: "neutral",
-      lut: null,
+      lut: { src: "assets/luts/custom.cube", intensity: 0.6 },
       effects: { pixelate: 0.5 },
       palette: ["#112233", "#ffffff"],
     });
