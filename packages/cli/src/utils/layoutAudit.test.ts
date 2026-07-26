@@ -279,6 +279,33 @@ describe("persistence-tiered severity (#U10)", () => {
     expect(collapsed[0]).toMatchObject({ severity: "error", occurrences: 2 });
   });
 
+  it("keeps two content_overlap pairs on different containers in separate groups", () => {
+    const collapsed = collapseStaticLayoutIssues(
+      [
+        { ...issue("content_overlap", "warning"), time: 4.0, containerSelector: ".num" },
+        { ...issue("content_overlap", "warning"), time: 4.5, containerSelector: ".pct" },
+      ],
+      73,
+    );
+
+    expect(collapsed).toHaveLength(2);
+  });
+
+  it("does not bridge two separate transients on one pair into a held collision", () => {
+    // Both blips sit under the 500ms floor; spanning them would fabricate a 4.1s collision that never happened.
+    const blip = { ...issue("content_overlap", "warning"), containerSelector: ".label" };
+    const collapsed = collapseStaticLayoutIssues(
+      [
+        { ...blip, time: 1.0 },
+        { ...blip, time: 1.125 },
+      ],
+      73,
+    );
+
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]).toMatchObject({ severity: "warning", occurrences: 2 });
+  });
+
   it("still separates two distinct text_box_overflow findings that differ only by text", () => {
     const collapsed = collapseStaticLayoutIssues(
       [
