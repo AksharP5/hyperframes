@@ -618,21 +618,7 @@ export async function extractVideoFramesRange(
     throw new VideoSourceExtractionError("cancelled", false, "Video extraction cancelled");
   }
   if (processResult.terminationReason === "spawn_error") {
-    if ((processResult.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-      throw new VideoSourceExtractionError(
-        "ffmpeg_unavailable",
-        false,
-        "FFmpeg is unavailable",
-        "[FFmpeg] ffmpeg not found",
-      );
-    }
-    const diagnostic = processResult.error?.message || processResult.stderr;
-    throw new VideoSourceExtractionError(
-      "ffmpeg_transient",
-      true,
-      "FFmpeg could not be started",
-      diagnostic,
-    );
+    throw classifyFfmpegSpawnError(processResult.error, processResult.stderr);
   }
   if (!processResult.success) {
     // With the SDR-to-HDR remap folded into this pass, a filter failure
@@ -695,6 +681,33 @@ export async function extractVideoFramesRange(
     metadata,
     framePaths,
   };
+}
+
+const TRANSIENT_FFMPEG_SPAWN_CODES = new Set(["EAGAIN", "EMFILE", "ENFILE"]);
+
+export function classifyFfmpegSpawnError(error: unknown, stderr = ""): VideoSourceExtractionError {
+  const code =
+    typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "";
+  if (code === "ENOENT") {
+    return new VideoSourceExtractionError(
+      "ffmpeg_unavailable",
+      false,
+      "FFmpeg is unavailable",
+      "[FFmpeg] ffmpeg not found",
+    );
+  }
+  const diagnostic = error instanceof Error ? error.message : stderr;
+  const retryable = TRANSIENT_FFMPEG_SPAWN_CODES.has(code);
+  return new VideoSourceExtractionError(
+    retryable ? "ffmpeg_transient" : "ffmpeg_failed",
+    retryable,
+    retryable
+      ? "FFmpeg could not be started due to transient resource pressure"
+      : "FFmpeg could not be started",
+    diagnostic,
+  );
 }
 
 /**

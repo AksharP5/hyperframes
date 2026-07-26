@@ -193,6 +193,45 @@ function buildVideoExtractionStageError(
   );
 }
 
+export function buildHdrProbeStageError(
+  failures: readonly Pick<ReturnType<typeof classifyVideoExtractionError>, "kind" | "retryable">[],
+): VideoExtractionStageError {
+  const counts = new Map<VideoExtractionFailureKind, number>();
+  for (const failure of failures) {
+    counts.set(failure.kind, (counts.get(failure.kind) ?? 0) + 1);
+  }
+  const summary = Array.from(counts, ([kind, count]) => ({ kind, count })).sort((a, b) =>
+    a.kind.localeCompare(b.kind),
+  );
+  const retryable = failures.length > 0 && failures.every((failure) => failure.retryable);
+  return new VideoExtractionStageError(
+    retryable ? "VIDEO_EXTRACTION_FAILED" : "VIDEO_SOURCE_UNRENDERABLE",
+    retryable,
+    summary,
+  );
+}
+
+type HdrProbeFailure = {
+  error: unknown;
+  classified: ReturnType<typeof classifyVideoExtractionError>;
+};
+
+function isHdrProbeFailure(failure: HdrProbeFailure | null): failure is HdrProbeFailure {
+  return failure !== null;
+}
+
+function throwHdrProbeFailures(
+  failures: readonly HdrProbeFailure[],
+  mode: VideoExtractionFailureMode,
+): void {
+  if (failures.length === 0) return;
+  if (mode === "enforce") {
+    throw buildHdrProbeStageError(failures.map((failure) => failure.classified));
+  }
+  const firstFailure = failures[0];
+  if (firstFailure) throw firstFailure.error;
+}
+
 function applyVideoExtractionFailurePolicy(
   result: ExtractionResult,
   policy: VideoExtractionPolicy,
@@ -242,7 +281,7 @@ export async function runExtractVideosStage(
   let hdrProbeTransientRetries = 0;
   if (job.config.hdrMode !== "force-sdr" && composition.videos.length > 0) {
     log?.info("Probing video color spaces...", { videoCount: composition.videos.length });
-    await Promise.all(
+    const probeFailures = await Promise.all(
       composition.videos.map(async (v) => {
         // Use the shared resolver so a `<video src="../assets/foo">` in a
         // sub-composition resolves the same way the browser would (see
@@ -252,7 +291,7 @@ export async function runExtractVideosStage(
         const videoPath = isAbsolute(v.src)
           ? v.src
           : resolveProjectRelativeSrc(v.src, projectDir, compiledDir);
-        if (!existsSync(videoPath)) return;
+        if (!existsSync(videoPath)) return null;
         try {
           // Retries are separately opt-in from the failure gate. With the
           // default zero budget this remains the exact legacy single probe.
@@ -271,27 +310,21 @@ export async function runExtractVideosStage(
             nativeHdrVideoIds.add(v.id);
             videoTransfers.set(v.id, detectTransfer(meta.colorSpace));
           }
+          return null;
         } catch (error) {
-          if (extractionPolicy.failureMode !== "off") {
-            const classified = classifyVideoExtractionError(error);
-            log?.warn("Video HDR metadata probe failed", {
-              mode: extractionPolicy.failureMode,
-              kind: classified.kind,
-              retryable: classified.retryable,
-              transientRetries: hdrProbeTransientRetries,
-            });
-            if (extractionPolicy.failureMode === "enforce") {
-              throw new VideoExtractionStageError(
-                classified.retryable ? "VIDEO_EXTRACTION_FAILED" : "VIDEO_SOURCE_UNRENDERABLE",
-                classified.retryable,
-                [{ kind: classified.kind, count: 1 }],
-              );
-            }
-          }
-          throw error;
+          if (extractionPolicy.failureMode === "off") throw error;
+          const classified = classifyVideoExtractionError(error);
+          log?.warn("Video HDR metadata probe failed", {
+            mode: extractionPolicy.failureMode,
+            kind: classified.kind,
+            retryable: classified.retryable,
+            transientRetries: hdrProbeTransientRetries,
+          });
+          return { error, classified };
         }
       }),
     );
+    throwHdrProbeFailures(probeFailures.filter(isHdrProbeFailure), extractionPolicy.failureMode);
   }
 
   // Probe images for HDR color spaces (16-bit PNGs tagged BT.2020 PQ/HLG).

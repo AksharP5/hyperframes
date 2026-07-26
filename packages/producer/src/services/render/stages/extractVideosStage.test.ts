@@ -8,6 +8,7 @@ import type {
 import {
   appendAutoDetectedVideoAudio,
   assertVideoExtractionSucceeded,
+  buildHdrProbeStageError,
   resolveVideoExtractionPolicy,
   shouldCopyExtractedFrames,
   VideoExtractionStageError,
@@ -242,5 +243,27 @@ describe("assertVideoExtractionSucceeded", () => {
         failures: [{ kind: "internal", count: 1 }],
       }),
     );
+  });
+});
+
+describe("buildHdrProbeStageError", () => {
+  it.each([
+    [
+      { kind: "download_transient" as const, retryable: true },
+      { kind: "source_missing" as const, retryable: false },
+    ],
+    [
+      { kind: "source_missing" as const, retryable: false },
+      { kind: "download_transient" as const, retryable: true },
+    ],
+  ])("fails closed for mixed probe outcomes regardless of completion order", (...failures) => {
+    expect(buildHdrProbeStageError(failures)).toMatchObject({
+      code: "VIDEO_SOURCE_UNRENDERABLE",
+      retryable: false,
+      failures: [
+        { kind: "download_transient", count: 1 },
+        { kind: "source_missing", count: 1 },
+      ],
+    });
   });
 });
