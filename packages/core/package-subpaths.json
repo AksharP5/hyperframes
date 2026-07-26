@@ -86,6 +86,12 @@
       "types": "./dist/colorLuts.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./media-grade-analyzer": {
+      "source": "./src/mediaGradeAnalyzer.ts",
+      "runtime": "./dist/mediaGradeAnalyzer.js",
+      "types": "./dist/mediaGradeAnalyzer.d.ts",
+      "environments": ["bun", "node"]
+    },
     "./storyboard": {
       "source": "./src/storyboard/index.ts",
       "runtime": "./dist/storyboard/index.js",

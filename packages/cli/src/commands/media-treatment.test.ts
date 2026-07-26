@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { runCommand } from "citty";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -12,6 +12,7 @@ import {
   getMediaTreatmentCapabilityDetail,
   getMediaTreatmentCapabilityOverview,
   mediaTreatmentCommand,
+  resolveMediaTreatmentSource,
 } from "./media-treatment.js";
 import { CliRuntimeError } from "../utils/commandResult.js";
 
@@ -22,6 +23,9 @@ describe("applyMediaTreatmentToHtml", () => {
     const overview = getMediaTreatmentCapabilityOverview();
 
     expect(overview.families.find(({ id }) => id === "correction")).not.toHaveProperty("items");
+    expect(overview.families.find(({ id }) => id === "grading")).toMatchObject({
+      label: "Color Grading",
+    });
     expect(overview.families.find(({ id }) => id === "art")).not.toHaveProperty("items");
     expect(overview.families.find(({ id }) => id === "overlays")).toMatchObject({
       owner: "registry",
@@ -76,6 +80,40 @@ describe("applyMediaTreatmentToHtml", () => {
       family: "finishing",
       control: expect.objectContaining({ key: "vignette" }),
     });
+    expect(getMediaTreatmentCapabilityDetail("wheels")).toMatchObject({
+      contract: expect.objectContaining({ zones: ["shadows", "midtones", "highlights"] }),
+    });
+    expect(getMediaTreatmentCapabilityDetail("curves")).toMatchObject({
+      contract: expect.objectContaining({ channels: ["master", "red", "green", "blue"] }),
+    });
+    const hueCurves = getMediaTreatmentCapabilityDetail("hue-curves");
+    const serializedHueCurves = JSON.stringify(hueCurves);
+    expect(serializedHueCurves).toContain('"maxPoints":16');
+    expect(serializedHueCurves).toContain('"key":"hueVsHue"');
+    expect(serializedHueCurves).toContain('"key":"hueVsSaturation"');
+    expect(serializedHueCurves).toContain('"key":"hueVsLuma"');
+    expect(getMediaTreatmentCapabilityDetail("secondary")).toMatchObject({
+      contract: expect.objectContaining({
+        max: 4,
+        saturation: expect.objectContaining({ relation: "min < max" }),
+        luma: expect.objectContaining({ relation: "min < max" }),
+      }),
+    });
+    expect(getMediaTreatmentCapabilityDetail("grading")).toMatchObject({
+      order: [
+        "adjust",
+        "wheels",
+        "curves",
+        "hueCurves",
+        "secondaries",
+        "lut",
+        "details",
+        "effects",
+      ],
+    });
+    expect(getMediaTreatmentCapabilityDetail("scopes")).toMatchObject({
+      command: expect.stringContaining("--analyze"),
+    });
   });
 
   it("rejects unknown capability lookups", () => {
@@ -111,6 +149,118 @@ describe("applyMediaTreatmentToHtml", () => {
     expect(result.value).toContain('"preset":"warm-daylight"');
     expect(result.value).toContain('"intensity":0.8');
     expect(result.html).toContain("data-color-grading=");
+  });
+
+  it("normalizes and persists advanced grading on real media", () => {
+    const result = applyMediaTreatmentToHtml(VIDEO, {
+      selector: "#hero",
+      grading: {
+        wheels: { shadows: { hue: 205, amount: 0.08, level: 0.02 } },
+        curves: {
+          master: [
+            [0, 0],
+            [0.5, 0.55],
+            [1, 1],
+          ],
+        },
+        hueCurves: {
+          hueVsSaturation: [
+            [180, 0],
+            [210, 0.15],
+            [240, 0],
+          ],
+        },
+        secondaries: [
+          {
+            key: {
+              hue: { center: 215, range: 25, softness: 10 },
+              saturation: { min: 0.2, max: 1, softness: 0.08 },
+              luma: { min: 0.1, max: 0.9, softness: 0.08 },
+            },
+            correction: { saturation: 0.15, luma: 0.03 },
+          },
+        ],
+      },
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.value).toContain('"wheels"');
+    expect(result.value).toContain('"curves"');
+    expect(result.value).toContain('"hueCurves"');
+    expect(result.value).toContain('"secondaries"');
+  });
+
+  it("persists a disabled secondary without treating it as an active grade", () => {
+    const result = applyMediaTreatmentToHtml(VIDEO, {
+      selector: "#hero",
+      grading: {
+        secondaries: [
+          {
+            enabled: false,
+            key: { hue: { center: 215, range: 25 } },
+            correction: { saturation: 0.15 },
+          },
+        ],
+      },
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.value).toContain('"enabled":false');
+    expect(result.value).toContain('"secondaries"');
+  });
+
+  it("resolves nested composition media through the shared project-root contract", () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-media-treatment-assets-"));
+    const escapedAsset = join(project, "..", `${basename(project)}-escape.mp4`);
+    mkdirSync(join(project, "capture"), { recursive: true });
+    mkdirSync(join(project, "assets"), { recursive: true });
+    writeFileSync(join(project, "capture", "talking-head.mp4"), "");
+    writeFileSync(join(project, "assets", "photo.webp"), "");
+    writeFileSync(join(project, "assets", "My Clip.mp4"), "");
+    writeFileSync(escapedAsset, "");
+
+    try {
+      expect(
+        resolveMediaTreatmentSource(
+          project,
+          "compositions/scene.html",
+          "../capture/talking-head.mp4?v=1#frame",
+        ),
+      ).toBe(join(project, "capture/talking-head.mp4"));
+      expect(
+        resolveMediaTreatmentSource(project, "compositions/scene.html", "assets/photo.webp"),
+      ).toBe(join(project, "assets/photo.webp"));
+      expect(
+        resolveMediaTreatmentSource(
+          project,
+          "compositions/scene.html",
+          "/assets/My%20Clip.mp4?v=1",
+        ),
+      ).toBe(join(project, "assets/My Clip.mp4"));
+      expect(() =>
+        resolveMediaTreatmentSource(
+          project,
+          "compositions/scene.html",
+          "https://example.com/a.mp4",
+        ),
+      ).toThrow(/local project asset/);
+      expect(() => resolveMediaTreatmentSource(project, "compositions/scene.html", "#")).toThrow(
+        /local project asset/,
+      );
+      expect(() =>
+        resolveMediaTreatmentSource(project, "compositions/scene.html", "missing.mp4"),
+      ).toThrow(/Media file not found/);
+      expect(() =>
+        resolveMediaTreatmentSource(
+          project,
+          "compositions/scene.html",
+          `../../${basename(escapedAsset)}`,
+        ),
+      ).toThrow(/Media file not found/);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+      rmSync(escapedAsset, { force: true });
+    }
   });
 
   it("merges a validated patch and reports the stored before and after payloads", () => {
