@@ -109,6 +109,8 @@ describe("assertPublicHttpsUrl — SSRF guard", () => {
       "https://198.18.0.1/secret",
       "https://192.0.2.1/secret",
       "https://224.0.0.1/secret",
+      "https://240.0.0.1/secret",
+      "https://255.255.255.255/secret",
     ]) {
       expect(() => assertPublicHttpsUrl(url), url).toThrow("private/reserved");
     }
