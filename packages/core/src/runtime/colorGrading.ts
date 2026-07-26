@@ -34,6 +34,7 @@ import {
   DEFAULT_MAX_CUBE_LUT_SIZE,
   packCubeLutToRgba8,
   parseCubeLut,
+  unitFloatToByte,
   type CubeLut3D,
   type CubeLutVec3,
 } from "../colorLuts";
@@ -337,7 +338,12 @@ const DEFAULT_COMPARE: RuntimeColorGradingCompareState = {
 const DEFAULT_EFFECT_PALETTE = ["#000000", "#ffffff"] as const;
 const DEFAULT_ART_PALETTE = ["#1a1a1a", "#f5f5dc"] as const;
 const ADVANCED_TEXTURE_HEIGHT = 3;
+const ADVANCED_CONFIG_ROW = ADVANCED_TEXTURE_HEIGHT - 1;
 const ADVANCED_SECONDARY_TEXELS = 5;
+const ADVANCED_TEXTURE_WIDTH_GLSL = `${HF_COLOR_CURVE_LUT_SIZE}.0`;
+const ADVANCED_TEXTURE_MAX_X_GLSL = `${HF_COLOR_CURVE_LUT_SIZE - 1}.0`;
+const ADVANCED_TEXTURE_HEIGHT_GLSL = `${ADVANCED_TEXTURE_HEIGHT}.0`;
+const ADVANCED_CONFIG_Y_GLSL = `${(ADVANCED_CONFIG_ROW + 0.5) / ADVANCED_TEXTURE_HEIGHT}`;
 
 function readColorGradingAttribute(element: Element): ResolvedHfColorGrading | null {
   const raw = element.getAttribute(HF_COLOR_GRADING_ATTR);
@@ -980,16 +986,16 @@ const FRAGMENT_SHADER = [
   "  return color.z * mix(vec3(1.0), clamp(bands - 1.0, 0.0, 1.0), color.y);",
   "}",
   "vec4 sampleAdvancedCurve(float coordinate, float row){",
-  "  float position = clamp(coordinate, 0.0, 1.0) * 1023.0;",
+  `  float position = clamp(coordinate, 0.0, 1.0) * ${ADVANCED_TEXTURE_MAX_X_GLSL};`,
   "  float lower = floor(position);",
-  "  float upper = min(lower + 1.0, 1023.0);",
-  "  float y = (row + 0.5) / 3.0;",
-  "  vec4 before = texture2D(u_advanced, vec2((lower + 0.5) / 1024.0, y));",
-  "  vec4 after = texture2D(u_advanced, vec2((upper + 0.5) / 1024.0, y));",
+  `  float upper = min(lower + 1.0, ${ADVANCED_TEXTURE_MAX_X_GLSL});`,
+  `  float y = (row + 0.5) / ${ADVANCED_TEXTURE_HEIGHT_GLSL};`,
+  `  vec4 before = texture2D(u_advanced, vec2((lower + 0.5) / ${ADVANCED_TEXTURE_WIDTH_GLSL}, y));`,
+  `  vec4 after = texture2D(u_advanced, vec2((upper + 0.5) / ${ADVANCED_TEXTURE_WIDTH_GLSL}, y));`,
   "  return mix(before, after, position - lower);",
   "}",
   "vec4 advancedConfig(float index){",
-  "  return texture2D(u_advanced, vec2((index + 0.5) / 1024.0, 0.8333333));",
+  `  return texture2D(u_advanced, vec2((index + 0.5) / ${ADVANCED_TEXTURE_WIDTH_GLSL}, ${ADVANCED_CONFIG_Y_GLSL}));`,
   "}",
   "vec3 wheelDirection(float hue){",
   "  vec3 direction = hsvToRgb(vec3(fract(hue), 1.0, 1.0));",
@@ -2741,10 +2747,36 @@ function buildAdvancedTextureData(
 ): Float32Array {
   const data = new Float32Array(HF_COLOR_CURVE_LUT_SIZE * ADVANCED_TEXTURE_HEIGHT * 4);
   writeAdvancedCurveRows(data, curves, hueCurves);
-  secondaries
-    .slice(0, 4)
-    .forEach((secondary, index) => writeAdvancedSecondary(data, secondary, index));
+  let index = 0;
+  for (const secondary of secondaries) {
+    if (!secondary.enabled) continue;
+    writeAdvancedSecondary(data, secondary, index);
+    index += 1;
+  }
   return data;
+}
+
+const ADVANCED_SIGNATURES = new WeakMap<
+  NormalizedHfColorGradingCurves,
+  {
+    hueCurves: NormalizedHfColorGradingHueCurves;
+    secondaries: readonly NormalizedHfColorGradingSecondary[];
+    signature: string;
+  }
+>();
+
+function advancedTextureSignature(
+  curves: NormalizedHfColorGradingCurves,
+  hueCurves: NormalizedHfColorGradingHueCurves,
+  secondaries: readonly NormalizedHfColorGradingSecondary[],
+): string {
+  const cached = ADVANCED_SIGNATURES.get(curves);
+  if (cached?.hueCurves === hueCurves && cached.secondaries === secondaries) {
+    return cached.signature;
+  }
+  const signature = JSON.stringify([curves, hueCurves, secondaries]);
+  ADVANCED_SIGNATURES.set(curves, { hueCurves, secondaries, signature });
+  return signature;
 }
 
 function ensureAdvancedTexture(
@@ -2754,12 +2786,12 @@ function ensureAdvancedTexture(
   secondaries: readonly NormalizedHfColorGradingSecondary[],
 ): void {
   const { curves, hueCurves } = grading;
-  const signature = JSON.stringify([curves, hueCurves, secondaries]);
+  const signature = advancedTextureSignature(curves, hueCurves, secondaries);
   if (program.advancedSignature === signature) return;
 
   const pixels = Uint8Array.from(
     buildAdvancedTextureData(curves, hueCurves, secondaries),
-    (value) => Math.round(Math.min(1, Math.max(0, value)) * 255),
+    unitFloatToByte,
   );
   gl.activeTexture(gl.TEXTURE5);
   gl.bindTexture(gl.TEXTURE_2D, program.advancedTexture);
@@ -2830,14 +2862,13 @@ function applyUniforms(
   );
   gl.uniform1f(program.lutIntensity, grading.lut?.intensity ?? 0);
   const { curves, hueCurves, secondaries } = grading;
-  const enabledSecondaries = secondaries.filter((secondary) => secondary.enabled);
   const rgbCurvesEnabled = hasHfColorGradingRgbCurveValues(curves);
   const hueCurvesEnabled = hasHfColorGradingHueCurveValues(hueCurves);
   const secondaryCount = hasHfColorGradingSecondaryValues(secondaries)
-    ? enabledSecondaries.length
+    ? secondaries.reduce((count, secondary) => count + Number(secondary.enabled), 0)
     : 0;
   if (rgbCurvesEnabled || hueCurvesEnabled || secondaryCount > 0) {
-    ensureAdvancedTexture(gl, program, grading, enabledSecondaries);
+    ensureAdvancedTexture(gl, program, grading, secondaries);
   }
   setWheelUniform(gl, program.shadowWheel, grading.wheels.shadows);
   setWheelUniform(gl, program.midtoneWheel, grading.wheels.midtones);

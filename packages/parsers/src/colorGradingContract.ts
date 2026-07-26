@@ -2,6 +2,16 @@ export const COLOR_GRADING_CONTRACT_VERSION = 2;
 export const COLOR_GRADING_COLOR_SPACE = "rec709";
 export const COLOR_GRADING_MAX_CURVE_POINTS = 16;
 export const COLOR_GRADING_MAX_SECONDARIES = 4;
+export const COLOR_GRADING_ADVANCED_LIMITS = {
+  hueDegrees: { min: 0, max: 360, inclusiveMax: false },
+  unit: { min: 0, max: 1 },
+  signedUnit: { min: -1, max: 1 },
+  secondaryHueRange: { min: 0, max: 180 },
+  secondaryHueSoftness: { min: 0, max: 180 },
+  secondaryHueCombinedMax: 180,
+  secondarySoftRangeSoftness: { min: 0, max: 0.5 },
+  secondaryHueShift: { min: -180, max: 180 },
+} as const;
 
 export const COLOR_GRADING_TOP_LEVEL_KEYS = [
   "enabled",
@@ -130,8 +140,8 @@ export const COLOR_GRADING_LUT_KEYS = ["src", "intensity"] as const;
 
 type NumericLimit = Readonly<{ min: number; max: number }>;
 
-const UNIT_LIMIT: NumericLimit = { min: 0, max: 1 };
-const SIGNED_UNIT_LIMIT: NumericLimit = { min: -1, max: 1 };
+const UNIT_LIMIT: NumericLimit = COLOR_GRADING_ADVANCED_LIMITS.unit;
+const SIGNED_UNIT_LIMIT: NumericLimit = COLOR_GRADING_ADVANCED_LIMITS.signedUnit;
 const EFFECT_LIMIT_OVERRIDES: Readonly<Record<string, NumericLimit>> = {
   asciiStyle: { min: 0, max: 7 },
   bloom: { min: 0, max: 3 },
@@ -449,7 +459,14 @@ function validateWheels(value: unknown, issues: ColorGradingContractIssue[]): vo
     const path = `wheels.${wheel}`;
     const controls = validateObject(wheels[wheel], path, COLOR_GRADING_WHEEL_CONTROL_KEYS, issues);
     if (!controls) continue;
-    validateNumericField(controls, "hue", path, { min: 0, max: 360 }, issues, false);
+    validateNumericField(
+      controls,
+      "hue",
+      path,
+      COLOR_GRADING_ADVANCED_LIMITS.hueDegrees,
+      issues,
+      COLOR_GRADING_ADVANCED_LIMITS.hueDegrees.inclusiveMax,
+    );
     validateNumericField(controls, "amount", path, UNIT_LIMIT, issues);
     validateNumericField(controls, "level", path, SIGNED_UNIT_LIMIT, issues);
   }
@@ -489,7 +506,13 @@ function validateSoftRange(
   if (!range) return;
   validateNumericField(range, "min", path, UNIT_LIMIT, issues);
   validateNumericField(range, "max", path, UNIT_LIMIT, issues);
-  validateNumericField(range, "softness", path, { min: 0, max: 0.5 }, issues);
+  validateNumericField(
+    range,
+    "softness",
+    path,
+    COLOR_GRADING_ADVANCED_LIMITS.secondarySoftRangeSoftness,
+    issues,
+  );
   if (typeof range.min === "number" && typeof range.max === "number" && range.min >= range.max) {
     issues.push({ path, message: "min must be smaller than max" });
   }
@@ -502,15 +525,31 @@ function validateSecondaryHue(
 ): void {
   const hue = validateObject(value, path, COLOR_GRADING_HUE_RANGE_KEYS, issues);
   if (!hue) return;
-  validateNumericField(hue, "center", path, { min: 0, max: 360 }, issues, false);
-  validateNumericField(hue, "range", path, { min: 0, max: 180 }, issues);
-  validateNumericField(hue, "softness", path, { min: 0, max: 180 }, issues);
+  validateNumericField(
+    hue,
+    "center",
+    path,
+    COLOR_GRADING_ADVANCED_LIMITS.hueDegrees,
+    issues,
+    COLOR_GRADING_ADVANCED_LIMITS.hueDegrees.inclusiveMax,
+  );
+  validateNumericField(hue, "range", path, COLOR_GRADING_ADVANCED_LIMITS.secondaryHueRange, issues);
+  validateNumericField(
+    hue,
+    "softness",
+    path,
+    COLOR_GRADING_ADVANCED_LIMITS.secondaryHueSoftness,
+    issues,
+  );
   if (
     typeof hue.range === "number" &&
     typeof hue.softness === "number" &&
-    hue.range + hue.softness > 180
+    hue.range + hue.softness > COLOR_GRADING_ADVANCED_LIMITS.secondaryHueCombinedMax
   ) {
-    issues.push({ path, message: "range plus softness must not exceed 180 degrees" });
+    issues.push({
+      path,
+      message: `range plus softness must not exceed ${COLOR_GRADING_ADVANCED_LIMITS.secondaryHueCombinedMax} degrees`,
+    });
   }
 }
 
@@ -533,7 +572,13 @@ function validateSecondaryCorrection(
 ): void {
   const correction = validateObject(value, path, COLOR_GRADING_SECONDARY_CORRECTION_KEYS, issues);
   if (!correction) return;
-  validateNumericField(correction, "hueShift", path, { min: -180, max: 180 }, issues);
+  validateNumericField(
+    correction,
+    "hueShift",
+    path,
+    COLOR_GRADING_ADVANCED_LIMITS.secondaryHueShift,
+    issues,
+  );
   for (const key of ["saturation", "luma", "temperature", "tint"] as const) {
     validateNumericField(correction, key, path, SIGNED_UNIT_LIMIT, issues);
   }

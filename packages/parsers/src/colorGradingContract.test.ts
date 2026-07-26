@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   COLOR_GRADING_ADJUST_KEYS,
+  COLOR_GRADING_ADVANCED_LIMITS,
   COLOR_GRADING_DETAIL_KEYS,
   COLOR_GRADING_EFFECT_KEYS,
   COLOR_GRADING_HUE_CURVE_KEYS,
@@ -20,6 +21,12 @@ describe("color grading contract", () => {
     expect(COLOR_GRADING_WHEEL_KEYS).toEqual(["shadows", "midtones", "highlights"]);
     expect(COLOR_GRADING_HUE_CURVE_KEYS).toContain("hueVsSaturation");
     expect(COLOR_GRADING_LUT_KEYS).toEqual(["src", "intensity"]);
+    expect(COLOR_GRADING_ADVANCED_LIMITS).toMatchObject({
+      hueDegrees: { min: 0, max: 360, inclusiveMax: false },
+      secondaryHueRange: { min: 0, max: 180 },
+      secondarySoftRangeSoftness: { min: 0, max: 0.5 },
+      secondaryHueShift: { min: -180, max: 180 },
+    });
   });
 
   it("accepts the complete current contract and variable references", () => {

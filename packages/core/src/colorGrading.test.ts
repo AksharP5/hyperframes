@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { COLOR_GRADING_ADVANCED_LIMITS } from "@hyperframes/parsers/color-grading-contract";
 import {
   HF_COLOR_GRADING_COLOR_SPACE,
   HF_COLOR_GRADING_ACTIVE_EFFECT_KEYS,
@@ -177,6 +178,24 @@ describe("color grading", () => {
       ]),
     );
     expect(capabilities.secondaries.max).toBe(4);
+    expect(capabilities.secondaries).toMatchObject({
+      hue: {
+        center: {
+          min: COLOR_GRADING_ADVANCED_LIMITS.hueDegrees.min,
+          maxExclusive: COLOR_GRADING_ADVANCED_LIMITS.hueDegrees.max,
+        },
+        range: COLOR_GRADING_ADVANCED_LIMITS.secondaryHueRange,
+        softness: COLOR_GRADING_ADVANCED_LIMITS.secondaryHueSoftness,
+        rangePlusSoftnessMax: COLOR_GRADING_ADVANCED_LIMITS.secondaryHueCombinedMax,
+      },
+      saturation: {
+        softness: COLOR_GRADING_ADVANCED_LIMITS.secondarySoftRangeSoftness,
+      },
+      correction: {
+        hueShift: COLOR_GRADING_ADVANCED_LIMITS.secondaryHueShift,
+        saturation: COLOR_GRADING_ADVANCED_LIMITS.signedUnit,
+      },
+    });
   });
 
   it("merges manual adjustments over preset values", () => {

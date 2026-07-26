@@ -25,29 +25,43 @@ function endpointSlope(
   return slope;
 }
 
+function valueAt<T>(values: readonly T[], index: number): T {
+  const value = values[index];
+  if (value === undefined) throw new RangeError("Color curve points must be contiguous");
+  return value;
+}
+
 function pointSlopes(points: readonly HfColorCurvePoint[]): number[] {
-  const spans = points.slice(1).map(([x], index) => x - points[index]![0]);
-  const slopes = spans.map((span, index) => (points[index + 1]![1] - points[index]![1]) / span);
-  if (points.length === 2) return [slopes[0]!, slopes[0]!];
+  const spans: number[] = [];
+  const slopes: number[] = [];
+  let previous = valueAt(points, 0);
+  for (const point of points.slice(1)) {
+    const span = point[0] - previous[0];
+    spans.push(span);
+    slopes.push((point[1] - previous[1]) / span);
+    previous = point;
+  }
+  const firstSlope = valueAt(slopes, 0);
+  if (points.length === 2) return [firstSlope, firstSlope];
 
   const result = new Array<number>(points.length);
-  result[0] = endpointSlope(spans[0]!, spans[1]!, slopes[0]!, slopes[1]!);
+  result[0] = endpointSlope(valueAt(spans, 0), valueAt(spans, 1), firstSlope, valueAt(slopes, 1));
   result[result.length - 1] = endpointSlope(
-    spans[spans.length - 1]!,
-    spans[spans.length - 2]!,
-    slopes[slopes.length - 1]!,
-    slopes[slopes.length - 2]!,
+    valueAt(spans, spans.length - 1),
+    valueAt(spans, spans.length - 2),
+    valueAt(slopes, slopes.length - 1),
+    valueAt(slopes, slopes.length - 2),
   );
 
   for (let index = 1; index < points.length - 1; index += 1) {
-    const before = slopes[index - 1]!;
-    const after = slopes[index]!;
+    const before = valueAt(slopes, index - 1);
+    const after = valueAt(slopes, index);
     if (before === 0 || after === 0 || Math.sign(before) !== Math.sign(after)) {
       result[index] = 0;
       continue;
     }
-    const beforeSpan = spans[index - 1]!;
-    const afterSpan = spans[index]!;
+    const beforeSpan = valueAt(spans, index - 1);
+    const afterSpan = valueAt(spans, index);
     const beforeWeight = 2 * afterSpan + beforeSpan;
     const afterWeight = afterSpan + 2 * beforeSpan;
     result[index] = (beforeWeight + afterWeight) / (beforeWeight / before + afterWeight / after);
@@ -111,7 +125,6 @@ function compileCurveSamples(
   outputMin: number,
   outputMax: number,
 ): Float32Array {
-  validateCurvePoints(points, size);
   validateOutputRange(points, outputMin, outputMax);
 
   const tangents = pointSlopes(points);
@@ -119,17 +132,17 @@ function compileCurveSamples(
   let segment = 0;
   for (let index = 0; index < size; index += 1) {
     const input = inputAt(index);
-    while (segment < points.length - 2 && input > points[segment + 1]![0]) {
+    while (segment < points.length - 2 && input > valueAt(points, segment + 1)[0]) {
       segment += 1;
     }
-    const start = points[segment]!;
-    const end = points[segment + 1]!;
+    const start = valueAt(points, segment);
+    const end = valueAt(points, segment + 1);
     const output = interpolateCurveSegment(
       input,
       start,
       end,
-      tangents[segment]!,
-      tangents[segment + 1]!,
+      valueAt(tangents, segment),
+      valueAt(tangents, segment + 1),
     );
     samples[index] = Math.min(outputMax, Math.max(outputMin, output));
   }
@@ -141,7 +154,7 @@ export function compileHfColorCurve(
   points: readonly HfColorCurvePoint[],
   size = HF_COLOR_CURVE_LUT_SIZE,
 ): Float32Array {
-  if (points.length < 2) throw new RangeError("A color curve requires at least two points");
+  validateCurvePoints(points, size);
   if (points.length > HF_COLOR_CURVE_MAX_POINTS) {
     throw new RangeError(`A color curve supports at most ${HF_COLOR_CURVE_MAX_POINTS} points`);
   }
@@ -177,11 +190,7 @@ export function compileHfHueCurve(
   }
   const before = sorted.slice(-2).map(([hue, delta]) => [hue - 360, delta] as const);
   const after = sorted.slice(0, 2).map(([hue, delta]) => [hue + 360, delta] as const);
-  return compileCurveSamples(
-    [...before, ...sorted, ...after],
-    size,
-    (index) => (index / size) * 360,
-    outputMin,
-    outputMax,
-  );
+  const periodic = [...before, ...sorted, ...after];
+  validateCurvePoints(periodic, size);
+  return compileCurveSamples(periodic, size, (index) => (index / size) * 360, outputMin, outputMax);
 }

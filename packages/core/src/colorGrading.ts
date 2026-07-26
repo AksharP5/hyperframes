@@ -2,6 +2,7 @@ import { DEFAULT_MAX_CUBE_LUT_SIZE } from "./colorLuts";
 import type { HfColorCurvePoint, HfHueCurvePoint } from "./colorGradingCurves";
 import {
   COLOR_GRADING_ADJUST_KEYS,
+  COLOR_GRADING_ADVANCED_LIMITS,
   COLOR_GRADING_COLOR_SPACE,
   COLOR_GRADING_CONTRACT_VERSION,
   COLOR_GRADING_CURVE_KEYS,
@@ -16,11 +17,7 @@ import {
 } from "@hyperframes/parsers/color-grading-contract";
 
 export type { HfColorCurvePoint, HfHueCurvePoint } from "./colorGradingCurves";
-export {
-  compileHfColorCurve,
-  compileHfHueCurve,
-  HF_COLOR_CURVE_MAX_POINTS,
-} from "./colorGradingCurves";
+export { HF_COLOR_CURVE_MAX_POINTS } from "./colorGradingCurves";
 
 export const HF_COLOR_GRADING_ATTR = "data-color-grading";
 
@@ -650,8 +647,8 @@ const TONAL_WHEEL_DEFAULT: Required<HfColorGradingTonalWheel> = {
   level: 0,
 };
 const WHEEL_LIMITS = {
-  amount: { min: 0, max: 1 },
-  level: { min: -1, max: 1 },
+  amount: COLOR_GRADING_ADVANCED_LIMITS.unit,
+  level: COLOR_GRADING_ADVANCED_LIMITS.signedUnit,
 };
 const RGB_CURVE_IDENTITY: readonly HfColorCurvePoint[] = [
   [0, 0],
@@ -659,9 +656,9 @@ const RGB_CURVE_IDENTITY: readonly HfColorCurvePoint[] = [
 ];
 const HUE_CURVE_IDENTITY: readonly HfHueCurvePoint[] = [];
 const HUE_CURVE_LIMITS: Record<HfColorGradingHueCurveKey, { min: number; max: number }> = {
-  hueVsHue: { min: -180, max: 180 },
-  hueVsSaturation: { min: -1, max: 1 },
-  hueVsLuma: { min: -1, max: 1 },
+  hueVsHue: COLOR_GRADING_ADVANCED_LIMITS.secondaryHueShift,
+  hueVsSaturation: COLOR_GRADING_ADVANCED_LIMITS.signedUnit,
+  hueVsLuma: COLOR_GRADING_ADVANCED_LIMITS.signedUnit,
 };
 const SECONDARY_HUE_DEFAULT: Required<HfColorGradingHueRange> = {
   center: 0,
@@ -683,7 +680,7 @@ const DETAIL_LIMITS: Record<HfColorGradingDetailKey, { min: number; max: number 
   grainRoughness: { min: 0, max: 1 },
 };
 
-const UNIT_LIMIT = { min: 0, max: 1 };
+const UNIT_LIMIT = COLOR_GRADING_ADVANCED_LIMITS.unit;
 const EFFECT_LIMIT_OVERRIDES: Partial<
   Record<HfColorGradingEffectKey, { min: number; max: number }>
 > = {
@@ -979,7 +976,13 @@ export function getHfColorGradingCapabilities() {
     wheels: {
       zones: HF_COLOR_GRADING_WHEEL_KEYS,
       controls: {
-        hue: { identity: 0, unit: "degrees", wrap: true, min: 0, maxExclusive: 360 },
+        hue: {
+          identity: 0,
+          unit: "degrees",
+          wrap: true,
+          min: COLOR_GRADING_ADVANCED_LIMITS.hueDegrees.min,
+          maxExclusive: COLOR_GRADING_ADVANCED_LIMITS.hueDegrees.max,
+        },
         amount: { identity: 0, ...WHEEL_LIMITS.amount },
         level: { identity: 0, ...WHEEL_LIMITS.level },
       },
@@ -1005,29 +1008,34 @@ export function getHfColorGradingCapabilities() {
     secondaries: {
       max: COLOR_GRADING_MAX_SECONDARIES,
       hue: {
-        center: { min: 0, maxExclusive: 360, unit: "degrees", wrap: true },
-        range: { min: 0, max: 180, unit: "degrees" },
-        softness: { min: 0, max: 180, unit: "degrees" },
-        rangePlusSoftnessMax: 180,
+        center: {
+          min: COLOR_GRADING_ADVANCED_LIMITS.hueDegrees.min,
+          maxExclusive: COLOR_GRADING_ADVANCED_LIMITS.hueDegrees.max,
+          unit: "degrees",
+          wrap: true,
+        },
+        range: { ...COLOR_GRADING_ADVANCED_LIMITS.secondaryHueRange, unit: "degrees" },
+        softness: { ...COLOR_GRADING_ADVANCED_LIMITS.secondaryHueSoftness, unit: "degrees" },
+        rangePlusSoftnessMax: COLOR_GRADING_ADVANCED_LIMITS.secondaryHueCombinedMax,
       },
       saturation: {
         min: { ...UNIT_LIMIT },
         max: { ...UNIT_LIMIT },
         relation: "min < max",
-        softness: { min: 0, max: 0.5 },
+        softness: { ...COLOR_GRADING_ADVANCED_LIMITS.secondarySoftRangeSoftness },
       },
       luma: {
         min: { ...UNIT_LIMIT },
         max: { ...UNIT_LIMIT },
         relation: "min < max",
-        softness: { min: 0, max: 0.5 },
+        softness: { ...COLOR_GRADING_ADVANCED_LIMITS.secondarySoftRangeSoftness },
       },
       correction: {
-        hueShift: { min: -180, max: 180, unit: "degrees" },
-        saturation: { min: -1, max: 1 },
-        luma: { min: -1, max: 1 },
-        temperature: { min: -1, max: 1 },
-        tint: { min: -1, max: 1 },
+        hueShift: { ...COLOR_GRADING_ADVANCED_LIMITS.secondaryHueShift, unit: "degrees" },
+        saturation: { ...COLOR_GRADING_ADVANCED_LIMITS.signedUnit },
+        luma: { ...COLOR_GRADING_ADVANCED_LIMITS.signedUnit },
+        temperature: { ...COLOR_GRADING_ADVANCED_LIMITS.signedUnit },
+        tint: { ...COLOR_GRADING_ADVANCED_LIMITS.signedUnit },
       },
     },
     effectFamilies: EFFECT_FAMILIES,
@@ -1136,6 +1144,11 @@ function hasDuplicateCurveInputs(points: readonly HfColorCurvePoint[]): boolean 
   return points.some((point, index) => index > 0 && point[0] === points[index - 1]?.[0]);
 }
 
+function completeCurveEndpoints(points: HfColorCurvePoint[]): void {
+  if ((points[0]?.[0] ?? 0) > 0) points.unshift([0, 0]);
+  if ((points.at(-1)?.[0] ?? 1) < 1) points.push([1, 1]);
+}
+
 function normalizeCurve(value: unknown): readonly HfColorCurvePoint[] {
   if (!Array.isArray(value) || value.length < 2) return RGB_CURVE_IDENTITY;
   const points: HfColorCurvePoint[] = [];
@@ -1146,8 +1159,7 @@ function normalizeCurve(value: unknown): readonly HfColorCurvePoint[] {
   }
   points.sort((a, b) => a[0] - b[0]);
   if (hasDuplicateCurveInputs(points)) return RGB_CURVE_IDENTITY;
-  if (points[0]![0] > 0) points.unshift([0, 0]);
-  if (points[points.length - 1]![0] < 1) points.push([1, 1]);
+  completeCurveEndpoints(points);
   if (points.length > COLOR_GRADING_MAX_CURVE_POINTS) return RGB_CURVE_IDENTITY;
   return points;
 }
@@ -1219,25 +1231,25 @@ function normalizeSoftRange(value: unknown): Required<HfColorGradingSoftRange> {
   return {
     min: Math.min(first, second),
     max: Math.max(first, second),
-    softness: readLimitedValue(range.softness ?? SECONDARY_SOFT_RANGE_DEFAULT.softness, {
-      min: 0,
-      max: 0.5,
-    }),
+    softness: readLimitedValue(
+      range.softness ?? SECONDARY_SOFT_RANGE_DEFAULT.softness,
+      COLOR_GRADING_ADVANCED_LIMITS.secondarySoftRangeSoftness,
+    ),
   };
 }
 
 function normalizeSecondaryHue(value: unknown): Required<HfColorGradingHueRange> {
   const hue = isRecord(value) ? value : {};
-  const range = readLimitedValue(hue.range ?? SECONDARY_HUE_DEFAULT.range, {
-    min: 0,
-    max: 180,
-  });
+  const range = readLimitedValue(
+    hue.range ?? SECONDARY_HUE_DEFAULT.range,
+    COLOR_GRADING_ADVANCED_LIMITS.secondaryHueRange,
+  );
   return {
     center: wrapDegrees(hue.center, SECONDARY_HUE_DEFAULT.center),
     range,
     softness: readLimitedValue(hue.softness ?? SECONDARY_HUE_DEFAULT.softness, {
-      min: 0,
-      max: 180 - range,
+      min: COLOR_GRADING_ADVANCED_LIMITS.secondaryHueSoftness.min,
+      max: COLOR_GRADING_ADVANCED_LIMITS.secondaryHueCombinedMax - range,
     }),
   };
 }
@@ -1246,11 +1258,14 @@ function normalizeSecondaryCorrection(
   value: Record<string, unknown>,
 ): Required<HfColorGradingSecondaryCorrection> {
   return {
-    hueShift: readLimitedValue(value.hueShift ?? 0, { min: -180, max: 180 }),
-    saturation: readLimitedValue(value.saturation ?? 0, { min: -1, max: 1 }),
-    luma: readLimitedValue(value.luma ?? 0, { min: -1, max: 1 }),
-    temperature: readLimitedValue(value.temperature ?? 0, { min: -1, max: 1 }),
-    tint: readLimitedValue(value.tint ?? 0, { min: -1, max: 1 }),
+    hueShift: readLimitedValue(
+      value.hueShift ?? 0,
+      COLOR_GRADING_ADVANCED_LIMITS.secondaryHueShift,
+    ),
+    saturation: readLimitedValue(value.saturation ?? 0, COLOR_GRADING_ADVANCED_LIMITS.signedUnit),
+    luma: readLimitedValue(value.luma ?? 0, COLOR_GRADING_ADVANCED_LIMITS.signedUnit),
+    temperature: readLimitedValue(value.temperature ?? 0, COLOR_GRADING_ADVANCED_LIMITS.signedUnit),
+    tint: readLimitedValue(value.tint ?? 0, COLOR_GRADING_ADVANCED_LIMITS.signedUnit),
   };
 }
 

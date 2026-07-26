@@ -184,8 +184,6 @@ export {
   HF_COLOR_GRADING_PRESETS,
   HF_COLOR_GRADING_TOP_LEVEL_KEYS,
   HF_COLOR_GRADING_WHEEL_KEYS,
-  compileHfColorCurve,
-  compileHfHueCurve,
   getHfColorGradingCapabilities,
   hasHfColorGradingAuthoredValues,
   isHfColorGradingActive,
