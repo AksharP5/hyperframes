@@ -129,6 +129,18 @@ export function probeElementVolumeKeyframes(
 
 export type RuntimeTimelineRef = Partial<Pick<RuntimeTimelineLike, "totalTime" | "seek">>;
 
+export interface VolumeProbeOptions {
+  /**
+   * Render/probe pages must not sample the live visual timeline during runtime
+   * initialization. The producer discovers audio automation in its own
+   * isolated pass and bakes it before frame capture, so seeking here is both
+   * redundant and capable of materializing future zero-duration GSAP state.
+   *
+   * Preview callers omit this option and retain live automation discovery.
+   */
+  allowLiveTimelineSeek?: boolean;
+}
+
 /**
  * Probe a media element and, if volume automation is detected, store the
  * keyframes in `cache`. Safe to call with a null timeline — returns early.
@@ -138,7 +150,9 @@ export function probeAndCacheElementVolume(
   timeline: RuntimeTimelineRef | null | undefined,
   compositionDuration: number,
   cache: WeakMap<HTMLMediaElement, VolumeKeyframe[]>,
+  options: VolumeProbeOptions = {},
 ): void {
+  if (options.allowLiveTimelineSeek === false) return;
   if (!timeline) return;
   if (!(mediaEl instanceof HTMLAudioElement) && !(mediaEl instanceof HTMLVideoElement)) return;
   if (compositionDuration <= 0) return;
