@@ -12,6 +12,14 @@ Every element is a primitive the agent can build directly. Two honest limits:
 - **Organic illustration** (drawn characters, painterly texture) can't be fully carried by text — words underdetermine a drawing. Steer to geometric shape language ("flat rounded-geometric figure, circle head, no facial features"), or generate the artwork (see [When to generate artwork](/prompting/generated-artwork)).
 - **Photographic and live-action content** must be supplied as files — mention the paths explicitly.
 
+## The density contract
+
+A spec tells the builder what each element *is*; a density contract tells it how full every frame must be. The capstone film states it once and every region obeys:
+
+> Density: every region fills three roles — one focal element at display scale, at least two supporting elements on their own cues, and the chrome/wire. Asymmetric compositions; display type ~a tenth of frame width; three depth layers with parallax between them.
+
+That's the whole formula, reusable in any prompt: **one focal + at least two supporting + persistent chrome**, composed asymmetrically (60/40, never one element centered in emptiness), display type around a tenth of the frame width, and at least three depth layers so parallax can sell the space. Supporting elements land on their own cues — a frame that fills all three roles at t=0 is a poster, not a scene. Ask for the contract explicitly when a build keeps coming back sparse: "every scene carries one focal element, two supporting elements on staggered cues, and the persistent chrome" is a sentence a builder can be held to.
+
 ## Two more worked specs
 
 The same density applied to a product-UI piece and a typographic piece — both one-shot from these exact words. Where a builder had to make a judgment call on the first pass, the spec below pins it, which is the editing loop these specs live by: build, see what the words underdetermined, tighten the words.

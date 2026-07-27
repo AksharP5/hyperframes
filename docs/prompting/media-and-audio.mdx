@@ -41,6 +41,18 @@ SFX resolve from a small bundled library plus the catalog. Cue them to specific 
 
 > Put a soft click on the button press at 0:04.
 
+## Pace reveals to the narration
+
+Once a video has a voice, the voice is the clock. The single highest-leverage audio instruction after choosing the voice is telling the agent that on-screen elements land **on their spoken cues** — the stat appears as the narrator says it, not at some independent time the builder eyeballed. Without this, narration and visuals drift into two parallel tracks that happen to share a file:
+
+> VO-paced reveals: each scene's elements land on their spoken cues; secondary elements keep resolving while the narrator is mid-thought; the scene is complete just as the narration moves on.
+
+The capstone film applies exactly this rule to every region — its Direction block reads:
+
+> VO-paced reveals: each region's elements land on their spoken cues as the camera arrives; secondary elements keep resolving while the camera is present; the region is complete just as the camera accelerates away.
+
+Two practical notes: the agent gets word timings for free (the narration is transcribed with per-word timestamps, the same machinery behind [captions](#captions-and-transcription)), so "on its spoken cue" is a real, executable instruction — and the inverse rule matters just as much: the narration never waits for the visuals. Pace the camera and reveals to the voice, not the voice to the animation.
+
 ## Captions and transcription
 
 Captions come from word-level timestamps. When you generate a voiceover, the timing comes with it; for existing footage, transcription produces the timing (Parakeet by default, with a whisper.cpp fallback). Scaffolding a project from a source video can generate captions from its audio directly.

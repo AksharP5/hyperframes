@@ -85,7 +85,7 @@ Every region pins a different technique, and every technique has a chapter:
 | Region | What it demonstrates | Chapter that teaches it |
 | --- | --- | --- |
 | Type (0:00–0:07) | Per-character code typing; the underline that becomes the wire | [Code animations](/prompting/code-blocks), [Prompt anatomy](/prompting/anatomy) |
-| Mount (0:07–0:14) | The timeline's own vocabulary — tracks, clips, `data-*` labels | [Prompt anatomy](/prompting/anatomy) |
+| Mount (0:07–0:14) | The timeline's own vocabulary — tracks, clips, `data-*` labels | [Vocabulary](/prompting/vocabulary) |
 | Measure (0:14–0:21) | `data-chart` block; the wire as chart baseline (matched motion) | [Data and maps](/prompting/data-and-maps), [Transitions](/prompting/transitions) |
 | Everywhere (0:21–0:28) | `world-map` block; real Lambda / Cloud Run regions | [Data and maps](/prompting/data-and-maps), [Rendering and output](/prompting/rendering-and-output) |
 | Material (0:28–0:39) | Generated clip → HEVC proxy → background removed *before* the speech → the line's keywords slam in word-synced as display text BEHIND the cutout (silhouette occlusion) → lower-third behind the subject | [Media and audio](/prompting/media-and-audio), [Caption styles](/prompting/captions-catalog), [Overlays and lower thirds](/prompting/overlays-and-lower-thirds) |
@@ -123,7 +123,7 @@ What IS new — the part you could not have written after any single chapter —
 - **The persistent elements do the handoffs.** The wire is the trick that makes each region *become* the next — the same line is the typed underline, the chart baseline, the map arc, the waveform, the 3D coil. The chip is a callback threaded through all nine techniques; the ruler makes the film's own medium visible.
 - **One brand file governs every region** ([Design systems](/prompting/design-systems)) — so nine techniques from nine chapters land looking like one designer made them.
 - **One variable scope re-skins all of it** ([Variables and templating](/prompting/variables-and-templating)) — the single-file constraint exists so the chart, the map, the glass, the mural, and the confetti all answer to the same two variables in one `--variables` flag.
-- **One soundtrack paces all of it** ([Media and audio](/prompting/media-and-audio)) — the VO cues every region's reveals, and the same BGM that beds the narration feeds the Rhythm region's beat analysis.
+- **One soundtrack paces all of it** ([Media and audio](/prompting/media-and-audio)) — the VO cues every region's reveals ([pace reveals to the narration](/prompting/media-and-audio#pace-reveals-to-the-narration)), the same BGM that beds the narration feeds the Rhythm region's beat analysis, and one SFX plan rides the visual hits — keystrokes at the open, a whoosh per handoff, ticks on counters and beats, one riser into the render ([sound effects](/prompting/media-and-audio#sound-effects)).
 
 That's the method this guide has been building toward: learn each technique in isolation, then write the prompt whose job is not to invent the pieces but to bind them — shared space, shared spine, shared brand, shared variables, shared clock. A chart, a map, typed markup, processed footage, 3D, glass, a shader seam, a beat grid, seeded confetti: every one traceable to a chapter you've already read. The film is what the glue makes of them — and the glue, like everything else here, is just words in the prompt.
 
