@@ -6,7 +6,7 @@ description: "One prompt, one continuous camera move, every technique in this gu
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-timeline-default.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *"The Timeline" — 1920x1080, ~62 seconds, one prompt, one unbroken camera move, unedited.*
 
-Every technique in this film has a chapter in this guide.
+If you read the guide in order, you have already seen every piece of this film. Each region was cut out and embedded in the chapter that teaches its technique — the typed opening in [Code animations](/prompting/code-blocks), the chart and map in [Data and maps](/prompting/data-and-maps), the footage pipeline in [Media and audio](/prompting/media-and-audio), the glass and mural in [VFX](/prompting/vfx-and-liquid-glass) and [Generated artwork](/prompting/generated-artwork), the beat grid in [Music](/prompting/music-and-slideshows), the 3D coil in [Runtimes and 3D](/prompting/runtimes-and-3d), the seeded finale in [Motion](/prompting/motion). This page is where the pieces become one composition, and the prompt below is the glue: every paragraph of it is a chapter of this guide restated as a binding clause.
 
 The concept is the product: the viewer travels along one literal timeline — the thing HyperFrames is built on — from the first typed character to the finished MP4. Everything in it is true: real catalog counts, real cloud regions, real product surfaces, footage staged as the material the tool processes. And the film has no scenes in the slideshow sense — it is one continuous camera journey through one wide world, which is the chapter's biggest lesson.
 
@@ -84,15 +84,15 @@ Every region pins a different technique, and every technique has a chapter:
 
 | Region | What it demonstrates | Chapter that teaches it |
 | --- | --- | --- |
-| Type | Per-character code typing; the underline that becomes the wire | [Code animations](/prompting/code-blocks), [Prompt anatomy](/prompting/anatomy) |
-| Mount | The timeline's own vocabulary — tracks, clips, `data-*` labels | [Prompt anatomy](/prompting/anatomy) |
-| Measure | `data-chart` block; the wire as chart baseline (matched motion) | [Data and maps](/prompting/data-and-maps), [Transitions](/prompting/transitions) |
-| Everywhere | `world-map` block; real Lambda / Cloud Run regions | [Data and maps](/prompting/data-and-maps), [Rendering and output](/prompting/rendering-and-output) |
-| Material | Generated clip → HEVC proxy → background removed *before* the speech → the line's keywords slam in word-synced as display text BEHIND the cutout (silhouette occlusion) → lower-third behind the subject | [Media and audio](/prompting/media-and-audio), [Caption styles](/prompting/captions-catalog), [Overlays and lower thirds](/prompting/overlays-and-lower-thirds) |
-| Surface | `sdf-iris` shader lens, frosted glass, palette-neutral generated mural | [Transitions](/prompting/transitions), [VFX and liquid glass](/prompting/vfx-and-liquid-glass), [When to generate artwork](/prompting/generated-artwork) |
-| Rhythm | Cuts on a real analyzed beat grid (`hyperframes beats`) | [Music videos and slideshows](/prompting/music-and-slideshows) |
-| Depth | Real Three.js via the frame adapter, wire as 3D coil; the chip joins the scene to thread the loops and pass behind the form (true depth occlusion) | [Runtimes and 3D](/prompting/runtimes-and-3d) |
-| Render | Seeded (42) two-frame-hold confetti — determinism as the punchline | [Motion that reads premium](/prompting/motion) (rule 7) |
+| Type (0:00–0:07) | Per-character code typing; the underline that becomes the wire | [Code animations](/prompting/code-blocks), [Prompt anatomy](/prompting/anatomy) |
+| Mount (0:07–0:14) | The timeline's own vocabulary — tracks, clips, `data-*` labels | [Prompt anatomy](/prompting/anatomy) |
+| Measure (0:14–0:21) | `data-chart` block; the wire as chart baseline (matched motion) | [Data and maps](/prompting/data-and-maps), [Transitions](/prompting/transitions) |
+| Everywhere (0:21–0:28) | `world-map` block; real Lambda / Cloud Run regions | [Data and maps](/prompting/data-and-maps), [Rendering and output](/prompting/rendering-and-output) |
+| Material (0:28–0:39) | Generated clip → HEVC proxy → background removed *before* the speech → the line's keywords slam in word-synced as display text BEHIND the cutout (silhouette occlusion) → lower-third behind the subject | [Media and audio](/prompting/media-and-audio), [Caption styles](/prompting/captions-catalog), [Overlays and lower thirds](/prompting/overlays-and-lower-thirds) |
+| Surface (0:39–0:45) | `sdf-iris` shader lens, frosted glass, palette-neutral generated mural | [Transitions](/prompting/transitions), [VFX and liquid glass](/prompting/vfx-and-liquid-glass), [When to generate artwork](/prompting/generated-artwork) |
+| Rhythm (0:45–0:52) | Cuts on a real analyzed beat grid (`hyperframes beats`) | [Music videos and slideshows](/prompting/music-and-slideshows) |
+| Depth (0:52–0:56) | Real Three.js via the frame adapter, wire as 3D coil; the chip joins the scene to thread the loops and pass behind the form (true depth occlusion) | [Runtimes and 3D](/prompting/runtimes-and-3d) |
+| Render (0:56–1:02) | Seeded (42) two-frame-hold confetti — determinism as the punchline | [Motion that reads premium](/prompting/motion) (rule 7) |
 
 The camera itself is [Motion that reads premium](/prompting/motion)'s "camera as actor" rule taken to its logical end — the camera isn't *in* the film, it *is* the film. The persistent wire/ruler/protagonist are [Storyboards](/prompting/storyboards)' callback device stretched across the whole runtime instead of two frames. And the whole thing is written in [High-fidelity looks](/prompting/visual-specs)' density: exact hexes, exact timings, named eases, quoted copy.
 
@@ -113,8 +113,18 @@ hyperframes render --variables '{"ground":"#0d1420","ink":"#c8ff3d"}' --strict-v
 
 The mural trick from the previous capstone carries over: the artwork is generated **palette-neutral** (grayscale) and duotoned live by CSS layers driven by the `ground`/`ink` variables, so even the raster re-skins. Keep color in CSS and shapes in the raster whenever a template frame needs to survive a re-skin.
 
-## What this page proved
+## How everything ties together
 
-A chart, a map, a diff of typed markup, real processed footage, 3D, glass, a shader seam, a beat grid, seeded confetti — every technique is traceable to a chapter you've already read. But the thing that makes it a film instead of a slideshow isn't any of them: it's the cinematography contract — one camera, persistent elements, arrivals instead of cuts — and that, like everything else here, is just words in the prompt.
+Read the prompt again with the guide behind you and it stops looking like one enormous ask. Region by region it is material you already have: the typed opening is [Code animations](/prompting/code-blocks), the chart and map paragraphs are [Data and maps](/prompting/data-and-maps), the Material paragraph is [Media and audio](/prompting/media-and-audio) + [Caption styles](/prompting/captions-catalog) + [Overlays](/prompting/overlays-and-lower-thirds) run in sequence, Surface is [Transitions](/prompting/transitions) + [VFX](/prompting/vfx-and-liquid-glass) + [Generated artwork](/prompting/generated-artwork), Rhythm is [Music](/prompting/music-and-slideshows), Depth is [Runtimes and 3D](/prompting/runtimes-and-3d), and the finale is [Motion](/prompting/motion)'s rule 7. None of those clauses is new — they are the chapters, restated as requirements.
+
+What IS new — the part you could not have written after any single chapter — is the connective tissue, and that is exactly what the rest of the prompt spends its words on:
+
+- **The cinematography contract** fuses nine demos into one space: one camera, arrivals instead of cuts, dwell-and-sweep pacing. Remove it and you get a playlist of chapter examples; with it, the same nine pieces are a film.
+- **The persistent elements do the handoffs.** The wire is the trick that makes each region *become* the next — the same line is the typed underline, the chart baseline, the map arc, the waveform, the 3D coil. The chip is a callback threaded through all nine techniques; the ruler makes the film's own medium visible.
+- **One brand file governs every region** ([Design systems](/prompting/design-systems)) — so nine techniques from nine chapters land looking like one designer made them.
+- **One variable scope re-skins all of it** ([Variables and templating](/prompting/variables-and-templating)) — the single-file constraint exists so the chart, the map, the glass, the mural, and the confetti all answer to the same two variables in one `--variables` flag.
+- **One soundtrack paces all of it** ([Media and audio](/prompting/media-and-audio)) — the VO cues every region's reveals, and the same BGM that beds the narration feeds the Rhythm region's beat analysis.
+
+That's the method this guide has been building toward: learn each technique in isolation, then write the prompt whose job is not to invent the pieces but to bind them — shared space, shared spine, shared brand, shared variables, shared clock. A chart, a map, typed markup, processed footage, 3D, glass, a shader seam, a beat grid, seeded confetti: every one traceable to a chapter you've already read. The film is what the glue makes of them — and the glue, like everything else here, is just words in the prompt.
 
 *Next: [Rules and anti-patterns](/prompting/rules-and-anti-patterns) — keep this cheat sheet open while you build.*

@@ -13,6 +13,13 @@ By now you can specify a frame precisely — exact copy, exact colors, exact lay
 6. **Match pacing to genre.** Showreel-style cuts run 1.5-4 seconds per idea; a stretched 8-second version of a 2-second idea feels slow no matter how it's animated.
 7. **Handmade imperfection stays reproducible.** A stop-motion or hand-animated feel wants irregular timing, not machine-smooth eases — but true unseeded randomness breaks the render: HyperFrames must produce the identical frame every time it seeks to the same point, and `Math.random()` can't promise that. Seed a PRNG once at composition start instead, and step discrete elements between held positions (a "two-frame hold": land, hold two frames, jump to the next offset) rather than tweening continuously between them. The irregularity is real — it just comes from a seed, not from chance.
 
+<Note>
+**Capstone thread** — rule 2 taken to its logical end is the spine of the [Level 7 film](/prompting/capstone): one continuous camera journey with full dwells at the hero moments. This is that camera mid-flight — accelerating out of one region, arriving and stopping in the next (0:11–0:21 of the film, cut in isolation). Rule 7 shows up there too: the film's closing confetti is seeded with a two-frame hold.
+</Note>
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-camera.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*The capstone's camera: never cutting, easing through arrivals, stopping only to let a beat land.*
+
 ## The grammar, measured
 
 The same composition built twice — identical content, identical layout; the only variable is the motion treatment. The first build commits the anti-patterns above: simultaneous identical entrances, no camera, a frozen final 2.4 seconds. The second applies the seven rules.
