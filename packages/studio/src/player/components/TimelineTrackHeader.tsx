@@ -178,6 +178,7 @@ function PropertyGroupHeaderRow({
   currentTime,
   clipPercentage,
   gutterBackground,
+  columnWidth,
   onTogglePropertyGroupKeyframe,
   onSeek,
 }: {
@@ -188,6 +189,7 @@ function PropertyGroupHeaderRow({
   currentTime: number;
   clipPercentage: number;
   gutterBackground: string;
+  columnWidth: number;
   onTogglePropertyGroupKeyframe?: TimelineEditCallbacks["onTogglePropertyGroupKeyframe"];
   onSeek?: (time: number) => void;
 }) {
@@ -201,10 +203,13 @@ function PropertyGroupHeaderRow({
     <div
       data-property-group={lane.group}
       data-timeline-lane-top={getTimelineLaneTop(laneIndex)}
-      className="absolute left-0 flex items-center gap-1 px-1.5 text-[10px] text-white/65"
+      className="absolute left-0 flex items-center gap-1 overflow-hidden px-1.5 text-[10px] text-white/65"
       style={{
         top: getTimelineLaneTop(laneIndex),
-        width: LABEL_COL_W,
+        // The header column narrows to contentOrigin whenever that is under
+        // LABEL_COL_W; a lane row pinned to LABEL_COL_W then hangs its value
+        // readout over the canvas, on top of the clips it is labelling.
+        width: columnWidth,
         height: LANE_H,
         background: gutterBackground,
       }}
@@ -339,6 +344,7 @@ export function TimelineTrackHeader({
                 currentTime={currentTime}
                 clipPercentage={clipPercentage}
                 gutterBackground={theme.gutterBackground}
+                columnWidth={showTrackLabel ? LABEL_COL_W : contentOrigin}
                 onTogglePropertyGroupKeyframe={onTogglePropertyGroupKeyframe}
                 onSeek={onSeek}
               />

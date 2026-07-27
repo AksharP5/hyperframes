@@ -313,7 +313,7 @@ export function useTimelineEditCallbacks({
             : 0;
         // Same frame for read and write: the toggled element's animations decide
         // add-vs-remove, and its selection is what the mutation commits through.
-        const animations = resolveElementAnimations(el.key ?? el.id);
+        const animations = resolveElementAnimations(getTimelineElementIdentity(el));
         void buildDomSelectionForTimelineElement(el).then((selection) => {
           if (!selection) return;
           const anim = animations.find((a) => a.keyframes);

@@ -163,3 +163,20 @@ describe("useGsapSelectionHandlers retime settlement", () => {
     withSelection.unmount();
   });
 });
+
+describe("useGsapSelectionHandlers selection override", () => {
+  it("aborts on an explicit null override instead of writing to the current selection", () => {
+    const removeKeyframe = vi.fn();
+    const rendered = renderHandlers(makeParams({ removeKeyframe }));
+
+    // Explicit null: the caller resolved a selection for its own element and
+    // found none, so the write must not land on the selected element.
+    rendered.handlers().handleGsapRemoveKeyframe("anim-1", 50, undefined, null);
+    expect(removeKeyframe).not.toHaveBeenCalled();
+
+    // Omitted override: falls back to the current selection as before.
+    rendered.handlers().handleGsapRemoveKeyframe("anim-1", 50);
+    expect(removeKeyframe).toHaveBeenCalledOnce();
+    rendered.unmount();
+  });
+});

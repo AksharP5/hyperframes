@@ -418,7 +418,7 @@ export function useGsapSelectionHandlers({
 
   const handleGsapRemoveAllKeyframes = useCallback(
     (animId: string, selectionOverride?: DomEditSelection | null) => {
-      const selection = selectionOverride ?? domEditSelection ?? lastSelectionRef.current;
+      const selection = resolveWriteSelection(selectionOverride);
       if (!selection) return;
       observeGsapMutation(
         removeAllKeyframes(selection, animId),
@@ -427,7 +427,7 @@ export function useGsapSelectionHandlers({
         "Remove all keyframes",
       );
     },
-    [domEditSelection, observeGsapMutation, removeAllKeyframes],
+    [resolveWriteSelection, observeGsapMutation, removeAllKeyframes],
   );
 
   const handleResetSelectedElementKeyframes = useCallback((): boolean => {
