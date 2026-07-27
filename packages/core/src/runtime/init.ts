@@ -1834,6 +1834,10 @@ export function initSandboxRuntimeModular(): void {
       state.capturedTimeline,
       getSafeTimelineDurationSeconds(state.capturedTimeline, 0),
       volumeKeyframeCache,
+      {
+        allowLiveTimelineSeek: !(window as Window & { __HF_RENDER_CAPTURE_MODE?: boolean })
+          .__HF_RENDER_CAPTURE_MODE,
+      },
     );
   };
 
