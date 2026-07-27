@@ -630,17 +630,18 @@ export function trackRenderFeedback(props: {
   /**
    * Join key shared with the forwarded feedback report (Slack/backend): the
    * same uuid rides in the report's env string as `fid=…`, so a wild report
-   * resolves to exactly one PostHog "survey sent" event and vice versa.
+   * resolves to exactly one PostHog `cli_render_feedback` event and vice versa.
    */
   feedbackId?: string;
   /** render_job_id values of this install's recent renders (newest last). */
   recentRenderIds?: string[];
 }): void {
-  trackEvent("survey sent", {
-    $survey_id: "render_satisfaction",
-    $survey_response: props.rating,
+  // Plain product event, not a PostHog survey response: nothing here is served
+  // by the surveys product (no survey definition, no targeting, no popover).
+  trackEvent("cli_render_feedback", {
+    rating: props.rating,
     rating_scale: FEEDBACK_RATING_SCALE,
-    ...(props.comment ? { $survey_response_2: props.comment } : {}),
+    ...(props.comment ? { comment: props.comment } : {}),
     ...(props.renderDurationMs !== undefined ? { render_duration_ms: props.renderDurationMs } : {}),
     ...(props.doctorSummary ? { doctor_summary: props.doctorSummary } : {}),
     ...(props.feedbackId ? { feedback_id: props.feedbackId } : {}),

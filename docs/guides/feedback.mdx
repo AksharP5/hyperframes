@@ -127,12 +127,13 @@ Only the existence (or in some cases the value) of these variables is checked �
 
 ### CLI feedback
 
+Event: `cli_render_feedback`
+
 | Field | Value |
 |-------|-------|
-| `$survey_id` | `render_satisfaction` |
-| `$survey_response` | Raw rating (0–10) |
+| `rating` | Raw rating (0–10) |
 | `rating_scale` | `10` for the current recommendation scale |
-| `$survey_response_2` | Free-text comment (only when provided) |
+| `comment` | Free-text comment (only when provided) |
 | `render_duration_ms` | Time the render took in milliseconds |
 | `doctor_summary` | System context (see below) |
 
@@ -146,12 +147,13 @@ It may also include `wsl` or sandbox runtime flags when those environments are d
 
 ### Studio feedback
 
+Event: `studio_feedback`
+
 | Field | Value |
 |-------|-------|
-| `$survey_id` | `studio_experience` |
-| `$survey_response` | Raw rating (0–10) |
+| `rating` | Raw rating (0–10) |
 | `rating_scale` | `10` for the current recommendation scale |
-| `$survey_response_2` | Free-text comment (only when provided) |
+| `comment` | Free-text comment (only when provided) |
 | `source` | `studio` |
 | `doctor_summary` | Browser context (platform, screen, CPU cores, device memory, network type) |
 

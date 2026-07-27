@@ -84,8 +84,8 @@ describe("studio telemetry events", () => {
     trackStudioFeedback({ rating });
 
     expect(trackEvent).toHaveBeenCalledWith(
-      "survey sent",
-      expect.objectContaining({ $survey_response: rating, rating_scale: 10 }),
+      "studio_feedback",
+      expect.objectContaining({ rating, rating_scale: 10 }),
     );
   });
 });

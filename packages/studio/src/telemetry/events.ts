@@ -69,11 +69,12 @@ export function trackStudioSegmentEaseEdit(props: { ease: string }): void {
 }
 
 export function trackStudioFeedback(props: { rating: number; comment?: string }): void {
-  trackEvent("survey sent", {
-    $survey_id: "studio_experience",
-    $survey_response: props.rating,
+  // Plain product event, not a PostHog survey response: nothing here is served
+  // by the surveys product (no survey definition, no targeting, no popover).
+  trackEvent("studio_feedback", {
+    rating: props.rating,
     rating_scale: 10,
-    ...(props.comment ? { $survey_response_2: props.comment } : {}),
+    ...(props.comment ? { comment: props.comment } : {}),
     doctor_summary: getBrowserDoctorSummary(),
     source: "studio",
   });
