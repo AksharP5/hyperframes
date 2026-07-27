@@ -457,6 +457,7 @@ async function handleRenderChunk(
       ChunkIndex: event.ChunkIndex,
       Sha256: result.sha256,
       FramesEncoded: result.framesEncoded,
+      CaptureMode: result.captureMode,
       DurationMs: Date.now() - started,
     };
   } finally {
@@ -504,6 +505,7 @@ async function handleRenderChunkV2(
       ChunkIndex: event.ChunkIndex,
       Sha256: result.sha256,
       FramesEncoded: result.framesEncoded,
+      CaptureMode: result.captureMode,
       DurationMs: Date.now() - started,
     };
   } finally {

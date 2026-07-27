@@ -14,6 +14,8 @@ describe("GCP smoke ownership and protocol safety", () => {
     expect(smoke).toContain("decodedFramesEqual");
     expect(smoke).toContain("decodedAudioEqual");
     expect(smoke).toContain("normalizedMetadataEqual");
+    expect(smoke).toContain('.CaptureMode == "beginframe"');
+    expect(smoke).toContain("expected every chunk to use beginframe");
   });
 
   it("derives a length-safe owner prefix and isolates Terraform state", () => {
@@ -51,6 +53,7 @@ describe("GCP smoke ownership and protocol safety", () => {
     expect(smoke).toContain("--ignore-file");
     expect(smoke).toContain("--gcs-source-staging-dir");
     expect(smoke).toContain("!scripts/package-subpaths.mjs");
+    expect(smoke).toContain("!packages/aws-lambda/scripts/probe-beginframe.ts");
     expect(dockerfile).toContain("COPY scripts/package-subpaths.mjs scripts/package-subpaths.mjs");
     expect(smoke).not.toContain("gcloud services enable");
     expect(smoke).toContain("gcloud services list");

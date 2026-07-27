@@ -121,6 +121,14 @@ function depsWith(
       outputKind: "file",
       framesEncoded: 30,
       sha256: `sha-${chunkIndex}`,
+      captureMode: "beginframe",
+      durationMs: 0,
+      planHashMs: 0,
+      sessionBootMs: 0,
+      captureStageMs: 0,
+      encodeStageMs: 0,
+      workers: 1,
+      perfPath: `${outputBase}.perf.json`,
     } satisfies ChunkResult;
   };
   const assemble = async (
@@ -201,6 +209,7 @@ describe("dispatch", () => {
     const res = await dispatch(event, depsWith(gcs));
     if (res.Action !== "renderChunk") throw new Error("unreachable");
     expect(res.ChunkIndex).toBe(2);
+    expect(res.CaptureMode).toBe("beginframe");
     expect(res.ChunkGcsUri).toBe("gs://b/renders/r1/chunks/0002.mp4");
     expect(gcs.objects.has("gs://b/renders/r1/chunks/0002.mp4")).toBe(true);
   });
@@ -270,6 +279,14 @@ describe("dispatch", () => {
         outputKind: "file",
         framesEncoded: 30,
         sha256: "b".repeat(64),
+        captureMode: "beginframe",
+        durationMs: 0,
+        planHashMs: 0,
+        sessionBootMs: 0,
+        captureStageMs: 0,
+        encodeStageMs: 0,
+        workers: 1,
+        perfPath: `${outputBase}.perf.json`,
       };
     };
     const assemble = async (

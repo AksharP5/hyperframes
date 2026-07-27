@@ -43,6 +43,8 @@ import {
   BROWSER_GPU_NOT_SOFTWARE,
   calculateOptimalWorkers,
   type CaptureOptions,
+  type CaptureMode,
+  type CapturePerfSummary,
   type CaptureSession,
   closeCaptureSession,
   createCaptureSession,
@@ -158,6 +160,8 @@ export interface ChunkResult {
   encodeStageMs: number;
   /** Capture workers used for this chunk (`calculateOptimalWorkers` result). */
   workers: number;
+  /** Effective engine mode used by every worker, after any browser fallback. */
+  captureMode: CaptureMode;
   /**
    * Path to a sidecar JSON containing per-chunk perf counters. Adapters
    * upload this alongside the chunk so per-chunk regressions are
@@ -330,6 +334,7 @@ export function resolveLockedVp9CpuUsed(
  * outputs — the caller picks the right shape based on `meta/encoder.json`.
  * `renderChunk` enforces the same choice via `outputKind` on the result.
  */
+// fallow-ignore-next-line complexity
 export async function renderChunk(
   planDir: string,
   chunkIndex: number,
@@ -485,6 +490,10 @@ export async function renderChunk(
       ...resolveConfig(),
       browserGpuMode: "software",
       forceScreenshot: encoder.forceScreenshot,
+      // `encoder.forceScreenshot=false` is a locked distributed-render
+      // decision, not the engine default. Carry that explicit opt-out through
+      // the software-GPU clamp so buildChromeArgs includes BeginFrameControl.
+      forceScreenshotExplicitlyOptedOut: !encoder.forceScreenshot,
     };
 
     // Build the BeforeCaptureHook that injects pre-extracted video frames
@@ -585,6 +594,8 @@ export async function renderChunk(
     let sessionBootMs = 0;
     let captureStageMs = 0;
     let encodeStageMs = 0;
+    let captureMode: CaptureMode | undefined;
+    const capturePerfs: CapturePerfSummary[] = [];
     try {
       if (chunkWorkerCount === 1) {
         // Sequential branch reuses the probe session for the actual capture.
@@ -638,9 +649,10 @@ export async function renderChunk(
         log,
         probeSession: session,
         captureAttempts: [],
-        // Distributed chunks run on Linux (beginframe) where dedup never arms;
-        // a throwaway sink satisfies the type without per-chunk dedup reporting.
-        dedupPerfs: [],
+        // This sink also records each worker's effective capture mode. That
+        // makes a BeginFrame → screenshot fallback observable to adapters and
+        // end-to-end smoke tests instead of existing only in stderr.
+        dedupPerfs: capturePerfs,
         buildCaptureOptions: () => captureOptions,
         createRenderVideoFrameInjector: () => videoInjector,
         abortSignal: undefined,
@@ -650,6 +662,20 @@ export async function renderChunk(
       // captureStage closes the session it consumed.
       captureStageMs = Date.now() - captureStarted;
       session = null;
+      const observedModes = new Set(capturePerfs.map((perf) => perf.captureMode));
+      const validModes = new Set<CaptureMode>(["beginframe", "screenshot", "drawelement"]);
+      if (
+        observedModes.size !== 1 ||
+        ![...observedModes].every((mode): mode is CaptureMode =>
+          validModes.has(mode as CaptureMode),
+        )
+      ) {
+        throw new Error(
+          `[renderChunk] capture workers reported invalid or inconsistent modes: ` +
+            `${[...observedModes].join(",") || "<none>"}`,
+        );
+      }
+      captureMode = [...observedModes][0] as CaptureMode;
       framesEncoded = framesInChunk;
 
       // ── Encode the chunk ──
@@ -737,6 +763,9 @@ export async function renderChunk(
     }
 
     // ── Hash the output + write the perf sidecar ──
+    if (!captureMode) {
+      throw new Error("[renderChunk] capture stage completed without reporting a capture mode");
+    }
     const sha256 = hashChunkOutput(outputChunkPath, outputKind);
     const durationMs = Date.now() - start;
     const perfPath = `${outputChunkPath}.perf.json`;
@@ -752,6 +781,7 @@ export async function renderChunk(
       captureStageMs,
       encodeStageMs,
       workers: chunkWorkerCount,
+      captureMode,
       sha256,
       outputKind,
       producerVersion: plan.producerVersion,
@@ -781,6 +811,7 @@ export async function renderChunk(
       captureStageMs,
       encodeStageMs,
       workers: chunkWorkerCount,
+      captureMode,
       perfPath,
     };
   } finally {
