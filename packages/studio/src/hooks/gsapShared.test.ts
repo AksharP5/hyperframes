@@ -11,17 +11,19 @@ import {
   toClipPercentage,
 } from "./gsapShared";
 
+// Fixtures carry only the fields the function under test reads; the double-cast
+// is the documented way to stand in for the full runtime shape (CONTRIBUTING.md).
+const tween = (duration: number | undefined) => ({ duration }) as unknown as GsapAnimation;
+
 describe("resolveEditableTweenDuration", () => {
-  const selection = { dataAttributes: { duration: "16.26" } } as DomEditSelection;
+  const selection = { dataAttributes: { duration: "16.26" } } as unknown as DomEditSelection;
 
   it("uses the owning clip duration when the tween omits an outer duration", () => {
-    expect(resolveEditableTweenDuration({ duration: undefined } as GsapAnimation, selection)).toBe(
-      16.26,
-    );
+    expect(resolveEditableTweenDuration(tween(undefined), selection)).toBe(16.26);
   });
 
   it("keeps an explicitly-authored tween duration", () => {
-    expect(resolveEditableTweenDuration({ duration: 4 } as GsapAnimation, selection)).toBe(4);
+    expect(resolveEditableTweenDuration(tween(4), selection)).toBe(4);
   });
 });
 

@@ -11,6 +11,24 @@ import { animationContributesLane } from "./TimelinePropertyLanes";
  * — tracked per-clip so a later user collapse sticks and never bounces back open
  * (and clips added later still auto-expand).
  */
+/**
+ * Prunes clips that left the source, then returns the ones that newly contribute
+ * a lane. The prune matters because the set is otherwise append-only: a clip
+ * deleted and reinserted under the same id (undo, paste) would be remembered as
+ * already-expanded and never auto-expand again.
+ */
+function freshLaneClips(gsapAnimations: Map<string, GsapAnimation[]>, clips: Set<string>) {
+  for (const key of clips) {
+    if (!gsapAnimations.has(key)) clips.delete(key);
+  }
+  const fresh: string[] = [];
+  for (const [key, animations] of gsapAnimations) {
+    if (clips.has(key)) continue;
+    if (animations.some(animationContributesLane)) fresh.push(key);
+  }
+  return fresh;
+}
+
 export function useAutoExpandKeyframedClips(gsapAnimations: Map<string, GsapAnimation[]>): void {
   const expandClips = usePlayerStore((s) => s.expandClips);
   const projectId = useStudioShellContextOptional()?.projectId ?? null;
@@ -24,17 +42,7 @@ export function useAutoExpandKeyframedClips(gsapAnimations: Map<string, GsapAnim
     } else {
       seen.current.source = gsapAnimations;
     }
-    // Drop clips that are no longer in the source at all. Without this the set
-    // is append-only, so a clip deleted and reinserted under the same id (undo,
-    // paste) is remembered as already-expanded and never auto-expands again.
-    for (const key of seen.current.clips) {
-      if (!gsapAnimations.has(key)) seen.current.clips.delete(key);
-    }
-    const fresh: string[] = [];
-    for (const [key, animations] of gsapAnimations) {
-      if (seen.current.clips.has(key)) continue;
-      if (animations.some(animationContributesLane)) fresh.push(key);
-    }
+    const fresh = freshLaneClips(gsapAnimations, seen.current.clips);
     if (fresh.length === 0) return;
     for (const key of fresh) seen.current.clips.add(key);
     expandClips(fresh);

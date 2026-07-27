@@ -45,6 +45,19 @@ type DragState = {
   ref: MotionNodeRef;
 };
 
+/**
+ * Tween-% for a stop inserted at fraction `t` along the segment between two
+ * nodes. null when either end is not a keyframe (arc waypoints carry no %).
+ */
+function interpolatedKeyframePct(
+  a: MotionNodeRef | undefined,
+  b: MotionNodeRef | undefined,
+  t: number,
+): number | null {
+  if (a?.type !== "keyframe" || b?.type !== "keyframe") return null;
+  return Math.round((a.pct + (b.pct - a.pct) * t) * 1000) / 1000;
+}
+
 const NODE_PX = 6; // node radius in screen pixels (kept constant across zoom)
 // Click-vs-drag cutoff in SCREEN pixels. Below this the pointer-up is a click
 // (select the keyframe); at or above it the gesture commits a move. Screen-space
@@ -402,13 +415,10 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
       void commitAddWaypoint(animId, np.segIndex + 1, x, y, commitMutation);
     } else {
       // Linear keyframe path: interpolate the new stop's tween-% from the two
-      // keyframes bounding the clicked segment (np.t = fraction along it), then
-      // insert it. Lands ON the current line, so the dot doesn't jump — drag it
-      // after to bend the path.
-      const a = abs[np.segIndex]?.ref;
-      const b = abs[np.segIndex + 1]?.ref;
-      if (a?.type !== "keyframe" || b?.type !== "keyframe") return;
-      const pct = Math.round((a.pct + (b.pct - a.pct) * np.t) * 1000) / 1000;
+      // keyframes bounding the clicked segment, then insert it. Lands ON the
+      // current line, so the dot doesn't jump — drag it after to bend the path.
+      const pct = interpolatedKeyframePct(abs[np.segIndex]?.ref, abs[np.segIndex + 1]?.ref, np.t);
+      if (pct === null) return;
       e.stopPropagation();
       void commitAddKeyframe(animId, pct, x, y, commitMutation);
     }
