@@ -26,6 +26,7 @@
     "mp4-h265-sdr": 4,
     "overlay-montage-prod": 512,
     "parallel-capture-regression": 86,
+    "plan-v2-partial-color": 120,
     "png-sequence": 3,
     "portrait-edge-bleed": 25,
     "raf-ball-render-compat": 22,
