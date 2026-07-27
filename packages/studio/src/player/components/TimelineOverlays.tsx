@@ -106,12 +106,12 @@ export function TimelineOverlays({
         <KeyframeDiamondContextMenu
           state={kfContextMenu}
           onClose={() => setKfContextMenu(null)}
-          onDelete={(elId, pct) => onDeleteKeyframe?.(elId, { percentage: pct })}
+          onDelete={(elId, target) => onDeleteKeyframe?.(elId, target)}
           onDeleteAll={(elId) => onDeleteAllKeyframes?.(elId)}
           onChangeEase={(elId, pct, ease) => onChangeKeyframeEase?.(elId, pct, ease)}
           onMoveToPlayhead={
             onMoveKeyframeToPlayhead
-              ? (elId, pct) => onMoveKeyframeToPlayhead(elId, { percentage: pct })
+              ? (element, target) => onMoveKeyframeToPlayhead(element, target)
               : undefined
           }
           onCopyProperties={(elId, pct) => {
