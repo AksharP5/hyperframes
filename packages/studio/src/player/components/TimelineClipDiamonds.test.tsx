@@ -46,7 +46,10 @@ function renderDiamonds(onClickKeyframe = vi.fn()) {
 }
 
 describe("TimelineClipDiamonds", () => {
-  it("keeps dense keyframe hit regions and visuals from overlapping", () => {
+  // Dense rows narrow the DIAMOND so neighbours stay individually readable, but
+  // the hit box floors at KF_MIN_HIT_W — a gap-sized target gets unusable
+  // (~7px) at the zoom floor.
+  it("narrows dense keyframe visuals while flooring their hit regions", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -76,7 +79,7 @@ describe("TimelineClipDiamonds", () => {
     const diamonds = Array.from(host.querySelectorAll<HTMLButtonElement>("button[title]"));
     expect(diamonds).toHaveLength(3);
     for (const diamond of diamonds) {
-      expect(Number.parseFloat(diamond.style.width)).toBeCloseTo(10.8);
+      expect(Number.parseFloat(diamond.style.width)).toBeCloseTo(12);
       expect(Number(diamond.querySelector("svg")?.getAttribute("width"))).toBeCloseTo(8.8);
     }
     act(() => root.unmount());

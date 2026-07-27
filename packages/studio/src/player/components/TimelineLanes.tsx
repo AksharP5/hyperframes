@@ -238,11 +238,6 @@ export function TimelineLanes({
                 currentTime={currentTime}
                 isTrackHidden={isTrackHidden}
                 isAudioTrack={isAudioTrack}
-                isActive={
-                  keyframeClipKey != null &&
-                  (selectedElementId === keyframeClipKey || selectedElementIds.has(keyframeClipKey))
-                }
-                isHovered={keyframeClipKey != null && hoveredClip === keyframeClipKey}
                 theme={theme}
                 onToggleClipExpanded={() => {
                   if (keyframeClipKey) {

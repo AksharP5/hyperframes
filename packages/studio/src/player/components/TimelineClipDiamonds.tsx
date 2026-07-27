@@ -1,11 +1,11 @@
-import { Fragment, memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { BEAT_BAND_H } from "./BeatStrip";
 import {
   KEYFRAME_DRAG_THRESHOLD_PX,
   previewClipPct,
   resolveKeyframeDrag,
 } from "../../components/editor/keyframeDrag";
-import { MiniCurveSvg } from "../../components/editor/EaseCurveSection";
+import { TimelineDiamondConnectors } from "./TimelineDiamondConnectors";
 import { clipToTweenPercentage } from "../../components/editor/KeyframeNavigation";
 import { LANE_H } from "./timelineLayout";
 import { timelineKeyframeSelectionKey } from "./timelineKeyframeIdentity";
@@ -16,10 +16,23 @@ import {
   keyframeTarget,
   type DragState,
   type TimelineClipDiamondsProps,
+  type TimelineDiamondKeyframe,
   type TimelineDiamondLaneProps,
 } from "./timelineDiamondTypes";
 
 export type { TimelineDiamondKeyframe } from "./timelineDiamondTypes";
+
+// Floor for a diamond's clickable width. The visual size still narrows to the
+// neighbour gap so packed diamonds stay individually readable, but the hit box
+// stops there: at the zoom floor the gap alone left a ~7px target, which is
+// neither hittable nor selectable with any accuracy. Boxes may overlap slightly
+// below this width; each diamond still owns the half-gap around its own centre.
+const KF_MIN_HIT_W = 12;
+
+/** A clip-% is a float division, so a raw tooltip reads `25.032499999999995%`. */
+function roundPct(percentage: number): number {
+  return Math.round(percentage * 1000) / 1000;
+}
 
 export const TimelineDiamondLane = memo(function TimelineDiamondLane({
   keyframesData,
@@ -115,9 +128,15 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
   const sorted = keyframesData.keyframes
     .filter((kf) => kf.percentage >= KF_MIN_PCT && kf.percentage <= KF_MAX_PCT)
     .sort((a, b) => a.percentage - b.percentage);
-  // Clip-%s of the sorted keyframes — the neighbour clamp (preview + drop) needs
-  // the whole row to bound the dragged diamond between its immediate siblings.
-  const sortedClipPcts = sorted.map((k) => k.percentage);
+  // The neighbour clamp bounds a dragged diamond between its immediate siblings
+  // so a retime can't reorder the tween. Siblings means "keyframes of the SAME
+  // tween": a merged row interleaves several animations, and two of them
+  // colliding at one percentage would otherwise pin each other's diamonds in
+  // place — the drag clamped back onto its own position and resolved to a click.
+  const siblingRowOf = (keyframe: TimelineDiamondKeyframe) =>
+    keyframe.animationId === undefined
+      ? sorted
+      : sorted.filter((k) => k.animationId === keyframe.animationId);
   const centerXOf = (percentage: number) =>
     Math.max(0, Math.min(clipWidthPx, (percentage / 100) * clipWidthPx));
   // One record per diamond, carrying its own geometry, so the connector and
@@ -129,12 +148,12 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
     const previousGap = previous ? centerX - centerXOf(previous.percentage) : Infinity;
     const nextGap = next ? centerXOf(next.percentage) - centerX : Infinity;
     const nearestGap = Math.max(1, Math.min(previousGap, nextGap));
-    const hitWidth = Math.min(diamondSize, nearestGap);
+    const gapWidth = Math.min(diamondSize, nearestGap);
     return {
       keyframe,
       centerX,
-      hitWidth,
-      visualSize: hitWidth === diamondSize ? diamondSize : Math.max(2, hitWidth - 2),
+      hitWidth: Math.max(KF_MIN_HIT_W, gapWidth),
+      visualSize: gapWidth === diamondSize ? diamondSize : Math.max(2, gapWidth - 2),
     };
   });
   const baseColor = isSelected ? accentColor : "#a3a3a3";
@@ -155,95 +174,25 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
         pointerEvents: "none",
       }}
     >
-      {markers.map((marker, i) => {
-        const previous = markers[i - 1];
-        if (!previous) return null;
-        const kf = marker.keyframe;
-        const x1 = previous.centerX;
-        const x2 = marker.centerX;
-        if (x2 - x1 < 1) return null;
-        const connectorLeft = x1 + previous.visualSize / 2;
-        const connectorWidth = x2 - x1 - previous.visualSize / 2 - marker.visualSize / 2;
-        // The ease button targets one segment, so it needs the keyframe's own
-        // animationId/tweenPercentage. On a merged inline row the button is
-        // hidden where the segment is ambiguous (two source animations collide
-        // at this % with different eases; see easeAmbiguous) or the keyframe has
-        // no source animation id (runtime-scanned) so there is no tween to target.
-        const target = keyframeTarget(kf);
-        const ease = kf.ease ?? globalEase;
-        return (
-          <Fragment key={`line-${i}-${previous.keyframe.percentage}-${kf.percentage}`}>
-            <div
-              className="absolute"
-              data-keyframe-connector={groupAware ? "" : undefined}
-              style={{
-                left: connectorLeft,
-                top: centerY,
-                width: Math.max(0, connectorWidth),
-                height: 2,
-                transform: "translateY(-1px)",
-                background: baseColor,
-                opacity: baseOpacity,
-                borderRadius: 1,
-              }}
-            />
-            {onSelectSegment && !kf.easeAmbiguous && kf.animationId !== undefined && (
-              <div
-                className="group absolute"
-                data-keyframe-ease-segment=""
-                style={{
-                  left: x1,
-                  top: centerY,
-                  width: x2 - x1,
-                  height: 18,
-                  transform: "translateY(-50%)",
-                  // Own a stacking context above the diamond buttons. At fit
-                  // zoom the 16px ease control can overlap its neighbouring
-                  // diamond; without a z-index here the later diamond wins the
-                  // hit test even though the child button has z-index 3.
-                  zIndex: 3,
-                  // Only the centered control is interactive. The transparent
-                  // segment wrapper must not swallow connector/clip gestures.
-                  pointerEvents: "none",
-                }}
-              >
-                <button
-                  type="button"
-                  data-keyframe-ease-button=""
-                  aria-label={`Edit ${ease} easing`}
-                  title={`Edit ${ease} easing`}
-                  className="absolute flex items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-                  style={{
-                    left: "50%",
-                    top: "50%",
-                    width: 16,
-                    height: 16,
-                    transform: "translate(-50%, -50%)",
-                    zIndex: 3,
-                    pointerEvents: "auto",
-                    padding: 0,
-                    border: "1px solid rgba(255, 255, 255, 0.14)",
-                    background: "#171717",
-                    cursor: "pointer",
-                  }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelectSegment(target);
-                  }}
-                >
-                  <MiniCurveSvg ease={ease} active size={12} />
-                </button>
-              </div>
-            )}
-          </Fragment>
-        );
-      })}
+      <TimelineDiamondConnectors
+        markers={markers}
+        centerY={centerY}
+        baseColor={baseColor}
+        baseOpacity={baseOpacity}
+        groupAware={groupAware}
+        globalEase={globalEase}
+        keyframeTarget={keyframeTarget}
+        onSelectSegment={onSelectSegment}
+      />
 
       {markers.map((marker, i) => {
         const kf = marker.keyframe;
         const target = keyframeTarget(kf);
         const kfKey = timelineKeyframeSelectionKey(elementId, target);
+        // Clamp against this keyframe's own tween, not the whole merged row.
+        const siblingRow = siblingRowOf(kf);
+        const siblingClipPcts = siblingRow.map((k) => k.percentage);
+        const siblingIndex = siblingRow.indexOf(kf);
         // While dragging this diamond, render it at the live preview clip-%.
         const renderPct = preview?.kfKey === kfKey ? preview.clipPct : kf.percentage;
         // Center the marker's non-overlapping hit region ON its keyframe %, so
@@ -266,7 +215,7 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
               kfKey,
               startX: e.clientX,
               lastX: e.clientX,
-              index: i,
+              index: siblingIndex,
               fromClipPct: pendingRetimeRef.current.get(kfKey)?.clipPct ?? kf.percentage,
               moved: false,
             };
@@ -292,7 +241,7 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
                 clipWidthPx,
                 draggedClipPct: live.fromClipPct,
                 draggedIndex: live.index,
-                sortedClipPcts,
+                sortedClipPcts: siblingClipPcts,
               }),
             });
           });
@@ -329,8 +278,8 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
             pointerUpX: e.clientX,
             clipWidthPx,
             draggedClipPct: d.fromClipPct,
-            draggedIndex: i,
-            sortedClipPcts,
+            draggedIndex: siblingIndex,
+            sortedClipPcts: siblingClipPcts,
           });
           if (res.kind === "click" || res.kind === "noop") {
             // "noop" is a press with enough pointer jitter to arm a drag (canDrag
@@ -445,7 +394,7 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
               e.stopPropagation();
               onContextMenuKeyframe?.(e, target);
             }}
-            title={`${kf.percentage}%`}
+            title={`${roundPct(kf.percentage)}%`}
           >
             <svg
               width={marker.visualSize}

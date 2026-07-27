@@ -90,8 +90,6 @@ function renderHeader(options: RenderHeaderOptions = {}): {
           currentTime={next.currentTime ?? 0}
           isTrackHidden={false}
           isAudioTrack={false}
-          isActive
-          isHovered={false}
           theme={defaultTimelineTheme}
           onToggleClipExpanded={vi.fn()}
           onToggleTrackHidden={vi.fn()}
@@ -120,6 +118,17 @@ describe("TimelineTrackHeader", () => {
 
     view.rerender({ clipCount: 3 });
     expect(view.host.querySelector('[aria-label="3 clips"]')?.textContent).toBe("3");
+    act(() => view.root.unmount());
+  });
+
+  // The eye acts on the layer, so it has to be reachable without a pointer and
+  // in every disclosure state — a hover-gated eye is unusable by keyboard.
+  it("keeps the visibility eye mounted whether the layer is expanded or collapsed", () => {
+    const view = renderHeader({ expanded: true });
+    expect(view.host.querySelector('button[aria-label="Hide track 0"]')).not.toBeNull();
+
+    view.rerender({ expanded: false });
+    expect(view.host.querySelector('button[aria-label="Hide track 0"]')).not.toBeNull();
     act(() => view.root.unmount());
   });
 

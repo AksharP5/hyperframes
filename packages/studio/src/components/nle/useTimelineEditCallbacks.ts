@@ -116,7 +116,6 @@ export function useTimelineEditCallbacks({
     handleGsapAddKeyframeBatch,
     handleGsapConvertToKeyframes,
     handleGsapRemoveAllKeyframes,
-    handleGsapDeleteAnimation,
     buildDomSelectionForTimelineElement,
   } = useDomEditActionsContext();
 
@@ -167,20 +166,16 @@ export function useTimelineEditCallbacks({
   );
 
   const removeKeyframeTarget = useCallback(
-    (
-      animationId: string,
-      percentage: number,
-      animations: GsapAnimation[],
-      selectionOverride?: DomEditSelection | null,
-    ) => {
-      const animation = animations.find((candidate) => candidate.id === animationId);
-      if (animation && !animation.keyframes) {
-        handleGsapDeleteAnimation(animationId, selectionOverride);
-        return;
-      }
+    (animationId: string, percentage: number, selectionOverride?: DomEditSelection | null) => {
+      // A flat tween's two diamonds are SYNTHESIZED endpoints, not authored
+      // keyframes, so "remove keyframe" has nothing to remove. Escalating to a
+      // whole-animation delete here destroyed the authored tween and its source
+      // comment on a single click, with no undo beyond the editor's own stack.
+      // Always post remove-keyframe: the writer refuses it for a flat tween
+      // (`changed:false`, file untouched), which is the correct no-op.
       handleGsapRemoveKeyframe(animationId, percentage, undefined, selectionOverride);
     },
-    [handleGsapDeleteAnimation, handleGsapRemoveKeyframe],
+    [handleGsapRemoveKeyframe],
   );
 
   return useMemo(
@@ -211,15 +206,14 @@ export function useTimelineEditCallbacks({
         if (!target) return;
         const element = usePlayerStore.getState().elements.find((el) => (el.key ?? el.id) === elId);
         if (!element) {
-          removeKeyframeTarget(target.animId, target.tweenPct, animations);
+          removeKeyframeTarget(target.animId, target.tweenPct);
           return;
         }
         // Persist through the CLICKED element's own selection so a deletion on a
         // non-selected element (especially one in a different source file) commits
         // against the right element instead of the current domEditSelection.
         void buildDomSelectionForTimelineElement(element).then((selection) => {
-          if (selection)
-            removeKeyframeTarget(target.animId, target.tweenPct, animations, selection);
+          if (selection) removeKeyframeTarget(target.animId, target.tweenPct, selection);
         });
       },
       // Retime the keyframe to the playhead, preserving its value + ease. The
@@ -341,15 +335,7 @@ export function useTimelineEditCallbacks({
         const selection = await buildDomSelectionForTimelineElement(element);
         if (!selection) return;
         if (target.remove) {
-          // The clicked element's animations, not the selected element's: this
-          // lookup decides delete-the-flat-tween vs remove-one-keyframe, and a
-          // miss silently takes the keyframe branch, stranding the flat tween.
-          removeKeyframeTarget(
-            target.animationId,
-            target.tweenPercentage,
-            resolveElementAnimations(element.key ?? element.id),
-            selection,
-          );
+          removeKeyframeTarget(target.animationId, target.tweenPercentage, selection);
           return;
         }
         await handleGsapAddKeyframeBatch(

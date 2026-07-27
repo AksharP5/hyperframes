@@ -205,7 +205,7 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     view.unmount();
   });
 
-  it("deletes a non-selected element flat boundary through the clicked element's selection", async () => {
+  it("refuses a non-selected element flat boundary instead of deleting the tween", async () => {
     const circle: TimelineElement = {
       ...element,
       id: "circle",
@@ -229,12 +229,15 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       await Promise.resolve();
     });
 
-    // Persisted through the CLICKED element's own selection, not the current one.
-    expect(mocks.actions.handleGsapDeleteAnimation).toHaveBeenCalledWith(
+    // Persisted through the CLICKED element's own selection, not the current one,
+    // and as a remove-keyframe the writer can refuse — never a whole-tween delete.
+    expect(mocks.actions.handleGsapRemoveKeyframe).toHaveBeenCalledWith(
       otherFlatAnimation.id,
+      0,
+      undefined,
       mocks.selection,
     );
-    expect(mocks.actions.handleGsapRemoveKeyframe).not.toHaveBeenCalled();
+    expect(mocks.actions.handleGsapDeleteAnimation).not.toHaveBeenCalled();
     view.unmount();
   });
 
@@ -313,7 +316,7 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     view.unmount();
   });
 
-  it("keeps selected-element flat boundary deletion on the animation delete path", () => {
+  it("keeps a selected-element flat boundary on the remove-keyframe path", () => {
     const view = renderCallbacks();
 
     act(() => {
@@ -325,15 +328,17 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       });
     });
 
-    expect(mocks.actions.handleGsapDeleteAnimation).toHaveBeenCalledWith(
+    expect(mocks.actions.handleGsapRemoveKeyframe).toHaveBeenCalledWith(
       flatAnimation.id,
+      0,
+      undefined,
       undefined,
     );
-    expect(mocks.actions.handleGsapRemoveKeyframe).not.toHaveBeenCalled();
+    expect(mocks.actions.handleGsapDeleteAnimation).not.toHaveBeenCalled();
     view.unmount();
   });
 
-  it("routes the flat lane-header remove toggle through the guarded delete path", async () => {
+  it("routes the flat lane-header remove toggle through the refusable remove path", async () => {
     const view = renderCallbacks();
 
     await act(async () => {
@@ -346,19 +351,20 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       });
     });
 
-    expect(mocks.actions.handleGsapDeleteAnimation).toHaveBeenCalledWith(
+    expect(mocks.actions.handleGsapRemoveKeyframe).toHaveBeenCalledWith(
       flatAnimation.id,
+      100,
+      undefined,
       mocks.selection,
     );
-    expect(mocks.actions.handleGsapRemoveKeyframe).not.toHaveBeenCalled();
+    expect(mocks.actions.handleGsapDeleteAnimation).not.toHaveBeenCalled();
     view.unmount();
   });
 
   // The lane-header toggle fires on whichever element owns the lane, which need
-  // not be the selected one. Looking the flat tween up in the selected element's
-  // animations misses, and the miss silently takes the remove-one-keyframe
-  // branch, which strands the flat tween instead of deleting it.
-  it("removes a non-selected element's flat tween through that element's own animations", async () => {
+  // not be the selected one. It must still commit through that element's own
+  // selection, and it must never escalate a flat tween to a whole-tween delete.
+  it("removes a non-selected element's flat tween through that element's own selection", async () => {
     const circle: TimelineElement = {
       ...element,
       id: "circle",
@@ -381,11 +387,13 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       });
     });
 
-    expect(mocks.actions.handleGsapDeleteAnimation).toHaveBeenCalledWith(
+    expect(mocks.actions.handleGsapRemoveKeyframe).toHaveBeenCalledWith(
       otherFlatAnimation.id,
+      0,
+      undefined,
       mocks.selection,
     );
-    expect(mocks.actions.handleGsapRemoveKeyframe).not.toHaveBeenCalled();
+    expect(mocks.actions.handleGsapDeleteAnimation).not.toHaveBeenCalled();
     view.unmount();
   });
 

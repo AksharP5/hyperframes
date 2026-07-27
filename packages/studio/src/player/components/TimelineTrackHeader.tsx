@@ -1,6 +1,5 @@
-import { useState } from "react";
 import { Eye, EyeSlash } from "@phosphor-icons/react";
-import type { GsapAnimation, PropertyGroupName } from "@hyperframes/core/gsap-parser";
+import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { Music } from "../../icons/SystemIcons";
 import type { TimelineElement } from "../store/playerStore";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
@@ -30,8 +29,6 @@ interface TimelineTrackHeaderProps {
   currentTime: number;
   isTrackHidden: boolean;
   isAudioTrack: boolean;
-  isActive: boolean;
-  isHovered: boolean;
   theme: TimelineTheme;
   onToggleClipExpanded: () => void;
   onToggleTrackHidden: TimelineEditCallbacks["onToggleTrackHidden"];
@@ -180,14 +177,7 @@ function PropertyGroupHeaderRow({
   expandedElement,
   currentTime,
   clipPercentage,
-  hoveredGroup,
-  setHoveredGroup,
-  isActive,
-  isHovered,
-  isTrackHidden,
-  trackNumber,
   gutterBackground,
-  onToggleTrackHidden,
   onTogglePropertyGroupKeyframe,
   onSeek,
 }: {
@@ -197,14 +187,7 @@ function PropertyGroupHeaderRow({
   expandedElement: TimelineElement;
   currentTime: number;
   clipPercentage: number;
-  hoveredGroup: PropertyGroupName | null;
-  setHoveredGroup: (group: PropertyGroupName | null) => void;
-  isActive: boolean;
-  isHovered: boolean;
-  isTrackHidden: boolean;
-  trackNumber: number;
   gutterBackground: string;
-  onToggleTrackHidden: TimelineEditCallbacks["onToggleTrackHidden"];
   onTogglePropertyGroupKeyframe?: TimelineEditCallbacks["onTogglePropertyGroupKeyframe"];
   onSeek?: (time: number) => void;
 }) {
@@ -213,9 +196,6 @@ function PropertyGroupHeaderRow({
     currentTime,
     clipPercentage,
   );
-  const showEye =
-    hoveredGroup === lane.group ||
-    (hoveredGroup === null && laneIndex === 0 && (isActive || isHovered));
 
   return (
     <div
@@ -228,8 +208,6 @@ function PropertyGroupHeaderRow({
         height: LANE_H,
         background: gutterBackground,
       }}
-      onPointerEnter={() => setHoveredGroup(lane.group)}
-      onPointerLeave={() => setHoveredGroup(null)}
     >
       {/* Tree connector: vertical spine (top-half on the last lane) + branch tick. */}
       <span className="relative h-full w-3 shrink-0" aria-hidden="true">
@@ -272,12 +250,6 @@ function PropertyGroupHeaderRow({
       >
         {valueReadout(lane.group, values)}
       </span>
-      <VisibilityButton
-        hidden={isTrackHidden}
-        trackNumber={trackNumber}
-        visible={showEye}
-        onToggle={onToggleTrackHidden}
-      />
     </div>
   );
 }
@@ -293,15 +265,12 @@ export function TimelineTrackHeader({
   currentTime,
   isTrackHidden,
   isAudioTrack,
-  isActive,
-  isHovered,
   theme,
   onToggleClipExpanded,
   onToggleTrackHidden,
   onTogglePropertyGroupKeyframe,
   onSeek,
 }: TimelineTrackHeaderProps) {
-  const [hoveredGroup, setHoveredGroup] = useState<PropertyGroupName | null>(null);
   const clipPercentage = keyframeClip
     ? ((currentTime - keyframeClip.start) / keyframeClip.duration) * 100
     : 0;
@@ -346,7 +315,19 @@ export function TimelineTrackHeader({
             isExpanded={isExpanded}
             gutterBackground={theme.gutterBackground}
             onToggleClipExpanded={onToggleClipExpanded}
-          />
+          >
+            {/* The eye belongs to the LAYER, so it lives on the always-mounted
+                layer row exactly like a plain track's. Hanging it off a lane row
+                (hover-gated, and only while expanded) left a keyframed track with
+                no way to be hidden at all by keyboard, and put the control on a
+                row it does not act on. */}
+            <VisibilityButton
+              hidden={isTrackHidden}
+              trackNumber={trackNumber}
+              visible
+              onToggle={onToggleTrackHidden}
+            />
+          </LayerDisclosureRow>
           {isExpanded &&
             lanes.map((lane, laneIndex) => (
               <PropertyGroupHeaderRow
@@ -357,14 +338,7 @@ export function TimelineTrackHeader({
                 expandedElement={keyframeClip}
                 currentTime={currentTime}
                 clipPercentage={clipPercentage}
-                hoveredGroup={hoveredGroup}
-                setHoveredGroup={setHoveredGroup}
-                isActive={isActive}
-                isHovered={isHovered}
-                isTrackHidden={isTrackHidden}
-                trackNumber={trackNumber}
                 gutterBackground={theme.gutterBackground}
-                onToggleTrackHidden={onToggleTrackHidden}
                 onTogglePropertyGroupKeyframe={onTogglePropertyGroupKeyframe}
                 onSeek={onSeek}
               />

@@ -4,6 +4,7 @@ import { usePlayerStore } from "../player/store/playerStore";
 import { readRuntimeKeyframes, scanAllRuntimeKeyframes } from "./gsapRuntimeBridge";
 import {
   clearKeyframeCacheForElement,
+  pruneKeyframeCacheToFiles,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
 import { toAbsoluteTime, toClipPercentage } from "./gsapShared";
@@ -390,6 +391,9 @@ export function usePopulateKeyframeCacheForFile(
       new Set([sourceFile, ...(compositionSrcKey ? compositionSrcKey.split("|") : [])]),
     );
     const doc = iframeRef?.current?.contentDocument;
+    // Everything the previous scan cached for a file this one no longer covers
+    // (the composition just switched away from) has no owner left to clear it.
+    pruneKeyframeCacheToFiles(files);
     Promise.all(files.map((sf) => populateKeyframeCacheFromAst(projectId, sf, doc))).then(() => {
       astFetchDoneRef.current = fetchKey;
     });

@@ -11,12 +11,15 @@ export function LayerDisclosureRow({
   isExpanded,
   gutterBackground,
   onToggleClipExpanded,
+  children,
 }: {
   keyframeClip: TimelineElement;
   clipCount: number;
   isExpanded: boolean;
   gutterBackground: string;
   onToggleClipExpanded: () => void;
+  /** Trailing controls that act on the LAYER (the visibility eye), not on a lane. */
+  children?: React.ReactNode;
 }) {
   const name = keyframeClip.label ?? keyframeClip.domId ?? keyframeClip.id;
   return (
@@ -57,6 +60,7 @@ export function LayerDisclosureRow({
         {name}
       </span>
       <TrackClipCount clipCount={clipCount} />
+      {children}
     </div>
   );
 }

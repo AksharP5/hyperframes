@@ -4,6 +4,7 @@ import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerS
 import {
   clearKeyframeCacheForElement,
   clearKeyframeCacheForFile,
+  pruneKeyframeCacheToFiles,
   updateKeyframeCacheFromParsed,
 } from "./gsapKeyframeCacheHelpers";
 
@@ -108,6 +109,48 @@ describe("clearKeyframeCacheForFile", () => {
 
     expect(cache().has("other.html#z")).toBe(true);
     expect(cache().has("z")).toBe(true);
+  });
+});
+
+describe("pruneKeyframeCacheToFiles", () => {
+  // Switching composition leaves the previous comp's elements cached with no
+  // owner left to clear them: each file only ever clears its own entries.
+  it("drops every element of a file the next scan no longer covers", () => {
+    seed("index.html#stress-1");
+    seed("stress-1");
+    seed("index.html#stress-2");
+    seed("stress-2");
+    seed("kf200.html#kf200");
+    seed("index.html#kf200");
+    seed("kf200");
+
+    pruneKeyframeCacheToFiles(["kf200.html"]);
+
+    for (const key of ["index.html#stress-1", "stress-1", "index.html#stress-2", "stress-2"]) {
+      expect(cache().has(key)).toBe(false);
+    }
+    expect(cache().has("kf200.html#kf200")).toBe(true);
+  });
+
+  it("prunes gsapAnimations alongside keyframeCache", () => {
+    usePlayerStore.getState().setGsapAnimations("index.html#stress-1", [animWithKeyframes("t")]);
+    usePlayerStore.getState().setGsapAnimations("kf200.html#kf200", [animWithKeyframes("u")]);
+
+    pruneKeyframeCacheToFiles(["kf200.html"]);
+
+    const animations = usePlayerStore.getState().gsapAnimations;
+    expect(animations.has("index.html#stress-1")).toBe(false);
+    expect(animations.has("kf200.html#kf200")).toBe(true);
+  });
+
+  it("keeps everything when every cached file is still covered", () => {
+    seed("index.html#hero");
+    seed("comp.html#a");
+
+    pruneKeyframeCacheToFiles(["index.html", "comp.html"]);
+
+    expect(cache().has("index.html#hero")).toBe(true);
+    expect(cache().has("comp.html#a")).toBe(true);
   });
 });
 

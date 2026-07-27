@@ -113,6 +113,34 @@ export function clearKeyframeCacheForFile(sourceFile: string): void {
   }
 }
 
+/**
+ * Drop every cached element owned by a file that is no longer on screen. Each
+ * file only ever clears its OWN entries (see clearKeyframeCacheForFile), so
+ * switching composition left the previous composition's elements cached forever
+ * — 240 entries per switch on a 120-clip comp, in both keyframeCache and
+ * gsapAnimations, with nothing to evict them. Called once before a re-scan, with
+ * the full set of files that scan covers.
+ */
+export function pruneKeyframeCacheToFiles(files: readonly string[]): void {
+  const keep = new Set(files);
+  const { keyframeCache, gsapAnimations } = usePlayerStore.getState();
+  const stale = new Map<string, Set<string>>();
+  for (const key of [...keyframeCache.keys(), ...gsapAnimations.keys()]) {
+    const hash = key.indexOf("#");
+    // Bare-id aliases carry no owner; clearKeyframeCacheForElement takes them
+    // with their prefixed key, so skipping them here loses nothing.
+    if (hash < 0) continue;
+    const sourceFile = key.slice(0, hash);
+    if (keep.has(sourceFile)) continue;
+    const ids = stale.get(sourceFile) ?? new Set<string>();
+    ids.add(key.slice(hash + 1));
+    stale.set(sourceFile, ids);
+  }
+  for (const [sourceFile, ids] of stale) {
+    for (const id of ids) clearKeyframeCacheForElement(sourceFile, id);
+  }
+}
+
 /** Every cache key a write for this element sets, in read-preference order. */
 export function elementCacheKeys(sourceFile: string, elementId: string): string[] {
   return sourceFile === "index.html"
