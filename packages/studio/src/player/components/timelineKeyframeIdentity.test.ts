@@ -32,6 +32,13 @@ describe("timeline keyframe selection identity", () => {
     expect(timelineKeyframeTargetFromSelectionKey("comp#a", key)).toBeNull();
   });
 
+  // Timeline.tsx still writes the collapsed form for clip-lane shift-clicks, and
+  // an element id can itself contain a colon — the split has to be the LAST one.
+  it("splits the collapsed key at the last colon so a colon-bearing id survives", () => {
+    expect(timelineKeyframeTargetFromSelectionKey("a:b", "a:b:40")).toEqual({ percentage: 40 });
+    expect(timelineKeyframeTargetFromSelectionKey("a", "a:b:40")).toBeNull();
+  });
+
   it("retains the collapsed key fallback and rejects malformed percentages", () => {
     expect(timelineKeyframeTargetFromSelectionKey("comp#a", "comp#a:30")).toEqual({
       percentage: 30,

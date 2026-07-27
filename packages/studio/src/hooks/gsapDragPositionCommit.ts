@@ -2,7 +2,7 @@ import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { usePlayerStore } from "../player/store/playerStore";
 import { resolveTweenStart, resolveTweenDuration } from "../utils/globalTimeCompiler";
-import { resolveEditableTweenDuration } from "./gsapShared";
+import { KEYFRAME_PCT_MATCH, resolveEditableTweenDuration } from "./gsapShared";
 import { roundTo3 } from "../utils/rounding";
 import { computeDraggedGsapPosition } from "./draggedGsapPosition";
 import {
@@ -12,17 +12,27 @@ import {
   materializeIfDynamic,
 } from "./gsapDragCommit";
 
+/**
+ * The tween's keyframes with one inserted at `percentage`. Any existing keyframe
+ * within {@link KEYFRAME_PCT_MATCH} of the insert is REPLACED, not kept: the
+ * server takes a replace-with-keyframes list verbatim, so an append-only build
+ * could hand it two keyframes a fraction of a percent apart. The invariant lives
+ * here rather than in each caller's own pre-check, which is how the two callers
+ * ended up with different tolerances in the first place.
+ */
 export function buildTemporalArcKeyframes(
   anim: GsapAnimation,
   percentage: number,
   properties: Record<string, number>,
 ) {
   return [
-    ...(anim.keyframes?.keyframes ?? []).map((keyframe) => ({
-      percentage: keyframe.percentage,
-      properties: { ...keyframe.properties },
-      ...(keyframe.ease ? { ease: keyframe.ease } : {}),
-    })),
+    ...(anim.keyframes?.keyframes ?? [])
+      .filter((keyframe) => Math.abs(keyframe.percentage - percentage) > KEYFRAME_PCT_MATCH)
+      .map((keyframe) => ({
+        percentage: keyframe.percentage,
+        properties: { ...keyframe.properties },
+        ...(keyframe.ease ? { ease: keyframe.ease } : {}),
+      })),
     { percentage, properties },
   ].sort((a, b) => a.percentage - b.percentage);
 }
@@ -279,7 +289,12 @@ export async function commitGsapPositionFromDrag(
     const { activeKeyframePct, setActiveKeyframePct } = usePlayerStore.getState();
     const pct = activeKeyframePct ?? computeCurrentPercentage(selection, anim);
     const keyframes = anim.keyframes?.keyframes ?? [];
-    const pointIndex = keyframes.findIndex((kf) => Math.abs(kf.percentage - pct) < 0.05);
+    // Same tolerance as applyArcKeyframeAtPlayhead and isMotionPathEndpoint. A
+    // tighter one here meant a drag that landed a fraction of a percent off an
+    // authored waypoint skipped the update-point branch and appended instead.
+    const pointIndex = keyframes.findIndex(
+      (kf) => Math.abs(kf.percentage - pct) <= KEYFRAME_PCT_MATCH,
+    );
     if (pointIndex >= 0) {
       await callbacks.commitMutation(
         selection,

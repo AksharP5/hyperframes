@@ -58,17 +58,29 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
   // Pending retime destination (clip + tween %) per keyframe key, so a rapid
   // second drag composes from where the first move left the keyframe (whose
   // cache entry has not rebuilt yet) instead of the stale rendered value.
-  const pendingRetimeRef = useRef(new Map<string, { clipPct: number; tweenPct: number }>());
+  const pendingRetimeRef = useRef<Map<string, { clipPct: number; tweenPct: number }> | null>(null);
+  // Lazy: `useRef(new Map())` allocates a Map on every render and throws all but
+  // the first away, once per mounted lane.
+  pendingRetimeRef.current ??= new Map();
+  const pendingRetimes = pendingRetimeRef.current;
   useEffect(() => {
-    // Clear a pending entry once the authoritative cache reflects a keyframe at
-    // ~its destination. Match by tolerance, not equality: cache writers round
-    // clip %s, so an exact check would leak an entry after every successful retime.
-    for (const [key, pending] of pendingRetimeRef.current) {
-      if (keyframesData.keyframes.some((k) => Math.abs(k.percentage - pending.clipPct) < 0.2)) {
-        pendingRetimeRef.current.delete(key);
-      }
+    // Clear a pending entry once the authoritative cache reflects THAT keyframe
+    // at ~its destination. Match by tolerance, not equality: cache writers round
+    // clip %s, so an exact check would leak an entry after every successful
+    // retime. Match by identity too: a bare "some keyframe is near that %" test
+    // cleared the entry whenever an unrelated sibling happened to sit there,
+    // which is easy to hit on an evenly spaced row.
+    const pendingEntries = pendingRetimeRef.current;
+    if (!pendingEntries) return;
+    for (const [key, pending] of pendingEntries) {
+      const settled = keyframesData.keyframes.some(
+        (k) =>
+          timelineKeyframeSelectionKey(elementId, keyframeTarget(k)) === key &&
+          Math.abs(k.percentage - pending.clipPct) < 0.2,
+      );
+      if (settled) pendingEntries.delete(key);
     }
-  }, [keyframesData.keyframes]);
+  }, [keyframesData.keyframes, elementId]);
   // Visual-only preview of the dragged diamond's clip-% — no runtime/GSAP hold
   // (that optimistic hold was the #1763 flake). The atomic move-keyframe commit
   // on drop re-keys the diamond from source.
@@ -190,9 +202,19 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
         const target = keyframeTarget(kf);
         const kfKey = timelineKeyframeSelectionKey(elementId, target);
         // Clamp against this keyframe's own tween, not the whole merged row.
-        const siblingRow = siblingRowOf(kf);
-        const siblingClipPcts = siblingRow.map((k) => k.percentage);
-        const siblingIndex = siblingRow.indexOf(kf);
+        // Compose each sibling's pending destination in first: clamping against
+        // cached positions while the dragged keyframe reads its pending one let
+        // a second drag cross a neighbour that had already moved past it.
+        const siblingRow = siblingRowOf(kf)
+          .map((k) => ({
+            keyframe: k,
+            clipPct:
+              pendingRetimes.get(timelineKeyframeSelectionKey(elementId, keyframeTarget(k)))
+                ?.clipPct ?? k.percentage,
+          }))
+          .sort((a, b) => a.clipPct - b.clipPct);
+        const siblingClipPcts = siblingRow.map((s) => s.clipPct);
+        const siblingIndex = siblingRow.findIndex((s) => s.keyframe === kf);
         // While dragging this diamond, render it at the live preview clip-%.
         const renderPct = preview?.kfKey === kfKey ? preview.clipPct : kf.percentage;
         // Center the marker's non-overlapping hit region ON its keyframe %, so
@@ -216,7 +238,7 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
               startX: e.clientX,
               lastX: e.clientX,
               index: siblingIndex,
-              fromClipPct: pendingRetimeRef.current.get(kfKey)?.clipPct ?? kf.percentage,
+              fromClipPct: pendingRetimes.get(kfKey)?.clipPct ?? kf.percentage,
               moved: false,
             };
           }
@@ -309,7 +331,7 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
             // For a rapid second retime the diamond still renders the stale cache
             // position, so identify the FROM keyframe by the pending (already-moved)
             // position; the mutation locates the source keyframe by this identity.
-            const pendingBefore = pendingRetimeRef.current.get(kfKey);
+            const pendingBefore = pendingRetimes.get(kfKey);
             const fromTarget = pendingBefore
               ? {
                   ...target,
@@ -318,10 +340,10 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
                 }
               : target;
             const pending = { clipPct: res.toClipPct, tweenPct: newTweenPct };
-            pendingRetimeRef.current.set(kfKey, pending);
+            pendingRetimes.set(kfKey, pending);
             const clearPending = () => {
-              if (pendingRetimeRef.current.get(kfKey) === pending) {
-                pendingRetimeRef.current.delete(kfKey);
+              if (pendingRetimes.get(kfKey) === pending) {
+                pendingRetimes.delete(kfKey);
               }
             };
             // A rejected drop (the destination time is already occupied) snaps

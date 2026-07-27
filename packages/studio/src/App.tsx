@@ -157,6 +157,9 @@ export function StudioApp() {
     pendingTimelineEditPathRef,
   });
   const invalidateGsapCacheRef = useRef<() => void>(() => {});
+  // Stable identity — what the ref indirection is for. An inline arrow re-created
+  // the memoized timeline handlers (it is in their deps) on every render.
+  const invalidateGsapCache = useCallback(() => invalidateGsapCacheRef.current(), []);
   const timelineEditing = useTimelineEditing({
     projectId,
     activeCompPath,
@@ -174,7 +177,7 @@ export function StudioApp() {
     sdkSession: editFlowSdkSession,
     publishSdkSession: sdkHandle.publish,
     forceReloadSdkSession: sdkHandle.forceReload,
-    invalidateGsapCache: () => invalidateGsapCacheRef.current(),
+    invalidateGsapCache,
     handleDomZIndexReorderCommitRef,
   });
   const handleTimelineElementsMove: TimelineMoveEditsHandler = useCallback(

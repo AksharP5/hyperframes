@@ -24,6 +24,12 @@ export function useAutoExpandKeyframedClips(gsapAnimations: Map<string, GsapAnim
     } else {
       seen.current.source = gsapAnimations;
     }
+    // Drop clips that are no longer in the source at all. Without this the set
+    // is append-only, so a clip deleted and reinserted under the same id (undo,
+    // paste) is remembered as already-expanded and never auto-expands again.
+    for (const key of seen.current.clips) {
+      if (!gsapAnimations.has(key)) seen.current.clips.delete(key);
+    }
     const fresh: string[] = [];
     for (const [key, animations] of gsapAnimations) {
       if (seen.current.clips.has(key)) continue;

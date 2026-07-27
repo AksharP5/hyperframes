@@ -70,6 +70,15 @@ export function isInstantHold(animation: GsapAnimation): boolean {
 // `CSS.escape`, it needs no browser global (this runs in node tests too).
 const SAFE_HASH_ID = /^-?[A-Za-z_][\w-]*$/;
 
+/**
+ * How close (in tween-%) a playhead has to be to count as sitting ON an existing
+ * keyframe. Every "is there already a keyframe here?" test shares this: with two
+ * different tolerances in play, one path decided "no keyframe here, append one"
+ * while another decided "yes, edit that one", and a drag near a waypoint left two
+ * keyframes a fraction of a percent apart.
+ */
+export const KEYFRAME_PCT_MATCH = 1;
+
 export function idSelector(id: string): string {
   // A `#id` selector is only valid for a CSS identifier. IDs that start with a
   // digit (e.g. "01-hook-hero-word") make `document.querySelector("#01-...")` and

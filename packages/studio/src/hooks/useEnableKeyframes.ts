@@ -15,6 +15,7 @@ import { fetchParsedAnimations, getAnimationsForElement } from "./useGsapTweenCa
 import {
   selectorFromSelection,
   computeElementPercentage,
+  KEYFRAME_PCT_MATCH,
   isInstantHold,
   resolveEditableTweenDuration,
 } from "./gsapShared";
@@ -302,7 +303,9 @@ async function applyKeyframeAtPlayhead(
   }
   const pct =
     start === null ? computeElementPercentage(t, sel) : absoluteToPercentage(t, start, duration);
-  const existing = kfAnim.keyframes?.keyframes.find((k) => Math.abs(k.percentage - pct) <= 1);
+  const existing = kfAnim.keyframes?.keyframes.find(
+    (k) => Math.abs(k.percentage - pct) <= KEYFRAME_PCT_MATCH,
+  );
   if (existing) {
     session.handleGsapRemoveKeyframe(kfAnim.id, existing.percentage);
     return;
@@ -406,7 +409,7 @@ export async function applyArcKeyframeAtPlayhead(
   const nodes = arcAnim.keyframes?.keyframes ?? [];
   const playheadPercentage = absoluteToPercentage(t, start, duration);
   const timedNodeIndex = nodes.findIndex(
-    (node) => Math.abs(node.percentage - playheadPercentage) <= 1,
+    (node) => Math.abs(node.percentage - playheadPercentage) <= KEYFRAME_PCT_MATCH,
   );
   if (timedNodeIndex !== -1) {
     if (timedNodeIndex > 0 && timedNodeIndex < nodes.length - 1) {

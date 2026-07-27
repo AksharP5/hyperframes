@@ -11,17 +11,12 @@ import {
   elementCacheKeys,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
-import { toClipKeyframes } from "./gsapShared";
+import { idFromSelector, toClipKeyframes } from "./gsapShared";
 import {
   deduplicateKeyframes,
   isStaticPositionHold,
   synthesizeFlatTweenKeyframes,
 } from "./gsapTweenSynth";
-
-function extractIdFromSelector(selector: string): string | null {
-  const match = selector.match(/^#([\w-]+)/);
-  return match ? match[1] : null;
-}
 
 /**
  * Resolve a tween's target selector to the ids of the element(s) it animates.
@@ -36,10 +31,13 @@ export function resolveSelectorElementIds(
   selector: string,
   doc: Document | null | undefined,
 ): string[] {
-  const bareId = selector.match(/^#([\w-]+)$/);
-  if (bareId) return [bareId[1]];
+  // A whole-selector id match (either shape) addresses exactly one element.
+  const bareId = /^(#[\w-]+|\[id="(?:\\.|[^"\\])*"\])$/.test(selector)
+    ? idFromSelector(selector)
+    : null;
+  if (bareId) return [bareId];
   if (!doc) {
-    const lead = extractIdFromSelector(selector);
+    const lead = idFromSelector(selector);
     return lead ? [lead] : [];
   }
   const ids = new Set<string>();
@@ -51,7 +49,7 @@ export function resolveSelectorElementIds(
         if (el.id) ids.add(el.id);
       }
     } catch {
-      const lead = extractIdFromSelector(sel);
+      const lead = idFromSelector(sel);
       if (lead) ids.add(lead);
     }
   }

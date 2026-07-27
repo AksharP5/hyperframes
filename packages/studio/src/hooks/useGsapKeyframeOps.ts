@@ -15,6 +15,7 @@ import {
 } from "../utils/sdkCutover";
 import type { KeyframeCacheEntry } from "../player/store/playerStore";
 import { commitKeyframeAtTimeImpl } from "./gsapKeyframeCommit";
+import { idFromSelector } from "./gsapShared";
 import {
   clearKeyframeCacheForElement,
   readKeyframeSnapshot,
@@ -338,7 +339,7 @@ export function useGsapKeyframeOps({
       // remove-all-keyframes collapses the tween to a static hold and the commit
       // path doesn't return parsed animations, so the keyframe cache is never
       // refreshed — clear it here so the timeline diamonds disappear immediately.
-      const elementId = selection.id ?? selection.selector?.match(/^#([\w-]+)/)?.[1] ?? null;
+      const elementId = selection.id ?? idFromSelector(selection.selector);
       if (elementId) clearKeyframeCacheForElement(targetPath, elementId);
       if (sdkSession && sdkDeps) {
         const handled = await sdkGsapRemoveAllKeyframesPersist(

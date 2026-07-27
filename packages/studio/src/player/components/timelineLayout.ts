@@ -104,6 +104,10 @@ function getTimelineRowOffset(row: number, rowHeights: readonly number[]): numbe
   const offsets = getTimelineRowOffsets(rowHeights);
   if (row <= 0) return row * getTimelineRowHeight(0, rowHeights);
   if (row >= rowHeights.length) {
+    // Deliberately TRACK_H, not the last row's height: rows past the end do not
+    // exist yet, and a row created by dropping there starts unexpanded. The
+    // pre-first-row branch above uses row 0's concrete height instead because
+    // that row DOES exist — the pointer is in the top pad above a real lane.
     return (offsets[rowHeights.length] ?? 0) + (row - rowHeights.length) * TRACK_H;
   }
   const wholeRow = Math.floor(row);
