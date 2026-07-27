@@ -502,19 +502,16 @@ function detectSweepStatic(
   ];
 }
 
-// rotation_pivot_drift thresholds. A spinning element's bbox center should be
-// fixed; drift beyond this signals a wrong pivot (transformOrigin/svgOrigin).
+// rotation_pivot_drift: bbox center should stay fixed while the element spins.
 const ROTATION_MIN_SAMPLES = 3;
-// Degrees of angle spread that count as "actually spinning" (vs a static tilt).
+// Minimum angle spread that counts as spinning rather than a static tilt.
 const ROTATION_MIN_ANGLE_SPREAD_DEG = 20;
-// Max bbox-width ratio across samples — above this it is scaling/entrancing,
-// not spinning in place. A rigid anisotropic shape's axis-aligned bbox
-// oscillates under rotation on its own (a plain square already swings 1.41x
-// between flat and 45deg), so this must sit above that; 1.6 admits rotating
-// squares/mild rectangles while still excluding gross scale/entrance growth
-// and thin bars/lines whose bbox swings many-fold (e.g. a rotating reference
-// arm). The bbox-CENTER drift below is the real spin-in-place discriminator.
+// Long-axis AABB growth ceiling (square@45° ≈ 1.41×); rejects non-rigid blow-ups before the model fit.
 const ROTATION_MAX_SIZE_RATIO = 1.6;
+// Relative slack when matching observed AABB to one rigid unrotated rectangle.
+const ROTATION_RIGID_AABB_RATIO = 1.15;
+// |cos2θ| below this → 45°-class sample; skip as an unrotated-size estimator (singular).
+const ROTATION_RIGID_ESTIMATE_MIN_DET = 0.15;
 // Skip tiny decorative spinners; only sizable rotating figures matter.
 const ROTATION_MIN_MEDIAN_AREA_PX = 2500;
 const ROTATION_DRIFT_SIZE_FRACTION = 0.1;
@@ -616,20 +613,90 @@ function isActuallySpinning(group: RotationSample[]): boolean {
   return maxAngleSpread(group.map((s) => s.angle)) > ROTATION_MIN_ANGLE_SPREAD_DEG;
 }
 
-/** Rigid bbox size in BOTH dimensions. A scale/entrance animation is not pivot
- * drift; in particular top-anchored height scaling (fixed width, growing height)
- * moves the AABB center on its own — the earlier width-only guard let that through
- * as a false positive. */
-function isRotationSizeStable(group: RotationSample[]): boolean {
-  const widths = group.map((s) => s.w);
-  const heights = group.map((s) => s.h);
-  const minWidth = Math.min(...widths);
-  const minHeight = Math.min(...heights);
-  if (minWidth <= 0 || minHeight <= 0) return false;
+/** AABB of an axis-aligned rectangle of size (elemW, elemH) after CSS rotation `angleDeg`. */
+function aabbForRotatedRect(
+  elemW: number,
+  elemH: number,
+  angleDeg: number,
+): { w: number; h: number } {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cosAbs = Math.abs(Math.cos(rad));
+  const sinAbs = Math.abs(Math.sin(rad));
+  return { w: elemW * cosAbs + elemH * sinAbs, h: elemW * sinAbs + elemH * cosAbs };
+}
+
+/** Invert one sample to unrotated (elemW, elemH); null when θ is near 45° (singular). */
+function unrotatedSizeFromSample(sample: RotationSample): { w: number; h: number } | null {
+  const rad = (sample.angle * Math.PI) / 180;
+  const cosAbs = Math.abs(Math.cos(rad));
+  const sinAbs = Math.abs(Math.sin(rad));
+  const det = cosAbs * cosAbs - sinAbs * sinAbs; // cos(2θ)
+  if (Math.abs(det) < ROTATION_RIGID_ESTIMATE_MIN_DET) return null;
+  const elemW = (cosAbs * sample.w - sinAbs * sample.h) / det;
+  const elemH = (cosAbs * sample.h - sinAbs * sample.w) / det;
+  if (!(elemW > 0) || !(elemH > 0)) return null;
+  return { w: elemW, h: elemH };
+}
+
+function aabbMatchesSample(expected: { w: number; h: number }, sample: RotationSample): boolean {
+  if (expected.w <= 0 || expected.h <= 0 || sample.w <= 0 || sample.h <= 0) return false;
   return (
-    Math.max(...widths) / minWidth <= ROTATION_MAX_SIZE_RATIO &&
-    Math.max(...heights) / minHeight <= ROTATION_MAX_SIZE_RATIO
+    Math.max(expected.w, sample.w) / Math.min(expected.w, sample.w) <= ROTATION_RIGID_AABB_RATIO &&
+    Math.max(expected.h, sample.h) / Math.min(expected.h, sample.h) <= ROTATION_RIGID_AABB_RATIO
   );
+}
+
+function isSingularRotationAngle(angleDeg: number): boolean {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cosAbs = Math.abs(Math.cos(rad));
+  const sinAbs = Math.abs(Math.sin(rad));
+  return Math.abs(cosAbs * cosAbs - sinAbs * sinAbs) < ROTATION_RIGID_ESTIMATE_MIN_DET;
+}
+
+function isNearSquareAabb(sample: RotationSample): boolean {
+  if (sample.w <= 0 || sample.h <= 0) return false;
+  return Math.max(sample.w, sample.h) / Math.min(sample.w, sample.h) <= ROTATION_RIGID_AABB_RATIO;
+}
+
+/**
+ * All samples are 45°-class (no invertible estimator): a rigid rectangle projects to one
+ * near-square AABB size at every such phase, so mutual AABB agreement is the rigidity proof.
+ */
+function fitsSingularPhaseRigidProjection(group: RotationSample[]): boolean {
+  if (group.length === 0 || !group.every((s) => isSingularRotationAngle(s.angle))) return false;
+  if (!group.every(isNearSquareAabb)) return false;
+  const ref = group[0];
+  if (!ref) return false;
+  return group.every((sample) => aabbMatchesSample({ w: ref.w, h: ref.h }, sample));
+}
+
+/**
+ * Every sample's AABB matches one fixed unrotated rectangle spun by that sample's angle.
+ * Scale/entrance fails; partial-arc and all-singular (45°-class) rigid spins still pass.
+ */
+function fitsOneRigidRectangle(group: RotationSample[]): boolean {
+  for (const ref of group) {
+    const size = unrotatedSizeFromSample(ref);
+    if (!size) continue;
+    if (
+      group.every((sample) =>
+        aabbMatchesSample(aabbForRotatedRect(size.w, size.h, sample.angle), sample),
+      )
+    ) {
+      return true;
+    }
+  }
+  return fitsSingularPhaseRigidProjection(group);
+}
+
+/** Rigid spin: long AABB side stays bounded, and all samples fit one rotated rectangle. */
+function isRotationSizeStable(group: RotationSample[]): boolean {
+  if (group.some((s) => s.w <= 0 || s.h <= 0)) return false;
+  const longSides = group.map((s) => Math.max(s.w, s.h));
+  const minLong = Math.min(...longSides);
+  if (minLong <= 0) return false;
+  if (Math.max(...longSides) / minLong > ROTATION_MAX_SIZE_RATIO) return false;
+  return fitsOneRigidRectangle(group);
 }
 
 /** Skip tiny decorative spinners; only sizable rotating figures matter. */
@@ -637,9 +704,7 @@ function isSizableRotation(group: RotationSample[]): boolean {
   return median(group.map((s) => s.w * s.h)) >= ROTATION_MIN_MEDIAN_AREA_PX;
 }
 
-/** The size/motion gates a selector group must clear before the (viewport-
- * dependent) center-drift test. Each is a strict FP guard, deliberately so:
- * a false positive feeds destructive downstream auto-fixes. */
+/** Size/motion FP gates before the viewport-dependent center-drift test. */
 function isRotationDriftCandidate(group: RotationSample[]): boolean {
   return (
     hasEnoughRotationSamples(group) &&
@@ -649,27 +714,7 @@ function isRotationDriftCandidate(group: RotationSample[]): boolean {
   );
 }
 
-/**
- * rotation_pivot_drift: an element that visibly SPINS (its rotation angle varies
- * across the seek grid) while its bounding-box CENTER travels is pivoting about
- * the wrong point — the classic symptom of a transformOrigin/svgOrigin authored
- * as hardcoded pixels against a coordinate space the element was later resized
- * out of (e.g. spokes set to `250px 250px` inside a 460px-rendered 500-viewBox
- * SVG). A correctly centered spinner holds its bbox center fixed.
- *
- * Cross-sample by necessity — one frame can't distinguish spin-in-place from
- * pivot drift. FP guards are deliberately strict because a false positive feeds
- * destructive downstream auto-fixes: requires real rotation, a stable bbox size
- * in both axes (excludes scale/entrance animations), a sizable element, and
- * honors `[data-layout-allow-orbit]` opt-outs (applied browser-side).
- *
- * Invariant: samples are grouped by `selector`, assumed stable across seeks.
- * An element without a stable id/class can fall back to a `nth-of-type(N)`
- * selector whose N shifts as siblings enter/exit — so in that fringe it may be
- * mis-grouped (a missed detection, or in a rare exit-then-enter aliasing case a
- * spurious one). Author-crafted rotating figures effectively always carry stable
- * anchors; a stable-anchor gate on the browser sampler is the structural fix.
- */
+/** Flags a spinning element whose bbox center drifts — wrong transformOrigin/svgOrigin (elongated rotators included). */
 export function detectRotationPivotDrift(
   samples: RotationSample[],
   canvas: Canvas,
