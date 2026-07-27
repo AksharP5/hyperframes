@@ -245,6 +245,77 @@ jobs:
 
           Write-Host "canary.mp4 ok: ${width}x${height} @ $fps, ${duration}s"
 
+      - name: Scaffold transparent WebM canary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $project = "$env:RUNNER_TEMP\windows-webm-alpha"
+          New-Item -ItemType Directory -Force -Path $project | Out-Null
+          Copy-Item `
+            "$env:GITHUB_WORKSPACE\.github\workflows\fixtures\windows-webm-alpha.html" `
+            "$project\index.html" `
+            -Force
+
+      - name: Render transparent WebM canary
+        shell: pwsh
+        run: |
+          cd "$env:RUNNER_TEMP\windows-webm-alpha"
+          node "$env:GITHUB_WORKSPACE\packages\cli\dist\cli.js" render `
+            --format webm `
+            --fps 30 `
+            --quality draft `
+            --workers 1 `
+            --output alpha.webm
+
+      - name: Verify decoded WebM alpha
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $webm = "$env:RUNNER_TEMP\windows-webm-alpha\alpha.webm"
+          $rgba = "$env:RUNNER_TEMP\windows-webm-alpha\frame.rgba"
+          if (-not (Test-Path $webm)) { throw "alpha.webm not produced" }
+
+          $probeJson = ffprobe -v error -select_streams v:0 `
+            -show_entries stream=codec_name,pix_fmt:stream_tags=alpha_mode `
+            -of json $webm
+          $probe = ($probeJson -join "`n") | ConvertFrom-Json
+          $stream = $probe.streams[0]
+          if ($stream.codec_name -ne 'vp9') {
+            throw "expected VP9, got $($stream.codec_name)"
+          }
+
+          # VP9 alpha is a Matroska BlockAdditional sidecar. ffprobe reports
+          # the primary stream as yuv420p even when the alpha plane is valid.
+          Write-Host "ffprobe primary pix_fmt=$($stream.pix_fmt)"
+          $alphaMode = $stream.tags.PSObject.Properties |
+            Where-Object { $_.Name -ieq 'alpha_mode' } |
+            Select-Object -First 1
+          if (-not $alphaMode -or [string]$alphaMode.Value -ne '1') {
+            throw "expected case-insensitive ALPHA_MODE=1 sidecar tag"
+          }
+
+          # FFmpeg's native VP9 decoder ignores BlockAdditional alpha. Force
+          # libvpx-vp9, then inspect the actual RGBA alpha bytes.
+          ffmpeg -v error -c:v libvpx-vp9 -i $webm `
+            -frames:v 1 -vf scale=8:8 -pix_fmt rgba -f rawvideo -y $rgba
+          $bytes = [System.IO.File]::ReadAllBytes($rgba)
+          if ($bytes.Length -ne 256) {
+            throw "expected one 8x8 RGBA frame (256 bytes), got $($bytes.Length)"
+          }
+          $hasTransparency = $false
+          for ($i = 3; $i -lt $bytes.Length; $i += 4) {
+            if ($bytes[$i] -lt 255) {
+              $hasTransparency = $true
+              break
+            }
+          }
+          if (-not $hasTransparency) {
+            throw "decoded VP9 frame is fully opaque"
+          }
+
+          Write-Host "alpha.webm ok: ffprobe pix_fmt=$($stream.pix_fmt), ALPHA_MODE=1, decoded RGBA contains transparency"
+
       - name: Scaffold issue #574 reused-video regression
         shell: pwsh
         run: |
@@ -359,6 +430,7 @@ jobs:
           name: windows-render-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/windows-canary/canary/renders/canary.mp4
+            ${{ runner.temp }}/windows-webm-alpha/alpha.webm
             ${{ runner.temp }}/issue-574-reused-video/renders/issue-574.mp4
           if-no-files-found: error
           retention-days: 7
