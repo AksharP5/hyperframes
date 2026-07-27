@@ -248,6 +248,15 @@ function isExtractionCacheCompleteSentinelPath(path: string): boolean {
   );
 }
 
+function resolveExtractedVideoOutputDir(planDir: string, videoId: string): string {
+  const videoRoot = resolve(planDir, "video-frames");
+  const outputDir = resolve(videoRoot, videoId);
+  if (outputDir === videoRoot || !outputDir.startsWith(`${videoRoot}${sep}`)) {
+    throw new PlanV2IntegrityError(`unsafe extracted video id: ${JSON.stringify(videoId)}`);
+  }
+  return outputDir;
+}
+
 // This is the fail-safe policy table for every v1 artifact class. Keeping the
 // branches together makes new artifact classes visibly fall through to both roles.
 // fallow-ignore-next-line complexity
@@ -279,7 +288,7 @@ function artifactTargets(
 
 function listVideoFramePaths(planV1Dir: string, videos: PlanVideosJson): ExtractedFrames[] {
   return videos.extracted.map((video) => {
-    const outputDir = join(planV1Dir, "video-frames", video.videoId);
+    const outputDir = resolveExtractedVideoOutputDir(planV1Dir, video.videoId);
     const frameNames = readdirSync(outputDir).sort();
     const framePaths = new Map<number, string>();
     for (const frameName of frameNames) {
@@ -401,6 +410,15 @@ function parsePlanVideosJson(value: unknown): PlanVideosJson {
     };
   });
   return { videos, extracted };
+}
+
+function materializeExtractedVideoDirectories(planDir: string): void {
+  const videosPath = join(planDir, PLAN_VIDEOS_META_RELATIVE_PATH);
+  if (!existsSync(videosPath)) return;
+  const videos = parsePlanVideosJson(readJsonFile(videosPath, PLAN_VIDEOS_META_RELATIVE_PATH));
+  for (const video of videos.extracted) {
+    mkdirSync(resolveExtractedVideoOutputDir(planDir, video.videoId), { recursive: true });
+  }
 }
 
 function parseChunkSlices(value: unknown): ChunkSliceJson[] {
@@ -919,6 +937,12 @@ export function materializePlanV2Target(
       mkdirSync(dirname(destinationPath), { recursive: true });
       copyFileSync(sourcePath, destinationPath);
     }
+    // Plan v2 transports only files, so a chunk where a video is inactive has
+    // no selected frame artifact from which to create its per-video directory.
+    // renderChunk consumes a v1-compatible layout and intentionally validates
+    // every extracted-video directory from meta/videos.json. Recreate those
+    // zero-byte structural directories without downloading unused frame data.
+    if (target.role === "chunk") materializeExtractedVideoDirectories(tempDir);
     writeFileSync(
       join(tempDir, PLAN_V2_MATERIALIZATION_MARKER),
       canonicalJsonStringify({ manifest, target }),

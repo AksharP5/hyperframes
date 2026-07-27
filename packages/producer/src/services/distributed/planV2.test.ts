@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -58,6 +59,8 @@ function createV1Plan(
     videoId?: string;
     videoSrcPath?: string;
     framePattern?: string;
+    videoStart?: number;
+    videoEnd?: number;
   },
 ): string {
   const {
@@ -70,6 +73,8 @@ function createV1Plan(
     videoId = "hero",
     videoSrcPath = "/fixture/hero.mp4",
     framePattern = "frame_%05d.jpg",
+    videoStart = 0,
+    videoEnd = 1,
   } = options ?? {};
   const planDir = join(root, "v1");
   mkdirSync(join(planDir, "compiled"), { recursive: true });
@@ -98,8 +103,8 @@ function createV1Plan(
           {
             id: videoId,
             src: "hero.mp4",
-            start: 0,
-            end: 1,
+            start: videoStart,
+            end: videoEnd,
             mediaStart: 0,
             loop: false,
             hasAudio: false,
@@ -328,6 +333,41 @@ describe("Plan v2 manifest", () => {
     );
   });
 
+  it("materializes empty video directories for chunks where the video is inactive", () => {
+    const root = tempPath("hf-plan-v2-inactive-video-directory-");
+    const v1 = createV1Plan(root, {
+      video: true,
+      videoStart: 1 / 30,
+      videoEnd: 1,
+    });
+    const result = createPlanV2FromV1(v1, join(root, "v2"));
+    const manifest = readPlanV2Manifest(result.planDir);
+    const chunk0Artifacts = listPlanV2ArtifactsForTarget(manifest, {
+      role: "chunk",
+      chunkIndex: 0,
+    });
+    const chunk1Artifacts = listPlanV2ArtifactsForTarget(manifest, {
+      role: "chunk",
+      chunkIndex: 1,
+    });
+    const chunk0Dir = join(root, "chunk-0");
+    const chunk1Dir = join(root, "chunk-1");
+
+    expect(chunk0Artifacts.some((artifact) => artifact.path.startsWith("video-frames/hero/"))).toBe(
+      false,
+    );
+    expect(
+      chunk1Artifacts.some((artifact) => artifact.path === "video-frames/hero/frame_00001.jpg"),
+    ).toBe(true);
+
+    materializePlanV2Target(result.planDir, { role: "chunk", chunkIndex: 0 }, chunk0Dir);
+    materializePlanV2Target(result.planDir, { role: "chunk", chunkIndex: 1 }, chunk1Dir);
+
+    expect(existsSync(join(chunk0Dir, "video-frames", "hero"))).toBe(true);
+    expect(readdirSync(join(chunk0Dir, "video-frames", "hero"))).toEqual([]);
+    expect(existsSync(join(chunk1Dir, "video-frames", "hero", "frame_00001.jpg"))).toBe(true);
+  });
+
   const partialColorSpaceCases = [
     {
       name: "matrix-only",
@@ -437,6 +477,15 @@ describe("Plan v2 manifest", () => {
       );
     });
   }
+
+  it("rejects an extracted video identifier that escapes the video-frame root", () => {
+    const root = tempPath("hf-plan-v2-unsafe-video-id-");
+    const v1 = createV1Plan(root, { video: true, videoId: "../escape" });
+
+    expect(() => createPlanV2FromV1(v1, join(root, "v2"))).toThrow(
+      'unsafe extracted video id: "../escape"',
+    );
+  });
 
   it("falls back to the full source frame pack when video metadata is absent", () => {
     const root = tempPath("hf-plan-v2-video-fallback-");
