@@ -194,10 +194,18 @@ export function useTimelineEditCallbacks({
         // than deleting the whole animation — deleting strands a stale GSAP base
         // that the next drag adds to, flinging the element off-screen.
         const elementKey = getTimelineElementIdentity(element);
-        const anim = resolveElementAnimations(elementKey).find((animation) => animation.keyframes);
-        if (!anim) return;
-        void buildDomSelectionForTimelineElement(element).then((selection) => {
-          if (selection) handleGsapRemoveAllKeyframes(anim.id, selection);
+        // Every keyframed tween on the layer, not just the first: a layer with
+        // position AND opacity keyframes left the second one keyframed, so
+        // "Delete All Keyframes" visibly did half the job.
+        const anims = resolveElementAnimations(elementKey).filter(
+          (animation) => animation.keyframes,
+        );
+        if (anims.length === 0) return;
+        void buildDomSelectionForTimelineElement(element).then(async (selection) => {
+          if (!selection) return;
+          // Serial: each removal rewrites the same source file, so dispatching
+          // them together would have the later writes read a pre-edit document.
+          for (const anim of anims) await handleGsapRemoveAllKeyframes(anim.id, selection);
         });
       },
       onDeleteKeyframe: (elId, keyframe) => {
@@ -287,12 +295,14 @@ export function useTimelineEditCallbacks({
           // keyframes form as a side effect of a pure position/duration change, so
           // dispatch update-meta and leave the tween as the author wrote it.
           if (decision.pctRemap.length === 0) {
-            handleGsapUpdateMeta(
+            // Report the write's real settlement, like every other branch here:
+            // answering `true` while the meta update is still in flight tells the
+            // diamond the retime landed, so a rejected write never snaps back.
+            return handleGsapUpdateMeta(
               target.animId,
               { position: decision.position, duration: decision.duration },
               sel,
             );
-            return true;
           }
           return handleGsapResizeKeyframedTween(
             target.animId,

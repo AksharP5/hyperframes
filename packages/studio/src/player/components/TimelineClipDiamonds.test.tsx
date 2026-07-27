@@ -310,6 +310,89 @@ describe("TimelineClipDiamonds", () => {
     act(() => root.unmount());
   });
 
+  it("leaves the selection alone when a stale retime fails after a newer drag", async () => {
+    const onClickKeyframe = vi.fn();
+    let failFirstDrag: (() => void) | undefined;
+    const onMoveKeyframe = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            failFirstDrag = () => resolve(false);
+          }),
+      )
+      .mockResolvedValue(true);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    act(() => {
+      root.render(
+        <TimelineDiamondLane
+          keyframesData={{
+            format: "percentage",
+            keyframes: [
+              {
+                percentage: 0,
+                tweenPercentage: 0,
+                propertyGroup: "position",
+                animationId: "anim-1",
+                properties: { x: 0 },
+              },
+              {
+                percentage: 50,
+                tweenPercentage: 50,
+                propertyGroup: "position",
+                animationId: "anim-1",
+                properties: { x: 100 },
+              },
+              {
+                percentage: 100,
+                tweenPercentage: 100,
+                propertyGroup: "position",
+                animationId: "anim-1",
+                properties: { x: 200 },
+              },
+            ],
+          }}
+          clipWidthPx={200}
+          clipHeightPx={48}
+          accentColor="#4ba3d2"
+          isSelected
+          currentPercentage={0}
+          elementId="clip-1"
+          selectedKeyframes={new Set()}
+          onClickKeyframe={onClickKeyframe}
+          onMoveKeyframe={onMoveKeyframe}
+          groupAware
+        />,
+      );
+    });
+    const diamond = host.querySelector<HTMLButtonElement>('button[title="50%"]');
+
+    // Two drags back to back; the first one's commit is still in flight.
+    act(() => {
+      diamond!.dispatchEvent(
+        pointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 100 }),
+      );
+      diamond!.dispatchEvent(pointerEvent("pointerup", { bubbles: true, button: 0, clientX: 150 }));
+      diamond!.dispatchEvent(
+        pointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 150 }),
+      );
+      diamond!.dispatchEvent(pointerEvent("pointerup", { bubbles: true, button: 0, clientX: 170 }));
+    });
+    onClickKeyframe.mockClear();
+
+    await act(async () => {
+      failFirstDrag?.();
+      await Promise.resolve();
+    });
+
+    // The stale failure must not drag the selection back to the first drag's
+    // source: the second retime, which the user can see, owns it now.
+    expect(onClickKeyframe).not.toHaveBeenCalled();
+    act(() => root.unmount());
+  });
+
   it("composes a rapid second retime from the pending position", () => {
     const onMoveKeyframe = vi.fn().mockResolvedValue(true);
     const host = document.createElement("div");

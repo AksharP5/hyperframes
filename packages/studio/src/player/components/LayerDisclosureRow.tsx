@@ -1,6 +1,6 @@
 import { CaretRight } from "@phosphor-icons/react";
 import type { TimelineElement } from "../store/playerStore";
-import { LABEL_COL_W, TRACK_H } from "./timelineLayout";
+import { TRACK_H } from "./timelineLayout";
 import { TrackClipCount } from "./TrackClipCount";
 
 // Layer row (Figma order: disclosure ▸/▾, diamond, name) — the disclosure lives
@@ -10,6 +10,8 @@ export function LayerDisclosureRow({
   clipCount,
   isExpanded,
   gutterBackground,
+  columnWidth,
+  lanesId,
   onToggleClipExpanded,
   children,
 }: {
@@ -17,6 +19,11 @@ export function LayerDisclosureRow({
   clipCount: number;
   isExpanded: boolean;
   gutterBackground: string;
+  /** Same adaptive width the lane rows use: a narrowed header column must not
+   *  leave this row hanging over the clips it labels. */
+  columnWidth: number;
+  /** Id of the element holding the lanes this row's caret expands. */
+  lanesId: string;
   onToggleClipExpanded: () => void;
   /** Trailing controls that act on the LAYER (the visibility eye), not on a lane. */
   children?: React.ReactNode;
@@ -26,7 +33,7 @@ export function LayerDisclosureRow({
     <div
       className="absolute left-0 top-0 flex items-center gap-1.5 overflow-hidden px-1.5 text-[11px]"
       style={{
-        width: LABEL_COL_W,
+        width: columnWidth,
         height: TRACK_H,
         color: "#ffffff",
         background: gutterBackground,
@@ -35,9 +42,12 @@ export function LayerDisclosureRow({
       <button
         type="button"
         aria-expanded={isExpanded}
+        aria-controls={lanesId}
         aria-label={`${isExpanded ? "Collapse" : "Expand"} ${name} keyframes`}
         title={`${isExpanded ? "Collapse" : "Expand"} keyframe lanes`}
-        className="flex h-5 w-4 shrink-0 items-center justify-center rounded border-0 bg-transparent p-0 text-white/55 hover:text-white focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#3CE6AC]"
+        // h-6 w-6 = the 24x24 WCAG 2.2 minimum target. The caret glyph stays 11px;
+        // only the hit box grows.
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded border-0 bg-transparent p-0 text-white/55 hover:text-white focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#3CE6AC]"
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();

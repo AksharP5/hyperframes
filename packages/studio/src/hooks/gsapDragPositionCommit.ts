@@ -210,8 +210,13 @@ async function commitFlatViaKeyframes(
       { label: "Convert to keyframes for drag", skipReload: true, coalesceKey },
     );
     const fresh = callbacks.fetchAnimations ? await callbacks.fetchAnimations() : [];
+    // By id first: a target with several tweens (two `to`s on the same selector)
+    // matches the selector lookup on whichever one happens to be first, and the
+    // extend-and-add below would then rewrite a tween the drag never touched.
     const converted =
-      fresh.find((a) => a.targetSelector === anim.targetSelector && a.keyframes) ?? anim;
+      fresh.find((a) => a.id === anim.id && a.keyframes) ??
+      fresh.find((a) => a.targetSelector === anim.targetSelector && a.keyframes) ??
+      anim;
     const convertedStart = resolveTweenStart(converted) ?? ts;
     const convertedDur = resolveTweenDuration(converted) || td;
     await extendTweenAndAddKeyframe(

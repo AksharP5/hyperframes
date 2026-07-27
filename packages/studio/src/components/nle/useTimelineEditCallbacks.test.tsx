@@ -16,11 +16,11 @@ const mocks = vi.hoisted(() => ({
     handleGsapMoveKeyframeToPlayhead: vi.fn(),
     handleGsapMoveKeyframe: vi.fn().mockResolvedValue(true),
     handleGsapResizeKeyframedTween: vi.fn().mockResolvedValue(true),
-    handleGsapUpdateMeta: vi.fn(),
+    handleGsapUpdateMeta: vi.fn().mockResolvedValue(true),
     handleGsapAddKeyframe: vi.fn(),
     handleGsapAddKeyframeBatch: vi.fn().mockResolvedValue(undefined),
     handleGsapConvertToKeyframes: vi.fn(),
-    handleGsapRemoveAllKeyframes: vi.fn(),
+    handleGsapRemoveAllKeyframes: vi.fn().mockResolvedValue(true),
     handleGsapDeleteAnimation: vi.fn(),
     buildDomSelectionForTimelineElement: vi.fn(),
   },
@@ -116,6 +116,19 @@ function renderCallbacks(): { callbacks: TimelineEditCallbacks; unmount: () => v
   return { callbacks, unmount: () => act(() => root.unmount()) };
 }
 
+// One selection PER element, so a callback that resolves the selection for the
+// wrong element gets a visibly different object. A single mockResolvedValue
+// hands every element the same selection, which passes just as happily when the
+// write is committed through whatever happens to be selected.
+function selectionForElement(el: TimelineElement): {
+  id: string;
+  selector: string;
+  sourceFile: string;
+} {
+  if (el.id === "box") return mocks.selection;
+  return { id: el.id, selector: `#${el.id}`, sourceFile: el.sourceFile ?? "index.html" };
+}
+
 function arrangeClickedCircle(): {
   circle: TimelineElement;
   selection: { id: string; selector: string; sourceFile: string };
@@ -128,19 +141,19 @@ function arrangeClickedCircle(): {
     domId: "circle",
     sourceFile: "scenes/main.html",
   };
-  const selection = { id: "circle", selector: "#circle", sourceFile: "scenes/main.html" };
   usePlayerStore.setState({
     elements: [element, circle],
     gsapAnimations: new Map([[elementKey, [otherKeyframedAnimation]]]),
   });
-  mocks.actions.buildDomSelectionForTimelineElement.mockResolvedValue(selection);
-  return { circle, selection };
+  return { circle, selection: selectionForElement(circle) };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.animations = [flatAnimation];
-  mocks.actions.buildDomSelectionForTimelineElement.mockResolvedValue(mocks.selection);
+  mocks.actions.buildDomSelectionForTimelineElement.mockImplementation((el: TimelineElement) =>
+    Promise.resolve(selectionForElement(el)),
+  );
   usePlayerStore.setState({
     currentTime: 0.5,
     elements: [element],
@@ -212,6 +225,27 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     view.unmount();
   });
 
+  it("reports an unsettled flat-boundary retime as uncommitted", async () => {
+    mocks.actions.handleGsapUpdateMeta.mockResolvedValueOnce(false);
+    const view = renderCallbacks();
+
+    // The diamond snaps back on `false`. Answering `true` the moment update-meta
+    // was dispatched left a rejected boundary drag rendered at its drop position.
+    await expect(
+      view.callbacks.onMoveKeyframe?.(
+        "box",
+        {
+          percentage: 0,
+          propertyGroup: "position",
+          tweenPercentage: 0,
+          animationId: flatAnimation.id,
+        },
+        25,
+      ),
+    ).resolves.toBe(false);
+    view.unmount();
+  });
+
   it("refuses a non-selected element flat boundary instead of deleting the tween", async () => {
     const circle: TimelineElement = {
       ...element,
@@ -242,7 +276,7 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       otherFlatAnimation.id,
       0,
       undefined,
-      mocks.selection,
+      selectionForElement(circle),
     );
     expect(mocks.actions.handleGsapDeleteAnimation).not.toHaveBeenCalled();
     view.unmount();
@@ -276,7 +310,7 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       otherKeyframedAnimation.id,
       100,
       undefined,
-      mocks.selection,
+      selectionForElement(circle),
     );
     expect(mocks.actions.handleGsapDeleteAnimation).not.toHaveBeenCalled();
     view.unmount();
@@ -295,6 +329,65 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       otherKeyframedAnimation.id,
       selection,
     );
+    view.unmount();
+  });
+
+  it("deletes all keyframes on every keyframed tween of the layer, not just the first", async () => {
+    const opacityAnimation: GsapAnimation = {
+      ...otherKeyframedAnimation,
+      id: "circle-to-0-visual",
+      propertyGroup: "visual",
+    };
+    const { circle } = arrangeClickedCircle();
+    usePlayerStore.setState({
+      gsapAnimations: new Map([
+        ["scenes/main.html#circle", [otherKeyframedAnimation, opacityAnimation]],
+      ]),
+    });
+    const view = renderCallbacks();
+
+    await act(async () => {
+      view.callbacks.onDeleteAllKeyframes?.(circle);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.actions.handleGsapRemoveAllKeyframes.mock.calls.map((call) => call[0])).toEqual([
+      otherKeyframedAnimation.id,
+      opacityAnimation.id,
+    ]);
+    view.unmount();
+  });
+
+  it("aborts every mutation when the clicked element resolves no selection", async () => {
+    const { circle } = arrangeClickedCircle();
+    mocks.actions.buildDomSelectionForTimelineElement.mockResolvedValue(null);
+    const view = renderCallbacks();
+
+    await act(async () => {
+      view.callbacks.onDeleteAllKeyframes?.(circle);
+      view.callbacks.onMoveKeyframeToPlayhead?.(circle, {
+        percentage: 100,
+        propertyGroup: "position",
+        tweenPercentage: 100,
+        animationId: otherKeyframedAnimation.id,
+      });
+      view.callbacks.onDeleteKeyframe?.("scenes/main.html#circle", {
+        percentage: 100,
+        propertyGroup: "position",
+        tweenPercentage: 100,
+        animationId: otherKeyframedAnimation.id,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // No selection for the clicked element means there is nothing safe to write
+    // to: falling back to the current selection would edit a different file.
+    expect(mocks.actions.handleGsapRemoveAllKeyframes).not.toHaveBeenCalled();
+    expect(mocks.actions.handleGsapMoveKeyframeToPlayhead).not.toHaveBeenCalled();
+    expect(mocks.actions.handleGsapRemoveKeyframe).not.toHaveBeenCalled();
     view.unmount();
   });
 
@@ -398,7 +491,7 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       otherFlatAnimation.id,
       0,
       undefined,
-      mocks.selection,
+      selectionForElement(circle),
     );
     expect(mocks.actions.handleGsapDeleteAnimation).not.toHaveBeenCalled();
     view.unmount();

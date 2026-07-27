@@ -150,12 +150,24 @@ export function useGsapSelectionHandlers({
     [showToast],
   );
 
+  // Resolves to whether the mutation landed. Callers that only fire-and-forget
+  // can ignore it (the rejection is always handled here), but a caller that
+  // reports a commit result to the UI has to await the real settlement instead
+  // of assuming success the moment it dispatched.
   const observeGsapMutation = useCallback(
-    (mutation: Promise<void>, selection: DomEditSelection, mutationType: string, label: string) => {
-      void mutation.catch((error) => {
-        trackGsapHandlerFailure(error, selection, mutationType, label);
-      });
-    },
+    (
+      mutation: Promise<void>,
+      selection: DomEditSelection,
+      mutationType: string,
+      label: string,
+    ): Promise<boolean> =>
+      mutation.then(
+        () => true,
+        (error: unknown) => {
+          trackGsapHandlerFailure(error, selection, mutationType, label);
+          return false;
+        },
+      ),
     [trackGsapHandlerFailure],
   );
 
@@ -174,8 +186,8 @@ export function useGsapSelectionHandlers({
       selectionOverride?: DomEditSelection | null,
     ) => {
       const sel = resolveWriteSelection(selectionOverride);
-      if (!sel) return;
-      observeGsapMutation(
+      if (!sel) return Promise.resolve(false);
+      return observeGsapMutation(
         updateGsapMeta(sel, animId, updates),
         sel,
         "update-meta",
@@ -419,8 +431,8 @@ export function useGsapSelectionHandlers({
   const handleGsapRemoveAllKeyframes = useCallback(
     (animId: string, selectionOverride?: DomEditSelection | null) => {
       const selection = resolveWriteSelection(selectionOverride);
-      if (!selection) return;
-      observeGsapMutation(
+      if (!selection) return Promise.resolve(false);
+      return observeGsapMutation(
         removeAllKeyframes(selection, animId),
         selection,
         "remove-all-keyframes",

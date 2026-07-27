@@ -236,7 +236,8 @@ function PropertyGroupHeaderRow({
           aria-pressed={!!navigation.currentKeyframe}
           aria-label={`${navigation.currentKeyframe ? "Remove" : "Add"} ${label} keyframe`}
           title={`${navigation.currentKeyframe ? "Remove" : "Add"} ${label} keyframe`}
-          className="flex h-5 w-4 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-[11px] text-[#3CE6AC] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#3CE6AC]"
+          // h-6 w-6 = the 24x24 WCAG 2.2 minimum target; the ◆ glyph stays 11px.
+          className="flex h-6 w-6 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-[11px] text-[#3CE6AC] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#3CE6AC]"
           onClick={(event) => {
             // Same as the disclosure caret and the eye: a control in the label
             // column owns its click, it does not also hit the track row behind it.
@@ -286,6 +287,7 @@ export function TimelineTrackHeader({
   // owns the gutter past it, so a 0% diamond isn't clipped by this panel).
   const showTrackLabel = contentOrigin >= LABEL_COL_W;
   const isKeyframeLayer = !!keyframeClip && lanes.length > 0;
+  const lanesId = `timeline-lanes-track-${trackNumber}`;
 
   return (
     <div
@@ -319,6 +321,8 @@ export function TimelineTrackHeader({
             clipCount={clipCount}
             isExpanded={isExpanded}
             gutterBackground={theme.gutterBackground}
+            columnWidth={showTrackLabel ? LABEL_COL_W : contentOrigin}
+            lanesId={lanesId}
             onToggleClipExpanded={onToggleClipExpanded}
           >
             {/* The eye belongs to the LAYER, so it lives on the always-mounted
@@ -333,22 +337,25 @@ export function TimelineTrackHeader({
               onToggle={onToggleTrackHidden}
             />
           </LayerDisclosureRow>
-          {isExpanded &&
-            lanes.map((lane, laneIndex) => (
-              <PropertyGroupHeaderRow
-                key={lane.group}
-                lane={lane}
-                laneIndex={laneIndex}
-                isLastLane={laneIndex === lanes.length - 1}
-                expandedElement={keyframeClip}
-                currentTime={currentTime}
-                clipPercentage={clipPercentage}
-                gutterBackground={theme.gutterBackground}
-                columnWidth={showTrackLabel ? LABEL_COL_W : contentOrigin}
-                onTogglePropertyGroupKeyframe={onTogglePropertyGroupKeyframe}
-                onSeek={onSeek}
-              />
-            ))}
+          {/* Always mounted so the caret's aria-controls resolves in both states. */}
+          <div id={lanesId}>
+            {isExpanded &&
+              lanes.map((lane, laneIndex) => (
+                <PropertyGroupHeaderRow
+                  key={lane.group}
+                  lane={lane}
+                  laneIndex={laneIndex}
+                  isLastLane={laneIndex === lanes.length - 1}
+                  expandedElement={keyframeClip}
+                  currentTime={currentTime}
+                  clipPercentage={clipPercentage}
+                  gutterBackground={theme.gutterBackground}
+                  columnWidth={showTrackLabel ? LABEL_COL_W : contentOrigin}
+                  onTogglePropertyGroupKeyframe={onTogglePropertyGroupKeyframe}
+                  onSeek={onSeek}
+                />
+              ))}
+          </div>
         </>
       )}
     </div>

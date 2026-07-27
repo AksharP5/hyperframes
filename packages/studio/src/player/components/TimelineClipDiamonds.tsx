@@ -63,6 +63,10 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
   // the first away, once per mounted lane.
   pendingRetimeRef.current ??= new Map();
   const pendingRetimes = pendingRetimeRef.current;
+  // The most recent retime dispatched from this lane, whichever diamond it came
+  // from. Selection is lane-wide, so "is my revert still relevant" is a lane-wide
+  // question, not a per-keyframe one.
+  const latestRetimeRef = useRef<{ clipPct: number; tweenPct: number } | null>(null);
   useEffect(() => {
     // Clear a pending entry once the authoritative cache reflects THAT keyframe
     // at ~its destination. Match by tolerance, not equality: cache writers round
@@ -354,6 +358,7 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
               : target;
             const pending = { clipPct: res.toClipPct, tweenPct: newTweenPct };
             pendingRetimes.set(kfKey, pending);
+            latestRetimeRef.current = pending;
             const clearPending = () => {
               if (pendingRetimes.get(kfKey) === pending) {
                 pendingRetimes.delete(kfKey);
@@ -365,8 +370,13 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
             // position strands the playhead + selection on a keyframe that does
             // not exist there.
             const revertRetime = () => {
+              // Only the newest gesture owns the selection. A rejected first drag
+              // whose commit settles after a second one started would otherwise
+              // park the selection back on ITS source keyframe, undoing a retime
+              // the user has already made and moving the playhead with it.
+              const isLatest = latestRetimeRef.current === pending;
               clearPending();
-              onClickKeyframe?.(fromTarget);
+              if (isLatest) onClickKeyframe?.(fromTarget);
             };
             void onMoveKeyframe?.(fromTarget, res.toClipPct).then((committed) => {
               if (!committed) revertRetime();
@@ -386,7 +396,11 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
 
         return (
           <button
-            key={`${i}-${kf.percentage}`}
+            // Key on the authored identity (tween-%), not the rendered clip-% or
+            // the row index: a clip resize, a neighbour's retime, or a re-sort
+            // changes both of those without changing WHICH keyframe this is, and
+            // a key change remounts the button mid-drag (losing pointer capture).
+            key={`${kf.animationId ?? i}:${kf.propertyGroup ?? ""}:${kf.tweenPercentage ?? kf.percentage}`}
             type="button"
             className="absolute"
             data-keyframe-group={groupAware ? kf.propertyGroup : undefined}

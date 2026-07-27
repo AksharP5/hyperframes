@@ -346,6 +346,16 @@ describe("TimelinePropertyLanes", () => {
     );
     expect(paths).toHaveLength(3);
     expect(new Set(paths).size).toBe(3);
+    // Uniqueness alone passes even when the curves are swapped between segments.
+    // Each segment is labelled with the ease it draws, so pin the ORDER: a
+    // segment carries the ease of the keyframe it arrives at.
+    expect(
+      segments.map((segment) => revealEaseButton(segment)?.getAttribute("aria-label")),
+    ).toEqual([
+      "Edit none easing",
+      "Edit power2.out easing",
+      "Edit custom(M0,0 C0.1,0.2 0.3,0.9 1,1) easing",
+    ]);
     act(() => root.unmount());
   });
 
@@ -391,6 +401,8 @@ describe("TimelinePropertyLanes", () => {
 
   it("keeps the collapsed TimelineClipDiamonds positions and callback contract unchanged", () => {
     const onClickKeyframe = vi.fn();
+    const COLLAPSED_IDENTITY = { animationId: "position-tween", propertyGroup: "position" };
+    const COLLAPSED_TARGET = { ...COLLAPSED_IDENTITY, percentage: 50, tweenPercentage: 50 };
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -400,8 +412,13 @@ describe("TimelinePropertyLanes", () => {
           keyframesData={{
             format: "percentage",
             keyframes: [
-              { percentage: 0, properties: { x: 0 } },
-              { percentage: 50, properties: { x: 100 } },
+              { percentage: 0, ...COLLAPSED_IDENTITY, tweenPercentage: 0, properties: { x: 0 } },
+              {
+                percentage: 50,
+                ...COLLAPSED_IDENTITY,
+                tweenPercentage: 50,
+                properties: { x: 100 },
+              },
             ],
           }}
           clipWidthPx={200}
@@ -410,7 +427,7 @@ describe("TimelinePropertyLanes", () => {
           isSelected
           currentPercentage={-10}
           elementId="clip-1"
-          selectedKeyframes={new Set(["clip-1:50"])}
+          selectedKeyframes={new Set([timelineKeyframeSelectionKey("clip-1", COLLAPSED_TARGET)])}
           onClickKeyframe={onClickKeyframe}
         />,
       );
@@ -424,10 +441,10 @@ describe("TimelinePropertyLanes", () => {
     act(() => {
       diamonds[1]?.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
     });
-    expect(onClickKeyframe).toHaveBeenCalledWith(
-      "clip-1",
-      expect.objectContaining({ percentage: 50 }),
-    );
+    // The whole identity, not just the percentage: objectContaining on the one
+    // field passes even when the animation id / property group / tween-% the
+    // diamond-identity refactor added are dropped on the way out.
+    expect(onClickKeyframe).toHaveBeenCalledWith("clip-1", COLLAPSED_TARGET);
     act(() => root.unmount());
   });
 });

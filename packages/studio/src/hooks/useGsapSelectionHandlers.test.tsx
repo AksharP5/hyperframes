@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
+import { usePlayerStore } from "../player/store/playerStore";
 import { useGsapSelectionHandlers } from "./useGsapSelectionHandlers";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -80,7 +81,11 @@ describe("useGsapSelectionHandlers save failures", () => {
       makeParams({ updateGsapMeta: vi.fn().mockRejectedValue(error), showToast }),
     );
 
-    act(() => rendered.handlers().handleGsapUpdateMeta("anim-1", { duration: 2 }));
+    // Braces, not a bare arrow: the handler returns its settlement promise now,
+    // and returning a thenable from act() turns it into an un-awaited async act.
+    act(() => {
+      void rendered.handlers().handleGsapUpdateMeta("anim-1", { duration: 2 });
+    });
     await flushRejection();
 
     expect(showToast).toHaveBeenCalledWith("Couldn't save animation: write failed", "error");
@@ -135,12 +140,24 @@ describe("useGsapSelectionHandlers selection override", () => {
   it("computes the playhead percentage from the passed animation, not the selection's", () => {
     const moveKeyframe = vi.fn();
     const selection = makeSelection();
-    const animation = { id: "anim-1", keyframes: { keyframes: [] } } as unknown as GsapAnimation;
+    // The passed tween runs 2s→6s, so the playhead at 3s is 25% into IT. Without
+    // the animation the handler falls back to the selection's own element window
+    // (0s→1s here), which reads the same playhead as 100%. Asserting the exact
+    // 25 is what separates the two; `expect.any(Number)` even accepts the NaN a
+    // missing window would produce.
+    const animation = {
+      id: "anim-1",
+      position: 2,
+      resolvedStart: 2,
+      duration: 4,
+      keyframes: { keyframes: [] },
+    } as unknown as GsapAnimation;
+    usePlayerStore.setState({ currentTime: 3 });
     const rendered = renderHandlers(makeParams({ moveKeyframe, selectedGsapAnimations: [] }));
 
     rendered.handlers().handleGsapMoveKeyframeToPlayhead("anim-1", 50, selection, animation);
 
-    expect(moveKeyframe).toHaveBeenCalledWith(selection, "anim-1", 50, expect.any(Number));
+    expect(moveKeyframe).toHaveBeenCalledWith(selection, "anim-1", 50, 25);
     rendered.unmount();
   });
 });
@@ -161,22 +178,5 @@ describe("useGsapSelectionHandlers retime settlement", () => {
     );
     expect(moveKeyframe).toHaveBeenCalledOnce();
     withSelection.unmount();
-  });
-});
-
-describe("useGsapSelectionHandlers selection override", () => {
-  it("aborts on an explicit null override instead of writing to the current selection", () => {
-    const removeKeyframe = vi.fn();
-    const rendered = renderHandlers(makeParams({ removeKeyframe }));
-
-    // Explicit null: the caller resolved a selection for its own element and
-    // found none, so the write must not land on the selected element.
-    rendered.handlers().handleGsapRemoveKeyframe("anim-1", 50, undefined, null);
-    expect(removeKeyframe).not.toHaveBeenCalled();
-
-    // Omitted override: falls back to the current selection as before.
-    rendered.handlers().handleGsapRemoveKeyframe("anim-1", 50);
-    expect(removeKeyframe).toHaveBeenCalledOnce();
-    rendered.unmount();
   });
 });
