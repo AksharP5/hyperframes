@@ -18,6 +18,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import {
   assemble,
   type AssembleResult,
+  type ChunkRenderer,
   type ChunkResult,
   type DistributedRenderConfig,
   listPlanV2ArtifactsForTarget,
@@ -77,7 +78,7 @@ export interface HandlerDeps {
   primitives?: {
     plan: typeof plan;
     planV2WithPublisher?: typeof planV2WithPublisher;
-    renderChunk: typeof renderChunk;
+    renderChunk: ChunkRenderer;
     assemble: typeof assemble;
   };
   /** Override the per-invocation `/tmp` workdir root (defaults to Lambda's `/tmp`). */

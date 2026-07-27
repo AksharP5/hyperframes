@@ -257,12 +257,16 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
         captureCfg,
       ));
     captureBeyondViewport = session.options.captureBeyondViewport;
-    if (probeSession) {
-      prepareCaptureSessionForReuse(session, framesDir, videoInjector);
-      probeSession = null;
-    }
 
     try {
+      // Reuse preparation can fail while creating/resetting the output
+      // directory (for example EACCES, EROFS, or ENOSPC). Keep it inside the
+      // session-owning try/finally so the borrowed probe browser is closed
+      // even when preparation fails before capture starts.
+      if (probeSession) {
+        prepareCaptureSessionForReuse(session, framesDir, videoInjector);
+        probeSession = null;
+      }
       if (!session.isInitialized) {
         await initializeSession(session);
       } else if (process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true") {

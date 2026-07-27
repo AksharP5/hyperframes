@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assemble, type AssembleResult } from "./assemble.js";
 import { materializePlanV2Target } from "./planV2.js";
-import { renderChunk, type ChunkResult } from "./renderChunk.js";
+import { renderChunk, type EffectiveChunkResult } from "./renderChunk.js";
 
 /**
  * Direct v2 chunk-role entry point. Storage adapters may instead download the
@@ -13,7 +13,7 @@ export async function renderChunkV2(
   planV2Dir: string,
   chunkIndex: number,
   outputChunkPath: string,
-): Promise<ChunkResult> {
+): Promise<EffectiveChunkResult> {
   const workRoot = mkdtempSync(join(tmpdir(), "hf-plan-v2-chunk-"));
   const materializedPlanDir = join(workRoot, "plan");
   try {
