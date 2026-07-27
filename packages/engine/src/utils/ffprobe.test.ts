@@ -316,6 +316,41 @@ describe("ffprobe missing-binary fallback", () => {
     expect(meta.hasAlpha).toBe(true);
   });
 
+  it("normalizes omitted video color components to empty strings", async () => {
+    const { spawn } = createSpawnSpy([
+      {
+        kind: "exit",
+        code: 0,
+        stdout: JSON.stringify({
+          streams: [
+            {
+              codec_type: "video",
+              codec_name: "h264",
+              width: 64,
+              height: 64,
+              r_frame_rate: "30/1",
+              avg_frame_rate: "30/1",
+              pix_fmt: "yuv420p",
+              color_space: "bt709",
+            },
+          ],
+          format: { duration: "1" },
+        }),
+      },
+    ]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+
+    const { extractMediaMetadata: extractMediaMetadataMocked } = await import("./ffprobe.js");
+    const metadata = await extractMediaMetadataMocked("/tmp/partial-color.mp4");
+
+    expect(metadata.colorSpace).toEqual({
+      colorPrimaries: "",
+      colorTransfer: "",
+      colorSpace: "bt709",
+    });
+  });
+
   // Regression: newer libavformat builds (and the output of `hyperframes
   // remove-background` itself) write the VP9-alpha sidecar tag as
   // `ALPHA_MODE` (uppercase). The lowercase-only check classified those
