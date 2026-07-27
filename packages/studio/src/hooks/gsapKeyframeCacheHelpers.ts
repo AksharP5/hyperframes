@@ -4,7 +4,7 @@
  */
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerStore";
-import { toClipKeyframes } from "./gsapShared";
+import { idFromSelector, toClipKeyframes } from "./gsapShared";
 import { deduplicateKeyframes, synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
 
 export function updateKeyframeCacheFromParsed(
@@ -18,7 +18,7 @@ export function updateKeyframeCacheFromParsed(
   const merged = new Map<string, KeyframeCacheEntry>();
   const sourceAnimations = new Map<string, GsapAnimation[]>();
   for (const anim of animations) {
-    const id = anim.targetSelector.match(/^#([\w-]+)/)?.[1];
+    const id = idFromSelector(anim.targetSelector);
     const kfSource =
       anim.keyframes?.keyframes ?? synthesizeFlatTweenKeyframes(anim)?.keyframes ?? [];
     if (!id || kfSource.length === 0) continue;
@@ -61,8 +61,7 @@ export function updateKeyframeCacheFromParsed(
     writeGsapAnimationsForElement(targetPath, id, sourceAnimations.get(id));
   }
   const targetId =
-    (mutation as { targetSelector?: string }).targetSelector?.match(/^#([\w-]+)/)?.[1] ??
-    selectionId;
+    idFromSelector((mutation as { targetSelector?: string }).targetSelector) ?? selectionId;
   if (targetId && !idsWithKeyframes.has(targetId)) {
     clearKeyframeCacheForElement(targetPath, targetId);
   }

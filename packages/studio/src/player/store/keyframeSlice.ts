@@ -92,6 +92,13 @@ export function createKeyframeSlice(set: StoreApi<KeyframeSlice>["setState"]): K
     keyframeCache: new Map(),
     setKeyframeCache: (elementId, data) =>
       set((state) => {
+        // A write that changes nothing must not emit a new Map: the cache has
+        // several hot writers (per-element effect, file populate, post-commit
+        // updater, delete) and every no-op re-rendered every subscriber.
+        if (
+          data ? state.keyframeCache.get(elementId) === data : !state.keyframeCache.has(elementId)
+        )
+          return state;
         const next = new Map(state.keyframeCache);
         if (data) next.set(elementId, data);
         else next.delete(elementId);
@@ -100,6 +107,12 @@ export function createKeyframeSlice(set: StoreApi<KeyframeSlice>["setState"]): K
     gsapAnimations: new Map(),
     setGsapAnimations: (elementId, animations) =>
       set((state) => {
+        if (
+          animations
+            ? state.gsapAnimations.get(elementId) === animations
+            : !state.gsapAnimations.has(elementId)
+        )
+          return state;
         const next = new Map(state.gsapAnimations);
         if (animations) next.set(elementId, animations);
         else next.delete(elementId);

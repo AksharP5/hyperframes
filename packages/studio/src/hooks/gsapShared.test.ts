@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import {
+  idFromSelector,
   idSelector,
   isInstantHold,
   parsePercentageKeyframes,
@@ -125,13 +126,16 @@ describe("toClipPercentage", () => {
 });
 
 describe("toClipKeyframes", () => {
-  const durationless: GsapAnimation = {
+  // Fixture carries only the fields the function under test reads; the
+  // double-cast is the documented way to stand in for the full runtime shape
+  // (CONTRIBUTING.md).
+  const durationless = {
     id: "a1",
     method: "to",
     targetSelector: "#box",
     vars: {},
     resolvedStart: 0,
-  } as GsapAnimation;
+  } as unknown as GsapAnimation;
 
   // A tween with no duration spans its clip everywhere else in Studio
   // (resolveEditableTweenDuration), so the cache rows have to agree: a fixed 1s
@@ -144,5 +148,19 @@ describe("toClipKeyframes", () => {
   it("keeps the tween percentage and the animation identity on every row", () => {
     const rows = toClipKeyframes([{ percentage: 50 }], durationless, 0, 4);
     expect(rows[0]).toMatchObject({ tweenPercentage: 50, animationId: "a1" });
+  });
+});
+
+describe("idFromSelector", () => {
+  it("round-trips every shape idSelector emits", () => {
+    for (const id of ["hero-word", "el_1", "01-hook-hero-word", "my.class", "1box", '1"x']) {
+      expect(idFromSelector(idSelector(id))).toBe(id);
+    }
+  });
+
+  it("returns null for a selector that does not address an id", () => {
+    expect(idFromSelector(".dot")).toBeNull();
+    expect(idFromSelector("[data-hf-id='x']")).toBeNull();
+    expect(idFromSelector(undefined)).toBeNull();
   });
 });

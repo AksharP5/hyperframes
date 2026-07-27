@@ -45,7 +45,9 @@ export function useStudioTestHooks({
     };
     (window as unknown as { __studioTest?: typeof api }).__studioTest = api;
     return () => {
-      (window as unknown as { __studioTest?: typeof api }).__studioTest = undefined;
+      // delete, not `= undefined`: an own key holding undefined keeps
+      // `"__studioTest" in window` true, which defeats feature detection.
+      delete (window as unknown as { __studioTest?: typeof api }).__studioTest;
     };
   }, [applyDomSelection, buildDomSelectionFromTarget, previewIframeRef]);
 }

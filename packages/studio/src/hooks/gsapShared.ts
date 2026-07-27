@@ -80,6 +80,27 @@ export function idSelector(id: string): string {
   return SAFE_HASH_ID.test(id) ? `#${id}` : `[id="${id.replace(/(["\\])/g, "\\$1")}"]`;
 }
 
+/**
+ * Inverse of {@link idSelector}: the element id a target selector addresses, or
+ * null for a selector that is not id-based (a class, a tag, a descendant path).
+ *
+ * Both shapes have to be read back, not just `#id`. Every writer emits through
+ * `idSelector`, so a digit-leading, dotted or otherwise CSS-unsafe id lands in
+ * the source as `[id="01-hook-hero"]`. A reader that only matched `#id` saw no
+ * id at all for those elements and skipped them — which is how the post-commit
+ * keyframe-cache refresh silently stopped running for exactly the ids
+ * `idSelector` was added to support.
+ */
+export function idFromSelector(selector: string | undefined | null): string | null {
+  if (!selector) return null;
+  const hash = selector.match(/^#([\w-]+)/);
+  if (hash) return hash[1] ?? null;
+  const attribute = selector.match(/^\[id="((?:\\.|[^"\\])*)"\]/);
+  if (!attribute) return null;
+  // Undo the quote/backslash escaping idSelector applies.
+  return (attribute[1] ?? "").replace(/\\(["\\])/g, "$1");
+}
+
 export function selectorFromSelection(selection: DomEditSelection): string | null {
   if (selection.id) return idSelector(selection.id);
   if (selection.selector) return selection.selector;
