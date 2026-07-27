@@ -89,7 +89,9 @@ export {
   readWebGlVendorInfoFromCanvas,
   renderChunk,
   // Types
+  type ChunkRenderer,
   type ChunkResult,
+  type EffectiveChunkResult,
   // Error codes + classes
   FFMPEG_VERSION_MISMATCH,
   PLAN_HASH_MISMATCH,

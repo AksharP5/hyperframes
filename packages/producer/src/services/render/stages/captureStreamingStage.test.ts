@@ -20,6 +20,7 @@ let failInitializeSession = false;
 let hangParallelUntilAbort = false;
 let hangSequentialUntilStall = false;
 let sessionWorkerEncodeEnabled = false;
+let failPrepareCaptureSessionForReuse = false;
 let initializeSessionErrorMessage = "initialize failed";
 const browserConsoleBuffer = ["[FrameCapture:ERROR] page.goto failed"];
 const closeCaptureSession = mock(async () => {});
@@ -100,7 +101,11 @@ mock.module("@hyperframes/engine", () => ({
     pixelFormat: "yuv420p",
   }),
   initTransparentBackground: async () => {},
-  prepareCaptureSessionForReuse: () => {},
+  prepareCaptureSessionForReuse: () => {
+    if (failPrepareCaptureSessionForReuse) {
+      throw new Error("prepare reuse failed: ENOSPC");
+    }
+  },
   recaptureDrawElementFrameForVerify: async () => Buffer.from("frame"),
   spawnStreamingEncoder,
   writeCapturedFrame: async () => {},
@@ -405,6 +410,53 @@ describe("runCaptureStreamingStage", () => {
 });
 
 describe("runCaptureStage", () => {
+  it("closes a reused probe session when reuse preparation fails", async () => {
+    failCaptureFrameToBuffer = false;
+    failInitializeSession = false;
+    failPrepareCaptureSessionForReuse = true;
+    closeCaptureSession.mockClear();
+    const { createCaptureSession } = await import("@hyperframes/engine");
+    const { runCaptureStage } = await import("./captureStage.js");
+    const cfg = { forceScreenshot: false, ffmpegStreamingTimeout: 3_600_000 };
+    const probeSession = await createCaptureSession(
+      "http://127.0.0.1:4173",
+      "/tmp/hf-test-frames",
+      {},
+      null,
+      cfg,
+    );
+
+    let caught: unknown;
+    try {
+      await runCaptureStage({
+        ...createInput(cfg),
+        plan: createCapturePlan({
+          workerCount: 1,
+          forceScreenshot: false,
+          useStreamingEncode: false,
+          useLayeredComposite: false,
+          usePageSideCompositing: false,
+          hasHdrContent: false,
+          needsAlpha: false,
+        }),
+        probeSession,
+        videoOnlyPath: undefined,
+        outputFormat: undefined,
+        streamingEncoderOptions: undefined,
+        captureAttempts: [],
+      });
+    } catch (error) {
+      caught = error;
+    } finally {
+      failPrepareCaptureSessionForReuse = false;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain("prepare reuse failed: ENOSPC");
+    expect(closeCaptureSession).toHaveBeenCalledTimes(1);
+    expect(closeCaptureSession).toHaveBeenCalledWith(probeSession);
+  });
+
   it("wraps sequential capture failures with the browser console buffer", async () => {
     failCaptureFrameToBuffer = false;
     failInitializeSession = true;

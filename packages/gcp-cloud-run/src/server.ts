@@ -26,6 +26,7 @@ import { Hono } from "hono";
 import {
   assemble,
   type AssembleResult,
+  type ChunkRenderer,
   type ChunkResult,
   type DistributedRenderConfig,
   listPlanV2ArtifactsForTarget,
@@ -84,7 +85,7 @@ export interface HandlerDeps {
   primitives?: {
     plan: typeof plan;
     planV2WithPublisher?: typeof planV2WithPublisher;
-    renderChunk: typeof renderChunk;
+    renderChunk: ChunkRenderer;
     assemble: typeof assemble;
   };
   /** Override the per-request workdir root (defaults to the OS tmpdir). */
