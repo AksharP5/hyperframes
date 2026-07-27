@@ -499,6 +499,63 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     view.unmount();
   });
 
+  // The diamond's rapid-second-retime path reports the PENDING clip-% (where the
+  // first drag put the keyframe), which the keyframe cache has not caught up to.
+  // TimelineClipDiamonds' own test mocks onMoveKeyframe, so only this one proves
+  // the real callback resolves that stale-cache position off the identity fields
+  // instead of failing the lookup.
+  it("retimes from a pending position the keyframe cache has not caught up to", async () => {
+    const authored = authoredInteriorAnimation();
+    mocks.animations = [authored];
+    usePlayerStore.setState({
+      elements: [element],
+      gsapAnimations: new Map([["index.html#box", [authored]]]),
+      // Still the pre-drag positions: 75% is not in here.
+      keyframeCache: new Map([
+        [
+          "index.html#box",
+          {
+            format: "percentage" as const,
+            keyframes: [
+              { percentage: 0, properties: { x: 0 } },
+              { percentage: 50, properties: { x: 210 } },
+              { percentage: 100, properties: { x: 420 } },
+            ],
+          },
+        ],
+      ]),
+    });
+    const view = renderCallbacks();
+
+    await expect(
+      view.callbacks.onMoveKeyframe?.(
+        "index.html#box",
+        {
+          percentage: 75,
+          propertyGroup: "position",
+          tweenPercentage: 50,
+          animationId: authored.id,
+        },
+        85,
+      ),
+    ).resolves.toBe(true);
+    expect(mocks.actions.handleGsapMoveKeyframe).toHaveBeenCalledWith(
+      authored.id,
+      50,
+      85,
+      mocks.selection,
+    );
+
+    // Control: the same drag WITHOUT the identity fields falls back to the cache
+    // lookup, finds nothing at 75%, and cannot retime.
+    mocks.actions.handleGsapMoveKeyframe.mockClear();
+    await expect(
+      view.callbacks.onMoveKeyframe?.("index.html#box", { percentage: 75 }, 85),
+    ).resolves.toBe(false);
+    expect(mocks.actions.handleGsapMoveKeyframe).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it("uses the clip timing basis when retiming a duration-less tween", async () => {
     const durationless = {
       ...authoredInteriorAnimation(),

@@ -149,6 +149,29 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
     keyframe.animationId === undefined
       ? sorted
       : sorted.filter((k) => k.animationId === keyframe.animationId);
+  // Compose each sibling's pending destination in first: clamping against
+  // cached positions while the dragged keyframe reads its pending one let a
+  // second drag cross a neighbour that had already moved past it. Built once
+  // per render, keyed by tween: every diamond of a row needs the same row, and
+  // rebuilding + re-sorting it inside the marker loop below made this
+  // O(keyframes squared) allocations on every playhead tick.
+  const pendingClipPctOf = (keyframe: TimelineDiamondKeyframe) =>
+    pendingRetimes.get(timelineKeyframeSelectionKey(elementId, keyframeTarget(keyframe)))
+      ?.clipPct ?? keyframe.percentage;
+  const siblingRows = new Map<
+    string | undefined,
+    { keyframes: TimelineDiamondKeyframe[]; clipPcts: number[] }
+  >();
+  for (const keyframe of sorted) {
+    if (siblingRows.has(keyframe.animationId)) continue;
+    const row = siblingRowOf(keyframe)
+      .map((k) => ({ keyframe: k, clipPct: pendingClipPctOf(k) }))
+      .sort((a, b) => a.clipPct - b.clipPct);
+    siblingRows.set(keyframe.animationId, {
+      keyframes: row.map((s) => s.keyframe),
+      clipPcts: row.map((s) => s.clipPct),
+    });
+  }
   const centerXOf = (percentage: number) =>
     Math.max(0, Math.min(clipWidthPx, (percentage / 100) * clipWidthPx));
   // One record per diamond, carrying its own geometry, so the connector and
@@ -202,19 +225,9 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
         const target = keyframeTarget(kf);
         const kfKey = timelineKeyframeSelectionKey(elementId, target);
         // Clamp against this keyframe's own tween, not the whole merged row.
-        // Compose each sibling's pending destination in first: clamping against
-        // cached positions while the dragged keyframe reads its pending one let
-        // a second drag cross a neighbour that had already moved past it.
-        const siblingRow = siblingRowOf(kf)
-          .map((k) => ({
-            keyframe: k,
-            clipPct:
-              pendingRetimes.get(timelineKeyframeSelectionKey(elementId, keyframeTarget(k)))
-                ?.clipPct ?? k.percentage,
-          }))
-          .sort((a, b) => a.clipPct - b.clipPct);
-        const siblingClipPcts = siblingRow.map((s) => s.clipPct);
-        const siblingIndex = siblingRow.findIndex((s) => s.keyframe === kf);
+        const siblingRow = siblingRows.get(kf.animationId);
+        const siblingClipPcts = siblingRow?.clipPcts ?? [];
+        const siblingIndex = siblingRow?.keyframes.indexOf(kf) ?? -1;
         // While dragging this diamond, render it at the live preview clip-%.
         const renderPct = preview?.kfKey === kfKey ? preview.clipPct : kf.percentage;
         // Center the marker's non-overlapping hit region ON its keyframe %, so

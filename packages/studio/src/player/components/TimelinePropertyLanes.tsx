@@ -4,7 +4,7 @@ import {
   type GsapAnimation,
   type PropertyGroupName,
 } from "@hyperframes/core/gsap-parser";
-import { toAbsoluteTime } from "../../hooks/gsapShared";
+import { toClipKeyframes } from "../../hooks/gsapShared";
 import { synthesizeFlatTweenKeyframes } from "../../hooks/gsapTweenSynth";
 import { TimelineDiamondLane, type TimelineDiamondKeyframe } from "./TimelineClipDiamonds";
 import { LANE_H, getTimelineLaneTop } from "./timelineLayout";
@@ -67,6 +67,13 @@ function keyframeEase(keyframe: { ease?: string }, animation: GsapAnimation): st
   return keyframe.ease ?? animation.keyframes?.easeEach ?? animation.ease;
 }
 
+/**
+ * One lane row per keyframe of `group`. The clip-% re-basing goes through the
+ * shared toClipKeyframes so lane rows land on the exact same percentage the
+ * keyframe cache writes: this file used to derive it inline and skipped that
+ * helper's rounding, which is the one precision every keyframe-cache writer has
+ * to agree on (selection keys embed the number).
+ */
 function groupKeyframes(
   animations: readonly GsapAnimation[],
   group: PropertyGroupName,
@@ -75,18 +82,15 @@ function groupKeyframes(
 ): TimelineDiamondKeyframe[] {
   const keyframes: TimelineDiamondKeyframe[] = [];
   for (const animation of animations) {
-    const tweenStart =
-      animation.resolvedStart ?? (typeof animation.position === "number" ? animation.position : 0);
-    const tweenDuration = animation.duration ?? clipDuration;
-    for (const keyframe of animationKeyframes(animation)) {
-      if (!hasGroupProperty(keyframe.properties, group)) continue;
-      const absoluteTime = toAbsoluteTime(tweenStart, tweenDuration, keyframe.percentage);
+    const inGroup = animationKeyframes(animation).filter((keyframe) =>
+      hasGroupProperty(keyframe.properties, group),
+    );
+    for (const keyframe of toClipKeyframes(inGroup, animation, clipStart, clipDuration)) {
       keyframes.push({
         ...keyframe,
-        percentage: ((absoluteTime - clipStart) / clipDuration) * 100,
-        tweenPercentage: keyframe.percentage,
+        // The LANE's group, not the tween's own classification: a mixed-property
+        // tween classifies to undefined yet still feeds every group it touches.
         propertyGroup: group,
-        animationId: animation.id,
         ease: keyframeEase(keyframe, animation),
       });
     }
