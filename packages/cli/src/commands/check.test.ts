@@ -1141,6 +1141,57 @@ describe("frame-check flag grammar", () => {
     });
     expect(() => parseFrameCheck("bogus=1")).toThrow("Invalid --frame-check");
     expect(() => parseFrameCheck("tol=-2")).toThrow("Invalid --frame-check");
+    expect(() => parseFrameCheck("tol=4px")).toThrow("Invalid --frame-check");
+    expect(() => parseFrameCheck("tol=2garbage")).toThrow("Invalid --frame-check");
+  });
+});
+
+describe("layout flag grammar", () => {
+  it("parses proseCoverageFloor and rejects malformed specs", async () => {
+    const { parseLayout } = await import("./check.js");
+    expect(parseLayout(undefined)).toBeUndefined();
+    expect(parseLayout("proseCoverageFloor=0.05")).toEqual({ proseCoverageFloor: 0.05 });
+    expect(parseLayout("proseCoverageFloor=0")).toEqual({ proseCoverageFloor: 0 });
+    expect(parseLayout("proseCoverageFloor=1")).toEqual({ proseCoverageFloor: 1 });
+    expect(() => parseLayout(true)).toThrow("Invalid --layout");
+    expect(() => parseLayout("")).toThrow("Invalid --layout");
+    expect(() => parseLayout("bogus=1")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=-0.1")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=1.1")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=0.05garbage")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=0.1%")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=")).toThrow("Invalid --layout");
+  });
+
+  it("threads --layout into the check pipeline options", async () => {
+    const { report } = await runScenario(fakeDriver());
+    const runPipeline = vi.fn(async (_project: ProjectDir, _options: CheckOptions) => report);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const command = createCheckCommand({
+      resolveProject: () => PROJECT,
+      runPipeline,
+      withMeta: (value) => value,
+    });
+
+    await runCommand(command, {
+      rawArgs: ["--json", "--layout", "proseCoverageFloor=0.05"],
+    });
+
+    expect(runPipeline).toHaveBeenCalledWith(
+      PROJECT,
+      expect.objectContaining({
+        layout: { proseCoverageFloor: 0.05 },
+      }),
+    );
+  });
+
+  it("forwards layout options into driver.collectLayout", async () => {
+    const collectLayout = vi.fn(async (_time: number, _tolerance: number, _layout?: unknown) => []);
+    await runScenario(fakeDriver({ collectLayout }), { layout: { proseCoverageFloor: 0.05 } });
+    expect(collectLayout).toHaveBeenCalled();
+    expect(collectLayout).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), {
+      proseCoverageFloor: 0.05,
+    });
   });
 });
 
