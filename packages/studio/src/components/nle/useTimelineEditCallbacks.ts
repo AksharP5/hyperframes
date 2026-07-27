@@ -171,12 +171,10 @@ export function useTimelineEditCallbacks({
     ) => {
       const animation = animations.find((candidate) => candidate.id === animationId);
       if (animation && !animation.keyframes) {
-        if (selectionOverride === undefined) handleGsapDeleteAnimation(animationId);
-        else handleGsapDeleteAnimation(animationId, selectionOverride);
+        handleGsapDeleteAnimation(animationId, selectionOverride);
         return;
       }
-      if (selectionOverride === undefined) handleGsapRemoveKeyframe(animationId, percentage);
-      else handleGsapRemoveKeyframe(animationId, percentage, undefined, selectionOverride);
+      handleGsapRemoveKeyframe(animationId, percentage, undefined, selectionOverride);
     },
     [handleGsapDeleteAnimation, handleGsapRemoveKeyframe],
   );
@@ -216,10 +214,25 @@ export function useTimelineEditCallbacks({
           removeKeyframeTarget(target.animId, target.tweenPct, animations, selection);
         });
       },
-      // Retime the keyframe to the playhead, preserving its value + ease.
+      // Retime the keyframe to the playhead, preserving its value + ease. The
+      // clicked element owns the whole write: its animations resolve the target,
+      // its selection commits it, and its animation computes the playhead
+      // percentage. Mixing frames here retimed against the selected element's
+      // tween and wrote the result into the clicked element's file.
       onMoveKeyframeToPlayhead: (elId, keyframe) => {
-        const target = resolveKeyframeTarget(keyframe, resolveElementAnimations(elId), elId);
-        if (target) handleGsapMoveKeyframeToPlayhead(target.animId, target.tweenPct);
+        const animations = resolveElementAnimations(elId);
+        const target = resolveKeyframeTarget(keyframe, animations, elId);
+        const animation = target
+          ? animations.find((candidate) => candidate.id === target.animId)
+          : undefined;
+        if (!target || !animation) return;
+        const element = usePlayerStore.getState().elements.find((el) => (el.key ?? el.id) === elId);
+        if (!element) return;
+        void buildDomSelectionForTimelineElement(element).then((selection) => {
+          if (selection) {
+            handleGsapMoveKeyframeToPlayhead(target.animId, target.tweenPct, selection, animation);
+          }
+        });
       },
       // Drag-to-retime. The diamond reports clip-%s; resolveKeyframeTarget gives
       // the dragged keyframe's anim + tween-%. We convert the clip-% drop to an
@@ -294,10 +307,19 @@ export function useTimelineEditCallbacks({
         }
         return true;
       },
-      onChangeKeyframeEase: (_elId: string, _pct: number, ease: string) => {
-        for (const anim of selectedGsapAnimations) {
-          if (anim.keyframes) handleGsapUpdateMeta(anim.id, { ease });
-        }
+      onChangeKeyframeEase: (elId: string, _pct: number, ease: string) => {
+        // The edited element's own animations + selection, not the selection's:
+        // an ease change on a non-selected lane otherwise rewrote whichever
+        // element happened to be selected, in whichever file it lives.
+        const animations = resolveElementAnimations(elId);
+        const element = usePlayerStore.getState().elements.find((el) => (el.key ?? el.id) === elId);
+        if (!element) return;
+        void buildDomSelectionForTimelineElement(element).then((selection) => {
+          if (!selection) return;
+          for (const anim of animations) {
+            if (anim.keyframes) handleGsapUpdateMeta(anim.id, { ease }, selection);
+          }
+        });
       },
       // fallow-ignore-next-line complexity
       onToggleKeyframeAtPlayhead: (el: TimelineElement) => {
@@ -306,18 +328,34 @@ export function useTimelineEditCallbacks({
           el.duration > 0
             ? Math.max(0, Math.min(100, Math.round(((currentTime - el.start) / el.duration) * 100)))
             : 0;
-        const anim = selectedGsapAnimations.find((a) => a.keyframes);
-        if (anim?.keyframes) {
-          const existing = anim.keyframes.keyframes.find((k) => Math.abs(k.percentage - pct) <= 1);
-          if (existing) {
-            handleGsapRemoveKeyframe(anim.id, existing.percentage);
+        // Same frame for read and write: the toggled element's animations decide
+        // add-vs-remove, and its selection is what the mutation commits through.
+        const animations = resolveElementAnimations(el.key ?? el.id);
+        void buildDomSelectionForTimelineElement(el).then((selection) => {
+          if (!selection) return;
+          const anim = animations.find((a) => a.keyframes);
+          if (anim?.keyframes) {
+            const existing = anim.keyframes.keyframes.find(
+              (k) => Math.abs(k.percentage - pct) <= 1,
+            );
+            if (existing) {
+              handleGsapRemoveKeyframe(anim.id, existing.percentage, undefined, selection);
+            } else {
+              handleGsapAddKeyframe(anim.id, pct, "x", 0, selection);
+            }
           } else {
-            handleGsapAddKeyframe(anim.id, pct, "x", 0);
+            const flatAnim = animations.find((a) => !a.keyframes);
+            if (flatAnim) {
+              void handleGsapConvertToKeyframes(
+                flatAnim.id,
+                undefined,
+                undefined,
+                undefined,
+                selection,
+              );
+            }
           }
-        } else {
-          const flatAnim = selectedGsapAnimations.find((a) => !a.keyframes);
-          if (flatAnim) handleGsapConvertToKeyframes(flatAnim.id);
-        }
+        });
       },
       onTogglePropertyGroupKeyframe: async (element, target) => {
         const selection = await buildDomSelectionForTimelineElement(element);

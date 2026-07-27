@@ -255,13 +255,16 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
   // not belong to the selected element, and it passes no explicit target — so
   // the resolve falls back to the cache. Reading the SELECTED element's cache
   // there resolves against the wrong element's keyframes.
-  it("resolves a cache fallback against the clicked element, not the selected one", () => {
+  it("resolves a cache fallback against the clicked element, not the selected one", async () => {
     const circle: TimelineElement = {
       ...element,
       id: "circle",
       key: "scenes/main.html#circle",
       domId: "circle",
+      sourceFile: "scenes/main.html",
     };
+    const circleSelection = { id: "circle", selector: "#circle", sourceFile: "scenes/main.html" };
+    mocks.actions.buildDomSelectionForTimelineElement.mockResolvedValue(circleSelection);
     usePlayerStore.setState({
       elements: [element, circle],
       gsapAnimations: new Map([["scenes/main.html#circle", [otherKeyframedAnimation]]]),
@@ -293,13 +296,18 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     });
     const view = renderCallbacks();
 
-    act(() => {
+    await act(async () => {
       view.callbacks.onMoveKeyframeToPlayhead?.("scenes/main.html#circle", { percentage: 100 });
+      await Promise.resolve();
     });
 
+    // The retime target, the selection it commits through, and the animation the
+    // playhead percentage is computed against all come from the CLICKED element.
     expect(mocks.actions.handleGsapMoveKeyframeToPlayhead).toHaveBeenCalledWith(
       otherKeyframedAnimation.id,
       100,
+      circleSelection,
+      otherKeyframedAnimation,
     );
     view.unmount();
   });
@@ -316,7 +324,10 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       });
     });
 
-    expect(mocks.actions.handleGsapDeleteAnimation).toHaveBeenCalledWith(flatAnimation.id);
+    expect(mocks.actions.handleGsapDeleteAnimation).toHaveBeenCalledWith(
+      flatAnimation.id,
+      undefined,
+    );
     expect(mocks.actions.handleGsapRemoveKeyframe).not.toHaveBeenCalled();
     view.unmount();
   });
@@ -391,7 +402,12 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       });
     });
 
-    expect(mocks.actions.handleGsapRemoveKeyframe).toHaveBeenCalledWith(flatAnimation.id, 50);
+    expect(mocks.actions.handleGsapRemoveKeyframe).toHaveBeenCalledWith(
+      flatAnimation.id,
+      50,
+      undefined,
+      undefined,
+    );
     expect(mocks.actions.handleGsapDeleteAnimation).not.toHaveBeenCalled();
     view.unmount();
   });

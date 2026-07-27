@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
+import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { useGsapSelectionHandlers } from "./useGsapSelectionHandlers";
 
@@ -111,6 +112,35 @@ describe("useGsapSelectionHandlers save failures", () => {
     await flushRejection();
 
     expect(showToast).not.toHaveBeenCalled();
+    rendered.unmount();
+  });
+});
+
+describe("useGsapSelectionHandlers selection override", () => {
+  it("aborts on an explicit null override instead of writing to the current selection", () => {
+    const removeKeyframe = vi.fn();
+    const rendered = renderHandlers(makeParams({ removeKeyframe }));
+
+    // Explicit null: the caller resolved a selection for its own element and
+    // found none, so the write must not land on the selected element.
+    rendered.handlers().handleGsapRemoveKeyframe("anim-1", 50, undefined, null);
+    expect(removeKeyframe).not.toHaveBeenCalled();
+
+    // Omitted override: falls back to the current selection as before.
+    rendered.handlers().handleGsapRemoveKeyframe("anim-1", 50);
+    expect(removeKeyframe).toHaveBeenCalledOnce();
+    rendered.unmount();
+  });
+
+  it("computes the playhead percentage from the passed animation, not the selection's", () => {
+    const moveKeyframe = vi.fn();
+    const selection = makeSelection();
+    const animation = { id: "anim-1", keyframes: { keyframes: [] } } as unknown as GsapAnimation;
+    const rendered = renderHandlers(makeParams({ moveKeyframe, selectedGsapAnimations: [] }));
+
+    rendered.handlers().handleGsapMoveKeyframeToPlayhead("anim-1", 50, selection, animation);
+
+    expect(moveKeyframe).toHaveBeenCalledWith(selection, "anim-1", 50, expect.any(Number));
     rendered.unmount();
   });
 });
