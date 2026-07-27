@@ -11,6 +11,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { checkDistributedSupport } from "./regression-harness-distributed.js";
 import { discoverTestSuites } from "./regression-harness.js";
 import {
   discoverFixtures,
@@ -21,7 +22,11 @@ import {
 
 const TESTS_DIR = join(import.meta.dir, "..", "tests");
 
-function readSchedule(): { timings?: Record<string, number>; excluded?: Record<string, string> } {
+function readSchedule(): {
+  timings?: Record<string, number>;
+  excluded?: Record<string, string>;
+  distributed?: Record<string, string>;
+} {
   return JSON.parse(readFileSync(join(TESTS_DIR, "shard-schedule.json"), "utf-8"));
 }
 
@@ -70,6 +75,85 @@ describe("shard planner fixture discovery", () => {
       }),
     );
     expect(() => planShards({ scheduleFile: tainted })).toThrow(/both scheduled and excluded/);
+  });
+
+  it("never mixes harness modes within a shard", () => {
+    // `--mode` is a per-invocation flag, so a shard carrying both kinds would
+    // silently run half of them in the wrong mode.
+    const { include } = planShards();
+    const distributed = new Set(Object.keys(readSchedule().distributed ?? {}));
+    for (const row of include) {
+      const fixtures = row.args.split(" ");
+      const chunked = fixtures.filter((f) => distributed.has(f));
+      expect(chunked.length === 0 || chunked.length === fixtures.length).toBe(true);
+      expect(row.mode).toBe(chunked.length > 0 ? "distributed-simulated" : "in-process");
+    }
+  });
+
+  it("gives every shard a mode the harness accepts", () => {
+    // Guards against a typo reaching the workflow, where `--mode=<bad>` throws
+    // at parse time inside the container after the image has already built.
+    for (const row of planShards().include) {
+      expect(["in-process", "distributed-simulated", "lambda-local"]).toContain(row.mode);
+    }
+  });
+
+  it("rejects a distributed fixture that is not scheduled", () => {
+    const schedule = readSchedule();
+    const tainted = join(mkdtempSync(join(tmpdir(), "hf-shard-schedule-")), "shard-schedule.json");
+    writeFileSync(
+      tainted,
+      JSON.stringify({
+        ...schedule,
+        distributed: { ...schedule.distributed, "not-a-real-fixture": "typo" },
+      }),
+    );
+    expect(() => planShards({ scheduleFile: tainted })).toThrow(/are not scheduled/);
+  });
+
+  it("only assigns distributed mode to fixtures the harness can actually run that way", () => {
+    // The blocking gap: `checkDistributedSupport` refuses HDR, non-integer fps,
+    // and fps outside {24,30,60}, and the harness records a refusal as
+    // `passed: true` with `skipped`. Skipping was safe while in-process also
+    // ran the fixture. It is not safe now — these fixtures run in distributed
+    // mode and nowhere else, so a later `hdr: true` or fps edit would turn
+    // their only coverage into a green no-op with every other planner
+    // invariant still passing. Membership and reason-text checks cannot see
+    // that; runtime support has to be part of the committed contract.
+    const suites = new Map(discoverTestSuites(TESTS_DIR, []).map((s) => [s.id, s]));
+    for (const fixture of Object.keys(readSchedule().distributed ?? {})) {
+      const suite = suites.get(fixture);
+      expect(
+        suite,
+        `${fixture} is marked distributed but the harness cannot load it`,
+      ).toBeDefined();
+      const support = checkDistributedSupport(
+        (suite as { meta: { renderConfig: Parameters<typeof checkDistributedSupport>[0] } }).meta
+          .renderConfig,
+      );
+      expect(
+        support.supported,
+        `${fixture} is scheduled distributed-only but distributed mode refuses it: ` +
+          `${support.supported ? "" : support.reason}`,
+      ).toBe(true);
+    }
+  });
+
+  it("would reject a distributed fixture the harness refuses to run chunked", () => {
+    // Proves the guard above has teeth rather than passing vacuously.
+    const hdr = checkDistributedSupport({ fps: { num: 30, den: 1 }, hdr: true });
+    expect(hdr.supported).toBe(false);
+    const ntsc = checkDistributedSupport({ fps: { num: 30000, den: 1001 } });
+    expect(ntsc.supported).toBe(false);
+    const odd = checkDistributedSupport({ fps: { num: 25, den: 1 } });
+    expect(odd.supported).toBe(false);
+  });
+
+  it("gives every distributed fixture a written reason", () => {
+    for (const [fixture, reason] of Object.entries(readSchedule().distributed ?? {})) {
+      expect(typeof reason, `${fixture} needs a reason`).toBe("string");
+      expect((reason as string).length, `${fixture} needs a real reason`).toBeGreaterThan(20);
+    }
   });
 
   it("gives every excluded fixture a written reason", () => {
