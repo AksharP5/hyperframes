@@ -256,10 +256,6 @@ export function useTimelineEditCallbacks({
         const anim = animations.find((a) => a.id === target.animId);
         const tweenStart = anim ? resolveTweenStart(anim) : null;
         if (!anim || tweenStart === null) return Promise.resolve(false);
-        // Synthesized flat endpoints are clip boundaries, not authored keyframes.
-        // Boundary-to-clip resize wiring is intentionally deferred; ignore the
-        // drag rather than dispatching a free keyframe move that cannot be written.
-        if (!anim.keyframes) return Promise.resolve(false);
         const sourceFile = sel.sourceFile || activeCompPath || "index.html";
         const { elements, domClipChildren } = usePlayerStore.getState();
         const { elStart, elDuration } = resolveClipTimingBasis(
@@ -285,6 +281,19 @@ export function useTimelineEditCallbacks({
           decision.position != null &&
           decision.duration != null
         ) {
+          // An empty remap means a FLAT tween's synthesized boundary: there is no
+          // keyframe node to re-key, only the window to move. Sending it through
+          // the keyframed-resize writer would rewrite the authored flat tween into
+          // keyframes form as a side effect of a pure position/duration change, so
+          // dispatch update-meta and leave the tween as the author wrote it.
+          if (decision.pctRemap.length === 0) {
+            handleGsapUpdateMeta(
+              target.animId,
+              { position: decision.position, duration: decision.duration },
+              sel,
+            );
+            return true;
+          }
           return handleGsapResizeKeyframedTween(
             target.animId,
             decision.position,

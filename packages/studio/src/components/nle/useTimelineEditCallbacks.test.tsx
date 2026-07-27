@@ -184,7 +184,7 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
     view.unmount();
   });
 
-  it("settles false for a boundary drag while the tween is still flat", async () => {
+  it("retimes a flat tween's boundary through update-meta, not the keyframe writer", async () => {
     const view = renderCallbacks();
 
     await expect(
@@ -198,9 +198,16 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
         },
         25,
       ),
-    ).resolves.toBe(false);
+    ).resolves.toBe(true);
 
+    // The start boundary moved to 0.25s; the end stays put, so the window is 0.75s.
+    expect(mocks.actions.handleGsapUpdateMeta).toHaveBeenCalledWith(
+      flatAnimation.id,
+      { position: 0.25, duration: 0.75 },
+      mocks.selection,
+    );
     expect(mocks.actions.handleGsapMoveKeyframe).not.toHaveBeenCalled();
+    // resize-keyframed-tween would convert the flat tween to keyframes form.
     expect(mocks.actions.handleGsapResizeKeyframedTween).not.toHaveBeenCalled();
     view.unmount();
   });

@@ -11,12 +11,15 @@ interface KeyframeNavigationProps {
     tweenPercentage?: number;
     properties: Record<string, number | string>;
     ease?: string;
+    /** The tween that authored this keyframe, when the cache knows it. */
+    animationId?: string;
   }> | null;
   /** Current playhead percentage within the element's lifetime (0-100) */
   currentPercentage: number;
   onSeek: (percentage: number) => void;
   onAddKeyframe: (percentage: number) => void;
-  onRemoveKeyframe: (percentage: number) => void;
+  /** `animationId` is the clicked keyframe's OWN tween; see handleDiamondClick. */
+  onRemoveKeyframe: (percentage: number, animationId?: string) => void;
   onConvertToKeyframes: () => void;
 }
 
@@ -152,7 +155,12 @@ export const KeyframeNavigation = memo(function KeyframeNavigation({
     if (diamondState === "ghost") {
       onConvertToKeyframes();
     } else if (diamondState === "active" && atCurrent) {
-      onRemoveKeyframe(atCurrent.tweenPercentage ?? atCurrent.percentage);
+      // Report the keyframe's OWN tween. A merged gutter row shows the keyframes
+      // of every tween in the property group, so the caller's "the group's
+      // animation" guess names the wrong tween whenever the clicked keyframe
+      // belongs to a sibling — and the writer then finds no keyframe at that
+      // percentage and silently does nothing.
+      onRemoveKeyframe(atCurrent.tweenPercentage ?? atCurrent.percentage, atCurrent.animationId);
     } else {
       onAddKeyframe(clipToTweenPercentage(propertyKeyframes, currentPercentage));
     }

@@ -408,7 +408,9 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
                       onCommitAnimatedProperty &&
                       void onCommitAnimatedProperty(element, "x", displayX)
                     }
-                    onRemoveKeyframe={(pct) => onRemoveKeyframe?.(animIdForProp("x"), pct)}
+                    onRemoveKeyframe={(pct, animationId) =>
+                      onRemoveKeyframe?.(animationId ?? animIdForProp("x"), pct)
+                    }
                     onConvertToKeyframes={() => onConvertToKeyframes?.(animIdForProp("x"))}
                   />
                 )}
@@ -433,7 +435,9 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
                       onCommitAnimatedProperty &&
                       void onCommitAnimatedProperty(element, "y", displayY)
                     }
-                    onRemoveKeyframe={(pct) => onRemoveKeyframe?.(animIdForProp("y"), pct)}
+                    onRemoveKeyframe={(pct, animationId) =>
+                      onRemoveKeyframe?.(animationId ?? animIdForProp("y"), pct)
+                    }
                     onConvertToKeyframes={() => onConvertToKeyframes?.(animIdForProp("y"))}
                   />
                 )}
@@ -458,7 +462,9 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
                       onCommitAnimatedProperty &&
                       void onCommitAnimatedProperty(element, "width", displayW)
                     }
-                    onRemoveKeyframe={(pct) => onRemoveKeyframe?.(animIdForProp("width"), pct)}
+                    onRemoveKeyframe={(pct, animationId) =>
+                      onRemoveKeyframe?.(animationId ?? animIdForProp("width"), pct)
+                    }
                     onConvertToKeyframes={() => onConvertToKeyframes?.(animIdForProp("width"))}
                   />
                 )}
@@ -483,7 +489,9 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
                       onCommitAnimatedProperty &&
                       void onCommitAnimatedProperty(element, "height", displayH)
                     }
-                    onRemoveKeyframe={(pct) => onRemoveKeyframe?.(animIdForProp("height"), pct)}
+                    onRemoveKeyframe={(pct, animationId) =>
+                      onRemoveKeyframe?.(animationId ?? animIdForProp("height"), pct)
+                    }
                     onConvertToKeyframes={() => onConvertToKeyframes?.(animIdForProp("height"))}
                   />
                 )}
@@ -507,7 +515,9 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
                       onCommitAnimatedProperty &&
                       void onCommitAnimatedProperty(element, "rotation", displayR)
                     }
-                    onRemoveKeyframe={(pct) => onRemoveKeyframe?.(animIdForProp("rotation"), pct)}
+                    onRemoveKeyframe={(pct, animationId) =>
+                      onRemoveKeyframe?.(animationId ?? animIdForProp("rotation"), pct)
+                    }
                     onConvertToKeyframes={() => onConvertToKeyframes?.(animIdForProp("rotation"))}
                   />
                 )}
