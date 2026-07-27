@@ -8,25 +8,22 @@ import {
   clearKeyframeCacheForFile,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
-import { toAbsoluteTime, toClipPercentage, toClipKeyframes } from "./gsapShared";
+import { idFromSelector, toAbsoluteTime, toClipPercentage, toClipKeyframes } from "./gsapShared";
 import {
   deduplicateKeyframes,
   isStaticPositionHold,
   synthesizeFlatTweenKeyframes,
 } from "./gsapTweenSynth";
 
-function extractIdFromSelector(selector: string): string | null {
-  const match = selector.match(/^#([\w-]+)/);
-  return match ? match[1] : null;
-}
-
 /**
  * Resolve a tween's target selector to the ids of the element(s) it animates.
  * A bare `#id` resolves directly; anything else (a class like `.dot`, a group
  * `.a, .b`, or a descendant selector) is matched against the live preview DOM so
  * class/selector tweens (e.g. `gsap.from(".dot", {stagger})`) attribute to every
- * element they animate — not just one parsed from the string. Falls back to a
- * leading `#id` when there's no DOM (so the cache still populates pre-iframe).
+ * element they animate — not just one parsed from the string. Falls back to the
+ * leading id when there's no DOM (so the cache still populates pre-iframe);
+ * `idFromSelector` reads both `#id` and the `[id="…"]` form writers emit for
+ * CSS-unsafe ids, so those elements resolve pre-iframe too.
  */
 // fallow-ignore-next-line complexity
 export function resolveSelectorElementIds(
@@ -36,7 +33,7 @@ export function resolveSelectorElementIds(
   const bareId = selector.match(/^#([\w-]+)$/);
   if (bareId) return [bareId[1]];
   if (!doc) {
-    const lead = extractIdFromSelector(selector);
+    const lead = idFromSelector(selector);
     return lead ? [lead] : [];
   }
   const ids = new Set<string>();
@@ -48,7 +45,7 @@ export function resolveSelectorElementIds(
         if (el.id) ids.add(el.id);
       }
     } catch {
-      const lead = extractIdFromSelector(sel);
+      const lead = idFromSelector(sel);
       if (lead) ids.add(lead);
     }
   }
