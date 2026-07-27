@@ -7,6 +7,7 @@ import {
   GUTTER,
   TRACKS_LEFT_PAD,
   getTimelineRowTop,
+  getTimelineScrubTime,
   getTimelineRowFromY,
   getTimelineCanvasHeight,
   resolveTimelineAssetDrop,
@@ -103,5 +104,48 @@ describe("track-area breathing pad y-math", () => {
       const { track } = resolveTimelineAssetDrop(base, GUTTER, clientY);
       expect(track).toBe(3); // max(trackOrder)+1
     });
+  });
+});
+
+describe("getTimelineScrubTime", () => {
+  const at = (clientX: number, duration = 10) =>
+    getTimelineScrubTime({
+      clientX,
+      viewportLeft: 0,
+      scrollLeft: 0,
+      pixelsPerSecond: 100,
+      duration,
+    });
+  const origin = GUTTER + TRACKS_LEFT_PAD;
+
+  it("maps the content origin to t=0", () => {
+    expect(at(origin)).toBe(0);
+    expect(at(origin + 250)).toBe(2.5);
+  });
+
+  // The bug: a pointer left of the origin used to abort the scrub instead of
+  // clamping, so dragging the playhead to the start only worked if a sample
+  // happened to land in the few px before t=0.
+  it("clamps a pointer left of the origin to 0 instead of dropping the scrub", () => {
+    expect(at(origin - 1)).toBe(0);
+    expect(at(origin - 500)).toBe(0);
+    expect(at(0)).toBe(0);
+  });
+
+  it("clamps past the end to the duration", () => {
+    expect(at(origin + 5000)).toBe(10);
+  });
+
+  it("returns 0 for a degenerate zoom or duration", () => {
+    expect(
+      getTimelineScrubTime({
+        clientX: 500,
+        viewportLeft: 0,
+        scrollLeft: 0,
+        pixelsPerSecond: 0,
+        duration: 10,
+      }),
+    ).toBe(0);
+    expect(at(origin + 250, Number.NaN)).toBe(0);
   });
 });

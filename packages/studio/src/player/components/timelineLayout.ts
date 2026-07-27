@@ -321,6 +321,29 @@ export function getTimelinePlayheadLeft(time: number, pixelsPerSecond: number): 
   );
 }
 
+/**
+ * Inverse of {@link getTimelinePlayheadLeft}: the scrub time under a viewport
+ * clientX. Clamped to [0, duration], NOT rejected — the scrub surface starts
+ * `GUTTER + TRACKS_LEFT_PAD` px right of the viewport edge, so any pointer left
+ * of t=0 maps to a negative offset. Callers used to bail on that instead of
+ * clamping, which made the last 80px of the drag to zero silently do nothing:
+ * the playhead stuck wherever the last in-range sample landed, and only a very
+ * slow drag that happened to sample inside the sliver before the origin reached
+ * 0. Every scrub path shares this so they cannot diverge on the edge again.
+ */
+export function getTimelineScrubTime(input: {
+  clientX: number;
+  viewportLeft: number;
+  scrollLeft: number;
+  pixelsPerSecond: number;
+  duration: number;
+}): number {
+  const { clientX, viewportLeft, scrollLeft, pixelsPerSecond, duration } = input;
+  if (!(pixelsPerSecond > 0) || !Number.isFinite(duration)) return 0;
+  const x = clientX - viewportLeft + scrollLeft - GUTTER - TRACKS_LEFT_PAD;
+  return Math.max(0, Math.min(duration, x / pixelsPerSecond));
+}
+
 export function getTimelineCanvasHeight(trackCount: number): number {
   // RULER_H + top pad + lanes + bottom pad. The old TIMELINE_SCROLL_BUFFER is
   // subsumed by TRACKS_BOTTOM_PAD (which is larger), so the drag-into-void space

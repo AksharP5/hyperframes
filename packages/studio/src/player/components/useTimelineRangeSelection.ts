@@ -7,7 +7,7 @@ import {
 } from "./timelineEditing";
 import type { TimelineElement } from "../store/playerStore";
 import { liveTime, usePlayerStore } from "../store/playerStore";
-import { GUTTER, TRACKS_LEFT_PAD } from "./timelineLayout";
+import { GUTTER, TRACKS_LEFT_PAD, getTimelineScrubTime } from "./timelineLayout";
 import {
   computeMarqueeSelection,
   getMarqueeRect,
@@ -286,11 +286,15 @@ export function useTimelineRangeSelection({
       const el = scrollRef.current;
       if (el) {
         const rect = el.getBoundingClientRect();
-        const x = clientX - rect.left + el.scrollLeft - GUTTER - TRACKS_LEFT_PAD;
-        if (x >= 0) {
-          const dur = el.scrollWidth / pps;
-          liveTime.notify(Math.max(0, Math.min(dur, x / pps)));
-        }
+        liveTime.notify(
+          getTimelineScrubTime({
+            clientX,
+            viewportLeft: rect.left,
+            scrollLeft: el.scrollLeft,
+            pixelsPerSecond: pps,
+            duration: el.scrollWidth / pps,
+          }),
+        );
       }
       if (!seekRafRef.current) {
         seekRafRef.current = requestAnimationFrame(() => {

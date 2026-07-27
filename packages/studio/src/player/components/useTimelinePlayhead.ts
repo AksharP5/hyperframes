@@ -6,6 +6,7 @@ import {
   GUTTER,
   TRACKS_LEFT_PAD,
   getTimelinePlayheadLeft,
+  getTimelineScrubTime,
   getTimelineScrollLeftForZoomTransition,
   getTimelineScrollLeftForZoomAnchor,
   shouldAutoScrollTimeline,
@@ -130,9 +131,13 @@ export function useTimelinePlayhead({
       const el = scrollRef.current;
       if (!el || effectiveDuration <= 0) return;
       const rect = el.getBoundingClientRect();
-      const x = clientX - rect.left + el.scrollLeft - GUTTER - TRACKS_LEFT_PAD;
-      if (x < 0) return;
-      const time = Math.max(0, Math.min(effectiveDuration, x / pps));
+      const time = getTimelineScrubTime({
+        clientX,
+        viewportLeft: rect.left,
+        scrollLeft: el.scrollLeft,
+        pixelsPerSecond: pps,
+        duration: effectiveDuration,
+      });
       liveTime.notify(time);
       onSeek?.(time);
     },
