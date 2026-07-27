@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { applyConcreteGpuScreenshotClamp, buildChromeArgs } from "@hyperframes/engine";
 import { recomputePlanHashFromPlanDir } from "../render/stages/freezePlan.js";
 import { RenderQualityError } from "../renderOrchestrator.js";
 import { CURRENT_PLAN_PROTOCOL } from "./planProtocol.js";
@@ -29,6 +30,7 @@ import {
   DEFAULT_MAX_PARALLEL_CHUNKS,
   MIN_CHUNK_SIZE,
   plan,
+  resolveDistributedEngineConfig,
   resolveChunkPlan,
 } from "./plan.js";
 import { buildSyntheticRenderJob } from "./shared.js";
@@ -154,6 +156,26 @@ describe("distributed synthetic render job", () => {
     });
 
     expect(job.config.variables).toEqual(variables);
+  });
+
+  it("keeps the production software-GPU launch on BeginFrame control", () => {
+    const cfg = resolveDistributedEngineConfig({
+      fps: 30,
+      width: 320,
+      height: 240,
+      format: "mp4",
+    });
+    const forceScreenshot = applyConcreteGpuScreenshotClamp(
+      cfg.forceScreenshot,
+      "software",
+      cfg,
+      {},
+    );
+    const captureMode = forceScreenshot ? "screenshot" : "beginframe";
+    const args = buildChromeArgs({ width: 320, height: 240, captureMode, platform: "linux" }, cfg);
+
+    expect(forceScreenshot).toBe(false);
+    expect(args).toContain("--enable-begin-frame-control");
   });
 });
 

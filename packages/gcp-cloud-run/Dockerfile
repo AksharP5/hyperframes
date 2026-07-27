@@ -21,7 +21,7 @@
 # Unlike the AWS Lambda adapter there is no ZIP-size ceiling and no runtime
 # Chrome decompression step — the binary lives in the image at a fixed path.
 
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS beginframe-contract
 
 # ── System dependencies (identical set to the producer's render image) ───────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -55,9 +55,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && fc-cache -fv
 
 # ── chrome-headless-shell (deterministic BeginFrame capture) ─────────────────
-# Pinned to the SAME build the producer regression baselines were generated
-# against so distributed renders are pixel-comparable. Bump together with the
-# producer's Dockerfile.test pin and a baseline regen.
+# Pinned deliberately. The build-stage contract probe below launches this
+# exact executable and requires a renderer-ready warm-up plus a PNG-returning
+# HeadlessExperimental.beginFrame before the image can build.
 RUN npx --yes @puppeteer/browsers install chrome-headless-shell@148.0.7778.167 \
       --path /opt/puppeteer \
     && CHS="$(find /opt/puppeteer/chrome-headless-shell -name chrome-headless-shell -type f | head -n1)" \
@@ -99,6 +99,23 @@ COPY packages/sdk-playground/package.json packages/sdk-playground/package.json
 COPY packages/studio-server/package.json packages/studio-server/package.json
 COPY scripts/package-subpaths.mjs scripts/package-subpaths.mjs
 RUN bun install --frozen-lockfile
+
+# Fail the image build closed if the packaged executable cannot perform the
+# same BeginFrame operation the distributed renderer relies on. Generate the
+# argument list with the production engine helper so a launcher-flag regression
+# invalidates this layer and fails the contract instead of testing a duplicate
+# hard-coded profile.
+COPY packages/engine/ packages/engine/
+COPY packages/aws-lambda/scripts/probe-beginframe.ts packages/aws-lambda/scripts/probe-beginframe.ts
+RUN bun -e 'import { buildChromeArgs } from "./packages/engine/src/services/browserManager.ts"; await Bun.write("/tmp/hf-gcp-chrome-args.json", JSON.stringify(buildChromeArgs({ width: 800, height: 600, captureMode: "beginframe", platform: "linux" }, { browserGpuMode: "software" })))' \
+    && bun packages/aws-lambda/scripts/probe-beginframe.ts \
+      --executable-path /opt/chrome/chrome-headless-shell \
+      --launch-args-json /tmp/hf-gcp-chrome-args.json
+
+# CI targets `beginframe-contract` directly, so pin/probe changes do not need
+# the full monorepo build merely to verify browser capability. The deployable
+# image continues from the already-proven binary and installed workspaces.
+FROM beginframe-contract AS runtime
 
 # Copy source for the packages the render path needs.
 COPY packages/core/ packages/core/

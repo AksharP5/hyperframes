@@ -203,6 +203,8 @@ export interface RenderChunkResultBody {
   ChunkIndex: number;
   Sha256: string;
   FramesEncoded: number;
+  /** Effective engine mode after browser probing. Emitted by current handlers. */
+  CaptureMode?: "beginframe" | "screenshot" | "drawelement";
   DurationMs: number;
 }
 

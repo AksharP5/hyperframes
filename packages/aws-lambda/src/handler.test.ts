@@ -377,6 +377,12 @@ describe("handler dispatch", () => {
           framesEncoded: 240,
           sha256: "0".repeat(64),
           durationMs: 12345,
+          planHashMs: 1,
+          sessionBootMs: 2,
+          captureStageMs: 3,
+          encodeStageMs: 4,
+          workers: 1,
+          captureMode: "beginframe",
           perfPath: outputChunkPath + ".perf.json",
         };
       },
@@ -416,6 +422,7 @@ describe("handler dispatch", () => {
     expect(result.ChunkIndex).toBe(2);
     expect(result.Sha256).toBe("0".repeat(64));
     expect(result.FramesEncoded).toBe(240);
+    expect(result.CaptureMode).toBe("beginframe");
     expect(renderChunkMock).toHaveBeenCalledTimes(1);
   });
 
@@ -555,6 +562,12 @@ describe("handler dispatch", () => {
           framesEncoded: 30,
           sha256: "b".repeat(64),
           durationMs: 1,
+          planHashMs: 0,
+          sessionBootMs: 0,
+          captureStageMs: 1,
+          encodeStageMs: 0,
+          workers: 1,
+          captureMode: "beginframe",
           perfPath: `${outputPath}.perf.json`,
         };
       },
@@ -631,6 +644,7 @@ describe("handler dispatch", () => {
       deps,
     );
     if (chunk.Action !== "renderChunk") throw new Error("expected chunk result");
+    expect(chunk.CaptureMode).toBe("beginframe");
     const audioDigest = createHash("sha256").update("AAC").digest("hex");
     const audioUri = `${planned.PlanV2ArtifactS3Prefix}/${audioDigest.slice(0, 2)}/${audioDigest}`;
     expect(s3.ops.slice(beforeChunk).some((operation) => operation.uri === audioUri)).toBe(false);

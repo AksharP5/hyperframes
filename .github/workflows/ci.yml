@@ -35,6 +35,7 @@ jobs:
       cli: ${{ steps.filter.outputs.cli }}
       skills: ${{ steps.filter.outputs.skills }}
       codex_plugin: ${{ steps.filter.outputs.codex_plugin }}
+      gcp_beginframe: ${{ steps.filter.outputs.gcp_beginframe }}
     steps:
       # Force git-based change detection instead of the pull_request REST API.
       # The API path can fail the whole workflow on transient listFiles
@@ -76,6 +77,33 @@ jobs:
               - "scripts/package-codex-plugin.mjs"
               - "package.json"
               - ".github/workflows/ci.yml"
+            gcp_beginframe:
+              - "packages/gcp-cloud-run/Dockerfile"
+              - "packages/aws-lambda/scripts/probe-beginframe.ts"
+              - "packages/engine/src/services/browserManager.ts"
+              - "package.json"
+              - "bun.lock"
+              - ".github/workflows/ci.yml"
+
+  gcp-beginframe-contract:
+    name: GCP BeginFrame image contract
+    needs: changes
+    if: needs.changes.outputs.gcp_beginframe == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          lfs: true
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          file: packages/gcp-cloud-run/Dockerfile
+          target: beginframe-contract
+          push: false
+          cache-from: type=gha,scope=gcp-beginframe-contract
+          cache-to: type=gha,mode=max,scope=gcp-beginframe-contract
 
   build:
     name: Build

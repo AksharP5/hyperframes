@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -9,6 +10,9 @@ import type { Browser, PuppeteerNode } from "puppeteer-core";
 import {
   _resetAutoBrowserGpuModeCacheForTests,
   _resetBrowserPoolForTests,
+  _closeBrowserAfterFailedProbeForTests,
+  _createBrowserLaunchFingerprintForTests,
+  _probeBeginFrameSupportForTests,
   _setPuppeteerForTests,
   acquireBrowser,
   buildChromeArgs,
@@ -18,6 +22,102 @@ import {
   resolveHeadlessShellPath,
   resolveBrowserGpuMode,
 } from "./browserManager.js";
+
+describe("BeginFrame capability probe", () => {
+  it("waits for a document and validates a PNG-returning frame", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ hasDamage: true, screenshotData: png.toString("base64") });
+    const detach = vi.fn().mockResolvedValue(undefined);
+    const goto = vi.fn().mockResolvedValue(null);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto,
+        createCDPSession: vi.fn().mockResolvedValue({ send, detach }),
+        close,
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser);
+
+    expect(result.supported).toBe(true);
+    expect(goto).toHaveBeenCalledWith(expect.stringContaining("hf-beginframe-probe"), {
+      waitUntil: "domcontentloaded",
+      timeout: 2000,
+    });
+    expect(send.mock.calls.map(([method]) => method)).toEqual([
+      "HeadlessExperimental.enable",
+      "HeadlessExperimental.beginFrame",
+      "HeadlessExperimental.beginFrame",
+    ]);
+    expect(detach).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("reports an empty screenshot as unsupported", async () => {
+    const send = vi.fn().mockResolvedValue({ hasDamage: false });
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(null),
+        createCDPSession: vi.fn().mockResolvedValue({
+          send,
+          detach: vi.fn().mockResolvedValue(undefined),
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser);
+
+    expect(result.supported).toBe(false);
+    expect(result.detail).toContain("returned 0 bytes after 10 attempts");
+  });
+
+  it("bounds a screenshot-bearing CDP call that never resolves", async () => {
+    const never = new Promise<never>(() => {});
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockReturnValueOnce(never);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(null),
+        createCDPSession: vi.fn().mockResolvedValue({
+          send,
+          detach: vi.fn().mockResolvedValue(undefined),
+        }),
+        close,
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser, 25);
+
+    expect(result.supported).toBe(false);
+    expect(result.detail).toContain("timeout during screenshot beginFrame attempt 1");
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("force-kills and disconnects when graceful browser cleanup never resolves", async () => {
+    const kill = vi.fn();
+    const disconnect = vi.fn().mockResolvedValue(undefined);
+    const browser = {
+      close: vi.fn().mockReturnValue(new Promise<never>(() => {})),
+      process: vi.fn().mockReturnValue({ kill }),
+      disconnect,
+    } as unknown as Browser;
+
+    await _closeBrowserAfterFailedProbeForTests(browser, 25);
+
+    expect(kill).toHaveBeenCalledWith("SIGKILL");
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+});
 
 describe("buildChromeArgs browser GPU mode", () => {
   const base = { width: 1920, height: 1080 };
@@ -86,6 +186,31 @@ describe("buildChromeArgs browser GPU mode", () => {
     expect(args).toContain("--disable-gpu");
     expect(args).toContain("--use-angle=swiftshader");
     expect(args).not.toContain("--use-angle=metal");
+  });
+});
+
+describe("browser launch capture-mode contract", () => {
+  it("derives BeginFrame from the actual launch flags, not forceScreenshot alone", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-browser-fingerprint-"));
+    const chromePath = join(dir, "chrome-headless-shell");
+    writeFileSync(chromePath, "");
+    try {
+      const withoutControl = _createBrowserLaunchFingerprintForTests([], {
+        chromePath,
+        forceScreenshot: false,
+      });
+      const withControl = _createBrowserLaunchFingerprintForTests(
+        ["--enable-begin-frame-control"],
+        { chromePath, forceScreenshot: false },
+      );
+
+      expect(withoutControl.requestedCaptureMode).toBe("screenshot");
+      expect(withControl.requestedCaptureMode).toBe(
+        process.platform === "linux" ? "beginframe" : "screenshot",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

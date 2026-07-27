@@ -217,43 +217,191 @@ function stripBeginFrameFlags(args: string[]): string[] {
 }
 
 /**
- * Probe whether the browser still speaks HeadlessExperimental.beginFrame.
+ * Probe the complete HeadlessExperimental.beginFrame runtime contract.
  *
- * Recent chrome-headless-shell builds (observed on 147) expose the domain
- * well enough that HeadlessExperimental.enable succeeds but drop the
- * beginFrame method itself — the capture loop then dies on first frame with
- * `'HeadlessExperimental.beginFrame' wasn't found`. So we probe BOTH: enable
- * + one cheap beginFrame raced against a 2s timeout. In beginframe-control
- * mode the command completes as soon as the compositor acks, so a real
- * supported browser returns well under the timeout.
- *
- * Any failure (method missing, timeout, protocol error) is treated as
- * unsupported. Real errors after launch would surface in the warmup loop and
- * fall out through the caller's try/catch.
+ * Domain registration alone is insufficient: BeginFrame control must be
+ * enabled at launch and a renderer-ready target must return a real PNG.
+ * Every operation shares one short deadline so a wedged CDP call cannot hold
+ * a serverless cold start until Puppeteer's much longer protocol timeout.
  */
-async function probeBeginFrameSupport(browser: Browser): Promise<boolean> {
-  let page;
+interface BeginFrameProbeResult {
+  supported: boolean;
+  detail: string;
+  durationMs: number;
+}
+
+const BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS = 10;
+const BEGINFRAME_PROBE_TIMEOUT_MS = 2000;
+const BEGINFRAME_PROBE_CLEANUP_TIMEOUT_MS = 250;
+
+async function awaitBeforeDeadline<T>(
+  operation: Promise<T>,
+  deadline: number,
+  label: string,
+): Promise<T> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) {
+    throw new Error(`beginFrame probe timeout before ${label}`);
+  }
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    page = await browser.newPage();
-    const client = await page.createCDPSession();
-    await client.send("HeadlessExperimental.enable");
-    const beginFrame = client.send("HeadlessExperimental.beginFrame", {
-      frameTimeTicks: 0,
-      interval: 33,
-      noDisplayUpdates: true,
-    });
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("beginFrame probe timeout")), 2000),
-    );
-    await Promise.race([beginFrame, timeout]);
-    await client.detach().catch(() => {});
-    return true;
-  } catch {
-    return false;
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`beginFrame probe timeout during ${label}`)),
+          remainingMs,
+        );
+      }),
+    ]);
   } finally {
-    await page?.close().catch(() => {});
+    if (timeout) clearTimeout(timeout);
   }
 }
+
+async function settleWithin(operation: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation.then(
+        () => true,
+        () => false,
+      ),
+      new Promise<false>((resolveTimeout) => {
+        timeout = setTimeout(() => resolveTimeout(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function closeBrowserAfterFailedProbe(
+  browser: Browser,
+  timeoutMs = BEGINFRAME_PROBE_CLEANUP_TIMEOUT_MS,
+): Promise<void> {
+  if (await settleWithin(browser.close(), timeoutMs)) return;
+  // A wedged CDP transport can make graceful close inherit Puppeteer's
+  // multi-minute protocol timeout. Kill the owned process and disconnect so
+  // screenshot fallback can launch promptly.
+  try {
+    browser.process()?.kill("SIGKILL");
+  } catch {
+    // Best effort; disconnect below still releases Puppeteer's transport.
+  }
+  await settleWithin(browser.disconnect(), timeoutMs);
+}
+
+// The probe keeps its renderer setup, bounded CDP sequence, PNG validation,
+// diagnostics, and cleanup together so every failure uses one contract.
+// fallow-ignore-next-line complexity
+async function probeBeginFrameSupport(
+  browser: Browser,
+  timeoutMs = BEGINFRAME_PROBE_TIMEOUT_MS,
+): Promise<BeginFrameProbeResult> {
+  const started = Date.now();
+  const deadline = started + timeoutMs;
+  let page;
+  let result: BeginFrameProbeResult;
+  try {
+    page = await awaitBeforeDeadline(browser.newPage(), deadline, "newPage");
+    // `browser.newPage()` resolves before a cold renderer has necessarily
+    // submitted its first surface. Cloud Run exposed this as a false
+    // "unsupported Chromium" result: probing the untouched about:blank
+    // target raced renderer initialization, while the same binary passed
+    // once a real document was ready. Navigate first so this tests protocol
+    // capability rather than target-startup timing.
+    await awaitBeforeDeadline(
+      page.goto(
+        "data:text/html,<style>html,body{margin:0;background:%23173}</style><div>hf-beginframe-probe</div>",
+        { waitUntil: "domcontentloaded", timeout: timeoutMs },
+      ),
+      deadline,
+      "navigation",
+    );
+    const client = await awaitBeforeDeadline(
+      page.createCDPSession(),
+      deadline,
+      "CDP session creation",
+    );
+    await awaitBeforeDeadline(
+      client.send("HeadlessExperimental.enable"),
+      deadline,
+      "HeadlessExperimental.enable",
+    );
+    await awaitBeforeDeadline(
+      client.send("HeadlessExperimental.beginFrame", {
+        frameTimeTicks: 0,
+        interval: 33,
+        noDisplayUpdates: true,
+      }),
+      deadline,
+      "warm-up beginFrame",
+    );
+    let bytes = Buffer.alloc(0);
+    let isPng = false;
+    let attempts = 0;
+    for (attempts = 1; attempts <= BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS; attempts += 1) {
+      const response = await awaitBeforeDeadline(
+        client.send("HeadlessExperimental.beginFrame", {
+          frameTimeTicks: 1000 + (attempts - 1) * 33,
+          interval: 33,
+          screenshot: { format: "png" },
+        }),
+        deadline,
+        `screenshot beginFrame attempt ${attempts}`,
+      );
+      const screenshot = response.screenshotData ?? "";
+      bytes = screenshot ? Buffer.from(screenshot, "base64") : Buffer.alloc(0);
+      isPng =
+        bytes.length >= 8 &&
+        bytes[0] === 0x89 &&
+        bytes[1] === 0x50 &&
+        bytes[2] === 0x4e &&
+        bytes[3] === 0x47;
+      if (isPng) break;
+      await awaitBeforeDeadline(
+        new Promise((resolveDelay) => setTimeout(resolveDelay, 10)),
+        deadline,
+        `screenshot retry delay ${attempts}`,
+      );
+    }
+    if (!isPng) {
+      throw new Error(
+        `beginFrame screenshot returned ${bytes.length} bytes after ` +
+          `${BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS} attempts with signature ` +
+          `${bytes.length >= 4 ? bytes.subarray(0, 4).toString("hex") : "<empty>"}`,
+      );
+    }
+    await awaitBeforeDeadline(client.detach(), deadline, "CDP detach").catch(() => {});
+    result = {
+      supported: true,
+      detail:
+        `enable + warm-up + ${bytes.length}-byte PNG beginFrame succeeded ` +
+        `after ${attempts} screenshot attempt(s)`,
+      durationMs: Date.now() - started,
+    };
+  } catch (error) {
+    result = {
+      supported: false,
+      detail: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - started,
+    };
+  }
+  if (page && !(await settleWithin(page.close(), BEGINFRAME_PROBE_CLEANUP_TIMEOUT_MS))) {
+    return {
+      supported: false,
+      detail: `${result.detail}; probe page cleanup timed out`,
+      durationMs: Date.now() - started,
+    };
+  }
+  return result;
+}
+
+/** Test-only export for the renderer-readiness + PNG capability contract. */
+export const _probeBeginFrameSupportForTests = probeBeginFrameSupport;
+/** Test-only export for the forced browser-cleanup fallback. */
+export const _closeBrowserAfterFailedProbeForTests = closeBrowserAfterFailedProbe;
 
 /**
  * Cached *in-flight or resolved* probe Promise for `resolveBrowserGpuMode("auto", ...)`.
@@ -391,8 +539,17 @@ function createBrowserLaunchFingerprint(
     ...config,
   };
   const headlessShell = resolveHeadlessShellPath(launchConfig);
+  // The launch arguments are the authoritative capture-mode contract.
+  // A caller can pass `forceScreenshot:false` while a later safety clamp
+  // deliberately omits BeginFrame control flags. Inferring solely from the
+  // raw config in that case makes BrowserManager probe a capability it never
+  // enabled, then mislabel the result as an unsupported Chromium build.
+  const beginFrameControlEnabled = chromeArgs.includes("--enable-begin-frame-control");
   const requestedCaptureMode: CaptureMode =
-    headlessShell && process.platform === "linux" && !launchConfig.forceScreenshot
+    headlessShell &&
+    process.platform === "linux" &&
+    !launchConfig.forceScreenshot &&
+    beginFrameControlEnabled
       ? "beginframe"
       : "screenshot";
   return {
@@ -403,6 +560,9 @@ function createBrowserLaunchFingerprint(
     requestedCaptureMode,
   };
 }
+
+/** Test-only export for launch-argument/capture-mode agreement. */
+export const _createBrowserLaunchFingerprintForTests = createBrowserLaunchFingerprint;
 
 export async function acquireBrowser(
   chromeArgs: string[],
@@ -443,12 +603,17 @@ async function launchBrowser(
     );
 
     if (captureMode === "beginframe") {
-      const supported = await probeBeginFrameSupport(browser).catch(() => true);
-      if (!supported) {
-        await browser.close().catch(() => {});
+      const probe = await probeBeginFrameSupport(browser).catch((error) => ({
+        supported: true,
+        detail: `probe harness error ignored: ${error instanceof Error ? error.message : String(error)}`,
+        durationMs: 0,
+      }));
+      if (!probe.supported) {
+        await closeBrowserAfterFailedProbe(browser);
         browser = undefined;
         console.warn(
-          "[BrowserManager] HeadlessExperimental.beginFrame unavailable in this Chromium build; falling back to screenshot mode.",
+          `[BrowserManager] HeadlessExperimental.beginFrame probe failed after ${probe.durationMs}ms: ` +
+            `${probe.detail}; falling back to screenshot mode.`,
         );
         captureMode = "screenshot";
         browser = await ppt.launch({

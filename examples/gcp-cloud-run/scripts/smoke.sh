@@ -408,6 +408,8 @@ else
 !packages/shader-transitions/package.json
 !packages/aws-lambda/
 !packages/aws-lambda/package.json
+!packages/aws-lambda/scripts/
+!packages/aws-lambda/scripts/probe-beginframe.ts
 packages/**/node_modules/**
 packages/**/dist/**
 packages/**/coverage/**
@@ -546,6 +548,19 @@ for protocol in "${PROTOCOL_LIST[@]}"; do
       jq -r '.error.payload // empty' "$EXECUTION_JSON" | head -c 800
       [ "$OVERALL_RC" -ne 0 ] || OVERALL_RC=4
       continue
+    fi
+
+    CAPTURE_MODES="$(jq -r \
+      '.result | fromjson | [.Chunks[]?.CaptureMode // "<missing>"] | unique | join(",")' \
+      "$EXECUTION_JSON")"
+    if jq -e \
+      '.result | fromjson | .Chunks as $chunks |
+       (($chunks | length) > 0 and all($chunks[]; .CaptureMode == "beginframe"))' \
+      "$EXECUTION_JSON" >/dev/null; then
+      echo "  ✓ effective capture mode=beginframe"
+    else
+      echo "  ✗ expected every chunk to use beginframe; observed=${CAPTURE_MODES:-<none>}"
+      [ "$OVERALL_RC" -ne 0 ] || OVERALL_RC=6
     fi
 
     OUTPUT_LOCAL="$RENDER_DIR/$protocol-c$chunk_size-output.mp4"
