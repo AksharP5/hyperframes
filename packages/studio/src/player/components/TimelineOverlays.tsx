@@ -1,4 +1,4 @@
-import type { KeyframeCacheEntry, TimelineElement } from "../store/playerStore";
+import type { TimelineElement } from "../store/playerStore";
 import type { TimelineTheme } from "./timelineTheme";
 import type { TimelineRangeSelection } from "./timelineEditing";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
@@ -38,9 +38,7 @@ interface TimelineOverlaysProps {
   setKfContextMenu: (value: KeyframeDiamondContextMenuState | null) => void;
   onDeleteKeyframe: TimelineEditCallbacks["onDeleteKeyframe"];
   onDeleteAllKeyframes: TimelineEditCallbacks["onDeleteAllKeyframes"];
-  onChangeKeyframeEase: TimelineEditCallbacks["onChangeKeyframeEase"];
   onMoveKeyframeToPlayhead: TimelineEditCallbacks["onMoveKeyframeToPlayhead"];
-  keyframeCache: Map<string, KeyframeCacheEntry>;
   clipContextMenu: ClipContextMenuState | null;
   setClipContextMenu: (value: ClipContextMenuState | null) => void;
   currentTime: number;
@@ -68,9 +66,7 @@ export function TimelineOverlays({
   setKfContextMenu,
   onDeleteKeyframe,
   onDeleteAllKeyframes,
-  onChangeKeyframeEase,
   onMoveKeyframeToPlayhead,
-  keyframeCache,
   clipContextMenu,
   setClipContextMenu,
   currentTime,
@@ -108,19 +104,11 @@ export function TimelineOverlays({
           onClose={() => setKfContextMenu(null)}
           onDelete={(elId, target) => onDeleteKeyframe?.(elId, target)}
           onDeleteAll={(elId) => onDeleteAllKeyframes?.(elId)}
-          onChangeEase={(elId, pct, ease) => onChangeKeyframeEase?.(elId, pct, ease)}
           onMoveToPlayhead={
             onMoveKeyframeToPlayhead
               ? (element, target) => onMoveKeyframeToPlayhead(element, target)
               : undefined
           }
-          onCopyProperties={(elId, pct) => {
-            const kfData = keyframeCache.get(elId);
-            const kf = kfData?.keyframes.find((k) => k.percentage === pct);
-            if (kf) {
-              void navigator.clipboard.writeText(JSON.stringify(kf.properties, null, 2));
-            }
-          }}
         />
       )}
 

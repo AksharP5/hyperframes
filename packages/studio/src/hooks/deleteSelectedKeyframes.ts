@@ -20,7 +20,10 @@ export function deleteSelectedKeyframes(session: {
   const { selectedKeyframes, selectedElementId } = usePlayerStore.getState();
   if (!selectedElementId) return;
   const keyframedAnimations = session.selectedGsapAnimations.filter((anim) => anim.keyframes);
-  const fallbackAnimation = keyframedAnimations[0];
+  // A collapsed selection key (an ungrouped animation) carries no animation id,
+  // so it only resolves when there is exactly one keyframed animation it could
+  // mean. Taking the first of several deletes an arbitrary tween's keyframe.
+  const fallbackAnimation = keyframedAnimations.length === 1 ? keyframedAnimations[0] : undefined;
   const animationsById = new Map(keyframedAnimations.map((animation) => [animation.id, animation]));
   const removals = new Map<string, { animationId: string; percentage: number }>();
   for (const key of selectedKeyframes) {

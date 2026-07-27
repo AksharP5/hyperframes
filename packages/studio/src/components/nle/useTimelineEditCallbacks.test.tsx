@@ -512,10 +512,14 @@ describe("useTimelineEditCallbacks — flat tween keyframe lanes", () => {
       ),
     ).resolves.toBe(true);
 
+    // The whole point of the clip basis: the drop lands at 10.94 + 0.40 * 16.26 =
+    // 17.444s, and the duration-less tween borrows the clip's 16.26s window from
+    // its 3.2s start, so 17.444 - 3.2 over 16.26 is 87.601%. Any other basis (a
+    // zero-length tween, or the clip's own 0-100 %) produces a different number.
     expect(mocks.actions.handleGsapMoveKeyframe).toHaveBeenCalledWith(
       durationless.id,
       50,
-      expect.any(Number),
+      expect.closeTo(87.601, 3),
       mocks.selection,
     );
     expect(mocks.actions.handleGsapResizeKeyframedTween).not.toHaveBeenCalled();

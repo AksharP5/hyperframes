@@ -74,6 +74,8 @@ export interface TimelineLaneBaseProps {
   currentTime: number;
   onClickKeyframe?: (element: TimelineElement, keyframe: TimelineKeyframeTarget) => void;
   onShiftClickKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
+  /** Click on the segment BETWEEN two diamonds: selects it to edit its ease. */
+  onSelectSegment?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
   onContextMenuKeyframe?: (
     e: React.MouseEvent,
     elementId: string,
@@ -141,6 +143,7 @@ export function TimelineLanes({
   currentTime,
   onClickKeyframe,
   onShiftClickKeyframe,
+  onSelectSegment,
   onContextMenuKeyframe,
   onMoveKeyframe,
   onContextMenuClip,
@@ -482,6 +485,7 @@ export function TimelineLanes({
                               onClickKeyframe?.(previewElement, keyframe)
                             }
                             onShiftClickKeyframe={onShiftClickKeyframe}
+                            onSelectSegment={onSelectSegment}
                             onContextMenuKeyframe={onContextMenuKeyframe}
                             onMoveKeyframe={onMoveKeyframe}
                             suppressClickRef={suppressClickRef}

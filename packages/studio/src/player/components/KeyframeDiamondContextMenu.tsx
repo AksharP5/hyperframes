@@ -21,8 +21,6 @@ interface KeyframeDiamondContextMenuProps {
   onClose: () => void;
   onDelete: (elementId: string, target: TimelineKeyframeTarget) => void;
   onDeleteAll: (element: TimelineElement) => void;
-  onChangeEase?: (elementId: string, percentage: number, ease: string) => void;
-  onCopyProperties?: (elementId: string, percentage: number) => void;
   /** Retime the keyframe to the current playhead, preserving its value + ease. */
   onMoveToPlayhead?: (element: TimelineElement, target: TimelineKeyframeTarget) => void;
 }

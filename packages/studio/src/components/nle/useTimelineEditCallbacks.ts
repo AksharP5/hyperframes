@@ -301,20 +301,6 @@ export function useTimelineEditCallbacks({
         }
         return Promise.resolve(false);
       },
-      onChangeKeyframeEase: (elId: string, _pct: number, ease: string) => {
-        // The edited element's own animations + selection, not the selection's:
-        // an ease change on a non-selected lane otherwise rewrote whichever
-        // element happened to be selected, in whichever file it lives.
-        const animations = resolveElementAnimations(elId);
-        const element = usePlayerStore.getState().elements.find((el) => (el.key ?? el.id) === elId);
-        if (!element) return;
-        void buildDomSelectionForTimelineElement(element).then((selection) => {
-          if (!selection) return;
-          for (const anim of animations) {
-            if (anim.keyframes) handleGsapUpdateMeta(anim.id, { ease }, selection);
-          }
-        });
-      },
       // fallow-ignore-next-line complexity
       onToggleKeyframeAtPlayhead: (el: TimelineElement) => {
         const currentTime = usePlayerStore.getState().currentTime;

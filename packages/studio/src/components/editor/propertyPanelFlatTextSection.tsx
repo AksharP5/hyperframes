@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTrackDesignInput } from "../../contexts/DesignPanelInputContext";
 import { Plus, X } from "../../icons/SystemIcons";
 import { isTextEditableSelection, type DomEditSelection } from "./domEditing";
@@ -257,10 +257,12 @@ export function FlatTextSection({
   const [activeFieldKey, setActiveFieldKey] = useState<string | null>(
     element.textFields[0]?.key ?? null,
   );
-  // Armed by the add handler, read and cleared by the render that first shows
-  // the new field. A ref rather than state: the marker only has to survive one
-  // render, and clearing it afterwards would be a state-syncing effect.
-  const autoFocusFieldKeyRef = useRef<string | null>(null);
+  // Armed by the add handler so the newly added field mounts focused. State, not
+  // a ref cleared during render: Strict Mode renders twice, so the first pass
+  // would eat the marker and the second would mount the field unfocused. Nothing
+  // clears it on read either — `autoFocus` is a mount-only DOM prop and the
+  // editor is keyed on the field, so it can only fire once per added field.
+  const [autoFocusFieldKey, setAutoFocusFieldKey] = useState<string | null>(null);
 
   useEffect(() => {
     const nextFields = element.textFields;
@@ -275,8 +277,7 @@ export function FlatTextSection({
   const activeField = textFields.find((field) => field.key === activeFieldKey) ?? textFields[0];
   if (!activeField) return null;
 
-  const autoFocusActiveField = autoFocusFieldKeyRef.current === activeField.key;
-  if (autoFocusActiveField) autoFocusFieldKeyRef.current = null;
+  const autoFocusActiveField = autoFocusFieldKey === activeField.key;
 
   if (textFields.length > 1) {
     return (
@@ -286,13 +287,13 @@ export function FlatTextSection({
           activeFieldKey={activeField.key}
           styles={styles}
           onSelect={(fieldKey) => {
-            autoFocusFieldKeyRef.current = null;
+            setAutoFocusFieldKey(null);
             setActiveFieldKey(fieldKey);
           }}
           onAdd={() =>
             void Promise.resolve(onAddTextField(activeField.key)).then((nextKey) => {
               if (!nextKey) return;
-              autoFocusFieldKeyRef.current = nextKey;
+              setAutoFocusFieldKey(nextKey);
               setActiveFieldKey(nextKey);
             })
           }
@@ -330,7 +331,7 @@ export function FlatTextSection({
           track("button", "Add text field");
           void Promise.resolve(onAddTextField(activeField.key)).then((nextKey) => {
             if (!nextKey) return;
-            autoFocusFieldKeyRef.current = nextKey;
+            setAutoFocusFieldKey(nextKey);
             setActiveFieldKey(nextKey);
           });
         }}

@@ -75,7 +75,6 @@ export const Timeline = memo(function Timeline({
     onRazorSplitAll,
     onDeleteKeyframe,
     onDeleteAllKeyframes,
-    onChangeKeyframeEase,
     onMoveKeyframeToPlayhead,
     onMoveKeyframe,
   } = useResolvedTimelineEditCallbacks({
@@ -263,7 +262,7 @@ export const Timeline = memo(function Timeline({
   const selectedKeyframes = usePlayerStore((s) => s.selectedKeyframes);
   const toggleSelectedKeyframe = usePlayerStore((s) => s.toggleSelectedKeyframe);
 
-  const { onClickKeyframe, onShiftClickKeyframe, onContextMenuKeyframe } =
+  const { onClickKeyframe, onSelectSegment, onShiftClickKeyframe, onContextMenuKeyframe } =
     useTimelineKeyframeHandlers({
       expandedElements,
       keyframeCache,
@@ -509,6 +508,7 @@ export const Timeline = memo(function Timeline({
           currentTime={currentTime}
           beatAnalysis={adjustedBeatAnalysis}
           onClickKeyframe={onClickKeyframe}
+          onSelectSegment={onSelectSegment}
           onShiftClickKeyframe={onShiftClickKeyframe}
           onMoveKeyframe={onMoveKeyframe}
           onContextMenuKeyframe={onContextMenuKeyframe}
@@ -547,9 +547,7 @@ export const Timeline = memo(function Timeline({
         setKfContextMenu={setKfContextMenu}
         onDeleteKeyframe={onDeleteKeyframe}
         onDeleteAllKeyframes={onDeleteAllKeyframes}
-        onChangeKeyframeEase={onChangeKeyframeEase}
         onMoveKeyframeToPlayhead={onMoveKeyframeToPlayhead}
-        keyframeCache={keyframeCache}
         clipContextMenu={clipContextMenu}
         setClipContextMenu={setClipContextMenu}
         currentTime={currentTime}
