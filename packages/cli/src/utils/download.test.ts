@@ -8,7 +8,16 @@ import type { ClientRequest, IncomingMessage } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { downloadFile } from "./download.js";
 
+const { unlinkSyncMock } = vi.hoisted(() => ({
+  unlinkSyncMock: vi.fn(),
+}));
+
 vi.mock("node:https", () => ({ get: vi.fn() }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  unlinkSyncMock.mockImplementation(actual.unlinkSync);
+  return { ...actual, unlinkSync: unlinkSyncMock };
+});
 
 const mockGet = vi.mocked(httpsGet);
 const tempDirs: string[] = [];
@@ -20,6 +29,17 @@ afterEach(() => {
 
 describe("downloadFile", () => {
   it("rejects an idle response and removes the partial file", async () => {
+    const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
+    let responseClosed = false;
+    unlinkSyncMock.mockImplementation((path) => {
+      if (!responseClosed) {
+        const error = new Error("file is locked");
+        Object.assign(error, { code: "EBUSY" });
+        throw error;
+      }
+      actualFs.unlinkSync(path);
+    });
+
     mockGet.mockImplementation(((_url: string, callback: (response: IncomingMessage) => void) => {
       const response = new PassThrough() as PassThrough & {
         statusCode: number;
@@ -27,6 +47,9 @@ describe("downloadFile", () => {
       };
       response.statusCode = 200;
       response.headers = {};
+      response.once("close", () => {
+        responseClosed = true;
+      });
 
       class FakeRequest extends EventEmitter {
         private timeout: ReturnType<typeof setTimeout> | undefined;
