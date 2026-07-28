@@ -725,7 +725,11 @@ describe("renderLocal browser GPU config", () => {
   });
 });
 
-describe("renderLocal — DE parallel-router CLI trial", () => {
+// Suite renamed with the breaker work: this is no longer an opt-in trial. The
+// bindings come from main's shared top-level `renderModule` import rather than
+// this suite's own beforeAll — same module instance every other suite uses, so
+// module-scope arm/consume state resets through the one `resetTrialState()`.
+describe("renderLocal — DE parallel-router circuit breaker", () => {
   const { renderLocal, __resetDeParallelRouterTrialStateForTests: resetTrialState } = renderModule;
   const savedEnv = new Map<string, string | undefined>();
 
@@ -768,19 +772,22 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
     browserGpuMode: "software" as const,
     hdrMode: "auto" as const,
     quiet: true,
-    // The trial is OPT-IN (review): only the CLI's own sequential call sites
-    // set this. These tests simulate those call sites.
-    enableDeParallelRouterTrial: true,
+    // Breaker management is OPT-IN (review): only the CLI's own sequential
+    // call sites set it. These tests simulate those call sites.
+    manageDeParallelRouterBreaker: true,
   };
 
-  it("enables the trial (sets the env var) on a fresh install with telemetry on", async () => {
+  it("leaves the env var untouched on a fresh install — the router is default-ON", async () => {
+    // Under the old opt-in trial this armed HF_DE_PARALLEL_ROUTER="true".
+    // The router now ships on, so the breaker's job is to stay out of the
+    // way until something actually fails.
     configState.disk = {
       telemetryEnabled: true,
       deParallelRouterTrialFired: false,
       telemetryNoticeShown: true,
     };
     await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("true");
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
   });
 
   it("does not override an env var the user already set themselves", async () => {
@@ -794,48 +801,29 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
     expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
   });
 
-  it("does not enable the trial once it has already fired for this install", async () => {
+  it("writes an explicit false once the breaker has tripped for this install", async () => {
+    // THE regression this rework exists for: the old code disabled the
+    // router by DELETING the var. With a default-ON router, absent means ON,
+    // so deleting would silently re-enable it on the very host that just
+    // failed. Only an explicit "false" is a real off-switch.
     configState.disk = {
       telemetryEnabled: true,
       deParallelRouterTrialFired: true,
       telemetryNoticeShown: true,
     };
     await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
   });
 
-  it("does not enable the trial when shouldTrack() is false (dev mode / DO_NOT_TRACK)", async () => {
-    configState.disk = {
-      telemetryEnabled: true,
-      deParallelRouterTrialFired: false,
-      telemetryNoticeShown: true,
-    };
-    trackingState.shouldTrack = false;
-    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
-  });
-
-  it("does not enable the trial when config.telemetryEnabled is false, even if shouldTrack() is stale-true (e.g. `hyperframes telemetry off` mid-batch)", async () => {
+  it("keeps the router on for a telemetry opt-out — analytics choice must not cost performance", async () => {
+    // The old trial refused to arm without recordable telemetry (no point
+    // running an experiment you can't measure). Now that the router is a
+    // shipped default, gating it on telemetry would punish a privacy choice
+    // with a slower renderer.
     configState.disk = {
       telemetryEnabled: false,
       deParallelRouterTrialFired: false,
       telemetryNoticeShown: true,
-    };
-    trackingState.shouldTrack = true;
-    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
-  });
-
-  it("does not enable the trial before the first-run telemetry disclosure has been shown at least once", async () => {
-    // cli.ts shows this notice via a fire-and-forget, unawaited dynamic
-    // import — there's no guarantee it printed before renderLocal runs on a
-    // brand-new install's very first invocation. Requiring
-    // telemetryNoticeShown means the trial never races an opt-in message
-    // against the disclosure it depends on.
-    configState.disk = {
-      telemetryEnabled: true,
-      deParallelRouterTrialFired: false,
-      telemetryNoticeShown: false,
     };
     await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
     expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
@@ -946,11 +934,9 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
   });
 
   it("persists a later --batch row's revert even though this process already armed the trial on an earlier row", async () => {
-    // Regression test for the exact scenario a --batch run hits: multiple
-    // renderLocal calls in one process. Before the fix, row 2's
-    // maybeEnableDeParallelRouterTrial saw process.env.HF_DE_PARALLEL_ROUTER
-    // already "true" (set by row 1) and mistook that for "the user set it",
-    // returning trialArmed=false — silently dropping row 2's revert.
+    // The --batch scenario: multiple renderLocal calls in one process. Row 1
+    // succeeds (breaker stays out of the way, env untouched); row 2 reverts
+    // and must still be recorded and trip the breaker.
     configState.disk = {
       telemetryEnabled: true,
       deParallelRouterTrialFired: false,
@@ -964,7 +950,7 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
       };
     };
     await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("true");
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
     expect(configState.disk.deParallelRouterTrialFired).toBe(false);
 
     producerState.executeImpl = async (job) => {
@@ -978,12 +964,14 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
     expect(configState.writeConfigCalls).toContainEqual(
       expect.objectContaining({ deParallelRouterTrialFired: true }),
     );
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+    // Explicit "false", not deleted: with a default-ON router, unsetting the
+    // var would re-enable it on the host that just reverted.
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
   });
 
   it("does not arm the trial for programmatic callers that never opted in (opt-in polarity — also covers --batch-concurrency N>=2, which leaves it unset)", async () => {
     // The trial's process-wide env var and module-level flags are only safe
-    // under sequential invocation, so enableDeParallelRouterTrial is OPT-IN
+    // under sequential invocation, so manageDeParallelRouterBreaker is OPT-IN
     // (review): a programmatic renderLocal consumer that doesn't know about
     // the trial must get no trial. The CLI's concurrent-batch path relies on
     // the same default by leaving the option unset.
@@ -992,7 +980,7 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
       deParallelRouterTrialFired: false,
       telemetryNoticeShown: true,
     };
-    const { enableDeParallelRouterTrial: _omitted, ...programmaticOptions } = baseOptions;
+    const { manageDeParallelRouterBreaker: _omitted, ...programmaticOptions } = baseOptions;
     await renderLocal("/tmp/project", "/tmp/out.mp4", programmaticOptions);
     expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
     expect(configState.writeConfigCalls).toHaveLength(0);
@@ -1011,7 +999,7 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
       };
     };
     await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("true");
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
 
     // A real interactive user can't do this mid-batch, but a wrapper script
     // invoking the CLI programmatically in the same process could — the
@@ -1021,7 +1009,10 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
     expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
   });
 
-  it("caps exposure at DE_PARALLEL_ROUTER_TRIAL_MAX_RENDERS even when the router never reverts", async () => {
+  it("never trips on healthy renders, however many — the old 25-render cap is gone", async () => {
+    // The cap was sampling logic for an opt-in experiment. Under a shipped
+    // default it would switch the feature off behind the user's back after
+    // 25 good renders.
     configState.disk = {
       telemetryEnabled: true,
       deParallelRouterTrialFired: false,
@@ -1034,40 +1025,14 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
       };
     };
 
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 30; i++) {
       await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
     }
 
-    expect(configState.writeConfigCalls).toContainEqual(
-      expect.objectContaining({
-        deParallelRouterTrialFired: true,
-        deParallelRouterTrialRenderCount: 25,
-      }),
-    );
     expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
-
-    // The 26th eligible render must not re-arm it.
-    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
-  });
-
-  it("observes a telemetry opt-out written by another process mid-batch (arm site reads fresh, not cached)", async () => {
-    configState.disk = {
-      telemetryEnabled: true,
-      deParallelRouterTrialFired: false,
-      telemetryNoticeShown: true,
-    };
-    // Row 1 arms and primes the config cache.
-    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("true");
-
-    // Another process runs `hyperframes telemetry off`, writing straight to
-    // "disk" — this process's cache still says telemetryEnabled: true, so a
-    // cached read at the arm site would keep arming (review finding).
-    configState.disk = { ...configState.disk, telemetryEnabled: false };
-
-    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+    expect(
+      configState.writeConfigCalls.some((call) => call.deParallelRouterTrialFired === true),
+    ).toBe(false);
   });
 
   // The config write landing is NOT enough: config.json is the copy a stale
@@ -1136,10 +1101,11 @@ describe("renderLocal — DE parallel-router CLI trial", () => {
     // Nothing could persist...
     expect(configState.disk.deParallelRouterTrialFired).toBe(false);
     // ...but the in-process latch still blocks the next render from
-    // re-running the experiment that just failed (review finding).
+    // re-running the path that just failed (review finding) — and now does
+    // it by writing an explicit "false", since absent means ON.
     producerState.executeImpl = async () => undefined;
     await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
-    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
   });
 });
 
