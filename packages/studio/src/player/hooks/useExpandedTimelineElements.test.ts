@@ -143,6 +143,51 @@ describe("buildExpandedElements", () => {
     expect(child.sourceFile).toBe("c.html"); // C's file, not b.html or a.html
   });
 
+  it("keeps the middle host's row when drilling two levels deep", () => {
+    // A embeds B; C lives in B. Drilling into B must leave BOTH host rows
+    // standing: sparing only the top-level one drops B's row, and its keyframe
+    // lane goes with it because diamonds render per row.
+    const elements = [
+      el({ id: "A", domId: "A", start: 10, duration: 8, compositionSrc: "a.html" }),
+      el({ id: "B", domId: "B", start: 12, duration: 4, track: 1, compositionSrc: "b.html" }),
+    ];
+    const manifest = [
+      clip({ id: "A", start: 10, duration: 8, compositionSrc: "a.html" }),
+      clip({ id: "B", start: 12, duration: 4, compositionSrc: "b.html" }),
+      clip({ id: "C", start: 13, duration: 2 }),
+    ];
+    const parentMap = new Map([
+      ["B", "A"],
+      ["C", "B"],
+    ]);
+
+    const out = buildExpandedElements(elements, manifest, parentMap, "A", "B");
+    const rows = out.map((e) => e.domId ?? e.id);
+    expect(rows).toContain("B");
+    // The child sits under its own host, not under the top-level row.
+    expect(rows.indexOf("C")).toBeGreaterThan(rows.indexOf("B"));
+  });
+
+  it("still drills a host that exists only in the manifest, without a row for it", () => {
+    // Same shape, but B has no store element, so there is no row to spare. The
+    // children stay anchored to the top-level row rather than vanishing.
+    const elements = [
+      el({ id: "A", domId: "A", start: 10, duration: 8, compositionSrc: "a.html" }),
+    ];
+    const manifest = [
+      clip({ id: "A", start: 10, duration: 8, compositionSrc: "a.html" }),
+      clip({ id: "B", start: 12, duration: 4, compositionSrc: "b.html" }),
+      clip({ id: "C", start: 13, duration: 2 }),
+    ];
+    const parentMap = new Map([
+      ["B", "A"],
+      ["C", "B"],
+    ]);
+
+    const out = buildExpandedElements(elements, manifest, parentMap, "A", "B");
+    expect(out.map((e) => e.domId ?? e.id)).toEqual(["A", "C"]);
+  });
+
   // Regression: an expanded child must share one identity (`key`) with the flat
   // store element for the same DOM id. Before the fix the child key fell back to
   // the colon form (`index.html:eyebrow:N`) while the store/selection used the

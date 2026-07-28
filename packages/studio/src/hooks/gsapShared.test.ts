@@ -217,6 +217,31 @@ describe("resolveClipTimingBasis", () => {
     });
   });
 
+  it("treats a child whose parent composition is missing as starting at 0", () => {
+    // The mount is unknowable, so the only safe frame is the child's own. The
+    // old `?? 0` handed back `start` unchanged, which is a main-timeline value
+    // masquerading as a composition-local one and caches negative percentages.
+    const pill = {
+      id: "pill",
+      domId: "pill",
+      start: 7,
+      duration: 3,
+      parentCompositionId: "not-in-elements",
+    };
+    expect(resolveClipTimingBasis("pill", "scene.html", [pill], [])).toEqual({
+      elStart: 0,
+      elDuration: 3,
+    });
+  });
+
+  it("keeps a main-timeline clip's own start when it names no parent", () => {
+    const box = { id: "box", domId: "box", start: 4, duration: 2 };
+    expect(resolveClipTimingBasis("box", "index.html", [box], [])).toEqual({
+      elStart: 4,
+      elDuration: 2,
+    });
+  });
+
   it("falls back to a unit window when neither the element nor a host resolves", () => {
     expect(resolveClipTimingBasis("ghost", "index.html", [], [])).toEqual({
       elStart: 0,

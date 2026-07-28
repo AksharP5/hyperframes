@@ -299,8 +299,16 @@ export function resolveClipTimingBasis(
     const parent = parentId
       ? elements.find((el) => el.domId === parentId || el.id === parentId)
       : undefined;
-    const mount = direct.expandedParentStart ?? parent?.start ?? 0;
-    return { elStart: direct.start - mount, elDuration: direct.duration };
+    const mount = direct.expandedParentStart ?? parent?.start;
+    if (mount !== undefined) return { elStart: direct.start - mount, elDuration: direct.duration };
+    // No parent composition named, so this IS a main-timeline clip and its own
+    // start is already the basis.
+    if (!parentId) return { elStart: direct.start, elDuration: direct.duration };
+    // It named a parent we cannot find, so the mount is unknowable. Its tweens
+    // are still composition-local, so treat its own window as the frame rather
+    // than subtracting nothing and handing back a main-timeline start, which is
+    // exactly the mixed-frame subtraction this function exists to prevent.
+    return { elStart: 0, elDuration: direct.duration };
   }
   const hostId = domClipChildren.find((c) => c.id === elementId)?.hostId;
   const host = hostId
