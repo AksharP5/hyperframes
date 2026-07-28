@@ -268,6 +268,11 @@ export function useTimelineRangeSelection({
       if (!point || !scrollRect || isTimelineRulerPress(e.clientY, scrollRect.top)) {
         isDragging.current = true;
         setIsScrubbing(true);
+        // Seed the pending coordinate so a press with no pointermove still
+        // replays THIS x on pointerup. `updateScrubDrag` is the only other
+        // writer, so without this a plain click settles on the ref's initial
+        // 0 and clamps the playhead back to t=0.
+        pendingClientXRef.current = e.clientX;
         seekFromX(e.clientX);
         return;
       }
