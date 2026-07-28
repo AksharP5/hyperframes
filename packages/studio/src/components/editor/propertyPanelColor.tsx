@@ -192,7 +192,10 @@ export function ColorField({
   }, []);
   const resolveColorGestureValue = useCallback((nextValue: string) => {
     const source = nextValue.startsWith("#") ? "hex" : "picker";
-    if (source === "hex" && !/^#[0-9a-f]{6}$/i.test(nextValue)) return null;
+    // Only a COMPLETE hex resolves, so a half-typed one neither previews nor
+    // commits. Both lengths parseCssColor accepts count as complete: gating on
+    // 6 alone silently dropped #F00 and friends, which the old onBlur committed.
+    if (source === "hex" && !/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(nextValue)) return null;
     const nextColor = parseCssColor(nextValue);
     if (!nextColor) return null;
     return {

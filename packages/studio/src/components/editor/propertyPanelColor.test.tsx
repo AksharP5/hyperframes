@@ -144,14 +144,31 @@ describe("ColorField hex editing", () => {
     expect(onCommit).toHaveBeenCalledWith("rgb(18, 171, 52)");
   });
 
-  it("does not commit an incomplete pending hex on outside-click", () => {
+  it("commits a 3-digit hex shorthand on outside-click", () => {
+    // parseCssColor accepts shorthand, so the gesture resolver has to as well;
+    // #F00 is ordinary designer input and used to be dropped in silence.
     const onCommit = vi.fn();
     const input = openHexInput(renderColorField({ onCommit }));
+
+    act(() => changeInput(input, "#F00"));
+    act(clickOutside);
+
+    expect(onCommit).toHaveBeenCalledOnce();
+    expect(onCommit).toHaveBeenCalledWith("rgb(255, 0, 0)");
+  });
+
+  it("does not commit an incomplete pending hex on outside-click", () => {
+    const onCommit = vi.fn();
+    const host = renderColorField({ value: "#224466", onCommit });
+    const input = openHexInput(host);
 
     act(() => changeInput(input, "#12AB3"));
     act(clickOutside);
 
     expect(onCommit).not.toHaveBeenCalled();
+    // The settle also has to put the field back, or the panel re-opens showing
+    // a value the composition never took.
+    expect(openHexInput(host).value).toBe("#224466");
   });
 
   it("cancels a pending hex edit on Escape and restores the previous value", () => {
@@ -180,16 +197,22 @@ describe("ColorField hex editing", () => {
     expect(onCommit).toHaveBeenCalledWith("rgb(18, 171, 52)");
   });
 
-  it("live-previews only a complete six-digit hex", () => {
+  it("live-previews only a hex length that parses, 3 or 6 digits", () => {
     const onPreview = vi.fn();
     const input = openHexInput(renderColorField({ value: "#112233", onPreview }));
 
-    act(() => changeInput(input, "#333"));
+    // 4 and 5 digits are mid-typing, so they must stay silent.
+    act(() => changeInput(input, "#3333"));
+    act(() => changeInput(input, "#33333"));
     expect(onPreview).not.toHaveBeenCalled();
 
     act(() => changeInput(input, "#333333"));
     expect(onPreview).toHaveBeenCalledOnce();
     expect(onPreview).toHaveBeenCalledWith("rgb(51, 51, 51)");
+
+    act(() => changeInput(input, "#333"));
+    expect(onPreview).toHaveBeenCalledTimes(2);
+    expect(onPreview).toHaveBeenLastCalledWith("rgb(51, 51, 51)");
   });
 
   it("tracks exactly once per completed edit, not once per keystroke", () => {
