@@ -40,6 +40,33 @@ function mount(onSelect = vi.fn(), onAddToTimeline = vi.fn()) {
 }
 
 describe("composition card drag", () => {
+  it("uses a cached image instead of eagerly mounting a live preview iframe", () => {
+    const { host } = mount();
+    expect(host.querySelector('img[src*="/thumbnail/"]')).not.toBeNull();
+    expect(host.querySelector("iframe")).toBeNull();
+  });
+
+  it("mounts one live preview only after sustained hover and removes it on leave", () => {
+    vi.useFakeTimers();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { host, card } = mount();
+      act(() => {
+        card.dispatchEvent(new Event("pointerover", { bubbles: true }));
+        vi.advanceTimersByTime(300);
+      });
+      expect(host.querySelectorAll("iframe")).toHaveLength(1);
+
+      act(() => {
+        card.dispatchEvent(new Event("pointerout", { bubbles: true }));
+      });
+      expect(host.querySelector("iframe")).toBeNull();
+    } finally {
+      consoleError.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps ordinary click navigation", () => {
     const { card, onSelect } = mount();
     act(() => card.click());

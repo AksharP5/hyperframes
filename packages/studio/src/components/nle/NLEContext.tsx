@@ -32,7 +32,7 @@ export interface NLEContextValue {
   togglePlay: () => void;
   seek: (time: number, options?: { keepPlaying?: boolean }) => boolean;
   refreshPlayer: () => void;
-  onIframeLoad: () => void;
+  onIframeLoad: (reportError?: (message: string) => void) => void;
   // composition stack (from useCompositionStack)
   compositionStack: CompositionLevel[];
   updateCompositionStack: React.Dispatch<React.SetStateAction<CompositionLevel[]>>;
@@ -122,14 +122,17 @@ export function NLEProvider({
     refreshPlayer();
   }, [refreshKey, refreshPlayer]);
 
-  const onIframeLoad = useCallback(() => {
-    baseOnIframeLoad();
-    // Pre-load + register MotionPathPlugin once so adding a motion path in the
-    // studio doesn't take the async plugin-load flash path on the first soft
-    // reload (the comp may not ship the plugin until it actually uses one).
-    ensureMotionPathPluginLoaded(iframeRef.current);
-    onIframeRef?.(iframeRef.current);
-  }, [baseOnIframeLoad, iframeRef, onIframeRef]);
+  const onIframeLoad = useCallback(
+    (reportError?: (message: string) => void) => {
+      baseOnIframeLoad(reportError);
+      // Pre-load + register MotionPathPlugin once so adding a motion path in the
+      // studio doesn't take the async plugin-load flash path on the first soft
+      // reload (the comp may not ship the plugin until it actually uses one).
+      ensureMotionPathPluginLoaded(iframeRef.current);
+      onIframeRef?.(iframeRef.current);
+    },
+    [baseOnIframeLoad, iframeRef, onIframeRef],
+  );
 
   const {
     compositionStack,

@@ -1,7 +1,29 @@
 // @vitest-environment happy-dom
 
 import { describe, expect, it } from "vitest";
-import { hasUnloadedAssets, shouldShowCompositionLoadingOverlay } from "./Player";
+import {
+  hasUnloadedAssets,
+  readPreviewErrorMessage,
+  shouldShowCompositionLoadingOverlay,
+} from "./Player";
+
+describe("preview errors", () => {
+  it("reads the player probe error for the visible retry state", () => {
+    expect(
+      readPreviewErrorMessage(
+        new CustomEvent("error", {
+          detail: { message: "Composition timeline not found after 8s" },
+        }),
+      ),
+    ).toBe("Composition timeline not found after 8s");
+  });
+
+  it("falls back when the player emits an unstructured error", () => {
+    expect(readPreviewErrorMessage(new Event("error"))).toBe(
+      "The composition preview did not become ready.",
+    );
+  });
+});
 
 describe("composition loading overlay", () => {
   it("shows while the composition is loading", () => {

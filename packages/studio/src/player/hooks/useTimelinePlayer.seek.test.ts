@@ -129,6 +129,39 @@ function expectStorePlaybackState(
 }
 
 describe("useTimelinePlayer seek hydration", () => {
+  it("reports when Studio cannot initialize a timeline after iframe load", () => {
+    vi.useFakeTimers();
+    const { api, root } = renderTimelinePlayerHarness();
+    const iframe = document.createElement("iframe");
+    const iframeWindow = {
+      postMessage: vi.fn(),
+      scrollTo: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    Object.defineProperty(iframe, "contentWindow", {
+      value: iframeWindow,
+      configurable: true,
+    });
+    Object.defineProperty(iframe, "contentDocument", {
+      value: document.implementation.createHTMLDocument("preview"),
+      configurable: true,
+    });
+    const reportError = vi.fn();
+
+    act(() => {
+      api.iframeRef.current = iframe;
+      api.onIframeLoad(reportError);
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(reportError).toHaveBeenCalledWith(
+      "Studio could not initialize the composition timeline.",
+    );
+    unmountWithAct(root);
+    vi.useRealTimers();
+  });
+
   it("keeps an external seek request until the iframe adapter is ready", () => {
     const observedTimes: number[] = [];
     const unsubscribe = liveTime.subscribe((time) => {
