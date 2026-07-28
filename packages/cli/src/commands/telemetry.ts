@@ -1,5 +1,10 @@
 import { defineCommand } from "citty";
-import { writeConfigWithResult, readConfigFresh, CONFIG_PATH } from "../telemetry/config.js";
+import {
+  writeConfigWithResult,
+  readConfigFresh,
+  CONFIG_PATH,
+  STATE_PATH,
+} from "../telemetry/config.js";
 import { effectiveTelemetryStatus, type TelemetryStatusSource } from "../telemetry/policy.js";
 import { c } from "../ui/colors.js";
 import { failCommand } from "../utils/commandResult.js";
@@ -56,6 +61,9 @@ function runStatus(): void {
   console.log(`  ${c.dim("Status:")}     ${status}`);
   console.log(`  ${c.dim("Source:")}     ${effective.source}`);
   console.log(`  ${c.dim("Config:")}     ${c.accent(CONFIG_PATH)}`);
+  // Machine-local safety state (no identity): survives a config wipe so a
+  // tripped experiment circuit breaker stays tripped. Listed for transparency.
+  console.log(`  ${c.dim("State:")}      ${c.accent(STATE_PATH)}`);
   console.log(`  ${c.dim("Tracked commands:")} ${c.bold(String(config.commandCount))}`);
   console.log();
   console.log(`  ${c.dim("Disable:")}    ${c.accent("hyperframes telemetry disable")}`);
