@@ -12,7 +12,7 @@ import { usePlayerStore } from "../player/store/playerStore";
 import { readRuntimeKeyframes, scanAllRuntimeKeyframes } from "./gsapRuntimeKeyframes";
 import { resolveTweenStart, resolveTweenDuration } from "../utils/globalTimeCompiler";
 import { roundTo3 } from "../utils/rounding";
-import { computeElementPercentage, idSelector } from "./gsapShared";
+import { computeElementPercentage, idSelector, writeTargetSelector } from "./gsapShared";
 import { computeDraggedGsapPosition } from "./draggedGsapPosition";
 import type { RuntimeTweenChange } from "./gsapRuntimePatch";
 import { isGestureTransactionCommit, runGestureTransaction } from "./gestureTransaction";
@@ -42,6 +42,18 @@ export interface GsapDragCommitCallbacks {
     },
   ) => Promise<void>;
   fetchAnimations?: () => Promise<GsapAnimation[]>;
+}
+
+/**
+ * The target for a tween these helpers are about to CREATE. Callers derive
+ * `selector` with `selectorFromSelection`, which hands back a bare class for an
+ * id-less element: authoring that widens a one-element drag/resize/rotate into a
+ * write over every sibling sharing the class. Retargets of an EXISTING tween
+ * must NOT come through here (they keep `anim.targetSelector`, so a tween the
+ * author aimed at a group stays aimed at it).
+ */
+function newTweenTarget(selection: DomEditSelection, selector: string): string {
+  return writeTargetSelector(selection) ?? selector;
 }
 
 // Re-export for backward compatibility with existing imports.
@@ -75,7 +87,7 @@ async function replaceKeyframedPositionHold(
       selection,
       {
         type: "add",
-        targetSelector: selector,
+        targetSelector: newTweenTarget(selection, selector),
         method: "set",
         position: 0,
         properties,
@@ -199,11 +211,14 @@ export async function commitStaticGsapPosition(
   }
   // New static hold → a base `gsap.set` (off-timeline, no 0% keyframe marker), with
   // an instant patch so the first nudge shows immediately (no soft-reload flash).
+  // The patch reuses the WRITTEN target so the runtime moves exactly the element
+  // the source write names.
+  const target = newTweenTarget(selection, selector);
   await callbacks.commitMutation(
     selection,
     {
       type: "add",
-      targetSelector: selector,
+      targetSelector: target,
       method: "set",
       position: 0,
       properties: { x: newX, y: newY },
@@ -212,7 +227,10 @@ export async function commitStaticGsapPosition(
     {
       label: "Move layer",
       softReload: true,
-      instantPatch: { selector, change: { kind: "global-set", props: { x: newX, y: newY } } },
+      instantPatch: {
+        selector: target,
+        change: { kind: "global-set", props: { x: newX, y: newY } },
+      },
     },
   );
 }
@@ -252,11 +270,12 @@ export async function commitStaticGsapRotation(
     return;
   }
   // New static hold → off-timeline `gsap.set` (no 0% keyframe marker) + instant patch.
+  const target = newTweenTarget(selection, selector);
   await callbacks.commitMutation(
     selection,
     {
       type: "add",
-      targetSelector: selector,
+      targetSelector: target,
       method: "set",
       position: 0,
       properties: { rotation: newRotation },
@@ -265,7 +284,10 @@ export async function commitStaticGsapRotation(
     {
       label: "Rotate layer",
       softReload: true,
-      instantPatch: { selector, change: { kind: "global-set", props: { rotation: newRotation } } },
+      instantPatch: {
+        selector: target,
+        change: { kind: "global-set", props: { rotation: newRotation } },
+      },
     },
   );
 }
@@ -305,7 +327,7 @@ export async function commitStaticGsapSize(
     selection,
     {
       type: "add",
-      targetSelector: selector,
+      targetSelector: newTweenTarget(selection, selector),
       method: "set",
       position: 0,
       properties: { width, height },
@@ -393,7 +415,7 @@ export async function commitKeyframedSizeFromResize(
     selection,
     {
       type: "add-with-keyframes",
-      targetSelector: selector,
+      targetSelector: newTweenTarget(selection, selector),
       position: roundTo3(ts),
       duration: roundTo3(td),
       keyframes,

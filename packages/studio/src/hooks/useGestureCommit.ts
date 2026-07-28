@@ -13,7 +13,7 @@ import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { CommitMutationOptions } from "./gsapScriptCommitTypes";
 import { roundTo3 } from "../utils/rounding";
 import { classifyPropertyGroup } from "@hyperframes/core/gsap-parser";
-import { isInstantHold, idSelector } from "./gsapShared";
+import { isInstantHold, idSelector, writeTargetSelector, tweenTargetsElement } from "./gsapShared";
 
 type RecordedKeyframe = {
   percentage: number;
@@ -168,11 +168,17 @@ export function useGestureCommit({
         if (!sortedPcts.includes(0)) sortedPcts.unshift(0);
       }
 
+      // Two different jobs, two different selectors. `selector` is the string an
+      // ALREADY-AUTHORED tween is matched against (and retargeted with, so a
+      // tween aimed at a whole group stays aimed at it). `writeSelector` is what
+      // a NEW tween is authored with: the bare class the id-less case yields here
+      // would record the gesture onto every sibling sharing it.
       const selector = sel.id ? idSelector(sel.id) : sel.selector;
       if (!selector) {
         showToast("Cannot save — element has no selector", "error");
         return;
       }
+      const writeSelector = writeTargetSelector(sel) ?? selector;
       if (liveSession.commitMutation) {
         const recStart = recordingStartTimeRef.current;
         const rawKeyframes = sortedPcts.map((pct) => ({
@@ -186,7 +192,11 @@ export function useGestureCommit({
         );
         const allAnims = liveSession.selectedGsapAnimations ?? [];
         const existingPositionTween = hasPositionProps
-          ? allAnims.find((a) => a.propertyGroup === "position" && a.targetSelector === selector)
+          ? allAnims.find(
+              (a) =>
+                a.propertyGroup === "position" &&
+                tweenTargetsElement(a.targetSelector, selector, sel.element),
+            )
           : undefined;
         if (existingPositionTween) {
           if (isInstantHold(existingPositionTween)) {
@@ -261,7 +271,7 @@ export function useGestureCommit({
                 await liveSession.commitMutation(
                   {
                     type: "add-with-keyframes",
-                    targetSelector: selector,
+                    targetSelector: writeSelector,
                     position: roundTo3(recStart),
                     duration: roundTo3(duration),
                     keyframes: groupKfs,
@@ -287,7 +297,7 @@ export function useGestureCommit({
             await liveSession.commitMutation(
               {
                 type: "add-with-keyframes",
-                targetSelector: selector,
+                targetSelector: writeSelector,
                 position: roundTo3(recStart),
                 duration: roundTo3(duration),
                 keyframes: groupKfs,

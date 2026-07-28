@@ -186,7 +186,12 @@ function attributeSelector(name: string, value: string): string {
   return `[${name}="${value.replace(/(["\\])/g, "\\$1")}"]`;
 }
 
-function matchesExactlyOne(doc: Document, selector: string, element: Element): boolean {
+/**
+ * Whether `selector` addresses `element` AND NOTHING ELSE. The single test for
+ * "this string is safe to author a new tween against": a selector that also
+ * hits siblings writes a tween that animates all of them.
+ */
+export function matchesExactlyOne(doc: Document, selector: string, element: Element): boolean {
   try {
     const matches = doc.querySelectorAll(selector);
     return matches.length === 1 && matches[0] === element;
@@ -284,6 +289,31 @@ export function existingTweenTargetSelector(
     return animation.targetSelector;
   }
   return selectorFromSelection(selection);
+}
+
+/**
+ * The read half of {@link writeTargetSelector}: does an already-authored tween
+ * write THIS element?
+ *
+ * String equality against `selectorFromSelection` alone is not enough once new
+ * tweens are authored with a narrowed one-element selector: the next edit would
+ * miss the write it just made and append a second, conflicting one. Falling back
+ * to the live DOM keeps the pair consistent, and still matches a deliberate group
+ * tween (`.group` matches each of its siblings) so merges into it keep working.
+ */
+export function tweenTargetsElement(
+  targetSelector: string,
+  selector: string,
+  element: Element | null | undefined,
+): boolean {
+  if (targetSelector === selector) return true;
+  if (!element) return false;
+  try {
+    return element.matches(targetSelector);
+  } catch {
+    // Not a selector `matches()` understands, so it never addressed this element.
+    return false;
+  }
 }
 
 // ── Percentage computation ────────────────────────────────────────────────────

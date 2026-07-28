@@ -14,7 +14,13 @@ import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { usePlayerStore } from "../player/store/playerStore";
 import { readAllAnimatedProperties, readGsapProperty } from "./gsapRuntimeBridge";
 import type { SetPatchProps } from "./gsapRuntimePatch";
-import { selectorFromSelection, computeElementPercentage, isInstantHold } from "./gsapShared";
+import {
+  selectorFromSelection,
+  computeElementPercentage,
+  isInstantHold,
+  writeTargetSelector,
+  tweenTargetsElement,
+} from "./gsapShared";
 import { resolveTweenStart, resolveTweenDuration } from "../utils/globalTimeCompiler";
 import { roundTo3 } from "../utils/rounding";
 import { commitWholePropertyOffset } from "./gsapWholePropertyOffsetCommit";
@@ -185,7 +191,9 @@ async function commitStaticSet(
     batch.push(entry);
     byGroup.set(group, batch);
   }
-  const staticWrites = animations.filter((a) => isInstantHold(a) && a.targetSelector === selector);
+  const staticWrites = animations.filter(
+    (a) => isInstantHold(a) && tweenTargetsElement(a.targetSelector, selector, selection.element),
+  );
   // Resolve every group's target BEFORE committing anything, and coalesce
   // groups that land on the SAME write into one commit: the snapshot is captured
   // once, so if two groups resolved to one legacy mixed write, a first
@@ -243,11 +251,14 @@ async function addGlobalStaticSet(
   for (const [k, v] of batch) {
     if (typeof v === "number") numericProps[k as keyof SetPatchProps] = v;
   }
+  // A brand-new write, so it must address ONE element: `selector` is the bare
+  // class an id-less selection yields, which would hold every sibling.
+  const target = writeTargetSelector(selection) ?? selector;
   await commit(
     selection,
     {
       type: "add",
-      targetSelector: selector,
+      targetSelector: target,
       method: "set",
       position: 0,
       properties: Object.fromEntries(batch),
@@ -259,7 +270,7 @@ async function addGlobalStaticSet(
       ...(Object.keys(numericProps).length > 0
         ? {
             instantPatch: {
-              selector,
+              selector: target,
               change: { kind: "global-set" as const, props: numericProps },
             },
           }
@@ -503,7 +514,7 @@ export function useAnimatedPropertyCommit(deps: CommitAnimatedPropertyDeps) {
             selection,
             {
               type: "add-with-keyframes",
-              targetSelector: selector,
+              targetSelector: writeTargetSelector(selection) ?? selector,
               position: roundTo3(tStart),
               duration: roundTo3(tDur),
               keyframes,
