@@ -672,7 +672,7 @@ describe("power-state sampling respects the telemetry opt-out", () => {
   });
 
   it("samples power state for a tracked render", () => {
-    trackRenderComplete({ durationMs: 1, fps: 30, quality: "high", docker: false });
+    trackRenderComplete({ durationMs: 1, fps: 30, quality: "high", docker: false, gpu: false });
     expect(getPowerState).toHaveBeenCalled();
     const props = trackEvent.mock.calls.at(-1)?.[1] as Record<string, unknown>;
     expect(props.on_battery).toBe(true);
@@ -685,7 +685,7 @@ describe("power-state sampling respects the telemetry opt-out", () => {
     // guard — an opted-out install would otherwise pay two blocking
     // subprocess spawns per render for an event that is then discarded.
     shouldTrack.mockReturnValue(false);
-    trackRenderComplete({ durationMs: 1, fps: 30, quality: "high", docker: false });
+    trackRenderComplete({ durationMs: 1, fps: 30, quality: "high", docker: false, gpu: false });
     expect(getPowerState).not.toHaveBeenCalled();
   });
 });
