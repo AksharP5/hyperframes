@@ -34,7 +34,8 @@ import {
   shouldDefaultCaptureBeyondViewport,
 } from "./screenshotService.js";
 import {
-  detectSwiftShader,
+  classifyGpuRenderer,
+  detectGpuBackend,
   injectDrawElementCanvas,
   captureDrawElementFrame,
   resolveDrawElementCaptureMode,
@@ -55,6 +56,7 @@ import type {
   CaptureWarning,
   SubTimelineWaitOutcome,
 } from "../types.js";
+import { cloneCaptureWarnings } from "./captureWarning.js";
 export { isMemoryExhaustionError, isTransientBrowserError } from "./captureFailure.js";
 
 export type { CaptureOptions, CaptureResult, CaptureBufferResult, CapturePerfSummary };
@@ -145,6 +147,15 @@ export interface CaptureSession {
   config?: Partial<EngineConfig>;
   /** True if running on SwiftShader (detected at init). Undefined before init. */
   isSwiftShader?: boolean;
+  /**
+   * Low-cardinality GPU bucket (`<backend>/<vendor>`, e.g. `d3d11/nvidia`)
+   * derived from the WebGL renderer at DE session init. Surfaces in
+   * CapturePerfSummary → render telemetry so backend-specific drawElement
+   * damage (Metal vs D3D11 vs GL) clusters attributably. The raw
+   * driver-supplied string is deliberately NOT retained — see
+   * classifyGpuRenderer.
+   */
+  gpuRenderer?: string;
   /** drawElementImage canvas was injected and is ready for capture. */
   drawElementReady?: boolean;
   /**
@@ -703,7 +714,9 @@ async function initDrawElementOrTransparentBackground(
     );
   }
   if (useDrawElement) {
-    session.isSwiftShader = await detectSwiftShader(page);
+    const gpuBackend = await detectGpuBackend(page);
+    session.isSwiftShader = gpuBackend.isSwiftShader;
+    session.gpuRenderer = classifyGpuRenderer(gpuBackend.renderer);
     const transparent = session.options.format === "png";
     async function routeToFallback(): Promise<void> {
       session.captureMode = session.launchCaptureMode;
@@ -1716,6 +1729,53 @@ function recordSubTimelineWarning(session: CaptureSession, timeoutMs: number): v
   ]);
 }
 
+/**
+ * Runtime-mounted map-viewport markers, keyed by the CSS selector each map
+ * library stamps on its live container. Selector presence means an actual map
+ * INSTANCE is rendering in the page — not merely that a map library script
+ * loaded — which keeps false positives low (a baked map video carries none of
+ * these).
+ */
+const LIVE_MAP_MARKERS: ReadonlyArray<{ selector: string; library: string }> = [
+  { selector: ".leaflet-container", library: "Leaflet" },
+  { selector: ".maplibregl-map", library: "MapLibre GL" },
+  { selector: ".mapboxgl-map", library: "Mapbox GL" },
+  { selector: ".gm-style", library: "Google Maps" },
+  { selector: ".ol-viewport", library: "OpenLayers" },
+];
+
+/**
+ * Build the `live_map_detected` warning for the detected map libraries.
+ * A live tile map violates the deterministic-render contract (tiles are
+ * render-time network fetches): none of the readiness polls cover late-added
+ * tile images or map canvases, so frames captured before tiles arrive ship a
+ * blank/partial map with no error — the render exits success. Wild signature:
+ * PRINFRA-300 (blank hook scene, zero diagnostics, "fixed" by re-render).
+ */
+export function buildLiveMapWarning(libraries: readonly string[]): CaptureWarning {
+  return {
+    code: "live_map_detected",
+    message:
+      `Live map viewport(s) detected in the composition (${libraries.join(", ")}). ` +
+      `Map tiles load over the network at render time, which the deterministic-render ` +
+      `contract forbids — frames captured before tiles arrive ship a blank or partial map ` +
+      `with no error. Bake the map to a video first (see the motion-graphics maps skill / ` +
+      `bake-basemap.mjs) and use the baked file as the imagery layer.`,
+    details: { sources: [...libraries] },
+  };
+}
+
+/** Detect live map viewports in the page and record the warning. */
+async function recordLiveMapWarning(session: CaptureSession, page: Page): Promise<void> {
+  const libraries = (await page.evaluate(
+    (markers: ReadonlyArray<{ selector: string; library: string }>) =>
+      markers.filter((m) => document.querySelector(m.selector) !== null).map((m) => m.library),
+    LIVE_MAP_MARKERS,
+  )) as string[];
+  if (libraries.length === 0) return;
+  recordCaptureWarnings(session, [buildLiveMapWarning(libraries)]);
+}
+
 // Force every successfully-loaded `<img>` to be GPU-uploaded before the first
 // frame capture. `naturalWidth > 0` means the bitmap has been decoded into
 // CPU memory, but compositor-side GPU upload can still happen lazily on first
@@ -2002,6 +2062,7 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
       session,
       await collectMediaReadinessWarnings(page, skipVideoIds, pageReadyTimeout),
     );
+    await recordLiveMapWarning(session, page);
 
     await recordSessionInitTelemetry(session, initStart);
 
@@ -2164,6 +2225,7 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
     session,
     await collectMediaReadinessWarnings(page, bfSkipVideoIds, pageReadyTimeout),
   );
+  await recordLiveMapWarning(session, page);
 
   await recordSessionInitTelemetry(session, initStart);
 
@@ -2307,6 +2369,14 @@ async function prepareFrameForCapture(
   if (session.onBeforeCapture) {
     await session.onBeforeCapture(page, quantizedTime);
   }
+  await page.evaluate(async () => {
+    const runtime = (
+      window as Window & {
+        __hf?: { colorGrading?: { waitForActiveLuts?: () => Promise<number> } };
+      }
+    ).__hf?.colorGrading;
+    await runtime?.waitForActiveLuts?.();
+  });
   const beforeCaptureMs = Date.now() - beforeCaptureStart;
 
   // Page-side compositing three-phase protocol:
@@ -3716,15 +3786,7 @@ export function getCapturePerfSummary(session: CaptureSession): CapturePerfSumma
     p95TotalMs: percentileOf(session.capturePerf.frameMs, 0.95),
     p99TotalMs: percentileOf(session.capturePerf.frameMs, 0.99),
     subTimelineWaitOutcome: session.subTimelineWaitOutcome,
-    warnings: session.warnings.map((warning) => ({
-      ...warning,
-      details: warning.details
-        ? {
-            ...warning.details,
-            sources: warning.details.sources ? [...warning.details.sources] : undefined,
-          }
-        : undefined,
-    })),
+    warnings: cloneCaptureWarnings(session.warnings),
     staticDedupReused: session.staticDedupCount ?? 0,
     staticDedupEnabled: session.staticDedupEnabled ?? false,
     // armed ⟺ a non-empty static set survived verification; predicted === its size.
@@ -3734,6 +3796,7 @@ export function getCapturePerfSummary(session: CaptureSession): CapturePerfSumma
     beginFrameNoDamage: session.beginFrameNoDamageCount,
     beginFrameHasDamage: session.beginFrameHasDamageCount,
     captureMode: session.captureMode,
+    gpuRenderer: session.gpuRenderer,
     deGateReason: session.deGateReason,
     deFallbackTrigger: session.deFallbackTrigger,
     deWorkerEncode: session.workerEncodeEnabled ?? false,

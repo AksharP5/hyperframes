@@ -1,5 +1,6 @@
 import { createWriteStream, renameSync, unlinkSync } from "node:fs";
 import { get as httpsGet } from "node:https";
+import type { IncomingMessage } from "node:http";
 import { pipeline } from "node:stream/promises";
 
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30_000;
@@ -31,7 +32,11 @@ export function downloadFile(
   const timeoutMs = options.timeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const follow = (u: string) => {
+      let activeResponse: IncomingMessage | undefined;
+      let responsePipelineStarted = false;
+      let requestError: Error | undefined;
       const request = httpsGet(u, (res) => {
+        activeResponse = res;
         if (res.statusCode === 301 || res.statusCode === 302) {
           const location = res.headers.location;
           if (location) {
@@ -47,6 +52,7 @@ export function downloadFile(
           return;
         }
         const file = createWriteStream(tmp);
+        responsePipelineStarted = true;
         pipeline(res, file)
           .then(() => {
             renameSync(tmp, dest);
@@ -54,13 +60,18 @@ export function downloadFile(
           })
           .catch((err) => {
             removePartialFile(tmp);
-            reject(err);
+            reject(requestError ?? err);
           });
       });
       request.setTimeout(timeoutMs, () => {
         request.destroy(new Error(`Download timed out after ${timeoutMs}ms`));
       });
       request.on("error", (err) => {
+        if (responsePipelineStarted) {
+          requestError = err;
+          activeResponse?.destroy(err);
+          return;
+        }
         removePartialFile(tmp);
         reject(err);
       });

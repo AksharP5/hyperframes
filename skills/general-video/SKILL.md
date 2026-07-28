@@ -20,8 +20,8 @@ A successful no-op means the skill is current. Surface an update failure instead
 
 ## 1. Apply cross-cutting source adapters
 
-- **Media:** For any audio, image, icon, logo, voice, grade, LUT, caption, or media-operation need, load `/media-use` and follow its adoption, resolution, provider, provenance, and reuse contracts. Before the first authenticated provider action, run `npx hyperframes auth status` and relay its output verbatim. If signed out, apply the gate in `../hyperframes-core/references/brief-contract.md`: collaborative waits for sign-in or an explicit offline choice; autonomous states the status and continues through an available offline provider. Surface a blocker when no offline provider can satisfy a required capability. Local adoption alone does not require an auth gate.
-- **Figma:** If any input is a `figma.com` URL, run `/figma` first. Build from its exported assets, tokens, components, or storyboard frames. Do not use raw Figma MCP calls because they skip SVG sanitization, media provenance, and brand-token binding.
+- **Media:** For any audio, image, icon, logo, voice, grade, LUT, treatment/effect, caption, or media-operation need, load `/media-use` and follow its adoption, resolution, provider, provenance, and reuse contracts. Vague footage feedback and named styles use its `media-treatments.md` policy before editing; do not improvise supported media effects with CSS/SVG/opacity. Before the first authenticated provider action, run `npx hyperframes auth status` and relay its output verbatim. If signed out, apply the gate in `../hyperframes-core/references/brief-contract.md`: collaborative waits for sign-in or an explicit offline choice; autonomous states the status and continues through an available offline provider. Surface a blocker when no offline provider can satisfy a required capability. Local adoption alone does not require an auth gate.
+- **Figma:** If any input is a `figma.com` URL, run `/figma` first. Build from its exported assets, tokens, components, or storyboard frames. Do not use raw Figma connector calls because they skip SVG sanitization, media provenance, and brand-token binding.
 
 These adapters do not change the workflow selected by `/hyperframes`.
 
@@ -39,7 +39,7 @@ Apply the first matching row; do not evaluate lower state rows:
 For a new project, choose a kebab-case directory name from the brief and scaffold before writing the brief:
 
 ```bash
-npx hyperframes init "videos/<project>" --non-interactive --example=blank
+npx hyperframes init "videos/<project>" --non-interactive --example=blank --skill=general-video
 ```
 
 Then write `BRIEF.md` at the project root using `../hyperframes-core/references/brief-format.md`. In an existing project, the root is the directory containing `hyperframes.json`. Record only the confirmed preference-backed fields named by the brief format, using `node <MEDIA_DIR>/scripts/prefs.mjs record --hyperframes <PROJECT_ROOT>`; never record inferred defaults. Here `<MEDIA_DIR>` is the installed `/media-use` skill directory and `<PROJECT_ROOT>` is the directory containing `hyperframes.json`. If the intent layer adopted a recipe, apply it now with `node <MEDIA_DIR>/scripts/recipe.mjs use --hyperframes <PROJECT_ROOT> --name <name>` and do not ask again.

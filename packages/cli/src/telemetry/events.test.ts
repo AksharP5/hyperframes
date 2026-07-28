@@ -197,6 +197,59 @@ describe("render telemetry events", () => {
     expect(flush).toHaveBeenCalledTimes(2);
   });
 
+  // The enforcement decision for the advisory heap budget reads these fleet
+  // props (see computeWorkerSizing) — a silent drop in the summary→event hop
+  // would invalidate that decision without anyone noticing.
+  it("carries every worker-sizing provenance prop on render_complete", () => {
+    trackRenderComplete({
+      durationMs: 1000,
+      fps: 30,
+      quality: "high",
+      docker: false,
+      gpu: false,
+      workers: 6,
+      workersBoundBy: "max_workers",
+      workersCpuBased: 16,
+      workersMemoryBased: 8,
+      workersHeapBased: 4,
+      workersFrameBased: 24,
+      workersHeapLimitMb: 4096,
+      workersExceedHeapAdvisory: true,
+    });
+
+    expect(trackEvent).toHaveBeenCalledWith(
+      "render_complete",
+      expect.objectContaining({
+        workers: 6,
+        workers_bound_by: "max_workers",
+        workers_cpu_based: 16,
+        workers_memory_based: 8,
+        workers_heap_based: 4,
+        workers_frame_based: 24,
+        workers_heap_limit_mb: 4096,
+        workers_exceed_heap_advisory: true,
+      }),
+      undefined,
+    );
+  });
+
+  it("ties feedback to its report and recent renders via feedback_id + recent_render_ids", () => {
+    trackRenderFeedback({
+      rating: 3,
+      comment: "hook scene blank",
+      feedbackId: "feedback-uuid",
+      recentRenderIds: ["render-a", "render-b"],
+    });
+
+    expect(trackEvent).toHaveBeenCalledWith(
+      "cli_render_feedback",
+      expect.objectContaining({
+        feedback_id: "feedback-uuid",
+        recent_render_ids: "render-a,render-b",
+      }),
+    );
+  });
+
   it("redacts paths and URL query strings from render error messages", () => {
     trackRenderError({
       fps: 30,
@@ -462,7 +515,7 @@ describe("trackRenderFeedback", () => {
 
     const [, props] = trackEvent.mock.calls[0] as [string, Record<string, unknown>];
     expect(props).not.toHaveProperty("render_duration_ms");
-    expect(props.$survey_response).toBe(4);
+    expect(props.rating).toBe(4);
     expect(props.rating_scale).toBe(10);
   });
 
@@ -470,7 +523,7 @@ describe("trackRenderFeedback", () => {
     trackRenderFeedback({ rating: 5, renderDurationMs: 6000 });
 
     expect(trackEvent).toHaveBeenCalledWith(
-      "survey sent",
+      "cli_render_feedback",
       expect.objectContaining({ render_duration_ms: 6000 }),
     );
   });

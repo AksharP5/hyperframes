@@ -1,4 +1,5 @@
 import type { HfColorGradingTarget } from "../colorGrading";
+import type { RuntimeAnalyticsEvent } from "./analytics";
 
 export type RuntimeJson =
   | string
@@ -177,13 +178,7 @@ export type RuntimeReadyMessage = {
 export type RuntimeAnalyticsMessage = {
   source: "hf-preview";
   type: "analytics";
-  event:
-    | "composition_loaded"
-    | "composition_played"
-    | "composition_paused"
-    | "composition_seeked"
-    | "composition_ended"
-    | "element_picked";
+  event: RuntimeAnalyticsEvent;
   properties: Record<string, string | number | boolean | null>;
 };
 

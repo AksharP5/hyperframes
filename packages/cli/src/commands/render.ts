@@ -1,8 +1,9 @@
 import { failCommand, requestCliExit } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { createRenderPlan, resolveBrowserGpuForCli, type RenderFormat } from "./render/plan.js";
+import { seedProjectAuthoringSkill } from "../utils/projectConfig.js";
 import { presentRenderPlan } from "./render/present.js";
 import { executeRenderPlan, renderLintContinuationHint } from "./render/execute.js";
 // Test-only seams retained at the command boundary for render behavior tests.
@@ -61,7 +62,12 @@ import {
   trackRenderObservation,
 } from "../telemetry/events.js";
 import { maybePromptRenderFeedback } from "../telemetry/feedback.js";
-import { readConfigFresh, writeConfig, type HyperframesConfig } from "../telemetry/config.js";
+import {
+  readConfigFresh,
+  recordRecentRender,
+  writeConfig,
+  type HyperframesConfig,
+} from "../telemetry/config.js";
 import { shouldTrack } from "../telemetry/client.js";
 import { renderJobObservabilityTelemetryPayload } from "../telemetry/renderObservability.js";
 import { bytesToMb } from "../telemetry/system.js";
@@ -346,6 +352,9 @@ export default defineCommand({
   // Keep the transport adapter thin: each phase has one ownership boundary.
   async run({ args }) {
     const plan = createRenderPlan(args);
+    // Teach the project its owning skill from an explicit --skill so every
+    // later flag-less render (re-render, `npm run render`, batch) inherits it.
+    seedProjectAuthoringSkill(plan.project.dir, args.skill);
     await presentRenderPlan(plan);
     await executeRenderPlan(plan, {
       renderDocker,
@@ -553,9 +562,12 @@ function ensureDockerImage(version: string, platform: string, quiet: boolean): s
 
   const dockerfilePath = resolveDockerfilePath();
 
-  // Copy Dockerfile to a temp build context so docker build has a clean context
-  const tmpDir = join(tmpdir(), `hyperframes-docker-${Date.now()}`);
-  mkdirSync(tmpDir, { recursive: true });
+  // Copy Dockerfile to a temp build context so docker build has a clean context.
+  // mkdtempSync (not a `Date.now()`-derived name) so the path is unpredictable
+  // and created 0o700 by the kernel — a guessable temp dir in a world-writable
+  // tmpdir is pre-creatable by another local user, who could then swap in their
+  // own Dockerfile or symlink the path (CodeQL js/insecure-temporary-file).
+  const tmpDir = mkdtempSync(join(tmpdir(), "hyperframes-docker-"));
   writeFileSync(join(tmpDir, "Dockerfile"), readFileSync(dockerfilePath));
 
   // Platform is now derived from the host arch (see resolveDockerPlatform).
@@ -1339,6 +1351,9 @@ function handleRenderError(
     ...renderJobObservabilityTelemetryPayload(job),
     ...getMemorySnapshot(),
   });
+  // Failed renders join the recent-renders ring too — a bug report filed via
+  // `hyperframes feedback` is MOST likely to be about a failed render.
+  if (job?.id) recordRecentRender(job.id, false);
   if (options.throwOnError) {
     throw new Error(message);
   }
@@ -1376,6 +1391,9 @@ function trackRenderMetrics(
   options: RenderOptions,
   docker: boolean,
 ): void {
+  // Successful render → recent-renders ring, so a later `hyperframes
+  // feedback` can attach this render's telemetry id to the report.
+  recordRecentRender(job.id, true);
   const perf = job.perfSummary;
   const compositionDurationMs = perf
     ? Math.round(perf.compositionDurationSeconds * 1000)
@@ -1393,6 +1411,13 @@ function trackRenderMetrics(
     fps: fpsToNumber(options.fps),
     quality: options.quality,
     workers: options.workers ?? perf?.workers,
+    workersBoundBy: perf?.workerSizing?.boundBy,
+    workersCpuBased: perf?.workerSizing?.cpuBasedWorkers,
+    workersMemoryBased: perf?.workerSizing?.memoryBasedWorkers,
+    workersHeapBased: perf?.workerSizing?.heapBasedWorkers,
+    workersFrameBased: perf?.workerSizing?.frameBasedWorkers,
+    workersHeapLimitMb: perf?.workerSizing?.heapLimitMb,
+    workersExceedHeapAdvisory: perf?.workerSizing?.exceedsHeapAdvisory,
     docker,
     gpu: options.gpu,
     authoringSkill: options.authoringSkill,
@@ -1411,6 +1436,7 @@ function trackRenderMetrics(
     deParallelRouter: perf?.drawElement?.parallelRouter,
     dePreRouterWorkers: perf?.drawElement?.preRouterWorkers,
     deGateReason: perf?.drawElement?.gateReason,
+    gpuRenderer: perf?.drawElement?.gpuRenderer,
     deWorkerEncode: perf?.drawElement?.workerEncode,
     deVerifyArmed: perf?.drawElement?.verifyArmed,
     deVerifyChecked: perf?.drawElement?.verifyChecked,

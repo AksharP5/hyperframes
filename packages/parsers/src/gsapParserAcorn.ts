@@ -21,6 +21,7 @@ import type {
 import { classifyTweenPropertyGroup } from "./gsapConstants.js";
 import { buildArcPath } from "./gsapSerialize.js";
 import { inlineComputedTimelines, readProvenance } from "./gsapInline.js";
+import { getObjectArrayKeyframeTiming } from "./gsapObjectArrayTiming.js";
 
 // Browser-safe re-exports so studio code can build arc config without importing
 // the recast parser (this acorn module is the browser-safe gsap subpath).
@@ -44,6 +45,22 @@ const SCOPE_NODE_TYPES = new Set([
   "FunctionExpression",
   "ArrowFunctionExpression",
 ]);
+
+function parseProgram(script: string): any {
+  try {
+    return acorn.parse(script, {
+      ecmaVersion: "latest",
+      sourceType: "script",
+      locations: true,
+    });
+  } catch {
+    return acorn.parse(script, {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      locations: true,
+    });
+  }
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -975,6 +992,14 @@ function parsePercentageKeyframes(
       for (const [k, v] of Object.entries(record)) {
         if (k === "ease" && typeof v === "string") {
           kfEase = v;
+        } else if (k === "duration") {
+          // `duration` is array-keyframe SEGMENT TIMING, not an animatable
+          // property. In a %-keyed object keyframe the % key owns timing, so a
+          // per-step `duration` is neither timing nor a property here. Skip it
+          // (parseObjectArrayKeyframes already does) — otherwise it surfaces as
+          // a bogus "duration" keyframe lane and gets round-tripped as a
+          // property, corrupting the tween on the next manual edit.
+          continue;
         } else if (typeof v === "number" || typeof v === "string") {
           properties[k] = v;
         }
@@ -1007,13 +1032,13 @@ function computeKeyframesTotalDuration(
     (p: any) => (p.key?.name ?? p.key?.value) === "keyframes",
   )?.value;
   if (!kfNode || kfNode.type !== "ArrayExpression") return undefined;
-  let total = 0;
+  const durations: unknown[] = [];
   for (const el of kfNode.elements ?? []) {
     if (!el || el.type !== "ObjectExpression") continue;
     const r = objectExpressionToRecord(el, scope, source);
-    if (typeof r.duration === "number") total += r.duration;
+    durations.push(r.duration);
   }
-  return total > 0 ? total : undefined;
+  return getObjectArrayKeyframeTiming(durations)?.totalDuration;
 }
 
 // fallow-ignore-next-line complexity
@@ -1021,11 +1046,11 @@ function parseObjectArrayKeyframes(
   node: any,
   scope: ScopeBindings,
   source: string,
-): GsapKeyframesData {
+): GsapKeyframesData | undefined {
   const elements = node.elements ?? [];
   const raw: Array<{
     properties: Record<string, number | string>;
-    duration?: number;
+    duration?: unknown;
     ease?: string;
   }> = [];
 
@@ -1033,10 +1058,10 @@ function parseObjectArrayKeyframes(
     if (!el || el.type !== "ObjectExpression") continue;
     const record = objectExpressionToRecord(el, scope, source);
     const properties: Record<string, number | string> = {};
-    let duration: number | undefined;
+    let duration: unknown;
     let ease: string | undefined;
     for (const [k, v] of Object.entries(record)) {
-      if (k === "duration" && typeof v === "number") {
+      if (k === "duration") {
         duration = v;
       } else if (k === "ease" && typeof v === "string") {
         ease = v;
@@ -1047,32 +1072,13 @@ function parseObjectArrayKeyframes(
     raw.push({ properties, duration, ease });
   }
 
-  const totalDuration = raw.reduce((sum, r) => sum + (r.duration ?? 0), 0);
-  const keyframes: GsapPercentageKeyframe[] = [];
-
-  if (totalDuration > 0) {
-    let cumulative = 0;
-    for (const entry of raw) {
-      cumulative += entry.duration ?? 0;
-      const percentage = Math.round((cumulative / totalDuration) * 100);
-      keyframes.push({
-        percentage,
-        properties: entry.properties,
-        ...(entry.ease ? { ease: entry.ease } : {}),
-      });
-    }
-  } else {
-    for (let i = 0; i < raw.length; i++) {
-      const entry = raw[i];
-      if (!entry) continue;
-      const percentage = raw.length > 1 ? Math.round((i / (raw.length - 1)) * 100) : 0;
-      keyframes.push({
-        percentage,
-        properties: entry.properties,
-        ...(entry.ease ? { ease: entry.ease } : {}),
-      });
-    }
-  }
+  const timing = getObjectArrayKeyframeTiming(raw.map((entry) => entry.duration));
+  if (!timing) return undefined;
+  const keyframes: GsapPercentageKeyframe[] = raw.map((entry, index) => ({
+    percentage: timing.percentages[index]!,
+    properties: entry.properties,
+    ...(entry.ease ? { ease: entry.ease } : {}),
+  }));
 
   return { format: "object-array", keyframes };
 }
@@ -1850,11 +1856,7 @@ export function parseGsapScriptAcornForWrite(script: string): ParsedGsapAcornFor
  */
 export function parseGsapScriptAcorn(script: string): ParsedGsap {
   try {
-    const ast = acorn.parse(script, {
-      ecmaVersion: "latest",
-      sourceType: "script",
-      locations: true,
-    });
+    const ast = parseProgram(script);
     const scope = collectScopeBindings(ast);
     const detection = findTimelineVar(ast, scope);
     const ref: TimelineRef = detection.ref ?? { kind: "identifier", name: "tl" };
@@ -1919,6 +1921,87 @@ export function parseGsapScriptAcorn(script: string): ParsedGsap {
   } catch {
     return { animations: [], timelineVar: "tl", preamble: "", postamble: "" };
   }
+}
+
+/** Source offset of the first timeline or standalone GSAP MotionPathPlugin tween. */
+export function gsapScriptMotionPathFirstUseIndex(script: string): number | null {
+  try {
+    const ast = parseProgram(script);
+    const scope = collectScopeBindings(ast);
+    const identifierBindings = collectIdentifierBindingIndex(ast);
+    const timelineRef = findTimelineVar(ast, scope).ref;
+    const timelineDeclarations = new Set<any>();
+    let firstUseIndex: number | null = null;
+
+    acornWalk.ancestor(ast, {
+      VariableDeclarator(node: any) {
+        if (node.id?.type === "Identifier" && isGsapTimelineCall(node.init)) {
+          timelineDeclarations.add(node);
+        }
+      },
+      AssignmentExpression(node: any, _: unknown, ancestors: any[]) {
+        if (node.left?.type === "Identifier" && isGsapTimelineCall(node.right)) {
+          const declaration = findVisibleIdentifierDeclaration(
+            node.left.name,
+            ancestors,
+            identifierBindings,
+            node.start,
+          );
+          if (declaration) timelineDeclarations.add(declaration.node);
+        }
+      },
+    } as any);
+
+    acornWalk.ancestor(ast, {
+      CallExpression(node: any, _: unknown, ancestors: any[]) {
+        const callee = node.callee;
+        const method = callee?.property?.name;
+        if (callee?.type !== "MemberExpression" || !GSAP_METHODS.has(method)) return;
+        let rootObject = callee.object;
+        while (rootObject?.type === "CallExpression") rootObject = rootObject.callee?.object;
+        const isGsapRooted = rootObject?.type === "Identifier" && rootObject.name === "gsap";
+        const visibleTimelineDeclaration =
+          rootObject?.type === "Identifier"
+            ? findVisibleIdentifierDeclaration(
+                rootObject.name,
+                ancestors,
+                identifierBindings,
+                node.start,
+              )
+            : undefined;
+        const isTimelineTween =
+          (timelineRef?.kind === "member" ? isTimelineRootedCall(node, timelineRef) : false) ||
+          (!!visibleTimelineDeclaration &&
+            timelineDeclarations.has(visibleTimelineDeclaration.node));
+        if (!isGsapRooted && !isTimelineTween) return;
+        const varsArgs =
+          method === "fromTo" ? [node.arguments?.[1], node.arguments?.[2]] : [node.arguments?.[1]];
+        if (
+          varsArgs.some((varsArg) => {
+            if (findPropertyNode(varsArg, "motionPath")) return true;
+            if (varsArg?.type !== "Identifier") return false;
+            const declaration = findVisibleIdentifierDeclaration(
+              varsArg.name,
+              ancestors,
+              identifierBindings,
+              node.start,
+            );
+            return !!findPropertyNode(declaration?.node.init, "motionPath");
+          })
+        )
+          firstUseIndex = firstUseIndex === null ? node.start : Math.min(firstUseIndex, node.start);
+      },
+    } as any);
+
+    return firstUseIndex;
+  } catch {
+    return null;
+  }
+}
+
+/** True when a timeline or standalone GSAP tween authors a MotionPathPlugin property. */
+export function gsapScriptUsesMotionPath(script: string): boolean {
+  return gsapScriptMotionPathFirstUseIndex(script) !== null;
 }
 
 // ── Label extraction (WS-C) ──────────────────────────────────────────────────

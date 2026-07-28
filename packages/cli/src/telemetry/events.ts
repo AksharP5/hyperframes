@@ -73,6 +73,7 @@ export interface RenderObservabilityTelemetryPayload {
   captureDeWorkerInversion?: string;
   captureDePreInversionWorkers?: number;
   captureDeParallelRouter?: string;
+  captureDeGpuRenderer?: string;
   captureDePreRouterWorkers?: number;
   captureDeSelfVerifyFallback?: boolean;
   captureDeFallbackReason?: string;
@@ -130,6 +131,7 @@ function renderObservabilityEventProperties(props: RenderObservabilityTelemetryP
     de_worker_inversion: props.captureDeWorkerInversion,
     de_pre_inversion_workers: props.captureDePreInversionWorkers,
     de_parallel_router: props.captureDeParallelRouter,
+    gpu_renderer: props.captureDeGpuRenderer,
     de_pre_router_workers: props.captureDePreRouterWorkers,
     de_self_verify_fallback: props.captureDeSelfVerifyFallback,
     de_fallback_reason: props.captureDeFallbackReason,
@@ -171,6 +173,17 @@ export function trackRenderComplete(
     /** Authoring workflow skill that drove this render (e.g. "product-launch-video"). */
     authoringSkill?: string;
     workers?: number;
+    // Worker auto-sizing provenance (RenderPerfSummary.workerSizing). Answers
+    // "why N workers?" fleet-wide, and validates the advisory per-worker heap
+    // budget before it's enforced (field OOM: 6 auto workers on a 24GB/4GB-heap
+    // machine — see computeWorkerSizing in @hyperframes/engine).
+    workersBoundBy?: string;
+    workersCpuBased?: number;
+    workersMemoryBased?: number;
+    workersHeapBased?: number;
+    workersFrameBased?: number;
+    workersHeapLimitMb?: number;
+    workersExceedHeapAdvisory?: boolean;
     docker: boolean;
     gpu: boolean;
     // Static-frame dedup outcome (opt-out HF_STATIC_DEDUP=false). Undefined on
@@ -194,6 +207,8 @@ export function trackRenderComplete(
     deParallelRouter?: string;
     dePreRouterWorkers?: number;
     deGateReason?: string;
+    /** Low-cardinality GPU bucket from DE session init (`<backend>/<vendor>`, e.g. `d3d11/nvidia`). */
+    gpuRenderer?: string;
     deWorkerEncode?: boolean;
     deVerifyArmed?: number;
     deVerifyChecked?: number;
@@ -267,6 +282,13 @@ export function trackRenderComplete(
       quality: props.quality,
       authoring_skill: props.authoringSkill,
       workers: props.workers,
+      workers_bound_by: props.workersBoundBy,
+      workers_cpu_based: props.workersCpuBased,
+      workers_memory_based: props.workersMemoryBased,
+      workers_heap_based: props.workersHeapBased,
+      workers_frame_based: props.workersFrameBased,
+      workers_heap_limit_mb: props.workersHeapLimitMb,
+      workers_exceed_heap_advisory: props.workersExceedHeapAdvisory,
       docker: props.docker,
       gpu: props.gpu,
       static_dedup_enabled: props.staticDedupEnabled,
@@ -284,6 +306,7 @@ export function trackRenderComplete(
       de_parallel_router: props.deParallelRouter,
       de_pre_router_workers: props.dePreRouterWorkers,
       de_gate_reason: props.deGateReason,
+      gpu_renderer: props.gpuRenderer,
       de_worker_encode: props.deWorkerEncode,
       de_verify_armed: props.deVerifyArmed,
       de_verify_checked: props.deVerifyChecked,
@@ -380,6 +403,10 @@ export function trackRenderError(
       peak_memory_mb: props.peakMemoryMb,
       memory_free_mb: props.memoryFreeMb,
       ...powerStateFields(),
+      // gpu_renderer arrives via renderObservabilityEventProperties below:
+      // on the failure path perfSummary is never built, so live capture
+      // observability is the only source. Backend attribution matters MOST
+      // here — a win32 D3D11 crash is what the rollout is watching for.
       ...renderObservabilityEventProperties(props),
     },
     props.distinctId,
@@ -633,14 +660,28 @@ export function trackRenderFeedback(props: {
   renderDurationMs?: number;
   comment?: string;
   doctorSummary?: string;
+  /**
+   * Join key shared with the forwarded feedback report (Slack/backend): the
+   * same uuid rides in the report's env string as `fid=…`, so a wild report
+   * resolves to exactly one PostHog `cli_render_feedback` event and vice versa.
+   */
+  feedbackId?: string;
+  /** render_job_id values of this install's recent renders (newest last). */
+  recentRenderIds?: string[];
 }): void {
-  trackEvent("survey sent", {
-    $survey_id: "render_satisfaction",
-    $survey_response: props.rating,
+  // Plain product event, not a PostHog survey response: nothing here is served
+  // by the surveys product (no survey definition, no targeting, no popover).
+  trackEvent("cli_render_feedback", {
+    rating: props.rating,
     rating_scale: FEEDBACK_RATING_SCALE,
-    ...(props.comment ? { $survey_response_2: props.comment } : {}),
+    ...(props.comment ? { comment: props.comment } : {}),
     ...(props.renderDurationMs !== undefined ? { render_duration_ms: props.renderDurationMs } : {}),
     ...(props.doctorSummary ? { doctor_summary: props.doctorSummary } : {}),
+    ...(props.feedbackId ? { feedback_id: props.feedbackId } : {}),
+    // Comma-joined: EventProperties values are scalars only.
+    ...(props.recentRenderIds?.length
+      ? { recent_render_ids: props.recentRenderIds.join(",") }
+      : {}),
   });
 }
 

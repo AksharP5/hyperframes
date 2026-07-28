@@ -17,6 +17,7 @@ vi.mock("@hyperframes/engine", async (importOriginal) => {
 import {
   buildMissingFrameRetryBatches,
   captureAttemptMadeProgress,
+  closeOrphanedProbeForRetry,
   describeMemoryExhaustion,
   executeDiskCaptureWithAdaptiveRetry,
   collectVideoMetadataHints,
@@ -2139,5 +2140,63 @@ describe("shouldStreamParallelCapture (non-DE parallel streaming router)", () =>
 
   it("skips HDR-layered and shader-transition routes", () => {
     expect(shouldStreamParallelCapture({ ...eligible, layeredOrEffectRoute: true })).toBe(false);
+  });
+});
+
+describe("closeOrphanedProbeForRetry (probe cleanup before verify-triggered retry)", () => {
+  // Enough of a CaptureSession stand-in to exercise the closer path — the
+  // helper never inspects the object; it just hands it to the injected closer.
+  const stubSession = { browserConsoleBuffer: [] } as unknown as Parameters<
+    typeof closeOrphanedProbeForRetry
+  >[0];
+
+  it("hands the still-owned probe to the closer before the caller clears it", async () => {
+    const closer = vi.fn(async () => {});
+    const log = { warn: vi.fn() };
+
+    await closeOrphanedProbeForRetry(stubSession, closer, log, "streaming");
+
+    expect(closer).toHaveBeenCalledTimes(1);
+    expect(closer).toHaveBeenCalledWith(stubSession);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("swallows a close failure with a warn so the caller's retry can proceed", async () => {
+    const closer = vi.fn(async () => {
+      throw new Error("chrome zombie");
+    });
+    const log = { warn: vi.fn() };
+
+    await expect(
+      closeOrphanedProbeForRetry(stubSession, closer, log, "disk verify"),
+    ).resolves.toBeUndefined();
+
+    expect(closer).toHaveBeenCalledTimes(1);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    const [message, meta] = log.warn.mock.calls[0];
+    expect(message).toContain("disk verify");
+    expect((meta as { error: string }).error).toBe("chrome zombie");
+  });
+
+  it("preserves the retry context in the warn message so the audit trail names which retry path leaked", async () => {
+    const closer = vi.fn(async () => {
+      throw new Error("session already closed");
+    });
+    const log = { warn: vi.fn() };
+
+    await closeOrphanedProbeForRetry(stubSession, closer, log, "streaming");
+
+    expect(log.warn.mock.calls[0][0]).toContain("streaming");
+    expect(log.warn.mock.calls[0][0]).not.toContain("disk verify");
+  });
+
+  it("stringifies non-Error rejections so the log entry still names the cause", async () => {
+    const closer = vi.fn(async () => Promise.reject("string-only rejection"));
+    const log = { warn: vi.fn() };
+
+    await closeOrphanedProbeForRetry(stubSession, closer, log, "streaming");
+
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect((log.warn.mock.calls[0][1] as { error: string }).error).toBe("string-only rejection");
   });
 });

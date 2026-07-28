@@ -184,12 +184,18 @@ export {
   createFrameLookupTable,
   FrameLookupTable,
   analyzeClipMediaFit,
+  classifyVideoExtractionError,
+  isVideoSourceExtractionError,
+  runVideoExtractionWithRetry,
+  VideoSourceExtractionError,
   type VideoElement,
   type ImageElement,
   type ExtractedFrames,
   type ExtractionOptions,
   type ExtractionResult,
   type ExtractionPhaseBreakdown,
+  type VideoExtractionFailure,
+  type VideoExtractionFailureKind,
   type VideoFrameFormat,
   VIDEO_FRAME_FORMATS,
   isVideoFrameFormat,
@@ -198,8 +204,12 @@ export {
 export { createVideoFrameInjector } from "./services/videoFrameInjector.js";
 
 export { parseAudioElements, processCompositionAudio } from "./services/audioMixer.js";
+export { cloneCaptureWarning, cloneCaptureWarnings } from "./services/captureWarning.js";
 export type {
   AudioElement,
+  AudioFailureReason,
+  AudioFailureStage,
+  AudioProcessingFailure,
   AudioTrack,
   AudioVolumeKeyframe,
   MixResult,
@@ -208,6 +218,9 @@ export type {
 // ── Parallel rendering ─────────────────────────────────────────────────────────
 export {
   calculateOptimalWorkers,
+  computeWorkerSizing,
+  selectVerifySampleIndicesForTask,
+  verifyDiskDrawElementSamples,
   distributeFrames,
   distributeFramesInterleaved,
   executeParallelCapture,
@@ -215,6 +228,8 @@ export {
   getSystemResources,
   type WorkerTask,
   type WorkerResult,
+  type WorkerSizing,
+  type WorkerSizingBound,
   type ParallelProgress,
 } from "./services/parallelCoordinator.js";
 
@@ -269,6 +284,10 @@ export {
 } from "./utils/ffmpegBinaries.js";
 
 export { trackChildProcess, killTrackedProcesses } from "./utils/processTracker.js";
+
+// drawElement self-verify comparison — shared by the streaming drain
+// (producer) and the parallel disk-path verify (parallelCoordinator).
+export { psnrDb, resolveDeVerifyMinDb } from "./utils/psnr.js";
 
 export {
   decodePng,

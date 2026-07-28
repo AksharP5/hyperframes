@@ -26,6 +26,11 @@ async function loadParseGsapScript(): Promise<(script: string) => LintParsedGsap
   const mod = await import("@hyperframes/parsers/gsap-parser-acorn");
   return mod.parseGsapScriptAcorn as unknown as (script: string) => LintParsedGsap;
 }
+
+async function loadGsapScriptMotionPathFirstUseIndex(): Promise<(script: string) => number | null> {
+  const mod = await import("@hyperframes/parsers/gsap-parser-acorn");
+  return mod.gsapScriptMotionPathFirstUseIndex;
+}
 import type { LintContext } from "../context";
 import type { HyperframeLintFinding, LintRule } from "../types";
 import type { OpenTag } from "../utils";
@@ -1420,6 +1425,85 @@ export const gsapRules: LintRule<LintContext>[] = [
     ];
   },
 
+  // missing_gsap_plugin
+  async ({ scripts, rawSource, options }) => {
+    const canInheritPluginFromHost =
+      options.isSubComposition || rawSource.trimStart().toLowerCase().startsWith("<template");
+    if (canInheritPluginFromHost) return [];
+
+    const gsapScriptMotionPathFirstUseIndex = await loadGsapScriptMotionPathFirstUseIndex();
+    const motionPathUseIndices = scripts.map((script) =>
+      gsapScriptMotionPathFirstUseIndex(script.content),
+    );
+    const firstMotionPathScriptIndex = motionPathUseIndices.findIndex((index) => index !== null);
+    const firstMotionPathUseIndex = motionPathUseIndices[firstMotionPathScriptIndex] ?? null;
+    const firstUseScript = scripts[firstMotionPathScriptIndex];
+    const executionMode = (attrs: string): "blocking" | "defer" | "module" | "async" => {
+      const tag = `<script ${attrs}>`;
+      const isModule = (readDecodedAttr(tag, "type") ?? "").toLowerCase() === "module";
+      const hasSrc = readDecodedAttr(tag, "src") !== null;
+      const hasAsync = readDecodedAttr(tag, "async") !== null;
+      const hasDefer = readDecodedAttr(tag, "defer") !== null;
+      if ((isModule || hasSrc) && hasAsync) return "async";
+      if (isModule) return "module";
+      if (hasSrc && hasDefer) return "defer";
+      return "blocking";
+    };
+    const firstUseMode = firstUseScript ? executionMode(firstUseScript.attrs) : "blocking";
+    const hasMotionPathPlugin = scripts
+      .slice(0, firstMotionPathScriptIndex + 1)
+      .some((script, candidateIndex) => {
+        const candidateMode = executionMode(script.attrs);
+        const sameScript = candidateIndex === firstMotionPathScriptIndex;
+        const candidateIsPostParse = candidateMode === "defer" || candidateMode === "module";
+        const firstUseIsPostParse = firstUseMode === "defer" || firstUseMode === "module";
+        const executesBeforeFirstUse =
+          sameScript ||
+          candidateMode === "blocking" ||
+          (candidateIsPostParse && firstUseIsPostParse);
+        if (!executesBeforeFirstUse || (!sameScript && candidateMode === "async")) return false;
+        const src = readAttr(`<script ${script.attrs}>`, "src") ?? "";
+        const uncommented = stripJsComments(script.content);
+        const hasStaticImport =
+          /\bimport\s+(?:[\s\S]*?\sfrom\s*)?["'][^"']*\bMotionPathPlugin\b[^"']*["']/.test(
+            uncommented,
+          ) ||
+          /\bimport\s+(?:[\w$]+\s*,\s*)?\{[^}]*\bMotionPathPlugin\b[^}]*\}\s+from\s*["'][^"']+["']/.test(
+            uncommented,
+          ) ||
+          /\bimport\s+MotionPathPlugin\s+from\s*["'][^"']+["']/.test(uncommented);
+        const inlinedMarkerIndex = script.content.search(/\/\*\s*inlined:.*MotionPathPlugin/i);
+        const definitionIndex = uncommented.search(
+          /\b(?:const|let|var|class|function)\s+MotionPathPlugin\b/,
+        );
+        if (sameScript) {
+          if (hasStaticImport) return true;
+          if (firstMotionPathUseIndex === null) return false;
+          return (
+            (inlinedMarkerIndex >= 0 && inlinedMarkerIndex < firstMotionPathUseIndex) ||
+            (definitionIndex >= 0 && definitionIndex < firstMotionPathUseIndex)
+          );
+        }
+        return (
+          /MotionPathPlugin/i.test(src) ||
+          hasStaticImport ||
+          inlinedMarkerIndex >= 0 ||
+          definitionIndex >= 0
+        );
+      });
+    if (firstMotionPathScriptIndex < 0 || hasMotionPathPlugin) return [];
+    return [
+      {
+        code: "missing_gsap_plugin",
+        severity: "error",
+        message:
+          "A GSAP tween uses motionPath, but MotionPathPlugin is not loaded. Core GSAP ignores this plugin-specific property, so the intended motion will not render.",
+        fixHint:
+          "Load MotionPathPlugin before the animation script and register it with gsap.registerPlugin(MotionPathPlugin), or replace motionPath with core GSAP x/y tweens.",
+      },
+    ];
+  },
+
   // audio_reactive_single_tween_per_group
   // fallow-ignore-next-line complexity
   ({ scripts, styles }) => {
@@ -1466,8 +1550,12 @@ export const gsapRules: LintRule<LintContext>[] = [
   },
 
   // gsap_infinite_repeat
-  ({ scripts }) => {
+  ({ scripts, rootTag }) => {
     const findings: HyperframeLintFinding[] = [];
+    const declaredDuration = Number.parseFloat(
+      rootTag ? (readAttr(rootTag.raw, "data-duration") ?? "") : "",
+    );
+    const hasFiniteCompositionWindow = Number.isFinite(declaredDuration) && declaredDuration > 0;
     // Match repeat: -1 in GSAP tweens or timeline configs
     const pattern = /repeat\s*:\s*-1(?!\d)/g;
     for (const { snippet } of scanScriptsForRegexMatches(scripts, pattern, {
@@ -1477,14 +1565,16 @@ export const gsapRules: LintRule<LintContext>[] = [
     })) {
       findings.push({
         code: "gsap_infinite_repeat",
-        severity: "error",
-        message:
-          "GSAP tween uses `repeat: -1` (infinite). Infinite repeats break the deterministic " +
-          "capture engine which seeks to exact frame times. Use a finite repeat count calculated " +
-          "from the composition duration: `repeat: Math.max(0, Math.floor(duration / cycleDuration) - 1)`.",
-        fixHint:
-          "Replace `repeat: -1` with a finite count, e.g. `repeat: Math.max(0, Math.floor(totalDuration / singleCycleDuration) - 1)`. " +
-          "Use Math.floor (not Math.ceil) so the animation fits, and clamp at zero so a short composition cannot evaluate to -1.",
+        severity: hasFiniteCompositionWindow ? "warning" : "error",
+        message: hasFiniteCompositionWindow
+          ? `GSAP tween uses \`repeat: -1\` (infinite), but the composition declares a finite ${declaredDuration}s window. ` +
+            "HyperFrames clips deterministic seeking and export to that explicit duration."
+          : "GSAP tween uses `repeat: -1` (infinite) without a finite composition `data-duration`. " +
+            "The timeline can report an unbounded duration and make render planning fail.",
+        fixHint: hasFiniteCompositionWindow
+          ? "Keep the explicit finite composition `data-duration`. Use a finite repeat count only when the loop itself must end before the composition does."
+          : "Add a finite composition `data-duration`, or replace `repeat: -1` with " +
+            "`repeat: Math.max(0, Math.floor(totalDuration / singleCycleDuration) - 1)`.",
         snippet: truncateSnippet(snippet),
       });
     }

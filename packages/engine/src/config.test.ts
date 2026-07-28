@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   resolveConfig,
+  resolveDefaultDrawElement,
   DEFAULT_CONFIG,
   scaleProtocolTimeoutForComposition,
   shouldClampToScreenshotForConcreteGpu,
@@ -232,6 +233,40 @@ describe("resolveConfig", () => {
     });
   });
 
+  describe("resolveDefaultDrawElement (pure host clamp)", () => {
+    const base = {
+      useDrawElement: true,
+      explicitOptIn: false,
+      browserGpuMode: "hardware" as const,
+      workerEncode: true,
+    };
+    it("engages on darwin and win32, not linux", () => {
+      expect(resolveDefaultDrawElement({ ...base, platform: "darwin" })).toBe(true);
+      expect(resolveDefaultDrawElement({ ...base, platform: "win32" })).toBe(true);
+      expect(resolveDefaultDrawElement({ ...base, platform: "linux" })).toBe(false);
+    });
+    it("software GPU clamps off even on supported platforms", () => {
+      expect(
+        resolveDefaultDrawElement({ ...base, platform: "win32", browserGpuMode: "software" }),
+      ).toBe(false);
+    });
+    it("explicit opt-in overrides platform and GPU clamps", () => {
+      expect(
+        resolveDefaultDrawElement({
+          ...base,
+          explicitOptIn: true,
+          platform: "linux",
+          browserGpuMode: "software",
+        }),
+      ).toBe(true);
+    });
+    it("no worker-encode (no verify net) clamps the default off", () => {
+      expect(resolveDefaultDrawElement({ ...base, platform: "darwin", workerEncode: false })).toBe(
+        false,
+      );
+    });
+  });
+
   describe("useDrawElement (PRODUCER_EXPERIMENTAL_FAST_CAPTURE)", () => {
     it("default is clamped off on software-GPU hosts (page-side compositing preserved)", () => {
       setEnv("PRODUCER_BROWSER_GPU_MODE", "software");
@@ -242,21 +277,20 @@ describe("resolveConfig", () => {
       expect(config.enablePageSideCompositing).toBe(true);
     });
 
-    it("default engages on macOS with a hardware-GPU browser", () => {
-      setEnv("PRODUCER_BROWSER_GPU_MODE", "hardware");
-      unsetEnv("PRODUCER_EXPERIMENTAL_FAST_CAPTURE");
-      unsetEnv("HF_DE_WORKER_ENCODE");
-      const config = resolveConfig();
-      expect(config.useDrawElement).toBe(process.platform === "darwin");
-    });
-
-    it("default engages on macOS with auto GPU mode (the stock CLI path)", () => {
-      setEnv("PRODUCER_BROWSER_GPU_MODE", "auto");
-      unsetEnv("PRODUCER_EXPERIMENTAL_FAST_CAPTURE");
-      unsetEnv("HF_DE_WORKER_ENCODE");
-      const config = resolveConfig();
-      expect(config.useDrawElement).toBe(process.platform === "darwin");
-    });
+    // win32 opened 2026-07-27 (was darwin-only): ~206k non-CI hardware-GPU
+    // Windows renders / 30d sat on the screenshot path behind the old clamp.
+    // "auto" is the stock CLI path; both must pass the platform clamp.
+    for (const gpuMode of ["hardware", "auto"] as const) {
+      it(`default engages on macOS/Windows with ${gpuMode} GPU mode`, () => {
+        setEnv("PRODUCER_BROWSER_GPU_MODE", gpuMode);
+        unsetEnv("PRODUCER_EXPERIMENTAL_FAST_CAPTURE");
+        unsetEnv("HF_DE_WORKER_ENCODE");
+        const config = resolveConfig();
+        expect(config.useDrawElement).toBe(
+          process.platform === "darwin" || process.platform === "win32",
+        );
+      });
+    }
 
     it("default requires worker-encode (the verified drain)", () => {
       setEnv("PRODUCER_BROWSER_GPU_MODE", "hardware");
@@ -624,40 +658,58 @@ describe("resolveConfig", () => {
       Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
     });
 
-    it("auto-disables on win32 + software-GPU + workers=1 + no user opt-in", () => {
-      setPlatform("win32");
-      setEnv("PRODUCER_BROWSER_GPU_MODE", "software");
-      setEnv("PRODUCER_MAX_WORKERS", "1");
+    /**
+     * Shared setup/assert for the win32 software-GPU compound: fixed common
+     * env (low-memory on, no explicit streaming opt-in), variable platform /
+     * gpu / workers, then assert whether the auto-disable fired.
+     */
+    function expectCompoundOutcome(opts: {
+      platform: NodeJS.Platform;
+      gpuMode?: string;
+      workers?: string;
+      autoDisabled: boolean;
+    }): void {
+      setPlatform(opts.platform);
+      if (opts.gpuMode === undefined) unsetEnv("PRODUCER_BROWSER_GPU_MODE");
+      else setEnv("PRODUCER_BROWSER_GPU_MODE", opts.gpuMode);
+      if (opts.workers === undefined) unsetEnv("PRODUCER_MAX_WORKERS");
+      else setEnv("PRODUCER_MAX_WORKERS", opts.workers);
       setEnv("PRODUCER_LOW_MEMORY_MODE", "true");
       unsetEnv("PRODUCER_ENABLE_STREAMING_ENCODE");
-
       const config = resolveConfig();
-      expect(config.enableStreamingEncode).toBe(false);
-      expect(config.streamingEncodeAutoDisabledOnWin32Compound).toBe(true);
+      expect(config.enableStreamingEncode).toBe(!opts.autoDisabled);
+      if (opts.autoDisabled) {
+        expect(config.streamingEncodeAutoDisabledOnWin32Compound).toBe(true);
+      } else {
+        expect(config.streamingEncodeAutoDisabledOnWin32Compound).toBeUndefined();
+      }
+    }
+
+    it("auto-disables on win32 + software-GPU + workers=1 + no user opt-in", () => {
+      expectCompoundOutcome({
+        platform: "win32",
+        gpuMode: "software",
+        workers: "1",
+        autoDisabled: true,
+      });
     });
 
     it("leaves streaming-encode on when platform is linux", () => {
-      setPlatform("linux");
-      setEnv("PRODUCER_BROWSER_GPU_MODE", "software");
-      setEnv("PRODUCER_MAX_WORKERS", "1");
-      setEnv("PRODUCER_LOW_MEMORY_MODE", "true");
-      unsetEnv("PRODUCER_ENABLE_STREAMING_ENCODE");
-
-      const config = resolveConfig();
-      expect(config.enableStreamingEncode).toBe(true);
-      expect(config.streamingEncodeAutoDisabledOnWin32Compound).toBeUndefined();
+      expectCompoundOutcome({
+        platform: "linux",
+        gpuMode: "software",
+        workers: "1",
+        autoDisabled: false,
+      });
     });
 
     it("leaves streaming-encode on when workers > 1", () => {
-      setPlatform("win32");
-      setEnv("PRODUCER_BROWSER_GPU_MODE", "software");
-      setEnv("PRODUCER_MAX_WORKERS", "4");
-      setEnv("PRODUCER_LOW_MEMORY_MODE", "true");
-      unsetEnv("PRODUCER_ENABLE_STREAMING_ENCODE");
-
-      const config = resolveConfig();
-      expect(config.enableStreamingEncode).toBe(true);
-      expect(config.streamingEncodeAutoDisabledOnWin32Compound).toBeUndefined();
+      expectCompoundOutcome({
+        platform: "win32",
+        gpuMode: "software",
+        workers: "4",
+        autoDisabled: false,
+      });
     });
 
     it("respects explicit env opt-in (PRODUCER_ENABLE_STREAMING_ENCODE=true) on the compound", () => {
@@ -703,16 +755,8 @@ describe("resolveConfig", () => {
       // --low-memory-mode implies screenshot capture. Compound applies even
       // if browserGpuMode is not literal "software" (defense-in-depth: matches
       // the OR semantics in `softwareGpuForced`).
-      setPlatform("win32");
-      unsetEnv("PRODUCER_BROWSER_GPU_MODE");
       unsetEnv("PRODUCER_DISABLE_GPU");
-      setEnv("PRODUCER_MAX_WORKERS", "1");
-      setEnv("PRODUCER_LOW_MEMORY_MODE", "true");
-      unsetEnv("PRODUCER_ENABLE_STREAMING_ENCODE");
-
-      const config = resolveConfig();
-      expect(config.enableStreamingEncode).toBe(false);
-      expect(config.streamingEncodeAutoDisabledOnWin32Compound).toBe(true);
+      expectCompoundOutcome({ platform: "win32", workers: "1", autoDisabled: true });
     });
 
     it("does not trigger when concurrency is 'auto' (workers not explicitly pinned)", () => {
@@ -720,15 +764,7 @@ describe("resolveConfig", () => {
       // helper's numeric workers check treats NaN as "unknown, don't trigger".
       // Downstream workers may still resolve to 1 via lowMemoryMode, but the
       // config-time clamp is deliberately conservative.
-      setPlatform("win32");
-      setEnv("PRODUCER_BROWSER_GPU_MODE", "software");
-      unsetEnv("PRODUCER_MAX_WORKERS");
-      setEnv("PRODUCER_LOW_MEMORY_MODE", "true");
-      unsetEnv("PRODUCER_ENABLE_STREAMING_ENCODE");
-
-      const config = resolveConfig();
-      expect(config.enableStreamingEncode).toBe(true);
-      expect(config.streamingEncodeAutoDisabledOnWin32Compound).toBeUndefined();
+      expectCompoundOutcome({ platform: "win32", gpuMode: "software", autoDisabled: false });
     });
   });
 

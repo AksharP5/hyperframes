@@ -935,7 +935,8 @@
   // (the pre-#U10 behaviour). Longer prose survives a nibbled edge; only flag
   // once a real share of it is covered — see `occludedTextIssue`.
   const ATOMIC_LABEL_MAX_CHARS = 16;
-  const PROSE_COVERAGE_FLOOR = 0.15;
+  // Default prose floor — callers may lower via auditLayout({ proseCoverageFloor }).
+  const DEFAULT_PROSE_COVERAGE_FLOOR = 0.15;
 
   function isAtomicLabel(text) {
     return text.length > 0 && text.length <= ATOMIC_LABEL_MAX_CHARS && !/\s/.test(text);
@@ -995,12 +996,8 @@
     return false;
   }
 
-  // Catches the blind spot the overflow checks miss: text that fits its box
-  // perfectly but is covered by a later sibling/overlay. An atomic label
-  // (short, no whitespace) flags at any coverage; ordinary prose only flags
-  // once coveredFraction clears PROSE_COVERAGE_FLOOR, since a sliver of edge
-  // cover on a paragraph is usually a styling artifact, not a reading defect.
-  function occludedTextIssue(element, time) {
+  // text_occluded: atomic labels flag at any hit; prose needs coveredFraction >= proseCoverageFloor (default 0.15).
+  function occludedTextIssue(element, time, proseCoverageFloor) {
     if (hasAllowOcclusionFlag(element)) return null;
     if (!hasVisibleTextInk(element)) return null;
     const textRect = textRectFor(element, true);
@@ -1012,7 +1009,7 @@
       textRects.length > 0 ? textRects : [textRect],
     );
     if (!occluder) return null;
-    if (!isAtomicLabel(text) && coveredFraction < PROSE_COVERAGE_FLOOR) return null;
+    if (!isAtomicLabel(text) && coveredFraction < proseCoverageFloor) return null;
     return {
       code: "text_occluded",
       severity: "error",
@@ -1198,6 +1195,7 @@
     return issues;
   }
 
+  // Soft prior only — the counterfactual attach test (below) is what makes detachment a finding.
   const CONNECTOR_NAME = /\b(conn(ector)?|arrow|edge|link|flow|wire)\b/i;
   const CONNECTOR_SKIP_CONTAINERS = "defs, marker, clipPath, mask, symbol, pattern";
 
@@ -1207,14 +1205,16 @@
     return `${element.id || ""} ${className}`;
   }
 
-  // Screen-space endpoints via the browser: getScreenCTM covers viewBox, preserveAspectRatio and group transforms.
-  function pathScreenEndpoints(svg, path) {
-    if (
-      typeof path.getTotalLength !== "function" ||
-      typeof path.getPointAtLength !== "function" ||
-      typeof path.getScreenCTM !== "function" ||
-      typeof svg.createSVGPoint !== "function"
-    ) {
+  function isConnectorPath(svg, path) {
+    if (path.hasAttribute("marker-start") || path.hasAttribute("marker-end")) return true;
+    return (
+      CONNECTOR_NAME.test(connectorNameFor(svg)) || CONNECTOR_NAME.test(connectorNameFor(path))
+    );
+  }
+
+  /** Raw `d`-space endpoints (no CTM) — the mapping authors use when they paste screen coords into `d`. */
+  function pathUserEndpoints(path) {
+    if (typeof path.getTotalLength !== "function" || typeof path.getPointAtLength !== "function") {
       return null;
     }
     let total;
@@ -1224,6 +1224,20 @@
       return null;
     }
     if (!Number.isFinite(total) || total <= 0) return null;
+    const start = path.getPointAtLength(0);
+    const end = path.getPointAtLength(total);
+    return { start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y } };
+  }
+
+  // Screen endpoints via getScreenCTM (viewBox, preserveAspectRatio, group transforms).
+  function pathScreenEndpoints(svg, path, user) {
+    if (
+      !user ||
+      typeof path.getScreenCTM !== "function" ||
+      typeof svg.createSVGPoint !== "function"
+    ) {
+      return null;
+    }
     const matrix = path.getScreenCTM();
     if (!matrix) return null;
     const toScreen = (local) => {
@@ -1233,10 +1247,7 @@
       const mapped = point.matrixTransform(matrix);
       return { x: mapped.x, y: mapped.y };
     };
-    return {
-      start: toScreen(path.getPointAtLength(0)),
-      end: toScreen(path.getPointAtLength(total)),
-    };
+    return { start: toScreen(user.start), end: toScreen(user.end) };
   }
 
   function distanceToRect(point, rect) {
@@ -1246,6 +1257,7 @@
   }
 
   // Solid, compact elements a connector could plausibly anchor to.
+  // Both tiers keep `element` so attachment identity is stable across containment vs near-miss.
   function connectorAnchorRects(root, rootRect) {
     const compact = [];
     const painted = [];
@@ -1261,42 +1273,57 @@
       if (area < 400) continue;
       // Containment tier: large opaque targets only — a text-bearing wrapper contains its own diagram's endpoints.
       if (opaque && area <= rootArea * 0.6) painted.push({ rect, element });
-      if (area <= rootArea * 0.15) compact.push(rect);
+      if (area <= rootArea * 0.15) compact.push({ rect, element });
     }
     return { compact, painted };
   }
 
-  function isConnectorPath(svg, path) {
-    if (path.hasAttribute("marker-start") || path.hasAttribute("marker-end")) return true;
-    return (
-      CONNECTOR_NAME.test(connectorNameFor(svg)) || CONNECTOR_NAME.test(connectorNameFor(path))
-    );
-  }
-
-  // A connector whose BOTH endpoints land far from every anchorable element was drawn in the wrong frame.
-  // min over the two endpoints is intentional: a half-attached connector is a design choice, not frame drift.
+  // Flag only the documented bug: rendered endpoints miss, but user-space-as-screen would attach.
   function connectorDetachmentIssues(root, rootRect, time) {
     const issues = [];
     let anchors = null;
+    // Attach near-miss tolerance (screen px). Separate from the closed-glyph chord floor.
     const threshold = Math.max(32, Math.min(rootRect.width, rootRect.height) * 0.02);
+    const MIN_CONNECTOR_CHORD_PX = 8;
     for (const svg of Array.from(root.querySelectorAll("svg"))) {
       if (!isVisibleElement(svg) || hasAllowOverflowFlag(svg)) continue;
       for (const path of Array.from(svg.querySelectorAll("path"))) {
         if (path.closest(CONNECTOR_SKIP_CONTAINERS)) continue;
         if (!isConnectorPath(svg, path)) continue;
-        const endpoints = pathScreenEndpoints(svg, path);
-        if (!endpoints) continue;
+        const user = pathUserEndpoints(path);
+        const rendered = pathScreenEndpoints(svg, path, user);
+        if (!user || !rendered) continue;
+        // Closed/glyph paths collapse to one point — compare in screen px (not user units).
+        const renderedChord = Math.hypot(
+          rendered.end.x - rendered.start.x,
+          rendered.end.y - rendered.start.y,
+        );
+        if (renderedChord < MIN_CONNECTOR_CHORD_PX) continue;
         if (anchors === null) anchors = connectorAnchorRects(root, rootRect);
         if (anchors.compact.length < 2) return issues;
-        const attached = (point) =>
-          anchors.painted.some(
-            (anchor) => !anchor.element.contains(svg) && distanceToRect(point, anchor.rect) === 0,
-          ) || anchors.compact.some((rect) => distanceToRect(point, rect) <= threshold);
-        if (attached(endpoints.start) || attached(endpoints.end)) continue;
+        // Stable DOM identity across painted (inside) and compact (near-miss) tiers.
+        const attachmentKey = (point) => {
+          for (const anchor of anchors.painted) {
+            if (!anchor.element.contains(svg) && distanceToRect(point, anchor.rect) === 0) {
+              return anchor.element;
+            }
+          }
+          for (const anchor of anchors.compact) {
+            if (distanceToRect(point, anchor.rect) <= threshold) return anchor.element;
+          }
+          return null;
+        };
+        const attached = (point) => attachmentKey(point) !== null;
+        // Half-attached as drawn is allowed; only full render-miss proceeds.
+        if (attached(rendered.start) || attached(rendered.end)) continue;
+        // Paste-into-`d` bug: both raw endpoints land on distinct anchors as screen pixels.
+        const userStartKey = attachmentKey(user.start);
+        const userEndKey = attachmentKey(user.end);
+        if (!userStartKey || !userEndKey || userStartKey === userEndKey) continue;
         const gap = Math.round(
           Math.min(
-            Math.min(...anchors.compact.map((rect) => distanceToRect(endpoints.start, rect))),
-            Math.min(...anchors.compact.map((rect) => distanceToRect(endpoints.end, rect))),
+            Math.min(...anchors.compact.map((a) => distanceToRect(rendered.start, a.rect))),
+            Math.min(...anchors.compact.map((a) => distanceToRect(rendered.end, a.rect))),
           ),
         );
         issues.push({
@@ -1305,17 +1332,17 @@
           time,
           selector: selectorFor(path),
           containerSelector: selectorFor(svg),
-          message: `Connector path endpoints are ${gap}px from the nearest anchorable element — measured coordinates were likely drawn into an SVG with a different origin.`,
+          message: `Connector path endpoints render ${gap}px from the nearest anchorable element, but the path's user-space coordinates would attach if read as screen pixels — screen/viewport numbers were likely written into SVG \`d\` without inverting the CTM.`,
           rect: toRect({
-            left: Math.min(endpoints.start.x, endpoints.end.x),
-            top: Math.min(endpoints.start.y, endpoints.end.y),
-            right: Math.max(endpoints.start.x, endpoints.end.x),
-            bottom: Math.max(endpoints.start.y, endpoints.end.y),
-            width: Math.abs(endpoints.end.x - endpoints.start.x),
-            height: Math.abs(endpoints.end.y - endpoints.start.y),
+            left: Math.min(rendered.start.x, rendered.end.x),
+            top: Math.min(rendered.start.y, rendered.end.y),
+            right: Math.max(rendered.start.x, rendered.end.x),
+            bottom: Math.max(rendered.start.y, rendered.end.y),
+            width: Math.abs(rendered.end.x - rendered.start.x),
+            height: Math.abs(rendered.end.y - rendered.start.y),
           }),
           fixHint:
-            "Subtract the SVG's own rect when converting measured coordinates, and keep the SVG a direct child of the stage.",
+            "Convert measured screen coordinates into the SVG's user space (subtract the SVG rect / invert getScreenCTM) before writing path `d`, and keep the SVG a direct child of the stage.",
         });
       }
     }
@@ -1390,6 +1417,10 @@
     const time = options && typeof options.time === "number" ? options.time : 0;
     const tolerance =
       options && typeof options.tolerance === "number" ? Math.max(0, options.tolerance) : 2;
+    const proseCoverageFloor =
+      options && typeof options.proseCoverageFloor === "number"
+        ? Math.min(1, Math.max(0, options.proseCoverageFloor))
+        : DEFAULT_PROSE_COVERAGE_FLOOR;
     const root =
       document.querySelector("[data-composition-id][data-width][data-height]") ||
       document.querySelector("[data-composition-id]") ||
@@ -1407,7 +1438,7 @@
         const clipped = clippedTextIssue(element, time, tolerance);
         if (clipped) issues.push(clipped);
         issues.push(...textOverflowIssues(element, root, rootRect, time, tolerance));
-        const occluded = occludedTextIssue(element, time);
+        const occluded = occludedTextIssue(element, time, proseCoverageFloor);
         if (occluded) issues.push(occluded);
         const invisible = invisibleTextIssue(element, time);
         if (invisible) issues.push(invisible);
@@ -1423,6 +1454,16 @@
     issues.push(...panelOutOfCanvasIssues(root, rootRect, time, tolerance, escaped.flagged));
     issues.push(...connectorDetachmentIssues(root, rootRect, time));
     return issues;
+  };
+
+  // Reruns only the overlap detector (same threshold, no new surface) on a fine grid for the dense motion re-sampling pass.
+  window.__hyperframesOverlapAudit = function auditOverlap(options) {
+    const time = options && typeof options.time === "number" ? options.time : 0;
+    const root =
+      document.querySelector("[data-composition-id][data-width][data-height]") ||
+      document.querySelector("[data-composition-id]") ||
+      document.body;
+    return contentOverlapIssues(root, time);
   };
 
   // Frozen-sweep guard (#U10, checkPipeline.ts): a compact per-sample
@@ -1479,5 +1520,249 @@
       parts.push(`p:${mediaPixelHash(media)}`);
     }
     return parts.join("|");
+  };
+
+  // Rotation-pivot sampling (rotation_pivot_drift). Per sample, report every
+  // rotatable candidate's bbox center, size, and current rotation angle. Node
+  // accumulates these across the seek grid and, after the run, flags any
+  // element that spins (angle varies) while its bbox CENTER drifts — the
+  // signature of a wrong transformOrigin/svgOrigin (spokes swinging off-axis
+  // instead of spinning in place). Single frame can't tell spin from pivot
+  // drift, so this is a cross-sample finder, not a per-sample one.
+  function rotationAngleDeg(transform) {
+    if (!transform || transform === "none") return null;
+    const match = transform.match(/matrix(3d)?\(([^)]+)\)/);
+    if (!match) return null;
+    const values = match[2].split(",").map((part) => Number.parseFloat(part));
+    // matrix(a,b,c,d,e,f) → a=values[0], b=values[1]. matrix3d shares the same
+    // leading two entries for the in-plane 2D rotation component.
+    const a = values[0];
+    const b = values[1];
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    return (Math.atan2(b, a) * 180) / Math.PI;
+  }
+
+  window.__hyperframesRotationSample = function collectRotationSample() {
+    const root =
+      document.querySelector("[data-composition-id][data-width][data-height]") ||
+      document.querySelector("[data-composition-id]") ||
+      document.body;
+    const samples = [];
+    // Cap the candidate set so a pathological composition can't blow up the
+    // per-sample payload; transformed elements above a minimum area only.
+    const CANDIDATE_CAP = 200;
+    for (const element of Array.from(root.querySelectorAll("*"))) {
+      if (samples.length >= CANDIDATE_CAP) break;
+      // Intended orbits/satellites opt out — their bbox center is SUPPOSED to
+      // travel, so a drift finding there is a false positive.
+      if (element.closest("[data-layout-allow-orbit]")) continue;
+      if (!isVisibleElement(element, 0.05)) continue;
+      const angle = rotationAngleDeg(getComputedStyle(element).transform);
+      if (angle === null) continue; // identity / untransformed — not a candidate
+      const box = element.getBoundingClientRect();
+      if (box.width * box.height <= 400) continue;
+      samples.push({
+        selector: selectorFor(element),
+        cx: round(box.left + box.width / 2),
+        cy: round(box.top + box.height / 2),
+        w: round(box.width),
+        h: round(box.height),
+        angle: round(angle),
+      });
+    }
+    return samples;
+  };
+
+  // Needle-pivot sampling (off_pivot_rotation). A gauge/clock/radar pointer
+  // whose center-of-rotation sits far from the dial hub. bbox-intrinsic measures
+  // can't tell a correct sweep from a broken one (a base-pivoted needle's bbox
+  // center orbits either way), so this records two MATERIAL points on each
+  // elongated rotating SVG figure — mapped through getScreenCTM so the actual
+  // rendered transform is honored regardless of svgOrigin/transform-origin — and
+  // the dial's static hub (the point shared by the most non-rotating circles).
+  // The pipeline fits a rotation to the material-point trajectories to recover
+  // the real center-of-rotation and flags it when it drifts off that hub.
+  function ctmRotationDeg(ctm) {
+    if (!ctm) return null;
+    return (Math.atan2(ctm.b, ctm.a) * 180) / Math.PI;
+  }
+
+  function ctmScale(ctm) {
+    return Math.hypot(ctm.a, ctm.b);
+  }
+
+  function mapPoint(svg, ctm, x, y) {
+    const point = svg.createSVGPoint();
+    point.x = x;
+    point.y = y;
+    const mapped = point.matrixTransform(ctm);
+    return { x: mapped.x, y: mapped.y };
+  }
+
+  // Walks up to (and including) the composition root, NOT just the owner <svg>:
+  // an element spun by a div ancestor above its svg must not be mistaken for a
+  // static hub anchor (else a lone rotating arc becomes its own dial center).
+  function hasRotatedAncestor(element, root) {
+    let node = element;
+    while (node) {
+      const angle = rotationAngleDeg(getComputedStyle(node).transform);
+      if (angle !== null && Math.abs(angle) > 1) return true;
+      if (node === root) break;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  // KEEP IN SYNC with `fitCircle` in packages/cli/src/utils/checkPipeline.ts —
+  // this browser copy resolves arc-drawn dial hubs and is injected as a raw
+  // string (no import across the puppeteer boundary), so the Kåsa math is
+  // intentionally duplicated per-language. Any change must land in both copies.
+  function fitCirclePoints(points) {
+    const count = points.length;
+    if (count < 3) return null;
+    const meanX = points.reduce((sum, p) => sum + p.x, 0) / count;
+    const meanY = points.reduce((sum, p) => sum + p.y, 0) / count;
+    let suu = 0,
+      svv = 0,
+      suv = 0,
+      suuu = 0,
+      svvv = 0,
+      suvv = 0,
+      svuu = 0;
+    for (const point of points) {
+      const u = point.x - meanX;
+      const v = point.y - meanY;
+      suu += u * u;
+      svv += v * v;
+      suv += u * v;
+      suuu += u * u * u;
+      svvv += v * v * v;
+      suvv += u * v * v;
+      svuu += v * u * u;
+    }
+    const det = suu * svv - suv * suv;
+    if (Math.abs(det) < 1e-6) return null;
+    const uc = (((suuu + suvv) / 2) * svv - ((svvv + svuu) / 2) * suv) / det;
+    const vc = (((svvv + svuu) / 2) * suu - ((suuu + suvv) / 2) * suv) / det;
+    const cx = uc + meanX;
+    const cy = vc + meanY;
+    const radius = Math.sqrt(uc * uc + vc * vc + (suu + svv) / count);
+    let squaredError = 0;
+    for (const point of points) {
+      const delta = Math.hypot(point.x - cx, point.y - cy) - radius;
+      squaredError += delta * delta;
+    }
+    return { cx, cy, radius, residual: Math.sqrt(squaredError / count) };
+  }
+
+  // Fallback for dials drawn as arc <path> rather than <circle> rings: sample
+  // the largest static, near-circular path and recover its arc center.
+  function arcHubForSvg(svg, root) {
+    let best = null;
+    for (const path of Array.from(svg.querySelectorAll("path"))) {
+      if (hasRotatedAncestor(path, root)) continue;
+      if (typeof path.getTotalLength !== "function") continue;
+      const total = path.getTotalLength();
+      if (total < 200) continue;
+      const ctm = path.getScreenCTM();
+      if (!ctm) continue;
+      const points = [];
+      for (let i = 0; i <= 16; i++) {
+        const local = path.getPointAtLength((total * i) / 16);
+        points.push(mapPoint(svg, ctm, local.x, local.y));
+      }
+      const fit = fitCirclePoints(points);
+      if (!fit || fit.radius < 40) continue;
+      if (fit.residual > 0.05 * fit.radius) continue;
+      if (!best || fit.radius > best.radius) best = fit;
+    }
+    return best ? { hx: best.cx, hy: best.cy, hr: best.radius, count: 2 } : null;
+  }
+
+  function dialHubForSvg(svg, root) {
+    const centers = [];
+    for (const circle of Array.from(svg.querySelectorAll("circle"))) {
+      if (hasRotatedAncestor(circle, root)) continue;
+      const ctm = circle.getScreenCTM();
+      if (!ctm) continue;
+      const cx = Number.parseFloat(circle.getAttribute("cx") || "0");
+      const cy = Number.parseFloat(circle.getAttribute("cy") || "0");
+      const center = mapPoint(svg, ctm, cx, cy);
+      const radius = Number.parseFloat(circle.getAttribute("r") || "0") * ctmScale(ctm);
+      centers.push({ x: center.x, y: center.y, radius });
+    }
+    let best = null;
+    for (const anchor of centers) {
+      const cluster = centers.filter(
+        (other) => Math.hypot(other.x - anchor.x, other.y - anchor.y) <= 8,
+      );
+      if (!best || cluster.length > best.cluster.length) best = { anchor, cluster };
+    }
+    if (best && best.cluster.length >= 2) {
+      const count = best.cluster.length;
+      const hx = best.cluster.reduce((sum, item) => sum + item.x, 0) / count;
+      const hy = best.cluster.reduce((sum, item) => sum + item.y, 0) / count;
+      const hr = best.cluster.reduce((max, item) => Math.max(max, item.radius), 0);
+      return { hx, hy, hr, count };
+    }
+    return arcHubForSvg(svg, root);
+  }
+
+  window.__hyperframesOffPivotRotationSample = function collectOffPivotRotationSample() {
+    const root =
+      document.querySelector("[data-composition-id][data-width][data-height]") ||
+      document.querySelector("[data-composition-id]") ||
+      document.body;
+    const samples = [];
+    const hubCache = new Map();
+    const CANDIDATE_CAP = 60;
+    for (const element of Array.from(
+      root.querySelectorAll("path, polygon, line, rect, polyline, g"),
+    )) {
+      if (samples.length >= CANDIDATE_CAP) break;
+      const svg = element.ownerSVGElement;
+      if (!svg || typeof element.getBBox !== "function") continue;
+      if (element.closest("[data-layout-allow-orbit]")) continue;
+      if (!isVisibleElement(element, 0.05)) continue;
+      const ctm = element.getScreenCTM();
+      const angle = ctmRotationDeg(ctm);
+      if (ctm === null || angle === null) continue;
+      let bbox;
+      try {
+        bbox = element.getBBox();
+      } catch {
+        continue;
+      }
+      const long = Math.max(bbox.width, bbox.height);
+      const short = Math.min(bbox.width, bbox.height);
+      if (short <= 0 || long / short < 3 || long < 40) continue;
+      const vertical = bbox.height >= bbox.width;
+      const midMajor = vertical ? bbox.x + bbox.width / 2 : bbox.y + bbox.height / 2;
+      const a = vertical
+        ? mapPoint(svg, ctm, midMajor, bbox.y)
+        : mapPoint(svg, ctm, bbox.x, midMajor);
+      const b = vertical
+        ? mapPoint(svg, ctm, midMajor, bbox.y + bbox.height)
+        : mapPoint(svg, ctm, bbox.x + bbox.width, midMajor);
+      let hub = hubCache.get(svg);
+      if (hub === undefined) {
+        hub = dialHubForSvg(svg, root);
+        hubCache.set(svg, hub);
+      }
+      samples.push({
+        selector: selectorFor(element),
+        ax: round(a.x),
+        ay: round(a.y),
+        bx: round(b.x),
+        by: round(b.y),
+        len: round(Math.hypot(b.x - a.x, b.y - a.y)),
+        angle: round(angle),
+        hx: hub ? round(hub.hx) : null,
+        hy: hub ? round(hub.hy) : null,
+        hr: hub ? round(hub.hr) : null,
+        hubCount: hub ? hub.count : 0,
+      });
+    }
+    return samples;
   };
 })();

@@ -119,9 +119,225 @@ describe("initSandboxRuntimeModular", () => {
     delete (window as { __HF_EXPORT_RENDER_SEEK_CONFIG?: unknown }).__HF_EXPORT_RENDER_SEEK_CONFIG;
     delete window.__hfTimelinesBuilding;
     delete (window as { THREE?: unknown }).THREE;
+    delete (window as { __hfAutoNoopRegistered?: boolean }).__hfAutoNoopRegistered;
+    delete window.gsap;
     vi.restoreAllMocks();
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
+  });
+
+  it("resolves Studio hold as a deterministic step at the segment end", () => {
+    const defaultEase = (progress: number) => progress;
+    const originalParseEase = vi.fn(() => defaultEase);
+    window.gsap = {
+      timeline: () => createMockTimeline(1),
+      parseEase: originalParseEase,
+      registerPlugin: vi.fn(),
+    };
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "1");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    window.__timelines = { main: createMockTimeline(1) };
+
+    initSandboxRuntimeModular();
+
+    const first = window.gsap.parseEase?.("hold");
+    const second = window.gsap.parseEase?.("hold");
+    expect(first).toBeTypeOf("function");
+    expect(second).toBe(first);
+    if (typeof first !== "function") return;
+
+    expect([0, 0.25, 0.5, 0.99].map(first)).toEqual([0, 0, 0, 0]);
+    expect(first(1)).toBe(1);
+    expect(first(1.01)).toBe(1);
+    expect(originalParseEase).not.toHaveBeenCalledWith("hold");
+  });
+
+  it("repairs a keyframes tween's inner-timeline ease baked to undefined before custom-ease registration", () => {
+    // The composition inline script builds keyframes tweens BEFORE this runtime
+    // registers the custom eases, so a `{keyframes, ease:"hold"}` tween's inner
+    // timeline `_ease` bakes to undefined (GSAP resolves it once at build via the
+    // internal ease map). GSAP then throws "_ease is not a function" on the first
+    // render. The runtime must re-resolve that inner ease after registration.
+    window.gsap = {
+      timeline: () => createMockTimeline(20),
+      parseEase: vi.fn(() => (progress: number) => progress),
+      registerPlugin: vi.fn(),
+      registerEase: vi.fn(),
+    } as unknown as typeof window.gsap;
+
+    const innerTimeline: { _ease?: unknown } = { _ease: undefined };
+    const keyframesTween = {
+      vars: { ease: "hold", keyframes: { "0%": { x: 0 }, "100%": { x: 50 } } },
+      timeline: innerTimeline,
+      _ease: (progress: number) => progress,
+      targets: () => [document.createElement("div")],
+    };
+    const main = createMockTimeline(20);
+    main.getChildren = () => [keyframesTween as unknown as RuntimeTimelineLike];
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "20");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    window.__timelines = { main };
+
+    expect(innerTimeline._ease).toBeUndefined();
+    initSandboxRuntimeModular();
+    // Bind re-resolves the inner ease to a real function (the installed hold ease),
+    // so a subsequent render can call `timeline._ease(...)` without throwing.
+    expect(innerTimeline._ease).toBeTypeOf("function");
+  });
+
+  it("isolates a failed keyframe ease repair and reports it without skipping siblings", () => {
+    const outbound: Array<{ type?: string; event?: string }> = [];
+    vi.spyOn(window.parent, "postMessage").mockImplementation((message: unknown) => {
+      if (typeof message === "object" && message !== null) {
+        outbound.push(message as { type?: string; event?: string });
+      }
+    });
+    window.gsap = {
+      timeline: () => createMockTimeline(20),
+      parseEase: vi.fn((ease: unknown) => {
+        if (ease === "bad-ease") throw new Error("bad ease");
+        return (progress: number) => progress;
+      }),
+      registerPlugin: vi.fn(),
+      registerEase: vi.fn(),
+    } as unknown as typeof window.gsap;
+
+    const failedInner: { _ease?: unknown } = { _ease: undefined };
+    const repairedInner: { _ease?: unknown } = { _ease: undefined };
+    const main = createMockTimeline(20);
+    main.getChildren = () =>
+      [
+        { vars: { ease: "bad-ease", keyframes: {} }, timeline: failedInner },
+        { vars: { ease: "hold", keyframes: {} }, timeline: repairedInner },
+      ] as unknown as RuntimeTimelineLike[];
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-duration", "20");
+    document.body.appendChild(root);
+    window.__timelines = { main };
+
+    initSandboxRuntimeModular();
+
+    expect(failedInner._ease).toBeUndefined();
+    expect(repairedInner._ease).toBeTypeOf("function");
+    expect(outbound).toContainEqual(
+      expect.objectContaining({
+        type: "analytics",
+        event: "keyframe_ease_repair_failed",
+      }),
+    );
+  });
+
+  it("resolves Studio custom cubic-bezier eases on the composition GSAP instance", () => {
+    const defaultEase = (progress: number) => 1 - (1 - progress) ** 2;
+    const originalParseEase = vi.fn(() => defaultEase);
+    window.gsap = {
+      timeline: () => createMockTimeline(1),
+      parseEase: originalParseEase,
+      registerPlugin: vi.fn(),
+    };
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "1");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    window.__timelines = { main: createMockTimeline(1) };
+
+    initSandboxRuntimeModular();
+
+    const custom = "custom(M0,0 C0.42,0 0.58,1 1,1)";
+    const first = window.gsap.parseEase?.(custom);
+    const second = window.gsap.parseEase?.(custom);
+    expect(first).toBeTypeOf("function");
+    expect(second).toBe(first);
+    if (typeof first !== "function" || typeof second !== "function") return;
+
+    const progressSamples = [0, 0.25, 0.5, 0.75, 1];
+    expect(progressSamples.map(first)).toEqual(progressSamples.map(second));
+    expect(first(0.25)).toBeCloseTo(0.1292, 4);
+    expect(first(0.5)).toBeCloseTo(0.5, 6);
+    expect(first(0.5)).not.toBeCloseTo(defaultEase(0.5), 6);
+    expect(first(0.75)).toBeCloseTo(0.8708, 4);
+    expect(originalParseEase).not.toHaveBeenCalledWith(custom);
+
+    expect(window.gsap.parseEase?.("power1.out")).toBe(defaultEase);
+    expect(originalParseEase).toHaveBeenCalledWith("power1.out");
+    expect(window.gsap.parseEase?.("custom(not-a-path)")).toBe(defaultEase);
+    expect(originalParseEase).toHaveBeenCalledWith("custom(not-a-path)");
+
+    const installedParseEase = window.gsap.parseEase;
+    initSandboxRuntimeModular();
+    expect(window.gsap.parseEase).toBe(installedParseEase);
+
+    window.gsap = {
+      timeline: () => createMockTimeline(1),
+      parseEase: vi.fn(() => defaultEase),
+      registerPlugin: vi.fn(),
+    };
+    initSandboxRuntimeModular();
+    const freshResolution = window.gsap.parseEase?.(custom);
+    expect(freshResolution).toBeTypeOf("function");
+    if (typeof freshResolution === "function") {
+      expect(progressSamples.map(freshResolution)).toEqual(progressSamples.map(first));
+    }
+  });
+
+  it("resolves Studio spring eases as deterministic oscillations that settle exactly", () => {
+    const defaultEase = (progress: number) => progress;
+    const originalParseEase = vi.fn(() => defaultEase);
+    window.gsap = {
+      timeline: () => createMockTimeline(1),
+      parseEase: originalParseEase,
+      registerPlugin: vi.fn(),
+    };
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "1");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    window.__timelines = { main: createMockTimeline(1) };
+
+    initSandboxRuntimeModular();
+
+    const first = window.gsap.parseEase?.("spring(0.5)");
+    const second = window.gsap.parseEase?.("spring(0.5)");
+    expect(first).toBeTypeOf("function");
+    expect(second).toBe(first);
+    if (typeof first !== "function" || typeof second !== "function") return;
+
+    const samples = Array.from({ length: 101 }, (_, index) => first(index / 100));
+    expect(first(0)).toBe(0);
+    expect(first(1)).toBe(1);
+    expect(Math.max(...samples)).toBeGreaterThan(1);
+    expect(samples).toEqual(Array.from({ length: 101 }, (_, index) => second(index / 100)));
+    expect(originalParseEase).not.toHaveBeenCalledWith("spring(0.5)");
+
+    expect(window.gsap.parseEase?.("power1.out")).toBe(defaultEase);
+    expect(originalParseEase).toHaveBeenCalledWith("power1.out");
   });
 
   it("keeps authored composition hosts visible when the live child timeline is shorter", () => {
@@ -1320,6 +1536,53 @@ describe("initSandboxRuntimeModular", () => {
     expect(video.style.visibility).toBe("hidden");
   });
 
+  it("allocates color grading only for the active timed media", () => {
+    const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "4");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+
+    const futureComposition = document.createElement("div");
+    futureComposition.id = "future-composition";
+    futureComposition.setAttribute("data-start", "2");
+    root.appendChild(futureComposition);
+
+    for (const [id, start] of [
+      ["first", "0"],
+      ["second", "2"],
+    ]) {
+      const video = document.createElement("video");
+      video.id = id;
+      video.setAttribute("data-start", start);
+      video.setAttribute("data-duration", "2");
+      video.setAttribute("data-color-grading", '{"adjust":{"exposure":0.1}}');
+      Object.defineProperty(video, "paused", { value: true, configurable: true });
+      Object.defineProperty(video, "readyState", { value: 0, configurable: true });
+      video.load = () => {};
+      root.appendChild(video);
+    }
+
+    window.__timelines = { main: createMockTimeline(4) };
+    initSandboxRuntimeModular();
+
+    expect(getContextSpy).toHaveBeenCalledTimes(1);
+    expect(document.getElementById("first")?.style.visibility).toBe("visible");
+    expect(document.getElementById("second")?.style.visibility).toBe("hidden");
+    expect(futureComposition.style.visibility).toBe("");
+    expect(futureComposition.style.display).toBe("");
+
+    window.__player?.seek(3);
+
+    expect(getContextSpy).toHaveBeenCalledTimes(2);
+    expect(document.getElementById("first")?.style.visibility).toBe("hidden");
+    expect(document.getElementById("second")?.style.visibility).toBe("visible");
+  });
+
   it("plays scheduled child timelines without a captured root timeline when audio has failed", () => {
     const raf = createManualRaf();
     vi.spyOn(performance, "now").mockImplementation(() => raf.now());
@@ -2120,6 +2383,36 @@ describe("initSandboxRuntimeModular", () => {
     const beforeResume = seekTimes.length;
     raf.step(16);
     expect(seekTimes.length).toBeGreaterThan(beforeResume);
+  });
+
+  it("redraws animated grading from the transport clock only during playback", () => {
+    const raf = createManualRaf();
+    vi.spyOn(performance, "now").mockImplementation(() => raf.now());
+    window.requestAnimationFrame = raf.requestAnimationFrame as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = raf.cancelAnimationFrame as typeof window.cancelAnimationFrame;
+
+    document.body.innerHTML = `
+      <div data-composition-id="root" data-duration="5" data-width="1920" data-height="1080"></div>
+    `;
+    window.__timelines = { root: createMockTimeline(5) };
+    initSandboxRuntimeModular();
+
+    const runtime = (
+      window as Window & { __hf?: { colorGrading?: { redrawAnimated: () => number } } }
+    ).__hf?.colorGrading;
+    if (!runtime) throw new Error("Expected color grading runtime");
+    const redrawAnimated = vi.spyOn(runtime, "redrawAnimated");
+
+    raf.step(16);
+    expect(redrawAnimated).not.toHaveBeenCalled();
+
+    window.__player?.play();
+    raf.step(16);
+    expect(redrawAnimated).toHaveBeenCalledTimes(1);
+
+    window.__player?.pause();
+    raf.step(16);
+    expect(redrawAnimated).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a usable bound timeline when the registry entry is replaced", () => {

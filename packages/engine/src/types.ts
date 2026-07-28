@@ -18,7 +18,8 @@ export type CaptureWarningCode =
   | "media_load_failed"
   | "audio_processing_failed"
   | "sub_timeline_readiness_timeout"
-  | "sub_timeline_script_failure";
+  | "sub_timeline_script_failure"
+  | "live_map_detected";
 
 /** Structured correctness warning produced while preparing a capture session. */
 export interface CaptureWarning {
@@ -28,6 +29,10 @@ export interface CaptureWarning {
     mediaType?: "image" | "video" | "audio";
     sources?: string[];
     timeoutMs?: number;
+    failureReasons?: string[];
+    failureStages?: string[];
+    failureOwner?: "user" | "system";
+    retryable?: boolean;
   };
 }
 
@@ -271,6 +276,14 @@ export interface CapturePerfSummary {
   // ── drawElement fast-capture outcome (default-on release visibility) ──
   /** Final capture mode this session used: "drawelement" | "screenshot" | "beginframe". */
   captureMode: string;
+  /**
+   * Low-cardinality GPU bucket from DE session init: `<backend>/<vendor>`
+   * (e.g. `metal/apple`, `d3d11/nvidia`). Undefined when drawElement was
+   * never attempted. Lets telemetry cluster backend-specific damage now that
+   * DE engages on both Metal (darwin) and D3D11 (win32). Bucketed, not raw —
+   * see `classifyGpuRenderer`.
+   */
+  gpuRenderer?: string;
   /**
    * Low-cardinality init-time gate that routed a drawElement-eligible session
    * to the baseline: `swiftshader` | `css_effect:<fx>` | `at_risk_timeline` |

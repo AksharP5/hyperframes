@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/gcp-cloud-run",
-  "version": "0.7.65",
+  "version": "0.7.77",
   "description": "Google Cloud Run + Workflows adapter for HyperFrames distributed rendering — request handler, client-side SDK, and Terraform module.",
   "repository": {
     "type": "git",
@@ -81,7 +81,8 @@
     "@types/tar": "^6.1.13",
     "esbuild": "^0.25.12",
     "tsx": "^4.21.0",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=22"

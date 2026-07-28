@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   calculateOptimalWorkers,
+  computeWorkerSizing,
   distributeFrames,
   expectedFramesForTask,
   flagSilentWorkerExits,
   formatWorkerFailure,
+  selectVerifySampleIndicesForTask,
   selectWorkerDiagnostics,
   shouldDisableBrowserPoolForParallelWorker,
   shouldVerifyWorkerGpu,
@@ -90,6 +92,50 @@ describe("calculateOptimalWorkers", () => {
 
   it("caps explicit worker requests at the documented 24-worker ceiling", () => {
     expect(calculateOptimalWorkers(900, 25, { concurrency: "auto" })).toBe(24);
+  });
+});
+
+describe("computeWorkerSizing", () => {
+  it("matches calculateOptimalWorkers and reports every constraint", () => {
+    const config = { concurrency: "auto" as const };
+    const sizing = computeWorkerSizing(900, undefined, config);
+    expect(sizing.workers).toBe(calculateOptimalWorkers(900, undefined, config));
+    expect(sizing.cpuBasedWorkers).toBeGreaterThanOrEqual(1);
+    expect(sizing.memoryBasedWorkers).toBeGreaterThanOrEqual(1);
+    expect(sizing.heapBasedWorkers).toBeGreaterThanOrEqual(1);
+    expect(sizing.frameBasedWorkers).toBe(30); // 900 / MIN_FRAMES_PER_WORKER(30)
+    expect(sizing.heapLimitMb).toBeGreaterThan(0);
+    expect(sizing.totalMemoryMb).toBeGreaterThan(0);
+    expect(sizing.cpuCount).toBeGreaterThan(0);
+  });
+
+  it("labels explicit requests and clamps them like the legacy wrapper", () => {
+    const sizing = computeWorkerSizing(900, 25, { concurrency: "auto" });
+    expect(sizing.workers).toBe(24);
+    expect(sizing.boundBy).toBe("explicit");
+  });
+
+  it("labels tiny renders as too_few_frames", () => {
+    const sizing = computeWorkerSizing(30, undefined, { concurrency: "auto" });
+    expect(sizing.workers).toBe(1);
+    expect(sizing.boundBy).toBe("too_few_frames");
+  });
+
+  it("labels the contention cap when high capture cost binds", () => {
+    const sizing = computeWorkerSizing(180, undefined, {
+      concurrency: 6,
+      coresPerWorker: 100,
+      minParallelFrames: 120,
+      largeRenderThreshold: 1000,
+      captureCostMultiplier: 4,
+    });
+    expect(sizing.workers).toBe(1);
+    expect(sizing.boundBy).toBe("contention");
+  });
+
+  it("flags exceedsHeapAdvisory exactly when workers exceed the heap budget", () => {
+    const sizing = computeWorkerSizing(900, 24, { concurrency: "auto" });
+    expect(sizing.exceedsHeapAdvisory).toBe(sizing.workers > sizing.heapBasedWorkers);
   });
 });
 
@@ -301,6 +347,35 @@ describe("flagSilentWorkerExits", () => {
     ];
     flagSilentWorkerExits(results);
     expect(results[0]?.error).toBe("Protocol error (Page.captureScreenshot): Target closed");
+  });
+});
+
+describe("selectVerifySampleIndicesForTask", () => {
+  it("keeps only samples inside the task's contiguous range, sorted", () => {
+    // 2-worker split of 3032 frames: worker 1 owns [1516, 3032).
+    expect(
+      selectVerifySampleIndicesForTask([2274, 758, 1516, 3031, 3032], {
+        startFrame: 1516,
+        endFrame: 3032,
+      }),
+    ).toEqual([1516, 2274, 3031]);
+  });
+
+  it("respects the stride lattice for interleaved tasks", () => {
+    // Worker 1 of a 3-way interleave over [1, 30): captures 1, 4, 7, ...
+    expect(
+      selectVerifySampleIndicesForTask([1, 2, 4, 6, 7, 28, 29], {
+        startFrame: 1,
+        endFrame: 30,
+        frameStride: 3,
+      }),
+    ).toEqual([1, 4, 7, 28]);
+  });
+
+  it("returns empty when no samples fall in the range", () => {
+    expect(
+      selectVerifySampleIndicesForTask([0, 10, 20], { startFrame: 100, endFrame: 200 }),
+    ).toEqual([]);
   });
 });
 

@@ -72,6 +72,13 @@ export interface RenderCaptureObservability {
   dePreInversionWorkers?: number;
   /** DE parallel-router outcome: "routed" (fired, held) | "reverted" (fired, self-verify retry rolled back). */
   deParallelRouter?: "routed" | "reverted";
+  /**
+   * Low-cardinality GPU bucket (`<backend>/<vendor>`) from the DE probe
+   * session. Lives on capture observability (not just perfSummary) so a hard
+   * failure — crash / OOM / timeout — still reports which GPU backend it hit:
+   * that is precisely the cohort the win32 D3D11 rollout must attribute.
+   */
+  deGpuRenderer?: string;
   /** Worker count the resolver would have used absent the router; undefined if it never fired. */
   dePreRouterWorkers?: number;
   /**
@@ -109,6 +116,8 @@ export interface RenderExtractionObservability {
   vfrPreflightCount?: number;
   cacheHits?: number;
   cacheMisses?: number;
+  /** Per-source transient download/metadata/FFmpeg retries performed during extraction. */
+  transientRetries?: number;
   /**
    * Per-clip captured-vs-expected-frame gauges. Emitted by the parity gate
    * at extract finalization (see `videoFrameCoverage.ts`). Undefined when

@@ -41,11 +41,9 @@
  * into a shared module so the stages can import without reaching back.
  */
 
-import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import {
   type BeforeCaptureHook,
   type CaptureOptions,
@@ -64,7 +62,8 @@ import {
   distributeFramesInterleaved,
   executeParallelCapture,
   getCapturePerfSummary,
-  getFfmpegBinary,
+  psnrDb,
+  resolveDeVerifyMinDb,
   recaptureDrawElementFrameForVerify,
   completeDeferredDrawElementInit,
   initializeSession,
@@ -223,27 +222,9 @@ export type CaptureStreamingStageResult =
       success: false;
     };
 
-const execFileP = promisify(execFile);
-
-/** PSNR (average, dB) between two same-dimension encoded images via ffmpeg. */
-async function psnrDb(a: Buffer, b: Buffer): Promise<number> {
-  const dir = await mkdtemp(join(tmpdir(), "hf-de-verify-"));
-  try {
-    const pa = join(dir, "a.jpg");
-    const pb = join(dir, "b.jpg");
-    await Promise.all([writeFile(pa, a), writeFile(pb, b)]);
-    const { stderr } = await execFileP(
-      getFfmpegBinary(),
-      ["-hide_banner", "-i", pa, "-i", pb, "-lavfi", "psnr", "-f", "null", "-"],
-      { maxBuffer: 4 * 1024 * 1024 },
-    );
-    const m = /average:(inf|[\d.]+)/.exec(stderr);
-    if (!m) throw new Error(`psnr parse failed: ${stderr.slice(-300)}`);
-    return m[1] === "inf" ? Infinity : Number(m[1]);
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-}
+// psnrDb moved to @hyperframes/engine (utils/psnr.ts) so the parallel
+// disk-path verify (parallelCoordinator) and this drain guard share one
+// comparison implementation.
 
 // ── drawElement drain-time safety checks (ungated-release safety net) ──
 // Shared by the sequential worker-encode loop and the interleaved parallel
@@ -277,14 +258,14 @@ function createDrainFrameGuard(args: {
   // check stops meaning anything); above ~60dB natural DE-vs-screenshot
   // encoder differences (~45dB+) would force a screenshot fallback on every
   // verified render. Out-of-range or malformed values fall back to 32.
-  const verifyMinDbRaw = Number(process.env.HF_DE_VERIFY_MIN_DB ?? "32");
-  const verifyMinDb =
-    Number.isFinite(verifyMinDbRaw) && verifyMinDbRaw >= 10 && verifyMinDbRaw <= 60
-      ? verifyMinDbRaw
-      : 32;
-  if (process.env.HF_DE_VERIFY_MIN_DB !== undefined && verifyMinDb !== verifyMinDbRaw) {
-    log.warn("[Render] HF_DE_VERIFY_MIN_DB out of range [10,60]; using 32", {
-      raw: process.env.HF_DE_VERIFY_MIN_DB,
+  // Single-sourced clamp (psnr.ts) so the disk and streaming verify paths can
+  // never apply different PSNR floors to the same composition. The warn stays
+  // here because only this path has a logger in scope.
+  const verifyMinDb = resolveDeVerifyMinDb();
+  const rawEnv = process.env.HF_DE_VERIFY_MIN_DB;
+  if (rawEnv !== undefined && Number(rawEnv) !== verifyMinDb) {
+    log.warn(`[Render] HF_DE_VERIFY_MIN_DB out of range [10,60]; using ${verifyMinDb}`, {
+      raw: rawEnv,
     });
   }
   const sizes: number[] = [];

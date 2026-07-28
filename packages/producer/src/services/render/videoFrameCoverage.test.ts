@@ -1,3 +1,5 @@
+// fallow-ignore-file code-duplication
+
 import type { ExtractedFrames, VideoElement, VideoMetadata } from "@hyperframes/engine";
 import { describe, expect, it } from "vitest";
 import {
@@ -35,9 +37,9 @@ function makeVideo(overrides: Partial<VideoElement> & { id: string }): VideoElem
 function makeExtracted(
   videoId: string,
   delivered: number,
-  options: { fps?: number; durationSeconds?: number } = {},
+  options: { fps?: number; durationSeconds?: number; isVFR?: boolean } = {},
 ): ExtractedFrames {
-  const { fps = 30, durationSeconds = Number.POSITIVE_INFINITY } = options;
+  const { fps = 30, durationSeconds = Number.POSITIVE_INFINITY, isVFR = false } = options;
   const framePaths = new Map<number, string>();
   for (let i = 0; i < delivered; i += 1) framePaths.set(i, `/tmp/${videoId}/${i}.jpg`);
   const metadata: VideoMetadata = {
@@ -48,7 +50,7 @@ function makeExtracted(
     fps,
     videoCodec: "h264",
     hasAudio: false,
-    isVFR: false,
+    isVFR,
     hasAlpha: false,
     colorSpace: null,
   };
@@ -72,9 +74,23 @@ describe("expectedFramesForClip", () => {
     expect(expectedFramesForClip(2, 1, 30)).toBe(0); // negative window collapses to 0
   });
 
-  it("ceils fractional-fps windows so a 29.97fps 1s clip demands 30 frames", () => {
+  it("defaults to fail-closed ceil rounding", () => {
     expect(expectedFramesForClip(0, 1, 29.97)).toBe(30);
     expect(expectedFramesForClip(0, 5, 30)).toBe(150);
+    expect(expectedFramesForClip(0, 0.616666, 30)).toBe(19);
+    expect(expectedFramesForClip(0, 0.316666, 30)).toBe(10);
+  });
+
+  it("matches the CFR fps filter's nearest-boundary rounding when requested", () => {
+    expect(expectedFramesForClip(0, 0.616666, 30, "nearest")).toBe(18);
+    expect(expectedFramesForClip(0, 0.316666, 30, "nearest")).toBe(9);
+    expect(expectedFramesForClip(0, 0.633333, 30, "nearest")).toBe(19);
+  });
+
+  it("requires one frame for every positive sub-frame clip", () => {
+    expect(expectedFramesForClip(0, 0.001, 30)).toBe(1);
+    expect(expectedFramesForClip(0, 0.001, 30, "nearest")).toBe(1);
+    expect(expectedFramesForClip(1, 1, 30)).toBe(0);
   });
 });
 
@@ -123,6 +139,43 @@ describe("computeVideoFrameCoverage", () => {
     });
   });
 
+  it("reports full coverage for a short CFR clip matching FFmpeg boundary rounding", () => {
+    const videos = [makeVideo({ id: "short", start: 0, end: 0.616666 })];
+    const reports = computeVideoFrameCoverage(videos, [makeExtracted("short", 18)], 30);
+    expect(reports[0]).toMatchObject({
+      expectedFrames: 18,
+      capturedFrames: 18,
+      ratio: 1,
+    });
+    expect(() => assertVideoFrameCoverage(reports, 0.95)).not.toThrow();
+  });
+
+  it("keeps ceil coverage for the VFR extraction branch", () => {
+    const videos = [makeVideo({ id: "short-vfr", start: 0, end: 0.616666 })];
+    const reports = computeVideoFrameCoverage(
+      videos,
+      [makeExtracted("short-vfr", 18, { isVFR: true })],
+      30,
+    );
+    expect(reports[0]).toMatchObject({
+      expectedFrames: 19,
+      capturedFrames: 18,
+      ratio: 18 / 19,
+    });
+    expect(() => assertVideoFrameCoverage(reports, 0.95)).toThrow(VideoFrameCoverageError);
+  });
+
+  it("still fails closed when a positive sub-frame clip captured zero frames", () => {
+    const videos = [makeVideo({ id: "blank-sub-frame", start: 0, end: 0.001 })];
+    const reports = computeVideoFrameCoverage(videos, [makeExtracted("blank-sub-frame", 0)], 30);
+    expect(reports[0]).toMatchObject({
+      expectedFrames: 1,
+      capturedFrames: 0,
+      ratio: 0,
+    });
+    expect(() => assertVideoFrameCoverage(reports, 0.95)).toThrow(VideoFrameCoverageError);
+  });
+
   it("reports 0 capturedFrames when a video was never extracted (injection failure)", () => {
     // Field signal ts=1784139267: later-injected video clips silently drop
     // out of the extractor under injection-count saturation.
@@ -155,12 +208,25 @@ describe("computeVideoFrameCoverage", () => {
     expect(reports[0]).toMatchObject({ expectedFrames: 90, capturedFrames: 90, ratio: 1 });
   });
 
-  it("still requires the full authored slot for looping clips", () => {
+  it("credits a looping short clip against the source portion — the delivered frame set covers every repeat (#2665)", () => {
+    // Regression #2665: a looping video shorter than its slot delivered all
+    // its source frames (extractor complete), but the pre-fix gate measured
+    // 90 unique / 300 slot = 30% and aborted. Every one of the 300 output
+    // frames maps to one of the 90 source frames — coverage is 100%.
     const videos = [makeVideo({ id: "loop", start: 0, end: 10, loop: true })];
     const extracted = [makeExtracted("loop", 90, { durationSeconds: 3 })];
     const reports = computeVideoFrameCoverage(videos, extracted, 30);
-    expect(reports[0]).toMatchObject({ expectedFrames: 300, capturedFrames: 90 });
-    expect(reports[0]!.ratio).toBeCloseTo(0.3, 5);
+    expect(reports[0]).toMatchObject({ expectedFrames: 90, capturedFrames: 90, ratio: 1 });
+  });
+
+  it("still fails when a looping clip's source extraction is truncated", () => {
+    // Fail-loud preserved for a genuinely-broken loop: only 60/90 source
+    // frames arrived, so the delivered set does NOT cover every repeat.
+    const videos = [makeVideo({ id: "truncated-loop", start: 0, end: 10, loop: true })];
+    const extracted = [makeExtracted("truncated-loop", 60, { durationSeconds: 3 })];
+    const reports = computeVideoFrameCoverage(videos, extracted, 30);
+    expect(reports[0]).toMatchObject({ expectedFrames: 90, capturedFrames: 60 });
+    expect(() => assertVideoFrameCoverage(reports, 0.95)).toThrow(VideoFrameCoverageError);
   });
 
   it("still fails when extraction is truncated before the held-tail source", () => {

@@ -55,6 +55,7 @@ import type { ProducerLogger } from "../../../logger.js";
 import {
   BROWSER_MEDIA_EPSILON,
   projectBrowserEndToCompositionTimeline,
+  resolveBrowserMediaEnd,
   writeCompiledArtifacts,
   type CompositionMetadata,
 } from "../shared.js";
@@ -320,9 +321,10 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
     assertNotAborted();
     // After the retry loop, probeSession is guaranteed non-null (the loop
     // either breaks with a valid session or throws on the last attempt).
-    const session = probeSession!;
-    probeSession = session;
-    lastBrowserConsole = session.browserConsoleBuffer;
+    if (!probeSession) {
+      throw new Error("Browser probe completed without a capture session");
+    }
+    lastBrowserConsole = probeSession.browserConsoleBuffer;
 
     // BeginFrame liveness probe. On SwiftShader, heavy-layer compositions
     // (multi-group nested opacity caption animations — style-N prod comps)
@@ -382,6 +384,12 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
         lastBrowserConsole = probeSession.browserConsoleBuffer;
       }
     }
+
+    // Bind the session only after the BeginFrame fallback, which may close the
+    // original browser and replace it with a screenshot-mode session. Every
+    // downstream probe must use the live replacement rather than the closed
+    // session captured before the fallback.
+    const session = probeSession;
 
     // Discover root composition duration
     if (composition.duration <= 0) {
@@ -454,7 +462,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
               const projectedEnd = projectBrowserEndToCompositionTimeline(
                 existing.start,
                 el.start,
-                el.end,
+                resolveBrowserMediaEnd(el.start, el.end, el.duration),
               );
               if (
                 projectedEnd > 0 &&
@@ -482,7 +490,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
               id: el.id,
               src,
               start: el.start,
-              end: el.end,
+              end: resolveBrowserMediaEnd(el.start, el.end, el.duration),
               mediaStart: el.mediaStart,
               loop: el.loop,
               hasAudio: el.hasAudio && !el.muted,
@@ -500,7 +508,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
               const projectedEnd = projectBrowserEndToCompositionTimeline(
                 existing.start,
                 el.start,
-                el.end,
+                resolveBrowserMediaEnd(el.start, el.end, el.duration),
               );
               if (
                 projectedEnd > 0 &&
@@ -527,7 +535,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
               id: el.id,
               src,
               start: el.start,
-              end: el.end,
+              end: resolveBrowserMediaEnd(el.start, el.end, el.duration),
               mediaStart: el.mediaStart,
               layer: 0,
               volume: el.volume,

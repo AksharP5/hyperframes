@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /** One owner for continuous inspector edits: preview freely, persist once. */
 export function useInspectorGestureTransaction<T>({
@@ -57,4 +57,33 @@ export function useInspectorGestureTransaction<T>({
   useEffect(() => cancel, [cancel]);
 
   return { begin, preview, settle, cancel, activeRef };
+}
+
+export function useInspectorGestureDraft<T>({
+  sourceValue,
+  onPreview,
+  onCommit,
+}: {
+  sourceValue: T;
+  onPreview: (value: T) => void;
+  onCommit: (value: T) => void;
+}) {
+  const [draft, setDraft] = useState(sourceValue);
+  const transaction = useInspectorGestureTransaction({
+    sourceValue,
+    onPreview: (next) => {
+      setDraft(next);
+      onPreview(next);
+    },
+    onCommit: (next) => {
+      setDraft(next);
+      onCommit(next);
+    },
+  });
+
+  useEffect(() => {
+    if (!transaction.activeRef.current) setDraft(sourceValue);
+  }, [sourceValue, transaction.activeRef]);
+
+  return { draft, setDraft, transaction };
 }

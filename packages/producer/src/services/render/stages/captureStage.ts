@@ -44,6 +44,7 @@ import {
   type EngineConfig,
   captureFrame,
   captureFrameToBufferPipelined,
+  verifyDiskDrawElementSamples,
   writeCapturedFrame,
   closeCaptureSession,
   completeDeferredDrawElementInit,
@@ -256,12 +257,16 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
         captureCfg,
       ));
     captureBeyondViewport = session.options.captureBeyondViewport;
-    if (probeSession) {
-      prepareCaptureSessionForReuse(session, framesDir, videoInjector);
-      probeSession = null;
-    }
 
     try {
+      // Reuse preparation can fail while creating/resetting the output
+      // directory (for example EACCES, EROFS, or ENOSPC). Keep it inside the
+      // session-owning try/finally so the borrowed probe browser is closed
+      // even when preparation fails before capture starts.
+      if (probeSession) {
+        prepareCaptureSessionForReuse(session, framesDir, videoInjector);
+        probeSession = null;
+      }
       if (!session.isInitialized) {
         await initializeSession(session);
       } else if (process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true") {
@@ -331,6 +336,24 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
           reportFrame(i);
         }
       }
+      // Sequential disk drawElement self-verification (PRINFRA-352 follow-up):
+      // the sequential disk path — reachable under the explicit fast-capture
+      // opt-in, including via probe-session reuse — armed ground-truth samples
+      // but never checked them, exactly like the parallel disk workers before
+      // #2749. Same synthetic-task shape the parallel verify uses; a breach
+      // throws DrawElementVerificationError and the orchestrator's disk-stage
+      // retry re-renders via screenshot.
+      await verifyDiskDrawElementSamples(
+        session,
+        {
+          workerId: 0,
+          startFrame: rangeStart,
+          endFrame: rangeEnd,
+          outputDir: framesDir,
+          outputFrameOffset: rangeStart,
+        },
+        false,
+      );
       // Capture the sequential session's static-dedup perf before close (the
       // counters are valid only while the session is live).
       dedupPerfs.push(getCapturePerfSummary(session));

@@ -140,6 +140,28 @@ describe("CapturePlan", () => {
     });
   });
 
+  it("forces screenshot on a disk-plan drawElement verify failure (PRINFRA-352 recovery)", () => {
+    // Parallel disk workers under the explicit fast-capture opt-in verify their
+    // own captured samples; a breach must re-render the DISK plan on the
+    // screenshot baseline (not throw, and not stay on drawElement).
+    const disk = createCapturePlan({
+      workerCount: 2,
+      forceScreenshot: false,
+      useStreamingEncode: false,
+      useLayeredComposite: false,
+      usePageSideCompositing: false,
+      hasHdrContent: false,
+      needsAlpha: false,
+    });
+    const next = replanAfterFailure(disk, { kind: "draw_element_verification" });
+    expect(next).toMatchObject({
+      kind: "sdr_disk",
+      forceScreenshot: true,
+      forceParallelStream: false,
+      workerCount: 2,
+    });
+  });
+
   it("rejects a streaming transition from a non-streaming plan", () => {
     const disk = createCapturePlan({
       workerCount: 2,

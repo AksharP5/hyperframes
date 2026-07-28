@@ -90,4 +90,20 @@ describe("resolveSelectorElementIds", () => {
     expect(resolveSelectorElementIds("#card .label", null)).toEqual(["card"]);
     expect(resolveSelectorElementIds(".dot", null)).toEqual([]);
   });
+
+  // The `[id="…"]` form is what writers emit for a CSS-unsafe id (digit-leading,
+  // dotted). The old local `#id`-only regex read no id at all for those, so they
+  // silently dropped out of both DOM-less paths.
+  it("falls back to a bracketed id when there is no DOM", () => {
+    expect(resolveSelectorElementIds('[id="01-hook"] .label', null)).toEqual(["01-hook"]);
+  });
+
+  it("falls back to a bracketed id when querySelectorAll rejects the selector", () => {
+    const doc = {
+      querySelectorAll: () => {
+        throw new SyntaxError("bad selector");
+      },
+    } as unknown as Document;
+    expect(resolveSelectorElementIds('[id="01-hook"]:has(>*)', doc)).toEqual(["01-hook"]);
+  });
 });

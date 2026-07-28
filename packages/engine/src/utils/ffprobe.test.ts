@@ -183,6 +183,7 @@ describe("ffprobe missing-binary fallback", () => {
 
   it("spawns the configured absolute FFprobe path when HYPERFRAMES_FFPROBE_PATH is set", async () => {
     process.env.HYPERFRAMES_FFPROBE_PATH = "/tools/ffprobe.exe";
+    const successfulStderr = "recoverable diagnostic on a successful probe";
     const { spawn, calls } = createSpawnSpy([
       {
         kind: "exit",
@@ -191,6 +192,7 @@ describe("ffprobe missing-binary fallback", () => {
           streams: [{ codec_type: "audio", codec_name: "aac", sample_rate: "48000", channels: 2 }],
           format: { duration: "1.25", bit_rate: "128000" },
         }),
+        stderr: successfulStderr,
       },
     ]);
     vi.resetModules();
@@ -200,7 +202,9 @@ describe("ffprobe missing-binary fallback", () => {
     const meta = await extractAudioMetadata("/tmp/uses-configured-ffprobe.wav");
 
     expect(meta.durationSeconds).toBe(1.25);
+    expect(JSON.stringify(meta)).not.toContain(successfulStderr);
     expect(calls[0]?.command).toBe(resolve("/tools/ffprobe.exe"));
+    expect(calls[0]?.args.slice(0, 2)).toEqual(["-v", "error"]);
   });
 
   it.each([
@@ -312,6 +316,41 @@ describe("ffprobe missing-binary fallback", () => {
     expect(meta.hasAlpha).toBe(true);
   });
 
+  it("normalizes omitted video color components to empty strings", async () => {
+    const { spawn } = createSpawnSpy([
+      {
+        kind: "exit",
+        code: 0,
+        stdout: JSON.stringify({
+          streams: [
+            {
+              codec_type: "video",
+              codec_name: "h264",
+              width: 64,
+              height: 64,
+              r_frame_rate: "30/1",
+              avg_frame_rate: "30/1",
+              pix_fmt: "yuv420p",
+              color_space: "bt709",
+            },
+          ],
+          format: { duration: "1" },
+        }),
+      },
+    ]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+
+    const { extractMediaMetadata: extractMediaMetadataMocked } = await import("./ffprobe.js");
+    const metadata = await extractMediaMetadataMocked("/tmp/partial-color.mp4");
+
+    expect(metadata.colorSpace).toEqual({
+      colorPrimaries: "",
+      colorTransfer: "",
+      colorSpace: "bt709",
+    });
+  });
+
   // Regression: newer libavformat builds (and the output of `hyperframes
   // remove-background` itself) write the VP9-alpha sidecar tag as
   // `ALPHA_MODE` (uppercase). The lowercase-only check classified those
@@ -361,6 +400,65 @@ describe("ffprobe missing-binary fallback", () => {
     const { extractMediaMetadata: extractMediaMetadataMocked } = await import("./ffprobe.js");
 
     await expect(extractMediaMetadataMocked("/tmp/no-such-video.mp4")).rejects.toThrow(/ffprobe/);
+  });
+
+  it("surfaces bounded ffprobe stderr for invalid media", async () => {
+    const leadingNoise = "x".repeat(10_000);
+    const diagnostic = "Invalid data found when processing input";
+    const inputPath = "/tmp/render/My Secret Video.mp4";
+    const { spawn, calls } = createSpawnSpy([
+      {
+        kind: "exit",
+        code: 1,
+        stderr: `${leadingNoise}${inputPath}: ${diagnostic}`,
+      },
+    ]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+
+    const { extractAudioMetadata } = await import("./ffprobe.js");
+
+    let thrown: unknown;
+    try {
+      await extractAudioMetadata(inputPath);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(String(thrown)).toContain(diagnostic);
+    expect(String(thrown)).toContain("[input]");
+    expect(String(thrown)).not.toContain(inputPath);
+    expect(String(thrown)).not.toContain("My Secret Video.mp4");
+    expect(String(thrown).length).toBeLessThan(4_500);
+    expect(calls[0]?.args.slice(0, 2)).toEqual(["-v", "error"]);
+    expect(calls[0]?.args.at(-1)).toBe(inputPath);
+  });
+
+  it("redacts an input path fragment when the stderr tail starts inside its basename", async () => {
+    const diagnostic = "Invalid data found when processing input";
+    const inputPath = "/tmp/render/Confidential Client Preview.mp4";
+    const retainedPathFragment = "Client Preview.mp4";
+    const diagnosticPrefix = `: ${diagnostic} `;
+    const remainingBytes =
+      8 * 1024 - Buffer.byteLength(retainedPathFragment) - Buffer.byteLength(diagnosticPrefix);
+    const multibyteCount = Math.floor(remainingBytes / Buffer.byteLength("€"));
+    const trailingAscii = "x".repeat(remainingBytes - multibyteCount * Buffer.byteLength("€"));
+    const stderr = `${inputPath}${diagnosticPrefix}${"€".repeat(multibyteCount)}${trailingAscii}`;
+    const { spawn } = createSpawnSpy([{ kind: "exit", code: 1, stderr }]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+
+    const { extractAudioMetadata } = await import("./ffprobe.js");
+
+    let thrown: unknown;
+    try {
+      await extractAudioMetadata(inputPath);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(String(thrown)).toContain(diagnostic);
+    expect(String(thrown)).toContain("[input]");
+    expect(String(thrown)).not.toContain(retainedPathFragment);
+    expect(String(thrown)).not.toContain("Client Preview.mp4");
   });
 
   it("extractAudioMetadata surfaces a ffprobe-missing error verbatim", async () => {

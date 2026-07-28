@@ -1,5 +1,6 @@
 {
   "Action": "assemble",
+  "PlanProtocol": "v1",
   "PlanGcsUri": "gs://hyperframes-render-PROJECT/renders/hf-render-demo/plan.tar.gz",
   "ChunkGcsUris": [
     "gs://hyperframes-render-PROJECT/renders/hf-render-demo/chunks/0000.mp4",

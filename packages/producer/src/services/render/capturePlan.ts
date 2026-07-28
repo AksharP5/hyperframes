@@ -124,6 +124,18 @@ function revertedRouting(routing: CaptureRouting): CaptureRouting {
 
 /** Pure, exhaustive capture fallback transition. The input plan is never mutated. */
 export function replanAfterFailure(plan: CapturePlan, failure: CapturePlanFailure): CapturePlan {
+  // Disk-path drawElement self-verification (parallel disk workers under the
+  // explicit fast-capture opt-in) can also trip — the retry stays on the disk
+  // path but forces the screenshot baseline.
+  if (plan.kind === "sdr_disk" && failure.kind === "draw_element_verification") {
+    return createCapturePlan({
+      ...plan,
+      forceScreenshot: true,
+      useStreamingEncode: false,
+      useLayeredComposite: false,
+      forceParallelStream: false,
+    });
+  }
   if (plan.kind !== "sdr_streaming") {
     throw new Error(`Cannot apply ${failure.kind} to ${plan.kind} capture plan`);
   }

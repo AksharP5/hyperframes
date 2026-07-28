@@ -257,6 +257,12 @@ export function FlatTextSection({
   const [activeFieldKey, setActiveFieldKey] = useState<string | null>(
     element.textFields[0]?.key ?? null,
   );
+  // Armed by the add handler so the newly added field mounts focused. State, not
+  // a ref cleared during render: Strict Mode renders twice, so the first pass
+  // would eat the marker and the second would mount the field unfocused. Nothing
+  // clears it on read either — `autoFocus` is a mount-only DOM prop and the
+  // editor is keyed on the field, so it can only fire once per added field.
+  const [autoFocusFieldKey, setAutoFocusFieldKey] = useState<string | null>(null);
 
   useEffect(() => {
     const nextFields = element.textFields;
@@ -271,6 +277,8 @@ export function FlatTextSection({
   const activeField = textFields.find((field) => field.key === activeFieldKey) ?? textFields[0];
   if (!activeField) return null;
 
+  const autoFocusActiveField = autoFocusFieldKey === activeField.key;
+
   if (textFields.length > 1) {
     return (
       <div className="space-y-2.5">
@@ -278,10 +286,15 @@ export function FlatTextSection({
           fields={textFields}
           activeFieldKey={activeField.key}
           styles={styles}
-          onSelect={setActiveFieldKey}
+          onSelect={(fieldKey) => {
+            setAutoFocusFieldKey(null);
+            setActiveFieldKey(fieldKey);
+          }}
           onAdd={() =>
             void Promise.resolve(onAddTextField(activeField.key)).then((nextKey) => {
-              if (nextKey) setActiveFieldKey(nextKey);
+              if (!nextKey) return;
+              setAutoFocusFieldKey(nextKey);
+              setActiveFieldKey(nextKey);
             })
           }
           onRemove={onRemoveTextField}
@@ -295,7 +308,7 @@ export function FlatTextSection({
           onSetText={onSetText}
           onSetTextFieldStyle={onSetTextFieldStyle}
           onPreviewTextFieldStyle={onPreviewTextFieldStyle}
-          autoFocus
+          autoFocus={autoFocusActiveField}
         />
       </div>
     );
@@ -316,7 +329,11 @@ export function FlatTextSection({
         type="button"
         onClick={() => {
           track("button", "Add text field");
-          void onAddTextField(activeField.key);
+          void Promise.resolve(onAddTextField(activeField.key)).then((nextKey) => {
+            if (!nextKey) return;
+            setAutoFocusFieldKey(nextKey);
+            setActiveFieldKey(nextKey);
+          });
         }}
         className="mt-0.5 flex items-center gap-[5px] text-[10px] text-panel-text-4 hover:text-panel-text-2"
       >
