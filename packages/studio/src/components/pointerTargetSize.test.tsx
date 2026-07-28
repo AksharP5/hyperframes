@@ -33,7 +33,7 @@ function mount(element: React.ReactNode) {
   return host;
 }
 
-describe("pointer target size (WCAG 2.5.8)", () => {
+describe("pointer target sizing classes (proxy for WCAG 2.5.8, not a geometry check)", () => {
   it("gives the timeline zoom slider a 24px box without changing its 2px track or 10px thumb", () => {
     const host = mount(<TimelineToolbar />);
     const slider = host.querySelector<HTMLInputElement>('input[aria-label="Timeline zoom"]');

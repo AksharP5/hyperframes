@@ -641,7 +641,7 @@ describe("TimelineClipDiamonds", () => {
     act(() => root.unmount());
   });
 
-  const renderSegmentLane = (lastAmbiguous: boolean) => {
+  const renderSegmentLane = (lastAmbiguous: boolean, clipWidthPx = 200) => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -660,7 +660,7 @@ describe("TimelineClipDiamonds", () => {
             format: "percentage",
             keyframes: [kf(0), kf(50), kf(100, { easeAmbiguous: lastAmbiguous })],
           }}
-          clipWidthPx={200}
+          clipWidthPx={clipWidthPx}
           clipHeightPx={48}
           accentColor="#4ba3d2"
           isSelected
@@ -698,6 +698,21 @@ describe("TimelineClipDiamonds", () => {
     expect(segment?.style.pointerEvents).toBe("none");
     expect(ease?.style.pointerEvents).toBe("auto");
     expect(Number(segment?.style.zIndex)).toBeGreaterThan(Number(diamond?.style.zIndex));
+    // Room to spare here, so the button carries the 24x24 WCAG 2.5.8 overlay.
+    expect(ease?.className).toContain("before:h-6");
+    act(() => root.unmount());
+  });
+
+  it("drops the 24x24 ease overlay when the segment is too narrow to hold it", () => {
+    // The segment wrapper outranks the diamonds, so an overlay wider than the
+    // clear span between them would steal their clicks at fit zoom. 40px of clip
+    // across three keyframes leaves well under 24px of clear span per segment.
+    const { host, root } = renderSegmentLane(false, 40);
+    const ease = host.querySelector<HTMLButtonElement>("[data-keyframe-ease-button]");
+
+    expect(ease).not.toBeNull();
+    expect(ease?.className).not.toContain("before:h-6");
+    expect(ease?.style.width).toBe("16px");
     act(() => root.unmount());
   });
 
