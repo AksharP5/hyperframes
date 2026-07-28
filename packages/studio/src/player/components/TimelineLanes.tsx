@@ -1,112 +1,27 @@
-import { type ReactNode } from "react";
-import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
+import { useId } from "react";
 import { BeatStrip, BeatBackgroundLines } from "./BeatStrip";
 import { TimelineClip } from "./TimelineClip";
 import { TimelineClipDiamonds } from "./TimelineClipDiamonds";
 import { TimelinePropertyLanes } from "./TimelinePropertyLanes";
 import { TimelineTrackHeader } from "./TimelineTrackHeader";
 import { resolveTrackKeyframeClip } from "./useTimelineTrackLayout";
+import { trackDisplayNumber, trackDisplaySuffix } from "./timelineTrackDisplay";
 import { clipTimingStart } from "../../hooks/gsapShared";
-import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
-import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
 import { getTimelineEditCapabilities, resolveBlockedTimelineEditIntent } from "./timelineEditing";
-import type { TimelineTheme } from "./timelineTheme";
 import { CLIP_Y, CLIP_HANDLE_W, TRACK_H, getTimelineRowHeight } from "./timelineLayout";
-import {
-  usePlayerStore,
-  type TimelineElement,
-  type KeyframeCacheEntry,
-} from "../store/playerStore";
-import type { DraggedClipState, ResizingClipState, BlockedClipState } from "./useTimelineClipDrag";
+import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import {
   isMultiDragPassenger,
   multiDragPassengerOffsetPx,
   type MultiDragPreviewInput,
 } from "./timelineMultiDragPreview";
-import type { TrackVisualStyle } from "./timelineIcons";
+import type { TimelineLaneBaseProps } from "./timelineLaneProps";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
 import { STUDIO_KEYFRAMES_ENABLED } from "../../components/editor/manualEditingAvailability";
 import { trackStudioKeyframeLaneExpand } from "../../telemetry/events";
 import { SPLIT_BOUNDARY_EPSILON_S } from "../../utils/timelineElementSplit";
 import { isAudioTimelineElement, isMusicTrack } from "../../utils/timelineInspector";
 import { renderClipChildren } from "./timelineClipChildren";
-
-/**
- * Props shared by the scroll container ({@link TimelineCanvas}) and the lane
- * renderer below. TimelineCanvas passes these straight through via spread, so
- * they are declared once here and both prop types compose from this base — no
- * duplicated prop list.
- */
-export interface TimelineLaneBaseProps {
-  pps: number;
-  contentOrigin: number;
-  contentGutter: number;
-  trackContentWidth: number;
-  theme: TimelineTheme;
-  displayTrackOrder: number[];
-  rowHeights: readonly number[];
-  trackOrder: number[];
-  tracks: [number, TimelineElement[]][];
-  trackStyles: Map<number, TrackVisualStyle>;
-  laneCounts: ReadonlyMap<string, number>;
-  selectedElementId: string | null;
-  selectedElementIds: Set<string>;
-  hoveredClip: string | null;
-  draggedClip: DraggedClipState | null;
-  blockedClipRef: React.RefObject<BlockedClipState | null>;
-  suppressClickRef: React.RefObject<boolean>;
-  scrollRef: React.RefObject<HTMLDivElement | null>;
-  renderClipContent?: (
-    element: TimelineElement,
-    style: { clip: string; label: string },
-  ) => ReactNode;
-  renderClipOverlay?: (element: TimelineElement) => ReactNode;
-  onDrillDown?: (element: TimelineElement) => void;
-  onSelectElement?: (element: TimelineElement | null) => void;
-  setHoveredClip: (key: string | null) => void;
-  setShowPopover: (v: boolean) => void;
-  setRangeSelection: (v: null) => void;
-  setResizingClip: (v: ResizingClipState | null) => void;
-  setDraggedClip: (v: DraggedClipState | null) => void;
-  setSelectedElementId: (id: string | null) => void;
-  syncClipDragAutoScroll: (x: number, y: number) => void;
-  shiftClickClipRef: React.RefObject<{
-    element: TimelineElement;
-    anchorX: number;
-    anchorY: number;
-  } | null>;
-  getPreviewElement: (element: TimelineElement) => TimelineElement;
-  getTrackStyle: (tag: string) => TrackVisualStyle;
-  keyframeCache?: Map<string, KeyframeCacheEntry>;
-  gsapAnimations: Map<string, GsapAnimation[]>;
-  selectedKeyframes: Set<string>;
-  currentTime: number;
-  onSeek?: (time: number) => void;
-  onSelectSegment?: (elementId: string, target: TimelineKeyframeTarget) => void;
-  onClickKeyframe?: (element: TimelineElement, target: TimelineKeyframeTarget) => void;
-  onShiftClickKeyframe?: (elementId: string, target: TimelineKeyframeTarget) => void;
-  onContextMenuKeyframe?: (
-    e: React.MouseEvent,
-    elementId: string,
-    target: TimelineKeyframeTarget,
-  ) => void;
-  onMoveKeyframe?: (
-    elementId: string,
-    keyframe: TimelineKeyframeTarget,
-    toClipPercentage: number,
-    propertyGroup?: string,
-    tweenPercentage?: number,
-    animationId?: string,
-  ) => Promise<boolean>;
-  onContextMenuClip?: (e: React.MouseEvent, element: TimelineElement) => void;
-  /**
-   * Right-click on EMPTY lane space (not on a clip — those preventDefault
-   * before this fires — not the gutter/ruler, not below the lanes). `time` is
-   * the timeline time (seconds) under the pointer on that lane.
-   */
-  onContextMenuLane?: (e: React.MouseEvent, track: number, time: number) => void;
-  beatAnalysis?: MusicBeatAnalysis | null;
-}
 
 interface TimelineLanesProps extends TimelineLaneBaseProps {
   /** Live-derived by TimelineCanvas from {@link TimelineLaneBaseProps.draggedClip}. */
@@ -175,6 +90,12 @@ export function TimelineLanes({
   onRazorSplit,
   onRazorSplitAll,
 }: TimelineLanesProps) {
+  // Per-INSTANCE, so two timelines on one page (a mini-timeline in a modal
+  // beside the main one) cannot both mint `...-track-0` and have every caret's
+  // aria-controls resolve to whichever mounted first. React's useId embeds
+  // colons, which are legal in an id and in aria-controls but need escaping in
+  // a CSS `#id` selector, so they come out here and the prefix stays plain.
+  const lanesIdPrefix = `timeline-lanes${useId().replaceAll(":", "")}`;
   const expandedClipIds = usePlayerStore((s) => s.expandedClipIds);
   const toggleClipExpanded = usePlayerStore((s) => s.toggleClipExpanded);
   const toggleClipExpandedTracked = (key: string) => {
@@ -192,6 +113,7 @@ export function TimelineLanes({
         // in a virtualizer if editorial workflows ever push very high clip counts.
         // fallow-ignore-next-line complexity
         displayTrackOrder.map((trackNum, row) => {
+          const displayNumber = trackDisplayNumber(displayTrackOrder, trackNum);
           const rowHeight = getTimelineRowHeight(row, rowHeights);
           const els = tracks.find(([t]) => t === trackNum)?.[1] ?? [];
           const ts = trackStyles.get(trackNum) ?? getTrackStyle("");
@@ -218,6 +140,11 @@ export function TimelineLanes({
           const keyframeClipKey = keyframeClip?.key ?? keyframeClip?.id;
           const keyframeClipExpanded =
             keyframeClipKey != null && expandedClipIds.has(keyframeClipKey);
+          // Minted here because this is the only place that sees BOTH ends of
+          // the disclosure: the caret in the sticky header and the diamond lanes
+          // on the canvas. Keyed by display row, not by `trackNum`, which is a
+          // fractional sort key and would mint ids like `...-0.16666666666666666`.
+          const lanesId = `${lanesIdPrefix}-track-${row}`;
           return (
             <div
               key={trackNum}
@@ -230,7 +157,16 @@ export function TimelineLanes({
             >
               <TimelineTrackHeader
                 trackNumber={trackNum}
-                trackLabel={els[0]?.label ?? els[0]?.domId ?? els[0]?.id ?? `Track ${trackNum}`}
+                // What gets announced. `trackNum` is a fractional z-order sort
+                // key, so it stays out of every label and in every callback.
+                trackDisplayNumber={displayNumber}
+                trackLabel={
+                  els[0]?.label ??
+                  els[0]?.domId ??
+                  els[0]?.id ??
+                  `Track${trackDisplaySuffix(displayNumber)}`
+                }
+                lanesId={lanesId}
                 contentOrigin={contentOrigin}
                 keyframeClip={keyframeClip}
                 clipCount={els.length}
@@ -313,10 +249,9 @@ export function TimelineLanes({
                     // Only the track's active keyframe clip shows expanded lanes;
                     // other clips (incl. siblings on a shared track) show compact
                     // diamonds on their own bar instead.
-                    const showsLanes =
-                      STUDIO_KEYFRAMES_ENABLED &&
-                      elementKey === keyframeClipKey &&
-                      keyframeClipExpanded;
+                    const isTrackKeyframeClip =
+                      STUDIO_KEYFRAMES_ENABLED && elementKey === keyframeClipKey;
+                    const showsLanes = isTrackKeyframeClip && keyframeClipExpanded;
                     const capabilities = getTimelineEditCapabilities(el);
                     const isSelected =
                       selectedElementId === elementKey || selectedElementIds.has(elementKey);
@@ -524,10 +459,17 @@ export function TimelineLanes({
                           )}
                       </TimelineClip>
                     );
-                    const propertyLanes = showsLanes && (
+                    // Mounted for the track's keyframe clip in BOTH disclosure
+                    // states, so the header caret's aria-controls resolves while
+                    // collapsed too; collapsed just feeds it no animations, so
+                    // the wrapper renders empty. The key is stable across a
+                    // multi-drag: without it the passenger branch below remounts
+                    // this subtree and interrupts the gesture.
+                    const propertyLanes = isTrackKeyframeClip && (
                       <TimelinePropertyLanes
                         key={`${clipKey}-property-lanes`}
-                        animations={gsapAnimations.get(elementKey) ?? []}
+                        id={lanesId}
+                        animations={showsLanes ? (gsapAnimations.get(elementKey) ?? []) : []}
                         // clipTimingStart, not the raw start: an expanded sub-comp
                         // child's start is host-absolute while its tweens are
                         // local to its own file.

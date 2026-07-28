@@ -1,6 +1,11 @@
 import { useCallback } from "react";
 import { usePlayerStore, type TimelineElement } from "../player";
 import { useExpandedTimelineElements } from "../player/hooks/useExpandedTimelineElements";
+import {
+  timelineTrackOrder,
+  trackDisplayNumber,
+  trackDisplaySuffix,
+} from "../player/components/timelineTrackDisplay";
 import { saveProjectFilesWithHistory } from "../utils/studioFileHistory";
 import { readTagSnippetByTarget, type PatchOperation } from "../utils/sourcePatcher";
 import {
@@ -208,12 +213,17 @@ export async function toggleTimelineTrackHidden({
   domEditSaveTimestampRef,
   pendingTimelineEditPathRef,
 }: ToggleTimelineTrackHiddenInput): Promise<string[]> {
+  // `track` is the fractional sort key the callback needs; the history entry is
+  // read by a human, so it gets the display row instead.
+  const suffix = trackDisplaySuffix(
+    trackDisplayNumber(timelineTrackOrder(timelineElements), track),
+  );
   return setElementsHidden({
     projectId,
     activeCompPath,
     elements: timelineElements.filter((element) => element.track === track),
     hidden,
-    label: hidden ? `Hide track ${track}` : `Show track ${track}`,
+    label: hidden ? `Hide track${suffix}` : `Show track${suffix}`,
     previewIframe,
     writeProjectFile,
     recordEdit,

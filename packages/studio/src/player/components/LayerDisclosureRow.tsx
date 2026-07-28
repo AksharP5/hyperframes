@@ -22,7 +22,10 @@ export function LayerDisclosureRow({
   /** Same adaptive width the lane rows use: a narrowed header column must not
    *  leave this row hanging over the clips it labels. */
   columnWidth: number;
-  /** Id of the element holding the lanes this row's caret expands. */
+  /** Id of the CANVAS-side element holding the diamond lanes this row's caret
+   *  expands (see TimelinePropertyLanes). The caret also reveals the per-lane
+   *  control rows in this column, but the diamonds are what following the
+   *  reference should land on. */
   lanesId: string;
   onToggleClipExpanded: () => void;
   /** Trailing controls that act on the LAYER (the visibility eye), not on a lane. */

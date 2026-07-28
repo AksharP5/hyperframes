@@ -11,6 +11,12 @@ import { LANE_H, getTimelineLaneTop } from "./timelineLayout";
 import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
 
 export interface TimelinePropertyLanesProps {
+  /**
+   * Id of the wrapper below, so the layer's disclosure caret can point
+   * `aria-controls` at the lanes a sighted user sees it reveal. Minted by
+   * TimelineLanes, which owns both this subtree and the caret's.
+   */
+  id?: string;
   animations: readonly GsapAnimation[];
   clipStart: number;
   clipDuration: number;
@@ -170,6 +176,7 @@ export function getTimelinePropertyLanes(
 }
 
 export function TimelinePropertyLanes({
+  id,
   animations,
   clipStart,
   clipDuration,
@@ -206,9 +213,13 @@ export function TimelinePropertyLanes({
     [lanes],
   );
 
-  if (laneData.length === 0) return null;
+  // One STATIC wrapper, never `relative`: a static box establishes no containing
+  // block, so every absolutely-positioned lane below still resolves against the
+  // track-content div and the rendered geometry is byte-identical to the bare
+  // fragment this replaced. It is also rendered when there are no lanes at all
+  // (collapsed layer), so `id` stays resolvable in both disclosure states.
   return (
-    <>
+    <div id={id}>
       {laneData.map(({ group, keyframesData }, laneIndex) => (
         <div
           key={group}
@@ -244,6 +255,6 @@ export function TimelinePropertyLanes({
           />
         </div>
       ))}
-    </>
+    </div>
   );
 }

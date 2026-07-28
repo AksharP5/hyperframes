@@ -293,7 +293,9 @@ describe("Timeline provider boundary", () => {
     // mounted before we query it.
     act(() => {});
 
-    const button = host.querySelector<HTMLButtonElement>('button[aria-label="Show track 0"]');
+    // "1", not "0": the label carries the 1-based display row, while the
+    // callback below still routes by the track's own key.
+    const button = host.querySelector<HTMLButtonElement>('button[aria-label="Show track 1"]');
     expect(button).not.toBeNull();
     if (!button) throw new Error("Expected a track visibility toggle");
 

@@ -67,6 +67,7 @@ interface RenderHeaderOptions {
   expanded?: boolean;
   onSeek?: (time: number) => void;
   onTogglePropertyGroupKeyframe?: TimelineEditCallbacks["onTogglePropertyGroupKeyframe"];
+  onToggleTrackHidden?: TimelineEditCallbacks["onToggleTrackHidden"];
 }
 
 function renderHeader(options: RenderHeaderOptions = {}): {
@@ -81,8 +82,12 @@ function renderHeader(options: RenderHeaderOptions = {}): {
     act(() => {
       root.render(
         <TimelineTrackHeader
-          trackNumber={0}
+          // A real fractional z-order sort key, so a label built from it would
+          // read out "track 0.16666666666666666".
+          trackNumber={1 / 6}
+          trackDisplayNumber={1}
           trackLabel="Hero card"
+          lanesId="timeline-lanes-track-0"
           contentOrigin={LABEL_COL_W}
           keyframeClip={next.keyframeClip ?? ELEMENT}
           clipCount={next.clipCount ?? 1}
@@ -93,7 +98,7 @@ function renderHeader(options: RenderHeaderOptions = {}): {
           isAudioTrack={false}
           theme={defaultTimelineTheme}
           onToggleClipExpanded={vi.fn()}
-          onToggleTrackHidden={vi.fn()}
+          onToggleTrackHidden={next.onToggleTrackHidden ?? vi.fn()}
           onTogglePropertyGroupKeyframe={next.onTogglePropertyGroupKeyframe}
           onSeek={next.onSeek}
         />,
@@ -173,10 +178,27 @@ describe("TimelineTrackHeader", () => {
   // in every disclosure state — a hover-gated eye is unusable by keyboard.
   it("keeps the visibility eye mounted whether the layer is expanded or collapsed", () => {
     const view = renderHeader({ expanded: true });
-    expect(view.host.querySelector('button[aria-label="Hide track 0"]')).not.toBeNull();
+    expect(view.host.querySelector('button[aria-label="Hide track 1"]')).not.toBeNull();
 
     view.rerender({ expanded: false });
-    expect(view.host.querySelector('button[aria-label="Hide track 0"]')).not.toBeNull();
+    expect(view.host.querySelector('button[aria-label="Hide track 1"]')).not.toBeNull();
+    act(() => view.root.unmount());
+  });
+
+  // trackNumber is a fractional z-order sort key, so building the label from it
+  // made screen readers announce "Hide track 0.16666666666666666". The display
+  // number is label-only; the toggle still routes by the real key.
+  it("announces the display track number but toggles with the real fractional key", () => {
+    const onToggleTrackHidden = vi.fn();
+    const view = renderHeader({ onToggleTrackHidden });
+    const eye = view.host.querySelector<HTMLButtonElement>('button[aria-label="Hide track 1"]');
+
+    expect(eye).not.toBeNull();
+    expect(eye?.title).toBe("Hide track 1");
+    expect(view.host.innerHTML).not.toContain("0.16666666666666666");
+
+    act(() => eye?.click());
+    expect(onToggleTrackHidden).toHaveBeenCalledWith(1 / 6, true);
     act(() => view.root.unmount());
   });
 

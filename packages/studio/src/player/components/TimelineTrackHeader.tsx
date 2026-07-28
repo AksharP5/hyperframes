@@ -15,10 +15,21 @@ import {
   type TimelinePropertyLane,
 } from "./trackHeaderLaneState";
 import { valueReadout } from "./trackHeaderLaneValues";
+import { trackDisplaySuffix } from "./timelineTrackDisplay";
 
 interface TimelineTrackHeaderProps {
+  /** The track's real key: a FRACTIONAL z-order sort value. Routes callbacks;
+   *  never shown or announced. */
   trackNumber: number;
+  /** The track's 1-based position in the rendered order: the only number safe
+   *  to put in a label. Announcing `trackNumber` read out "track
+   *  0.16666666666666666". Null when the key has no row, which drops the number
+   *  from the label rather than inventing one (see trackDisplayNumber). */
+  trackDisplayNumber: number | null;
   trackLabel: string;
+  /** Id of the canvas-side lanes element the disclosure caret expands. Minted by
+   *  TimelineLanes, which is the one place that sees both subtrees. */
+  lanesId: string;
   contentOrigin: number;
   /** The track's active keyframe clip (selected, else primary) — the one whose
    *  disclosure + property rows this header shows, whether expanded or not. */
@@ -40,16 +51,21 @@ interface TimelineTrackHeaderProps {
 function VisibilityButton({
   hidden,
   trackNumber,
+  trackDisplayNumber,
   visible,
   onToggle,
 }: {
   hidden: boolean;
   trackNumber: number;
+  trackDisplayNumber: number | null;
   visible: boolean;
   onToggle: TimelineEditCallbacks["onToggleTrackHidden"];
 }) {
   if (!visible) return <span aria-hidden="true" className="h-6 w-6 shrink-0" />;
-  const label = hidden ? `Show track ${trackNumber}` : `Hide track ${trackNumber}`;
+  // Display number in the text, real key in the callback. The two must not be
+  // conflated in either direction.
+  const suffix = trackDisplaySuffix(trackDisplayNumber);
+  const label = hidden ? `Show track${suffix}` : `Hide track${suffix}`;
   return (
     <button
       type="button"
@@ -77,6 +93,7 @@ function VisibilityButton({
 // count, eye. Not deprecated — it is the live path for every track without lanes.
 function PlainTrackHeader({
   trackNumber,
+  trackDisplayNumber,
   trackLabel,
   clipCount,
   showTrackLabel,
@@ -86,6 +103,7 @@ function PlainTrackHeader({
 }: Pick<
   TimelineTrackHeaderProps,
   | "trackNumber"
+  | "trackDisplayNumber"
   | "trackLabel"
   | "clipCount"
   | "isTrackHidden"
@@ -106,6 +124,7 @@ function PlainTrackHeader({
       <VisibilityButton
         hidden={isTrackHidden}
         trackNumber={trackNumber}
+        trackDisplayNumber={trackDisplayNumber}
         visible
         onToggle={onToggleTrackHidden}
       />
@@ -263,7 +282,9 @@ function PropertyGroupHeaderRow({
 
 export function TimelineTrackHeader({
   trackNumber,
+  trackDisplayNumber,
   trackLabel,
+  lanesId,
   contentOrigin,
   keyframeClip,
   clipCount,
@@ -290,7 +311,6 @@ export function TimelineTrackHeader({
   // owns the gutter past it, so a 0% diamond isn't clipped by this panel).
   const showTrackLabel = contentOrigin >= LABEL_COL_W;
   const isKeyframeLayer = !!keyframeClip && lanes.length > 0;
-  const lanesId = `timeline-lanes-track-${trackNumber}`;
 
   return (
     <div
@@ -310,6 +330,7 @@ export function TimelineTrackHeader({
       {!keyframeClip || lanes.length === 0 ? (
         <PlainTrackHeader
           trackNumber={trackNumber}
+          trackDisplayNumber={trackDisplayNumber}
           trackLabel={trackLabel}
           clipCount={clipCount}
           showTrackLabel={showTrackLabel}
@@ -336,29 +357,35 @@ export function TimelineTrackHeader({
             <VisibilityButton
               hidden={isTrackHidden}
               trackNumber={trackNumber}
+              trackDisplayNumber={trackDisplayNumber}
               visible
               onToggle={onToggleTrackHidden}
             />
           </LayerDisclosureRow>
-          {/* Always mounted so the caret's aria-controls resolves in both states. */}
-          <div id={lanesId}>
-            {isExpanded &&
-              lanes.map((lane, laneIndex) => (
-                <PropertyGroupHeaderRow
-                  key={lane.group}
-                  lane={lane}
-                  laneIndex={laneIndex}
-                  isLastLane={laneIndex === lanes.length - 1}
-                  expandedElement={keyframeClip}
-                  currentTime={currentTime}
-                  clipPercentage={clipPercentage}
-                  gutterBackground={theme.gutterBackground}
-                  columnWidth={showTrackLabel ? LABEL_COL_W : contentOrigin}
-                  onTogglePropertyGroupKeyframe={onTogglePropertyGroupKeyframe}
-                  onSeek={onSeek}
-                />
-              ))}
-          </div>
+          {/* The caret expands TWO disjoint subtrees: these label-column rows,
+              which carry the per-lane keyframe controls, and the diamond lanes
+              on the canvas. `lanesId` names the canvas lanes (rendered by
+              TimelineLanes), because that is what a sighted user watches appear
+              and what following the reference has to land on. These rows are not
+              empty and are not the target; they are absolutely positioned inside
+              the sticky column, which is what made a wrapper HERE compute to
+              0x0 and hold no diamonds. */}
+          {isExpanded &&
+            lanes.map((lane, laneIndex) => (
+              <PropertyGroupHeaderRow
+                key={lane.group}
+                lane={lane}
+                laneIndex={laneIndex}
+                isLastLane={laneIndex === lanes.length - 1}
+                expandedElement={keyframeClip}
+                currentTime={currentTime}
+                clipPercentage={clipPercentage}
+                gutterBackground={theme.gutterBackground}
+                columnWidth={showTrackLabel ? LABEL_COL_W : contentOrigin}
+                onTogglePropertyGroupKeyframe={onTogglePropertyGroupKeyframe}
+                onSeek={onSeek}
+              />
+            ))}
         </>
       )}
     </div>
