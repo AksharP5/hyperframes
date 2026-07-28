@@ -15,7 +15,7 @@ import { readStudioUiPreferences, writeStudioUiPreferences } from "../../utils/s
 interface NLEPreviewProps {
   projectId: string;
   iframeRef: RefObject<HTMLIFrameElement | null>;
-  onIframeLoad: (reportError?: (message: string) => void) => void;
+  onIframeLoad: () => void;
   onCompositionLoadingChange?: (loading: boolean) => void;
   portrait?: boolean;
   directUrl?: string;
@@ -491,9 +491,9 @@ export const NLEPreview = memo(function NLEPreview({
               ref={setPreviewIframeRef}
               projectId={directUrl ? undefined : projectId}
               directUrl={directUrl}
-              onLoad={(reportError) => {
+              onLoad={() => {
                 updateCompositionSizeFromPreview();
-                onIframeLoad(reportError);
+                onIframeLoad();
                 applyInitialZoom();
               }}
               onCompositionLoadingChange={onCompositionLoadingChange}

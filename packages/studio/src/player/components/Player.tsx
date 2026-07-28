@@ -10,7 +10,7 @@ import { HyperframesLoader } from "../../components/ui";
 interface PlayerProps {
   projectId?: string;
   directUrl?: string;
-  onLoad: (reportError: (message: string) => void) => void;
+  onLoad: () => void;
   onCompositionLoadingChange?: (loading: boolean) => void;
   portrait?: boolean;
   style?: React.CSSProperties;
@@ -208,10 +208,7 @@ export const Player = forwardRef<HTMLIFrameElement, PlayerProps>(
             const onEnd = () => container.classList.remove("preview-revealing");
             container.addEventListener("animationend", onEnd, { once: true });
           }
-          onLoad((message) => {
-            setPreviewError(message);
-            setCompositionLoading(false);
-          });
+          onLoad();
 
           // Show a loading overlay until every `<video>`/`<audio>` and Lottie
           // asset is ready. Without this users can click play before audio has

@@ -38,6 +38,7 @@ const GET_RESPONSES = new Map([
     }),
   ],
   [`${PROJECT_PATH}/preview`, text(SMOKE_COMPOSITION_HTML, "text/html")],
+  [`${PROJECT_PATH}/thumbnail/index.html`, text(SMOKE_THUMBNAIL_SVG, "image/svg+xml")],
   [`${PROJECT_PATH}/renders`, json({ renders: [] })],
   [`${PROJECT_PATH}/lint`, json({ findings: [] })],
   [
@@ -77,11 +78,6 @@ function projectPreviewResponse(pathname) {
     : text(SMOKE_COMPOSITION_HTML, "text/html");
 }
 
-function projectThumbnailResponse(pathname) {
-  if (!pathname.startsWith(`${PROJECT_PATH}/thumbnail/`)) return undefined;
-  return text(SMOKE_THUMBNAIL_SVG, "image/svg+xml");
-}
-
 function gsapAnimationsResponse(pathname) {
   if (!pathname.startsWith(`${PROJECT_PATH}/gsap-animations/`)) return undefined;
   return json({ animations: [], timelineVar: "tl", preamble: "", postamble: "" });
@@ -92,7 +88,6 @@ function getStudioSmokeResponse(pathname) {
     GET_RESPONSES.get(pathname) ??
     projectFileResponse(pathname) ??
     projectPreviewResponse(pathname) ??
-    projectThumbnailResponse(pathname) ??
     gsapAnimationsResponse(pathname)
   );
 }

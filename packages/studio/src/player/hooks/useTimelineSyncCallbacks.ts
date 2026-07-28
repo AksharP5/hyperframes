@@ -399,60 +399,51 @@ export function useTimelineSyncCallbacks({
     pendingSeekRef,
   ]);
 
-  const onIframeLoad = useCallback(
-    (reportError?: (message: string) => void) => {
-      applyPreviewAudioState();
-      if (probeIntervalRef.current) clearInterval(probeIntervalRef.current);
+  const onIframeLoad = useCallback(() => {
+    applyPreviewAudioState();
+    if (probeIntervalRef.current) clearInterval(probeIntervalRef.current);
 
-      // Fast path: adapter already available (in-place reloads, cached compositions)
-      if (initializeAdapter()) return;
+    // Fast path: adapter already available (in-place reloads, cached compositions)
+    if (initializeAdapter()) return;
 
-      // The runtime posts "state" or "timeline" messages once ready.
-      // Listen for those instead of polling.
-      const iframe = iframeRef.current;
-      let settled = false;
+    // The runtime posts "state" or "timeline" messages once ready.
+    // Listen for those instead of polling.
+    const iframe = iframeRef.current;
+    let settled = false;
 
-      const trySettle = () => {
-        if (settled) return;
-        if (initializeAdapter()) {
-          settled = true;
-          window.removeEventListener("message", onMessage);
-          if (probeIntervalRef.current) clearInterval(probeIntervalRef.current);
-        }
-      };
-
-      const onMessage = (e: MessageEvent) => {
-        if (e.source && iframe && e.source !== iframe.contentWindow) return;
-        const data = e.data;
-        if (
-          data?.source === "hf-preview" &&
-          (data?.type === "state" || data?.type === "timeline")
-        ) {
-          // The main message handler owns protocol-error diagnostics. This readiness-only
-          // listener mirrors its acceptance gate without dispatching a duplicate event:
-          // an unsupported runtime must not make the iframe appear successfully settled.
-          if (inspectStudioRuntimeMessage(data).status === "unsupported") return;
-          trySettle();
-        }
-      };
-      window.addEventListener("message", onMessage);
-
-      // Safety net: if no message arrives within 5s, try one last time then give up.
-      probeIntervalRef.current = setTimeout(() => {
-        if (!settled) {
-          trySettle();
-          if (!settled) {
-            reportError?.("Studio could not initialize the composition timeline.");
-          }
-        }
+    const trySettle = () => {
+      if (settled) return;
+      if (initializeAdapter()) {
+        settled = true;
         window.removeEventListener("message", onMessage);
-        // Never leave the preview stuck invisible if the runtime never settled
-        // (initializeAdapter reveals on success; this covers the give-up case).
-        revealIframe(iframeRef.current);
-      }, 5000) as unknown as ReturnType<typeof setInterval>;
-    },
-    [initializeAdapter, iframeRef, probeIntervalRef, applyPreviewAudioState],
-  );
+        if (probeIntervalRef.current) clearInterval(probeIntervalRef.current);
+      }
+    };
+
+    const onMessage = (e: MessageEvent) => {
+      if (e.source && iframe && e.source !== iframe.contentWindow) return;
+      const data = e.data;
+      if (data?.source === "hf-preview" && (data?.type === "state" || data?.type === "timeline")) {
+        // The main message handler owns protocol-error diagnostics. This readiness-only
+        // listener mirrors its acceptance gate without dispatching a duplicate event:
+        // an unsupported runtime must not make the iframe appear successfully settled.
+        if (inspectStudioRuntimeMessage(data).status === "unsupported") return;
+        trySettle();
+      }
+    };
+    window.addEventListener("message", onMessage);
+
+    // Safety net: if no message arrives within 5s, try one last time then give up.
+    probeIntervalRef.current = setTimeout(() => {
+      if (!settled) {
+        trySettle();
+      }
+      window.removeEventListener("message", onMessage);
+      // Never leave the preview stuck invisible if the runtime never settled
+      // (initializeAdapter reveals on success; this covers the give-up case).
+      revealIframe(iframeRef.current);
+    }, 5000) as unknown as ReturnType<typeof setInterval>;
+  }, [initializeAdapter, iframeRef, probeIntervalRef, applyPreviewAudioState]);
 
   // Stable refs so mount-effect closures always call the latest version
   const processTimelineMessageRef = { current: processTimelineMessage };

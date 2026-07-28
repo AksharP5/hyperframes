@@ -7,6 +7,15 @@ import {
   shouldShowCompositionLoadingOverlay,
 } from "./Player";
 
+function createAudioIframe() {
+  const iframe = document.createElement("iframe");
+  document.body.appendChild(iframe);
+  const audio = iframe.contentDocument?.createElement("audio");
+  expect(audio).toBeDefined();
+  iframe.contentDocument?.body.appendChild(audio!);
+  return { audio: audio!, iframe };
+}
+
 describe("preview errors", () => {
   it("reads the player probe error for the visible retry state", () => {
     expect(
@@ -35,10 +44,7 @@ describe("composition loading overlay", () => {
   });
 
   it("keeps the asset overlay up while media is still buffering", () => {
-    const iframe = document.createElement("iframe");
-    document.body.appendChild(iframe);
-    const audio = iframe.contentDocument?.createElement("audio");
-    expect(audio).toBeDefined();
+    const { audio, iframe } = createAudioIframe();
     Object.defineProperty(audio, "readyState", {
       value: 0,
       configurable: true,
@@ -47,7 +53,6 @@ describe("composition loading overlay", () => {
       value: 2,
       configurable: true,
     });
-    iframe.contentDocument?.body.appendChild(audio!);
 
     expect(hasUnloadedAssets(iframe, false)).toBe(true);
 
@@ -55,10 +60,7 @@ describe("composition loading overlay", () => {
   });
 
   it("does not keep the asset overlay stuck on failed media sources", () => {
-    const iframe = document.createElement("iframe");
-    document.body.appendChild(iframe);
-    const audio = iframe.contentDocument?.createElement("audio");
-    expect(audio).toBeDefined();
+    const { audio, iframe } = createAudioIframe();
     Object.defineProperty(audio, "error", {
       value: { code: 4, message: "format error" },
       configurable: true,
@@ -71,7 +73,6 @@ describe("composition loading overlay", () => {
       value: 3,
       configurable: true,
     });
-    iframe.contentDocument?.body.appendChild(audio!);
 
     expect(hasUnloadedAssets(iframe, false)).toBe(false);
 
