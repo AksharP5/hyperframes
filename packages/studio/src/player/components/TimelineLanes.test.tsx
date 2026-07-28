@@ -215,6 +215,30 @@ describe("TimelineLanes disclosure target", () => {
     act(() => view.root.unmount());
   });
 
+  // Two timelines on one page (a mini-timeline in a modal beside the main one)
+  // both minted `timeline-lanes-track-0`, so every caret's aria-controls
+  // resolved to whichever instance mounted first.
+  it("mints lane ids that do not collide with a second TimelineLanes on the page", () => {
+    const first = renderLanes({ animations: ANIMATIONS, expandedClipIds: ["clip-a"] });
+    const second = renderLanes({ animations: ANIMATIONS, expandedClipIds: ["clip-a"] });
+
+    const idsFor = (host: HTMLElement) =>
+      Array.from(host.querySelectorAll("button[aria-controls]")).map((caret) =>
+        caret.getAttribute("aria-controls"),
+      );
+    const firstIds = idsFor(first.host);
+    const secondIds = idsFor(second.host);
+
+    expect(firstIds.length).toBeGreaterThan(0);
+    expect(firstIds.some((id) => secondIds.includes(id))).toBe(false);
+    // Still a legal CSS id selector: the aria-controls lookups above use `#id`.
+    for (const id of [...firstIds, ...secondIds]) {
+      expect(id).toMatch(/^[A-Za-z][\w-]*$/);
+    }
+    act(() => first.root.unmount());
+    act(() => second.root.unmount());
+  });
+
   // The passenger branch wraps [clip, lanes] in a transformed div that re-renders
   // on every pointer move. An unstable key there remounts the lanes and drops the
   // in-flight drag.

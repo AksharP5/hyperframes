@@ -1,10 +1,11 @@
+import { useId } from "react";
 import { BeatStrip, BeatBackgroundLines } from "./BeatStrip";
 import { TimelineClip } from "./TimelineClip";
 import { TimelineClipDiamonds } from "./TimelineClipDiamonds";
 import { TimelinePropertyLanes } from "./TimelinePropertyLanes";
 import { TimelineTrackHeader } from "./TimelineTrackHeader";
 import { resolveTrackKeyframeClip } from "./useTimelineTrackLayout";
-import { trackDisplayNumber } from "./timelineTrackDisplay";
+import { trackDisplayNumber, trackDisplaySuffix } from "./timelineTrackDisplay";
 import { clipTimingStart } from "../../hooks/gsapShared";
 import { getTimelineEditCapabilities, resolveBlockedTimelineEditIntent } from "./timelineEditing";
 import { CLIP_Y, CLIP_HANDLE_W, TRACK_H, getTimelineRowHeight } from "./timelineLayout";
@@ -89,6 +90,12 @@ export function TimelineLanes({
   onRazorSplit,
   onRazorSplitAll,
 }: TimelineLanesProps) {
+  // Per-INSTANCE, so two timelines on one page (a mini-timeline in a modal
+  // beside the main one) cannot both mint `...-track-0` and have every caret's
+  // aria-controls resolve to whichever mounted first. React's useId embeds
+  // colons, which are legal in an id and in aria-controls but need escaping in
+  // a CSS `#id` selector, so they come out here and the prefix stays plain.
+  const lanesIdPrefix = `timeline-lanes${useId().replaceAll(":", "")}`;
   const expandedClipIds = usePlayerStore((s) => s.expandedClipIds);
   const toggleClipExpanded = usePlayerStore((s) => s.toggleClipExpanded);
   const toggleClipExpandedTracked = (key: string) => {
@@ -137,7 +144,7 @@ export function TimelineLanes({
           // the disclosure: the caret in the sticky header and the diamond lanes
           // on the canvas. Keyed by display row, not by `trackNum`, which is a
           // fractional sort key and would mint ids like `...-0.16666666666666666`.
-          const lanesId = `timeline-lanes-track-${row}`;
+          const lanesId = `${lanesIdPrefix}-track-${row}`;
           return (
             <div
               key={trackNum}
@@ -154,7 +161,10 @@ export function TimelineLanes({
                 // key, so it stays out of every label and in every callback.
                 trackDisplayNumber={displayNumber}
                 trackLabel={
-                  els[0]?.label ?? els[0]?.domId ?? els[0]?.id ?? `Track ${displayNumber}`
+                  els[0]?.label ??
+                  els[0]?.domId ??
+                  els[0]?.id ??
+                  `Track${trackDisplaySuffix(displayNumber)}`
                 }
                 lanesId={lanesId}
                 contentOrigin={contentOrigin}

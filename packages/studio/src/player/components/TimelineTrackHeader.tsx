@@ -15,6 +15,7 @@ import {
   type TimelinePropertyLane,
 } from "./trackHeaderLaneState";
 import { valueReadout } from "./trackHeaderLaneValues";
+import { trackDisplaySuffix } from "./timelineTrackDisplay";
 
 interface TimelineTrackHeaderProps {
   /** The track's real key: a FRACTIONAL z-order sort value. Routes callbacks;
@@ -22,8 +23,9 @@ interface TimelineTrackHeaderProps {
   trackNumber: number;
   /** The track's 1-based position in the rendered order: the only number safe
    *  to put in a label. Announcing `trackNumber` read out "track
-   *  0.16666666666666666". */
-  trackDisplayNumber: number;
+   *  0.16666666666666666". Null when the key has no row, which drops the number
+   *  from the label rather than inventing one (see trackDisplayNumber). */
+  trackDisplayNumber: number | null;
   trackLabel: string;
   /** Id of the canvas-side lanes element the disclosure caret expands. Minted by
    *  TimelineLanes, which is the one place that sees both subtrees. */
@@ -55,14 +57,15 @@ function VisibilityButton({
 }: {
   hidden: boolean;
   trackNumber: number;
-  trackDisplayNumber: number;
+  trackDisplayNumber: number | null;
   visible: boolean;
   onToggle: TimelineEditCallbacks["onToggleTrackHidden"];
 }) {
   if (!visible) return <span aria-hidden="true" className="h-6 w-6 shrink-0" />;
   // Display number in the text, real key in the callback. The two must not be
   // conflated in either direction.
-  const label = hidden ? `Show track ${trackDisplayNumber}` : `Hide track ${trackDisplayNumber}`;
+  const suffix = trackDisplaySuffix(trackDisplayNumber);
+  const label = hidden ? `Show track${suffix}` : `Hide track${suffix}`;
   return (
     <button
       type="button"
