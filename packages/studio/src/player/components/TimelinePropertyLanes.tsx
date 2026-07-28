@@ -77,6 +77,28 @@ export function animationLaneGroups(animation: GsapAnimation): PropertyGroupName
   return Array.from(groups);
 }
 
+/**
+ * Which tween a panel edit to `prop` belongs to.
+ *
+ * Matches on the groups the tween's KEYFRAMES animate, not on the parser's
+ * whole-tween `propertyGroup` verdict: that field is undefined for a legacy
+ * mixed tween such as `{ x, opacity }`, so matching it dropped every such
+ * tween and sent the edit to the selection's default animation instead, which
+ * is a different tween than the lane the user is looking at.
+ * {@link animationLaneGroups} is the single owner the rendered lanes count
+ * groups through, so resolving here through the same helper keeps the panel
+ * and the lanes on one answer.
+ */
+export function resolveAnimIdForProperty(
+  prop: string,
+  animations: readonly GsapAnimation[] | undefined,
+  fallbackAnimId: string | undefined,
+): string {
+  const group = classifyPropertyGroup(prop);
+  const groupAnim = animations?.find((a) => animationLaneGroups(a).includes(group));
+  return groupAnim?.id ?? fallbackAnimId ?? "";
+}
+
 /** A tween contributes a property lane when it animates at least one property
  *  on at least one editable keyframe (real or synthesized). */
 export function animationContributesLane(animation: GsapAnimation): boolean {

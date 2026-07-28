@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TimelineClipDiamonds } from "./TimelineClipDiamonds";
 import {
   getTimelinePropertyLanes,
+  resolveAnimIdForProperty,
   TimelinePropertyLanes,
   type TimelinePropertyLanesProps,
 } from "./TimelinePropertyLanes";
@@ -553,5 +554,51 @@ describe("TimelinePropertyLanes", () => {
     // diamond-identity refactor added are dropped on the way out.
     expect(onClickKeyframe).toHaveBeenCalledWith("clip-1", COLLAPSED_TARGET);
     act(() => root.unmount());
+  });
+});
+
+describe("resolveAnimIdForProperty", () => {
+  /** A legacy mixed tween: the parser leaves propertyGroup undefined for it. */
+  const mixed = {
+    id: "mixed-1",
+    targetSelector: "#box",
+    method: "to",
+    position: 0,
+    properties: {},
+    keyframes: {
+      keyframes: [
+        { percentage: 0, properties: { x: 0, opacity: 0 } },
+        { percentage: 100, properties: { x: 40, opacity: 1 } },
+      ],
+    },
+  } as unknown as GsapAnimation;
+
+  it("routes both groups of a mixed tween to that tween, not the fallback", () => {
+    expect(mixed.propertyGroup).toBeUndefined();
+
+    expect(resolveAnimIdForProperty("x", [mixed], "fallback")).toBe("mixed-1");
+    expect(resolveAnimIdForProperty("opacity", [mixed], "fallback")).toBe("mixed-1");
+  });
+
+  it("falls back only when no tween animates the property's group", () => {
+    expect(resolveAnimIdForProperty("rotation", [mixed], "fallback")).toBe("fallback");
+    expect(resolveAnimIdForProperty("rotation", [mixed], undefined)).toBe("");
+  });
+
+  it("prefers a single-group tween that owns the lane", () => {
+    const opacityOnly = {
+      ...mixed,
+      id: "opacity-1",
+      propertyGroup: "visual",
+      keyframes: {
+        keyframes: [
+          { percentage: 0, properties: { opacity: 0 } },
+          { percentage: 100, properties: { opacity: 1 } },
+        ],
+      },
+    } as unknown as GsapAnimation;
+
+    expect(resolveAnimIdForProperty("opacity", [opacityOnly, mixed], "fallback")).toBe("opacity-1");
+    expect(resolveAnimIdForProperty("x", [opacityOnly, mixed], "fallback")).toBe("mixed-1");
   });
 });
