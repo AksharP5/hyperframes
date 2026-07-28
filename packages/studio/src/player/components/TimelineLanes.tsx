@@ -4,6 +4,7 @@ import { TimelineClipDiamonds } from "./TimelineClipDiamonds";
 import { TimelinePropertyLanes } from "./TimelinePropertyLanes";
 import { TimelineTrackHeader } from "./TimelineTrackHeader";
 import { resolveTrackKeyframeClip } from "./useTimelineTrackLayout";
+import { trackDisplayNumber } from "./timelineTrackDisplay";
 import { clipTimingStart } from "../../hooks/gsapShared";
 import { getTimelineEditCapabilities, resolveBlockedTimelineEditIntent } from "./timelineEditing";
 import { CLIP_Y, CLIP_HANDLE_W, TRACK_H, getTimelineRowHeight } from "./timelineLayout";
@@ -105,6 +106,7 @@ export function TimelineLanes({
         // in a virtualizer if editorial workflows ever push very high clip counts.
         // fallow-ignore-next-line complexity
         displayTrackOrder.map((trackNum, row) => {
+          const displayNumber = trackDisplayNumber(displayTrackOrder, trackNum);
           const rowHeight = getTimelineRowHeight(row, rowHeights);
           const els = tracks.find(([t]) => t === trackNum)?.[1] ?? [];
           const ts = trackStyles.get(trackNum) ?? getTrackStyle("");
@@ -150,8 +152,10 @@ export function TimelineLanes({
                 trackNumber={trackNum}
                 // What gets announced. `trackNum` is a fractional z-order sort
                 // key, so it stays out of every label and in every callback.
-                trackDisplayNumber={row + 1}
-                trackLabel={els[0]?.label ?? els[0]?.domId ?? els[0]?.id ?? `Track ${row + 1}`}
+                trackDisplayNumber={displayNumber}
+                trackLabel={
+                  els[0]?.label ?? els[0]?.domId ?? els[0]?.id ?? `Track ${displayNumber}`
+                }
                 lanesId={lanesId}
                 contentOrigin={contentOrigin}
                 keyframeClip={keyframeClip}
