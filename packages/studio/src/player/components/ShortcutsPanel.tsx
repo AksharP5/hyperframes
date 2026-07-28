@@ -170,7 +170,9 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
         <div
           id={shortcutsPanelId}
           role="dialog"
-          aria-modal="true"
+          // Deliberately NOT aria-modal. This is a non-modal disclosure: focus is
+          // not trapped and the rest of the editor stays operable, so claiming
+          // modality would make assistive tech treat the whole app as inert.
           className="absolute bottom-full right-0 mb-2 z-50 rounded-lg shadow-xl min-w-[220px] overflow-y-auto"
           style={{
             background: "#161618",

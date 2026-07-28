@@ -150,7 +150,9 @@ describe("ShortcutsPanel", () => {
 
     expect(panelId).not.toBeNull();
     expect(panel?.getAttribute("role")).toBe("dialog");
-    expect(panel?.getAttribute("aria-modal")).toBe("true");
+    // Non-modal on purpose: focus is not trapped and the editor behind stays
+    // operable, so aria-modal would lie to assistive tech about inertness.
+    expect(panel?.getAttribute("aria-modal")).toBeNull();
     expect(panel?.id).toBe(panelId);
   });
 });
