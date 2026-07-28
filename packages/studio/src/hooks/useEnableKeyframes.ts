@@ -18,6 +18,7 @@ import {
   KEYFRAME_PCT_MATCH,
   isInstantHold,
   resolveEditableTweenDuration,
+  writeTargetSelector,
 } from "./gsapShared";
 import {
   absoluteToPercentage,
@@ -523,7 +524,10 @@ export function useEnableKeyframes(
         sel.dataAttributes?.duration,
         t,
       );
-      const selector = selectorFromSelection(sel);
+      // A brand-new tween: author it against the one element the user selected.
+      // The bare class selectorFromSelection hands back for an id-less element
+      // animates every sibling sharing the class (see writeTargetSelector).
+      const selector = writeTargetSelector(sel);
 
       if (!selector) {
         session.handleGsapAddAnimation("to");

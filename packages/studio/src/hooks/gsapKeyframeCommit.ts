@@ -1,7 +1,7 @@
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { absoluteToPercentageForAnimation, findTweenAtTime } from "../utils/globalTimeCompiler";
-import { PROPERTY_DEFAULTS, selectorFromSelection } from "./gsapShared";
+import { PROPERTY_DEFAULTS, selectorFromSelection, writeTargetSelector } from "./gsapShared";
 import { roundToCenti } from "../utils/rounding";
 
 type CommitFn = (
@@ -22,6 +22,9 @@ export async function commitKeyframeAtTimeImpl(
   properties: Record<string, number | string>,
   commitMutation: CommitFn,
 ): Promise<void> {
+  // Matching an authored tween is a string compare against what the author
+  // wrote, so it keeps using the selection's own selector; the NEW tween below
+  // is authored with the one-element form instead.
   const selector = selectorFromSelection(selection);
   if (!selector) return;
 
@@ -65,7 +68,7 @@ export async function commitKeyframeAtTimeImpl(
       selection,
       {
         type: "add-with-keyframes" as const,
-        targetSelector: selector,
+        targetSelector: writeTargetSelector(selection) ?? selector,
         position: absoluteTime,
         duration: defaultDuration,
         keyframes: [

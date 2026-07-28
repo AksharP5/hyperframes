@@ -181,6 +181,86 @@ export function selectorFromSelection(selection: DomEditSelection): string | nul
   return null;
 }
 
+/** `[name="value"]`, with the quote/backslash escaping a CSS string needs. */
+function attributeSelector(name: string, value: string): string {
+  return `[${name}="${value.replace(/(["\\])/g, "\\$1")}"]`;
+}
+
+function matchesExactlyOne(doc: Document, selector: string, element: Element): boolean {
+  try {
+    const matches = doc.querySelectorAll(selector);
+    return matches.length === 1 && matches[0] === element;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A structural address for an element that carries no identity of its own:
+ * `:nth-child` steps up to the nearest ancestor that IS uniquely addressable
+ * (an id or a data-hf-id). This is the `selector` + `selectorIndex` pair the
+ * selection already carries, resolved through the live DOM the index was
+ * counted in — an index can't be spelled in CSS, but the element's position can.
+ */
+function structuralSelector(element: Element): string | null {
+  const doc = element.ownerDocument;
+  if (!doc) return null;
+  const parts: string[] = [];
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    if (node !== element) {
+      const id = node instanceof HTMLElement ? node.id : "";
+      const hfId = node.getAttribute("data-hf-id");
+      if (id) {
+        parts.unshift(idSelector(id));
+        break;
+      }
+      if (hfId) {
+        parts.unshift(attributeSelector("data-hf-id", hfId));
+        break;
+      }
+    }
+    const parent = node.parentElement;
+    if (!parent) break;
+    const index = Array.prototype.indexOf.call(parent.children, node) + 1;
+    if (index < 1) return null;
+    parts.unshift(`${node.tagName.toLowerCase()}:nth-child(${index})`);
+  }
+  if (parts.length === 0) return null;
+  const selector = parts.join(" > ");
+  return matchesExactlyOne(doc, selector, element) ? selector : null;
+}
+
+/**
+ * The selector to author a NEW tween with. Distinct from
+ * {@link selectorFromSelection}, which must keep returning the exact string an
+ * already-authored tween is string-matched against (findTweenAtTime): this one
+ * has to ADDRESS ONE ELEMENT.
+ *
+ * `buildStableSelector` hands back a bare class for any element without an id,
+ * so "add keyframe at playhead" on one of five `.group` siblings wrote
+ * `tl.set(".group", …)` — a tween that animates all five and that
+ * {@link resolveSelectorElementIds} reads back as all five, collapsing their
+ * timeline rows into one. Every rung below resolves to exactly one element.
+ *
+ * ponytail: the last rung returns the bare selector unchanged rather than null.
+ * Refusing to write would turn a mis-targeted add into a silently dead button;
+ * it is only reachable with no live DOM to disambiguate against.
+ */
+export function writeTargetSelector(selection: DomEditSelection): string | null {
+  if (selection.id) return idSelector(selection.id);
+  if (selection.hfId) return attributeSelector("data-hf-id", selection.hfId);
+  const element = selection.element;
+  const doc = element?.ownerDocument;
+  if (element && doc) {
+    if (selection.selector && matchesExactlyOne(doc, selection.selector, element)) {
+      return selection.selector;
+    }
+    const structural = structuralSelector(element);
+    if (structural) return structural;
+  }
+  return selection.selector ?? null;
+}
+
 // ── Percentage computation ────────────────────────────────────────────────────
 
 /**
