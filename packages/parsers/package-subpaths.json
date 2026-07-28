@@ -80,6 +80,12 @@
       "types": "./dist/compositionContract.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./color-grading-contract": {
+      "source": "./src/colorGradingContract.ts",
+      "runtime": "./dist/colorGradingContract.js",
+      "types": "./dist/colorGradingContract.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./sub-composition-validity": {
       "source": "./src/subCompositionValidity.ts",
       "runtime": "./dist/subCompositionValidity.js",

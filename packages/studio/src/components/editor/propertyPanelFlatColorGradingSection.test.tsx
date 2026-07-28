@@ -7,7 +7,10 @@ import {
   FlatColorGradingAccessory,
   FlatColorGradingSection,
 } from "./propertyPanelFlatColorGradingSection";
-import { normalizeHfColorGrading } from "@hyperframes/core/color-grading";
+import {
+  normalizeHfColorGrading,
+  type NormalizedHfColorGrading,
+} from "@hyperframes/core/color-grading";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -215,39 +218,260 @@ function neutralPropsBase() {
     grading: neutralGrading(),
     assets: [] as string[],
     onCommitColorGrading: vi.fn(),
+    onPreviewColorGrading: vi.fn(),
     applyScope: "source-file" as const,
     applyBusy: false,
     onSetApplyScope: vi.fn(),
     onApplyToScope: vi.fn(),
     onApplyScopeAvailable: true,
     mediaMetadata: null,
+    presetPreviews: {
+      status: "ready" as const,
+      images: { "bright-pop": "data:image/png;base64,bright" },
+      width: 160,
+      height: 90,
+    },
+    onRequestPresetPreviews: vi.fn(),
+    captureGradedFrame: vi.fn(async () => null),
   };
 }
 
 describe("FlatColorGradingSection — Preset + LUT", () => {
-  it("renders the Preset dropdown with id/label pairs and fires onCommitColorGrading on change", () => {
+  it("previews looks without committing, restores on leave, and commits only on click", () => {
     const onCommitColorGrading = vi.fn();
+    const onPreviewColorGrading = vi.fn();
+    const base = neutralGrading();
+    const grading = {
+      ...base,
+      intensity: 0.4,
+      adjust: { ...base.adjust, contrast: 0.3 },
+      wheels: {
+        ...base.wheels,
+        shadows: { hue: 210, amount: 0.12, level: 0.04 },
+      },
+      curves: {
+        ...base.curves,
+        master: [
+          [0, 0],
+          [0.5, 0.58],
+          [1, 1],
+        ] as const,
+      },
+      hueCurves: {
+        ...base.hueCurves,
+        hueVsSaturation: [
+          [0, 0],
+          [120, 0.1],
+          [240, 0],
+        ] as const,
+      },
+      secondaries:
+        normalizeHfColorGrading({
+          secondaries: [
+            {
+              key: { hue: { center: 30, range: 15 } },
+              correction: { saturation: 0.08 },
+            },
+          ],
+        })?.secondaries ?? [],
+      details: { ...base.details, vignette: 0.2 },
+      effects: { ...base.effects, pixelate: 0.5 },
+      palette: ["#112233", "#ffffff"],
+      lut: { src: "assets/luts/custom.cube", intensity: 0.6 },
+    };
     const { host, root } = renderInto(
       <FlatColorGradingSection
         {...neutralPropsBase()}
+        grading={grading}
         onCommitColorGrading={onCommitColorGrading}
+        onPreviewColorGrading={onPreviewColorGrading}
       />,
     );
-    const presetSelect = host.querySelector<HTMLSelectElement>(
-      '[data-flat-grade-preset="true"] select',
+    const brightPop = host.querySelector<HTMLButtonElement>(
+      '[data-flat-grade-preset="bright-pop"]',
     );
-    if (!presetSelect) throw new Error("expected a preset select");
-    expect(presetSelect.value).toBe("neutral");
-    // The visible "Preset" label is a sibling span outside FlatSelectRow
-    // (label="" there, to avoid rendering it twice) — the select still
-    // needs its own accessible name via the dedicated ariaLabel prop.
-    expect(presetSelect.getAttribute("aria-label")).toBe("Preset");
+    if (!brightPop) throw new Error("expected a Bright Pop look button");
     act(() => {
-      presetSelect.value = "fresh-pop";
-      presetSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      brightPop.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
     });
+    expect(onPreviewColorGrading.mock.calls.at(-1)?.[0].preset).toBe("bright-pop");
+    expect(onPreviewColorGrading.mock.calls.at(-1)?.[1]).toEqual({
+      animatedPreview: { kind: "presets", id: "bright-pop" },
+    });
+    expect(onCommitColorGrading).not.toHaveBeenCalled();
+    act(() => brightPop.dispatchEvent(new MouseEvent("pointerout", { bubbles: true })));
+    expect(onPreviewColorGrading).toHaveBeenLastCalledWith(null);
+    act(() => brightPop.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(onCommitColorGrading).toHaveBeenCalledTimes(1);
-    expect(onCommitColorGrading.mock.calls[0][0].preset).toBe("fresh-pop");
+    expect(onCommitColorGrading.mock.calls[0][0]).toMatchObject({
+      preset: "bright-pop",
+      intensity: 1,
+      effects: { pixelate: 0.5 },
+      palette: ["#112233", "#ffffff"],
+      lut: { src: "assets/luts/custom.cube", intensity: 0.6 },
+    });
+    expect(onCommitColorGrading.mock.calls[0][0].wheels.shadows.amount).toBe(0);
+    expect(onCommitColorGrading.mock.calls[0][0].curves.master).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
+    expect(onCommitColorGrading.mock.calls[0][0].hueCurves.hueVsSaturation).toEqual([]);
+    expect(onCommitColorGrading.mock.calls[0][0].secondaries).toEqual([]);
+    expect(onCommitColorGrading.mock.calls[0][0].adjust.contrast).not.toBe(0.3);
+    expect(onCommitColorGrading.mock.calls[0][0].details.vignette).not.toBe(0.2);
+    act(() => root.unmount());
+  });
+
+  it("orders manual controls like the shader pipeline", () => {
+    const { host, root } = renderInto(<FlatColorGradingSection {...neutralPropsBase()} />);
+    const elements = [
+      host.querySelector('[data-flat-grade-adjust="true"]'),
+      host.querySelector('[data-color-wheels="true"]'),
+      host.querySelector('[data-color-curves="true"]'),
+      host.querySelector('[data-flat-grade-secondary="true"]'),
+      host.querySelector('[data-flat-grade-lut-toggle="true"]'),
+    ];
+    expect(elements.every(Boolean)).toBe(true);
+    for (let index = 0; index < elements.length - 1; index += 1) {
+      const current = elements[index];
+      const next = elements[index + 1];
+      if (!current || !next) throw new Error("expected all grading sections");
+      expect(current.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    }
+    act(() => root.unmount());
+  });
+
+  it("samples the full-strength signal entering the secondary stage", async () => {
+    const base = neutralGrading();
+    const grading = normalizeHfColorGrading({
+      ...base,
+      preset: "warm-polished",
+      intensity: 0.35,
+      adjust: { ...base.adjust, exposure: 0.2 },
+      wheels: {
+        ...base.wheels,
+        shadows: { hue: 210, amount: 0.2, level: 0.05 },
+      },
+      curves: {
+        ...base.curves,
+        master: [
+          [0, 0],
+          [0.5, 0.6],
+          [1, 1],
+        ],
+      },
+      hueCurves: {
+        ...base.hueCurves,
+        hueVsSaturation: [
+          [0, 0],
+          [120, 0.1],
+          [240, 0],
+        ],
+      },
+      secondaries: [{ key: { hue: { center: 30, range: 15 } }, correction: {} }],
+      details: { ...base.details, vignette: 0.4, grain: 0.2 },
+      effects: { ...base.effects, pixelate: 0.5 },
+      lut: { src: "assets/luts/custom.cube", intensity: 0.8 },
+    });
+    if (!grading) throw new Error("expected a secondary grade");
+    const captureGradedFrame = vi.fn(
+      async (_options?: { grading?: NormalizedHfColorGrading }) => null,
+    );
+    const { host, root } = renderInto(
+      <FlatColorGradingSection
+        {...neutralPropsBase()}
+        grading={grading}
+        captureGradedFrame={captureGradedFrame}
+      />,
+    );
+
+    await act(async () => {
+      const sample = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find((button) =>
+        button.textContent?.includes("Sample color from frame"),
+      );
+      sample?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(captureGradedFrame).toHaveBeenCalledTimes(1);
+    const options = captureGradedFrame.mock.calls[0]?.[0];
+    const sampledGrading = options?.grading;
+    if (!sampledGrading) throw new Error("expected the sampled grading input");
+    expect(sampledGrading).toMatchObject({
+      preset: null,
+      intensity: 1,
+      adjust: grading.adjust,
+      wheels: grading.wheels,
+      curves: grading.curves,
+      hueCurves: grading.hueCurves,
+      secondaries: [],
+      lut: null,
+    });
+    expect(sampledGrading.details.vignette).toBe(0);
+    expect(sampledGrading.details.grain).toBe(0);
+    expect(sampledGrading.effects.pixelate).toBe(0);
+    act(() => root.unmount());
+  });
+
+  it("keeps effect-bearing saved styles out of Grade", () => {
+    const { host, root } = renderInto(<FlatColorGradingSection {...neutralPropsBase()} />);
+    const presets = host.querySelector('[data-flat-grade-preset-group="presets"]');
+    expect(presets?.querySelector('[data-flat-grade-preset="bright-pop"]')).not.toBeNull();
+    expect(presets?.querySelector('[data-flat-grade-preset="vhs-playback"]')).toBeNull();
+    expect(presets?.querySelector('[data-flat-grade-preset="editorial-halftone"]')).toBeNull();
+    expect(host.querySelector('[data-flat-grade-preset="neutral"]')?.textContent).toContain(
+      "Neutral",
+    );
+    act(() => root.unmount());
+  });
+
+  it("shows ready selected-media preview images without requesting a duplicate batch", () => {
+    const onRequestPresetPreviews = vi.fn();
+    const { host, root } = renderInto(
+      <FlatColorGradingSection
+        {...neutralPropsBase()}
+        onRequestPresetPreviews={onRequestPresetPreviews}
+      />,
+    );
+    expect(onRequestPresetPreviews).not.toHaveBeenCalled();
+    expect(
+      host.querySelector<HTMLImageElement>('[data-flat-grade-preview="bright-pop"]')?.src,
+    ).toContain("data:image/png;base64,bright");
+    expect(host.textContent).not.toContain("VHS Playback");
+    act(() => root.unmount());
+  });
+
+  it("requests an idle preview batch once", () => {
+    const onRequestPresetPreviews = vi.fn();
+    const props = neutralPropsBase();
+    const { root } = renderInto(
+      <FlatColorGradingSection
+        {...props}
+        presetPreviews={{ ...props.presetPreviews, status: "idle", images: {} }}
+        onRequestPresetPreviews={onRequestPresetPreviews}
+      />,
+    );
+    expect(onRequestPresetPreviews).toHaveBeenCalledTimes(1);
+    act(() => root.unmount());
+  });
+
+  it("requires an explicit retry after a preview failure", () => {
+    const onRequestPresetPreviews = vi.fn();
+    const props = neutralPropsBase();
+    const { host, root } = renderInto(
+      <FlatColorGradingSection
+        {...props}
+        presetPreviews={{ ...props.presetPreviews, status: "unavailable", images: {} }}
+        onRequestPresetPreviews={onRequestPresetPreviews}
+      />,
+    );
+    expect(onRequestPresetPreviews).not.toHaveBeenCalled();
+    const retry = Array.from(host.querySelectorAll("button")).find(
+      (button) => button.textContent === "Retry look previews",
+    );
+    if (!retry) throw new Error("expected an explicit preview retry");
+    act(() => retry.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onRequestPresetPreviews).toHaveBeenCalledTimes(1);
     act(() => root.unmount());
   });
 
@@ -410,7 +634,7 @@ describe("FlatColorGradingSection — Adjust sliders", () => {
     act(() => root.unmount());
   });
 
-  it("does NOT force intensity to revive when the Strength slider itself is dragged — it writes the value directly", () => {
+  it("does NOT force intensity to revive when the Amount slider itself is dragged — it writes the value directly", () => {
     const onCommitColorGrading = vi.fn();
     const grading = { ...neutralGrading(), intensity: 0 };
     const { host, root } = renderInto(
@@ -420,7 +644,7 @@ describe("FlatColorGradingSection — Adjust sliders", () => {
         onCommitColorGrading={onCommitColorGrading}
       />,
     );
-    const strengthRow = findRowByText(host, "div", "Strength", "startsWith");
+    const strengthRow = findRowByText(host, "div", "Amount", "startsWith");
     // min=0, max=100, step=1, ratio=0.4 -> raw=40 -> commit(40) -> intensity = 40/100 = 0.4
     dragSliderTrack(strengthRow, 40, 100);
     expect(onCommitColorGrading).toHaveBeenCalledTimes(1);
@@ -488,32 +712,6 @@ describe("FlatColorGradingSection — Vignette and Grain", () => {
     clickSliderReset(roundnessRow);
     expect(onCommitColorGrading).toHaveBeenCalledTimes(1);
     expect(onCommitColorGrading.mock.calls[0][0].details.vignetteRoundness).toBe(0);
-    act(() => root.unmount());
-  });
-});
-
-describe("FlatColorGradingSection — Effects", () => {
-  it("renders Blur and Pixelate sliders under an Effects micro-label", () => {
-    const { host, root } = renderInto(<FlatColorGradingSection {...neutralPropsBase()} />);
-    expect(host.textContent).toContain("Effects");
-    const rows = host.querySelectorAll('[data-flat-grade-effect="true"]');
-    expect(rows).toHaveLength(2);
-    act(() => root.unmount());
-  });
-
-  it("commits a dragged Pixelate value on slider track pointerdown, scaled from percent to the 0..1 effect range", () => {
-    const onCommitColorGrading = vi.fn();
-    const { host, root } = renderInto(
-      <FlatColorGradingSection
-        {...neutralPropsBase()}
-        onCommitColorGrading={onCommitColorGrading}
-      />,
-    );
-    const pixelateRow = findRowByText(host, '[data-flat-grade-effect="true"]', "Pixelate");
-    // min=0, max=100, step=1, ratio=0.75 -> raw=75 -> commit(75) -> effects.pixelate = 75/100 = 0.75
-    dragSliderTrack(pixelateRow, 75, 100);
-    expect(onCommitColorGrading).toHaveBeenCalledTimes(1);
-    expect(onCommitColorGrading.mock.calls[0][0].effects.pixelate).toBe(0.75);
     act(() => root.unmount());
   });
 });

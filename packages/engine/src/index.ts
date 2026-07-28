@@ -184,12 +184,18 @@ export {
   createFrameLookupTable,
   FrameLookupTable,
   analyzeClipMediaFit,
+  classifyVideoExtractionError,
+  isVideoSourceExtractionError,
+  runVideoExtractionWithRetry,
+  VideoSourceExtractionError,
   type VideoElement,
   type ImageElement,
   type ExtractedFrames,
   type ExtractionOptions,
   type ExtractionResult,
   type ExtractionPhaseBreakdown,
+  type VideoExtractionFailure,
+  type VideoExtractionFailureKind,
   type VideoFrameFormat,
   VIDEO_FRAME_FORMATS,
   isVideoFrameFormat,
@@ -198,8 +204,12 @@ export {
 export { createVideoFrameInjector } from "./services/videoFrameInjector.js";
 
 export { parseAudioElements, processCompositionAudio } from "./services/audioMixer.js";
+export { cloneCaptureWarning, cloneCaptureWarnings } from "./services/captureWarning.js";
 export type {
   AudioElement,
+  AudioFailureReason,
+  AudioFailureStage,
+  AudioProcessingFailure,
   AudioTrack,
   AudioVolumeKeyframe,
   MixResult,

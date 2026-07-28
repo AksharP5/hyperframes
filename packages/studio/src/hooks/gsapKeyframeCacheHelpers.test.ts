@@ -4,6 +4,7 @@ import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerS
 import {
   clearKeyframeCacheForElement,
   clearKeyframeCacheForFile,
+  pruneKeyframeCacheToFiles,
   updateKeyframeCacheFromParsed,
 } from "./gsapKeyframeCacheHelpers";
 
@@ -28,7 +29,7 @@ const animWithKeyframes = (id: string): GsapAnimation => ({
 });
 
 beforeEach(() => {
-  usePlayerStore.setState({ keyframeCache: new Map(), elements: [] });
+  usePlayerStore.setState({ keyframeCache: new Map(), gsapAnimations: new Map(), elements: [] });
 });
 
 describe("clearKeyframeCacheForElement", () => {
@@ -84,6 +85,20 @@ describe("clearKeyframeCacheForFile", () => {
     }
   });
 
+  // Several composition files re-scan concurrently, so a clear that walked the
+  // index.html alias would delete rows a sibling file had just written.
+  it("leaves an index.html-owned element alone when another file re-scans", () => {
+    seed("index.html#title");
+    seed("title");
+    seed("comp.html#a");
+
+    clearKeyframeCacheForFile("comp.html");
+
+    expect(cache().has("index.html#title")).toBe(true);
+    expect(cache().has("title")).toBe(true);
+    expect(cache().has("comp.html#a")).toBe(false);
+  });
+
   it("leaves entries that belong to a different source file", () => {
     seed("comp.html#a");
     seed("a");
@@ -97,7 +112,84 @@ describe("clearKeyframeCacheForFile", () => {
   });
 });
 
+describe("pruneKeyframeCacheToFiles", () => {
+  // Switching composition leaves the previous comp's elements cached with no
+  // owner left to clear them: each file only ever clears its own entries.
+  it("drops every element of a file the next scan no longer covers", () => {
+    seed("index.html#stress-1");
+    seed("stress-1");
+    seed("index.html#stress-2");
+    seed("stress-2");
+    seed("kf200.html#kf200");
+    seed("index.html#kf200");
+    seed("kf200");
+
+    pruneKeyframeCacheToFiles(["kf200.html"]);
+
+    for (const key of ["index.html#stress-1", "stress-1", "index.html#stress-2", "stress-2"]) {
+      expect(cache().has(key)).toBe(false);
+    }
+    expect(cache().has("kf200.html#kf200")).toBe(true);
+  });
+
+  it("prunes gsapAnimations alongside keyframeCache", () => {
+    usePlayerStore.getState().setGsapAnimations("index.html#stress-1", [animWithKeyframes("t")]);
+    usePlayerStore.getState().setGsapAnimations("kf200.html#kf200", [animWithKeyframes("u")]);
+
+    pruneKeyframeCacheToFiles(["kf200.html"]);
+
+    const animations = usePlayerStore.getState().gsapAnimations;
+    expect(animations.has("index.html#stress-1")).toBe(false);
+    expect(animations.has("kf200.html#kf200")).toBe(true);
+  });
+
+  it("keeps everything when every cached file is still covered", () => {
+    seed("index.html#hero");
+    seed("comp.html#a");
+
+    pruneKeyframeCacheToFiles(["index.html", "comp.html"]);
+
+    expect(cache().has("index.html#hero")).toBe(true);
+    expect(cache().has("comp.html#a")).toBe(true);
+  });
+});
+
 describe("updateKeyframeCacheFromParsed", () => {
+  it("serializes a multi-keyframe tween with a stable shape and animation identity", () => {
+    const animation: GsapAnimation = {
+      ...animWithKeyframes("hero"),
+      duration: 2,
+      resolvedStart: 3,
+      keyframes: {
+        format: "percentage",
+        keyframes: [
+          { percentage: 0, properties: { x: 0 } },
+          { percentage: 50, properties: { x: 100 }, ease: "power1.inOut" },
+          { percentage: 100, properties: { x: 200 } },
+        ],
+        easeEach: "power1.inOut",
+      },
+    };
+    usePlayerStore.setState({
+      elements: [
+        {
+          id: "hero-clip",
+          domId: "hero",
+          tag: "div",
+          start: 2,
+          duration: 4,
+          track: 0,
+        },
+      ],
+    });
+
+    updateKeyframeCacheFromParsed([animation], "scene.html", "hero", {});
+
+    expect(JSON.stringify(cache().get("scene.html#hero"))).toBe(
+      '{"format":"percentage","keyframes":[{"percentage":25,"properties":{"x":0},"tweenPercentage":0,"propertyGroup":"position","animationId":"hero"},{"percentage":50,"properties":{"x":100},"ease":"power1.inOut","tweenPercentage":50,"propertyGroup":"position","animationId":"hero"},{"percentage":75,"properties":{"x":200},"tweenPercentage":100,"propertyGroup":"position","animationId":"hero"}],"easeEach":"power1.inOut"}',
+    );
+  });
+
   it("clears the bare key when the selected element no longer has keyframes", () => {
     // Element previously had keyframes, so a bare entry exists (writes set both).
     seed("index.html#box");
@@ -117,5 +209,88 @@ describe("updateKeyframeCacheFromParsed", () => {
 
     expect(cache().has("index.html#hero")).toBe(true);
     expect(cache().has("hero")).toBe(true);
+  });
+
+  it("caches flat tweens as clip-relative start and end keyframes", () => {
+    const animation: GsapAnimation = {
+      id: "flat-box",
+      targetSelector: "#box",
+      method: "to",
+      position: 1,
+      properties: { x: 420 },
+      duration: 2,
+      resolvedStart: 1,
+      ease: "power2.out",
+      propertyGroup: "position",
+    };
+    usePlayerStore.setState({
+      elements: [{ id: "box-clip", domId: "box", tag: "div", start: 1, duration: 2, track: 0 }],
+    });
+
+    updateKeyframeCacheFromParsed([animation], "scene.html", "box", {});
+
+    expect(cache().get("scene.html#box")).toEqual({
+      format: "percentage",
+      keyframes: [
+        {
+          percentage: 0,
+          properties: { x: 0 },
+          tweenPercentage: 0,
+          propertyGroup: "position",
+          animationId: "flat-box",
+        },
+        {
+          percentage: 100,
+          properties: { x: 420 },
+          ease: "power2.out",
+          tweenPercentage: 100,
+          propertyGroup: "position",
+          animationId: "flat-box",
+        },
+      ],
+    });
+    expect(usePlayerStore.getState().gsapAnimations.get("scene.html#box")).toEqual([animation]);
+  });
+
+  it("records an ungrouped tween in gsapAnimations too, so the two stores agree", () => {
+    // `{ x, opacity }` spans two property groups, so the parser leaves
+    // propertyGroup undefined. Skipping it here used to cache diamonds with no
+    // source animation behind them: the collapsed row drew keyframes the
+    // expanded lanes could not render.
+    const animation: GsapAnimation = {
+      id: "mixed-box",
+      targetSelector: "#box",
+      method: "to",
+      position: 0,
+      properties: { x: 100, opacity: 0 },
+      duration: 1,
+      resolvedStart: 0,
+    };
+    usePlayerStore.setState({
+      elements: [{ id: "box-clip", domId: "box", tag: "div", start: 0, duration: 1, track: 0 }],
+    });
+
+    updateKeyframeCacheFromParsed([animation], "scene.html", "box", {});
+
+    expect(cache().has("scene.html#box")).toBe(true);
+    expect(usePlayerStore.getState().gsapAnimations.get("scene.html#box")).toEqual([animation]);
+  });
+
+  it("does not cache a flat tween without animatable numeric properties", () => {
+    const animation: GsapAnimation = {
+      id: "flat-box",
+      targetSelector: "#box",
+      method: "to",
+      position: 0,
+      properties: { backgroundColor: "#fff" },
+      duration: 1,
+      propertyGroup: "visual",
+    };
+
+    updateKeyframeCacheFromParsed([animation], "scene.html", "box", {});
+
+    expect(cache().has("scene.html#box")).toBe(false);
+    expect(cache().has("box")).toBe(false);
+    expect(usePlayerStore.getState().gsapAnimations.has("scene.html#box")).toBe(false);
   });
 });

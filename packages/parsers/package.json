@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/parsers",
-  "version": "0.7.70",
+  "version": "0.7.77",
   "repository": {
     "type": "git",
     "url": "https://github.com/heygen-com/hyperframes",
@@ -88,6 +88,12 @@
       "import": "./src/compositionContract.ts",
       "types": "./src/compositionContract.ts"
     },
+    "./color-grading-contract": {
+      "bun": "./src/colorGradingContract.ts",
+      "node": "./dist/colorGradingContract.js",
+      "import": "./src/colorGradingContract.ts",
+      "types": "./src/colorGradingContract.ts"
+    },
     "./sub-composition-validity": {
       "bun": "./src/subCompositionValidity.ts",
       "node": "./dist/subCompositionValidity.js",
@@ -158,6 +164,10 @@
       "./composition-contract": {
         "import": "./dist/compositionContract.js",
         "types": "./dist/compositionContract.d.ts"
+      },
+      "./color-grading-contract": {
+        "import": "./dist/colorGradingContract.js",
+        "types": "./dist/colorGradingContract.d.ts"
       },
       "./sub-composition-validity": {
         "import": "./dist/subCompositionValidity.js",

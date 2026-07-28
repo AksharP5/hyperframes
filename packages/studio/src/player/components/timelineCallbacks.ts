@@ -3,6 +3,16 @@
 import type { TimelineElement } from "../store/playerStore";
 import type { TimelineMoveOperation } from "../../hooks/timelineMoveAdapter";
 import type { BlockedTimelineEditIntent } from "./timelineEditing";
+import type { PropertyGroupName } from "@hyperframes/core/gsap-parser";
+import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
+
+export interface TimelinePropertyGroupKeyframeToggle {
+  animationId: string;
+  propertyGroup: PropertyGroupName;
+  tweenPercentage: number;
+  properties: Record<string, number | string>;
+  remove: boolean;
+}
 
 /**
  * Shared callback signatures for timeline editing operations.
@@ -62,14 +72,19 @@ export interface TimelineEditCallbacks {
   onSplitElement?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplit?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplitAll?: (splitTime: number) => Promise<void> | void;
-  onDeleteKeyframe?: (elementId: string, percentage: number) => void;
-  onDeleteAllKeyframes?: (elementId: string) => void;
-  onChangeKeyframeEase?: (elementId: string, percentage: number, ease: string) => void;
-  onMoveKeyframeToPlayhead?: (elementId: string, percentage: number) => void;
+  onDeleteKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
+  onDeleteAllKeyframes?: (element: TimelineElement) => void;
+  onMoveKeyframeToPlayhead?: (element: TimelineElement, keyframe: TimelineKeyframeTarget) => void;
+  /** Drag-to-retime: `keyframe` identifies the dragged keyframe (its percentage
+   *  is clip-relative), `toClipPercentage` is the neighbour-clamped drop. */
   onMoveKeyframe?: (
     elementId: string,
-    fromClipPercentage: number,
+    keyframe: TimelineKeyframeTarget,
     toClipPercentage: number,
-  ) => void;
+  ) => Promise<boolean>;
   onToggleKeyframeAtPlayhead?: (element: TimelineElement) => void;
+  onTogglePropertyGroupKeyframe?: (
+    element: TimelineElement,
+    target: TimelinePropertyGroupKeyframeToggle,
+  ) => Promise<void> | void;
 }

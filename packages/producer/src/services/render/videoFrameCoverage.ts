@@ -71,6 +71,8 @@ export interface VideoFrameCoverageErrorDetails {
 }
 
 export class VideoFrameCoverageError extends Error {
+  // Read structurally by isVideoFrameCoverageError and cross-module callers.
+  // fallow-ignore-next-line unused-class-member
   readonly hyperframesVideoFrameCoverageError = true as const;
   readonly threshold: number;
   readonly worst: VideoFrameCoverageReport;
@@ -117,16 +119,47 @@ export function resolveVideoCoverageThreshold(
 }
 
 /**
- * Ceil the clip's authored `[start,end)` window at `fps` — the number of
- * captured render frames whose center-time falls inside the window. Kept
- * separate so a caller (or a test) can override it if a composition uses
- * a non-integer fps whose sampling makes the naive count off by one.
+ * Count frames in a clip's authored `[start,end)` window. CFR extraction uses
+ * FFmpeg's `-vf fps=<fps>` and rounds to the nearest output-frame boundary;
+ * VFR extraction uses `-fps_mode cfr -r <fps>` and rounds up. Missing entries
+ * retain the fail-closed `ceil` default. Positive sub-frame clips emit one.
  */
-export function expectedFramesForClip(start: number, end: number, fps: number): number {
+export function expectedFramesForClip(
+  start: number,
+  end: number,
+  fps: number,
+  rounding: "ceil" | "nearest" = "ceil",
+): number {
   if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(fps)) return 0;
   if (fps <= 0) return 0;
   const duration = Math.max(0, end - start);
-  return Math.ceil(duration * fps);
+  if (duration === 0) return 0;
+  const frameCount =
+    rounding === "nearest" ? Math.round(duration * fps) : Math.ceil(duration * fps);
+  return Math.max(1, frameCount);
+}
+
+function expectedFramesForVideo(
+  video: VideoElement,
+  entry: ExtractedFrames | undefined,
+  fps: number,
+): number {
+  const rounding = entry && !entry.metadata.isVFR ? "nearest" : "ceil";
+  const slotFrames = expectedFramesForClip(video.start, video.end, fps, rounding);
+  if (!entry) return slotFrames;
+
+  // A short source in a longer slot has a legitimate delivery ceiling of
+  // the source portion, not the full slot: a non-looping clip holds its
+  // final decoded frame across the tail (#2516/#2606), and a looping clip
+  // reuses its full source frame set per repeat (#2665). In both cases the
+  // full source *has* been delivered — the same 90 unique source frames
+  // cover the 300-frame slot — so coverage must measure source-source, not
+  // slot-source.
+  const sourceDuration = entry.metadata.durationSeconds - video.mediaStart;
+  if (!Number.isFinite(sourceDuration) || sourceDuration <= 0) return slotFrames;
+
+  const sourceFrames = expectedFramesForClip(0, sourceDuration, fps, rounding);
+  return Math.min(slotFrames, sourceFrames);
 }
 
 export function computeVideoFrameCoverage(
@@ -140,20 +173,7 @@ export function computeVideoFrameCoverage(
   const reports: VideoFrameCoverageReport[] = [];
   for (const video of videos) {
     const entry = byId.get(video.id);
-    const slotFrames = expectedFramesForClip(video.start, video.end, fps);
-    // A short source in a longer slot has a legitimate delivery ceiling of
-    // the source portion, not the full slot: a non-looping clip holds its
-    // final decoded frame across the tail (#2516/#2606), and a looping clip
-    // reuses its full source frame set per repeat (#2665). In both cases the
-    // full source *has* been delivered — the same 90 unique source frames
-    // cover the 300-frame slot — so coverage must measure source-source, not
-    // slot-source. A missing extraction (no `entry`) still requires the full
-    // slot; there's no delivered set to credit.
-    const sourceDuration = entry ? entry.metadata.durationSeconds - video.mediaStart : NaN;
-    const hasUsableSourceDuration = Number.isFinite(sourceDuration) && sourceDuration > 0;
-    const sourceFrames =
-      entry && hasUsableSourceDuration ? expectedFramesForClip(0, sourceDuration, fps) : slotFrames;
-    const expectedFrames = entry ? Math.min(slotFrames, sourceFrames) : slotFrames;
+    const expectedFrames = expectedFramesForVideo(video, entry, fps);
     // framePaths is a Map — `size` is the number of distinct captured frames
     // delivered to the runtime injector, which is the load-bearing count
     // (some extractors report a total that includes cache-hit-skipped frames

@@ -31,7 +31,10 @@ import {
   EMPTY_COLOR_GRADING_SCOPE_RESULT,
   type ColorGradingScope,
 } from "./studioColorGradingScope";
-import type { BackgroundRemovalProgress } from "./editor/propertyPanelTypes";
+import type {
+  AddMediaOverlayHandler,
+  BackgroundRemovalProgress,
+} from "./editor/propertyPanelTypes";
 import { timelineKeysForSelections, type ToggleHiddenHandler } from "../utils/studioHelpers";
 import { useInspectorSplitResize } from "../hooks/useInspectorSplitResize";
 
@@ -71,6 +74,7 @@ export interface StudioRightPanelProps extends StudioEditPersistenceProps {
     files: Record<string, { before: string; after: string }>;
   }) => Promise<void>;
   onToggleElementHidden?: ToggleHiddenHandler;
+  onAddMediaOverlay?: AddMediaOverlayHandler;
 }
 
 // fallow-ignore-next-line complexity
@@ -88,10 +92,11 @@ export function StudioRightPanel({
   domEditSaveTimestampRef,
   recordEdit,
   onToggleElementHidden,
+  onAddMediaOverlay,
 }: StudioRightPanelProps) {
   const {
     rightWidth,
-    setRightWidth,
+    adjustPanelWidth,
     rightPanelTab,
     setRightPanelTab,
     rightInspectorPanes,
@@ -372,6 +377,7 @@ export function StudioRightPanel({
         onRemoveTextField={handleDomRemoveTextField}
         onAskAgent={handleAskAgent}
         onImportAssets={handleImportFiles}
+        onAddMediaOverlay={onAddMediaOverlay}
         fontAssets={fontAssets}
         onImportFonts={handleImportFonts}
         previewIframeRef={previewIframeRef}
@@ -458,7 +464,7 @@ export function StudioRightPanel({
           e.preventDefault();
           // Panel is right-anchored: ArrowLeft grows it, ArrowRight shrinks it.
           const delta = e.key === "ArrowLeft" ? 16 : -16;
-          setRightWidth(Math.max(160, Math.min(600, rightWidth + delta)));
+          adjustPanelWidth("right", delta);
         }}
       >
         {/* Expanded hit zone: 8px wide, centered on the 3px seam */}
@@ -467,7 +473,7 @@ export function StudioRightPanel({
         <div className="absolute top-1/2 left-0 h-[52px] w-[3px] -translate-y-1/2 bg-white/12 transition-colors group-hover:bg-white/18 group-active:bg-white/24" />
       </div>
       <div
-        className="flex min-w-0 flex-shrink-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900"
+        className="flex min-w-0 flex-shrink-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950"
         style={{ width: rightWidth }}
       >
         {captionEditMode ? (

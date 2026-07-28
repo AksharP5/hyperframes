@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { usePlayerStore, type TimelineElement, type DomClipChild } from "../store/playerStore";
 import type { ClipManifestClip } from "../lib/playbackTypes";
 import { createTimelineElementFromManifestClip } from "../lib/timelineDOM";
-import { buildTimelineElementKey } from "../lib/timelineElementHelpers";
+import { buildTimelineElementKey, splitTimelineElementKey } from "../lib/timelineElementHelpers";
 
 function findTopLevelAncestor(id: string, parentMap: Map<string, string>): string | null {
   let current = parentMap.get(id);
@@ -19,18 +19,13 @@ function findTopLevelAncestor(id: string, parentMap: Map<string, string>): strin
   return current;
 }
 
-function extractDomId(key: string): string {
-  const hashIdx = key.lastIndexOf("#");
-  return hashIdx >= 0 ? key.slice(hashIdx + 1) : key;
-}
-
 function resolveRawId(
   selectedId: string | null,
   manifest: ClipManifestClip[],
   parentMap: Map<string, string>,
 ): string | null {
   if (!selectedId) return null;
-  const rawId = extractDomId(selectedId);
+  const rawId = splitTimelineElementKey(selectedId).domId;
   if (parentMap.has(rawId)) return rawId;
   if (parentMap.has(selectedId)) return selectedId;
   const clip = manifest.find((c) => c.label === selectedId || c.label === rawId);
@@ -48,6 +43,11 @@ interface TimelineExpansionRawIdInput {
 
 function clipContainsTime(clip: ClipManifestClip, time: number): boolean {
   return Number.isFinite(time) && time >= clip.start && time < clip.start + clip.duration;
+}
+
+/** Half-open containment plus the closing boundary — see the fallback below. */
+function clipTouchesTime(clip: ClipManifestClip, time: number): boolean {
+  return Number.isFinite(time) && time >= clip.start && time <= clip.start + clip.duration;
 }
 
 function getActiveParentDepth(id: string, parentMap: Map<string, string>, activeIds: Set<string>) {
@@ -70,11 +70,20 @@ function findActiveExpandableCompositionId(
   parentMap: Map<string, string>,
 ): string | null {
   const parentIds = new Set(parentMap.values());
-  const activeIds = new Set<string>();
-  for (const clip of manifest) {
-    if (!clip.id || !parentIds.has(clip.id) || !clipContainsTime(clip, currentTime)) continue;
-    activeIds.add(clip.id);
-  }
+  const collect = (matches: (clip: ClipManifestClip, time: number) => boolean) => {
+    const ids = new Set<string>();
+    for (const clip of manifest) {
+      if (clip.id && parentIds.has(clip.id) && matches(clip, currentTime)) ids.add(clip.id);
+    }
+    return ids;
+  };
+  // Clip windows are half-open, so a playhead parked exactly on a clip's end is
+  // inside nothing — at the end of the timeline that collapsed every expanded
+  // sub-composition row and its keyframe lanes. Only when the strict pass finds
+  // nothing do we accept the closing boundary, so a playhead landing on the seam
+  // between two adjacent clips still expands the one that is starting.
+  const strict = collect(clipContainsTime);
+  const activeIds = strict.size > 0 ? strict : collect(clipTouchesTime);
   let bestId: string | null = null;
   let bestDepth = -1;
   for (const id of activeIds) {

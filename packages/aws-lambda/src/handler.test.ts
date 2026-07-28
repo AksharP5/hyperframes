@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication complexity
 /**
  * Handler dispatch unit tests.
  *
@@ -15,10 +16,20 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { AssembleResult, ChunkResult, PlanResult } from "@hyperframes/producer/distributed";
+import { dirname, join } from "node:path";
+import {
+  CURRENT_PLAN_PROTOCOL,
+  type AssembleResult,
+  type ChunkResult,
+  type PlanResult,
+  type PlanV2ArtifactPublisher,
+  type PlanV2Manifest,
+  publishPlanV2FromV1,
+} from "@hyperframes/producer/distributed";
+import { recomputePlanHashFromPlanDir } from "../../producer/src/services/render/stages/freezePlan.js";
 import type { AssembleEvent, LambdaEvent, PlanEvent, RenderChunkEvent } from "./events.js";
 import { handler, unwrapEvent } from "./handler.js";
 
@@ -37,9 +48,13 @@ class FakeS3Client {
   ops: FakeS3Op[] = [];
   // Map S3 URIs → byte buffers the fake serves.
   objects = new Map<string, Buffer>();
+  metadata = new Map<string, Record<string, string>>();
 
   // Methods called by the real S3 transport — minimal surface so the
   // handler's call sites don't need rewriting under test.
+  // This fake intentionally implements the complete S3 command matrix inline so
+  // handler tests exercise realistic state transitions without AWS.
+  // fallow-ignore-next-line complexity
   async send(command: unknown): Promise<unknown> {
     const op = command as { input: { Bucket: string; Key: string } } & {
       constructor: { name: string };
@@ -54,20 +69,38 @@ class FakeS3Client {
       const { Readable } = await import("node:stream");
       return { Body: Readable.from([bytes]) };
     }
+    if (cmdName === "HeadObjectCommand") {
+      const bytes = this.objects.get(uri);
+      if (!bytes) {
+        const error = new Error("not found") as Error & {
+          $metadata: { httpStatusCode: number };
+        };
+        error.name = "NotFound";
+        error.$metadata = { httpStatusCode: 404 };
+        throw error;
+      }
+      return {
+        ContentLength: bytes.length,
+        Metadata: this.metadata.get(uri),
+      };
+    }
     if (cmdName === "PutObjectCommand") {
       // Buffer the body so we can record how many bytes were uploaded; the
       // handler's hot path streams from disk, but tests pin the count.
       const body = (command as { input: { Body: NodeJS.ReadableStream | Buffer } }).input.Body;
-      let bytes = 0;
+      const chunks: Buffer[] = [];
       if (Buffer.isBuffer(body)) {
-        bytes = body.length;
+        chunks.push(body);
       } else if (body && typeof (body as NodeJS.ReadableStream).pipe === "function") {
         for await (const chunk of body as NodeJS.ReadableStream) {
-          bytes += (chunk as Buffer).length;
+          chunks.push(Buffer.from(chunk as Buffer));
         }
       }
-      this.ops.push({ kind: "upload", uri, bytes });
-      this.objects.set(uri, Buffer.alloc(bytes));
+      const bytes = Buffer.concat(chunks);
+      this.ops.push({ kind: "upload", uri, bytes: bytes.length });
+      this.objects.set(uri, bytes);
+      const metadata = (command as { input: { Metadata?: Record<string, string> } }).input.Metadata;
+      if (metadata) this.metadata.set(uri, metadata);
       return {};
     }
     return {};
@@ -157,6 +190,7 @@ describe("handler dispatch", () => {
         writeFileSync(join(planDir, "meta", "chunks.json"), "[]");
         return {
           planDir,
+          planProtocol: CURRENT_PLAN_PROTOCOL,
           planHash: "fakehash",
           chunkCount: 4,
           totalFrames: 720,
@@ -209,6 +243,49 @@ describe("handler dispatch", () => {
     ).toBe(true);
   });
 
+  it("normalizes producer terminal codes to Step Functions error names", async () => {
+    for (const code of [
+      "PLAN_TOO_LARGE",
+      "PLAN_PROTOCOL_UNSUPPORTED",
+      "PLAN_V2_INTEGRITY_UNRECOVERABLE",
+    ] as const) {
+      const tmpRoot = makeTmpRoot();
+      const s3 = new FakeS3Client();
+      s3.objects.set("s3://bucket/project.tar.gz", await makeMinimalProjectTar());
+      const terminal = Object.assign(new Error(`terminal: ${code}`), {
+        code,
+        name: "ProducerError",
+      });
+
+      await expect(
+        handler(
+          {
+            Action: "plan",
+            ProjectS3Uri: "s3://bucket/project.tar.gz",
+            PlanOutputS3Prefix: "s3://bucket/renders/terminal/",
+            Config: { fps: 30, width: 640, height: 360, format: "mp4" },
+          },
+          {
+            s3: s3 as unknown as import("@aws-sdk/client-s3").S3Client,
+            primitives: {
+              plan: mock(async () => {
+                throw terminal;
+              }) as unknown as typeof import("@hyperframes/producer/distributed").plan,
+              renderChunk: mock(async () => {
+                throw new Error("unused");
+              }) as unknown as typeof import("@hyperframes/producer/distributed").renderChunk,
+              assemble: mock(async () => {
+                throw new Error("unused");
+              }) as unknown as typeof import("@hyperframes/producer/distributed").assemble,
+            },
+            tmpRoot,
+            skipChromeResolution: true,
+          },
+        ),
+      ).rejects.toMatchObject({ name: code });
+    }
+  });
+
   it("plan honors a pre-set PRODUCER_HEADLESS_SHELL_PATH instead of re-resolving Chrome", async () => {
     // Mirrors the renderChunk env-var guard — when a caller (e.g. SAM-local
     // RIE smoke) seeds the path, handlePlan must not overwrite it.
@@ -224,6 +301,7 @@ describe("handler dispatch", () => {
         writeFileSync(join(planDir, "meta", "chunks.json"), "[]");
         return {
           planDir,
+          planProtocol: CURRENT_PLAN_PROTOCOL,
           planHash: "fakehash",
           chunkCount: 1,
           totalFrames: 30,
@@ -299,6 +377,12 @@ describe("handler dispatch", () => {
           framesEncoded: 240,
           sha256: "0".repeat(64),
           durationMs: 12345,
+          planHashMs: 1,
+          sessionBootMs: 2,
+          captureStageMs: 3,
+          encodeStageMs: 4,
+          workers: 1,
+          captureMode: "beginframe",
           perfPath: outputChunkPath + ".perf.json",
         };
       },
@@ -338,6 +422,7 @@ describe("handler dispatch", () => {
     expect(result.ChunkIndex).toBe(2);
     expect(result.Sha256).toBe("0".repeat(64));
     expect(result.FramesEncoded).toBe(240);
+    expect(result.CaptureMode).toBe("beginframe");
     expect(renderChunkMock).toHaveBeenCalledTimes(1);
   });
 
@@ -445,6 +530,142 @@ describe("handler dispatch", () => {
     expect(result.OutputS3Uri).toBe("s3://bucket/renders/abc/output.mp4");
     expect(result.FramesEncoded).toBe(480);
     expect(assembleMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs v2 plan → target-scoped chunk → assemble without a PlanS3Uri", async () => {
+    const tmpRoot = makeTmpRoot();
+    const s3 = new FakeS3Client();
+    s3.objects.set("s3://bucket/project.tar.gz", await makeMinimalProjectTar());
+
+    const planV2WithPublisherMock = mock(
+      async (
+        projectDir: string,
+        _config: unknown,
+        publisher: PlanV2ArtifactPublisher,
+        options: Readonly<{ stagingParentDir?: string }>,
+      ): Promise<PlanV2Manifest> => {
+        const v1Dir = join(tmpRoot, `v1-${Date.now()}`);
+        makeMinimalV1PlanDir(v1Dir, true);
+        const manifest = await publishPlanV2FromV1(v1Dir, publisher);
+        expect(options.stagingParentDir).toBe(dirname(projectDir));
+        expect(existsSync(join(dirname(projectDir), "plan-v2"))).toBe(false);
+        return manifest;
+      },
+    );
+    const renderChunkMock = mock(
+      async (planDir: string, _chunkIndex: number, outputPath: string): Promise<ChunkResult> => {
+        expect(existsSync(join(planDir, "audio.aac"))).toBe(false);
+        writeFileSync(outputPath, "V2-CHUNK");
+        return {
+          outputPath,
+          outputKind: "file",
+          framesEncoded: 30,
+          sha256: "b".repeat(64),
+          durationMs: 1,
+          planHashMs: 0,
+          sessionBootMs: 0,
+          captureStageMs: 1,
+          encodeStageMs: 0,
+          workers: 1,
+          captureMode: "beginframe",
+          perfPath: `${outputPath}.perf.json`,
+        };
+      },
+    );
+    const assembleMock = mock(
+      async (
+        _planDir: string,
+        _chunks: readonly string[],
+        audioPath: string | null,
+        outputPath: string,
+      ): Promise<AssembleResult> => {
+        expect(audioPath).not.toBeNull();
+        expect(readFileSync(audioPath as string, "utf-8")).toBe("AAC");
+        writeFileSync(outputPath, "V2-OUTPUT");
+        return { outputPath, durationMs: 1, framesEncoded: 30, fileSize: 9 };
+      },
+    );
+    const deps = {
+      s3: s3 as unknown as import("@aws-sdk/client-s3").S3Client,
+      primitives: {
+        plan: mock(async () => {
+          throw new Error("v1 plan should not be called");
+        }) as unknown as typeof import("@hyperframes/producer/distributed").plan,
+        planV2WithPublisher:
+          planV2WithPublisherMock as unknown as typeof import("@hyperframes/producer/distributed").planV2WithPublisher,
+        renderChunk:
+          renderChunkMock as unknown as typeof import("@hyperframes/producer/distributed").renderChunk,
+        assemble:
+          assembleMock as unknown as typeof import("@hyperframes/producer/distributed").assemble,
+      },
+      tmpRoot,
+      skipChromeResolution: true,
+    };
+
+    const planned = await handler(
+      {
+        Action: "plan",
+        PlanProtocol: "v2",
+        ProjectS3Uri: "s3://bucket/project.tar.gz",
+        PlanOutputS3Prefix: "s3://bucket/renders/v2/",
+        Config: { fps: 30, width: 640, height: 360, format: "mp4" },
+      },
+      deps,
+    );
+    expect(planned).toMatchObject({
+      PlanProtocol: "v2",
+      PlanV2ManifestS3Uri: "s3://bucket/renders/v2/v2/manifest.json",
+      PlanV2ArtifactS3Prefix: "s3://bucket/renders/v2/v2/artifacts/sha256",
+    });
+    expect("PlanS3Uri" in planned).toBe(false);
+    if (!("PlanProtocol" in planned) || planned.PlanProtocol !== "v2") {
+      throw new Error("expected v2 plan result");
+    }
+    const planUploads = s3.ops.filter((operation) => operation.kind === "upload");
+    expect(planUploads.at(-1)?.uri).toBe(planned.PlanV2ManifestS3Uri);
+    expect(
+      planUploads
+        .slice(0, -1)
+        .every((operation) => operation.uri.startsWith(`${planned.PlanV2ArtifactS3Prefix}/`)),
+    ).toBe(true);
+
+    const beforeChunk = s3.ops.length;
+    const chunk = await handler(
+      {
+        Action: "renderChunk",
+        PlanProtocol: "v2",
+        PlanV2ManifestS3Uri: planned.PlanV2ManifestS3Uri,
+        PlanV2ArtifactS3Prefix: planned.PlanV2ArtifactS3Prefix,
+        PlanHash: planned.PlanHash,
+        ChunkIndex: 0,
+        ChunkOutputS3Prefix: "s3://bucket/renders/v2/",
+        Format: "mp4",
+      },
+      deps,
+    );
+    if (chunk.Action !== "renderChunk") throw new Error("expected chunk result");
+    expect(chunk.CaptureMode).toBe("beginframe");
+    const audioDigest = createHash("sha256").update("AAC").digest("hex");
+    const audioUri = `${planned.PlanV2ArtifactS3Prefix}/${audioDigest.slice(0, 2)}/${audioDigest}`;
+    expect(s3.ops.slice(beforeChunk).some((operation) => operation.uri === audioUri)).toBe(false);
+
+    await handler(
+      {
+        Action: "assemble",
+        PlanProtocol: "v2",
+        PlanV2ManifestS3Uri: planned.PlanV2ManifestS3Uri,
+        PlanV2ArtifactS3Prefix: planned.PlanV2ArtifactS3Prefix,
+        PlanHash: planned.PlanHash,
+        ChunkS3Uris: [chunk.ChunkS3Uri],
+        AudioS3Uri: null,
+        OutputS3Uri: "s3://bucket/renders/v2/output.mp4",
+        Format: "mp4",
+      },
+      deps,
+    );
+    expect(
+      s3.ops.some((operation) => operation.kind === "download" && operation.uri === audioUri),
+    ).toBe(true);
   });
 
   it("rejects unknown actions", async () => {
@@ -567,4 +788,28 @@ async function makeMinimalPlanTar(): Promise<Buffer> {
   const tarPath = join(dir, "out.tar.gz");
   await tar.create({ gzip: true, file: tarPath, cwd: dir }, ["plan.json", "meta"]);
   return rf(tarPath);
+}
+
+function makeMinimalV1PlanDir(dir: string, withAudio: boolean): void {
+  mkdirSync(join(dir, "meta"), { recursive: true });
+  mkdirSync(join(dir, "compiled"), { recursive: true });
+  writeFileSync(join(dir, "compiled", "index.html"), "<html>aws v2 fixture</html>");
+  const planJson = {
+    planHash: "a".repeat(64),
+    chunkCount: 1,
+    totalFrames: 30,
+    dimensions: { fpsNum: 30, fpsDen: 1, width: 640, height: 360, format: "mp4" },
+    ffmpegVersion: "6.0",
+    producerVersion: "test",
+    fontSnapshotSha: "font-snapshot-test",
+  };
+  writeFileSync(join(dir, "plan.json"), JSON.stringify(planJson));
+  writeFileSync(
+    join(dir, "meta", "chunks.json"),
+    JSON.stringify([{ index: 0, startFrame: 0, endFrame: 30 }]),
+  );
+  writeFileSync(join(dir, "meta", "encoder.json"), "{}");
+  if (withAudio) writeFileSync(join(dir, "audio.aac"), "AAC");
+  planJson.planHash = recomputePlanHashFromPlanDir(dir);
+  writeFileSync(join(dir, "plan.json"), JSON.stringify(planJson));
 }

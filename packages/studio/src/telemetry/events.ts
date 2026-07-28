@@ -63,12 +63,26 @@ export function trackStudioExpandedClipEdit(props: {
   trackEvent("studio_expanded_clip_edit", { action: props.action });
 }
 
+// Adoption signal for the per-clip keyframe-lane caret toggle.
+export function trackStudioKeyframeLaneExpand(props: { expanded: boolean }): void {
+  trackEvent("studio_keyframe_lane_expand", { expanded: props.expanded });
+}
+
+// Adoption signal for opening and committing the per-segment ease editor.
+export function trackStudioSegmentEaseEdit(props: {
+  action: "open" | "commit";
+  ease?: string;
+}): void {
+  trackEvent("studio_segment_ease_edit", { action: props.action, ease: props.ease });
+}
+
 export function trackStudioFeedback(props: { rating: number; comment?: string }): void {
-  trackEvent("survey sent", {
-    $survey_id: "studio_experience",
-    $survey_response: props.rating,
+  // Plain product event, not a PostHog survey response: nothing here is served
+  // by the surveys product (no survey definition, no targeting, no popover).
+  trackEvent("studio_feedback", {
+    rating: props.rating,
     rating_scale: 10,
-    ...(props.comment ? { $survey_response_2: props.comment } : {}),
+    ...(props.comment ? { comment: props.comment } : {}),
     doctor_summary: getBrowserDoctorSummary(),
     source: "studio",
   });

@@ -73,3 +73,56 @@ describe("media-use TTS documentation", () => {
     expect(captions).toContain("heygen-tts.mjs");
   });
 });
+
+describe("media treatment routing documentation", () => {
+  it("routes vague composition-media feedback to the canonical workflow", () => {
+    const router = read("skills", "hyperframes", "SKILL.md");
+    const mediaUse = read("skills", "media-use", "SKILL.md");
+    const treatments = read("skills", "media-use", "references", "media-treatments.md");
+
+    expect(router).toContain("dark/flat/boring footage");
+    expect(router).toContain("`/media-use`");
+    expect(mediaUse).toContain("references/media-treatments.md");
+    expect(mediaUse).toContain("`hyperframes media-treatment`");
+    expect(treatments).toContain("Persist pixel settings with `hyperframes media-treatment`");
+    expect(treatments).toContain("apply to the entire selected real `<img>` or");
+    expect(treatments).toContain("external segmentation/tracking tool");
+  });
+
+  it("keeps discovery progressive and verification visual", () => {
+    const treatments = read("skills", "media-use", "references", "media-treatments.md");
+    const recipes = read("skills", "media-use", "references", "media-treatment-recipes.md");
+
+    expect(treatments).toContain("hyperframes media-treatment --capabilities --json");
+    expect(treatments).toContain("--capability <id>");
+    expect(treatments).toContain("Recipes are optional macros");
+    expect(recipes).toContain("optional tested seeds");
+    expect(treatments).toContain("hyperframes add <name> --dir <project>");
+    expect(treatments).toContain("snapshots/treatment-before/contact-sheet.jpg");
+    expect(treatments).toMatch(/Do not report visual\s+quality from command success alone/);
+  });
+
+  it("indexes calibrated treatment recipes without making them mandatory", () => {
+    const treatments = read("skills", "media-use", "references", "media-treatments.md");
+    const recipes = read("skills", "media-use", "references", "media-treatment-recipes.md");
+
+    for (const heading of [
+      "Monochrome Screen Print",
+      "Engraved Illustration",
+      "Crosshatched Sketch",
+      "CRT Display",
+    ]) {
+      expect(treatments).toContain(`\`${heading}\``);
+      expect(recipes).toContain(`## ${heading}`);
+    }
+  });
+
+  it("places the media-treatment discovery gate in new project instructions", () => {
+    for (const file of ["AGENTS.md", "CLAUDE.md"]) {
+      const template = read("packages", "cli", "src", "templates", "_shared", file);
+      expect(template).toContain("Changing how real footage or images look or reveal?");
+      expect(template).toContain("Load `/media-use`");
+      expect(template).toContain("do not improvise equivalent CSS/SVG filters or overlays");
+    }
+  });
+});

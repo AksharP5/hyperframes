@@ -48,6 +48,8 @@ import type {
   ContrastAuditEntry,
   GeometryCandidateRequest,
   MotionSpecResolution,
+  OffPivotFrame,
+  OffPivotRotationSample,
   RotationSample,
 } from "./checkTypes.js";
 
@@ -193,6 +195,10 @@ interface GridSamples {
   /** Every rotatable element's geometry at each layout sample; grouped by
    * selector after the run to detect rotation_pivot_drift. */
   rotationSamples: RotationSample[];
+  /** One time-hoisted frame of every elongated rotating SVG figure's
+   * material-point geometry + dial hub per layout sample; flattened by selector
+   * to detect off_pivot_rotation. */
+  indicatorFrames: OffPivotFrame[];
 }
 
 interface GeometrySeen {
@@ -365,6 +371,7 @@ async function collectGridSamples(
     contrastMs: 0,
     geometrySignatures: [],
     rotationSamples: [],
+    indicatorFrames: [],
   };
   for (const time of mergeSampleTimes(grid.layoutSamples, motion.times)) {
     await driver.seek(time);
@@ -373,11 +380,12 @@ async function collectGridSamples(
     // that render time — never a stale bbox from an earlier/later sample.
     const issuesAtTime: AnchoredLayoutIssue[] = [];
     if (layoutSet.has(time)) {
-      const layoutIssues = await driver.collectLayout(time, options.tolerance);
+      const layoutIssues = await driver.collectLayout(time, options.tolerance, options.layout);
       collected.layoutIssues.push(...layoutIssues);
       issuesAtTime.push(...layoutIssues);
       collected.geometrySignatures.push(await driver.collectLayoutGeometry());
       collected.rotationSamples.push(...(await driver.collectRotationSample(time)));
+      collected.indicatorFrames.push(await driver.collectOffPivotRotationSample(time));
     }
     if (canvas) {
       const geometryIssues = await collectGeometryAt(
@@ -409,7 +417,40 @@ async function collectGridSamples(
       collected.screenshots.push({ time, pngBase64: capture.pngBase64 });
     }
   }
+  await collectMotionOverlapSamples(driver, grid, collected);
   return collected;
+}
+
+// Dense grid catches mid-motion text collisions the sparse layout grid seeks past; text-only overlap collection is cheap enough to afford it.
+const OVERLAP_SAMPLE_FPS = 8;
+// Ceiling that bounds dense seeks; past ~75s the grid degrades below 8fps rather than growing the seek budget without limit.
+const OVERLAP_MAX_SAMPLES = 600;
+
+function buildOverlapSampleTimes(duration: number): number[] {
+  if (!Number.isFinite(duration) || duration <= 0) return [];
+  const count = Math.min(
+    OVERLAP_MAX_SAMPLES,
+    Math.max(2, Math.ceil(duration * OVERLAP_SAMPLE_FPS) + 1),
+  );
+  const step = duration / (count - 1);
+  return mergeSampleTimes(
+    Array.from({ length: count }, (_, index) => Math.round(index * step * 1000) / 1000),
+  );
+}
+
+/** Reruns content_overlap on a fine grid, unconditionally rather than gated on fingerprint change, since an animation aliased to the sparse grid collides between identical-fingerprint samples. */
+async function collectMotionOverlapSamples(
+  driver: CheckAuditDriver,
+  grid: SampleGrid,
+  collected: GridSamples,
+): Promise<void> {
+  const baseTimes = new Set(grid.layoutSamples);
+  for (const time of buildOverlapSampleTimes(grid.duration)) {
+    if (baseTimes.has(time)) continue;
+    // Settle-free seek: collectOverlap reads getBoundingClientRect geometry, valid synchronously after setTime, so the dense pass skips the per-seek paint settle.
+    await driver.seekGeometry(time);
+    collected.layoutIssues.push(...(await driver.collectOverlap(time)));
+  }
 }
 
 // Frozen-sweep guard (#U10): compositions this short can legitimately hold a
@@ -461,19 +502,16 @@ function detectSweepStatic(
   ];
 }
 
-// rotation_pivot_drift thresholds. A spinning element's bbox center should be
-// fixed; drift beyond this signals a wrong pivot (transformOrigin/svgOrigin).
+// rotation_pivot_drift: bbox center should stay fixed while the element spins.
 const ROTATION_MIN_SAMPLES = 3;
-// Degrees of angle spread that count as "actually spinning" (vs a static tilt).
+// Minimum angle spread that counts as spinning rather than a static tilt.
 const ROTATION_MIN_ANGLE_SPREAD_DEG = 20;
-// Max bbox-width ratio across samples — above this it is scaling/entrancing,
-// not spinning in place. A rigid anisotropic shape's axis-aligned bbox
-// oscillates under rotation on its own (a plain square already swings 1.41x
-// between flat and 45deg), so this must sit above that; 1.6 admits rotating
-// squares/mild rectangles while still excluding gross scale/entrance growth
-// and thin bars/lines whose bbox swings many-fold (e.g. a rotating reference
-// arm). The bbox-CENTER drift below is the real spin-in-place discriminator.
+// Long-axis AABB growth ceiling (square@45° ≈ 1.41×); rejects non-rigid blow-ups before the model fit.
 const ROTATION_MAX_SIZE_RATIO = 1.6;
+// Relative slack when matching observed AABB to one rigid unrotated rectangle.
+const ROTATION_RIGID_AABB_RATIO = 1.15;
+// |cos2θ| below this → 45°-class sample; skip as an unrotated-size estimator (singular).
+const ROTATION_RIGID_ESTIMATE_MIN_DET = 0.15;
 // Skip tiny decorative spinners; only sizable rotating figures matter.
 const ROTATION_MIN_MEDIAN_AREA_PX = 2500;
 const ROTATION_DRIFT_SIZE_FRACTION = 0.1;
@@ -548,14 +586,21 @@ function rotationDriftFinding(
   };
 }
 
-function groupRotationSamplesBySelector(samples: RotationSample[]): Map<string, RotationSample[]> {
-  const bySelector = new Map<string, RotationSample[]>();
-  for (const sample of samples) {
-    const group = bySelector.get(sample.selector);
-    if (group) group.push(sample);
-    else bySelector.set(sample.selector, [sample]);
+/** Bucket items by a derived key, preserving insertion order within each bucket. */
+function groupBy<T>(items: T[], keyOf: (item: T) => string): Map<string, T[]> {
+  const byKey = new Map<string, T[]>();
+  for (const item of items) {
+    const group = byKey.get(keyOf(item));
+    if (group) group.push(item);
+    else byKey.set(keyOf(item), [item]);
   }
-  return bySelector;
+  return byKey;
+}
+
+/** Bucket time-samples by their CSS selector so each element's trajectory can be
+ * analyzed independently. Shared by rotation_pivot_drift and off_pivot_rotation. */
+function groupBySelector<T extends { selector: string }>(samples: T[]): Map<string, T[]> {
+  return groupBy(samples, (sample) => sample.selector);
 }
 
 /** Enough samples to establish a spin trajectory (one frame can't). */
@@ -568,20 +613,90 @@ function isActuallySpinning(group: RotationSample[]): boolean {
   return maxAngleSpread(group.map((s) => s.angle)) > ROTATION_MIN_ANGLE_SPREAD_DEG;
 }
 
-/** Rigid bbox size in BOTH dimensions. A scale/entrance animation is not pivot
- * drift; in particular top-anchored height scaling (fixed width, growing height)
- * moves the AABB center on its own — the earlier width-only guard let that through
- * as a false positive. */
-function isRotationSizeStable(group: RotationSample[]): boolean {
-  const widths = group.map((s) => s.w);
-  const heights = group.map((s) => s.h);
-  const minWidth = Math.min(...widths);
-  const minHeight = Math.min(...heights);
-  if (minWidth <= 0 || minHeight <= 0) return false;
+/** AABB of an axis-aligned rectangle of size (elemW, elemH) after CSS rotation `angleDeg`. */
+function aabbForRotatedRect(
+  elemW: number,
+  elemH: number,
+  angleDeg: number,
+): { w: number; h: number } {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cosAbs = Math.abs(Math.cos(rad));
+  const sinAbs = Math.abs(Math.sin(rad));
+  return { w: elemW * cosAbs + elemH * sinAbs, h: elemW * sinAbs + elemH * cosAbs };
+}
+
+/** Invert one sample to unrotated (elemW, elemH); null when θ is near 45° (singular). */
+function unrotatedSizeFromSample(sample: RotationSample): { w: number; h: number } | null {
+  const rad = (sample.angle * Math.PI) / 180;
+  const cosAbs = Math.abs(Math.cos(rad));
+  const sinAbs = Math.abs(Math.sin(rad));
+  const det = cosAbs * cosAbs - sinAbs * sinAbs; // cos(2θ)
+  if (Math.abs(det) < ROTATION_RIGID_ESTIMATE_MIN_DET) return null;
+  const elemW = (cosAbs * sample.w - sinAbs * sample.h) / det;
+  const elemH = (cosAbs * sample.h - sinAbs * sample.w) / det;
+  if (!(elemW > 0) || !(elemH > 0)) return null;
+  return { w: elemW, h: elemH };
+}
+
+function aabbMatchesSample(expected: { w: number; h: number }, sample: RotationSample): boolean {
+  if (expected.w <= 0 || expected.h <= 0 || sample.w <= 0 || sample.h <= 0) return false;
   return (
-    Math.max(...widths) / minWidth <= ROTATION_MAX_SIZE_RATIO &&
-    Math.max(...heights) / minHeight <= ROTATION_MAX_SIZE_RATIO
+    Math.max(expected.w, sample.w) / Math.min(expected.w, sample.w) <= ROTATION_RIGID_AABB_RATIO &&
+    Math.max(expected.h, sample.h) / Math.min(expected.h, sample.h) <= ROTATION_RIGID_AABB_RATIO
   );
+}
+
+function isSingularRotationAngle(angleDeg: number): boolean {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cosAbs = Math.abs(Math.cos(rad));
+  const sinAbs = Math.abs(Math.sin(rad));
+  return Math.abs(cosAbs * cosAbs - sinAbs * sinAbs) < ROTATION_RIGID_ESTIMATE_MIN_DET;
+}
+
+function isNearSquareAabb(sample: RotationSample): boolean {
+  if (sample.w <= 0 || sample.h <= 0) return false;
+  return Math.max(sample.w, sample.h) / Math.min(sample.w, sample.h) <= ROTATION_RIGID_AABB_RATIO;
+}
+
+/**
+ * All samples are 45°-class (no invertible estimator): a rigid rectangle projects to one
+ * near-square AABB size at every such phase, so mutual AABB agreement is the rigidity proof.
+ */
+function fitsSingularPhaseRigidProjection(group: RotationSample[]): boolean {
+  if (group.length === 0 || !group.every((s) => isSingularRotationAngle(s.angle))) return false;
+  if (!group.every(isNearSquareAabb)) return false;
+  const ref = group[0];
+  if (!ref) return false;
+  return group.every((sample) => aabbMatchesSample({ w: ref.w, h: ref.h }, sample));
+}
+
+/**
+ * Every sample's AABB matches one fixed unrotated rectangle spun by that sample's angle.
+ * Scale/entrance fails; partial-arc and all-singular (45°-class) rigid spins still pass.
+ */
+function fitsOneRigidRectangle(group: RotationSample[]): boolean {
+  for (const ref of group) {
+    const size = unrotatedSizeFromSample(ref);
+    if (!size) continue;
+    if (
+      group.every((sample) =>
+        aabbMatchesSample(aabbForRotatedRect(size.w, size.h, sample.angle), sample),
+      )
+    ) {
+      return true;
+    }
+  }
+  return fitsSingularPhaseRigidProjection(group);
+}
+
+/** Rigid spin: long AABB side stays bounded, and all samples fit one rotated rectangle. */
+function isRotationSizeStable(group: RotationSample[]): boolean {
+  if (group.some((s) => s.w <= 0 || s.h <= 0)) return false;
+  const longSides = group.map((s) => Math.max(s.w, s.h));
+  const minLong = Math.min(...longSides);
+  if (minLong <= 0) return false;
+  if (Math.max(...longSides) / minLong > ROTATION_MAX_SIZE_RATIO) return false;
+  return fitsOneRigidRectangle(group);
 }
 
 /** Skip tiny decorative spinners; only sizable rotating figures matter. */
@@ -589,9 +704,7 @@ function isSizableRotation(group: RotationSample[]): boolean {
   return median(group.map((s) => s.w * s.h)) >= ROTATION_MIN_MEDIAN_AREA_PX;
 }
 
-/** The size/motion gates a selector group must clear before the (viewport-
- * dependent) center-drift test. Each is a strict FP guard, deliberately so:
- * a false positive feeds destructive downstream auto-fixes. */
+/** Size/motion FP gates before the viewport-dependent center-drift test. */
 function isRotationDriftCandidate(group: RotationSample[]): boolean {
   return (
     hasEnoughRotationSamples(group) &&
@@ -601,34 +714,14 @@ function isRotationDriftCandidate(group: RotationSample[]): boolean {
   );
 }
 
-/**
- * rotation_pivot_drift: an element that visibly SPINS (its rotation angle varies
- * across the seek grid) while its bounding-box CENTER travels is pivoting about
- * the wrong point — the classic symptom of a transformOrigin/svgOrigin authored
- * as hardcoded pixels against a coordinate space the element was later resized
- * out of (e.g. spokes set to `250px 250px` inside a 460px-rendered 500-viewBox
- * SVG). A correctly centered spinner holds its bbox center fixed.
- *
- * Cross-sample by necessity — one frame can't distinguish spin-in-place from
- * pivot drift. FP guards are deliberately strict because a false positive feeds
- * destructive downstream auto-fixes: requires real rotation, a stable bbox size
- * in both axes (excludes scale/entrance animations), a sizable element, and
- * honors `[data-layout-allow-orbit]` opt-outs (applied browser-side).
- *
- * Invariant: samples are grouped by `selector`, assumed stable across seeks.
- * An element without a stable id/class can fall back to a `nth-of-type(N)`
- * selector whose N shifts as siblings enter/exit — so in that fringe it may be
- * mis-grouped (a missed detection, or in a rare exit-then-enter aliasing case a
- * spurious one). Author-crafted rotating figures effectively always carry stable
- * anchors; a stable-anchor gate on the browser sampler is the structural fix.
- */
+/** Flags a spinning element whose bbox center drifts — wrong transformOrigin/svgOrigin (elongated rotators included). */
 export function detectRotationPivotDrift(
   samples: RotationSample[],
   canvas: Canvas,
 ): AnchoredLayoutIssue[] {
   const findings: AnchoredLayoutIssue[] = [];
   const viewportFloor = ROTATION_DRIFT_VIEWPORT_FRACTION * Math.min(canvas.width, canvas.height);
-  for (const group of groupRotationSamplesBySelector(samples).values()) {
+  for (const group of groupBySelector(samples).values()) {
     if (!isRotationDriftCandidate(group)) continue;
     const medianSize = median(group.map((s) => Math.max(s.w, s.h)));
     const threshold = Math.max(ROTATION_DRIFT_SIZE_FRACTION * medianSize, viewportFloor);
@@ -638,6 +731,296 @@ export function detectRotationPivotDrift(
     if (finding) findings.push(finding);
   }
   return findings;
+}
+
+// off_pivot_rotation thresholds. A pointer must actually sweep, sit on a
+// resolvable dial hub, and its recovered center-of-rotation must land far from
+// that hub relative to the pointer's own length.
+//
+// The fit MUST be OVERDETERMINED: any 3 non-collinear points fit a circle with
+// ~zero residual, so a 3-sample "clean circle" guard is vacuous — arbitrary
+// endpoint deformation or translation would read as a perfect orbit. Require
+// >=5 distinct time-samples so the least-squares residual actually measures
+// whether the trajectory lies on one circle.
+const INDICATOR_MIN_SAMPLES = 5;
+const INDICATOR_MIN_ANGLE_SPREAD_DEG = 20;
+const INDICATOR_MIN_HUB_CIRCLES = 2;
+// The Kåsa fit's RMS residual normalized by the fitted radius. With >=5 samples
+// a genuine rotation lands well under this; non-circular motion (deformation,
+// translation, skew, jitter/scatter) blows past it, so we skip rather than
+// misread it as an off-hub pivot.
+const INDICATOR_MAX_FIT_RESIDUAL_FRACTION = 0.05;
+// Rigid-body guard: rotation preserves shape, so the pairwise distance between
+// the two tracked material points must stay ~constant. If it swings more than
+// this fraction of its median across the window the element is deforming, not
+// rotating rigidly — do not flag.
+const INDICATOR_MAX_RIGID_LEN_VARIATION = 0.15;
+// Drift beyond this fraction of the pointer length is a wrong pivot. A correctly
+// hubbed needle recovers a center within a few px of the hub (≈0); a base/edge
+// pivot mistake puts the recovered center a large fraction of the needle away.
+const INDICATOR_DRIFT_LENGTH_FRACTION = 0.35;
+
+interface CircleFit {
+  cx: number;
+  cy: number;
+  radius: number;
+  residual: number;
+}
+
+/** Kåsa algebraic circle fit; null when the points are near-collinear/degenerate
+ * (no stable center recoverable).
+ *
+ * KEEP IN SYNC with `fitCirclePoints` in
+ * packages/cli/src/commands/layout-audit.browser.js — the browser sampler needs
+ * the same fit to resolve arc-drawn dial hubs, but it is injected as a raw
+ * string (no import across the puppeteer boundary), so the math is intentionally
+ * duplicated per-language. Any change to the algorithm must land in both. */
+function fitCircle(points: Array<{ x: number; y: number }>): CircleFit | null {
+  const count = points.length;
+  if (count < 3) return null;
+  const meanX = points.reduce((sum, p) => sum + p.x, 0) / count;
+  const meanY = points.reduce((sum, p) => sum + p.y, 0) / count;
+  let suu = 0;
+  let svv = 0;
+  let suv = 0;
+  let suuu = 0;
+  let svvv = 0;
+  let suvv = 0;
+  let svuu = 0;
+  for (const point of points) {
+    const u = point.x - meanX;
+    const v = point.y - meanY;
+    suu += u * u;
+    svv += v * v;
+    suv += u * v;
+    suuu += u * u * u;
+    svvv += v * v * v;
+    suvv += u * v * v;
+    svuu += v * u * u;
+  }
+  const determinant = suu * svv - suv * suv;
+  if (Math.abs(determinant) < 1e-6) return null;
+  const rhsU = (suuu + suvv) / 2;
+  const rhsV = (svvv + svuu) / 2;
+  const uc = (rhsU * svv - rhsV * suv) / determinant;
+  const vc = (rhsV * suu - rhsU * suv) / determinant;
+  const cx = uc + meanX;
+  const cy = vc + meanY;
+  const radius = Math.sqrt(uc * uc + vc * vc + (suu + svv) / count);
+  // RMS radial residual: penalizes any point straying off the fitted circle
+  // more sharply than a mean-absolute error, so an overdetermined fit exposes
+  // non-circular trajectories instead of averaging them away.
+  let squaredError = 0;
+  for (const point of points) {
+    const delta = Math.hypot(point.x - cx, point.y - cy) - radius;
+    squaredError += delta * delta;
+  }
+  return { cx, cy, radius, residual: Math.sqrt(squaredError / count) };
+}
+
+/** A dial hub that is present for a SUSTAINED majority of the sampled window,
+ * not just the final frame — a transient single-frame hub is not a reliable
+ * anchor. The representative center is the median across the frames that carry
+ * one, so a stray frame can't yank it. */
+const INDICATOR_MIN_HUB_PRESENCE_FRACTION = 0.6;
+
+interface ResolvedHub {
+  hx: number;
+  hy: number;
+}
+
+function resolveHub(group: OffPivotRotationSample[]): ResolvedHub | null {
+  const present = group.filter(
+    (s) => s.hx !== null && s.hy !== null && s.hubCount >= INDICATOR_MIN_HUB_CIRCLES,
+  );
+  if (present.length < INDICATOR_MIN_HUB_PRESENCE_FRACTION * group.length) return null;
+  const hx = median(present.map((s) => s.hx as number));
+  const hy = median(present.map((s) => s.hy as number));
+  return { hx, hy };
+}
+
+/** Rigid-body guard: a rotation preserves the figure's shape, so the distance
+ * between the two tracked material points stays ~constant. Arbitrary endpoint
+ * deformation (morphing, stretching) changes it — reject so it isn't misread as
+ * an off-hub orbit. */
+function isRigidBody(group: OffPivotRotationSample[]): boolean {
+  const lengths = group.map((s) => s.len).filter((len) => len > 0);
+  if (lengths.length < group.length) return false;
+  const mid = median(lengths);
+  if (mid <= 0) return false;
+  const spread = Math.max(...lengths) - Math.min(...lengths);
+  return spread <= INDICATOR_MAX_RIGID_LEN_VARIATION * mid;
+}
+
+/** Recover the center-of-rotation from whichever major-axis endpoint traces the
+ * larger orbit (more movement → more numerically stable), rejecting scattered
+ * fits. The fit is OVERDETERMINED (>=INDICATOR_MIN_SAMPLES points) so a high RMS
+ * residual genuinely means the trajectory is not one circle. */
+function recoverPivot(group: OffPivotRotationSample[]): CircleFit | null {
+  if (group.length < INDICATOR_MIN_SAMPLES) return null;
+  const endpointA = group.map((s) => ({ x: s.ax, y: s.ay }));
+  const endpointB = group.map((s) => ({ x: s.bx, y: s.by }));
+  const fits = [fitCircle(endpointA), fitCircle(endpointB)].filter(
+    (fit): fit is CircleFit => fit !== null,
+  );
+  if (fits.length === 0) return null;
+  // Scoped-known blind spot: we keep the wider-radius endpoint fit and, if it
+  // fails the residual gate below, return null rather than falling back to the
+  // narrower fit. Deliberately conservative — a missed pointer (false negative)
+  // over threading both fits and risking a spurious pivot on a noisy arc.
+  const best = fits.reduce((widest, fit) => (fit.radius > widest.radius ? fit : widest));
+  if (best.radius <= 0) return null;
+  if (best.residual > INDICATOR_MAX_FIT_RESIDUAL_FRACTION * best.radius) return null;
+  return best;
+}
+
+/** An off-pivot sample with its frame time reattached for grouping/annotation.
+ * The wire shape ({@link OffPivotFrame}) hoists time to the frame; the detector
+ * flattens back to timed samples so the last frame's time anchors the finding. */
+type TimedIndicatorSample = OffPivotRotationSample & { time: number };
+
+function offPivotRotationFinding(
+  group: TimedIndicatorSample[],
+  drift: number,
+): AnchoredLayoutIssue | null {
+  const last = group[group.length - 1];
+  if (!last) return null;
+  const rect: LayoutRect = {
+    left: Math.min(last.ax, last.bx) - 4,
+    top: Math.min(last.ay, last.by) - 4,
+    right: Math.max(last.ax, last.bx) + 4,
+    bottom: Math.max(last.ay, last.by) + 4,
+    width: Math.abs(last.bx - last.ax) + 8,
+    height: Math.abs(last.by - last.ay) + 8,
+  };
+  return {
+    code: "off_pivot_rotation",
+    severity: "warning",
+    time: last.time,
+    selector: last.selector,
+    dataAttributes: {},
+    sourceFile: "index.html",
+    bbox: rectToBbox(rect),
+    rect,
+    message: `Gauge/dial pointer rotates about a point ${Math.round(drift)}px from the dial hub — its center-of-rotation is off the hub, so it points wrong or overshoots the track (check the rotating group's pivot: translate to the hub before rotate, or set svgOrigin/transform-origin to the hub).`,
+    fixHint:
+      "The pointer's center-of-rotation must coincide with the dial hub. Rotate the group about the hub (e.g. transform-origin/svgOrigin set to the hub center, or translate the group so its rotation pivot lands on the hub) rather than about the element's own bbox center.",
+  };
+}
+
+/**
+ * off_pivot_rotation: a gauge needle / clock hand / radar sweep / dial pointer
+ * that rotates about the WRONG pivot — its center-of-rotation is far from the
+ * dial's hub, so the pointer aims wrong, runs off the track, or leaves the canvas.
+ *
+ * This is a HUB-REFERENCED check by necessity: a correctly-swept needle's bbox
+ * center orbits identically to a broken one (the pivot sits at the needle's
+ * base/edge either way), so no element-intrinsic measure separates them. The
+ * browser sampler records two fixed MATERIAL points on the pointer per frame; a
+ * circle fit recovers the true center-of-rotation, which is then compared to the
+ * dial's static hub (the screen point shared by the most non-rotating circles).
+ *
+ * FP guards are strict and STRUCTURAL (evaluated across the whole sampled
+ * window, not a single frame): requires real sweep (angle varies), a hub present
+ * for a sustained majority of frames (≥2 concentric static circles), a
+ * rigid-body trajectory (the two tracked points keep a constant separation), an
+ * OVERDETERMINED circle fit (≥5 samples, low RMS residual), and drift exceeding a
+ * fraction of the pointer's own length. When no sustained hub reference resolves
+ * it does not fire, so a lone decorative rotator can't trip it.
+ */
+interface IndicatorCandidate {
+  hubKey: string;
+  angleAboutHub: number;
+  drift: number;
+  length: number;
+  finding: AnchoredLayoutIssue | null;
+}
+
+/** Distinct angular positions about the hub among a set of candidates (nested
+ * blade parts share one angle; orbiting bodies spread to several). Exported for
+ * direct unit coverage of the multi-body/orbit-atom suppression guard. */
+export function countAngularBodies(angles: number[]): number {
+  const clusters: number[] = [];
+  for (const angle of angles) {
+    if (
+      !clusters.some((rep) => Math.min(Math.abs(angle - rep), 360 - Math.abs(angle - rep)) <= 25)
+    ) {
+      clusters.push(angle);
+    }
+  }
+  return clusters.length;
+}
+
+/** The pointer's angular position about the resolved hub, averaged across the
+ * window so the multi-body clustering compares a stable per-body angle rather
+ * than a single-frame snapshot. */
+function angleAboutHub(group: OffPivotRotationSample[], hub: ResolvedHub): number {
+  const midX = median(group.map((s) => (s.ax + s.bx) / 2));
+  const midY = median(group.map((s) => (s.ay + s.by) / 2));
+  return (Math.atan2(midY - hub.hy, midX - hub.hx) * 180) / Math.PI;
+}
+
+/** Gate one element's samples into a candidate, applying every structural FP
+ * guard. Returns null when the element is not an off-pivot-able dial pointer. */
+function buildIndicatorCandidate(group: TimedIndicatorSample[]): IndicatorCandidate | null {
+  if (group.length < INDICATOR_MIN_SAMPLES) return null;
+  if (maxAngleSpread(group.map((s) => s.angle)) <= INDICATOR_MIN_ANGLE_SPREAD_DEG) return null;
+  const hub = resolveHub(group);
+  if (!hub) return null;
+  if (!isRigidBody(group)) return null;
+  const pivot = recoverPivot(group);
+  if (!pivot) return null;
+  const drift = Math.hypot(pivot.cx - hub.hx, pivot.cy - hub.hy);
+  const length = median(group.map((s) => s.len));
+  const eligible = drift > INDICATOR_DRIFT_LENGTH_FRACTION * length;
+  return {
+    // Scoped-known blind spot: hubs bucketed by rounded screen coords, so two
+    // separate dials whose screen hubs land in the same 5px bucket merge into
+    // one multi-body group (rare — distinct dials stacked at ~identical screen
+    // position). Key by owning <svg> identity if that pattern shows up.
+    hubKey: `${Math.round(hub.hx / 5)}:${Math.round(hub.hy / 5)}`,
+    angleAboutHub: angleAboutHub(group, hub),
+    drift,
+    length,
+    finding: eligible ? offPivotRotationFinding(group, drift) : null,
+  };
+}
+
+/** Per hub: multiple bodies at distinct angular positions = an orbit/atom/radial
+ * system, not a single dial pointer — suppress. A real pointer (group + nested
+ * blades) collapses to one angular cluster. Otherwise emit one finding per hub,
+ * keeping the longest pointer. */
+function selectHubFindings(candidates: IndicatorCandidate[]): AnchoredLayoutIssue[] {
+  const byHub = groupBy(candidates, (candidate) => candidate.hubKey);
+  const findings: AnchoredLayoutIssue[] = [];
+  for (const group of byHub.values()) {
+    // Count angular bodies only over ELIGIBLE (off-pivot) candidates. Sibling
+    // hands that are correctly hubbed (finding === null) are not orbiting
+    // bodies, so counting them would falsely suppress a lone off-pivot hand on
+    // a multi-hand clock/dial whose other hands pivot correctly.
+    const eligible = group.filter((c) => c.finding !== null);
+    if (countAngularBodies(eligible.map((c) => c.angleAboutHub)) >= 2) continue;
+    const best = group
+      .filter((c) => c.finding !== null)
+      .reduce<IndicatorCandidate | null>(
+        (max, c) => (!max || c.length > max.length ? c : max),
+        null,
+      );
+    if (best?.finding) findings.push(best.finding);
+  }
+  return findings;
+}
+
+export function detectOffPivotRotation(frames: OffPivotFrame[]): AnchoredLayoutIssue[] {
+  const timed: TimedIndicatorSample[] = frames.flatMap((frame) =>
+    frame.samples.map((sample) => ({ ...sample, time: frame.time })),
+  );
+  const candidates: IndicatorCandidate[] = [];
+  for (const group of groupBySelector(timed).values()) {
+    const candidate = buildIndicatorCandidate(group);
+    if (candidate) candidates.push(candidate);
+  }
+  return selectHubFindings(candidates);
 }
 
 /** Error-severity findings with real geometry become labeled overview boxes.
@@ -679,6 +1062,7 @@ export async function runAuditGrid(
     collected.rotationSamples,
     await driver.getCanvas(),
   );
+  const offPivotFindings = detectOffPivotRotation(collected.indicatorFrames);
   const contrast = buildContrastResults(collected.contrastEntries);
   return {
     duration: grid.duration,
@@ -686,7 +1070,12 @@ export async function runAuditGrid(
     transitionSamples: grid.transitionSamples,
     transitionSamplesDropped: grid.transitionSamplesDropped,
     runtimeFindings: [],
-    layoutIssues: [...collected.layoutIssues, ...sweepFindings, ...rotationFindings],
+    layoutIssues: [
+      ...collected.layoutIssues,
+      ...sweepFindings,
+      ...rotationFindings,
+      ...offPivotFindings,
+    ],
     motionIssues,
     motionSampleCount: collected.motionFrames.length,
     contrastSamples: grid.contrastSamples,

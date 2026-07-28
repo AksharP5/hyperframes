@@ -53,13 +53,86 @@ export function isInstantHold(animation: GsapAnimation): boolean {
  * Returns `#id` if the selection has an id, otherwise the raw selector,
  * or null if neither exists.
  */
+/**
+ * A CSS-valid selector for an element id. `#id` for a valid CSS identifier,
+ * otherwise an `[id="..."]` attribute selector. IDs that start with a digit
+ * (e.g. "01-hook-hero-word") make `#id` an invalid selector, so
+ * `document.querySelector("#01-...")` / GSAP's `querySelectorAll` throw a
+ * SyntaxError — which surfaces as a masked cross-origin "Script error." and
+ * crashes the preview the moment such a target is committed (e.g. dragging).
+ */
+// Conservative: matches only ids that are unquestionably safe as a `#id`
+// selector — ASCII identifier, starts with a letter/underscore (or a single
+// leading hyphen), no dots/colons/spaces/digits-first. Anything it rejects
+// (digit-leading like "01-hook-...", dots, spaces, non-ASCII, …) falls through
+// to the attribute selector below, which is always valid. It can only ever err
+// toward the safe form, never toward a `#id` that throws — and, unlike
+// `CSS.escape`, it needs no browser global (this runs in node tests too).
+const SAFE_HASH_ID = /^-?[A-Za-z_][\w-]*$/;
+
+/**
+ * How close (in tween-%) a playhead has to be to count as sitting ON an existing
+ * keyframe. Every "is there already a keyframe here?" test shares this: with two
+ * different tolerances in play, one path decided "no keyframe here, append one"
+ * while another decided "yes, edit that one", and a drag near a waypoint left two
+ * keyframes a fraction of a percent apart.
+ */
+export const KEYFRAME_PCT_MATCH = 1;
+
+export function idSelector(id: string): string {
+  // A `#id` selector is only valid for a CSS identifier. IDs that start with a
+  // digit (e.g. "01-hook-hero-word") make `document.querySelector("#01-...")` and
+  // GSAP's `querySelectorAll` throw a SyntaxError — surfacing as a masked
+  // cross-origin "Script error." that crashes the preview the moment such a
+  // target is committed (e.g. dragging the element). Address those via an
+  // attribute selector instead (quotes/backslashes escaped for the string).
+  return SAFE_HASH_ID.test(id) ? `#${id}` : `[id="${id.replace(/(["\\])/g, "\\$1")}"]`;
+}
+
+/**
+ * Inverse of {@link idSelector}: the element id a target selector addresses, or
+ * null for a selector that is not id-based (a class, a tag, a descendant path).
+ *
+ * Both shapes have to be read back, not just `#id`. Every writer emits through
+ * `idSelector`, so a digit-leading, dotted or otherwise CSS-unsafe id lands in
+ * the source as `[id="01-hook-hero"]`. A reader that only matched `#id` saw no
+ * id at all for those elements and skipped them — which is how the post-commit
+ * keyframe-cache refresh silently stopped running for exactly the ids
+ * `idSelector` was added to support.
+ */
+export function idFromSelector(selector: string | undefined | null): string | null {
+  if (!selector) return null;
+  const hash = selector.match(/^#([\w-]+)/);
+  if (hash) return hash[1] ?? null;
+  const attribute = selector.match(/^\[id="((?:\\.|[^"\\])*)"\]/);
+  if (!attribute) return null;
+  // Undo the quote/backslash escaping idSelector applies.
+  return (attribute[1] ?? "").replace(/\\(["\\])/g, "$1");
+}
+
 export function selectorFromSelection(selection: DomEditSelection): string | null {
-  if (selection.id) return `#${selection.id}`;
+  if (selection.id) return idSelector(selection.id);
   if (selection.selector) return selection.selector;
   return null;
 }
 
 // ── Percentage computation ────────────────────────────────────────────────────
+
+/**
+ * Resolve the timing basis used by editor keyframes. The timeline renders a
+ * duration-less tween across its owning clip, so mutations must use that same
+ * duration instead of silently falling back to GSAP's 0.5s default.
+ */
+export function resolveEditableTweenDuration(
+  animation: GsapAnimation,
+  selection: DomEditSelection,
+): number {
+  const clipDuration = Number.parseFloat(selection.dataAttributes?.duration ?? "");
+  return resolveTweenDuration(
+    animation,
+    Number.isFinite(clipDuration) && clipDuration > 0 ? clipDuration : 0.5,
+  );
+}
 
 /**
  * Compute the current playback percentage within an element's animation range.
@@ -73,7 +146,7 @@ export function computeElementPercentage(
 ): number {
   if (animation) {
     const start = resolveTweenStart(animation);
-    const duration = resolveTweenDuration(animation);
+    const duration = resolveEditableTweenDuration(animation, selection);
     if (duration <= 0) return 0;
     if (start !== null) {
       return absoluteToPercentage(currentTime, start, duration);
@@ -81,9 +154,7 @@ export function computeElementPercentage(
   }
   const elStart = Number.parseFloat(selection.dataAttributes?.start ?? "0") || 0;
   const elDuration = Number.parseFloat(selection.dataAttributes?.duration ?? "1") || 1;
-  return elDuration > 0
-    ? Math.max(0, Math.min(100, Math.round(((currentTime - elStart) / elDuration) * 1000) / 10))
-    : 0;
+  return absoluteToPercentage(currentTime, elStart, elDuration);
 }
 
 // ── Iframe accessors ──────────────────────────────────────────────────────────
@@ -118,6 +189,16 @@ export interface ParsedPercentageKeyframes {
   easeEach?: string;
 }
 
+function collectAnimatableKeyframeProperties(entry: object): Record<string, number | string> {
+  const properties: Record<string, number | string> = {};
+  for (const [property, value] of Object.entries(entry)) {
+    if (property === "ease") continue;
+    if (typeof value === "number") properties[property] = Math.round(value * 1000) / 1000;
+    else if (typeof value === "string") properties[property] = value;
+  }
+  return properties;
+}
+
 /**
  * Parse a GSAP percentage-keyframe object (`{ "0%": { x: 10 }, "100%": { x: 200 } }`)
  * into a sorted array of `{ percentage, properties }` entries.
@@ -146,12 +227,7 @@ export function parsePercentageKeyframes(
     steps.forEach((entry, i) => {
       if (!entry || typeof entry !== "object") return;
       const percentage = steps.length > 1 ? Math.round((i / (steps.length - 1)) * 1000) / 10 : 0;
-      const properties: Record<string, number | string> = {};
-      for (const [pk, pv] of Object.entries(entry as Record<string, unknown>)) {
-        if (pk === "ease") continue;
-        if (typeof pv === "number") properties[pk] = Math.round(pv * 1000) / 1000;
-        else if (typeof pv === "string") properties[pk] = pv;
-      }
+      const properties = collectAnimatableKeyframeProperties(entry);
       if (Object.keys(properties).length > 0) keyframes.push({ percentage, properties });
     });
     return keyframes.length > 0 ? { keyframes } : null;
@@ -165,12 +241,7 @@ export function parsePercentageKeyframes(
     const pctMatch = key.match(/^(\d+(?:\.\d+)?)%$/);
     if (!pctMatch || !val || typeof val !== "object") continue;
     const percentage = parseFloat(pctMatch[1]);
-    const properties: Record<string, number | string> = {};
-    for (const [pk, pv] of Object.entries(val as Record<string, unknown>)) {
-      if (pk === "ease") continue;
-      if (typeof pv === "number") properties[pk] = Math.round(pv * 1000) / 1000;
-      else if (typeof pv === "string") properties[pk] = pv;
-    }
+    const properties = collectAnimatableKeyframeProperties(val);
     if (Object.keys(properties).length > 0) {
       keyframes.push({ percentage, properties });
     }
@@ -186,4 +257,58 @@ export function parsePercentageKeyframes(
 /** Convert a tween-relative percentage to an absolute time. */
 export function toAbsoluteTime(tweenPos: number, tweenDur: number, percentage: number): number {
   return tweenPos + (percentage / 100) * tweenDur;
+}
+
+/**
+ * An absolute time as a percentage of a timeline clip, at the one precision every
+ * keyframe-cache writer must share. 0.001% keeps a beat-snapped keyframe centered
+ * on the beat dot, and because selection keys embed this number, a writer that
+ * rounds coarser would orphan a live selection the moment it rewrites the cache.
+ * A zero-length clip has no percentage to give, so the tween-% passes through.
+ */
+export function toClipPercentage(
+  absoluteTime: number,
+  clipStart: number,
+  clipDuration: number,
+  fallbackPercentage: number,
+): number {
+  if (clipDuration <= 0) return fallbackPercentage;
+  return Math.round(((absoluteTime - clipStart) / clipDuration) * 100000) / 1000;
+}
+
+/**
+ * One keyframe-cache row per tween keyframe: the percentage re-based onto the
+ * clip, the original tween percentage kept alongside it, and the animation
+ * identity every lane and selection key needs. Shared by the cache writers so
+ * they cannot drift in precision or in which identity fields they record.
+ */
+export function toClipKeyframes<T extends { percentage: number }>(
+  source: readonly T[],
+  anim: GsapAnimation,
+  clipStart: number,
+  clipDuration: number,
+): Array<
+  T & {
+    tweenPercentage: number;
+    propertyGroup: GsapAnimation["propertyGroup"];
+    animationId: string;
+  }
+> {
+  const tweenStart = anim.resolvedStart ?? (typeof anim.position === "number" ? anim.position : 0);
+  // A duration-less tween spans the clip, the same rule the edit paths use
+  // (resolveEditableTweenDuration). A fixed 1s here put its keyframes at a
+  // percentage no editor agreed with.
+  const tweenDuration = anim.duration ?? clipDuration;
+  return source.map((keyframe) => ({
+    ...keyframe,
+    percentage: toClipPercentage(
+      toAbsoluteTime(tweenStart, tweenDuration, keyframe.percentage),
+      clipStart,
+      clipDuration,
+      keyframe.percentage,
+    ),
+    tweenPercentage: keyframe.percentage,
+    propertyGroup: anim.propertyGroup,
+    animationId: anim.id,
+  }));
 }

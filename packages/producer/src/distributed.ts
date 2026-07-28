@@ -54,13 +54,44 @@ export {
   PlanTooLargeError,
 } from "./services/distributed/plan.js";
 
+// ── Plan v2 content-addressed transport ────────────────────────────────────
+export {
+  createPlanV2FromV1,
+  listPlanV2ArtifactsForTarget,
+  materializePlanV2Target,
+  planV2,
+  planV2WithPublisher,
+  publishPlanV2FromV1,
+  readPlanV2Manifest,
+  validatePlanV2MaterializedTarget,
+  PLAN_V2_INTEGRITY_UNRECOVERABLE,
+  PLAN_V2_MATERIALIZATION_MARKER,
+  PlanV2IntegrityError,
+  type PlanV2Artifact,
+  type PlanV2Limitations,
+  type PlanV2Manifest,
+  type PlanV2MaterializationResult,
+  type PlanV2MaterializationTarget,
+  type PlanV2Result,
+  type PlanV2WithPublisherOptions,
+} from "./services/distributed/planV2.js";
+export {
+  LocalPlanV2ArtifactPublisher,
+  type LocalPlanV2ArtifactPublisherOptions,
+  type PlanV2ArtifactPublisher,
+  type PlanV2PublishBlob,
+} from "./services/distributed/planV2Publisher.js";
+export { assembleV2, renderChunkV2 } from "./services/distributed/planV2Execution.js";
+
 // ── RenderChunk (Activity B) ────────────────────────────────────────────────
 export {
   applyRuntimeEnvSnapshot,
   readWebGlVendorInfoFromCanvas,
   renderChunk,
   // Types
+  type ChunkRenderer,
   type ChunkResult,
+  type EffectiveChunkResult,
   // Error codes + classes
   FFMPEG_VERSION_MISMATCH,
   PLAN_HASH_MISMATCH,
@@ -81,6 +112,32 @@ export {
   validateVariablesPayload,
 } from "./services/distributed/renderConfigValidation.js";
 export { hashProjectDir } from "./services/distributed/projectHash.js";
+
+// ── Plan protocol compatibility ────────────────────────────────────────────
+// Workers validate this descriptor before consuming layout-specific
+// artifacts. Missing descriptors remain compatible with legacy v1 plans.
+export {
+  CURRENT_PLAN_PROTOCOL,
+  DISTRIBUTED_RENDER_CAPABILITIES,
+  getDistributedRenderCapabilities,
+  PLAN_ARTIFACT_LAYOUT,
+  PLAN_HASH_SCHEMA,
+  PLAN_PROTOCOL_V2,
+  PLAN_PROTOCOL_UNSUPPORTED,
+  PLAN_SCHEMA_VERSION,
+  PLAN_V2_ARTIFACT_LAYOUT,
+  PLAN_V2_HASH_SCHEMA,
+  PLAN_V2_SCHEMA_VERSION,
+  PlanProtocolUnsupportedError,
+  readPlanProtocol,
+  readPlanProtocolV1,
+  type DistributedRenderCapabilities,
+  type PlanProtocolConsumerCapabilities,
+  type PlanProtocolDescriptor,
+  type PlanProtocolV1Descriptor,
+  type PlanProtocolV2Descriptor,
+  type SupportedPlanProtocolDescriptor,
+} from "./services/distributed/planProtocol.js";
 
 // ── Format union ────────────────────────────────────────────────────────────
 // Canonical output-format type. The aws-lambda package re-exports it so

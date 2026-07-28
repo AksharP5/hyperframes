@@ -77,6 +77,17 @@ async function mutateGsapScriptBatch(
 
 type ShowToast = (message: string, tone?: "error" | "info") => void;
 
+function showUnchangedMutationFeedback(
+  mutations: Record<string, unknown>[],
+  result: MutationResult,
+  showToast: ShowToast | undefined,
+): void {
+  if (result.changed !== false || mutations.length !== 1) return;
+  if (mutations[0]?.type === "move-keyframe") {
+    showToast?.("A keyframe already exists at that time", "info");
+  }
+}
+
 async function runMutationRequest(
   mutations: Record<string, unknown>[],
   options: CommitMutationOptions,
@@ -94,7 +105,9 @@ async function runMutationRequest(
     );
   }
   try {
-    return await request();
+    const result = await request();
+    showUnchangedMutationFeedback(mutations, result, showToast);
+    return result;
   } catch (error) {
     if (error instanceof GsapMutationHttpError) {
       showToast?.(formatGsapMutationRejectionToast(error), "error");
@@ -325,6 +338,7 @@ export function useGsapScriptCommits({ projectIdRef, activeCompPath, previewIfra
       mutateGsapScript(pid, targetPath, mutation),
     );
     if (!result) return;
+    options.onResult?.(result);
     await finalizeSuccessfulMutation(pid, compositionPath, selection, mutation, targetPath, result, options);
   }, [showToast, finalizeSuccessfulMutation]);
 
@@ -337,6 +351,7 @@ export function useGsapScriptCommits({ projectIdRef, activeCompPath, previewIfra
       mutateGsapScriptBatch(pid, targetPath, mutations),
     );
     if (!result) return;
+    options.onResult?.(result);
     await finalizeSuccessfulMutation(pid, compositionPath, last.selection, last.mutation, targetPath, result, options);
   }, [showToast, finalizeSuccessfulMutation]);
 

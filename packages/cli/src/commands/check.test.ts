@@ -147,9 +147,12 @@ function fakeDriver(overrides: Partial<CheckAuditDriver> = {}): CheckAuditDriver
     getCanvas: vi.fn(async () => ({ width: 1920, height: 1080 })),
     findAmbiguousSelectors: vi.fn(async (_selectors: string[]) => []),
     seek: vi.fn(async (_time: number) => undefined),
+    seekGeometry: vi.fn(async (_time: number) => undefined),
     collectLayout: vi.fn(async (_time: number, _tolerance: number) => []),
+    collectOverlap: vi.fn(async (_time: number) => []),
     collectLayoutGeometry: vi.fn(async () => `geometry-${geometryCallCount++}`),
     collectRotationSample: vi.fn(async (_time: number) => []),
+    collectOffPivotRotationSample: vi.fn(async (time: number) => ({ time, samples: [] })),
     collectGeometryCandidates: vi.fn(async () => []),
     collectMotionFrame: vi.fn(async (time: number) => ({ time, data: {}, liveness: {} })),
     anchorMotionIssues: vi.fn(async (issues: LayoutIssue[]) =>
@@ -1138,6 +1141,57 @@ describe("frame-check flag grammar", () => {
     });
     expect(() => parseFrameCheck("bogus=1")).toThrow("Invalid --frame-check");
     expect(() => parseFrameCheck("tol=-2")).toThrow("Invalid --frame-check");
+    expect(() => parseFrameCheck("tol=4px")).toThrow("Invalid --frame-check");
+    expect(() => parseFrameCheck("tol=2garbage")).toThrow("Invalid --frame-check");
+  });
+});
+
+describe("layout flag grammar", () => {
+  it("parses proseCoverageFloor and rejects malformed specs", async () => {
+    const { parseLayout } = await import("./check.js");
+    expect(parseLayout(undefined)).toBeUndefined();
+    expect(parseLayout("proseCoverageFloor=0.05")).toEqual({ proseCoverageFloor: 0.05 });
+    expect(parseLayout("proseCoverageFloor=0")).toEqual({ proseCoverageFloor: 0 });
+    expect(parseLayout("proseCoverageFloor=1")).toEqual({ proseCoverageFloor: 1 });
+    expect(() => parseLayout(true)).toThrow("Invalid --layout");
+    expect(() => parseLayout("")).toThrow("Invalid --layout");
+    expect(() => parseLayout("bogus=1")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=-0.1")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=1.1")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=0.05garbage")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=0.1%")).toThrow("Invalid --layout");
+    expect(() => parseLayout("proseCoverageFloor=")).toThrow("Invalid --layout");
+  });
+
+  it("threads --layout into the check pipeline options", async () => {
+    const { report } = await runScenario(fakeDriver());
+    const runPipeline = vi.fn(async (_project: ProjectDir, _options: CheckOptions) => report);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const command = createCheckCommand({
+      resolveProject: () => PROJECT,
+      runPipeline,
+      withMeta: (value) => value,
+    });
+
+    await runCommand(command, {
+      rawArgs: ["--json", "--layout", "proseCoverageFloor=0.05"],
+    });
+
+    expect(runPipeline).toHaveBeenCalledWith(
+      PROJECT,
+      expect.objectContaining({
+        layout: { proseCoverageFloor: 0.05 },
+      }),
+    );
+  });
+
+  it("forwards layout options into driver.collectLayout", async () => {
+    const collectLayout = vi.fn(async (_time: number, _tolerance: number, _layout?: unknown) => []);
+    await runScenario(fakeDriver({ collectLayout }), { layout: { proseCoverageFloor: 0.05 } });
+    expect(collectLayout).toHaveBeenCalled();
+    expect(collectLayout).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), {
+      proseCoverageFloor: 0.05,
+    });
   });
 });
 
@@ -1340,5 +1394,44 @@ describe("contrast candidate round-trip", () => {
     expect(source).toMatch(/prepared\.map\(\(entry\) => entry\.raw\)/);
     expect(source).toMatch(/raw: unknown;/);
     expect(source).not.toMatch(/prepared\.map\(\(entry\) => entry\.candidate\)/);
+  });
+});
+
+describe("dense motion-overlap re-sampling", () => {
+  // Collision lives inside (3.5, 4.5), a gap the sparse base grid seeks past; only the 8fps dense pass observes it.
+  const inBetweenGridWindow = (time: number): boolean => time >= 3.6 && time <= 4.4;
+
+  it("detects a content_overlap that occurs ONLY between two sparse grid samples", async () => {
+    const driver = fakeDriver({
+      // Sparse base grid sees nothing at any base sample time.
+      collectLayout: vi.fn(async (_time: number) => []),
+      // The transient exists only strictly between base samples 3.5 and 4.5.
+      collectOverlap: vi.fn(async (time: number) =>
+        inBetweenGridWindow(time)
+          ? [layoutIssue("warning", { time, code: "content_overlap" })]
+          : [],
+      ),
+    });
+    const { report } = await runScenario(driver);
+    expect(driver.collectOverlap).toHaveBeenCalled();
+    expect(report.layout.findings.some((f) => f.code === "content_overlap")).toBe(true);
+    // Held ~750ms across the dense grid (>= the 500ms floor) -> promoted.
+    expect(report.layout.errorCount).toBeGreaterThan(0);
+  });
+
+  it("runs the dense pass even when sparse fingerprints are identical (aliased motion)", async () => {
+    // Aliased motion has identical fingerprints yet still collides between samples — the false-negative the removed gate caused.
+    const driver = fakeDriver({
+      collectLayoutGeometry: vi.fn(async () => "static"),
+      collectLayout: vi.fn(async (_time: number) => []),
+      collectOverlap: vi.fn(async (time: number) =>
+        inBetweenGridWindow(time)
+          ? [layoutIssue("warning", { time, code: "content_overlap" })]
+          : [],
+      ),
+    });
+    const { report } = await runScenario(driver);
+    expect(driver.collectOverlap).toHaveBeenCalled();
+    expect(report.layout.findings.some((f) => f.code === "content_overlap")).toBe(true);
   });
 });

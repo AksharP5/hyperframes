@@ -7,7 +7,7 @@ import {
 } from "./timelineEditing";
 import type { TimelineElement } from "../store/playerStore";
 import { liveTime, usePlayerStore } from "../store/playerStore";
-import { GUTTER, TRACKS_LEFT_PAD } from "./timelineLayout";
+import { getTimelineScrubTime } from "./timelineLayout";
 import {
   computeMarqueeSelection,
   getMarqueeRect,
@@ -30,7 +30,9 @@ interface UseTimelineRangeSelectionInput {
   setShowPopover: (v: boolean) => void;
   elementsRef: React.RefObject<TimelineElement[]>;
   trackOrderRef: React.RefObject<number[]>;
+  rowHeightsRef: React.RefObject<readonly number[]>;
   onSelectElement?: (element: TimelineElement | null) => void;
+  contentOrigin: number;
 }
 
 interface MarqueeDragState {
@@ -72,12 +74,16 @@ function commitMarqueeSelection(
   marquee: MarqueeDragState,
   elements: TimelineElement[],
   trackOrder: number[],
+  rowHeights: readonly number[],
   pps: number,
+  contentOrigin: number,
 ): void {
   const { ids, primaryId } = computeMarqueeSelection({
     clips: toMarqueeClips(elements),
     trackOrder,
+    rowHeights,
     pps,
+    contentOrigin,
     marquee: rect,
     baseSelection: additive ? marquee.baseIds : undefined,
   });
@@ -101,7 +107,9 @@ export function useTimelineRangeSelection({
   setShowPopover,
   elementsRef,
   trackOrderRef,
+  rowHeightsRef,
   onSelectElement,
+  contentOrigin,
 }: UseTimelineRangeSelectionInput) {
   const isRangeSelecting = useRef(false);
   const rangeAnchorTime = useRef(0);
@@ -168,10 +176,12 @@ export function useTimelineRangeSelection({
         marquee,
         elementsRef.current ?? [],
         trackOrderRef.current ?? [],
+        rowHeightsRef.current,
         ppsRef.current,
+        contentOrigin,
       );
     },
-    [toContentPoint, elementsRef, trackOrderRef, ppsRef],
+    [toContentPoint, elementsRef, trackOrderRef, rowHeightsRef, ppsRef, contentOrigin],
   );
 
   const stopMarqueeAutoScroll = useCallback(() => {
@@ -228,14 +238,13 @@ export function useTimelineRangeSelection({
       setShowPopover(false);
       const rect = scrollRef.current?.getBoundingClientRect();
       if (rect) {
-        const x =
-          e.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0) - GUTTER - TRACKS_LEFT_PAD;
+        const x = e.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0) - contentOrigin;
         const time = Math.max(0, x / pps);
         rangeAnchorTime.current = time;
         setRangeSelection({ start: time, end: time, anchorX: e.clientX, anchorY: e.clientY });
       }
     },
-    [scrollRef, pps, setShowPopover],
+    [scrollRef, pps, setShowPopover, contentOrigin],
   );
 
   const handlePointerDown = useCallback(
@@ -286,11 +295,16 @@ export function useTimelineRangeSelection({
       const el = scrollRef.current;
       if (el) {
         const rect = el.getBoundingClientRect();
-        const x = clientX - rect.left + el.scrollLeft - GUTTER - TRACKS_LEFT_PAD;
-        if (x >= 0) {
-          const dur = el.scrollWidth / pps;
-          liveTime.notify(Math.max(0, Math.min(dur, x / pps)));
-        }
+        liveTime.notify(
+          getTimelineScrubTime({
+            clientX,
+            viewportLeft: rect.left,
+            scrollLeft: el.scrollLeft,
+            contentOrigin,
+            pixelsPerSecond: pps,
+            duration: el.scrollWidth / pps,
+          }),
+        );
       }
       if (!seekRafRef.current) {
         seekRafRef.current = requestAnimationFrame(() => {
@@ -302,7 +316,7 @@ export function useTimelineRangeSelection({
         });
       }
     },
-    [scrollRef, pps, seekFromX, autoScrollDuringDrag, isDragging],
+    [scrollRef, pps, seekFromX, autoScrollDuringDrag, isDragging, contentOrigin],
   );
 
   const handlePointerMove = useCallback(
@@ -310,8 +324,7 @@ export function useTimelineRangeSelection({
       if (isRangeSelecting.current) {
         const rect = scrollRef.current?.getBoundingClientRect();
         if (rect) {
-          const x =
-            e.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0) - GUTTER - TRACKS_LEFT_PAD;
+          const x = e.clientX - rect.left + (scrollRef.current?.scrollLeft ?? 0) - contentOrigin;
           setRangeSelection((prev) =>
             prev
               ? { ...prev, end: Math.max(0, x / pps), anchorX: e.clientX, anchorY: e.clientY }
@@ -331,7 +344,15 @@ export function useTimelineRangeSelection({
       if (!isDragging.current) return;
       updateScrubDrag(e.clientX);
     },
-    [pps, scrollRef, isDragging, applyMarqueeAtClient, syncMarqueeAutoScroll, updateScrubDrag],
+    [
+      pps,
+      scrollRef,
+      isDragging,
+      applyMarqueeAtClient,
+      syncMarqueeAutoScroll,
+      updateScrubDrag,
+      contentOrigin,
+    ],
   );
 
   // Release of a shift time-range gesture: keep a real range (or a shift-click

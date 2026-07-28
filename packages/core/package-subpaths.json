@@ -86,6 +86,12 @@
       "types": "./dist/colorLuts.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./media-grade-analyzer": {
+      "source": "./src/mediaGradeAnalyzer.ts",
+      "runtime": "./dist/mediaGradeAnalyzer.js",
+      "types": "./dist/mediaGradeAnalyzer.d.ts",
+      "environments": ["bun", "node"]
+    },
     "./storyboard": {
       "source": "./src/storyboard/index.ts",
       "runtime": "./dist/storyboard/index.js",
@@ -240,6 +246,12 @@
       "source": "./src/parsers/springEase.ts",
       "runtime": "./dist/parsers/springEase.js",
       "types": "./dist/parsers/springEase.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
+    "./wiggle-ease": {
+      "source": "./src/runtime/wiggleEase.ts",
+      "runtime": "./dist/runtime/wiggleEase.js",
+      "types": "./dist/runtime/wiggleEase.d.ts",
       "environments": ["browser", "bun", "node"]
     },
     "./fonts/aliases": {

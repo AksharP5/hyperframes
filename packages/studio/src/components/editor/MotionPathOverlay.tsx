@@ -45,6 +45,19 @@ type DragState = {
   ref: MotionNodeRef;
 };
 
+/**
+ * Tween-% for a stop inserted at fraction `t` along the segment between two
+ * nodes. null when either end is not a keyframe (arc waypoints carry no %).
+ */
+function interpolatedKeyframePct(
+  a: MotionNodeRef | undefined,
+  b: MotionNodeRef | undefined,
+  t: number,
+): number | null {
+  if (a?.type !== "keyframe" || b?.type !== "keyframe") return null;
+  return Math.round((a.pct + (b.pct - a.pct) * t) * 1000) / 1000;
+}
+
 const NODE_PX = 6; // node radius in screen pixels (kept constant across zoom)
 // Click-vs-drag cutoff in SCREEN pixels. Below this the pointer-up is a click
 // (select the keyframe); at or above it the gesture commits a move. Screen-space
@@ -88,6 +101,13 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
   // The keyframe % selected by clicking its node — highlighted, and the next drag
   // modifies it rather than adding a keyframe.
   const activeKeyframePct = usePlayerStore((s) => s.activeKeyframePct);
+  const timelineElement = usePlayerStore((state) => {
+    if (!selection) return undefined;
+    const sourceScopedId = `${selection.sourceFile || "index.html"}#${selection.id}`;
+    return state.elements.find(
+      (element) => (element.key ?? element.id) === sourceScopedId || element.id === selection.id,
+    );
+  });
   // Set-destination mode is armed from the preview toolbar (replaces the old
   // double-click-on-canvas UX). See createMode effects below.
   const armed = usePlayerStore((s) => s.motionPathArmed);
@@ -395,13 +415,10 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
       void commitAddWaypoint(animId, np.segIndex + 1, x, y, commitMutation);
     } else {
       // Linear keyframe path: interpolate the new stop's tween-% from the two
-      // keyframes bounding the clicked segment (np.t = fraction along it), then
-      // insert it. Lands ON the current line, so the dot doesn't jump — drag it
-      // after to bend the path.
-      const a = abs[np.segIndex]?.ref;
-      const b = abs[np.segIndex + 1]?.ref;
-      if (a?.type !== "keyframe" || b?.type !== "keyframe") return;
-      const pct = Math.round((a.pct + (b.pct - a.pct) * np.t) * 1000) / 1000;
+      // keyframes bounding the clicked segment, then insert it. Lands ON the
+      // current line, so the dot doesn't jump — drag it after to bend the path.
+      const pct = interpolatedKeyframePct(abs[np.segIndex]?.ref, abs[np.segIndex + 1]?.ref, np.t);
+      if (pct === null) return;
       e.stopPropagation();
       void commitAddKeyframe(animId, pct, x, y, commitMutation);
     }
@@ -418,12 +435,13 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
   // Right-click a keyframe node → the timeline's keyframe context menu (delete
   // this keyframe / delete all), so motion-path keyframes are removable in place.
   const onNodeContextMenu = (e: React.MouseEvent, ref: MotionNodeRef) => {
-    if (ref.type !== "keyframe" || !animId || !elementId) return;
+    if (ref.type !== "keyframe" || !animId || !elementId || !timelineElement) return;
     e.preventDefault();
     e.stopPropagation();
     setKfMenu({
       x: e.clientX,
       y: e.clientY,
+      element: timelineElement,
       elementId,
       percentage: ref.pct,
       tweenPercentage: ref.pct,
@@ -512,9 +530,13 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
         <KeyframeDiamondContextMenu
           state={kfMenu}
           onClose={() => setKfMenu(null)}
-          onDelete={(_elId, pct) => animId && handleGsapRemoveKeyframe(animId, pct)}
+          onDelete={(_elId, keyframe) =>
+            animId && handleGsapRemoveKeyframe(animId, keyframe.percentage)
+          }
           onDeleteAll={() => animId && handleGsapRemoveAllKeyframes(animId)}
-          onMoveToPlayhead={(_elId, pct) => animId && handleGsapMoveKeyframeToPlayhead(animId, pct)}
+          onMoveToPlayhead={(_element, keyframe) =>
+            animId && handleGsapMoveKeyframeToPlayhead(animId, keyframe.percentage)
+          }
         />
       )}
     </>

@@ -83,10 +83,10 @@ function KeyframeGutter({
           track("button", `Add ${property} keyframe`);
           void onCommitAnimatedProperty(element, property, displayValue);
         }}
-        onRemoveKeyframe={(pct) => {
+        onRemoveKeyframe={(pct, animationId) => {
           if (!onRemoveKeyframe) return;
           track("button", `Remove ${property} keyframe`);
-          onRemoveKeyframe(animIdForProp(property), pct);
+          onRemoveKeyframe(animationId ?? animIdForProp(property), pct);
         }}
         onConvertToKeyframes={() => {
           if (!onConvertToKeyframes) return;

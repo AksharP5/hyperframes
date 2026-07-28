@@ -34,15 +34,19 @@ import {
   type CaptureVideoMetadataHint,
   type EngineConfig,
   type ExtractedFrames,
+  type ExtractionResult,
   type FrameLookupTable,
   type HdrTransfer,
+  type VideoExtractionFailureKind,
   type VideoColorSpace,
+  classifyVideoExtractionError,
   createFrameLookupTable,
   detectTransfer,
   extractAllVideoFrames,
   extractMediaMetadata,
   isHdrColorSpace,
   resolveProjectRelativeSrc,
+  runVideoExtractionWithRetry,
 } from "@hyperframes/engine";
 import { fpsToNumber } from "@hyperframes/core";
 import {
@@ -94,6 +98,11 @@ export interface ExtractVideosStageResult {
   imageColorSpaces: (VideoColorSpace | null)[];
   /** Wall-clock ms for the video extraction phase. */
   videoExtractMs: number;
+  /**
+   * Candidate-only typed failure gate. Callers throw this only after their
+   * extraction telemetry checkpoint has been emitted.
+   */
+  failureToEnforce: VideoExtractionStageError | null;
 }
 
 /**
@@ -109,18 +118,21 @@ export function shouldCopyExtractedFrames(platform: NodeJS.Platform): boolean {
 }
 
 /**
- * Probe a media file's color space, returning null when it can't be read.
+ * Probe an IMAGE file's color space, returning null when it can't be read.
  *
- * Both HDR probes below widened which files they resolve (PRINFRA-349: the
- * shared resolver percent-decodes non-ASCII names, so `%E5%9B%BE1.png` now
- * finds `图1.png`). Files that used to silently fail to resolve are therefore
- * reachable for the first time — including truncated / 0-byte assets, on which
- * ffprobe exits non-zero and `extractMediaMetadata` throws. These probes run
- * inside a bare `Promise.all`, so an unguarded throw aborts the whole render
- * over one unreadable image. A probe that can't read a file must skip it, not
- * kill the render.
+ * The image probe widened which files it resolves (PRINFRA-349: the shared
+ * resolver percent-decodes non-ASCII names, so `%E5%9B%BE1.png` now finds
+ * `图1.png`). Files that used to silently fail to resolve are therefore
+ * reachable for the first time — including truncated / 0-byte assets, on
+ * which ffprobe exits non-zero and `extractMediaMetadata` throws. The image
+ * probe runs inside a bare `Promise.all`, so an unguarded throw would abort
+ * the whole render over one unreadable image; an image that can't be probed
+ * is treated as SDR and skipped. (The VIDEO probe deliberately does NOT use
+ * this: its errors route through the opt-in failure policy below —
+ * `resolveVideoExtractionPolicy` / `throwHdrProbeFailures` — which preserves
+ * the legacy throw in "off" mode and typed enforcement in "enforce".)
  */
-async function probeColorSpaceSafely(
+async function probeImageColorSpaceSafely(
   path: string,
   log: ProducerLogger | undefined,
 ): Promise<VideoColorSpace | null> {
@@ -134,6 +146,137 @@ async function probeColorSpaceSafely(
     });
     return null;
   }
+}
+
+export type VideoExtractionStageErrorCode = "VIDEO_SOURCE_UNRENDERABLE" | "VIDEO_EXTRACTION_FAILED";
+
+export interface VideoExtractionStageFailureSummary {
+  kind: VideoExtractionFailureKind;
+  count: number;
+}
+
+export type VideoExtractionFailureMode = "off" | "observe" | "enforce";
+
+export interface VideoExtractionPolicy {
+  failureMode: VideoExtractionFailureMode;
+  maxTransientRetries: 0 | 1;
+}
+
+/**
+ * Candidate-lane rollout controls. Stable behavior remains unchanged unless
+ * explicitly enabled in the producer environment.
+ */
+export function resolveVideoExtractionPolicy(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): VideoExtractionPolicy {
+  const rawMode = env.HF_VIDEO_EXTRACTION_FAILURE_MODE?.trim().toLowerCase();
+  const failureMode: VideoExtractionFailureMode =
+    rawMode === "observe" || rawMode === "enforce" ? rawMode : "off";
+  const maxTransientRetries =
+    failureMode !== "off" && env.HF_VIDEO_EXTRACTION_MAX_RETRIES?.trim() === "1" ? 1 : 0;
+  return { failureMode, maxTransientRetries };
+}
+
+/**
+ * Producer-safe terminal error for per-source extraction failures.
+ *
+ * `ExtractionResult.errors[].error` intentionally retains local diagnostics
+ * and can contain signed URLs or filesystem paths. This error carries only a
+ * bounded taxonomy/count summary so the HTTP/Temporal boundary can transport
+ * the cause without leaking those values.
+ */
+export class VideoExtractionStageError extends Error {
+  constructor(
+    readonly code: VideoExtractionStageErrorCode,
+    readonly retryable: boolean,
+    readonly failures: readonly VideoExtractionStageFailureSummary[],
+  ) {
+    const total = failures.reduce((sum, failure) => sum + failure.count, 0);
+    const breakdown = failures.map((failure) => `${failure.kind}=${failure.count}`).join(",");
+    super(`Video extraction failed for ${total} source(s) [${code}; ${breakdown}]`);
+    this.name = "VideoExtractionStageError";
+  }
+}
+
+export function assertVideoExtractionSucceeded(result: ExtractionResult): void {
+  const error = buildVideoExtractionStageError(result);
+  if (error) throw error;
+}
+
+function buildVideoExtractionStageError(
+  result: ExtractionResult,
+): VideoExtractionStageError | null {
+  if (result.success && result.errors.length === 0) return null;
+  const counts = new Map<VideoExtractionFailureKind, number>();
+  for (const failure of result.errors) {
+    const kind = failure.kind ?? "internal";
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  const failures = Array.from(counts, ([kind, count]) => ({ kind, count })).sort((a, b) =>
+    a.kind.localeCompare(b.kind),
+  );
+  const retryable =
+    result.errors.length > 0 && result.errors.every((failure) => failure.retryable === true);
+  return new VideoExtractionStageError(
+    retryable ? "VIDEO_EXTRACTION_FAILED" : "VIDEO_SOURCE_UNRENDERABLE",
+    retryable,
+    failures,
+  );
+}
+
+export function buildHdrProbeStageError(
+  failures: readonly Pick<ReturnType<typeof classifyVideoExtractionError>, "kind" | "retryable">[],
+): VideoExtractionStageError {
+  const counts = new Map<VideoExtractionFailureKind, number>();
+  for (const failure of failures) {
+    counts.set(failure.kind, (counts.get(failure.kind) ?? 0) + 1);
+  }
+  const summary = Array.from(counts, ([kind, count]) => ({ kind, count })).sort((a, b) =>
+    a.kind.localeCompare(b.kind),
+  );
+  const retryable = failures.length > 0 && failures.every((failure) => failure.retryable);
+  return new VideoExtractionStageError(
+    retryable ? "VIDEO_EXTRACTION_FAILED" : "VIDEO_SOURCE_UNRENDERABLE",
+    retryable,
+    summary,
+  );
+}
+
+type HdrProbeFailure = {
+  error: unknown;
+  classified: ReturnType<typeof classifyVideoExtractionError>;
+};
+
+function isHdrProbeFailure(failure: HdrProbeFailure | null): failure is HdrProbeFailure {
+  return failure !== null;
+}
+
+function throwHdrProbeFailures(
+  failures: readonly HdrProbeFailure[],
+  mode: VideoExtractionFailureMode,
+): void {
+  if (failures.length === 0) return;
+  if (mode === "enforce") {
+    throw buildHdrProbeStageError(failures.map((failure) => failure.classified));
+  }
+  const firstFailure = failures[0];
+  if (firstFailure) throw firstFailure.error;
+}
+
+function applyVideoExtractionFailurePolicy(
+  result: ExtractionResult,
+  policy: VideoExtractionPolicy,
+  log?: ProducerLogger,
+): VideoExtractionStageError | null {
+  const error = buildVideoExtractionStageError(result);
+  if (!error || policy.failureMode === "off") return null;
+  log?.warn("Video extraction produced typed source failures", {
+    mode: policy.failureMode,
+    code: error.code,
+    retryable: error.retryable,
+    failures: error.failures,
+  });
+  return policy.failureMode === "enforce" ? error : null;
 }
 
 export async function runExtractVideosStage(
@@ -152,9 +295,11 @@ export async function runExtractVideosStage(
   } = input;
 
   const stage2Start = Date.now();
+  const extractionPolicy = resolveVideoExtractionPolicy();
 
   let frameLookup: FrameLookupTable | null = null;
   let extractionResult: Awaited<ReturnType<typeof extractAllVideoFrames>> | null = null;
+  let failureToEnforce: VideoExtractionStageError | null = null;
   let videoReadinessSkipIds: string[] = [];
   let videoMetadataHints: CaptureVideoMetadataHint[] = [];
 
@@ -164,26 +309,54 @@ export async function runExtractVideosStage(
   // avoid ffprobe overhead when the user has explicitly opted out.
   const nativeHdrVideoIds = new Set<string>();
   const videoTransfers = new Map<string, HdrTransfer>();
+  let hdrProbeTransientRetries = 0;
   if (job.config.hdrMode !== "force-sdr" && composition.videos.length > 0) {
     log?.info("Probing video color spaces...", { videoCount: composition.videos.length });
-    await Promise.all(
+    const probeFailures = await Promise.all(
       composition.videos.map(async (v) => {
-        // Shared resolver so a `<video src="../assets/foo">` in a sub-composition
-        // resolves the same way the browser would, and a percent-encoded
-        // non-ASCII name decodes to its real on-disk path. Called with no
-        // isAbsolute() pre-check: the resolver already returns an absolute path
-        // that exists, and otherwise treats a leading slash as a browser
-        // origin-root URL — pre-checking would hand back `/assets/%E5%9B%BE1.png`
-        // undecoded and re-open PRINFRA-349 for root-relative srcs.
+        // Shared resolver so a `<video src="../assets/foo">` in a
+        // sub-composition resolves the same way the browser would, and a
+        // percent-encoded non-ASCII name decodes to its real on-disk path.
+        // Called with NO isAbsolute() pre-check (PRINFRA-349): the resolver
+        // already returns an absolute path that exists, and otherwise treats
+        // a leading slash as a browser origin-root URL — pre-checking would
+        // hand back `/assets/%E5%9B%BE1.png` undecoded and re-open the bug
+        // for root-relative srcs.
         const videoPath = resolveProjectRelativeSrc(v.src, projectDir, compiledDir);
-        if (!existsSync(videoPath)) return;
-        const colorSpace = await probeColorSpaceSafely(videoPath, log);
-        if (isHdrColorSpace(colorSpace)) {
-          nativeHdrVideoIds.add(v.id);
-          videoTransfers.set(v.id, detectTransfer(colorSpace));
+        if (!existsSync(videoPath)) return null;
+        try {
+          // Retries are separately opt-in from the failure gate. With the
+          // default zero budget this remains the exact legacy single probe.
+          const attempted =
+            extractionPolicy.maxTransientRetries === 0
+              ? { result: await extractMediaMetadata(videoPath), retries: 0 }
+              : await runVideoExtractionWithRetry(() => extractMediaMetadata(videoPath), {
+                  signal: abortSignal,
+                  maxTransientRetries: extractionPolicy.maxTransientRetries,
+                  onRetry: () => {
+                    hdrProbeTransientRetries += 1;
+                  },
+                });
+          const meta = attempted.result;
+          if (isHdrColorSpace(meta.colorSpace)) {
+            nativeHdrVideoIds.add(v.id);
+            videoTransfers.set(v.id, detectTransfer(meta.colorSpace));
+          }
+          return null;
+        } catch (error) {
+          if (extractionPolicy.failureMode === "off") throw error;
+          const classified = classifyVideoExtractionError(error);
+          log?.warn("Video HDR metadata probe failed", {
+            mode: extractionPolicy.failureMode,
+            kind: classified.kind,
+            retryable: classified.retryable,
+            transientRetries: hdrProbeTransientRetries,
+          });
+          return { error, classified };
         }
       }),
     );
+    throwHdrProbeFailures(probeFailures.filter(isHdrProbeFailure), extractionPolicy.failureMode);
   }
 
   // Probe images for HDR color spaces (16-bit PNGs tagged BT.2020 PQ/HLG).
@@ -204,7 +377,7 @@ export async function runExtractVideosStage(
         // through the SDR fallback with wrong color (PRINFRA-349 symptom c).
         const imgPath = resolveProjectRelativeSrc(img.src, projectDir, compiledDir);
         if (!existsSync(imgPath)) return null;
-        const colorSpace = await probeColorSpaceSafely(imgPath, log);
+        const colorSpace = await probeImageColorSpaceSafely(imgPath, log);
         if (isHdrColorSpace(colorSpace)) {
           nativeHdrImageIds.add(img.id);
           imageTransfers.set(img.id, detectTransfer(colorSpace));
@@ -233,12 +406,17 @@ export async function runExtractVideosStage(
         fps: fpsToNumber(job.config.fps),
         outputDir: join(compiledDir, "__hyperframes_video_frames"),
         format: job.config.videoFrameFormat ?? "auto",
+        maxTransientRetries: extractionPolicy.maxTransientRetries,
+        collectProbeFailures: extractionPolicy.failureMode === "enforce",
       },
       abortSignal,
       { extractCacheDir: cfg.extractCacheDir, extractCacheMaxBytes: cfg.extractCacheMaxBytes },
       compiledDir,
     );
+    extractionResult.phaseBreakdown.transientRetries =
+      (extractionResult.phaseBreakdown.transientRetries ?? 0) + hdrProbeTransientRetries;
     assertNotAborted();
+    failureToEnforce = applyVideoExtractionFailurePolicy(extractionResult, extractionPolicy, log);
 
     materializeExtractedFramesForCompiledDir(extractionResult.extracted, compiledDir, {
       materializeSymlinks,
@@ -269,6 +447,7 @@ export async function runExtractVideosStage(
     hdrImageSrcPaths,
     imageColorSpaces,
     videoExtractMs,
+    failureToEnforce,
   };
 }
 

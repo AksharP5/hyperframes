@@ -1,6 +1,31 @@
 import { describe, it, expect } from "vitest";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
-import { isInstantHold, parsePercentageKeyframes } from "./gsapShared";
+import type { DomEditSelection } from "../components/editor/domEditingTypes";
+import {
+  idFromSelector,
+  idSelector,
+  isInstantHold,
+  parsePercentageKeyframes,
+  resolveEditableTweenDuration,
+  toClipKeyframes,
+  toClipPercentage,
+} from "./gsapShared";
+
+// Fixtures carry only the fields the function under test reads; the double-cast
+// is the documented way to stand in for the full runtime shape (CONTRIBUTING.md).
+const tween = (duration: number | undefined) => ({ duration }) as unknown as GsapAnimation;
+
+describe("resolveEditableTweenDuration", () => {
+  const selection = { dataAttributes: { duration: "16.26" } } as unknown as DomEditSelection;
+
+  it("uses the owning clip duration when the tween omits an outer duration", () => {
+    expect(resolveEditableTweenDuration(tween(undefined), selection)).toBe(16.26);
+  });
+
+  it("keeps an explicitly-authored tween duration", () => {
+    expect(resolveEditableTweenDuration(tween(4), selection)).toBe(4);
+  });
+});
 
 describe("isInstantHold", () => {
   const animation = (method: GsapAnimation["method"], duration?: number) =>
@@ -72,5 +97,88 @@ describe("parsePercentageKeyframes", () => {
   it("returns null for keyframes with no positional/animatable props", () => {
     expect(parsePercentageKeyframes([] as unknown as Record<string, unknown>)).toBeNull();
     expect(parsePercentageKeyframes({})).toBeNull();
+  });
+});
+
+describe("idSelector", () => {
+  it("uses #id for valid CSS identifiers", () => {
+    expect(idSelector("hero-word")).toBe("#hero-word");
+    expect(idSelector("el_1")).toBe("#el_1");
+  });
+
+  it("uses an attribute selector for ids that #id can't address (digit-leading, dots, spaces)", () => {
+    // #01-... / #a.b / #a b throw a SyntaxError in querySelector / GSAP, crashing
+    // the preview when such a target is committed (e.g. dragging the element).
+    expect(idSelector("01-hook-hero-word")).toBe('[id="01-hook-hero-word"]');
+    expect(idSelector("my.class")).toBe('[id="my.class"]');
+    expect(idSelector("1box")).toBe('[id="1box"]');
+  });
+
+  it("escapes quotes and backslashes in the attribute selector value", () => {
+    expect(idSelector('1"x')).toBe('[id="1\\"x"]');
+  });
+
+  it("only ever emits #id for ids that can't break querySelector", () => {
+    // Every id resolves to either a plain #id (only when safe) or an attribute
+    // selector — never a #id that would throw a SyntaxError.
+    for (const id of ["hero-word", "01-hook", "a.b", "a b", "1", "--x", '1"q']) {
+      const sel = idSelector(id);
+      if (sel.startsWith("#")) expect(sel).toBe(`#${id}`);
+      else expect(sel.startsWith('[id="')).toBe(true);
+    }
+  });
+});
+
+describe("toClipPercentage", () => {
+  // Selection keys embed this number, so every keyframe-cache writer has to round
+  // it identically: a coarser writer rewrites the cache with a different value and
+  // orphans the live selection key built from the finer one.
+  it("keeps three decimals so a beat-snapped keyframe lands on its beat", () => {
+    expect(toClipPercentage(1 / 3, 0, 1, 0)).toBe(33.333);
+    expect(toClipPercentage(2.5, 2, 4, 0)).toBe(12.5);
+  });
+
+  it("passes the tween percentage through for a zero-length clip", () => {
+    expect(toClipPercentage(5, 0, 0, 42)).toBe(42);
+  });
+});
+
+describe("toClipKeyframes", () => {
+  // Fixture carries only the fields the function under test reads; the
+  // double-cast is the documented way to stand in for the full runtime shape
+  // (CONTRIBUTING.md).
+  const durationless = {
+    id: "a1",
+    method: "to",
+    targetSelector: "#box",
+    vars: {},
+    resolvedStart: 0,
+  } as unknown as GsapAnimation;
+
+  // A tween with no duration spans its clip everywhere else in Studio
+  // (resolveEditableTweenDuration), so the cache rows have to agree: a fixed 1s
+  // basis put the end keyframe at 25% of a 4s clip instead of 100%.
+  it("spans the clip when the tween has no duration", () => {
+    const rows = toClipKeyframes([{ percentage: 0 }, { percentage: 100 }], durationless, 0, 4);
+    expect(rows.map((row) => row.percentage)).toEqual([0, 100]);
+  });
+
+  it("keeps the tween percentage and the animation identity on every row", () => {
+    const rows = toClipKeyframes([{ percentage: 50 }], durationless, 0, 4);
+    expect(rows[0]).toMatchObject({ tweenPercentage: 50, animationId: "a1" });
+  });
+});
+
+describe("idFromSelector", () => {
+  it("round-trips every shape idSelector emits", () => {
+    for (const id of ["hero-word", "el_1", "01-hook-hero-word", "my.class", "1box", '1"x']) {
+      expect(idFromSelector(idSelector(id))).toBe(id);
+    }
+  });
+
+  it("returns null for a selector that does not address an id", () => {
+    expect(idFromSelector(".dot")).toBeNull();
+    expect(idFromSelector("[data-hf-id='x']")).toBeNull();
+    expect(idFromSelector(undefined)).toBeNull();
   });
 });

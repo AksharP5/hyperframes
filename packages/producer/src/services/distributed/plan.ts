@@ -24,16 +24,7 @@
  * never have to handle them.
  */
 
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { cpSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { type CanvasResolution, fpsToNumber } from "@hyperframes/core";
 import {
@@ -42,6 +33,7 @@ import {
   getEncoderPreset,
   normalizeVp9CpuUsed,
   resolveConfig,
+  type AudioProcessingFailure,
 } from "@hyperframes/engine";
 import { defaultLogger, type ProducerLogger } from "../../logger.js";
 import {
@@ -74,11 +66,18 @@ import { snapshotRuntimeEnv } from "../render/runtimeEnvSnapshot.js";
 import {
   buildSyntheticRenderJob,
   type DistributedFormat,
+  PLAN_AUDIO_RELATIVE_PATH,
   PLAN_VIDEOS_META_RELATIVE_PATH,
   type PlanVideosJson,
   readFfmpegVersion,
   readProducerVersion,
 } from "./shared.js";
+import { CURRENT_PLAN_PROTOCOL, type PlanProtocolV1Descriptor } from "./planProtocol.js";
+import {
+  measurePlanSizeBreakdown,
+  type PlanSizeBreakdown,
+  type PlanSizeRootKind,
+} from "./planSize.js";
 
 /**
  * Caller-supplied configuration for a distributed render. `fps`, `width`,
@@ -223,7 +222,8 @@ export interface DistributedRenderConfig {
    * 10 GB `/tmp` budget alongside the chunk worker's frame buffer +
    * ffmpeg working set). Adapters that deploy onto storage with
    * tighter ceilings can pass a smaller cap; tests pass a tiny cap to
-   * exercise the throw path.
+   * exercise the throw path. This applies to the monolithic v1 transport;
+   * `planV2()` emits content-addressed role dependencies and bypasses it.
    */
   planDirSizeLimitBytes?: number;
 
@@ -254,6 +254,7 @@ export interface DistributedRenderConfig {
  */
 export interface PlanResult {
   planDir: string;
+  planProtocol: Readonly<PlanProtocolV1Descriptor>;
   planHash: string;
   chunkCount: number;
   totalFrames: number;
@@ -269,15 +270,30 @@ export interface PlanResult {
 export function applyDistributedAudioWarningPolicy(
   job: RenderJob,
   audioError: string,
+  audioFailures: readonly AudioProcessingFailure[] = [],
   log: ProducerLogger = defaultLogger,
 ): void {
+  const failureOwner =
+    audioFailures.length === 0
+      ? undefined
+      : audioFailures.some((failure) => failure.owner === "system")
+        ? "system"
+        : "user";
+  const retryable =
+    audioFailures.length === 0 ? undefined : audioFailures.every((failure) => failure.retryable);
   applyRenderWarningPolicy(
     job,
     [
       {
         code: "audio_processing_failed",
         message: `Audio mix failed; output would be video-only: ${audioError}`,
-        details: { mediaType: "audio" },
+        details: {
+          mediaType: "audio",
+          failureReasons: [...new Set(audioFailures.map((failure) => failure.reason))],
+          failureStages: [...new Set(audioFailures.map((failure) => failure.stage))],
+          failureOwner,
+          retryable,
+        },
       },
     ],
     log,
@@ -322,9 +338,8 @@ export const MIN_CHUNK_SIZE = 10;
 /**
  * Default hard ceiling on `<planDir>/` size in bytes. 2 GB fits inside
  * AWS Lambda's 10 GB `/tmp` alongside the chunk worker's captured frames
- * and ffmpeg's temporary files. Compositions that exceed this have to
- * fall back to the in-process renderer until per-chunk video-frame
- * slicing lands.
+ * and ffmpeg's temporary files. Compositions that exceed this can opt into
+ * `planV2()` or fall back to the in-process renderer.
  */
 export const PLAN_DIR_SIZE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -341,17 +356,37 @@ export class PlanTooLargeError extends Error {
   readonly code: typeof PLAN_TOO_LARGE = PLAN_TOO_LARGE;
   readonly sizeBytes: number;
   readonly limitBytes: number;
-  constructor(sizeBytes: number, limitBytes: number) {
+  readonly breakdown?: PlanSizeBreakdown;
+  readonly observedAt?: string;
+  constructor(
+    sizeBytes: number,
+    limitBytes: number,
+    breakdown?: PlanSizeBreakdown,
+    observedAt?: string,
+  ) {
+    const breakdownSuffix = breakdown
+      ? ` Breakdown: video-frames=${formatBytes(breakdown.videoFramesBytes)}, ` +
+        `compiled=${formatBytes(breakdown.compiledBytes)} ` +
+        `(source-media=${formatBytes(breakdown.sourceMediaBytes)}), ` +
+        `audio=${formatBytes(breakdown.audioBytes)}, metadata=${formatBytes(breakdown.metadataBytes)}, ` +
+        `other=${formatBytes(breakdown.otherBytes)}, files=${breakdown.fileCount}.`
+      : "";
+    const observationSuffix = observedAt ? ` Observed at ${observedAt}.` : "";
     super(
       `[plan] planDir size ${formatBytes(sizeBytes)} exceeds the configured ceiling ` +
         `${formatBytes(limitBytes)} (PLAN_TOO_LARGE). The default 2 GB cap fits inside AWS ` +
         `Lambda's 10 GB /tmp budget alongside the chunk worker's frame buffer and ffmpeg's ` +
-        `working set. To unblock: shorten the composition, lower the framerate, or use the ` +
-        `in-process renderer (\`executeRenderJob\`) — it has no planDir size cap.`,
+        `working set. To unblock: use the content-addressed \`planV2()\` transport, shorten ` +
+        `the composition, lower the framerate, or use the in-process renderer ` +
+        `(\`executeRenderJob\`) — it has no planDir size cap.` +
+        observationSuffix +
+        breakdownSuffix,
     );
     this.name = "PlanTooLargeError";
     this.sizeBytes = sizeBytes;
     this.limitBytes = limitBytes;
+    this.breakdown = breakdown;
+    this.observedAt = observedAt;
   }
 }
 
@@ -434,30 +469,33 @@ export function rejectUnsupportedDistributedFormat(
  * walker outside the planDir.
  */
 export function measurePlanDirBytes(planDir: string): number {
-  let total = 0;
-  function walk(dir: string): void {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (entry.isFile()) {
-        try {
-          total += statSync(full).size;
-        } catch {
-          // Ignore — a file disappearing during the walk shouldn't crash
-          // the measurement.
-        }
-      }
-    }
-  }
-  walk(planDir);
-  return total;
+  return measurePlanSizeBreakdown(planDir).totalBytes;
+}
+
+function assertPlanSizeWithinLimit(input: {
+  rootDir: string;
+  rootKind: PlanSizeRootKind;
+  limitBytes: number;
+  observedAt: string;
+  log: ProducerLogger;
+}): PlanSizeBreakdown {
+  const breakdown = measurePlanSizeBreakdown(input.rootDir, input.rootKind);
+  if (breakdown.totalBytes <= input.limitBytes) return breakdown;
+  input.log.warn("[plan] size budget exceeded", {
+    observedAt: input.observedAt,
+    sizeBytes: breakdown.totalBytes,
+    limitBytes: input.limitBytes,
+    fileCount: breakdown.fileCount,
+    compiledBytes: breakdown.compiledBytes,
+    sourceMediaBytes: breakdown.sourceMediaBytes,
+    videoFramesBytes: breakdown.videoFramesBytes,
+    videoFrameFileCount: breakdown.videoFrameFileCount,
+    audioBytes: breakdown.audioBytes,
+    metadataBytes: breakdown.metadataBytes,
+    otherBytes: breakdown.otherBytes,
+    topComponents: breakdown.topComponents,
+  });
+  throw new PlanTooLargeError(breakdown.totalBytes, input.limitBytes, breakdown, input.observedAt);
 }
 
 /**
@@ -543,6 +581,19 @@ function assertPositiveInteger(name: string, value: number): void {
     throw new Error(
       `[plan] resolveChunkPlan: ${name} must be a positive integer (received ${String(value)})`,
     );
+  }
+}
+
+const FREEZE_OWNED_PLAN_FILES = [
+  "plan.json",
+  join("meta", "composition.json"),
+  join("meta", "encoder.json"),
+  join("meta", "chunks.json"),
+] as const;
+
+function removeFreezeOwnedPlanFiles(planDir: string): void {
+  for (const relativePath of FREEZE_OWNED_PLAN_FILES) {
+    rmSync(join(planDir, relativePath), { force: true });
   }
 }
 
@@ -727,6 +778,20 @@ function resolveNonMp4EncoderTriple(
   return { encoder: "png-sequence", pixelFormat: "rgba", preset: "lossless" };
 }
 
+/** Test-visible construction of the engine config used by distributed planning. */
+export function resolveDistributedEngineConfig(config: DistributedRenderConfig): EngineConfig {
+  return {
+    ...(config.producerConfig ?? config.engineConfig ?? resolveConfig()),
+    browserGpuMode: "software",
+    forceScreenshot: false,
+    // Distributed rendering deliberately opts into deterministic BeginFrame
+    // on Linux SwiftShader. Preserve the provenance bit consumed by the
+    // engine's software-GPU screenshot clamp; assigning the boolean alone
+    // loses the distinction between a default false and this explicit opt-out.
+    forceScreenshotExplicitlyOptedOut: true,
+  };
+}
+
 /**
  * Activity A of the distributed render pipeline. Produces a self-contained
  * `<planDir>/` from a project + config. See module docstring for the
@@ -750,17 +815,14 @@ export async function plan(
   if (!existsSync(planDir)) mkdirSync(planDir, { recursive: true });
 
   const log = config.logger ?? defaultLogger;
+  const sizeLimitBytes = config.planDirSizeLimitBytes ?? PLAN_DIR_SIZE_LIMIT_BYTES;
   const abortSignal = config.abortSignal;
   const assertNotAborted = (): void => {
     if (abortSignal?.aborted) {
       throw new Error("[plan] render_cancelled");
     }
   };
-  const cfg: EngineConfig = {
-    ...(config.producerConfig ?? config.engineConfig ?? resolveConfig()),
-    browserGpuMode: "software",
-    forceScreenshot: false,
-  };
+  const cfg = resolveDistributedEngineConfig(config);
 
   const job = buildSyntheticRenderJob({
     fps: { num: config.fps, den: 1 },
@@ -787,7 +849,12 @@ export async function plan(
   }
 
   const workDir = join(planDir, ".plan-work");
-  if (!existsSync(workDir)) mkdirSync(workDir, { recursive: true });
+  // `.plan-work` is planner-owned scratch space. A prior attempt can fail
+  // before the end-of-plan cleanup and leave compiled assets behind; cpSync
+  // and compileStage both overlay their outputs, so reusing that directory
+  // would let stale bytes contaminate the new plan and its size check.
+  rmSync(workDir, { recursive: true, force: true });
+  mkdirSync(workDir, { recursive: true });
   const compiledDir = join(workDir, "compiled");
 
   // Pre-seed the compiled directory with `projectDir`'s local assets
@@ -915,6 +982,17 @@ export async function plan(
     }
   }
 
+  // The compiled tree is now stable. If it already exceeds the final plan
+  // budget, extraction/audio/freeze can only add retained bytes, so fail before
+  // generating a multi-GiB frame tree.
+  assertPlanSizeWithinLimit({
+    rootDir: compiledDir,
+    rootKind: "compiled",
+    limitBytes: sizeLimitBytes,
+    observedAt: "pre-extract",
+    log,
+  });
+
   // ── Extract videos ──
   // `materializeSymlinks: true` recursively copies frames so the planDir is
   // self-contained (symlinks don't survive S3/GCS round-trips).
@@ -928,6 +1006,7 @@ export async function plan(
     assertNotAborted,
     materializeSymlinks: true,
   });
+  if (extractResult.failureToEnforce) throw extractResult.failureToEnforce;
   // Skip `extractResult.frameLookup.cleanup()`: it would rm-rf each
   // video's outputDir, but in `plan()` those directories ARE the source
   // material the renames below move into `planDir/video-frames/`.
@@ -943,7 +1022,7 @@ export async function plan(
     assertNotAborted,
   });
   if (audioResult.audioError) {
-    applyDistributedAudioWarningPolicy(job, audioResult.audioError, log);
+    applyDistributedAudioWarningPolicy(job, audioResult.audioError, audioResult.audioFailures, log);
   }
 
   // Promote staged artifacts from the temp work tree into the final planDir
@@ -988,7 +1067,7 @@ export async function plan(
     "utf-8",
   );
 
-  const planAudioPath = join(planDir, "audio.aac");
+  const planAudioPath = join(planDir, PLAN_AUDIO_RELATIVE_PATH);
   if (audioResult.hasAudio && existsSync(audioResult.audioOutputPath)) {
     renameSync(audioResult.audioOutputPath, planAudioPath);
   }
@@ -1058,6 +1137,21 @@ export async function plan(
     });
   }
 
+  // A caller may reuse an existing planDir. freezePlan overwrites these four
+  // files, so remove stale versions before the preliminary measurement; the
+  // exact post-freeze check below still includes the newly written metadata.
+  removeFreezeOwnedPlanFiles(planDir);
+
+  // All retained heavy artifacts have been promoted and transient work files
+  // removed. Reject before freezePlan performs its full content-hash read.
+  assertPlanSizeWithinLimit({
+    rootDir: planDir,
+    rootKind: "plan",
+    limitBytes: sizeLimitBytes,
+    observedAt: "pre-freeze",
+    log,
+  });
+
   const freezeResult = await freezePlan({
     planDir,
     composition: compositionJson,
@@ -1076,14 +1170,17 @@ export async function plan(
   // alongside the chunk worker's frame buffer + ffmpeg working set. The
   // check runs AFTER cleanup so the workDir tree doesn't double-count.
   // Non-retryable: the same planDir would trip the cap on every retry.
-  const sizeLimitBytes = config.planDirSizeLimitBytes ?? PLAN_DIR_SIZE_LIMIT_BYTES;
-  const planDirBytes = measurePlanDirBytes(planDir);
-  if (planDirBytes > sizeLimitBytes) {
-    throw new PlanTooLargeError(planDirBytes, sizeLimitBytes);
-  }
+  assertPlanSizeWithinLimit({
+    rootDir: planDir,
+    rootKind: "plan",
+    limitBytes: sizeLimitBytes,
+    observedAt: "post-freeze",
+    log,
+  });
 
   return {
     planDir,
+    planProtocol: CURRENT_PLAN_PROTOCOL,
     planHash,
     chunkCount,
     totalFrames,
