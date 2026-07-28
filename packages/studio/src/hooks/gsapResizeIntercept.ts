@@ -79,7 +79,7 @@ export async function tryGsapResizeIntercept(
   if (!anim || isInstantHold(anim)) {
     const sel = selectorFromSelection(selection);
     if (!sel) return false;
-    const sizeSet = anim ?? findSizeSetAnimation(animations, sel);
+    const sizeSet = anim ?? findSizeSetAnimation(animations, sel, selection.element);
 
     // If the element is animated (has a real tween, not just a static size
     // hold), keyframe the size at the playhead so other keyframes keep theirs —
@@ -242,7 +242,7 @@ export async function tryGsapResizeIntercept(
     const currentAnimations = fetchFallbackAnimations
       ? await fetchFallbackAnimations()
       : (resolved?.animations ?? animations);
-    const existingSet = findExistingPositionWrite(currentAnimations, selector);
+    const existingSet = findExistingPositionWrite(currentAnimations, selector, selection.element);
     // Delta chosen so the drag-path math composes back to exactly `corrected`
     // (no drag scratch attrs exist during a resize, so base = gsapPos).
     await commitStaticGsapPosition(

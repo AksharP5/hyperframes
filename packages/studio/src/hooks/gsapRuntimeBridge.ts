@@ -213,7 +213,7 @@ export async function tryGsapDragIntercept(
     const existingSet =
       posAnim && isInstantHold(posAnim) && posAnim.targetSelector === selector
         ? posAnim
-        : findExistingPositionWrite(resolvedAnimations, selector);
+        : findExistingPositionWrite(resolvedAnimations, selector, selection.element);
     await commitStaticGsapPosition(selection, offset, gsapPos, selector, existingSet, {
       commitMutation,
       fetchAnimations: fetchFallbackAnimations,
@@ -301,7 +301,8 @@ export async function tryGsapRotationIntercept(
   // rotation set in place, else add a new one. This replaces the old
   // `--hf-studio-rotation` CSS-var fallback (the same dual-channel bug class).
   if (!anim || isInstantHold(anim)) {
-    const existingSet = anim ?? findRotationSetAnimation(resolvedAnimations, selector);
+    const existingSet =
+      anim ?? findRotationSetAnimation(resolvedAnimations, selector, selection.element);
     await commitStaticGsapRotation(selection, newRotation, selector, existingSet, {
       commitMutation,
       fetchAnimations: fetchFallbackAnimations,

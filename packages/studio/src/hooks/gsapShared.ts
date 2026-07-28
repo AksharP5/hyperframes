@@ -186,7 +186,12 @@ function attributeSelector(name: string, value: string): string {
   return `[${name}="${value.replace(/(["\\])/g, "\\$1")}"]`;
 }
 
-function matchesExactlyOne(doc: Document, selector: string, element: Element): boolean {
+/**
+ * Whether `selector` addresses `element` AND NOTHING ELSE. The single test for
+ * "this string is safe to author a new tween against": a selector that also
+ * hits siblings writes a tween that animates all of them.
+ */
+export function matchesExactlyOne(doc: Document, selector: string, element: Element): boolean {
   try {
     const matches = doc.querySelectorAll(selector);
     return matches.length === 1 && matches[0] === element;
@@ -246,11 +251,12 @@ function structuralSelector(element: Element): string | null {
  * against, a failed structural walk (detached between select and commit, a
  * shadow-root boundary, a chain that no longer re-resolves) IS that evidence,
  * so returning the bare selector anyway would hand back the exact input this
- * function exists to replace. Callers decide what to do with the null: the
- * add-keyframe path has a graceful no-animation fallback, and the paths that
- * cannot afford to drop a user edit opt back in with `?? selectorFromSelection`
- * where the trade is visible. The bare selector comes back only with no DOM to
- * disambiguate against, where refusing would be guessing rather than knowing.
+ * function exists to replace. Every caller treats the null as "do not author
+ * this tween": falling back to the selection's own selector would write the
+ * group-collapsing target this function exists to prevent, and a gesture that
+ * does not persist reverts visibly on the next reload, where a tween silently
+ * aimed at five elements does not. The bare selector comes back only with no DOM
+ * to disambiguate against, where refusing would be guessing rather than knowing.
  */
 export function writeTargetSelector(selection: DomEditSelection): string | null {
   if (selection.id) return idSelector(selection.id);
@@ -284,6 +290,33 @@ export function existingTweenTargetSelector(
     return animation.targetSelector;
   }
   return selectorFromSelection(selection);
+}
+
+/**
+ * The read half of {@link writeTargetSelector}: does an already-authored tween
+ * write THIS element?
+ *
+ * String equality against `selectorFromSelection` alone is not enough once new
+ * tweens are authored with a narrowed one-element selector: the next edit would
+ * miss the write it just made and append a second, conflicting one. Falling back
+ * to the live DOM keeps the pair consistent.
+ *
+ * That fallback is `matchesExactlyOne`, not a bare `element.matches`. A target
+ * the element merely shares with its siblings is a GROUP tween, and the callers
+ * here MUTATE what they find: an individual nudge on one of five `.group`
+ * siblings would rewrite the group's own tween and move all five. Only the
+ * selection that IS the group (string equality above, where the author selected
+ * `.group` itself) may edit it; every other element authors its own write.
+ */
+export function tweenTargetsElement(
+  targetSelector: string,
+  selector: string,
+  element: Element | null | undefined,
+): boolean {
+  if (targetSelector === selector) return true;
+  const doc = element?.ownerDocument;
+  if (!element || !doc) return false;
+  return matchesExactlyOne(doc, targetSelector, element);
 }
 
 // ── Percentage computation ────────────────────────────────────────────────────

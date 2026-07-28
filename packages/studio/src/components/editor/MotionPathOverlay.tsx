@@ -132,7 +132,10 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
   const createMode = geometryResolved && !geometry && Boolean(selection?.element) && !isPlaying;
   const createSelector = createMode ? selectorFor(selection) : null;
   const compW = compositionSize?.width ?? null;
-  const canCreate = createMode && hasMotionPathPlugin(iframeRef.current);
+  // No one-element selector means the path could only be authored onto the
+  // element's class siblings, so the toolbar toggle stays hidden instead of
+  // arming a press that the effect below would silently drop.
+  const canCreate = createMode && !!createSelector && hasMotionPathPlugin(iframeRef.current);
 
   // Publish whether the selected element can take a path so the preview toolbar
   // shows its "set destination" toggle. Drops to false when this overlay unmounts

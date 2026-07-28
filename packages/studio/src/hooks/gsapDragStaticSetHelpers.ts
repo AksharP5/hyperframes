@@ -1,6 +1,6 @@
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { RuntimeTweenChange, SetPatchProps } from "./gsapRuntimePatch";
-import { isInstantHold } from "./gsapShared";
+import { isInstantHold, tweenTargetsElement } from "./gsapShared";
 
 /** The shape of an `update-property` mutation a static-set nudge POSTs. */
 interface UpdatePropertyMutation {
@@ -34,12 +34,13 @@ export function setPatchFromUpdateProperty(
 function findPositionSetAnimation(
   animations: GsapAnimation[],
   selector: string,
+  element?: Element | null,
 ): GsapAnimation | null {
   return (
     animations.find(
       (a) =>
         a.method === "set" &&
-        a.targetSelector === selector &&
+        tweenTargetsElement(a.targetSelector, selector, element) &&
         ("x" in a.properties || "y" in a.properties),
     ) ?? null
   );
@@ -61,12 +62,16 @@ function findPositionSetAnimation(
 export function findExistingPositionWrite(
   animations: GsapAnimation[],
   selector: string,
+  element?: Element | null,
 ): GsapAnimation | null {
-  const set = findPositionSetAnimation(animations, selector);
+  const set = findPositionSetAnimation(animations, selector, element);
   if (set) return set;
   return (
     animations.find(
-      (a) => a.targetSelector === selector && a.propertyGroup === "position" && isInstantHold(a),
+      (a) =>
+        tweenTargetsElement(a.targetSelector, selector, element) &&
+        a.propertyGroup === "position" &&
+        isInstantHold(a),
     ) ?? null
   );
 }
@@ -74,10 +79,14 @@ export function findExistingPositionWrite(
 export function findRotationSetAnimation(
   animations: GsapAnimation[],
   selector: string,
+  element?: Element | null,
 ): GsapAnimation | null {
   return (
     animations.find(
-      (a) => isInstantHold(a) && a.targetSelector === selector && "rotation" in a.properties,
+      (a) =>
+        isInstantHold(a) &&
+        tweenTargetsElement(a.targetSelector, selector, element) &&
+        "rotation" in a.properties,
     ) ?? null
   );
 }
@@ -85,12 +94,13 @@ export function findRotationSetAnimation(
 export function findSizeSetAnimation(
   animations: GsapAnimation[],
   selector: string,
+  element?: Element | null,
 ): GsapAnimation | null {
   return (
     animations.find(
       (a) =>
         isInstantHold(a) &&
-        a.targetSelector === selector &&
+        tweenTargetsElement(a.targetSelector, selector, element) &&
         ("width" in a.properties || "height" in a.properties),
     ) ?? null
   );

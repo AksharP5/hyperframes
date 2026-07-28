@@ -63,16 +63,18 @@ export async function commitKeyframeAtTimeImpl(
       },
     );
   } else {
+    // Null means the live DOM could not prove any one-element form. Falling
+    // back to the author's own selector would write the group-collapsing
+    // target this narrowing exists to prevent, so the keyframe is dropped
+    // instead (see writeTargetSelector).
+    const target = writeTargetSelector(selection);
+    if (!target) return;
     const defaultDuration = 0.5;
     await commitMutation(
       selection,
       {
         type: "add-with-keyframes" as const,
-        // Null here means the live DOM could not prove any one-element form.
-        // This branch has no graceful no-op to fall to, so it takes the
-        // author's own selector, group collapse and all, over dropping the
-        // keyframe the user just asked for.
-        targetSelector: writeTargetSelector(selection) ?? selector,
+        targetSelector: target,
         position: absoluteTime,
         duration: defaultDuration,
         keyframes: [
