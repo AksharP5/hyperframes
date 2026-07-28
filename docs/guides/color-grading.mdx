@@ -1,347 +1,187 @@
 ---
 title: Color Grading
-description: "Apply real-time color grading, presets, LUTs, finishing, and media effects to video and image media in Studio and final renders."
+description: "Correct and creatively grade video or image media with presets, scopes, color wheels, curves, HSL selections, and custom LUTs."
 ---
 
-HyperFrames Studio can color grade project-local `<video>` and `<img>` media directly in the preview. The same `data-color-grading` settings are used by the render pipeline, so the exported video should match the look you preview.
+Use Color Grading to correct and creatively grade real `<video>` and `<img>`
+media in Studio or through an agent with the same validated SDR/Rec.709 shader
+contract in preview and render.
 
-This is a lightweight media color tool for generated videos, uploaded footage, social variants, and agent-authored compositions. It is not a DaVinci Resolve, Premiere, ACES, or OCIO finishing pipeline.
+## Choose the Right Tool
 
-## What Is New
-
-| Capability | Status | Notes |
+| Stage | Purpose | HyperFrames tools |
 | --- | --- | --- |
-| Studio Color Grading panel | Supported | Appears on selected `<video>` and `<img>` elements. |
-| Manual controls | Supported | Exposure, contrast, highlights, shadows, white point, black point, warmth, tint, vibrance, saturation. |
-| Presets | Supported | Named HyperFrames presets backed by shader settings, not bundled third-party LUT packs. |
-| Custom LUT upload | Supported | Project-local 3D `.cube` LUT files with strength control. |
-| Finish | Supported | Vignette and grain, with advanced settings behind the settings icon. |
-| Studio Effects panel | Supported | Essentials, Retro & Glitch, Print, and Art effects share the same media shader and persisted `effects` object. |
-| Studio Overlays panel | Supported | Inserts selected Registry overlays at the media timing as ordinary timeline layers. |
-| Before preview | Supported | Hold the compare button to temporarily show the ungraded media. |
-| Render parity | Supported | The render pipeline redraws the color-grading shader after video-frame injection. |
+| Correct | Fix exposure, contrast, tonal balance, and casts | Adjust controls and source analysis |
+| Grade | Shape color and mood | Tonal wheels, RGB curves, hue curves, and HSL color selections |
+| Apply a look | Start from a tested style or an existing external look | Presets and custom 3D `.cube` LUTs |
+| Finish | Add restrained optical texture | Vignette and grain |
+| Stylize | Transform the pixels beyond normal grading | [Media Effects](/guides/media-effects) |
+| Dress | Add an authored HUD, flash, light leak, or freeze-frame layer | [Media Overlays](/guides/media-overlays) |
 
-Studio labels `whites`, `blacks`, and `temperature` as White Point, Black Point, and Warmth. Use the JSON keys shown in the data shape when authoring `data-color-grading` by hand or through an agent.
+All pixel-level stages are stored together on the selected media element. An
+overlay is different: it is an ordinary editable composition layer whose final
+paint order follows its authored track and CSS `z-index`.
 
-## Support Matrix
+## Quick Start
 
-| Source / workflow | Supported? | What to expect |
-| --- | --- | --- |
-| 1080p SDR video | Yes | Best default path. Good for most uploaded/generated MP4/WebM/MOV media that browsers can decode. |
-| 4K SDR video | Yes | Works when the browser and machine can decode it. Preview/render cost is higher. A 4K source only produces 4K output when the composition/render is also 4K. |
-| 1080p / 4K images | Yes | Works on normal project-local images. Output resolution follows the element/composition render size, not hidden extra detail beyond that size. |
-| iPhone SDR video | Yes | Treat as normal SDR media when it is tagged/decoded as SDR. |
-| iPhone HDR / HLG / Dolby Vision-style uploads | Partial | The media can be loaded if browser/FFmpeg support the file, and Studio warns when HDR metadata is detected. The live Color Grading shader is still an SDR preview path, not true HDR grading. Use the existing [HDR Rendering](/guides/hdr) pipeline for HDR delivery and verify the output. |
-| HDR render output | Related, not new | HyperFrames already has HDR render support. Color Grading does not yet provide HDR-aware grading controls. |
-| LOG camera footage | Partial | Sliders and LUTs can be applied, but HyperFrames does not auto-detect camera LOG profiles or apply ACES/OCIO input transforms. Use a matching conversion/look LUT if you know the source profile. |
-| Rec.709 creative LUTs | Yes | Best LUT path today. Use project-local 3D `.cube` files. |
-| Camera conversion LUTs | Partial | Technically accepted if they are supported 3D `.cube` files, but correctness depends on the source footage matching the LUT's expected input color space. |
-| Full-scene grading including text/DOM | Not yet | Color Grading is media-only. Captions, text, SVG, and regular DOM overlays stay unchanged. |
-| Face/region-only grading or privacy | Not yet | Realtime effects process the whole selected `<img>` or `<video>`. Isolate the region into a separate cropped/masked media layer or use an external segmentation/tracking tool first. |
-| Remote media URLs | Partial | WebGL pixel processing requires compatible CORS headers. Project-local assets are the reliable path. |
-| Professional ACES/OCIO/HDR finishing | Not yet | Future render/color-management work, not this Studio shader path. |
+<Tabs>
+  <Tab title="Studio">
+    Select a real `<img>` or `<video>` element to open Color Grading in the
+    Design panel.
 
-## How It Works
+    <Steps>
+      <Step title="Correct the source">
+        Open **Scopes**, then adjust exposure, tonal balance, white balance, and
+        saturation before applying a stronger look.
+      </Step>
+      <Step title="Shape the grade">
+        Use tonal wheels, curves, or an HSL Color Selection only where the
+        source needs more precise control.
+      </Step>
+      <Step title="Choose a look and verify">
+        Preview a preset or load a 3D `.cube` LUT, compare with the source, and
+        scrub representative frames before rendering.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Agent / CLI">
+    Inspect the media, apply one validated payload, then verify representative
+    frames:
 
-Color grading is stored on media elements as `data-color-grading`:
+    ```bash Terminal
+    npx hyperframes media-treatment \
+      --project . \
+      --file compositions/interview.html \
+      --selector '#interview' \
+      --analyze \
+      --json
 
-```html index.html
-<video
-  id="hero-video"
-  src="assets/hero.mp4"
-  data-start="0"
-  data-duration="6"
-  muted
-  playsinline
-  data-color-grading='{
-    "preset":"clean-studio",
-    "intensity":0.85,
-    "adjust":{
-      "exposure":0.05,
-      "contrast":0.08,
-      "highlights":-0.08,
-      "shadows":0.06,
-      "vibrance":0.04,
-      "saturation":0.04
-    },
-    "details":{
-      "vignette":0.08,
-      "vignetteFeather":0.72,
-      "grain":0.12,
-      "grainSize":0.25,
-      "grainRoughness":0.55
-    },
-    "effects":{
-      "blur":0.08,
-      "chromaBleed":0,
-      "tapeDamage":0,
-      "tapeTracking":0,
-      "tapeNoise":1,
-      "tapeSpeed":0.5,
-      "filmArtifacts":0,
-      "halftone":0,
-      "halftoneSize":0,
-      "twoInkPrint":0,
-      "twoInkPrintSize":0,
-      "ascii":0,
-      "asciiSize":0.066,
-      "asciiInvert":0,
-      "dither":0,
-      "ditherSize":0.25
-    },
-    "palette":["#0b0d0d","#eee9db"],
-    "colorSpace":"rec709"
-  }'
-></video>
-```
+    npx hyperframes media-treatment \
+      --project . \
+      --file compositions/interview.html \
+      --selector '#interview' \
+      --grading '{"adjust":{"highlights":-0.08,"shadows":0.06},"wheels":{"midtones":{"hue":32,"amount":0.05}}}' \
+      --apply \
+      --json
+    ```
 
-The runtime creates a sibling WebGL canvas for the media element, samples the current video or image frame, applies shader uniforms, then hides the native media only after a shader frame is ready.
+    Use `--dry-run` when target or scope is uncertain. Use `--clear` to remove
+    the complete treatment.
+  </Tab>
+</Tabs>
 
-## Studio Workflow
+To reuse a grade in Studio, use **Copy grade to**, choose **Current file media**
+or **All project media**, then click **Apply**. Project-wide copy refuses
+project-relative LUT paths because the same path may resolve differently in
+another composition; use current-file copy or a project-root path/data URL. The
+copy changes only the treatment payload, not overlays, captions, or DOM layers.
 
-Select a real `<img>` or `<video>` element in Studio to open the media tools:
+Project-local media is the reliable path. Remote media requires compatible CORS
+headers. Color Grading does not process captions, text, SVG, arbitrary DOM, or
+CSS background images.
 
-1. **Presets** shows every built-in starting point in a responsive preview
-   grid. Hover to preview it on the selected media, click to apply it, or choose
-   **Original** to return to the neutral preset.
-2. **Adjust** provides tonal and color correction.
-3. **Effects** groups configurable shader controls under Essentials, Retro &
-   Glitch, Print, and Art.
-4. **Finish** provides vignette and grain.
-5. **Custom LUT** accepts a project-local 3D `.cube` file.
-6. **Overlays** installs Camcorder HUD, Editorial Flash, Organic Light Leak,
-   or Freeze-Frame Cutout from the existing Registry.
+## Professional Controls
 
-An overlay inserted from this panel starts with the selected media, uses its
-duration, and is placed on the next visual track when one is known. It then
-behaves like any other composition layer: edit or remove it through Layers and
-Timeline. The left Catalog remains the browse-all Registry surface.
+### Color Wheels
 
-<Note>
-Color Grading is intentionally **media-only**. It applies to `<video>` and `<img>` sources. Captions, text, divs, SVG, and UI graphics remain ungraded unless you render them into media first.
-</Note>
+The three wheels target broad tonal zones:
 
-<Note>
-Project-local media is the safest path. Remote media must be served with compatible CORS headers and should use `crossorigin="anonymous"` when pixel processing is needed.
-</Note>
+- **Shadows** shapes dark regions.
+- **Midtones** shapes most faces, products, and general scene color.
+- **Highlights** shapes bright regions and specular areas.
 
-## Data Shape
+Use small amounts first. The **Level** control changes the brightness of the
+same tonal zone, while hue and amount introduce color.
 
-```json
-{
-  "preset": "clean-studio",
-  "intensity": 1,
-  "adjust": {
-    "exposure": 0,
-    "contrast": 0,
-    "highlights": 0,
-    "shadows": 0,
-    "whites": 0,
-    "blacks": 0,
-    "temperature": 0,
-    "tint": 0,
-    "vibrance": 0,
-    "saturation": 0
-  },
-  "details": {
-    "vignette": 0,
-    "vignetteMidpoint": 0.5,
-    "vignetteRoundness": 0,
-    "vignetteFeather": 0.65,
-    "grain": 0,
-    "grainSize": 0.25,
-    "grainRoughness": 0.5
-  },
-  "effects": {
-    "blur": 0,
-    "pixelate": 0,
-    "chromaBleed": 0,
-    "tapeDamage": 0,
-    "tapeTracking": 0,
-    "tapeNoise": 1,
-    "tapeSpeed": 0.5,
-    "filmArtifacts": 0,
-    "halftone": 0,
-    "halftoneSize": 0,
-    "twoInkPrint": 0,
-    "twoInkPrintSize": 0,
-    "ascii": 0,
-    "asciiSize": 0.066,
-    "asciiInvert": 0,
-    "dither": 0,
-    "ditherSize": 0.25
-  },
-  "palette": ["#0b0d0d", "#eee9db"],
-  "lut": {
-    "src": "assets/luts/look.cube",
-    "intensity": 0.75
-  },
-  "colorSpace": "rec709"
-}
-```
+### RGB Curves
 
-Omit `enabled`; the presence of `data-color-grading` implies that grading is active. All numeric controls are clamped by the runtime. The current color grading path is Rec.709/sRGB-oriented and assumes browser-decoded media frames.
+- **Master** remaps overall luminance.
+- **Red**, **Green**, and **Blue** remap individual channels.
 
-`chromaBleed` is a bounded `0` to `1` treatment primitive that horizontally
-softens chroma detail while preserving the center sample's luma. It is useful
-inside restrained creator-camera/camcorder treatments; it is not VHS, CRT, RGB
-split, tracking noise, or a complete camera emulation.
+Curve points are normalized `[input, output]` pairs. Resolved curves contain
+input endpoints `0` and `1`; HyperFrames infers missing endpoints, and the
+2–16-point limit includes those inferred points. An S-curve increases contrast;
+lifting the lower-left region raises shadows; channel curves can build
+split-tone or cast-removal adjustments.
 
-Most effect amounts and settings are normalized from `0` to `1`. Bloom supports
-up to `3`, bloom radius uses pixels, and enum controls use the integer choices
-shown in Studio:
+### Hue Curves
 
-- `tapeDamage` adds deterministic horizontal time-base instability, lower luma
-  bandwidth, restrained ghosting, noise, sparse dropouts, and bottom-edge head
-  switching. `tapeTracking` adds bounded moving horizontal tracking tears,
-  `tapeNoise` scales tape noise and row jitter, and `tapeSpeed` controls their
-  deterministic motion (`0.5` is normal speed). These three subordinate
-  controls do nothing without `tapeDamage`. A complete analog-tape treatment
-  may also use restrained `chromaBleed`, scanlines, RGB separation, and rare
-  row tears; none of these controls adds CRT curvature.
-- `filmArtifacts` adds deterministic sparse dust and short scratches. Combine
-  it with existing grain, vignette, color, and seek-safe GSAP gate weave for an
-  8mm treatment. It does not change the frame by itself when set to `0`.
-- `halftone` blends in a four-angle CMYK print screen. `halftoneSize` controls
-  its resolution-aware dot-cell size from fine to coarse. The channel angles
-  and edge response use fixed print-oriented defaults to keep authored output
-  consistent across agents.
-- `twoInkPrint` maps warm midtones and deep/cool shadows to fixed original
-  vermilion and teal spot screens with a dark overprint on warm paper.
-  `twoInkPrintSize` controls its resolution-aware screen size. Do not combine
-  it with `halftone` or describe it as a named commercial print process.
-- `ascii` converts the selected media to a procedural 5x7 glyph field.
-  `asciiSize` controls cell size and `asciiInvert` switches the light/dark ink
-  polarity. It uses the first and last colors from `palette`.
-- `dither` applies a temporally stable ordered 4x4 Bayer dither.
-  `ditherSize` controls cell size and all `palette` colors participate in the
-  result. This is ordered dithering, not Floyd-Steinberg or another sequential
-  error-diffusion algorithm.
-- `bloom` extracts bright pixels and runs a bounded half-resolution separable
-  blur. `bloomRadius` controls its radius.
-- `monoScreen` provides configurable mono print shapes, angle, spread, invert,
-  and palette controls.
-- `scanlines`, `crtCurvature`, and `chromaticAberration` provide display
-  geometry and channel treatments with their related settings.
-- `digitalGlitch` provides deterministic line tears, blocks, displacement,
-  selective pixelation, channel split, opacity, and speed controls.
-- `engraving`, `crosshatch`, and `kuwahara` provide stylized art treatments with
-  their calibrated settings. Kuwahara uses bounded half-float intermediate
-  targets when the browser supports them and otherwise reports unavailable.
+- **Hue vs Hue** moves a selected hue toward another hue.
+- **Hue vs Saturation** changes saturation around a selected hue.
+- **Hue vs Luma** changes brightness around a selected hue.
 
-`palette` accepts two to six exact `#RRGGBB` colors in authored order. Use
-dark-to-light order for normal luminance mapping; intentionally reverse the
-array for an inverted result. The runtime validates and lowercases colors but
-does not reorder them. ASCII, dither, mono screen, engraving, and crosshatch use
-it; a palette or subordinate setting alone does not allocate an effect. Omit it
-for the family default.
+Hue curve points are `[hueDegrees, delta]` pairs and wrap around the color
+wheel. An authored hue curve requires 3–16 unique hue inputs from `0` up to,
+but not including, `360`.
 
-When effects are combined, HyperFrames evaluates them in one fixed,
-deterministic order: source framing and multipass blur/Kuwahara preparation;
-chromatic and digital glitch; primary color grading and LUT blended by global
-intensity; grain and film
-artifacts; mono/engraving/crosshatch/halftone/two-ink/dither/ASCII; bloom,
-scanlines, vignette, and CRT display masking; then before/after comparison.
-Effects cannot currently be reordered. The fixed
-pipeline keeps Studio, playback, seeking, and final render behavior
-predictable.
+### HSL Color Selections
 
-Studio exposes these controls in the selected media element's **Effects**
-accordion. Agents should choose one primary intent through the `media-use`
-skill, then either seed from a source-aware treatment recipe or inspect the
-canonical toolbox and assemble a bespoke combination:
+A color selection qualifies pixels by hue, saturation, and luma, then applies a
+correction only inside that matte. This is useful for restrained tasks such as
+reducing an overly saturated shirt, cooling a background color, or protecting
+skin from a broad creative grade.
 
-```bash
-hyperframes media-treatment --capabilities --json
-hyperframes media-treatment --capability kuwahara --json
-```
+HyperFrames supports up to four ordered selections. These are static
+media-level qualifiers: they do not include object tracking, rotoscoping,
+facial recognition, or spatial masks.
 
-The first command reports a concise overview of every capability family. The
-focused query reports one family's or effect's controls, calibrated apply
-payload, render lane, palette support, and seek-safe animation paths. Use
-`--all` only for exhaustive tooling. Recipes are tested shortcuts, not the
-complete allowed surface. Persist the final combined payload with the same
-`hyperframes media-treatment` command; unknown keys are rejected before the
-composition is changed.
+### Scopes
 
-## Custom LUTs
-
-HyperFrames supports project-local 3D `.cube` LUT files:
-
-```html index.html
-<img
-  src="assets/product.jpg"
-  data-color-grading='{
-    "lut":{"src":"assets/luts/product-pop.cube","intensity":0.7}
-  }'
-/>
-```
-
-Use `.cube` LUTs when users already have a look from another editor or camera workflow.
-
-- HyperFrames currently supports 3D `.cube` LUTs for this path.
-- 3D cube LUTs up to `LUT_3D_SIZE 64` are supported.
-- 1D `.cube` LUTs and mixed 1D+3D LUT files are not supported yet.
-- Supported headers include common `DOMAIN_MIN` / `DOMAIN_MAX` and DaVinci/IRIDAS-style `LUT_3D_INPUT_RANGE`.
-- LUTs are not universal. A LUT looks correct only when the source footage roughly matches the LUT's expected input color space.
-- Rec.709 creative LUTs are the safest fit today.
-- LOG/camera conversion LUTs can be used, but HyperFrames does not yet manage camera color profiles for you.
-
-## Render Behavior
-
-Color Grading is part of the media runtime, so render uses the same settings as Studio preview. During render, HyperFrames injects exact video frames and asks the color-grading runtime to redraw before capture.
-
-For 4K output, use the existing [4K Rendering](/guides/4k-rendering) workflow. Color Grading can run at 4K when the composition/render surface is 4K, but a 1080p source video does not become sharper just because the final render is 4K.
-
-Performance follows the total number of treated pixels and the selected render
-lane, not only the number of media elements. Several tiled videos can be
-cheaper than several overlapping full-frame videos. Blur, Bloom, and Kuwahara
-use multipass rendering. When more than two full-frame multipass-treated media
-elements are visible together, verify continuous playback on the target
-machine and simplify or pre-render the stack if frames drop. HyperFrames does
-not impose a universal hard cap because GPU and decoder capacity varies by
-device.
-
-For HDR output, use the existing [HDR Rendering](/guides/hdr) workflow. Color Grading currently warns on detected HDR media, but the grading controls themselves are not HDR-aware.
-
-When grading a video, animate opacity on a wrapper element instead of directly on the `<video>` element. The runtime hides the native media and draws the graded result through a sibling canvas, so wrapper opacity preserves preview/render parity.
-
-## What Belongs Where
-
-| User wants | Use |
+| Scope | Use it for |
 | --- | --- |
-| Make uploaded footage look cleaner | Color Grading preset + adjust controls |
-| Use a look from another editor | Custom 3D `.cube` LUT |
-| Add polish to a product shot | Vignette, subtle grain, contrast, vibrance |
-| Blur or pixelate selected media | Effects panel |
-| Add restrained camcorder chroma softness | Effects panel or `effects.chromaBleed` through an agent |
-| Build an analog VHS treatment | `effects.tapeDamage` + bounded tracking/noise/speed + restrained chroma, scanline, row-tear, grain, and color settings |
-| Build an 8mm home-movie treatment | `effects.filmArtifacts` + grain/vignette/color + seek-safe GSAP weave |
-| Build a print/editorial treatment | `effects.halftone` + `effects.halftoneSize` |
-| Build a two-spot editorial print | `effects.twoInkPrint` + `effects.twoInkPrintSize` |
-| Build a terminal/editorial character treatment | `effects.ascii` + `effects.asciiSize` + an optional two-color `palette` |
-| Build a restrained multi-color pixel treatment | `effects.dither` + `effects.ditherSize` + a two-to-six-color `palette` |
-| Add an organic light leak | Install the finite `organic-light-leak-overlay` Registry block |
-| Build a freeze-frame cutout | Existing background removal + the `freeze-frame-dressing` Registry overlay block + host GSAP |
-| Make a presenter float over graphics | Existing [Remove Background](/guides/remove-background) workflow |
-| Put text behind a presenter | Existing `remove-background --background-output` workflow |
-| Render HDR delivery files | Existing [HDR Rendering](/guides/hdr) workflow |
-| Render 4K | Existing [4K Rendering](/guides/4k-rendering) workflow |
-| Remove a person and reconstruct the room | External video inpainting, not HyperFrames background removal |
-| Green screen keying | Preprocess with FFmpeg `chromakey` or a future HyperFrames command |
-| Grade every pixel in the full scene including captions/DOM | Future compositor or render post-process |
-| Professional ACES/OCIO color pipeline | Future high-fidelity color-management pipeline |
+| Histogram | Overall distribution from dark to bright |
+| Waveform | Brightness by horizontal image position |
+| RGB Parade | Channel balance and clipped individual channels |
+| Vectorscope | Hue direction and saturation |
 
-## Agent-Friendly Examples
+Studio scopes analyze a captured selected-media frame with the current
+treatment applied. They refresh as the grade changes, but are inspection tools
+and do not modify the grade.
 
-For AI agents, keep the instruction declarative:
+## Presets
 
-```text
-Apply a clean studio preset to assets/interview.mp4, reduce highlights slightly,
-lift shadows, add subtle vignette, and keep captions ungraded.
+HyperFrames ships tested shader-setting presets, not bundled LUT files:
+
+| Intent | Presets |
+| --- | --- |
+| Natural and corrective | Neutral, Warm Daylight, Clean Studio, Skin Soft, Food Pop, Night Lift |
+| Editorial and tonal | Muted Editorial, Vintage Wash, Soft Boost, Bright Pop, Deep Contrast |
+| Monochrome | Mono Clean, Mono Fade |
+
+Use these as starting points and tune them for the actual source. Presets that
+also activate a stylized shader treatment are documented under
+[Media Effects](/guides/media-effects).
+
+## Agent Guidance
+
+Agents should use the CLI as the normal authoring surface. The
+`data-color-grading` attribute is the persistence contract, not the first thing
+an agent needs to memorize.
+
+Users do not need to name a technical control. Requests such as _"this
+interview feels too dark and cold"_ or _"polish the footage without making it
+look filtered"_ route through the `media-use` skill, which inspects the source,
+discovers the relevant contract, applies a deterministic payload, and verifies
+the result.
+
+Start with the concise capability overview, then query only the contract needed
+for the current intent:
+
+```bash Terminal
+npx hyperframes media-treatment --capabilities --json
+npx hyperframes media-treatment --capability grading --json
+npx hyperframes media-treatment --capability curves --json
 ```
 
-Expected markup:
+Focused queries such as `wheels`, `hue-curves`, `secondary`, `scopes`, or `lut`
+return exact controls, bounds, and examples. Start from source analysis or a
+tested preset, then add small, explainable adjustments. Avoid inventing many
+unrelated curve and secondary values: they are difficult to review and easy to
+overcook.
+
+## Low-Level HTML Contract
+
+The CLI and Studio persist the resolved grade in `data-color-grading`:
 
 ```html index.html
 <video
@@ -353,26 +193,131 @@ Expected markup:
   playsinline
   data-color-grading='{
     "preset":"clean-studio",
-    "intensity":0.8,
-    "adjust":{"highlights":-0.08,"shadows":0.08},
-    "details":{"vignette":0.08}
+    "intensity":0.85,
+    "adjust":{
+      "exposure":0.04,
+      "highlights":-0.08,
+      "shadows":0.06,
+      "temperature":0.03
+    },
+    "wheels":{
+      "shadows":{"hue":218,"amount":0.04,"level":-0.01},
+      "midtones":{"hue":32,"amount":0.05,"level":0.01},
+      "highlights":{"hue":42,"amount":0.03,"level":0}
+    },
+    "curves":{
+      "master":[[0,0],[0.28,0.25],[0.72,0.76],[1,1]]
+    },
+    "hueCurves":{
+      "hueVsSaturation":[[0,0],[28,-0.05],[52,0]]
+    },
+    "secondaries":[{
+      "enabled":true,
+      "key":{
+        "hue":{"center":28,"range":18,"softness":12},
+        "saturation":{"min":0.15,"max":0.9,"softness":0.08},
+        "luma":{"min":0.12,"max":0.95,"softness":0.08}
+      },
+      "correction":{"saturation":-0.04,"temperature":0.03}
+    }],
+    "details":{"vignette":0.05,"grain":0.03},
+    "colorSpace":"rec709"
   }'
 ></video>
 ```
 
-## Related Guides
+The contract rejects unknown keys and clamps numeric values to Core-owned
+bounds. Query the current contract instead of copying bounds into agent
+instructions:
+
+```bash Terminal
+npx hyperframes media-treatment --capability secondary --json
+npx hyperframes media-treatment --all --json
+```
+
+Use `--all` only for exhaustive tooling or contract inspection.
+
+## Custom LUTs
+
+HyperFrames supports project-local 3D `.cube` LUTs:
+
+```json data-color-grading
+{
+  "lut": {
+    "src": "assets/luts/product-look.cube",
+    "intensity": 0.7
+  }
+}
+```
+
+- 3D `.cube` LUTs up to `LUT_3D_SIZE 64` are supported.
+- 1D and mixed 1D+3D `.cube` files are not supported.
+- Common `DOMAIN_MIN`, `DOMAIN_MAX`, and DaVinci/IRIDAS-style
+  `LUT_3D_INPUT_RANGE` headers are supported.
+- HyperFrames does not bundle third-party LUT packs.
+- A LUT is only correct when its expected input color space matches the source.
+- Rec.709 creative LUTs are the safest current workflow.
+- Camera LOG conversion LUTs can be loaded, but HyperFrames does not identify
+  camera profiles or apply ACES/OCIO input transforms automatically.
+
+Never paste a `.cube` body into an agent prompt. LUT files commonly contain
+tens of thousands of numeric rows. Keep the file local and use metadata,
+validation, and rendered comparisons to evaluate it.
+
+## Support Matrix
+
+| Source or workflow | Status | What to expect |
+| --- | --- | --- |
+| 1080p SDR video | Supported | Recommended default path |
+| 4K SDR video or image | Supported | Higher preview/render cost; output resolution still follows the composition |
+| iPhone SDR video | Supported | Treated as normal browser-decoded SDR media |
+| iPhone HDR, HLG, or Dolby Vision-style upload | Partial | Studio can show an SDR shader preview, but native HDR delivery bypasses the SDR treatment for native HDR source pixels |
+| HDR delivery render | Separate workflow | The native HDR compositor preserves HDR source pixels and does not apply this SDR grading/effects pipeline to native HDR layers |
+| LOG camera footage | Partial | Requires a known matching transform/LUT; no automatic camera profile management |
+| Full-scene grade including DOM/text | Not supported | Current grading targets individual media elements |
+| Face or region tracking | Not supported | Use a separate isolated media layer or external tracking/masking workflow |
+| Remote media | Partial | Requires compatible CORS headers; project-local assets are reliable |
+| ACES/OCIO finishing | Not supported | Outside the current browser shader pipeline |
+
+## Render and Performance
+
+The runtime creates a sibling WebGL canvas, uploads the current image/video
+frame as a texture, applies the same grading contract used by Studio, and hides
+the native source after a shader frame is ready. During final rendering,
+HyperFrames injects exact video frames and waits for the grading runtime to
+redraw before capture.
+
+That render-parity statement applies to SDR output. In the native HDR render
+path, HyperFrames keeps HDR source pixels out of the SDR DOM capture and
+composites them separately at higher bit depth. The current SDR grading canvas
+is therefore not applied to native HDR layers. Convert or tone-map the source to
+SDR first when these grading controls must appear in the result, or use
+[HDR Rendering](/guides/hdr) to preserve the untreated HDR source.
+
+For 4K output, follow [4K Rendering](/guides/4k-rendering). A 1080p source does
+not gain new detail merely because the composition is rendered at 4K.
+
+When animating a graded media layer's opacity, animate a wrapper rather than the
+`<video>` itself. The visible pixels are drawn by the sibling grading canvas,
+so wrapper opacity keeps the media and canvas together.
+
+Project-local media is the safest path. Remote media must provide compatible
+CORS headers and should use `crossorigin="anonymous"` when pixel access is
+required.
+
+## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Remove Background" icon="scissors" href="/guides/remove-background">
-    Create transparent video/image cutouts for presenter and product overlays.
+  <Card title="Media Effects" icon="wand-magic-sparkles" href="/guides/media-effects">
+    Apply and animate shader-based optical, retro, print, and art treatments.
   </Card>
-  <Card title="Rendering" icon="film" href="/guides/rendering#transparent-background">
-    Render transparent overlays and final MP4/WebM/MOV outputs.
+  <Card title="Media Overlays" icon="layer-group" href="/guides/media-overlays">
+    Add editable HUD, flash, light-leak, and freeze-frame composition layers.
   </Card>
   <Card title="HDR Rendering" icon="sun" href="/guides/hdr">
-    Render HDR10 outputs when your project uses HDR video or image sources.
+    Render HDR10 outputs and understand the boundary with SDR grading.
   </Card>
   <Card title="4K Rendering" icon="up-right-and-down-left-from-center" href="/guides/4k-rendering">
-    Render at 4K and understand what supersampling does and does not improve.
+    Render at 4K and understand source-versus-output resolution.
   </Card>
 </CardGroup>

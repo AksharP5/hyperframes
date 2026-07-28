@@ -21,6 +21,7 @@ npx hyperframes <command>
 - Lint compositions for structural issues (`lint`)
 - Inspect rendered visual layout for text overflow, clipped containers, and overlapping text, plus verify motion intent against the seeked timeline (`inspect`)
 - Capture key frames as PNG screenshots (`snapshot`)
+- Discover, analyze, and apply media grading/effects (`media-treatment`)
 - Check your environment for missing dependencies (`doctor`)
 
 **Use a different package if you want to:**
@@ -797,6 +798,53 @@ Word-level transcripts (whisper output) are grouped into readable caption cues o
     Runs multiple render configurations (varying fps, quality, and worker count) and compares timing and file size for each.
   </Tab>
   <Tab title="Utilities">
+    ### `media-treatment`
+
+    Discover the media-treatment contract, analyze a local media source, and
+    apply validated grading or effects to a real `<img>` or `<video>`:
+
+    ```bash Terminal
+    # Concise capability index, then one focused contract
+    npx hyperframes media-treatment --capabilities --json
+    npx hyperframes media-treatment --capability grading --json
+
+    # Analyze and update one selected media element
+    npx hyperframes media-treatment \
+      --project . \
+      --file compositions/scene.html \
+      --selector '#hero' \
+      --analyze \
+      --json
+    npx hyperframes media-treatment \
+      --project . \
+      --file compositions/scene.html \
+      --selector '#hero' \
+      --grading '{"adjust":{"exposure":0.05},"effects":{"bloom":0.15}}' \
+      --apply \
+      --json
+    ```
+
+    | Flag | Description |
+    |------|-------------|
+    | `--capabilities` | Print the concise capability-family index |
+    | `--capability <id>` | Print exact controls and examples for one family, preset, palette, adjustment, or effect |
+    | `--all` | Print the exhaustive contract for tooling; avoid for routine agent context |
+    | `--project <dir>` | Project directory; defaults to the current directory |
+    | `--file <path>` | HTML composition containing the target; defaults to `index.html` |
+    | `--selector <css>` | CSS selector for the target real media element |
+    | `--selector-index <n>` | Zero-based match when the selector is intentionally non-unique |
+    | `--analyze` | Measure a local source and return metadata, warnings, diagnosis, and bounded correction suggestions |
+    | `--grading <json>` | Validated grading/effects patch to merge into the target |
+    | `--apply` | Persist the validated patch; without it, no file is written |
+    | `--clear` | Remove the complete media treatment from the target |
+    | `--dry-run` | Report the mutation without writing |
+    | `--json` | Output a machine-readable result |
+
+    Use the [Color Grading](/guides/color-grading) and
+    [Media Effects](/guides/media-effects) guides for workflow guidance. The
+    command authors the low-level `data-color-grading` persistence contract so
+    agents do not need to construct HTML mutations by hand.
+
     ### `doctor`
 
     Check your environment for required dependencies:
