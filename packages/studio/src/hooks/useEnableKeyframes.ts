@@ -13,7 +13,7 @@ import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { usePlayerStore } from "../player/store/playerStore";
 import { fetchParsedAnimations, getAnimationsForElement } from "./useGsapTweenCache";
 import {
-  selectorFromSelection,
+  existingTweenTargetSelector,
   computeElementPercentage,
   KEYFRAME_PCT_MATCH,
   isInstantHold,
@@ -251,7 +251,10 @@ async function extendKeyframedTweenToPlayhead(
   iframe: HTMLIFrameElement | null,
   commitOverrides?: Partial<CommitMutationOptions>,
 ): Promise<void> {
-  const selector = selectorFromSelection(sel);
+  // Re-authoring an EXISTING tween: keep the target it already writes rather
+  // than re-deriving one from the selection, which would widen a tween already
+  // narrowed to one element back onto its class siblings (existingTweenTargetSelector).
+  const selector = existingTweenTargetSelector(anim, sel);
   const position = readElementPosition(iframe, sel, anim);
   if (!selector || Object.keys(position).length === 0 || !session.commitMutation) return;
   const extended = buildExtendedKeyframes(anim, currentTime, position, duration);
@@ -336,7 +339,10 @@ export async function promoteSetToKeyframes(
   t: number,
   iframe: HTMLIFrameElement | null,
 ): Promise<void> {
-  const selector = selectorFromSelection(sel);
+  // Re-authoring an EXISTING tween: keep the target it already writes rather
+  // than re-deriving one from the selection, which would widen a tween already
+  // narrowed to one element back onto its class siblings (existingTweenTargetSelector).
+  const selector = existingTweenTargetSelector(setAnim, sel);
   const setStart = resolveTweenStart(setAnim) ?? 0;
   if (!selector || !session.commitMutation) return;
   // Playhead at or before the set → there's no forward range to promote into.
@@ -390,7 +396,10 @@ export async function applyArcKeyframeAtPlayhead(
   iframe: HTMLIFrameElement | null,
 ): Promise<void> {
   if (!session.commitMutation) return;
-  const targetSelector = selectorFromSelection(sel);
+  // Re-authoring an EXISTING tween: keep the target it already writes rather
+  // than re-deriving one from the selection, which would widen a tween already
+  // narrowed to one element back onto its class siblings (existingTweenTargetSelector).
+  const targetSelector = existingTweenTargetSelector(arcAnim, sel);
   if (!targetSelector) return;
   const start = resolveTweenStart(arcAnim) ?? 0;
   const duration = resolveEditableTweenDuration(arcAnim, sel);

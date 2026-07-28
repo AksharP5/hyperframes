@@ -221,7 +221,7 @@ function structuralSelector(element: Element): string | null {
     }
     const parent = node.parentElement;
     if (!parent) break;
-    const index = Array.prototype.indexOf.call(parent.children, node) + 1;
+    const index = [...parent.children].indexOf(node) + 1;
     if (index < 1) return null;
     parts.unshift(`${node.tagName.toLowerCase()}:nth-child(${index})`);
   }
@@ -242,9 +242,15 @@ function structuralSelector(element: Element): string | null {
  * {@link resolveSelectorElementIds} reads back as all five, collapsing their
  * timeline rows into one. Every rung below resolves to exactly one element.
  *
- * ponytail: the last rung returns the bare selector unchanged rather than null.
- * Refusing to write would turn a mis-targeted add into a silently dead button;
- * it is only reachable with no live DOM to disambiguate against.
+ * Null means "no string here addresses one element". With a live DOM to check
+ * against, a failed structural walk (detached between select and commit, a
+ * shadow-root boundary, a chain that no longer re-resolves) IS that evidence,
+ * so returning the bare selector anyway would hand back the exact input this
+ * function exists to replace. Callers decide what to do with the null: the
+ * add-keyframe path has a graceful no-animation fallback, and the paths that
+ * cannot afford to drop a user edit opt back in with `?? selectorFromSelection`
+ * where the trade is visible. The bare selector comes back only with no DOM to
+ * disambiguate against, where refusing would be guessing rather than knowing.
  */
 export function writeTargetSelector(selection: DomEditSelection): string | null {
   if (selection.id) return idSelector(selection.id);
@@ -255,10 +261,29 @@ export function writeTargetSelector(selection: DomEditSelection): string | null 
     if (selection.selector && matchesExactlyOne(doc, selection.selector, element)) {
       return selection.selector;
     }
-    const structural = structuralSelector(element);
-    if (structural) return structural;
+    return structuralSelector(element);
   }
   return selection.selector ?? null;
+}
+
+/**
+ * The selector a `replace-with-keyframes` mutation must re-author an EXISTING
+ * tween against. The server deletes the tween and adds it back, so this string
+ * REWRITES its target: deriving it from the selection instead discards whatever
+ * the author aimed at, and silently widens a tween {@link writeTargetSelector}
+ * had already narrowed to one element back onto every class sibling.
+ *
+ * The selection is the fallback only for a target the parser could not resolve
+ * statically, where there is no authored string to preserve.
+ */
+export function existingTweenTargetSelector(
+  animation: Pick<GsapAnimation, "targetSelector" | "hasUnresolvedSelector">,
+  selection: DomEditSelection,
+): string | null {
+  if (animation.targetSelector && !animation.hasUnresolvedSelector) {
+    return animation.targetSelector;
+  }
+  return selectorFromSelection(selection);
 }
 
 // ── Percentage computation ────────────────────────────────────────────────────

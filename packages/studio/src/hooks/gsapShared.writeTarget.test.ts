@@ -6,6 +6,7 @@ import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { buildStableSelector, getSelectorIndex } from "../components/editor/domEditingDom";
 import { resolveSelectorElementIds, writeTargetSelector } from "./gsapShared";
 import { commitKeyframeAtTimeImpl } from "./gsapKeyframeCommit";
+import { promoteSetToKeyframes } from "./useEnableKeyframes";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -102,6 +103,62 @@ describe("writeTargetSelector", () => {
 
     expect(writeTargetSelector(selectionFor(el))).toBe(".header");
   });
+
+  it("hands identity back to a data-hf-id ancestor part way up a deep chain", () => {
+    // Mixed identity: the walk must step past the id-less <section>, stop at the
+    // data-hf-id row, and NOT keep climbing to #outer.
+    document.body.innerHTML = `
+      <div id="outer">
+        <header></header>
+        <section>
+          <div data-hf-id="mid">
+            <div class="cell"></div>
+            <div class="cell"></div>
+            <div class="cell"></div>
+          </div>
+        </section>
+      </div>
+    `;
+    const el = document.querySelectorAll<HTMLElement>(".cell")[2]!;
+
+    const written = writeTargetSelector(selectionFor(el));
+
+    expect(written).toBe('[data-hf-id="mid"] > div:nth-child(3)');
+    expect(document.querySelectorAll(written!)).toHaveLength(1);
+    expect(document.querySelector(written!)).toBe(el);
+  });
+
+  it("falls through to the structural walk when the selection's selector is not valid CSS", () => {
+    document.body.innerHTML = `<div id="scene"><div></div><div></div></div>`;
+    const el = document.querySelectorAll<HTMLElement>("#scene > div")[1]!;
+    // querySelectorAll throws on this, so the "does it match exactly one?" rung
+    // must read as a miss rather than crashing the add.
+    const selection = { ...selectionFor(el), selector: "div[unclosed" } as DomEditSelection;
+
+    expect(writeTargetSelector(selection)).toBe("#scene > div:nth-child(2)");
+  });
+
+  it("returns null when a live DOM is present and no rung addresses one element", () => {
+    document.body.innerHTML = `<div id="scene"><div class="group"></div><div class="group"></div></div>`;
+    const el = document.querySelectorAll<HTMLElement>(".group")[1]!;
+    const selection = selectionFor(el);
+    expect(selection.selector).toBe(".group");
+    // Detached between selecting and committing: ownerDocument still resolves,
+    // but there is no parent to count a :nth-child position in. Returning
+    // ".group" here would re-author the very selector this function replaces.
+    el.remove();
+
+    expect(writeTargetSelector(selection)).toBeNull();
+  });
+
+  it("still returns the selection's own selector when there is no DOM to check against", () => {
+    const selection = {
+      selector: ".group",
+      sourceFile: "index.html",
+    } as unknown as DomEditSelection;
+
+    expect(writeTargetSelector(selection)).toBe(".group");
+  });
 });
 
 describe("writeTargetSelector — write/read round trip", () => {
@@ -128,6 +185,48 @@ describe("writeTargetSelector — write/read round trip", () => {
     expect(roundTripTargets(".group").targets).toHaveLength(5);
 
     expect(roundTripTargets(writeTargetSelector(selection)!).targets).toHaveLength(1);
+  });
+});
+
+describe("existingTweenTargetSelector", () => {
+  it("keeps the narrowed target when a replace re-authors the tween", async () => {
+    const groups = mountGroupSiblings();
+    const selection = selectionFor(groups[2]);
+    const commitMutation = vi.fn(async () => undefined);
+    // A tween a previous add already narrowed to one sibling. Re-deriving the
+    // target from the selection would widen it back to all five.
+    const setAnim = {
+      id: "a1",
+      targetSelector: "#scene > div:nth-child(3)",
+      method: "set",
+      position: 0,
+      properties: { x: 10 },
+    };
+
+    await promoteSetToKeyframes({ commitMutation } as never, selection, setAnim as never, 0, null);
+
+    const mutation = commitMutation.mock.calls[0]?.[0] as { targetSelector: string };
+    expect(mutation.targetSelector).toBe("#scene > div:nth-child(3)");
+    expect(document.querySelectorAll(mutation.targetSelector)).toHaveLength(1);
+  });
+
+  it("falls back to the selection when the tween's own target did not resolve", async () => {
+    const groups = mountGroupSiblings();
+    const selection = selectionFor(groups[2]);
+    const commitMutation = vi.fn(async () => undefined);
+    const setAnim = {
+      id: "a1",
+      targetSelector: "targets[i]",
+      hasUnresolvedSelector: true,
+      method: "set",
+      position: 0,
+      properties: { x: 10 },
+    };
+
+    await promoteSetToKeyframes({ commitMutation } as never, selection, setAnim as never, 0, null);
+
+    const mutation = commitMutation.mock.calls[0]?.[0] as { targetSelector: string };
+    expect(mutation.targetSelector).toBe(".group");
   });
 });
 

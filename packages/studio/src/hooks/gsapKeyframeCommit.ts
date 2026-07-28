@@ -68,6 +68,10 @@ export async function commitKeyframeAtTimeImpl(
       selection,
       {
         type: "add-with-keyframes" as const,
+        // Null here means the live DOM could not prove any one-element form.
+        // This branch has no graceful no-op to fall to, so it takes the
+        // author's own selector, group collapse and all, over dropping the
+        // keyframe the user just asked for.
         targetSelector: writeTargetSelector(selection) ?? selector,
         position: absoluteTime,
         duration: defaultDuration,
