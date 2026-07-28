@@ -2,9 +2,20 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const trackEvent = vi.fn();
 const flush = vi.fn(() => Promise.resolve());
+const shouldTrack = vi.fn(() => true);
 vi.mock("./client.js", () => ({
   trackEvent: (...args: unknown[]) => trackEvent(...args),
   flush: () => flush(),
+  shouldTrack: () => shouldTrack(),
+}));
+
+// Power state shells out to `pmset`; spy so tests can assert it is NOT
+// sampled for opted-out installs (the fields are built at the call site,
+// before trackEvent's own shouldTrack guard).
+const getPowerState = vi.fn(() => ({ on_battery: true, low_power_mode: false }));
+vi.mock("./system.js", async () => ({
+  ...(await vi.importActual<typeof import("./system.js")>("./system.js")),
+  getPowerState: () => getPowerState(),
 }));
 
 // identifyUser reads the install anonymousId; pin it so the $identify alias is
@@ -704,5 +715,30 @@ describe("auth login telemetry events", () => {
   it("identifyUser is a no-op when there is no identity to attach", () => {
     identifyUser("");
     expect(trackEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("power-state sampling respects the telemetry opt-out", () => {
+  beforeEach(() => {
+    getPowerState.mockClear();
+    shouldTrack.mockReturnValue(true);
+  });
+
+  it("samples power state for a tracked render", () => {
+    trackRenderComplete({ durationMs: 1, fps: 30, quality: "high", docker: false, gpu: false });
+    expect(getPowerState).toHaveBeenCalled();
+    const props = trackEvent.mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(props.on_battery).toBe(true);
+    expect(props.low_power_mode).toBe(false);
+  });
+
+  it("does NOT spawn pmset when telemetry is disabled", () => {
+    // Regression: powerStateFields() is spread into the properties object at
+    // the call site, so it runs BEFORE trackEvent's `if (!shouldTrack())`
+    // guard — an opted-out install would otherwise pay two blocking
+    // subprocess spawns per render for an event that is then discarded.
+    shouldTrack.mockReturnValue(false);
+    trackRenderComplete({ durationMs: 1, fps: 30, quality: "high", docker: false, gpu: false });
+    expect(getPowerState).not.toHaveBeenCalled();
   });
 });

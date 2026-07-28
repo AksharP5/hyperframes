@@ -1,8 +1,30 @@
 import { redactTelemetryString, type OutputResolutionIssueKind } from "@hyperframes/core";
 import type { SubTimelineWaitOutcome } from "@hyperframes/engine";
 import { FEEDBACK_RATING_SCALE } from "../utils/feedbackRating.js";
-import { flush, trackEvent } from "./client.js";
+import { flush, shouldTrack, trackEvent } from "./client.js";
 import { readConfig } from "./config.js";
+import { getPowerState } from "./system.js";
+
+// Power state is volatile (a laptop docks/undocks mid-session), so it is
+// sampled per render event rather than cached with SystemMeta. Attached to
+// render_complete AND render_error: the DE fleet is macOS laptops whose
+// power management shifts render perf ~1.8x with no other telemetry signal,
+// and perf/soak analysis needs to segment by it (see getPowerState).
+//
+// shouldTrack() is checked HERE, not just inside trackEvent: this helper is
+// spread into the properties object at the CALL SITE, so it runs before
+// trackEvent's own `if (!shouldTrack()) return` guard. Without this an
+// opted-out install would still pay two blocking `pmset` subprocess spawns
+// per render for an event that is then discarded (review finding).
+// shouldTrack() memoizes, so this costs nothing on the tracked path.
+function powerStateFields(): { on_battery?: boolean; low_power_mode?: boolean } {
+  if (!shouldTrack()) return {};
+  const power = getPowerState();
+  return {
+    on_battery: power.on_battery ?? undefined,
+    low_power_mode: power.low_power_mode ?? undefined,
+  };
+}
 
 // run_id is attached only when the orchestrator set HYPERFRAMES_RUN_ID — an
 // absent property, never null/"" (PostHog treats those as real values).
@@ -300,6 +322,7 @@ export function trackRenderComplete(
       de_blank_recaptures: props.deBlankRecaptures,
       de_boundary_frames: props.deBoundaryFrames,
       de_ncpr_fallbacks: props.deNcprFallbacks,
+      ...powerStateFields(),
       source: props.source ?? "cli",
       composition_duration_ms: props.compositionDurationMs,
       composition_width: props.compositionWidth,
@@ -379,6 +402,7 @@ export function trackRenderError(
       elapsed_ms: props.elapsedMs,
       peak_memory_mb: props.peakMemoryMb,
       memory_free_mb: props.memoryFreeMb,
+      ...powerStateFields(),
       // gpu_renderer arrives via renderObservabilityEventProperties below:
       // on the failure path perfSummary is never built, so live capture
       // observability is the only source. Backend attribution matters MOST

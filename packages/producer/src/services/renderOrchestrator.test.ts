@@ -1843,12 +1843,23 @@ describe("shouldPreferParallelDrawElement (DE parallel router)", () => {
     probeDeGated: false,
     experimentalParallelDeOptIn: false,
     routerEnabled: true,
+    parallelStreamingAvailable: true,
     totalMemoryMb: 32768,
     minMemoryMb: 24576,
   };
 
   it("routes an auto-resolved multi-worker render for an eligible long comp", () => {
     expect(shouldPreferParallelDrawElement(eligible)).toBe(true);
+  });
+
+  it("withholds the bet when parallel streaming can't run (e.g. over the duration cap)", () => {
+    // The router pins workerCount to 3 and skips calibration to serve the
+    // verified parallel DE STREAMING path. If streaming is off for this
+    // render — the >240s duration cap is the common case — firing would pay
+    // the whole cost of the pin for none of the benefit.
+    expect(
+      shouldPreferParallelDrawElement({ ...eligible, parallelStreamingAvailable: false }),
+    ).toBe(false);
   });
 
   it("withholds the parallel bet below the RAM floor (16 GB black-slab report)", () => {
