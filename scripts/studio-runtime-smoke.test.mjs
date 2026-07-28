@@ -8,7 +8,7 @@ import {
 
 function bodyOf(method, path) {
   const response = studioSmokeApiResponse(method, `http://localhost:5199${path}`);
-  assert.ok(response && response !== null);
+  assert.ok(response);
   return JSON.parse(response.body);
 }
 
@@ -49,7 +49,7 @@ describe("Studio runtime smoke fixtures", () => {
       "GET",
       "http://localhost:5199/api/projects/smoke-test/thumbnail/index.html?t=3",
     );
-    assert.ok(response && response !== null);
+    assert.ok(response);
     assert.equal(response.contentType, "image/svg+xml");
   });
 

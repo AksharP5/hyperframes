@@ -42,8 +42,21 @@ function mount(onSelect = vi.fn(), onAddToTimeline = vi.fn()) {
 describe("composition card drag", () => {
   it("uses a cached image instead of eagerly mounting a live preview iframe", () => {
     const { host } = mount();
-    expect(host.querySelector('img[src*="/thumbnail/"]')).not.toBeNull();
+    const thumbnail = host.querySelector<HTMLImageElement>('img[src*="/thumbnail/"]');
+    expect(thumbnail).not.toBeNull();
+    expect(new URL(thumbnail?.src ?? "").searchParams.get("t")).toBe("3.00");
     expect(host.querySelector("iframe")).toBeNull();
+  });
+
+  it("shows a fallback when the cached thumbnail fails", () => {
+    const { host } = mount();
+    const thumbnail = host.querySelector<HTMLImageElement>('img[src*="/thumbnail/"]');
+    if (!thumbnail) throw new Error("composition thumbnail did not render");
+
+    act(() => thumbnail.dispatchEvent(new Event("error")));
+
+    expect(host.textContent).toContain("Preview unavailable");
+    expect(host.querySelector('img[src*="/thumbnail/"]')).toBeNull();
   });
 
   it("mounts one live preview only after sustained hover and removes it on leave", () => {
@@ -61,6 +74,7 @@ describe("composition card drag", () => {
         card.dispatchEvent(new Event("pointerout", { bubbles: true }));
       });
       expect(host.querySelector("iframe")).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       consoleError.mockRestore();
       vi.useRealTimers();

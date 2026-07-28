@@ -132,6 +132,7 @@ function CompCard({
   const [hovered, setHovered] = useState(false);
   const [stageSize, setStageSize] = useState(DEFAULT_PREVIEW_STAGE);
   const [livePreviewLoaded, setLivePreviewLoaded] = useState(false);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -160,6 +161,10 @@ function CompCard({
       clearTimeout(hoverTimer.current);
       hoverTimer.current = null;
     }
+    if (syncTimer.current) {
+      clearTimeout(syncTimer.current);
+      syncTimer.current = null;
+    }
     setHovered(false);
     setLivePreviewLoaded(false);
   };
@@ -167,8 +172,8 @@ function CompCard({
   const previewUrl = `/api/projects/${projectId}/preview/comp/${comp}`;
   const thumbnailUrl = buildCompositionThumbnailUrl({
     previewUrl,
-    seekTime: 0,
-    duration: THUMBNAIL_SEEK_TIME_SECONDS * 2,
+    seekTime: THUMBNAIL_SEEK_TIME_SECONDS,
+    duration: 0,
     origin: window.location.origin,
   });
   const previewScale = resolveCompositionPreviewScale({
@@ -225,16 +230,23 @@ function CompCard({
       }`}
     >
       <div className="w-20 h-[45px] rounded overflow-hidden bg-neutral-900 flex-shrink-0 relative">
-        <img
-          src={thumbnailUrl}
-          alt=""
-          draggable={false}
-          loading="lazy"
-          decoding="async"
-          className={`absolute inset-0 h-full w-full object-contain transition-opacity ${
-            livePreviewLoaded ? "opacity-0" : "opacity-100"
-          }`}
-        />
+        {thumbnailFailed ? (
+          <div className="absolute inset-0 flex items-center justify-center px-1 text-center text-[8px] leading-tight text-neutral-600">
+            Preview unavailable
+          </div>
+        ) : (
+          <img
+            src={thumbnailUrl}
+            alt=""
+            draggable={false}
+            loading="lazy"
+            decoding="async"
+            onError={() => setThumbnailFailed(true)}
+            className={`absolute inset-0 h-full w-full object-contain transition-opacity ${
+              livePreviewLoaded ? "opacity-0" : "opacity-100"
+            }`}
+          />
+        )}
         {hovered && (
           <iframe
             ref={iframeRef}
@@ -353,7 +365,7 @@ export const CompositionsTab = memo(function CompositionsTab({
     <div className="flex-1 overflow-y-auto">
       {compositions.map((comp) => (
         <CompCard
-          key={comp}
+          key={`${projectId}:${comp}`}
           projectId={projectId}
           comp={comp}
           isActive={activeComposition === comp}
