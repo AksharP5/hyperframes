@@ -277,6 +277,14 @@ export interface CapturePerfSummary {
   /** Final capture mode this session used: "drawelement" | "screenshot" | "beginframe". */
   captureMode: string;
   /**
+   * Low-cardinality GPU bucket from DE session init: `<backend>/<vendor>`
+   * (e.g. `metal/apple`, `d3d11/nvidia`). Undefined when drawElement was
+   * never attempted. Lets telemetry cluster backend-specific damage now that
+   * DE engages on both Metal (darwin) and D3D11 (win32). Bucketed, not raw —
+   * see `classifyGpuRenderer`.
+   */
+  gpuRenderer?: string;
+  /**
    * Low-cardinality init-time gate that routed a drawElement-eligible session
    * to the baseline: `swiftshader` | `css_effect:<fx>` | `at_risk_timeline` |
    * `3d_init_failed` | `supersampling` | `render_mode_hint`. Undefined when

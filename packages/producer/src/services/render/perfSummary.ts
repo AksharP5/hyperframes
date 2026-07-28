@@ -111,6 +111,9 @@ function aggregateDrawElement(
   const gateReasons = [
     ...new Set(perfs.map((p) => p.deGateReason).filter((r): r is string => !!r)),
   ].sort();
+  const gpuRenderers = [
+    ...new Set(perfs.map((p) => p.gpuRenderer).filter((r): r is string => !!r)),
+  ].sort();
   const drain = de.drainStats;
   return {
     mode: modes.join("|") || "unknown",
@@ -121,6 +124,7 @@ function aggregateDrawElement(
     parallelRouter: de.parallelRouter ?? "none",
     preRouterWorkers: de.preRouterWorkers,
     gateReason: gateReasons.length > 0 ? gateReasons.join("|") : undefined,
+    gpuRenderer: gpuRenderers.length > 0 ? gpuRenderers.join("|") : undefined,
     workerEncode: perfs.some((p) => p.deWorkerEncode),
     verifyArmed: perfs.reduce((sum, p) => sum + (p.deVerifyArmed ?? 0), 0),
     verifyChecked: drain?.verifyChecked ?? 0,

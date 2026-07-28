@@ -51,6 +51,7 @@ export interface RenderObservabilityTelemetryPayload {
   captureDeWorkerInversion?: string;
   captureDePreInversionWorkers?: number;
   captureDeParallelRouter?: string;
+  captureDeGpuRenderer?: string;
   captureDePreRouterWorkers?: number;
   captureDeSelfVerifyFallback?: boolean;
   captureDeFallbackReason?: string;
@@ -108,6 +109,7 @@ function renderObservabilityEventProperties(props: RenderObservabilityTelemetryP
     de_worker_inversion: props.captureDeWorkerInversion,
     de_pre_inversion_workers: props.captureDePreInversionWorkers,
     de_parallel_router: props.captureDeParallelRouter,
+    gpu_renderer: props.captureDeGpuRenderer,
     de_pre_router_workers: props.captureDePreRouterWorkers,
     de_self_verify_fallback: props.captureDeSelfVerifyFallback,
     de_fallback_reason: props.captureDeFallbackReason,
@@ -183,6 +185,8 @@ export function trackRenderComplete(
     deParallelRouter?: string;
     dePreRouterWorkers?: number;
     deGateReason?: string;
+    /** Low-cardinality GPU bucket from DE session init (`<backend>/<vendor>`, e.g. `d3d11/nvidia`). */
+    gpuRenderer?: string;
     deWorkerEncode?: boolean;
     deVerifyArmed?: number;
     deVerifyChecked?: number;
@@ -280,6 +284,7 @@ export function trackRenderComplete(
       de_parallel_router: props.deParallelRouter,
       de_pre_router_workers: props.dePreRouterWorkers,
       de_gate_reason: props.deGateReason,
+      gpu_renderer: props.gpuRenderer,
       de_worker_encode: props.deWorkerEncode,
       de_verify_armed: props.deVerifyArmed,
       de_verify_checked: props.deVerifyChecked,
@@ -374,6 +379,10 @@ export function trackRenderError(
       elapsed_ms: props.elapsedMs,
       peak_memory_mb: props.peakMemoryMb,
       memory_free_mb: props.memoryFreeMb,
+      // gpu_renderer arrives via renderObservabilityEventProperties below:
+      // on the failure path perfSummary is never built, so live capture
+      // observability is the only source. Backend attribution matters MOST
+      // here — a win32 D3D11 crash is what the rollout is watching for.
       ...renderObservabilityEventProperties(props),
     },
     props.distinctId,

@@ -1436,6 +1436,7 @@ function trackRenderMetrics(
     deParallelRouter: perf?.drawElement?.parallelRouter,
     dePreRouterWorkers: perf?.drawElement?.preRouterWorkers,
     deGateReason: perf?.drawElement?.gateReason,
+    gpuRenderer: perf?.drawElement?.gpuRenderer,
     deWorkerEncode: perf?.drawElement?.workerEncode,
     deVerifyArmed: perf?.drawElement?.verifyArmed,
     deVerifyChecked: perf?.drawElement?.verifyChecked,

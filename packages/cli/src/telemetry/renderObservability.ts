@@ -43,6 +43,7 @@ export function renderObservabilityTelemetryPayload(
     captureDeWorkerInversion: capture.deWorkerInversion,
     captureDePreInversionWorkers: capture.dePreInversionWorkers,
     captureDeParallelRouter: capture.deParallelRouter,
+    captureDeGpuRenderer: capture.deGpuRenderer,
     captureDePreRouterWorkers: capture.dePreRouterWorkers,
     captureDeSelfVerifyFallback: capture.deSelfVerifyFallback,
     captureDeFallbackReason: capture.deFallbackReason,
