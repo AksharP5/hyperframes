@@ -3,7 +3,7 @@ import { VERSION } from "../version.js";
 import { c } from "../ui/colors.js";
 import { diag } from "../ui/diagnostics.js";
 import { getSystemMeta } from "./system.js";
-import { activeCanaryNames } from "./canary.js";
+import { canaryEventProperties } from "./canary.js";
 import { enqueue, type EventProperties } from "./transport.js";
 import { telemetryRuntimeOverride } from "./policy.js";
 
@@ -80,12 +80,13 @@ export function trackEvent(
       // we already knew. Absent (not false) when the config predates the
       // marker. Resolved after the shouldTrack guard.
       install_predecessor_found: readConfig().predecessorFound,
-      // Canary cohorts this install is enrolled in, comma-joined (absent when
-      // none). Attached to EVERY event, not just renders: a staged rollout is
-      // only as good as the ability to split any metric by cohort. Resolved
-      // after the shouldTrack guard above, so opted-out installs never pay for
-      // it. See telemetry/canary.ts.
-      canaries: activeCanaryNames(),
+      // Canary assignments as `$feature/canary-<name>` — PostHog's native flag
+      // property shape, so breakdowns and experiment analysis work on a canary
+      // with nothing configured server-side. On EVERY event, not just renders:
+      // a staged rollout is only as good as the ability to split any metric by
+      // cohort. Resolved after the shouldTrack guard, so opted-out installs
+      // never pay for it. See telemetry/canary.ts.
+      ...canaryEventProperties(),
       agent_env_hints: sys.agent_env_hints ?? undefined,
     },
     distinctId,
