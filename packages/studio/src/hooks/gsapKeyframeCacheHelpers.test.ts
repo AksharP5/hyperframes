@@ -276,6 +276,69 @@ describe("updateKeyframeCacheFromParsed", () => {
     expect(usePlayerStore.getState().gsapAnimations.get("scene.html#box")).toEqual([animation]);
   });
 
+  // `#stat3 .block` animates the BLOCK inside #stat3, not #stat3. An unanchored
+  // `^#([\w-]+)/` prefix match filed it under "stat3", which both stole the
+  // child's diamonds and collided with #stat3's own tween at the shared
+  // percentage (dropping #stat3's ease as ambiguous).
+  it("attributes a descendant selector to the child, not to its ancestor", () => {
+    const parent: GsapAnimation = {
+      id: "stat3-fromTo",
+      targetSelector: "#stat3",
+      method: "fromTo",
+      position: 8.88,
+      resolvedStart: 8.88,
+      duration: 0.25,
+      fromProperties: { y: 20 },
+      properties: { y: 0 },
+      ease: "power2.out",
+      propertyGroup: "position",
+    };
+    const child: GsapAnimation = {
+      id: "block-from",
+      targetSelector: "#stat3 .block",
+      method: "from",
+      position: 9.13,
+      resolvedStart: 9.13,
+      duration: 0.3,
+      properties: { opacity: 0 },
+      ease: "power2.in",
+      propertyGroup: "visual",
+    };
+    usePlayerStore.setState({
+      elements: [
+        { id: "stat3-clip", domId: "stat3", tag: "div", start: 8.88, duration: 1, track: 0 },
+      ],
+    });
+    const doc = {
+      querySelectorAll: (selector: string) =>
+        (selector === "#stat3 .block"
+          ? [{ id: "stat3-block" }]
+          : []) as unknown as NodeListOf<Element>,
+    } as unknown as Document;
+
+    updateKeyframeCacheFromParsed([parent, child], "scene.html", "stat3", {}, doc);
+
+    expect(usePlayerStore.getState().gsapAnimations.get("scene.html#stat3")).toEqual([parent]);
+    expect(usePlayerStore.getState().gsapAnimations.get("scene.html#stat3-block")).toEqual([child]);
+    // With the collision gone, #stat3's own curve survives instead of being
+    // deleted as an ambiguous same-percentage merge.
+    const parentKeyframes = cache().get("scene.html#stat3")?.keyframes ?? [];
+    expect(parentKeyframes.at(-1)?.ease).toBe("power2.out");
+    expect(parentKeyframes.some((keyframe) => "easeAmbiguous" in keyframe)).toBe(false);
+  });
+
+  it("attributes a descendant selector to nothing when there is no document", () => {
+    const child: GsapAnimation = {
+      ...animWithKeyframes("block-from"),
+      targetSelector: "#stat3 .block",
+    };
+
+    updateKeyframeCacheFromParsed([child], "scene.html", "stat3", {});
+
+    expect(cache().has("scene.html#stat3")).toBe(false);
+    expect(usePlayerStore.getState().gsapAnimations.has("scene.html#stat3")).toBe(false);
+  });
+
   it("does not cache a flat tween without animatable numeric properties", () => {
     const animation: GsapAnimation = {
       id: "flat-box",

@@ -60,6 +60,7 @@ const OPACITY = animation("opacity-tween", "visual", [
 ]);
 
 interface RenderHeaderOptions {
+  keyframeClip?: TimelineElement;
   animations?: GsapAnimation[];
   clipCount?: number;
   currentTime?: number;
@@ -83,7 +84,7 @@ function renderHeader(options: RenderHeaderOptions = {}): {
           trackNumber={0}
           trackLabel="Hero card"
           contentOrigin={LABEL_COL_W}
-          keyframeClip={ELEMENT}
+          keyframeClip={next.keyframeClip ?? ELEMENT}
           clipCount={next.clipCount ?? 1}
           isExpanded={next.expanded !== false}
           animations={next.animations ?? [POSITION, OPACITY]}
@@ -110,6 +111,53 @@ function click(host: HTMLElement, label: string) {
 }
 
 describe("TimelineTrackHeader", () => {
+  // An expanded sub-composition child sits on the MASTER timeline at a
+  // host-absolute start, but its tweens are parsed from its own file and are
+  // local to it. Feeding the raw start straight into the clip-% math put every
+  // lane keyframe far outside the clip.
+  it("keeps an expanded sub-comp child's lane percentages inside the clip", () => {
+    const child: TimelineElement = {
+      id: "pill",
+      tag: "div",
+      start: 16.5,
+      duration: 2,
+      track: 0,
+      expandedParentStart: 16,
+      sourceFile: "scene.html",
+    };
+    const local: GsapAnimation = {
+      id: "pill-tween",
+      targetSelector: "#pill",
+      method: "to",
+      position: 0.5,
+      resolvedStart: 0.5,
+      duration: 2,
+      properties: {},
+      propertyGroup: "position",
+      keyframes: {
+        format: "percentage",
+        keyframes: [
+          { percentage: 0, properties: { x: 0 } },
+          { percentage: 100, properties: { x: 100 } },
+        ],
+      },
+    };
+    // Playhead at the clip's midpoint (master time), so the 100% keyframe is
+    // ahead of it. On the raw host-absolute basis every keyframe rebased to a
+    // large negative percentage and nothing was ever ahead of the playhead.
+    const view = renderHeader({
+      keyframeClip: child,
+      animations: [local],
+      currentTime: 17.5,
+    });
+
+    expect(
+      view.host.querySelector<HTMLButtonElement>('button[aria-label="Next Position keyframe"]')
+        ?.disabled,
+    ).toBe(false);
+    act(() => view.root.unmount());
+  });
+
   // The header shows one clip's lanes, so how many clips the track holds is
   // otherwise invisible from the label column. A single-clip track stays silent.
   it("shows the track's clip count only once the track holds more than one clip", () => {

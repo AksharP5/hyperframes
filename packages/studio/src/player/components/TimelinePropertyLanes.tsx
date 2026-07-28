@@ -29,11 +29,25 @@ export interface TimelinePropertyLanesProps {
   suppressClickRef?: RefObject<boolean>;
 }
 
+/**
+ * Keys that ride along in a tween's property bag without being animated: a
+ * transform modifier, Studio's internal endpoint marker, and GSAP's reserved
+ * `data`. Same exclusion list the parser's classifyTweenPropertyGroup applies —
+ * without it `{ x, transformOrigin }` would draw a spurious "Other" lane.
+ */
+const NON_ANIMATED_PROPERTIES = new Set(["transformOrigin", "_auto", "data"]);
+
+function isAnimatedProperty(property: string): boolean {
+  return !NON_ANIMATED_PROPERTIES.has(property);
+}
+
 function hasGroupProperty(
   properties: Record<string, number | string>,
   group: PropertyGroupName,
 ): boolean {
-  return Object.keys(properties).some((property) => classifyPropertyGroup(property) === group);
+  return Object.keys(properties).some(
+    (property) => isAnimatedProperty(property) && classifyPropertyGroup(property) === group,
+  );
 }
 
 /** The tween's editable keyframes: its real keyframes, or the start→end pair
@@ -42,19 +56,63 @@ function animationKeyframes(animation: GsapAnimation) {
   return animation.keyframes?.keyframes ?? synthesizeFlatTweenKeyframes(animation)?.keyframes ?? [];
 }
 
-/** A tween contributes a property lane when it has a group and at least one
- *  editable keyframe (real or synthesized). */
+/**
+ * Every property group a tween draws a lane for, classified PER PROPERTY.
+ * `animation.propertyGroup` is the parser's whole-tween verdict and is
+ * `undefined` for anything spanning more than one group — but `{ x, opacity }`
+ * is the canonical HyperFrames entrance tween, and reading that verdict gave it
+ * no caret, no reserved row and no diamonds. classifyPropertyGroup is total, so
+ * an unrecognised property still lands in "other" rather than vanishing.
+ *
+ * Single owner: the rendered lanes (sourceGroups) and the reserved row heights
+ * (computeLaneCounts) both count groups through here, or they drift.
+ */
+export function animationLaneGroups(animation: GsapAnimation): PropertyGroupName[] {
+  const groups = new Set<PropertyGroupName>();
+  for (const keyframe of animationKeyframes(animation)) {
+    for (const property of Object.keys(keyframe.properties)) {
+      if (isAnimatedProperty(property)) groups.add(classifyPropertyGroup(property));
+    }
+  }
+  return Array.from(groups);
+}
+
+/**
+ * Which tween a panel edit to `prop` belongs to.
+ *
+ * Matches on the groups the tween's KEYFRAMES animate, not on the parser's
+ * whole-tween `propertyGroup` verdict: that field is undefined for a legacy
+ * mixed tween such as `{ x, opacity }`, so matching it dropped every such
+ * tween and sent the edit to the selection's default animation instead, which
+ * is a different tween than the lane the user is looking at.
+ * {@link animationLaneGroups} is the single owner the rendered lanes count
+ * groups through, so resolving here through the same helper keeps the panel
+ * and the lanes on one answer.
+ */
+export function resolveAnimIdForProperty(
+  prop: string,
+  animations: readonly GsapAnimation[] | undefined,
+  fallbackAnimId: string | undefined,
+): string {
+  const group = classifyPropertyGroup(prop);
+  const groupAnim = animations?.find((a) => animationLaneGroups(a).includes(group));
+  return groupAnim?.id ?? fallbackAnimId ?? "";
+}
+
+/** A tween contributes a property lane when it animates at least one property
+ *  on at least one editable keyframe (real or synthesized). */
 export function animationContributesLane(animation: GsapAnimation): boolean {
-  return !!animation.propertyGroup && animationKeyframes(animation).length > 0;
+  return animationLaneGroups(animation).length > 0;
 }
 
 function sourceGroups(animations: readonly GsapAnimation[]) {
   const groups = new Map<PropertyGroupName, GsapAnimation[]>();
   for (const animation of animations) {
-    if (!animation.propertyGroup || !animationContributesLane(animation)) continue;
-    const groupAnimations = groups.get(animation.propertyGroup) ?? [];
-    groupAnimations.push(animation);
-    groups.set(animation.propertyGroup, groupAnimations);
+    for (const group of animationLaneGroups(animation)) {
+      const groupAnimations = groups.get(group) ?? [];
+      groupAnimations.push(animation);
+      groups.set(group, groupAnimations);
+    }
   }
   return groups;
 }

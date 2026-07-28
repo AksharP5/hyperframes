@@ -110,6 +110,71 @@ export function idFromSelector(selector: string | undefined | null): string | nu
   return (attribute[1] ?? "").replace(/\\(["\\])/g, "$1");
 }
 
+/** Either shape {@link idSelector} emits, anchored to the WHOLE selector. */
+const WHOLE_SELECTOR_ID = /^(#[\w-]+|\[id="(?:\\.|[^"\\])*"\])$/;
+
+/**
+ * The id a selector addresses **as a whole**, or null. `"#stat3 .block"` animates
+ * the `.block` INSIDE `#stat3`, not `#stat3`, so the unanchored leading-id match
+ * of {@link idFromSelector} is wrong for attribution: it files the child's
+ * keyframes under its ancestor. `idFromSelector` stays unanchored on purpose
+ * (two non-attribution callers want the leading id); attribution goes through
+ * here, or through the DOM (see resolveSelectorElementIds).
+ */
+function wholeSelectorElementId(selector: string): string | null {
+  const trimmed = selector.trim();
+  return WHOLE_SELECTOR_ID.test(trimmed) ? idFromSelector(trimmed) : null;
+}
+
+/**
+ * Resolve a tween's target selector to the ids of the element(s) it animates.
+ * A whole-selector `#id` resolves directly; anything else (a class like `.dot`,
+ * a group `.a, .b`, or a descendant selector) is matched against the live
+ * preview DOM so class/selector tweens (e.g. `gsap.from(".dot", {stagger})`)
+ * attribute to every element they animate — not just one parsed from the string.
+ * With no DOM, only whole-selector ids resolve: a descendant selector has no
+ * answer that isn't a guess at its ancestor.
+ */
+export function resolveSelectorElementIds(
+  selector: string,
+  doc: Document | null | undefined,
+): string[] {
+  const bareId = wholeSelectorElementId(selector);
+  if (bareId) return [bareId];
+  const ids = new Set<string>();
+  for (const part of selector.split(",")) {
+    const sel = part.trim();
+    if (!sel) continue;
+    if (!doc) {
+      const whole = wholeSelectorElementId(sel);
+      if (whole) ids.add(whole);
+      continue;
+    }
+    try {
+      for (const el of Array.from(doc.querySelectorAll(sel))) {
+        if (el.id) ids.add(el.id);
+      }
+    } catch {
+      // An unsupported/invalid selector never reached the DOM, so the leading id
+      // is the best available answer (`[id="01-hook"]:has(>*)` still names it).
+      const lead = idFromSelector(sel);
+      if (lead) ids.add(lead);
+    }
+  }
+  return Array.from(ids);
+}
+
+/**
+ * The clip start in the frame the element's OWN tweens are measured in. An
+ * expanded sub-composition child sits on the master timeline at a host-absolute
+ * `start`, but its tweens are parsed from its own source file and are local to
+ * it, so the two must be brought into one frame before any clip-% math — or
+ * every keyframe rebases to a percentage far outside the clip.
+ */
+export function clipTimingStart(element: { start: number; expandedParentStart?: number }): number {
+  return element.start - (element.expandedParentStart ?? 0);
+}
+
 export function selectorFromSelection(selection: DomEditSelection): string | null {
   if (selection.id) return idSelector(selection.id);
   if (selection.selector) return selection.selector;
