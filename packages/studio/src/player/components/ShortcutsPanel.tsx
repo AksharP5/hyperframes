@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef, useEffect, memo } from "react";
+import { useState, useCallback, useId, memo } from "react";
 import { formatTime, frameToSeconds } from "../lib/time";
 import { Tooltip } from "../../components/ui";
+import { useContextMenuDismiss } from "../../hooks/useContextMenuDismiss";
 
 const SHORTCUT_SECTIONS = [
   {
@@ -108,20 +109,9 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
 }: ShortcutsPanelProps) {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [jumpFrame, setJumpFrame] = useState("");
-  const shortcutsPanelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showShortcuts) return;
-    const handleMouseDown = (e: MouseEvent) => {
-      if (shortcutsPanelRef.current && !shortcutsPanelRef.current.contains(e.target as Node)) {
-        setShowShortcuts(false);
-      }
-    };
-    document.addEventListener("mousedown", handleMouseDown);
-    return () => {
-      document.removeEventListener("mousedown", handleMouseDown);
-    };
-  }, [showShortcuts]);
+  const shortcutsPanelId = useId();
+  const closeShortcuts = useCallback(() => setShowShortcuts(false), []);
+  const shortcutsPanelRef = useContextMenuDismiss(closeShortcuts);
 
   const commitJumpFrame = useCallback(() => {
     if (disabled) return;
@@ -158,6 +148,7 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
           }`}
           aria-label="Shortcuts and tools"
           aria-expanded={showShortcuts}
+          aria-controls={shortcutsPanelId}
         >
           <svg
             width="11"
@@ -177,6 +168,9 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
       </Tooltip>
       {showShortcuts && (
         <div
+          id={shortcutsPanelId}
+          role="dialog"
+          aria-modal="true"
           className="absolute bottom-full right-0 mb-2 z-50 rounded-lg shadow-xl min-w-[220px] overflow-y-auto"
           style={{
             background: "#161618",
