@@ -1305,9 +1305,14 @@ export function resolveInversionRetryPlan(args: {
  * but the decision itself stays gated behind its own flag pending the
  * telemetry soak (revert rate, de_verify_min_db distribution) on real wild
  * traffic — there is currently none, since nothing routes here by default.
- * Takes priority over the single-worker inversion when both would fire (a
- * higher minFrames than HF_DE_SINGLE_MIN_FRAMES is the intended shape: this
- * only picks up the long tail the inversion's own benchmark didn't cover).
+ * Takes priority over the single-worker inversion when both would fire.
+ * Re-calibrated 2026-07-27: a controlled crossover sweep (three content
+ * profiles including a genuinely init-expensive 24-sub-composition comp;
+ * worker counts and capture modes verified per run) found par3 > single at
+ * every size from 350f up in every profile — workers init concurrently, so
+ * per-worker init duplication costs CPU, not wall-clock. minFrames therefore
+ * dropped below the inversion's threshold (700 vs 900): where both fire,
+ * parallel wins over the inversion's single-worker pick (+17–21% at 700f).
  */
 export function shouldPreferParallelDrawElement(args: {
   workerCount: number;
@@ -2310,18 +2315,27 @@ async function executeRenderPipeline(input: {
         process.env.HF_DE_PARALLEL_STREAM === "true",
     });
     // DE parallel-router eligibility — see shouldPreferParallelDrawElement.
-    // Default-off (HF_DE_PARALLEL_ROUTER); HF_DE_PARALLEL_MIN_FRAMES defaults
-    // higher than the single-worker inversion's threshold since it targets
-    // the long tail the inversion's own benchmark didn't cover.
+    // Default-off (HF_DE_PARALLEL_ROUTER); HF_DE_PARALLEL_MIN_FRAMES default
+    // 700, re-calibrated 2026-07-27 from the original safe-high 2000. A
+    // controlled frame-count sweep (fixed content-per-frame, three synthetic
+    // profiles × {350..3000f} × {single,par2,par3} × 3 reps, worker counts +
+    // capture modes verified per run) showed par3 beating single at EVERY
+    // size in every profile — +17–21% at 700f rising to +28–34% at 3000f —
+    // including a 24-sub-composition profile built to reproduce the
+    // "workers re-pay init" failure (92k tweens, ~2.5s
+    // pollSubCompositionTimelines per worker): workers init CONCURRENTLY, so
+    // duplicated init costs CPU, not wall-clock. Below ~700f the win thins
+    // toward ~+10% while still paying 3 hardware-GPU browsers, so the floor
+    // stays. Harness: plans/drawelement-fast-capture/de-crossover-bench.sh.
     const deParallelRouterEnabled = process.env.HF_DE_PARALLEL_ROUTER === "true";
     const deParallelMinFramesRaw = process.env.HF_DE_PARALLEL_MIN_FRAMES;
     const deParallelMinFramesNum =
       deParallelMinFramesRaw === undefined || deParallelMinFramesRaw.trim() === ""
-        ? 2000
+        ? 700
         : Number(deParallelMinFramesRaw);
     const deParallelMinFrames = Number.isFinite(deParallelMinFramesNum)
       ? deParallelMinFramesNum
-      : 2000;
+      : 700;
     // RAM floor default 24 GB: the wild black-slab report was a 16 GB
     // machine; every clean routed cohort in telemetry so far is >=24 GB.
     // HF_DE_PARALLEL_MIN_MEM_MB overrides (0 disables the guard).

@@ -3,6 +3,20 @@ import type { SubTimelineWaitOutcome } from "@hyperframes/engine";
 import { FEEDBACK_RATING_SCALE } from "../utils/feedbackRating.js";
 import { flush, trackEvent } from "./client.js";
 import { readConfig } from "./config.js";
+import { getPowerState } from "./system.js";
+
+// Power state is volatile (a laptop docks/undocks mid-session), so it is
+// sampled per render event rather than cached with SystemMeta. Attached to
+// render_complete AND render_error: the DE fleet is macOS laptops whose
+// power management shifts render perf ~1.8x with no other telemetry signal,
+// and perf/soak analysis needs to segment by it (see getPowerState).
+function powerStateFields(): { on_battery?: boolean; low_power_mode?: boolean } {
+  const power = getPowerState();
+  return {
+    on_battery: power.on_battery ?? undefined,
+    low_power_mode: power.low_power_mode ?? undefined,
+  };
+}
 
 // run_id is attached only when the orchestrator set HYPERFRAMES_RUN_ID — an
 // absent property, never null/"" (PostHog treats those as real values).
@@ -277,6 +291,7 @@ export function trackRenderComplete(
       de_blank_recaptures: props.deBlankRecaptures,
       de_boundary_frames: props.deBoundaryFrames,
       de_ncpr_fallbacks: props.deNcprFallbacks,
+      ...powerStateFields(),
       source: props.source ?? "cli",
       composition_duration_ms: props.compositionDurationMs,
       composition_width: props.compositionWidth,
@@ -356,6 +371,7 @@ export function trackRenderError(
       elapsed_ms: props.elapsedMs,
       peak_memory_mb: props.peakMemoryMb,
       memory_free_mb: props.memoryFreeMb,
+      ...powerStateFields(),
       ...renderObservabilityEventProperties(props),
     },
     props.distinctId,
