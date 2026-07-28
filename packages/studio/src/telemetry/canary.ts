@@ -14,11 +14,11 @@
 //
 // Three things differ from the CLI, each for a reason:
 //
-// 1. UNIT ID — `resolveStudioDistinctId()` instead of the CLI's config file.
-//    That function already adopts `window.__HF_CLI_DISTINCT_ID` when the CLI
-//    launched Studio, so a CLI-launched Studio lands in the SAME cohort as the
-//    CLI itself: a rollout spanning render and editor is coherent for that
-//    user instead of enrolling their terminal but not their editor.
+// 1. UNIT ID — the CLI's bucket seed (`window.__HF_CLI_BUCKET_SEED`) when the
+//    CLI launched Studio, so both surfaces bucket on the SAME unit and a
+//    rollout spanning render and editor is coherent for that user. Standalone
+//    Studio falls back to `resolveStudioDistinctId()` — the browser has no
+//    second storage location, so its localStorage id doubles as the seed.
 //
 // 2. OVERRIDE — there is no `process.env` in a page, so the override is a URL
 //    query param mirrored into sessionStorage (see `readOverride`).
@@ -46,6 +46,30 @@ import { safeSessionStorage } from "../utils/safeStorage";
 /** `my-feature` → `hf_canary_my_feature`, the query param and storage key. */
 export function canaryParamName(name: string): string {
   return `hf_canary_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+}
+
+// Injected by the CLI's studio server alongside __HF_CLI_DISTINCT_ID.
+declare global {
+  interface Window {
+    __HF_CLI_BUCKET_SEED?: string;
+  }
+}
+
+/**
+ * The bucketing unit. A CLI-launched Studio buckets on the CLI's SEED (which
+ * survives config wipes via the install-state file), not its distinct id —
+ * the CLI itself buckets on the seed, and the two surfaces must agree per
+ * machine. Standalone Studio falls back to its own distinct id: the browser
+ * has no second storage location, so localStorage IS both id and seed there.
+ */
+function resolveBucketUnit(): string {
+  try {
+    const seed = typeof window === "undefined" ? undefined : window.__HF_CLI_BUCKET_SEED;
+    if (typeof seed === "string" && seed.length > 0) return seed;
+  } catch {
+    /* fall through */
+  }
+  return resolveStudioDistinctId();
 }
 
 const STORAGE_PREFIX = "hyperframes-studio:canary:";
@@ -130,7 +154,7 @@ export function resolveCanary(name: string): CanaryDecision {
   const decision: CanaryDecision = definition
     ? evaluateCanary({
         feature: definition.name,
-        unitId: resolveStudioDistinctId(),
+        unitId: resolveBucketUnit(),
         percentage: definition.percentage,
         override: readOverride(definition.name),
         exclude: isAutomatedBrowser(),

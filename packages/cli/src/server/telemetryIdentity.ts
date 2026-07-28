@@ -41,15 +41,39 @@ export function resolveCliTelemetryDistinctId(): string | null {
  * `url_hash` telemetry or browser history. Empty string when there's nothing to
  * seed (telemetry off / no id).
  */
+/**
+ * The CLI's canary bucket seed to hand to Studio, or null. Injected alongside
+ * the distinct id so a CLI-launched Studio buckets canaries on the SAME unit
+ * as the CLI — without it the two surfaces would agree only while the seed
+ * still equals whatever Studio falls back to, and a rollout spanning render
+ * and editor would split one user across cohorts. Same telemetry gate as the
+ * distinct id: seeding is part of the identity stitch, not a separate channel.
+ */
+export function resolveCliBucketSeed(): string | null {
+  try {
+    if (!telemetryShouldTrack()) return null;
+    const seed = readConfig().bucketSeed;
+    return typeof seed === "string" && seed.length > 0 ? seed : null;
+  } catch {
+    return null;
+  }
+}
+
+// JSON.stringify does not escape "<" or "/". Escaping both means no
+// "</script>" (or "</…") sequence can form in the emitted value, so it can
+// never terminate the inline <script> or open a new tag. (The values are
+// randomUUID()s, so this is belt-and-suspenders.)
+function encodeInlineScriptValue(value: string): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/\//g, "\\/");
+}
+
 export function buildCliIdentityScript(): string {
   const cliId = resolveCliTelemetryDistinctId();
   if (!cliId) return "";
-  // The id is a randomUUID() so this is belt-and-suspenders, but JSON.stringify
-  // does not escape "<" or "/". Escaping both means no "</script>" (or "</…")
-  // sequence can form in the emitted value, so it can never terminate the
-  // inline <script> or open a new tag.
-  const encoded = JSON.stringify(cliId).replace(/</g, "\\u003c").replace(/\//g, "\\/");
-  return `<script>window.__HF_CLI_DISTINCT_ID=${encoded};</script>`;
+  const parts = [`window.__HF_CLI_DISTINCT_ID=${encodeInlineScriptValue(cliId)};`];
+  const seed = resolveCliBucketSeed();
+  if (seed) parts.push(`window.__HF_CLI_BUCKET_SEED=${encodeInlineScriptValue(seed)};`);
+  return `<script>${parts.join("")}</script>`;
 }
 
 /**

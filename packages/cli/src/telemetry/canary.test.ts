@@ -1,10 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const configState = { anonymousId: "db0c1f4a-b95e-4c35-90c6-1a15bd76f717" };
+const configState: { anonymousId: string; bucketSeed: string | undefined } = {
+  anonymousId: "db0c1f4a-b95e-4c35-90c6-1a15bd76f717",
+  bucketSeed: undefined,
+};
 const systemState = { is_ci: false };
 
 vi.mock("./config.js", () => ({
-  readConfig: () => ({ anonymousId: configState.anonymousId }),
+  readConfig: () => ({ anonymousId: configState.anonymousId, bucketSeed: configState.bucketSeed }),
 }));
 vi.mock("./system.js", () => ({
   getSystemMeta: () => ({ is_ci: systemState.is_ci }),
@@ -60,9 +63,42 @@ const { isCanaryEnabled, resolveCanary, canaryEventProperties, __resetCanaryCach
 beforeEach(() => {
   __resetCanaryCacheForTests();
   configState.anonymousId = "db0c1f4a-b95e-4c35-90c6-1a15bd76f717";
+  configState.bucketSeed = undefined;
   systemState.is_ci = false;
   delete process.env.HF_CANARY_TEST_ALPHA;
   delete process.env.HF_CANARY_TEST_BETA;
+});
+
+describe("bucketing unit", () => {
+  it("buckets on the bucketSeed when present — the unit that survives config wipes", async () => {
+    const { evaluateCanary } = await import("@hyperframes/core/canary");
+    configState.bucketSeed = "5f1c9d2e-0000-4000-8000-aaaaaaaaaaaa";
+    const viaBinding = resolveCanary("test-alpha").bucket;
+    const bySeed = evaluateCanary({
+      feature: "test-alpha",
+      unitId: configState.bucketSeed,
+      percentage: 100,
+    }).bucket;
+    const byId = evaluateCanary({
+      feature: "test-alpha",
+      unitId: configState.anonymousId,
+      percentage: 100,
+    }).bucket;
+    expect(viaBinding).toBe(bySeed);
+    // Only meaningful if the two units actually bucket differently.
+    expect(bySeed).not.toBe(byId);
+  });
+
+  it("falls back to the anonymousId when no seed exists (failed legacy backfill)", async () => {
+    const { evaluateCanary } = await import("@hyperframes/core/canary");
+    const viaBinding = resolveCanary("test-alpha").bucket;
+    const byId = evaluateCanary({
+      feature: "test-alpha",
+      unitId: configState.anonymousId,
+      percentage: 100,
+    }).bucket;
+    expect(viaBinding).toBe(byId);
+  });
 });
 
 describe("CLI canary binding", () => {

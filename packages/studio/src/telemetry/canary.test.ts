@@ -47,6 +47,7 @@ beforeEach(() => {
   sessionStorage.clear();
   setSearch("");
   delete window.__HF_CLI_DISTINCT_ID;
+  delete window.__HF_CLI_BUCKET_SEED;
   Object.defineProperty(navigator, "webdriver", { value: false, configurable: true });
   __resetStudioCanaryCacheForTests();
   __resetStudioDistinctIdForTests();
@@ -131,19 +132,35 @@ describe("automated browsers", () => {
 });
 
 describe("cohort identity", () => {
-  it("buckets on the Studio distinct id unmodified — so a CLI-launched Studio shares the CLI's cohort", () => {
-    // distinctId.ts adopts window.__HF_CLI_DISTINCT_ID when the CLI launched
-    // Studio. This asserts the binding passes that id through untouched: if it
-    // prefixed or re-hashed it, the editor would land in a different cohort
-    // than the terminal for the same user, and a rollout spanning both would
-    // be incoherent.
+  it("buckets on the CLI's bucket seed when injected — the unit that survives config wipes", () => {
+    // The CLI buckets on its bucketSeed (inherited across config wipes via
+    // the install-state file), so a CLI-launched Studio must bucket on the
+    // SAME seed or the two surfaces would split one machine across cohorts.
+    const cliId = "db0c1f4a-b95e-4c35-90c6-1a15bd76f717";
+    const cliSeed = "5f1c9d2e-0000-4000-8000-aaaaaaaaaaaa";
+    window.__HF_CLI_DISTINCT_ID = cliId;
+    window.__HF_CLI_BUCKET_SEED = cliSeed;
+    __resetStudioDistinctIdForTests();
+    __resetStudioCanaryCacheForTests();
+
+    // Telemetry identity still adopts the DISTINCT id — the seed only buckets.
+    expect(resolveStudioDistinctId()).toBe(cliId);
+    const viaBinding = resolveCanary("on-everywhere").bucket;
+    const bySeed = evaluateCanary({
+      feature: "on-everywhere",
+      unitId: cliSeed,
+      percentage: 100,
+    }).bucket;
+    expect(viaBinding).toBe(bySeed);
+  });
+
+  it("buckets on the Studio distinct id when no seed is injected (standalone Studio)", () => {
     const cliId = "db0c1f4a-b95e-4c35-90c6-1a15bd76f717";
     window.__HF_CLI_DISTINCT_ID = cliId;
     __resetStudioDistinctIdForTests();
     __resetStudioCanaryCacheForTests();
 
     expect(resolveStudioDistinctId()).toBe(cliId);
-    // 50% so the answer is id-dependent rather than trivially true.
     const viaBinding = resolveCanary("on-everywhere").bucket;
     const direct = evaluateCanary({
       feature: "on-everywhere",

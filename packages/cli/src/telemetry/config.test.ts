@@ -204,11 +204,18 @@ describe("install-state rollover (breaker survives a config re-mint)", () => {
     expect(readConfigFresh().deParallelRouterTrialFired).toBe(true);
   });
 
-  it("the state file holds no identity — only the marker timestamp and breaker fact", () => {
+  it("the state file holds no telemetry identity — marker, breaker fact, bucket seed only", () => {
     const config = readConfig();
     config.deParallelRouterTrialFired = true;
     writeConfig(config);
-    expect(Object.keys(stateFile()).sort()).toEqual(["deParallelRouterTrialFired", "markerAt"]);
+    expect(Object.keys(stateFile()).sort()).toEqual([
+      "bucketSeed",
+      "deParallelRouterTrialFired",
+      "markerAt",
+    ]);
+    // The seed is a separate random UUID, never the anonymousId — the old
+    // telemetry id must not survive a wipe in any form.
+    expect(config.bucketSeed).not.toBe(config.anonymousId);
     expect(JSON.stringify(stateFile())).not.toContain(config.anonymousId);
   });
 
@@ -290,5 +297,72 @@ describe("install-state rollover (breaker survives a config re-mint)", () => {
     fsState.files.set(STATE_PATH, JSON.stringify({ markerAt: "2026-07-30T00:00:00.000Z" }));
     expect(readConfig().deParallelRouterTrialFired).toBeUndefined();
     expect(fsState.files.has(LEGACY_STATE_PATH)).toBe(false);
+  });
+});
+
+describe("bucket-seed carryover (cohorts survive a config wipe)", () => {
+  let readConfig: typeof import("./config.js").readConfig;
+  let readConfigFresh: typeof import("./config.js").readConfigFresh;
+  let writeConfig: typeof import("./config.js").writeConfig;
+  let CONFIG_PATH: typeof import("./config.js").CONFIG_PATH;
+  let STATE_PATH: typeof import("./config.js").STATE_PATH;
+
+  beforeEach(async () => {
+    fsState.files.clear();
+    vi.resetModules();
+    ({ readConfig, readConfigFresh, writeConfig, CONFIG_PATH, STATE_PATH } =
+      await import("./config.js"));
+  });
+
+  it("a fresh install mints a seed distinct from its anonymousId and mirrors it to the state file", () => {
+    const config = readConfig();
+    expect(config.bucketSeed).toBeTruthy();
+    expect(config.bucketSeed).not.toBe(config.anonymousId);
+    const state = JSON.parse(fsState.files.get(STATE_PATH) as string) as { bucketSeed?: string };
+    expect(state.bucketSeed).toBe(config.bucketSeed);
+  });
+
+  it("the seed survives a config wipe — the machine keeps its cohorts, only the id re-rolls", () => {
+    const first = readConfig();
+    fsState.files.delete(CONFIG_PATH);
+    const second = readConfigFresh();
+    expect(second.bucketSeed).toBe(first.bucketSeed);
+    expect(second.anonymousId).not.toBe(first.anonymousId);
+  });
+
+  it("the seed survives config corruption via the same mint path", () => {
+    const first = readConfig();
+    fsState.files.set(CONFIG_PATH, "{not valid json");
+    expect(readConfigFresh().bucketSeed).toBe(first.bucketSeed);
+  });
+
+  it("the state-file seed is write-once — a later install never overwrites the lineage seed", () => {
+    const first = readConfig();
+    fsState.files.delete(CONFIG_PATH);
+    const second = readConfigFresh();
+    // Force more config writes from the second install; the state seed must not move.
+    second.commandCount = 7;
+    writeConfig(second);
+    const state = JSON.parse(fsState.files.get(STATE_PATH) as string) as { bucketSeed?: string };
+    expect(state.bucketSeed).toBe(first.bucketSeed);
+  });
+
+  it("a legacy config without a seed is backfilled ONCE and stays stable across fresh reads", () => {
+    const base = readConfig();
+    const { bucketSeed: _dropped, ...legacy } = base;
+    fsState.files.set(CONFIG_PATH, JSON.stringify(legacy));
+    fsState.files.delete(STATE_PATH); // no lineage either — pure legacy machine
+    const first = readConfigFresh();
+    expect(first.bucketSeed).toBeTruthy();
+    const second = readConfigFresh();
+    expect(second.bucketSeed).toBe(first.bucketSeed); // persisted, not re-rolled per read
+  });
+
+  it("a legacy config adopts the lineage seed from the state file when one exists", () => {
+    const base = readConfig(); // wrote the state file with a seed
+    const lineageSeed = base.bucketSeed;
+    const { bucketSeed: _dropped, ...legacy } = base;
+    fsState.files.set(CONFIG_PATH, JSON.stringify(legacy));
+    expect(readConfigFresh().bucketSeed).toBe(lineageSeed);
   });
 });

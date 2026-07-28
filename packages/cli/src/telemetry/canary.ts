@@ -55,10 +55,15 @@ export function resolveCanary(name: string): CanaryDecision {
   if (cached) return cached;
 
   const definition = findCanary(name);
+  const config = readConfig();
   const decision: CanaryDecision = definition
     ? evaluateCanary({
         feature: definition.name,
-        unitId: readConfig().anonymousId,
+        // The bucket seed, NOT the anonymousId: the seed is inherited across
+        // config wipes via the install-state file, so the machine keeps its
+        // cohorts when the telemetry id re-rolls. Fallback covers only a
+        // failed backfill write on a legacy config.
+        unitId: config.bucketSeed ?? config.anonymousId,
         percentage: definition.percentage,
         override: parseCanaryOverride(process.env[canaryEnvVar(definition.name)]),
         // CI installs regenerate their config per run, so their ids are

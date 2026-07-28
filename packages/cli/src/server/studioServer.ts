@@ -16,7 +16,11 @@ import {
   loadRuntimeSourceSignature,
 } from "./runtimeSource.js";
 import { VERSION as version } from "../version.js";
-import { buildStudioHeadScripts, resolveCliTelemetryDistinctId } from "./telemetryIdentity.js";
+import {
+  buildStudioHeadScripts,
+  resolveCliBucketSeed,
+  resolveCliTelemetryDistinctId,
+} from "./telemetryIdentity.js";
 import { emitStudioRenderComplete, emitStudioRenderError } from "./studioRenderTelemetry.js";
 import { isDevMode } from "../utils/env.js";
 import {
@@ -652,7 +656,10 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
   // distinct id (no PII) so the browser session can join the CLI's PostHog
   // person, or `{ distinctId: null }` when CLI telemetry is disabled.
   app.get("/api/telemetry-identity", (c) => {
-    return c.json({ distinctId: resolveCliTelemetryDistinctId() });
+    return c.json({
+      distinctId: resolveCliTelemetryDistinctId(),
+      bucketSeed: resolveCliBucketSeed(),
+    });
   });
 
   app.get("/api/events", (c) => {

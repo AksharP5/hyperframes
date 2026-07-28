@@ -66,6 +66,14 @@ describe("buildCliIdentityScript", () => {
     );
   });
 
+  it("also seeds window.__HF_CLI_BUCKET_SEED when the config carries a bucket seed", () => {
+    shouldTrack.mockReturnValue(true);
+    readConfig.mockReturnValue({ anonymousId: "machine-uuid", bucketSeed: "seed-uuid" });
+    expect(buildCliIdentityScript()).toBe(
+      '<script>window.__HF_CLI_DISTINCT_ID="machine-uuid";window.__HF_CLI_BUCKET_SEED="seed-uuid";</script>',
+    );
+  });
+
   it("emits an empty string when telemetry is disabled (nothing to seed)", () => {
     shouldTrack.mockReturnValue(false);
     expect(buildCliIdentityScript()).toBe("");

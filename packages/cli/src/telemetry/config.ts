@@ -56,6 +56,12 @@ interface InstallState {
   markerAt: string;
   /** Rolled-over circuit-breaker state — see HyperframesConfig's field. */
   deParallelRouterTrialFired?: boolean;
+  /**
+   * The machine's canary bucketing seed — see HyperframesConfig's field.
+   * Write-once: the first install's seed is the lineage's seed forever, so a
+   * config wipe re-mints the telemetry id but NOT the canary cohorts.
+   */
+  bucketSeed?: string;
 }
 
 /** Parse one state file; any parse/shape failure reads as absent. */
@@ -67,6 +73,10 @@ function parseInstallState(file: string): InstallState | null {
     return {
       markerAt: parsed.markerAt,
       deParallelRouterTrialFired: parsed.deParallelRouterTrialFired === true ? true : undefined,
+      bucketSeed:
+        typeof parsed.bucketSeed === "string" && parsed.bucketSeed.length > 0
+          ? parsed.bucketSeed
+          : undefined,
     };
   } catch {
     return null;
@@ -136,18 +146,35 @@ function writeInstallState(next: InstallState): void {
  * no breaker write site can forget it. Never throws — same contract as the
  * rest of this file, telemetry must not break the CLI.
  */
+function sameInstallState(a: InstallState, b: InstallState): boolean {
+  return (
+    a.deParallelRouterTrialFired === b.deParallelRouterTrialFired && a.bucketSeed === b.bucketSeed
+  );
+}
+
+/** Latching: once tripped (by any install in this machine's lineage), stays tripped. */
+function latchedFired(state: InstallState | null, config: HyperframesConfig): true | undefined {
+  return (
+    state?.deParallelRouterTrialFired === true ||
+    config.deParallelRouterTrialFired === true ||
+    undefined
+  );
+}
+
 /** What the state file should say after this config write; null = already correct. */
-function nextInstallState(state: InstallState | null, wantFired: boolean): InstallState | null {
-  const hadFired = state?.deParallelRouterTrialFired === true;
-  if (state !== null && (hadFired || !wantFired)) return null;
-  // Every path reaching here has hadFired === false (state is either null, or
-  // the guard above already returned when hadFired was true) — the field is
-  // simply wantFired, not a merge of the two (review nit, two independent
-  // reviewers).
-  return {
+function nextInstallState(
+  state: InstallState | null,
+  config: HyperframesConfig,
+): InstallState | null {
+  const next: InstallState = {
     markerAt: state?.markerAt ?? new Date().toISOString(),
-    deParallelRouterTrialFired: wantFired || undefined,
+    deParallelRouterTrialFired: latchedFired(state, config),
+    // Write-once: an existing lineage seed always wins, so cohorts stay
+    // anchored to the FIRST install in this config dir, not the latest one.
+    bucketSeed: state?.bucketSeed ?? config.bucketSeed,
   };
+  if (state !== null && sameInstallState(state, next)) return null;
+  return next;
 }
 
 function syncInstallState(config: HyperframesConfig): void {
@@ -155,7 +182,7 @@ function syncInstallState(config: HyperframesConfig): void {
   if (stateMarkerSynced && (stateFiredSynced || !wantFired)) return;
   try {
     const state = readInstallState();
-    const next = nextInstallState(state, wantFired);
+    const next = nextInstallState(state, config);
     if (next !== null) writeInstallState(next);
     stateMarkerSynced = true;
     stateFiredSynced = wantFired || state?.deParallelRouterTrialFired === true;
@@ -176,8 +203,11 @@ function mintConfig(): HyperframesConfig {
     anonymousId: randomUUID(),
     predecessorFound: state !== null,
     // The rollover itself: a breaker tripped by a previous install on this
-    // machine stays tripped for the new one.
+    // machine stays tripped for the new one, and the canary bucketing seed is
+    // inherited so the machine keeps its cohorts — a wipe re-rolls the
+    // telemetry id, never the canary assignment.
     deParallelRouterTrialFired: state?.deParallelRouterTrialFired === true ? true : undefined,
+    bucketSeed: state?.bucketSeed ?? randomUUID(),
   };
 }
 
@@ -265,6 +295,17 @@ export interface HyperframesConfig {
    */
   predecessorFound?: boolean;
   /**
+   * The unit canary percentages bucket on — deliberately NOT the anonymousId.
+   * A fresh random UUID, mirrored write-once into the install-state file and
+   * inherited at mint, so a config wipe re-rolls the telemetry id but keeps
+   * the machine's canary cohorts: no cumulative-exposure drift from wipes,
+   * and before/after comparisons survive a reinstall. It is never emitted in
+   * telemetry (only the resulting true/false assignments are), so it does not
+   * link the old id to the new one server-side. Backfilled once for configs
+   * predating the field.
+   */
+  bucketSeed?: string;
+  /**
    * Ring of the last few local renders (newest last). `hyperframes feedback`
    * attaches these ids — which are the `render_job_id` /
    * `observability_render_job_id` on this install's PostHog events — to the
@@ -309,6 +350,26 @@ const DEFAULT_CONFIG: HyperframesConfig = {
 };
 
 let cachedConfig: HyperframesConfig | null = null;
+
+/** A non-empty string, or undefined — hand-edited configs can carry anything. */
+function parseNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** Shape-validate the recent-renders ring from a parsed config. */
+function parseRecentRenders(value: unknown): RecentRenderRecord[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter(
+      (r): r is RecentRenderRecord =>
+        typeof r === "object" &&
+        r !== null &&
+        typeof (r as RecentRenderRecord).id === "string" &&
+        typeof (r as RecentRenderRecord).at === "string" &&
+        typeof (r as RecentRenderRecord).ok === "boolean",
+    )
+    .slice(-MAX_RECENT_RENDERS);
+}
 
 /**
  * Read the config file, creating it with defaults if it doesn't exist.
@@ -356,19 +417,22 @@ export function readConfig(): HyperframesConfig {
           : undefined,
       predecessorFound:
         typeof parsed.predecessorFound === "boolean" ? parsed.predecessorFound : undefined,
-      recentRenders: Array.isArray(parsed.recentRenders)
-        ? parsed.recentRenders
-            .filter(
-              (r): r is RecentRenderRecord =>
-                typeof r === "object" &&
-                r !== null &&
-                typeof (r as RecentRenderRecord).id === "string" &&
-                typeof (r as RecentRenderRecord).at === "string" &&
-                typeof (r as RecentRenderRecord).ok === "boolean",
-            )
-            .slice(-MAX_RECENT_RENDERS)
-        : undefined,
+      bucketSeed: parseNonEmptyString(parsed.bucketSeed),
+      recentRenders: parseRecentRenders(parsed.recentRenders),
     };
+
+    // One-time backfill for configs predating the bucket seed: prefer the
+    // lineage seed if a previous install already recorded one, else mint.
+    // Persisted immediately — an unpersisted seed would re-roll every process.
+    if (config.bucketSeed === undefined) {
+      config.bucketSeed = readInstallState()?.bucketSeed ?? randomUUID();
+      writeConfig(config);
+      // Cache even if the write failed, so the seed is at least stable for
+      // the life of this process (a re-roll per readConfigFresh would flip
+      // cohorts mid-session).
+      cachedConfig = config;
+      return { ...config };
+    }
 
     cachedConfig = config;
     return { ...config };
