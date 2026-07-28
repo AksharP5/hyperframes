@@ -103,7 +103,10 @@ export function TimelineDiamondConnectors({
                   data-keyframe-ease-button=""
                   aria-label={`Edit ${ease} easing`}
                   title={`Edit ${ease} easing`}
-                  className="absolute flex items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                  // A visible 24x24 badge would collide with the diamonds either
+                  // side, so the WCAG 2.2 (2.5.8) target is met with a centered
+                  // transparent ::before overlay; the box stays 16x16.
+                  className="absolute flex items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 before:absolute before:left-1/2 before:top-1/2 before:h-6 before:w-6 before:-translate-x-1/2 before:-translate-y-1/2 before:content-['']"
                   style={{
                     left: "50%",
                     top: "50%",

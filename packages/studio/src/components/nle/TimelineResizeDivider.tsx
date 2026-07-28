@@ -73,9 +73,9 @@ export function TimelineResizeDivider({
   );
 
   return (
-    // Horizontal resize divider: 3px visible seam (h-[3px]), 8px pointer-capture
+    // Horizontal resize divider: 3px visible seam (h-[3px]), 10px pointer-capture
     // zone via the absolutely-positioned inner hit area so the layout gap stays
-    // at 3px while draggability is preserved over the full 8px band.
+    // at 3px while draggability is preserved over the full band.
     <div
       role="separator"
       aria-orientation="horizontal"
@@ -94,8 +94,13 @@ export function TimelineResizeDivider({
       onPointerCancel={handlePointerUp}
       onKeyDown={handleKeyDown}
     >
-      {/* Expanded hit zone: 8px tall, centered on the 3px seam */}
-      <div className="absolute inset-x-0 -top-[2.5px] h-2" />
+      {/* Expanded hit zone, deliberately asymmetric: 4px up into the transport
+          row's vertical centring slack, the 3px seam, then 3px down into the
+          timeline card's border + toolbar padding. It stops at 10px rather than
+          the 24px WCAG 2.2 (2.5.8) target because that is all the dead space
+          there is: 28px transport buttons sit above and 28px toolbar buttons
+          below, and silently stealing their clicks is the worse bug. */}
+      <div className="absolute inset-x-0 -top-[4px] h-[10px]" />
       {/* Visible hairline — invisible at rest, subtle wash on hover/drag/focus */}
       <div className="h-[3px] w-full bg-transparent transition-colors group-hover:bg-white/12 group-active:bg-white/18 group-focus-visible:bg-studio-accent/60" />
     </div>
