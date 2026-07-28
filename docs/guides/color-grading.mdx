@@ -98,10 +98,11 @@ same tonal zone, while hue and amount introduce color.
 - **Master** remaps overall luminance.
 - **Red**, **Green**, and **Blue** remap individual channels.
 
-Curve points are normalized `[input, output]` pairs. Every RGB curve must include
-input endpoints `0` and `1` and contain 2–16 points. An S-curve increases
-contrast; lifting the lower-left region raises shadows; channel curves can
-build split-tone or cast-removal adjustments.
+Curve points are normalized `[input, output]` pairs. Resolved curves contain
+input endpoints `0` and `1`; HyperFrames infers missing endpoints, and the
+2–16-point limit includes those inferred points. An S-curve increases contrast;
+lifting the lower-left region raises shadows; channel curves can build
+split-tone or cast-removal adjustments.
 
 ### Hue Curves
 
