@@ -260,6 +260,59 @@ export function toAbsoluteTime(tweenPos: number, tweenDur: number, percentage: n
 }
 
 /**
+ * Timing basis for an element's keyframes, expressed in the TWEEN's own time
+ * frame. Sub-composition internals (e.g. pills inside a scene) aren't timeline
+ * clips themselves — they're derived at expand time — so they're absent from
+ * `elements`. Without a basis, elDuration defaulted to 1 and clip-relative
+ * keyframe percentages blew past 100% (rendering off the clip). Fall back to the
+ * sub-comp HOST's bounds, resolved via domClipChildren (the host's
+ * data-composition-src is stripped in the rendered DOM, so we can't query it).
+ *
+ * `elStart` is the clip's start in the frame the tween's own times are measured
+ * in. A sub-composition tween's resolvedStart is composition-local while a
+ * timeline element's start is main-timeline absolute, so passing the raw element
+ * start subtracted two different frames from each other: a host mounted at 1.5s
+ * cached its 0s tween at -12%, and a clip-relative percentage can never be
+ * negative. The composition's mount is `expandedParentStart` for an expanded
+ * child, the parent composition clip's start otherwise, and 0 for a
+ * root-composition element, whose start already IS the tween frame.
+ */
+export function resolveClipTimingBasis(
+  elementId: string,
+  sourceFile: string,
+  elements: ReadonlyArray<{
+    domId?: string;
+    key?: string;
+    id: string;
+    start: number;
+    duration: number;
+    expandedParentStart?: number;
+    parentCompositionId?: string | null;
+  }>,
+  domClipChildren: ReadonlyArray<{ id: string; hostId: string }>,
+): { elStart: number; elDuration: number } {
+  const direct = elements.find(
+    (el) => el.domId === elementId || (el.key ?? el.id) === `${sourceFile}#${elementId}`,
+  );
+  if (direct) {
+    const parentId = direct.parentCompositionId;
+    const parent = parentId
+      ? elements.find((el) => el.domId === parentId || el.id === parentId)
+      : undefined;
+    const mount = direct.expandedParentStart ?? parent?.start ?? 0;
+    return { elStart: direct.start - mount, elDuration: direct.duration };
+  }
+  const hostId = domClipChildren.find((c) => c.id === elementId)?.hostId;
+  const host = hostId
+    ? elements.find((el) => el.domId === hostId || (el.key ?? el.id) === `index.html#${hostId}`)
+    : undefined;
+  // The inner element is not a clip of its own: the host's window IS the frame
+  // its tweens are timed in, so the start in that frame is 0, not the host's
+  // main-timeline mount.
+  return { elStart: 0, elDuration: host?.duration ?? 1 };
+}
+
+/**
  * An absolute time as a percentage of a timeline clip, at the one precision every
  * keyframe-cache writer must share. 0.001% keeps a beat-snapped keyframe centered
  * on the beat dot, and because selection keys embed this number, a writer that

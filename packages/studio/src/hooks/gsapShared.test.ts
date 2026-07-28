@@ -6,6 +6,7 @@ import {
   idSelector,
   isInstantHold,
   parsePercentageKeyframes,
+  resolveClipTimingBasis,
   resolveEditableTweenDuration,
   toClipKeyframes,
   toClipPercentage,
@@ -166,6 +167,124 @@ describe("toClipKeyframes", () => {
   it("keeps the tween percentage and the animation identity on every row", () => {
     const rows = toClipKeyframes([{ percentage: 50 }], durationless, 0, 4);
     expect(rows[0]).toMatchObject({ tweenPercentage: 50, animationId: "a1" });
+  });
+});
+
+describe("resolveClipTimingBasis", () => {
+  // Measured on v-product-promo: `captions-comp` mounts at 1.5s for 12.5s, and the
+  // six tweens inside it resolve to 0..12.5 — composition-local, not main-timeline
+  // absolute. Subtracting the host's 1.5 mount from a 0s tween cached pct -12.
+  const host = { id: "captions-comp", domId: "captions-comp", start: 1.5, duration: 12.5 };
+  const children = [{ id: "line", hostId: "captions-comp" }];
+
+  it("gives a sub-composition inner element the host window in the tween's own frame", () => {
+    expect(resolveClipTimingBasis("line", "captions.html", [host], children)).toEqual({
+      elStart: 0,
+      elDuration: 12.5,
+    });
+  });
+
+  it("leaves a root-composition element on the main timeline", () => {
+    const box = { id: "box", domId: "box", start: 3, duration: 2 };
+    expect(resolveClipTimingBasis("box", "index.html", [box], [])).toEqual({
+      elStart: 3,
+      elDuration: 2,
+    });
+  });
+
+  it("rebases an expanded sub-comp child by its host mount", () => {
+    // Expanded children carry host-ABSOLUTE display starts; the tweens they own are
+    // still composition-local, so the basis is the child's local start.
+    const pill = { id: "pill", domId: "pill", start: 8, duration: 4, expandedParentStart: 6 };
+    expect(resolveClipTimingBasis("pill", "scene.html", [pill], [])).toEqual({
+      elStart: 2,
+      elDuration: 4,
+    });
+  });
+
+  it("rebases by the parent composition clip when the child is not expanded", () => {
+    const parent = { id: "scene-comp", domId: "scene-comp", start: 5, duration: 10 };
+    const pill = {
+      id: "pill",
+      domId: "pill",
+      start: 7,
+      duration: 3,
+      parentCompositionId: "scene-comp",
+    };
+    expect(resolveClipTimingBasis("pill", "scene.html", [parent, pill], [])).toEqual({
+      elStart: 2,
+      elDuration: 3,
+    });
+  });
+
+  it("falls back to a unit window when neither the element nor a host resolves", () => {
+    expect(resolveClipTimingBasis("ghost", "index.html", [], [])).toEqual({
+      elStart: 0,
+      elDuration: 1,
+    });
+  });
+});
+
+describe("sub-composition keyframe percentages", () => {
+  const host = { id: "captions-comp", domId: "captions-comp", start: 1.5, duration: 12.5 };
+  const children = [{ id: "line", hostId: "captions-comp" }];
+  const basis = () => resolveClipTimingBasis("line", "captions.html", [host], children);
+  const inner = (resolvedStart: number, duration?: number) =>
+    ({
+      id: `t-${resolvedStart}`,
+      method: "to",
+      targetSelector: "#line",
+      vars: {},
+      resolvedStart,
+      duration,
+    }) as unknown as GsapAnimation;
+  const percentages = (animation: GsapAnimation) => {
+    const { elStart, elDuration } = basis();
+    return toClipKeyframes(
+      [{ percentage: 0 }, { percentage: 100 }],
+      animation,
+      elStart,
+      elDuration,
+    ).map((row) => row.percentage);
+  };
+
+  it("puts a tween on the host's first frame at 0%, never below zero", () => {
+    // A clip-relative percentage can never be negative; this one cached -12.
+    expect(percentages(inner(0))).toEqual([0, 100]);
+  });
+
+  it("puts the last tween's end keyframe at 100%", () => {
+    expect(percentages(inner(12.1, 0.4))).toEqual([96.8, 100]);
+  });
+
+  it("keeps every measured tween of the fixture inside 0..100", () => {
+    for (const start of [0, 3.2, 3.5, 7.7, 8, 12.1]) {
+      for (const percentage of percentages(inner(start, 0.4))) {
+        expect(percentage).toBeGreaterThanOrEqual(0);
+        expect(percentage).toBeLessThanOrEqual(100);
+      }
+    }
+  });
+
+  it("keeps a root-composition tween at the head of its own clip", () => {
+    const box = { id: "box", domId: "box", start: 3, duration: 2 };
+    const { elStart, elDuration } = resolveClipTimingBasis("box", "index.html", [box], []);
+    const rows = toClipKeyframes([{ percentage: 0 }], inner(3, 2), elStart, elDuration);
+    expect(rows[0]!.percentage).toBe(0);
+  });
+
+  it("passes tween percentages through for a zero-length clip", () => {
+    expect(toClipKeyframes([{ percentage: 40 }], inner(0, 0.4), 0, 0)[0]!.percentage).toBe(40);
+  });
+
+  it("round-trips a clip percentage through the basis it was written with", () => {
+    // The drag commit converts a dropped clip-% back to a time with this basis
+    // (useTimelineEditCallbacks) and compares it against the tween's own
+    // resolvedStart, so the basis has to be in the tween's frame on both sides.
+    const { elStart, elDuration } = basis();
+    const absTime = elStart + (40 / 100) * elDuration;
+    expect(absTime).toBe(5);
+    expect(toClipPercentage(absTime, elStart, elDuration, 0)).toBe(40);
   });
 });
 

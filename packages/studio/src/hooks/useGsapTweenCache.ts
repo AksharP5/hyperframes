@@ -7,24 +7,17 @@ import {
   pruneKeyframeCacheToFiles,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
-import { toAbsoluteTime, toClipPercentage } from "./gsapShared";
+import { resolveClipTimingBasis, toAbsoluteTime, toClipPercentage } from "./gsapShared";
 import {
   deduplicateKeyframes,
   isStaticPositionHold,
   synthesizeFlatTweenKeyframes,
 } from "./gsapTweenSynth";
-import {
-  fetchParsedAnimations,
-  populateKeyframeCacheFromAst,
-  resolveClipTimingBasis,
-} from "./keyframeCacheAstLoad";
+import { fetchParsedAnimations, populateKeyframeCacheFromAst } from "./keyframeCacheAstLoad";
 
 // Re-exported so callers keep importing the GSAP cache surface from one module.
-export {
-  fetchParsedAnimations,
-  resolveClipTimingBasis,
-  resolveSelectorElementIds,
-} from "./keyframeCacheAstLoad";
+export { resolveClipTimingBasis } from "./gsapShared";
+export { fetchParsedAnimations, resolveSelectorElementIds } from "./keyframeCacheAstLoad";
 
 /** The selected element's identity for matching tweens to it. */
 export interface GsapElementTarget {

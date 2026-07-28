@@ -4,7 +4,7 @@
  */
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerStore";
-import { idFromSelector, toClipKeyframes } from "./gsapShared";
+import { idFromSelector, resolveClipTimingBasis, toClipKeyframes } from "./gsapShared";
 import { deduplicateKeyframes, synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
 
 export function updateKeyframeCacheFromParsed(
@@ -13,7 +13,7 @@ export function updateKeyframeCacheFromParsed(
   selectionId: string | undefined,
   mutation: Record<string, unknown>,
 ): void {
-  const { setKeyframeCache, elements } = usePlayerStore.getState();
+  const { setKeyframeCache, elements, domClipChildren } = usePlayerStore.getState();
   const idsWithKeyframes = new Set<string>();
   const merged = new Map<string, KeyframeCacheEntry>();
   const sourceAnimations = new Map<string, GsapAnimation[]>();
@@ -31,16 +31,16 @@ export function updateKeyframeCacheFromParsed(
     sourceAnimations.set(id, [...(sourceAnimations.get(id) ?? []), anim]);
 
     // Convert tween-relative percentages to clip-relative so diamonds
-    // render at the correct position within the timeline clip.
-    const timelineEl = elements.find(
-      (el) => el.domId === id || (el.key ?? el.id) === `${targetPath}#${id}`,
+    // render at the correct position within the timeline clip. The basis comes
+    // from the shared resolver, so this writer agrees with the AST load on both
+    // the sub-comp host fallback and the tween's own time frame.
+    const { elStart, elDuration } = resolveClipTimingBasis(
+      id,
+      targetPath,
+      elements,
+      domClipChildren,
     );
-    const clipKeyframes = toClipKeyframes(
-      kfSource,
-      anim,
-      timelineEl?.start ?? 0,
-      timelineEl?.duration ?? 1,
-    );
+    const clipKeyframes = toClipKeyframes(kfSource, anim, elStart, elDuration);
 
     const existing = merged.get(id);
     if (existing) {
