@@ -1,7 +1,7 @@
 import { redactTelemetryString, type OutputResolutionIssueKind } from "@hyperframes/core";
 import type { SubTimelineWaitOutcome } from "@hyperframes/engine";
 import { FEEDBACK_RATING_SCALE } from "../utils/feedbackRating.js";
-import { flush, trackEvent } from "./client.js";
+import { flush, shouldTrack, trackEvent } from "./client.js";
 import { readConfig } from "./config.js";
 import { getPowerState } from "./system.js";
 
@@ -10,7 +10,15 @@ import { getPowerState } from "./system.js";
 // render_complete AND render_error: the DE fleet is macOS laptops whose
 // power management shifts render perf ~1.8x with no other telemetry signal,
 // and perf/soak analysis needs to segment by it (see getPowerState).
+//
+// shouldTrack() is checked HERE, not just inside trackEvent: this helper is
+// spread into the properties object at the CALL SITE, so it runs before
+// trackEvent's own `if (!shouldTrack()) return` guard. Without this an
+// opted-out install would still pay two blocking `pmset` subprocess spawns
+// per render for an event that is then discarded (review finding).
+// shouldTrack() memoizes, so this costs nothing on the tracked path.
 function powerStateFields(): { on_battery?: boolean; low_power_mode?: boolean } {
+  if (!shouldTrack()) return {};
   const power = getPowerState();
   return {
     on_battery: power.on_battery ?? undefined,

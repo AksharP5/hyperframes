@@ -1331,6 +1331,16 @@ export function shouldPreferParallelDrawElement(args: {
   experimentalParallelDeOptIn: boolean;
   /** HF_DE_PARALLEL_ROUTER === "true" — the router's own kill switch, default off. */
   routerEnabled: boolean;
+  /**
+   * Whether verified parallel DE STREAMING can actually run for this render
+   * (`shouldUseStreamingEncode` at the router's worker count with
+   * forceParallelStream). The router's entire value is that path; without it
+   * firing would pin workerCount to 3 and skip calibration while delivering
+   * none of the benefit — e.g. a composition longer than
+   * `streamingEncodeMaxDurationSeconds` (240 s default), where the duration
+   * cap disables streaming before the router's force flag is consulted.
+   */
+  parallelStreamingAvailable: boolean;
   /** Machine RAM (os.totalmem, MB). */
   totalMemoryMb: number;
   /** RAM floor for routing; <=0 disables the guard. */
@@ -1338,6 +1348,7 @@ export function shouldPreferParallelDrawElement(args: {
 }): boolean {
   return (
     args.routerEnabled &&
+    args.parallelStreamingAvailable &&
     args.workerCount > 1 &&
     typeof args.requestedWorkers !== "number" &&
     args.useDrawElement &&
@@ -2366,6 +2377,15 @@ async function executeRenderPipeline(input: {
         process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true" ||
         process.env.HF_DE_PARALLEL_STREAM === "true",
       routerEnabled: deParallelRouterEnabled,
+      // Router pins 3 workers for the streaming path; don't pin when the
+      // duration cap (or any other streaming gate) would turn that path off.
+      parallelStreamingAvailable: shouldUseStreamingEncode(
+        cfg,
+        outputFormat,
+        3,
+        job.duration,
+        true,
+      ),
       totalMemoryMb: Math.round(totalmem() / (1024 * 1024)),
       minMemoryMb: deParallelMinMemoryMb,
     });
