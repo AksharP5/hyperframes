@@ -466,3 +466,47 @@ describe("useEnableKeyframes — flat tween transaction", () => {
     });
   });
 });
+
+describe("useEnableKeyframes — new tween on a class-only element", () => {
+  it("targets the selected sibling alone, not every element sharing its class", async () => {
+    window.location.hash = "#/project/test-project";
+    usePlayerStore.setState({ currentTime: 1 });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({ animations: [] }) })),
+    );
+    const scene = document.body.appendChild(document.createElement("div"));
+    scene.id = "scene";
+    scene.innerHTML = '<i class="group"></i>'.repeat(5);
+    const groups = Array.from(scene.querySelectorAll<HTMLElement>(".group"));
+    const commitMutation = vi.fn(async () => undefined);
+    const enable = renderEnableKeyframes({
+      // A bare `.group` here writes `tl.to(".group", …)`, which animates all five
+      // siblings and reads back as all five — one add wiped the timeline.
+      domEditSelection: {
+        selector: ".group",
+        selectorIndex: 3,
+        sourceFile: "index.html",
+        element: groups[3],
+        dataAttributes: { start: "0", duration: "2" },
+      } as unknown as DomEditSelection,
+      selectedGsapAnimations: [],
+      previewIframeRef: {
+        current: {
+          contentWindow: { gsap: { getProperty: () => 7 } },
+        } as unknown as HTMLIFrameElement,
+      },
+      handleGsapAddAnimation: vi.fn(),
+      handleGsapConvertToKeyframes: vi.fn(),
+      handleGsapRemoveKeyframe: vi.fn(),
+      commitMutation,
+    });
+
+    await act(async () => enable());
+
+    const mutation = commitMutation.mock.calls[0]?.[0] as { targetSelector: string };
+    expect(mutation?.targetSelector).toBeTruthy();
+    expect(document.querySelectorAll(mutation.targetSelector)).toHaveLength(1);
+    expect(document.querySelector(mutation.targetSelector)).toBe(groups[3]);
+  });
+});

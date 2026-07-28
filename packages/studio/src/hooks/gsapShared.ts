@@ -181,6 +181,111 @@ export function selectorFromSelection(selection: DomEditSelection): string | nul
   return null;
 }
 
+/** `[name="value"]`, with the quote/backslash escaping a CSS string needs. */
+function attributeSelector(name: string, value: string): string {
+  return `[${name}="${value.replace(/(["\\])/g, "\\$1")}"]`;
+}
+
+function matchesExactlyOne(doc: Document, selector: string, element: Element): boolean {
+  try {
+    const matches = doc.querySelectorAll(selector);
+    return matches.length === 1 && matches[0] === element;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A structural address for an element that carries no identity of its own:
+ * `:nth-child` steps up to the nearest ancestor that IS uniquely addressable
+ * (an id or a data-hf-id). This is the `selector` + `selectorIndex` pair the
+ * selection already carries, resolved through the live DOM the index was
+ * counted in — an index can't be spelled in CSS, but the element's position can.
+ */
+function structuralSelector(element: Element): string | null {
+  const doc = element.ownerDocument;
+  if (!doc) return null;
+  const parts: string[] = [];
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    if (node !== element) {
+      const id = node instanceof HTMLElement ? node.id : "";
+      const hfId = node.getAttribute("data-hf-id");
+      if (id) {
+        parts.unshift(idSelector(id));
+        break;
+      }
+      if (hfId) {
+        parts.unshift(attributeSelector("data-hf-id", hfId));
+        break;
+      }
+    }
+    const parent = node.parentElement;
+    if (!parent) break;
+    const index = [...parent.children].indexOf(node) + 1;
+    if (index < 1) return null;
+    parts.unshift(`${node.tagName.toLowerCase()}:nth-child(${index})`);
+  }
+  if (parts.length === 0) return null;
+  const selector = parts.join(" > ");
+  return matchesExactlyOne(doc, selector, element) ? selector : null;
+}
+
+/**
+ * The selector to author a NEW tween with. Distinct from
+ * {@link selectorFromSelection}, which must keep returning the exact string an
+ * already-authored tween is string-matched against (findTweenAtTime): this one
+ * has to ADDRESS ONE ELEMENT.
+ *
+ * `buildStableSelector` hands back a bare class for any element without an id,
+ * so "add keyframe at playhead" on one of five `.group` siblings wrote
+ * `tl.set(".group", …)` — a tween that animates all five and that
+ * {@link resolveSelectorElementIds} reads back as all five, collapsing their
+ * timeline rows into one. Every rung below resolves to exactly one element.
+ *
+ * Null means "no string here addresses one element". With a live DOM to check
+ * against, a failed structural walk (detached between select and commit, a
+ * shadow-root boundary, a chain that no longer re-resolves) IS that evidence,
+ * so returning the bare selector anyway would hand back the exact input this
+ * function exists to replace. Callers decide what to do with the null: the
+ * add-keyframe path has a graceful no-animation fallback, and the paths that
+ * cannot afford to drop a user edit opt back in with `?? selectorFromSelection`
+ * where the trade is visible. The bare selector comes back only with no DOM to
+ * disambiguate against, where refusing would be guessing rather than knowing.
+ */
+export function writeTargetSelector(selection: DomEditSelection): string | null {
+  if (selection.id) return idSelector(selection.id);
+  if (selection.hfId) return attributeSelector("data-hf-id", selection.hfId);
+  const element = selection.element;
+  const doc = element?.ownerDocument;
+  if (element && doc) {
+    if (selection.selector && matchesExactlyOne(doc, selection.selector, element)) {
+      return selection.selector;
+    }
+    return structuralSelector(element);
+  }
+  return selection.selector ?? null;
+}
+
+/**
+ * The selector a `replace-with-keyframes` mutation must re-author an EXISTING
+ * tween against. The server deletes the tween and adds it back, so this string
+ * REWRITES its target: deriving it from the selection instead discards whatever
+ * the author aimed at, and silently widens a tween {@link writeTargetSelector}
+ * had already narrowed to one element back onto every class sibling.
+ *
+ * The selection is the fallback only for a target the parser could not resolve
+ * statically, where there is no authored string to preserve.
+ */
+export function existingTweenTargetSelector(
+  animation: Pick<GsapAnimation, "targetSelector" | "hasUnresolvedSelector">,
+  selection: DomEditSelection,
+): string | null {
+  if (animation.targetSelector && !animation.hasUnresolvedSelector) {
+    return animation.targetSelector;
+  }
+  return selectorFromSelection(selection);
+}
+
 // ── Percentage computation ────────────────────────────────────────────────────
 
 /**
