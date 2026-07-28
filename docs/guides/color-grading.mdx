@@ -3,17 +3,11 @@ title: Color Grading
 description: "Correct and creatively grade video or image media with presets, scopes, color wheels, curves, HSL selections, and custom LUTs."
 ---
 
-HyperFrames provides real-time, media-level color grading for project-local
-`<video>` and `<img>` elements.
+Use Color Grading to correct and creatively grade real `<video>` and `<img>`
+media in Studio or through an agent with the same validated SDR/Rec.709 shader
+contract in preview and render.
 
-Studio and AI agents use the same validated grading contract, and final
-rendering runs the same shader pipeline used by the preview.
-
-The current pipeline is designed for SDR/Rec.709-oriented work. It provides
-professional primary and selective grading tools, but it is not an ACES, OCIO,
-or native HDR finishing pipeline.
-
-## The Mental Model
+## Choose the Right Tool
 
 | Stage | Purpose | HyperFrames tools |
 | --- | --- | --- |
@@ -25,67 +19,68 @@ or native HDR finishing pipeline.
 | Dress | Add an authored HUD, flash, light leak, or freeze-frame layer | [Media Overlays](/guides/media-overlays) |
 
 All pixel-level stages are stored together on the selected media element. An
-overlay is different: it is an ordinary editable composition layer above the
-media.
+overlay is different: it is an ordinary editable composition layer whose final
+paint order follows its authored track and CSS `z-index`.
 
-## Studio Workflow
+## Quick Start
 
-Select a real `<img>` or `<video>` element to open Color Grading in the Design
-panel.
+<Tabs>
+  <Tab title="Studio">
+    Select a real `<img>` or `<video>` element to open Color Grading in the
+    Design panel.
 
-<Steps>
-  <Step title="Inspect the source">
-    Open **Scopes** and choose Histogram, Waveform, RGB Parade, or Vectorscope.
-    Scopes refresh from the selected media frame and help identify clipped
-    highlights, crushed shadows, channel imbalance, and saturation before you
-    make creative changes.
-  </Step>
-  <Step title="Make the primary correction">
-    Use Exposure, Contrast, Highlights, Shadows, White Point, Black Point,
-    Warmth, Tint, Vibrance, and Saturation. Correct obvious source problems
-    before applying a stronger look.
-  </Step>
-  <Step title="Shape tonal color">
-    Use the Shadows, Midtones, and Highlights wheels. Each wheel provides hue,
-    color amount, and level, so color and brightness can be adjusted within the
-    same tonal zone.
-  </Step>
-  <Step title="Refine with curves">
-    Use the Master curve for overall luminance, Red/Green/Blue curves for
-    channel shaping, and Hue vs Hue, Hue vs Saturation, or Hue vs Luma for
-    hue-selective adjustments.
-  </Step>
-  <Step title="Isolate a color when needed">
-    Add a Color Selection, capture the current frame, and use the eyedropper to
-    initialize its HSL qualifier. Switch to **Selection matte** to inspect the
-    selected pixels, refine hue/saturation/luma range and softness, then apply
-    bounded hue, saturation, luma, temperature, or tint correction. Up to four
-    ordered selections are supported.
-  </Step>
-  <Step title="Choose a look and finish">
-    Preview a built-in preset on the selected media or load a project-local 3D
-    `.cube` LUT. Use vignette and grain only when they support the visual
-    direction.
-  </Step>
-  <Step title="Compare and render">
-    Hold the compare control to see the ungraded source. Scrub representative
-    frames, verify faces and highlights, then render. The final render redraws
-    the grading shader after exact video-frame injection.
-  </Step>
-</Steps>
+    <Steps>
+      <Step title="Correct the source">
+        Open **Scopes**, then adjust exposure, tonal balance, white balance, and
+        saturation before applying a stronger look.
+      </Step>
+      <Step title="Shape the grade">
+        Use tonal wheels, curves, or an HSL Color Selection only where the
+        source needs more precise control.
+      </Step>
+      <Step title="Choose a look and verify">
+        Preview a preset or load a 3D `.cube` LUT, compare with the source, and
+        scrub representative frames before rendering.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Agent / CLI">
+    Inspect the media, apply one validated payload, then verify representative
+    frames:
 
-To reuse the complete authored grade, use **Copy grade to** and choose
-**Current file media** or **All project media**, then click **Apply**. This
-copies the validated payload to other real media elements; it does not alter
-overlay, caption, or DOM layers.
+    ```bash Terminal
+    npx hyperframes media-treatment \
+      --project . \
+      --file compositions/interview.html \
+      --selector '#interview' \
+      --analyze \
+      --json
 
-<Note>
-  Color Grading is media-only. It processes real `<video>` and `<img>` elements,
-  not captions, text, SVG, or arbitrary DOM. Use first-class media elements for
-  visual assets that should remain editable and gradeable.
-</Note>
+    npx hyperframes media-treatment \
+      --project . \
+      --file compositions/interview.html \
+      --selector '#interview' \
+      --grading '{"adjust":{"highlights":-0.08,"shadows":0.06},"wheels":{"midtones":{"hue":32,"amount":0.05}}}' \
+      --apply \
+      --json
+    ```
 
-## What Each Professional Tool Does
+    Use `--dry-run` when target or scope is uncertain. Use `--clear` to remove
+    the complete treatment.
+  </Tab>
+</Tabs>
+
+To reuse a grade in Studio, use **Copy grade to**, choose **Current file media**
+or **All project media**, then click **Apply**. Project-wide copy refuses
+project-relative LUT paths because the same path may resolve differently in
+another composition; use current-file copy or a project-root path/data URL. The
+copy changes only the treatment payload, not overlays, captions, or DOM layers.
+
+Project-local media is the reliable path. Remote media requires compatible CORS
+headers. Color Grading does not process captions, text, SVG, arbitrary DOM, or
+CSS background images.
+
+## Professional Controls
 
 ### Color Wheels
 
@@ -103,10 +98,10 @@ same tonal zone, while hue and amount introduce color.
 - **Master** remaps overall luminance.
 - **Red**, **Green**, and **Blue** remap individual channels.
 
-Curve points are normalized `[input, output]` pairs. Endpoints are implicit,
-and each curve supports up to 16 points. An S-curve increases contrast; lifting
-the lower-left region raises shadows; channel curves can build split-tone or
-cast-removal adjustments.
+Curve points are normalized `[input, output]` pairs. Every RGB curve must include
+input endpoints `0` and `1` and contain 2–16 points. An S-curve increases
+contrast; lifting the lower-left region raises shadows; channel curves can
+build split-tone or cast-removal adjustments.
 
 ### Hue Curves
 
@@ -115,7 +110,8 @@ cast-removal adjustments.
 - **Hue vs Luma** changes brightness around a selected hue.
 
 Hue curve points are `[hueDegrees, delta]` pairs and wrap around the color
-wheel.
+wheel. An authored hue curve requires 3–16 unique hue inputs from `0` up to,
+but not including, `360`.
 
 ### HSL Color Selections
 
@@ -137,10 +133,11 @@ facial recognition, or spatial masks.
 | RGB Parade | Channel balance and clipped individual channels |
 | Vectorscope | Hue direction and saturation |
 
-Studio scopes analyze a captured selected-media frame. They are inspection
-tools and do not change the grade.
+Studio scopes analyze a captured selected-media frame with the current
+treatment applied. They refresh as the grade changes, but are inspection tools
+and do not modify the grade.
 
-## Built-In Looks
+## Presets
 
 HyperFrames ships tested shader-setting presets, not bundled LUT files:
 
@@ -154,7 +151,7 @@ Use these as starting points and tune them for the actual source. Presets that
 also activate a stylized shader treatment are documented under
 [Media Effects](/guides/media-effects).
 
-## Agent Workflow
+## Agent Guidance
 
 Agents should use the CLI as the normal authoring surface. The
 `data-color-grading` attribute is the persistence contract, not the first thing
@@ -166,56 +163,22 @@ look filtered"_ route through the `media-use` skill, which inspects the source,
 discovers the relevant contract, applies a deterministic payload, and verifies
 the result.
 
-<Steps>
-  <Step title="Discover the relevant surface">
-    ```bash Terminal
-    hyperframes media-treatment --capabilities --json
-    hyperframes media-treatment --capability grading --json
-    ```
+Start with the concise capability overview, then query only the contract needed
+for the current intent:
 
-    The overview stays concise. Focused queries such as `wheels`, `curves`,
-    `hue-curves`, `secondary`, `scopes`, or `lut` return exact controls, bounds,
-    and examples.
-  </Step>
-  <Step title="Analyze the selected source">
-    ```bash Terminal
-    hyperframes media-treatment \
-      --project . \
-      --file compositions/interview.html \
-      --selector '#interview' \
-      --analyze \
-      --json
-    ```
+```bash Terminal
+npx hyperframes media-treatment --capabilities --json
+npx hyperframes media-treatment --capability grading --json
+npx hyperframes media-treatment --capability curves --json
+```
 
-    Analysis measures a local media source and returns metadata, warnings,
-    diagnosis, and a bounded suggested primary-correction patch. It does not
-    replace visual judgment or automatically invent a creative grade.
-  </Step>
-  <Step title="Apply a validated grade">
-    ```bash Terminal
-    hyperframes media-treatment \
-      --project . \
-      --file compositions/interview.html \
-      --selector '#interview' \
-      --grading '{"adjust":{"highlights":-0.08,"shadows":0.06},"wheels":{"midtones":{"hue":32,"amount":0.05}}}' \
-      --apply \
-      --json
-    ```
+Focused queries such as `wheels`, `hue-curves`, `secondary`, `scopes`, or `lut`
+return exact controls, bounds, and examples. Start from source analysis or a
+tested preset, then add small, explainable adjustments. Avoid inventing many
+unrelated curve and secondary values: they are difficult to review and easy to
+overcook.
 
-    Use `--dry-run` when target or scope is uncertain. Use `--clear` to remove
-    the complete treatment from the target.
-  </Step>
-  <Step title="Verify representative frames">
-    Inspect more than one frame for video, compare before and after, and render
-    a short draft when the grade is important to the final result.
-  </Step>
-</Steps>
-
-Agents should normally start from source analysis or a tested preset, then add
-small, explainable adjustments. Directly inventing many unrelated curve and
-secondary values is difficult to review and easy to overcook.
-
-## Advanced Data Shape
+## Low-Level HTML Contract
 
 The CLI and Studio persist the resolved grade in `data-color-grading`:
 
@@ -267,8 +230,8 @@ bounds. Query the current contract instead of copying bounds into agent
 instructions:
 
 ```bash Terminal
-hyperframes media-treatment --capability secondary --json
-hyperframes media-treatment --all --json
+npx hyperframes media-treatment --capability secondary --json
+npx hyperframes media-treatment --all --json
 ```
 
 Use `--all` only for exhaustive tooling or contract inspection.
@@ -277,7 +240,7 @@ Use `--all` only for exhaustive tooling or contract inspection.
 
 HyperFrames supports project-local 3D `.cube` LUTs:
 
-```json
+```json data-color-grading
 {
   "lut": {
     "src": "assets/luts/product-look.cube",
@@ -307,8 +270,8 @@ validation, and rendered comparisons to evaluate it.
 | 1080p SDR video | Supported | Recommended default path |
 | 4K SDR video or image | Supported | Higher preview/render cost; output resolution still follows the composition |
 | iPhone SDR video | Supported | Treated as normal browser-decoded SDR media |
-| iPhone HDR, HLG, or Dolby Vision-style upload | Partial | HDR metadata is detected and warned; the grading shader remains SDR |
-| HDR delivery render | Separate workflow | Use [HDR Rendering](/guides/hdr); grading controls are not HDR-aware |
+| iPhone HDR, HLG, or Dolby Vision-style upload | Partial | Studio can show an SDR shader preview, but native HDR delivery bypasses the SDR treatment for native HDR source pixels |
+| HDR delivery render | Separate workflow | The native HDR compositor preserves HDR source pixels and does not apply this SDR grading/effects pipeline to native HDR layers |
 | LOG camera footage | Partial | Requires a known matching transform/LUT; no automatic camera profile management |
 | Full-scene grade including DOM/text | Not supported | Current grading targets individual media elements |
 | Face or region tracking | Not supported | Use a separate isolated media layer or external tracking/masking workflow |
@@ -323,6 +286,13 @@ the native source after a shader frame is ready. During final rendering,
 HyperFrames injects exact video frames and waits for the grading runtime to
 redraw before capture.
 
+That render-parity statement applies to SDR output. In the native HDR render
+path, HyperFrames keeps HDR source pixels out of the SDR DOM capture and
+composites them separately at higher bit depth. The current SDR grading canvas
+is therefore not applied to native HDR layers. Convert or tone-map the source to
+SDR first when these grading controls must appear in the result, or use
+[HDR Rendering](/guides/hdr) to preserve the untreated HDR source.
+
 For 4K output, follow [4K Rendering](/guides/4k-rendering). A 1080p source does
 not gain new detail merely because the composition is rendered at 4K.
 
@@ -334,7 +304,7 @@ Project-local media is the safest path. Remote media must provide compatible
 CORS headers and should use `crossorigin="anonymous"` when pixel access is
 required.
 
-## Related Guides
+## Next Steps
 
 <CardGroup cols={2}>
   <Card title="Media Effects" icon="wand-magic-sparkles" href="/guides/media-effects">

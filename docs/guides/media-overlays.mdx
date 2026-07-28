@@ -1,20 +1,13 @@
 ---
 title: Media Overlays
-description: "Add editable, timeline-driven HUD, flash, light-leak, and freeze-frame dressing above video or image media."
+description: "Add editable, timeline-driven HUD, flash, light-leak, and freeze-frame dressing alongside video or image media."
 ---
 
-Media Overlays are authored HyperFrames composition blocks that sit above a
-video or image.
+Use Media Overlays to add editable, timeline-driven HUD, flash, light-leak, and
+freeze-frame dressing around a video or image without baking it into the source
+pixels.
 
-They add visual dressing such as a recording HUD, camera flash, light leak, or
-freeze-frame treatment without baking those pixels into the source media.
-Unlike [Color Grading](/guides/color-grading) and
-[Media Effects](/guides/media-effects), overlays are not shader properties.
-They are real HTML, CSS, and paused GSAP timelines installed from the
-HyperFrames Registry. Once inserted, they remain normal editable layers in the
-composition.
-
-## Shipped Overlays
+## Included Overlays
 
 | Registry block | Purpose |
 | --- | --- |
@@ -26,67 +19,56 @@ composition.
 These are first-party authored blocks. Their Catalog poster/video assets are
 previews only; the installed result is editable composition source.
 
-## Studio Workflow
+Unlike [Color Grading](/guides/color-grading) and
+[Media Effects](/guides/media-effects), overlays are real HTML, CSS, and paused
+GSAP timelines installed from the HyperFrames Registry. Their final paint order
+follows authored track placement and CSS `z-index`.
 
-<Steps>
-  <Step title="Select the media beat">
-    Select the `<video>` or `<img>` the overlay should accompany.
-  </Step>
-  <Step title="Open Overlays">
-    The Design panel shows responsive preview cards for media-treatment overlay
-    blocks from the Registry.
-  </Step>
-  <Step title="Insert a block">
-    Choose an overlay. Studio installs its composition source, aligns it to the
-    selected media's start and duration, and places it on the next known visual
-    track.
-  </Step>
-  <Step title="Edit it as a normal layer">
-    Use Layers, Timeline, Design, or Code to change text, timing, color,
-    opacity, animation, or placement. Removing the overlay does not alter the
-    underlying media treatment.
-  </Step>
-  <Step title="Verify the complete beat">
-    Play and scrub through the overlay's entrance, hold, and exit. Check the
-    final render because the overlay, source media, and shader treatment are
-    separate compositing layers.
-  </Step>
-</Steps>
+## Quick Start
 
-The left Catalog remains the browse-all Registry surface. The Overlays section
-is the media-focused shortcut for the selected beat.
+<Tabs>
+  <Tab title="Studio">
+    <Steps>
+      <Step title="Select the media beat">
+        Select the `<video>` or `<img>` the overlay should accompany.
+      </Step>
+      <Step title="Insert an overlay">
+        Open **Overlays** in the Design panel and choose a preview card. Studio
+        installs the composition source and aligns it to the selected beat.
+      </Step>
+      <Step title="Edit and verify">
+        Use Layers, Timeline, Design, or Code to change content, timing, color,
+        animation, or placement, then play through the entrance and exit.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Agent / CLI">
+    Discover the available overlay blocks, then install the one that supports
+    the intended beat:
 
-## Agent Workflow
+    ```bash Terminal
+    npx hyperframes media-treatment --capabilities --json
+    npx hyperframes add camcorder-hud --no-clipboard
+    ```
+
+    The command installs editable composition source under the project. Embed
+    and time it with the host composition's normal sub-composition rules.
+  </Tab>
+</Tabs>
+
+When the selected media has an authored track, Studio starts the overlay on the
+next track. Otherwise, normal block placement defaults apply. The left Catalog
+remains the browse-all Registry surface; **Overlays** is the selected-media
+shortcut.
+
+## Agent Guidance
 
 An agent may combine grading, a shader effect, treatment animation, and an
-overlay when they support one coherent intent. It should not treat them as
-mutually exclusive.
+overlay when they support one coherent intent. A restrained camcorder treatment
+can combine a small source correction, tape damage on the media, the
+`camcorder-hud` block, and a finite reveal or exit timed to the edit.
 
-For example, a restrained camcorder treatment can combine:
-
-1. A small source correction.
-2. Chroma softening and tape damage on the media.
-3. The `camcorder-hud` Registry block above it.
-4. A finite reveal or exit timed to the edit.
-
-Discover overlays through the media-treatment overview:
-
-```bash Terminal
-hyperframes media-treatment --capabilities --json
-```
-
-Install one through the Registry:
-
-```bash Terminal
-hyperframes add camcorder-hud --no-clipboard
-hyperframes add organic-light-leak-overlay --no-clipboard
-```
-
-The command installs composition source under the project. The agent then
-embeds and times that sub-composition according to the host composition's
-normal rules.
-
-Agents should:
+Use these constraints:
 
 - Use an overlay when it adds information, motivated light, or useful visual
   language.
@@ -127,8 +109,8 @@ flash dressing; it does not perform background removal itself.
 For a transparent subject:
 
 ```bash Terminal
-hyperframes remove-background subject.mp4 -o subject.webm
-hyperframes add freeze-frame-dressing --no-clipboard
+npx hyperframes remove-background subject.mp4 -o subject.webm
+npx hyperframes add freeze-frame-dressing --no-clipboard
 ```
 
 See [Remove Background](/guides/remove-background) for cutout and background
@@ -143,13 +125,15 @@ source <img>/<video>
   -> color correction and grading
   -> LUT and shader effects
   -> visible media canvas
-  -> HTML/CSS/GSAP overlay layers above it
-  -> captions and other composition layers
+
+overlay, caption, and other composition layers
+  -> composed with the visible media canvas by authored track and z-index
 ```
 
 Color grading does not recolor overlay text or graphics. This is intentional:
-HUD labels remain crisp, captions remain readable, and an organic light leak
-can be adjusted independently from the source grade.
+HUD labels remain crisp and an organic light leak can be adjusted independently
+from the source grade. Place captions, HUD fields, and other important graphics
+on the intended track and verify their final stacking in Studio.
 
 If an overlay should appear behind a subject, separate the subject into its own
 transparent media layer and place the overlay between the background and
@@ -169,7 +153,7 @@ time. This keeps rendering deterministic and lets teams:
 Keep host-specific timing and placement in the host composition when possible.
 That preserves the Registry block as a reusable visual unit.
 
-## Related Guides
+## Next Steps
 
 <CardGroup cols={2}>
   <Card title="Color Grading" icon="palette" href="/guides/color-grading">
