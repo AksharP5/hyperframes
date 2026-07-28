@@ -790,6 +790,51 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
     expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
   });
 
+  for (const emptyish of ["", "   "]) {
+    it(`treats a set-but-empty env var (${JSON.stringify(emptyish)}) as default, not a user choice`, async () => {
+      // Both parsers read empty/whitespace as "unset → default ON", so the
+      // producer routes. If ownership instead treated any defined value as a
+      // user choice, the breaker would no-op and this install would keep
+      // retrying a failing router forever — losing the first-fallback
+      // protection that is the point of the breaker.
+      configState.disk = {
+        telemetryEnabled: true,
+        deParallelRouterTrialFired: false,
+        telemetryNoticeShown: true,
+      };
+      process.env.HF_DE_PARALLEL_ROUTER = emptyish;
+      producerState.executeImpl = async (job) => {
+        job.perfSummary = {
+          resolution: { width: 100, height: 100 },
+          drawElement: { parallelRouter: "reverted" },
+        };
+      };
+      await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+      expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
+      expect(configState.writeConfigCalls).toContainEqual(
+        expect.objectContaining({ deParallelRouterTrialFired: true }),
+      );
+    });
+  }
+
+  it("does not override an explicit user opt-in even after a fallback", async () => {
+    // "Explicit user choice wins in both directions" — the opt-in half.
+    configState.disk = {
+      telemetryEnabled: true,
+      deParallelRouterTrialFired: false,
+      telemetryNoticeShown: true,
+    };
+    process.env.HF_DE_PARALLEL_ROUTER = "true";
+    producerState.executeImpl = async (job) => {
+      job.perfSummary = {
+        resolution: { width: 100, height: 100 },
+        drawElement: { parallelRouter: "reverted" },
+      };
+    };
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("true");
+  });
+
   it("keeps the router on for a telemetry opt-out — analytics choice must not cost performance", async () => {
     // The old trial refused to arm without recordable telemetry (no point
     // running an experiment you can't measure). Now that the router is a
