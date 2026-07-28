@@ -3,6 +3,7 @@ import { VERSION } from "../version.js";
 import { c } from "../ui/colors.js";
 import { diag } from "../ui/diagnostics.js";
 import { getSystemMeta } from "./system.js";
+import { activeCanaryNames } from "./canary.js";
 import { enqueue, type EventProperties } from "./transport.js";
 import { telemetryRuntimeOverride } from "./policy.js";
 
@@ -75,10 +76,16 @@ export function trackEvent(
       term_program: sys.term_program ?? undefined,
       // Did this install's mint find a previous install's state marker?
       // The fleet-wide rate of `true` IS the recoverable-churn fraction —
-      // the share of "new" ids that are really a config wipe on a machine
+      // the share of "new" ids that are really a config re-mint on a machine
       // we already knew. Absent (not false) when the config predates the
       // marker. Resolved after the shouldTrack guard.
       install_predecessor_found: readConfig().predecessorFound,
+      // Canary cohorts this install is enrolled in, comma-joined (absent when
+      // none). Attached to EVERY event, not just renders: a staged rollout is
+      // only as good as the ability to split any metric by cohort. Resolved
+      // after the shouldTrack guard above, so opted-out installs never pay for
+      // it. See telemetry/canary.ts.
+      canaries: activeCanaryNames(),
       agent_env_hints: sys.agent_env_hints ?? undefined,
     },
     distinctId,
