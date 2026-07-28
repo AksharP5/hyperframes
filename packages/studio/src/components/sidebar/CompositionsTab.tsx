@@ -317,7 +317,10 @@ function CompCard({
             e.stopPropagation();
             onRender();
           }}
-          className={`flex-shrink-0 p-1 rounded transition-colors ${
+          // h-6 w-6 = the 24x24 WCAG 2.2 (2.5.8) minimum target; the 14px glyph
+          // is unchanged, only the box grows. The sibling "+" button is h-8 w-8,
+          // so the card row already has the room.
+          className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-colors ${
             isRendering
               ? "text-neutral-600 cursor-not-allowed"
               : "text-neutral-600 hover:text-studio-accent hover:bg-neutral-800"

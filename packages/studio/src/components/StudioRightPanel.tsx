@@ -446,8 +446,7 @@ export function StudioRightPanel({
 
   return (
     <>
-      {/* Vertical resize divider: 3px visible seam, 8px pointer-capture zone via
-          the absolutely-positioned inner hit area. */}
+      {/* Vertical resize divider: 3px visible seam, 13px hit zone via the inner div. */}
       <div
         role="separator"
         aria-label="Resize inspector panel"
@@ -467,8 +466,10 @@ export function StudioRightPanel({
           adjustPanelWidth("right", delta);
         }}
       >
-        {/* Expanded hit zone: 8px wide, centered on the 3px seam */}
-        <div className="absolute inset-y-0 -left-[2.5px] w-2" />
+        {/* Asymmetric hit zone: 8px into the preview's p-2 gutter (the only dead
+            space), the 3px seam, 2px into the card. Stops short of the 24px WCAG
+            2.5.8 target because the next pixel each way is live. */}
+        <div className="absolute inset-y-0 -left-[8px] w-[13px]" />
         {/* Visible hairline */}
         <div className="absolute top-1/2 left-0 h-[52px] w-[3px] -translate-y-1/2 bg-white/12 transition-colors group-hover:bg-white/18 group-active:bg-white/24" />
       </div>

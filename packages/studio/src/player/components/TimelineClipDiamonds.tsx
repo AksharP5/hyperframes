@@ -27,6 +27,12 @@ export type { TimelineDiamondKeyframe } from "./timelineDiamondTypes";
 // stops there: at the zoom floor the gap alone left a ~7px target, which is
 // neither hittable nor selectable with any accuracy. Boxes may overlap slightly
 // below this width; each diamond still owns the half-gap around its own centre.
+//
+// Deliberately below the 24px WCAG 2.2 (2.5.8) minimum, under that criterion's
+// own spacing exception: at normal keyframe density the neighbour gap is under
+// 24px, so a 24px floor would make adjacent diamonds' hit boxes OVERLAP — one
+// diamond swallowing its neighbour's clicks is a worse 2.5.8 failure than a
+// small target. Do not "fix" this to 24.
 const KF_MIN_HIT_W = 12;
 
 /** A clip-% is a float division, so a raw tooltip reads `25.032499999999995%`. */
@@ -141,6 +147,10 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
     ? Math.round(clipHeightPx * 0.45)
     : Math.round(LANE_H * DIAMOND_RATIO);
   const centerY = beatsActive ? BEAT_BAND_H + (clipHeightPx - BEAT_BAND_H) / 2 : clipHeightPx / 2;
+  // Hit-box height only — the glyph keeps `marker.visualSize`. 24 is the WCAG 2.2
+  // (2.5.8) minimum and still fits the 28px lane. Beat-strip lanes keep the
+  // shrunken box: 24px there would reach up into the beat strip.
+  const hitHeight = beatsActive ? diamondSize : 24;
   const sorted = keyframesData.keyframes
     .filter((kf) => kf.percentage >= KF_MIN_PCT && kf.percentage <= KF_MAX_PCT)
     .sort((a, b) => a.percentage - b.percentage);
@@ -412,7 +422,7 @@ export const TimelineDiamondLane = memo(function TimelineDiamondLane({
               top: centerY,
               transform: "translateY(-50%)",
               width: marker.hitWidth,
-              height: diamondSize,
+              height: hitHeight,
               zIndex: isHighlighted ? 2 : 1,
               pointerEvents: "auto",
               background: "none",

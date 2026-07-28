@@ -180,3 +180,45 @@ describe("resolveKeyframeRetime — guards", () => {
     expect(r.pctRemap).toEqual([]);
   });
 });
+
+describe("resolveKeyframeRetime — move percentages are rounded like the resize path", () => {
+  // The move branch used to return the raw quotient, so `74.81203007518799%`
+  // landed in the user's source and churned the diff on every drag.
+  const decimals = (n: number): number => String(n).split(".")[1]?.length ?? 0;
+
+  it("rounds a repeating quotient to 3dp", () => {
+    const r = resolveKeyframeRetime({
+      tweenStart: 2,
+      tweenDuration: 3,
+      keyframes: KEYFRAMES,
+      draggedTweenPct: 0,
+      dropAbsTime: 3, // (3-2)/3 = 33.333333333333336%
+    });
+    expect(r.kind).toBe("move");
+    expect(r.toTweenPct).toBe(33.333);
+  });
+
+  it("never emits more than 3 decimal places", () => {
+    for (const tweenDuration of [3, 7, 9, 11, 133]) {
+      const r = resolveKeyframeRetime({
+        tweenStart: 2,
+        tweenDuration,
+        keyframes: KEYFRAMES,
+        draggedTweenPct: 0,
+        dropAbsTime: 3,
+      });
+      expect(r.kind).toBe("move");
+      expect(decimals(r.toTweenPct ?? 0)).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("leaves an already-short percentage untouched", () => {
+    const r = resolveKeyframeRetime({
+      ...WINDOW,
+      keyframes: KEYFRAMES,
+      draggedTweenPct: 0,
+      dropAbsTime: 3, // (3-2)/4 = exactly 25%
+    });
+    expect(r.toTweenPct).toBe(25);
+  });
+});

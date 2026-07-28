@@ -154,10 +154,10 @@ export function StudioLeftSidebar({
         onAddAssetToTimeline={onAddAssetToTimeline}
         onAddCompositionToTimeline={onAddCompositionToTimeline}
       />
-      {/* Vertical resize divider: 3px visible seam, 8px pointer-capture zone via
+      {/* Vertical resize divider: 3px visible seam, 13px pointer-capture zone via
           the absolutely-positioned inner hit area. The outer element is w-[3px] so
-          it contributes only 3px of gap in the flex row; the inner -left-[2.5px]
-          element widens the hit area to 8px without affecting layout. */}
+          it contributes only 3px of gap in the flex row; the inner -left-[2px]
+          element widens the hit area without affecting layout. */}
       <div
         role="separator"
         aria-label="Resize sidebar"
@@ -176,8 +176,13 @@ export function StudioLeftSidebar({
           adjustPanelWidth("left", delta);
         }}
       >
-        {/* Expanded hit zone: 8px wide, centered on the 3px seam */}
-        <div className="absolute inset-y-0 -left-[2.5px] w-2" />
+        {/* Expanded hit zone, deliberately asymmetric: 2px into the sidebar card,
+            the 3px seam, then 8px into the preview pane's p-2 stage gutter — the
+            only dead space adjacent to this seam. It stops at 13px rather than the
+            24px WCAG 2.2 (2.5.8) target because the next pixel on either side is
+            live: the sidebar's scrolling tab content on the left, the preview
+            stage on the right. Silently stealing their clicks is the worse bug. */}
+        <div className="absolute inset-y-0 -left-[2px] w-[13px]" />
         {/* Visible hairline */}
         <div className="absolute top-1/2 left-0 h-[52px] w-[3px] -translate-y-1/2 bg-white/12 transition-colors group-hover:bg-white/18 group-active:bg-white/24" />
       </div>

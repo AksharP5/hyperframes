@@ -121,7 +121,10 @@ export function resolveKeyframeRetime(opts: {
 
   // Within the tween window → plain move (re-key the tween-%).
   if (dropAbsTime >= tweenStart - EPSILON_TIME && dropAbsTime <= tweenEnd + EPSILON_TIME) {
-    const toTweenPct = clamp(((dropAbsTime - tweenStart) / tweenDuration) * 100, 0, 100);
+    // Round here, not at the return: the no-op test below and the value written
+    // to source must be the same number. The resize branch already rounds, so
+    // this keeps both write paths at the authored 3dp precision.
+    const toTweenPct = round3(clamp(((dropAbsTime - tweenStart) / tweenDuration) * 100, 0, 100));
     if (Math.abs(toTweenPct - draggedTweenPct) < NOOP_EPSILON_PCT) return { kind: "noop" };
     return { kind: "move", toTweenPct };
   }

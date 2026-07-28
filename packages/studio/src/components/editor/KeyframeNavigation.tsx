@@ -167,6 +167,11 @@ export const KeyframeNavigation = memo(function KeyframeNavigation({
   };
 
   return (
+    // The two 12x20 steppers sit gap-0.5 apart with a 9px diamond between them,
+    // so they stay below the 24px WCAG 2.2 (2.5.8) minimum under that criterion's
+    // own spacing/inline exception: centred 24px targets here would overlap each
+    // other AND the diamond, and one control swallowing its neighbour's clicks is
+    // a worse 2.5.8 failure than a small target. Do not "fix" these to 24.
     <div className="flex h-5 items-center gap-0.5">
       <button
         type="button"
