@@ -4,6 +4,7 @@ import { Music } from "../../icons/SystemIcons";
 import type { TimelineElement } from "../store/playerStore";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
 import { getTimelinePropertyLanes } from "./TimelinePropertyLanes";
+import { clipTimingStart } from "../../hooks/gsapShared";
 import { LayerDisclosureRow } from "./LayerDisclosureRow";
 import { TrackClipCount } from "./TrackClipCount";
 import { LABEL_COL_W, LANE_H, getTimelineLaneTop } from "./timelineLayout";
@@ -281,7 +282,9 @@ export function TimelineTrackHeader({
     ? ((currentTime - keyframeClip.start) / keyframeClip.duration) * 100
     : 0;
   const lanes = keyframeClip
-    ? getTimelinePropertyLanes(animations, keyframeClip.start, keyframeClip.duration)
+    ? // clipTimingStart, not the raw start: an expanded sub-comp child's start is
+      // host-absolute while its tweens are local to its own file.
+      getTimelinePropertyLanes(animations, clipTimingStart(keyframeClip), keyframeClip.duration)
     : [];
   // Label mode = keyframe view; the label column stays LABEL_COL_W (Timeline.tsx
   // owns the gutter past it, so a 0% diamond isn't clipped by this panel).

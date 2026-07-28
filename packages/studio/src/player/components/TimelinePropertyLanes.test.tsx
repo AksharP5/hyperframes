@@ -11,6 +11,9 @@ import {
   type TimelinePropertyLanesProps,
 } from "./TimelinePropertyLanes";
 import { timelineKeyframeSelectionKey } from "./timelineKeyframeIdentity";
+import { groupLabel } from "./trackHeaderLaneValues";
+import { clipTimingStart } from "../../hooks/gsapShared";
+import { resolveTimelineKeyframeTarget } from "../../components/nle/useTimelineEditCallbacks";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -121,7 +124,111 @@ const POSITION_SEGMENT_ANIMATION = animation("position-tween", "position", [
   { percentage: 50, properties: { x: 50 } },
 ]);
 
+/** A tween the parser leaves unclassified because it spans several groups. */
+function ungroupedAnimation(
+  id: string,
+  properties: Record<string, number | string>,
+): GsapAnimation {
+  return {
+    id,
+    targetSelector: "#clip-1",
+    method: "to",
+    position: 0,
+    duration: 1,
+    properties,
+  };
+}
+
 describe("TimelinePropertyLanes", () => {
+  // `{ x, opacity }` is the canonical HyperFrames entrance tween. The parser
+  // classifies it to `undefined` (two groups), which used to erase it from the
+  // lanes entirely — no caret, no reserved row, nothing to edit.
+  it("lanes a mixed-group tween once per group it animates", () => {
+    const lanes = getTimelinePropertyLanes(
+      [ungroupedAnimation("entrance", { x: 0, opacity: 1 })],
+      0,
+      1,
+    );
+
+    expect(lanes.map((lane) => lane.group).sort()).toEqual(["position", "visual"]);
+    for (const lane of lanes) {
+      expect(lane.keyframes.map((keyframe) => keyframe.percentage)).toEqual([0, 100]);
+      expect(lane.keyframes.every((keyframe) => keyframe.animationId === "entrance")).toBe(true);
+    }
+  });
+
+  it("lanes a tween whose properties are all unknown as one 'other' lane", () => {
+    const lanes = getTimelinePropertyLanes(
+      [ungroupedAnimation("rounded", { borderRadius: 12, fontSize: 24 })],
+      0,
+      1,
+    );
+
+    expect(lanes).toHaveLength(1);
+    expect(lanes[0]?.group).toBe("other");
+    expect(groupLabel("other", lanes[0]!.keyframes[0]!.properties)).toBe("BorderRadius");
+  });
+
+  // An expanded sub-composition child sits on the MASTER timeline at a
+  // host-absolute start while its tweens are parsed from its own file and are
+  // local to it. clipTimingStart is what brings the two into one frame.
+  it("keeps an expanded sub-comp child's lane percentages inside the clip", () => {
+    const child = { start: 16.5, duration: 2, expandedParentStart: 16 };
+    const local = animation("pill-tween", "position", [
+      { percentage: 0, properties: { x: 0 } },
+      { percentage: 100, properties: { x: 100 } },
+    ]);
+    local.position = 0.5;
+    local.resolvedStart = 0.5;
+    local.duration = 2;
+
+    const percentages = getTimelinePropertyLanes(
+      [local],
+      clipTimingStart(child),
+      child.duration,
+    ).flatMap((lane) => lane.keyframes.map((keyframe) => keyframe.percentage));
+
+    expect(percentages).toHaveLength(2);
+    for (const percentage of percentages) {
+      expect(percentage).toBeGreaterThanOrEqual(0);
+      expect(percentage).toBeLessThanOrEqual(100);
+    }
+    // Falsifier: the raw host-absolute start is what used to be passed.
+    expect(
+      getTimelinePropertyLanes([local], child.start, child.duration)[0]?.keyframes[0]?.percentage,
+    ).toBeLessThan(0);
+  });
+
+  it("still lanes a single-group tween exactly once", () => {
+    const lanes = getTimelinePropertyLanes(
+      [animation("position-tween", "position", [{ percentage: 0, properties: { x: 0, y: 0 } }])],
+      0,
+      1,
+    );
+
+    expect(lanes.map((lane) => lane.group)).toEqual(["position"]);
+  });
+
+  // A lane can merge several tweens, so an edit routed from it must carry the
+  // clicked keyframe's own animation identity — group matching alone is
+  // ambiguous once two tweens feed the same lane.
+  it("routes a mixed-tween lane edit to the tween that owns the keyframe", () => {
+    const mixed = ungroupedAnimation("entrance", { x: 40, opacity: 1 });
+    const sibling = animation("drift", "position", [
+      { percentage: 0, properties: { x: 0 } },
+      { percentage: 100, properties: { x: 9 } },
+    ]);
+    const lanes = getTimelinePropertyLanes([mixed, sibling], 0, 1);
+    const position = lanes.find((lane) => lane.group === "position");
+
+    expect(
+      resolveTimelineKeyframeTarget(100, position?.keyframes ?? [], [
+        { id: "entrance" },
+        { id: "drift", propertyGroup: "position" },
+      ]),
+    ).toEqual({ animId: "entrance", tweenPct: 100 });
+  });
+
   it("returns a position lane with synthesized endpoints for a flat tween", () => {
     const lanes = getTimelinePropertyLanes(
       [flatAnimation("position-tween", "position", { x: 420 })],

@@ -186,6 +186,9 @@ function syncCommittedGsapMutation({
       targetPath,
       selection.id ?? undefined,
       mutation,
+      // The live preview document is what resolves a class / descendant tween to
+      // the elements it really animates; without it only whole-id selectors do.
+      iframe?.contentDocument,
     );
   }
   refreshMutationPreview(iframe, result, options, reloadPreview, onCacheInvalidate);

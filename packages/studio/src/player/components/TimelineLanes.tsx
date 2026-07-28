@@ -6,6 +6,7 @@ import { TimelineClipDiamonds } from "./TimelineClipDiamonds";
 import { TimelinePropertyLanes } from "./TimelinePropertyLanes";
 import { TimelineTrackHeader } from "./TimelineTrackHeader";
 import { resolveTrackKeyframeClip } from "./useTimelineTrackLayout";
+import { clipTimingStart } from "../../hooks/gsapShared";
 import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
 import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
 import { getTimelineEditCapabilities, resolveBlockedTimelineEditIntent } from "./timelineEditing";
@@ -527,7 +528,10 @@ export function TimelineLanes({
                       <TimelinePropertyLanes
                         key={`${clipKey}-property-lanes`}
                         animations={gsapAnimations.get(elementKey) ?? []}
-                        clipStart={previewElement.start}
+                        // clipTimingStart, not the raw start: an expanded sub-comp
+                        // child's start is host-absolute while its tweens are
+                        // local to its own file.
+                        clipStart={clipTimingStart(previewElement)}
                         clipDuration={previewElement.duration}
                         clipLeftPx={previewElement.start * pps}
                         clipWidthPx={Math.max(previewElement.duration * pps, 4)}

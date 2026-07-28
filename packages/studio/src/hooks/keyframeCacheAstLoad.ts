@@ -11,50 +11,15 @@ import {
   elementCacheKeys,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
-import { idFromSelector, resolveClipTimingBasis, toClipKeyframes } from "./gsapShared";
+import { resolveClipTimingBasis, resolveSelectorElementIds, toClipKeyframes } from "./gsapShared";
 import {
   deduplicateKeyframes,
   isStaticPositionHold,
   synthesizeFlatTweenKeyframes,
 } from "./gsapTweenSynth";
 
-/**
- * Resolve a tween's target selector to the ids of the element(s) it animates.
- * A bare `#id` resolves directly; anything else (a class like `.dot`, a group
- * `.a, .b`, or a descendant selector) is matched against the live preview DOM so
- * class/selector tweens (e.g. `gsap.from(".dot", {stagger})`) attribute to every
- * element they animate — not just one parsed from the string. Falls back to a
- * leading `#id` when there's no DOM (so the cache still populates pre-iframe).
- */
-// fallow-ignore-next-line complexity
-export function resolveSelectorElementIds(
-  selector: string,
-  doc: Document | null | undefined,
-): string[] {
-  // A whole-selector id match (either shape) addresses exactly one element.
-  const bareId = /^(#[\w-]+|\[id="(?:\\.|[^"\\])*"\])$/.test(selector)
-    ? idFromSelector(selector)
-    : null;
-  if (bareId) return [bareId];
-  if (!doc) {
-    const lead = idFromSelector(selector);
-    return lead ? [lead] : [];
-  }
-  const ids = new Set<string>();
-  for (const part of selector.split(",")) {
-    const sel = part.trim();
-    if (!sel) continue;
-    try {
-      for (const el of Array.from(doc.querySelectorAll(sel))) {
-        if (el.id) ids.add(el.id);
-      }
-    } catch {
-      const lead = idFromSelector(sel);
-      if (lead) ids.add(lead);
-    }
-  }
-  return Array.from(ids);
-}
+export { resolveSelectorElementIds };
+
 /**
  * The slice of the parse response callers actually read. The endpoint returns
  * the full `ParsedGsap` (preamble/postamble and all), but nothing downstream of

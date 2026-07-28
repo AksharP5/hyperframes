@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
-import { animationContributesLane } from "./TimelinePropertyLanes";
+import { animationLaneGroups } from "./TimelinePropertyLanes";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import { STUDIO_KEYFRAMES_ENABLED } from "../../components/editor/manualEditingAvailability";
 import type { DraggedClipState } from "./timelineClipDragTypes";
@@ -56,9 +56,9 @@ function computeLaneCounts(
       const clipId = element.key ?? element.id;
       const propertyGroups = new Set<string>();
       for (const animation of gsapAnimations.get(clipId) ?? []) {
-        if (animation.propertyGroup && animationContributesLane(animation)) {
-          propertyGroups.add(animation.propertyGroup);
-        }
+        // Same helper the rendered lanes count through, so a reserved row and a
+        // drawn lane can never disagree.
+        for (const group of animationLaneGroups(animation)) propertyGroups.add(group);
       }
       laneCounts.set(clipId, propertyGroups.size);
     }

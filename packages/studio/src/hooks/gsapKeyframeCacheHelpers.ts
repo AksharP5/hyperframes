@@ -4,7 +4,7 @@
  */
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerStore";
-import { idFromSelector, resolveClipTimingBasis, toClipKeyframes } from "./gsapShared";
+import { resolveClipTimingBasis, resolveSelectorElementIds, toClipKeyframes } from "./gsapShared";
 import { deduplicateKeyframes, synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
 
 export function updateKeyframeCacheFromParsed(
@@ -12,58 +12,65 @@ export function updateKeyframeCacheFromParsed(
   targetPath: string,
   selectionId: string | undefined,
   mutation: Record<string, unknown>,
+  doc?: Document | null,
 ): void {
   const { setKeyframeCache, elements, domClipChildren } = usePlayerStore.getState();
   const idsWithKeyframes = new Set<string>();
   const merged = new Map<string, KeyframeCacheEntry>();
   const sourceAnimations = new Map<string, GsapAnimation[]>();
   for (const anim of animations) {
-    const id = idFromSelector(anim.targetSelector);
     const kfSource =
       anim.keyframes?.keyframes ?? synthesizeFlatTweenKeyframes(anim)?.keyframes ?? [];
-    if (!id || kfSource.length === 0) continue;
-    idsWithKeyframes.add(id);
-    // Every tween that fed keyframeCache also lands in gsapAnimations, group or
-    // not: a mixed-group tween (`{ x, opacity }` classifies to undefined) used to
-    // cache diamonds with no source animation behind them, so the collapsed row
-    // drew keyframes the expanded lanes couldn't render. Lane consumers do the
-    // group filtering themselves (animationContributesLane).
-    sourceAnimations.set(id, [...(sourceAnimations.get(id) ?? []), anim]);
+    if (kfSource.length === 0) continue;
+    // Attribute the tween to every element it actually animates. A leading-id
+    // match filed `#stat3 .block` under `#stat3`: the child's diamonds landed on
+    // its ancestor AND collided with the ancestor's own tween at the shared
+    // percentage, which the same-% merge then resolved by dropping the ease.
+    for (const id of resolveSelectorElementIds(anim.targetSelector, doc)) {
+      idsWithKeyframes.add(id);
+      // Every tween that fed keyframeCache also lands in gsapAnimations, group or
+      // not: a mixed-group tween (`{ x, opacity }` classifies to undefined) used to
+      // cache diamonds with no source animation behind them, so the collapsed row
+      // drew keyframes the expanded lanes couldn't render. Lane consumers do the
+      // group filtering themselves (animationContributesLane).
+      sourceAnimations.set(id, [...(sourceAnimations.get(id) ?? []), anim]);
 
-    // Convert tween-relative percentages to clip-relative so diamonds
-    // render at the correct position within the timeline clip. The basis comes
-    // from the shared resolver, so this writer agrees with the AST load on both
-    // the sub-comp host fallback and the tween's own time frame.
-    const { elStart, elDuration } = resolveClipTimingBasis(
-      id,
-      targetPath,
-      elements,
-      domClipChildren,
-    );
-    const clipKeyframes = toClipKeyframes(kfSource, anim, elStart, elDuration);
+      // Convert tween-relative percentages to clip-relative so diamonds
+      // render at the correct position within the timeline clip. The basis comes
+      // from the shared resolver, so this writer agrees with the AST load on both
+      // the sub-comp host fallback and the tween's own time frame.
+      const { elStart, elDuration } = resolveClipTimingBasis(
+        id,
+        targetPath,
+        elements,
+        domClipChildren,
+      );
+      const clipKeyframes = toClipKeyframes(kfSource, anim, elStart, elDuration);
 
-    const existing = merged.get(id);
-    if (existing) {
-      // deduplicateKeyframes owns the same-% merge (including the easeAmbiguous
-      // flag downstream lanes read); a second copy of that rule here is how the
-      // two writers drift.
-      existing.keyframes = deduplicateKeyframes([...existing.keyframes, ...clipKeyframes]);
-    } else {
-      merged.set(id, {
-        ...anim.keyframes,
-        format: anim.keyframes?.format ?? "percentage",
-        keyframes: clipKeyframes,
-      });
+      const existing = merged.get(id);
+      if (existing) {
+        // deduplicateKeyframes owns the same-% merge (including the easeAmbiguous
+        // flag downstream lanes read); a second copy of that rule here is how the
+        // two writers drift.
+        existing.keyframes = deduplicateKeyframes([...existing.keyframes, ...clipKeyframes]);
+      } else {
+        merged.set(id, {
+          ...anim.keyframes,
+          format: anim.keyframes?.format ?? "percentage",
+          keyframes: clipKeyframes,
+        });
+      }
     }
   }
   for (const [id, entry] of merged) {
     for (const key of elementCacheKeys(targetPath, id)) setKeyframeCache(key, entry);
     writeGsapAnimationsForElement(targetPath, id, sourceAnimations.get(id));
   }
-  const targetId =
-    idFromSelector((mutation as { targetSelector?: string }).targetSelector) ?? selectionId;
-  if (targetId && !idsWithKeyframes.has(targetId)) {
-    clearKeyframeCacheForElement(targetPath, targetId);
+  const mutationSelector = (mutation as { targetSelector?: string }).targetSelector;
+  const mutated = mutationSelector ? resolveSelectorElementIds(mutationSelector, doc) : [];
+  const targetIds = mutated.length > 0 ? mutated : selectionId ? [selectionId] : [];
+  for (const targetId of targetIds) {
+    if (!idsWithKeyframes.has(targetId)) clearKeyframeCacheForElement(targetPath, targetId);
   }
 }
 
