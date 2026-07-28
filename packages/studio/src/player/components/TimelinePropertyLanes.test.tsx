@@ -12,6 +12,7 @@ import {
   type TimelinePropertyLanesProps,
 } from "./TimelinePropertyLanes";
 import { timelineKeyframeSelectionKey } from "./timelineKeyframeIdentity";
+import { LANE_H, getTimelineLaneTop } from "./timelineLayout";
 import { groupLabel } from "./trackHeaderLaneValues";
 import { clipTimingStart } from "../../hooks/gsapShared";
 import { resolveTimelineKeyframeTarget } from "../../components/nle/useTimelineEditCallbacks";
@@ -504,6 +505,68 @@ describe("TimelinePropertyLanes", () => {
       animationId: "position-tween",
       propertyGroup: "position",
     });
+    act(() => root.unmount());
+  });
+
+  // The disclosure caret's aria-controls used to name a div in the STICKY LABEL
+  // COLUMN whose children are all absolutely positioned: it computed to 0x0 and
+  // held no diamonds. The real lanes had no wrapper at all to point at.
+  it("wraps the lanes in the identified element so aria-controls resolves to the diamonds", () => {
+    const animations = [
+      animation("position-tween", "position", [
+        { percentage: 0, properties: { x: 0 } },
+        { percentage: 100, properties: { x: 100 } },
+      ]),
+      animation("visual-tween", "visual", [
+        { percentage: 0, properties: { opacity: 0 } },
+        { percentage: 100, properties: { opacity: 1 } },
+      ]),
+    ];
+    const { host, root } = renderPropertyLanes({ id: "timeline-lanes-track-0", animations });
+    const wrapper = host.querySelector("#timeline-lanes-track-0");
+
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.querySelectorAll("[data-timeline-property-lane]")).toHaveLength(2);
+    expect(wrapper?.querySelectorAll("button[data-keyframe-percentage]").length).toBeGreaterThan(0);
+    // Load-bearing: a `position: relative` wrapper would become the containing
+    // block for the absolute lanes below and shift every one of them.
+    expect((wrapper as HTMLElement).style.position).toBe("");
+    act(() => root.unmount());
+  });
+
+  // happy-dom has no CSS engine, so measured geometry is always 0x0. The lanes'
+  // own inline offsets are what the component actually computes, so pin those.
+  it("leaves every lane's inline offsets untouched by the wrapper", () => {
+    const animations = [
+      animation("position-tween", "position", [{ percentage: 0, properties: { x: 0 } }]),
+      animation("visual-tween", "visual", [{ percentage: 0, properties: { opacity: 0 } }]),
+    ];
+    const { host, root } = renderPropertyLanes({
+      id: "timeline-lanes-track-0",
+      animations,
+      clipLeftPx: 120,
+      clipWidthPx: 200,
+    });
+
+    const lanes = Array.from(host.querySelectorAll<HTMLElement>("[data-timeline-property-lane]"));
+    expect(lanes.map((lane) => lane.style.top)).toEqual([
+      `${getTimelineLaneTop(0)}px`,
+      `${getTimelineLaneTop(1)}px`,
+    ]);
+    expect(lanes.map((lane) => lane.style.left)).toEqual(["120px", "120px"]);
+    expect(lanes.map((lane) => lane.style.width)).toEqual(["200px", "200px"]);
+    expect(lanes.map((lane) => lane.style.height)).toEqual([`${LANE_H}px`, `${LANE_H}px`]);
+    act(() => root.unmount());
+  });
+
+  // The wrapper is the aria-controls target in BOTH disclosure states, so a
+  // collapsed layer (no animations reach it) must still resolve the id.
+  it("still renders the identified wrapper when there are no lanes to show", () => {
+    const { host, root } = renderPropertyLanes({ id: "timeline-lanes-track-0", animations: [] });
+
+    const wrapper = host.querySelector("#timeline-lanes-track-0");
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.querySelectorAll("[data-timeline-property-lane]")).toHaveLength(0);
     act(() => root.unmount());
   });
 
