@@ -184,11 +184,24 @@ export function ColorField({
   const brightnessPercent = Math.round(hsv.value * 100);
   const alphaPercent = Math.round(draftColor.alpha * 100);
 
-  const updateColorDraft = useCallback((nextValue: string) => {
+  const updateColorDraft = useCallback((nextValue: string, source: "hex" | "picker") => {
     const nextColor = parseCssColor(nextValue);
     if (!nextColor) return;
     setDraftColor(nextColor);
-    setHexDraft(toHexColor(nextColor).toUpperCase());
+    if (source === "picker") setHexDraft(toHexColor(nextColor).toUpperCase());
+  }, []);
+  const resolveColorGestureValue = useCallback((nextValue: string) => {
+    const source = nextValue.startsWith("#") ? "hex" : "picker";
+    if (source === "hex" && !/^#[0-9a-f]{6}$/i.test(nextValue)) return null;
+    const nextColor = parseCssColor(nextValue);
+    if (!nextColor) return null;
+    return {
+      source,
+      value: formatCssColor({
+        ...nextColor,
+        alpha: source === "hex" ? draftColorRef.current.alpha : nextColor.alpha,
+      }),
+    } as const;
   }, []);
   const persistColorValue = useCallback(
     (nextValue: string) => {
@@ -203,12 +216,17 @@ export function ColorField({
     settle: settleColorGesture,
     cancel: cancelColorGesture,
   } = useInspectorGestureTransaction({
-    sourceValue: value,
+    sourceValue: formatCssColor(colorFromCss(value)),
     onPreview: (nextValue) => {
-      updateColorDraft(nextValue);
-      onPreview?.(nextValue);
+      const resolved = resolveColorGestureValue(nextValue);
+      if (!resolved) return;
+      updateColorDraft(resolved.value, resolved.source);
+      onPreview?.(resolved.value);
     },
-    onCommit: persistColorValue,
+    onCommit: (nextValue) => {
+      const resolved = resolveColorGestureValue(nextValue);
+      if (resolved) persistColorValue(resolved.value);
+    },
   });
 
   useEffect(() => {
@@ -288,13 +306,11 @@ export function ColorField({
     commitHsv({ saturation, value: nextValue });
   };
 
-  const handleHexCommit = (nextHex: string) => {
+  const handleHexChange = (nextHex: string) => {
     setHexDraft(nextHex);
     const normalized = nextHex.trim().startsWith("#") ? nextHex.trim() : `#${nextHex.trim()}`;
-    const parsed = parseCssColor(normalized);
-    if (!parsed) return;
-    const nextValue = formatCssColor({ ...parsed, alpha: draftColorRef.current.alpha });
-    updateColorDraft(nextValue);
+    beginColorGesture();
+    previewColorGesture(normalized);
   };
 
   const picker = open
@@ -413,21 +429,8 @@ export function ColorField({
               <span className={LABEL}>Hex</span>
               <input
                 value={hexDraft}
-                onChange={(event) => handleHexCommit(event.target.value)}
-                onBlur={() => {
-                  const normalized = hexDraft.trim().startsWith("#")
-                    ? hexDraft.trim()
-                    : `#${hexDraft.trim()}`;
-                  const parsed = parseCssColor(normalized);
-                  if (parsed) {
-                    const nextValue = formatCssColor({
-                      ...parsed,
-                      alpha: draftColorRef.current.alpha,
-                    });
-                    persistColorValue(nextValue);
-                  }
-                  setHexDraft(toHexColor(draftColorRef.current).toUpperCase());
-                }}
+                onChange={(event) => handleHexChange(event.target.value)}
+                onBlur={settleColorGesture}
                 className={`${FIELD} h-10 w-full text-[11px] font-medium outline-none`}
                 spellCheck={false}
               />
