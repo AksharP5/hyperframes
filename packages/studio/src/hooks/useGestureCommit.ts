@@ -178,7 +178,14 @@ export function useGestureCommit({
         showToast("Cannot save — element has no selector", "error");
         return;
       }
-      const writeSelector = writeTargetSelector(sel) ?? selector;
+      // A recorded gesture becomes a NEW tween, so its target must address one
+      // element; the selection's own selector would record the motion onto
+      // every sibling sharing its class (see writeTargetSelector).
+      const writeSelector = writeTargetSelector(sel);
+      if (!writeSelector) {
+        showToast("Cannot save: element has no unique selector", "error");
+        return;
+      }
       if (liveSession.commitMutation) {
         const recStart = recordingStartTimeRef.current;
         const rawKeyframes = sortedPcts.map((pct) => ({

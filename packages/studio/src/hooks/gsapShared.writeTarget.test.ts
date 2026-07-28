@@ -4,7 +4,7 @@ import { parseGsapScript } from "@hyperframes/core/gsap-parser";
 import { addAnimationWithKeyframesToScript } from "@hyperframes/parsers/gsap-writer-acorn";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { buildStableSelector, getSelectorIndex } from "../components/editor/domEditingDom";
-import { resolveSelectorElementIds, writeTargetSelector } from "./gsapShared";
+import { resolveSelectorElementIds, tweenTargetsElement, writeTargetSelector } from "./gsapShared";
 import { commitKeyframeAtTimeImpl } from "./gsapKeyframeCommit";
 import { promoteSetToKeyframes } from "./useEnableKeyframes";
 
@@ -242,5 +242,48 @@ describe("commitKeyframeAtTimeImpl — new-tween target", () => {
     expect(mutation.targetSelector).not.toBe(".group");
     expect(document.querySelectorAll(mutation.targetSelector)).toHaveLength(1);
     expect(document.querySelector(mutation.targetSelector)).toBe(groups[3]);
+  });
+});
+
+describe("tweenTargetsElement", () => {
+  it("matches a tween narrowed to this element by a selector the selection does not use", () => {
+    const groups = mountGroupSiblings();
+    groups[2]!.id = "narrowed";
+
+    // The write half authored "#narrowed"; the read half still has ".group".
+    expect(tweenTargetsElement("#narrowed", ".group", groups[2])).toBe(true);
+  });
+
+  it("does not hand an individual element the group tween it merely inherits", () => {
+    const groups = mountGroupSiblings();
+
+    // Selecting one sibling by its own address must not let an edit mutate the
+    // ".group" tween: that write moves all five, not the one being nudged.
+    expect(tweenTargetsElement(".group", "#scene > div:nth-child(3)", groups[2])).toBe(false);
+  });
+
+  it("still edits a group tween when the group itself is the selection", () => {
+    const groups = mountGroupSiblings();
+
+    expect(tweenTargetsElement(".group", ".group", groups[0])).toBe(true);
+  });
+
+  it("does not match a target that is not a selector matches() understands", () => {
+    const groups = mountGroupSiblings();
+
+    expect(tweenTargetsElement("div[unclosed", ".group", groups[0])).toBe(false);
+  });
+});
+
+describe("commitKeyframeAtTimeImpl — no one-element target", () => {
+  it("drops the keyframe rather than authoring the bare class", async () => {
+    const groups = mountGroupSiblings();
+    const selection = selectionFor(groups[3]!);
+    groups[3]!.remove();
+    const commitMutation = vi.fn(async () => undefined);
+
+    await commitKeyframeAtTimeImpl(selection, 1, [], { x: 12 }, commitMutation);
+
+    expect(commitMutation).not.toHaveBeenCalled();
   });
 });

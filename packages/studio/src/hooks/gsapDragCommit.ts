@@ -51,9 +51,14 @@ export interface GsapDragCommitCallbacks {
  * write over every sibling sharing the class. Retargets of an EXISTING tween
  * must NOT come through here (they keep `anim.targetSelector`, so a tween the
  * author aimed at a group stays aimed at it).
+ *
+ * Null means no one-element form exists, and every caller drops the commit
+ * rather than falling back to `selector` (see writeTargetSelector): the drag
+ * reverts on the next reload, which is recoverable, where a `.group` write is
+ * not.
  */
-function newTweenTarget(selection: DomEditSelection, selector: string): string {
-  return writeTargetSelector(selection) ?? selector;
+function newTweenTarget(selection: DomEditSelection): string | null {
+  return writeTargetSelector(selection);
 }
 
 // Re-export for backward compatibility with existing imports.
@@ -77,17 +82,18 @@ export function parkPlayheadOnKeyframe(anim: GsapAnimation, pct: number): void {
 
 async function replaceKeyframedPositionHold(
   selection: DomEditSelection,
-  selector: string,
   existingSet: GsapAnimation,
   properties: { x: number; y: number },
   commitMutation: GsapDragCommitCallbacks["commitMutation"],
 ): Promise<void> {
+  const target = newTweenTarget(selection);
+  if (!target) return;
   const persist = async (commit: GsapDragCommitCallbacks["commitMutation"]) => {
     await commit(
       selection,
       {
         type: "add",
-        targetSelector: newTweenTarget(selection, selector),
+        targetSelector: target,
         method: "set",
         position: 0,
         properties,
@@ -186,7 +192,6 @@ export async function commitStaticGsapPosition(
       // least one hold on disk, then delete the corrupt tween in one transaction.
       await replaceKeyframedPositionHold(
         selection,
-        selector,
         existingSet,
         { x: newX, y: newY },
         callbacks.commitMutation,
@@ -213,7 +218,8 @@ export async function commitStaticGsapPosition(
   // an instant patch so the first nudge shows immediately (no soft-reload flash).
   // The patch reuses the WRITTEN target so the runtime moves exactly the element
   // the source write names.
-  const target = newTweenTarget(selection, selector);
+  const target = newTweenTarget(selection);
+  if (!target) return;
   await callbacks.commitMutation(
     selection,
     {
@@ -270,7 +276,8 @@ export async function commitStaticGsapRotation(
     return;
   }
   // New static hold → off-timeline `gsap.set` (no 0% keyframe marker) + instant patch.
-  const target = newTweenTarget(selection, selector);
+  const target = newTweenTarget(selection);
+  if (!target) return;
   await callbacks.commitMutation(
     selection,
     {
@@ -323,11 +330,13 @@ export async function commitStaticGsapSize(
     );
     return;
   }
+  const target = newTweenTarget(selection);
+  if (!target) return;
   await callbacks.commitMutation(
     selection,
     {
       type: "add",
-      targetSelector: newTweenTarget(selection, selector),
+      targetSelector: target,
       method: "set",
       position: 0,
       properties: { width, height },
@@ -411,11 +420,13 @@ export async function commitKeyframedSizeFromResize(
   // transport applies both in one ordered batch; a plain commit fallback keeps the
   // same recoverable ordering. Only the transaction's result triggers the reload.
   const addLabel = `Resize (size keyframe ${pct.toFixed(0)}%)`;
+  const target = newTweenTarget(selection);
+  if (!target) return false;
   await callbacks.commitMutation(
     selection,
     {
       type: "add-with-keyframes",
-      targetSelector: newTweenTarget(selection, selector),
+      targetSelector: target,
       position: roundTo3(ts),
       duration: roundTo3(td),
       keyframes,
