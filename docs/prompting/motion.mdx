@@ -27,26 +27,44 @@ The difference is measurable, not just visible: in the final second the frozen b
 
 ## Avoiding the slideshow
 
-The seven rules govern motion *inside* a scene. Apply all seven, cut between scenes, and you can still end up with a slideshow: a sequence of well-animated cards that happen to play in order. This is the single most common note on multi-scene work, and it took two failed review passes on the [Level 7 film](/prompting/capstone) to learn what actually fixes it — neither fix is more animation.
+The seven rules govern motion *inside* a scene. Apply all seven, cut between scenes, and you can still end up with a slideshow: a sequence of well-animated cards that happen to play in order. It's the most common note on multi-scene work, and two failed review passes on the [Level 7 film](/prompting/capstone) are what taught us the diagnosis — neither fix was more animation.
 
-**Continuity is a contract, not a side effect.** The first rebuild said "no hard cuts" and still played as a slideshow: each region faded up centered, sat, and faded out while the camera politely waited. "No cuts" only removes the seam; it doesn't create a relationship between scenes. What creates one is naming, in the prompt, the things that survive the boundary:
+**What a slideshow actually is:** a run of scenes that are *independent* (nothing connects one to the next) and *uniform in energy* (nothing tells you which moment matters). So any fix has to supply two properties:
 
-- **Persistent elements that cross every scene.** Name two or three concretely and say they are never absent. In the capstone it's a wire (one continuous line that becomes the chart baseline, the map arc, the waveform, the 3D coil), a frame-ruler whose playhead tracks real playback time, and a protagonist chip that rides the whole journey. Each one is a thread the eye follows across a boundary it would otherwise read as a cut.
-- **Arrivals instead of cuts.** Say the next scene is already visible at the edge of frame before the camera reaches it, and the previous one exits by parallax rather than fading. A scene you *travel to* cannot read as a slide.
-- **Negatives that name the tell.** "No element cluster that fades in centered, sits, and fades out; no region that reads as a static slide while the camera happens to pass." Agents reproduce the slideshow because it is the safe default — you have to forbid it by name.
+1. **Something crosses the boundary.** Consecutive scenes need a shared element, space, or motion the eye can follow through the transition — otherwise the viewer re-orients at every seam and reads slides.
+2. **The energy varies.** The piece needs quiet against which a hero moment can register. Uniform motion is as flat as no motion; emphasis is a *contrast* effect.
 
-**Rest is what creates emphasis.** The second rebuild fixed continuity and introduced the opposite problem: the camera now never stopped, so every hero moment — the count completing, the kicker stamping — landed mid-sweep and got thrown away. Constant motion is not the goal; *modulated* motion is. Ask for a **dwell-and-sweep rhythm**: the camera travels between regions, then eases to a genuine full stop while the point lands, then accelerates away.
+Ask for those two properties, not for a specific device. Below is the device we used, then several others that satisfy the same two properties differently — pick whichever fits your piece.
 
-The subtlety that keeps this from contradicting rule 1: during a dwell the **camera** rests, the **film** does not. Counters keep ticking, labels keep stamping, secondary motion keeps resolving. Say that explicitly or you'll trade a slideshow for a freeze-frame.
+### One method: a continuous world-camera
 
-Here is the clause that buys both fixes, quoted from the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) — lift it for your own multi-scene work:
+The capstone treats the whole film as a single wide space the camera travels across, with three elements that never leave frame and a dwell-and-sweep rhythm on the camera itself.
+
+For property 1, "no hard cuts" was not enough on its own — the first rebuild honored it and still played as slides, because each region faded up centered, sat, and faded out while the camera politely waited. What worked was naming the things that survive the boundary: **persistent elements** (a wire that becomes the chart baseline, then the map arc, then the waveform, then the 3D coil; a frame-ruler; a protagonist chip), **arrivals instead of cuts** (the next region is already at the edge of frame before the camera reaches it; the previous exits by parallax), and **a negative that names the tell** (agents default to the slideshow because it is safe — forbid it explicitly).
+
+For property 2, the second rebuild fixed continuity and broke emphasis: the camera never stopped, so every hero moment landed mid-sweep and got thrown away. The fix was a **dwell** — a genuine 1.5–2.5s full stop while the point lands. The subtlety that keeps this from contradicting rule 1: during a dwell the **camera** rests, the **film** does not. Counters keep ticking, labels keep stamping. Say that, or you trade a slideshow for a freeze-frame.
 
 > ONE continuous camera journey with a dwell-and-sweep rhythm. The whole film is a single wide world (one large scene space) that the camera dollies across […] in one unbroken move with NO hard cuts anywhere except inside the two sanctioned seam moments named below. The rhythm: the camera SWEEPS between regions, then eases to a genuine REST at each region's hero moment — a full stop of roughly 1.5–2.5 seconds while the main point lands […] then accelerates away. The dwell is what gives the sweep meaning: without the rest, emphasis dies mid-motion. During a dwell the WORLD keeps resolving (counters tick, labels stamp, secondary motion continues) — the camera rests, the film never freezes.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-camera.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*That clause, rendered: the camera accelerating out of one region, arriving in the next, and stopping to let the beat land — no cut anywhere in the span.*
+*That clause, rendered: accelerating out of one region, arriving in the next, stopping to let the beat land — no cut anywhere in the span.*
 
-One honest caveat: a continuous world costs more than a cut. It only pays when the piece has a through-line worth following. For a 6-second stat card, cut.
+This method is expensive. One continuous space is more to author than a cut, and it only pays when the piece has a through-line worth following. For a 6-second stat card, cut.
+
+### Other methods worth trying
+
+Each of these supplies both properties by different means. They also compose — a beat grid pairs happily with a hero prop.
+
+| Method | How it crosses the boundary | Where the emphasis comes from |
+| --- | --- | --- |
+| **Match cuts** | Cut freely, but on a shared shape, color, or motion vector, so the eye carries a form through the seam | Break the rhyme deliberately at the moment that matters |
+| **A hero prop** | Cut the environment, keep one object continuously on screen (the product, a chart, a character) | Push in on the prop and still everything else around it |
+| **Persistent chrome** | Scenes change *inside* a frame that never does — a HUD, a ruler, a browser shell, a border | Let the chrome fall away for one beat; its absence is the accent |
+| **Audio as the spine** | One unbroken sentence or musical phrase crosses the cut; the ear ties what the eye didn't | A rest in the audio — a held note, a beat of silence before the number lands |
+| **Beat-locked cutting** | Cuts land on an analyzed grid, so the rhythm itself is the connective tissue ([Music](/prompting/music-and-slideshows)) | Hold through a downbeat, or drop a hit, so one card gets twice the space |
+| **Accumulation** | Nothing ever exits — each scene adds to one canvas and the frame reflows to the new material | Everything but the newest element quiets to a low idle |
+
+Whichever you choose, put the two properties in the prompt in your own words, and name the tell you are forbidding. The device is negotiable; the properties are not.
 
 ## Handmade, still deterministic
 
