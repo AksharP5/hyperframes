@@ -243,6 +243,45 @@ describe("buildExpandedElements", () => {
     // The host row is replaced by its children.
     expect(out.some((e) => e.domId === "scene-host")).toBe(false);
   });
+
+  // Regression: DOM-only children were synthesized against the TOP-LEVEL element
+  // instead of the sub-comp host they actually live in, so every child row read
+  // the whole top-level window rather than its host's.
+  it("spans DOM-only children over their nested host's window, not the top-level one", () => {
+    const elements = [
+      el({ id: "scene-host", start: 0, duration: 20, compositionSrc: "scene.html" }),
+    ];
+    const manifest = [
+      clip({ id: "scene-host", start: 0, duration: 20, compositionSrc: "scene.html" }),
+      clip({ id: "sub-host", start: 5, duration: 6, compositionSrc: "sub.html" }),
+    ];
+    const parentMap = new Map([
+      ["sub-host", "scene-host"],
+      ["pill-1", "sub-host"],
+    ]);
+    const domClipChildren = [
+      {
+        id: "pill-1",
+        parentId: "sub-host",
+        hostId: "sub-host",
+        label: "pill-1",
+        stackingContextId: "css:0.0",
+      },
+    ];
+
+    const out = buildExpandedElements(
+      elements,
+      manifest,
+      parentMap,
+      "scene-host",
+      "sub-host",
+      domClipChildren,
+    );
+    const pill = out.find((e) => e.domId === "pill-1")!;
+    expect(pill.start).toBe(5);
+    expect(pill.duration).toBe(6);
+    expect(pill.sourceFile).toBe("sub.html");
+  });
 });
 
 describe("resolveTimelineExpansionRawId", () => {

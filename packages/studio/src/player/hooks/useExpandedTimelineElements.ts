@@ -209,7 +209,13 @@ function buildChildElements(
 function domSiblingClips(
   domClipChildren: DomClipChild[],
   siblingParentId: string,
-  host: TimelineElement,
+  host: {
+    id: string | null;
+    start: number;
+    duration: number;
+    track: number;
+    compositionSrc?: string | null;
+  },
 ): ClipManifestClip[] {
   return domClipChildren
     .filter((c) => c.parentId === siblingParentId)
@@ -243,20 +249,23 @@ export function buildExpandedElements(
   const topLevelElement = elements.find((el) => el.id === topLevelId || el.domId === topLevelId);
   if (!topLevelElement) return filterToTopLevel(elements, parentMap);
 
+  // The sub-comp host the children actually live in: top-level host for 1-level
+  // nesting, a nested host for deeper nesting. Its start/file anchor edits.
+  const parentHost = manifest.find((c) => c.id === siblingParentId);
+
   // Prefer real manifest children; fall back to DOM-only sub-comp children
   // (groups/pills) that have no data-start and thus never enter the manifest.
+  // Those are synthesized against the host they actually live in, not the
+  // top-level element, or every child row reads the whole top-level window.
   const siblings = (() => {
     const fromManifest = manifest.filter(
       (c) => c.id != null && parentMap.get(c.id) === siblingParentId,
     );
     if (fromManifest.length > 0) return fromManifest;
-    return domSiblingClips(domClipChildren, siblingParentId, topLevelElement);
+    return domSiblingClips(domClipChildren, siblingParentId, parentHost ?? topLevelElement);
   })();
   if (siblings.length === 0) return filterToTopLevel(elements, parentMap);
 
-  // The sub-comp host the children actually live in: top-level host for 1-level
-  // nesting, a nested host for deeper nesting. Its start/file anchor edits.
-  const parentHost = manifest.find((c) => c.id === siblingParentId);
   const editBasis = {
     start: parentHost?.start ?? topLevelElement.start,
     sourceFile: parentHost?.compositionSrc ?? topLevelElement.compositionSrc ?? undefined,
