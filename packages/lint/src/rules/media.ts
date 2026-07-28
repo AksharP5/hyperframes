@@ -1,5 +1,6 @@
 import type { LintContext, HyperframeLintFinding } from "../context";
-import { readAttr, truncateSnippet, isMediaTag } from "../utils";
+import { readAttr, readDecodedAttr, truncateSnippet, isMediaTag } from "../utils";
+import { validateColorGradingContract } from "@hyperframes/parsers/color-grading-contract";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -247,6 +248,59 @@ export const mediaRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = 
     return findings;
   },
 
+  // color_grading_* — grading is a structured media-only contract. Unknown
+  // keys are ignored by the runtime, so catch them before an agent can report
+  // controls that never actually rendered.
+  ({ tags }) => {
+    const findings: HyperframeLintFinding[] = [];
+    for (const tag of tags) {
+      const raw = readDecodedAttr(tag.raw, "data-color-grading");
+      if (raw === null) continue;
+      const elementId = readAttr(tag.raw, "id") || undefined;
+      const report = (code: string, message: string, fixHint: string) => {
+        findings.push({
+          code,
+          severity: "error",
+          message,
+          elementId,
+          fixHint,
+          snippet: truncateSnippet(tag.raw),
+        });
+      };
+      if (tag.name !== "video" && tag.name !== "img") {
+        report(
+          "color_grading_non_media",
+          `data-color-grading on <${tag.name}> has no effect. The shader runtime only grades real <video> and <img> elements.`,
+          "Move the grading attribute to the real <video> or <img> media element. Do not attach it to a wrapper or CSS background.",
+        );
+        continue;
+      }
+
+      const trimmed = raw.trim();
+      if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        report(
+          "color_grading_invalid_json",
+          "data-color-grading contains malformed JSON and will not render.",
+          'Use valid JSON, for example {"preset":"skin-soft","intensity":0.6,"adjust":{"highlights":-0.08}}.',
+        );
+        continue;
+      }
+      for (const issue of validateColorGradingContract(parsed)) {
+        report(
+          "color_grading_invalid_structure",
+          `data-color-grading ${issue.path} ${issue.message}.`,
+          issue.hint ??
+            "Use the documented media-treatment contract and correct or remove the invalid value.",
+        );
+      }
+    }
+    return findings;
+  },
+
   // video_missing_muted
   ({ tags }) => {
     const findings: HyperframeLintFinding[] = [];
@@ -308,7 +362,7 @@ export const mediaRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = 
       if (tag.name === "video" || tag.name === "audio") continue;
       if (voidElements.has(tag.name)) continue;
       // Skip the composition root — it uses data-start as a playback anchor, not as a clip timer
-      if (readAttr(tag.raw, "data-composition-id")) continue;
+      if (readDecodedAttr(tag.raw, "data-composition-id")) continue;
       if (readAttr(tag.raw, "data-start")) {
         timedTagPositions.push({
           name: tag.name,
@@ -338,29 +392,6 @@ export const mediaRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = 
           }
         }
       }
-    }
-    return findings;
-  },
-
-  // media_in_subcomposition — <video>/<audio> only render as a DIRECT child of the host
-  // root (index.html). Inside a sub-composition <template> the runtime never seeks/decodes
-  // them, so they render BLANK/black in preview and renders — and the other lint/validate
-  // passes otherwise miss it (only a per-frame snapshot reveals the blank panel).
-  ({ tags, options }) => {
-    const findings: HyperframeLintFinding[] = [];
-    if (!options.isSubComposition) return findings;
-    for (const tag of tags) {
-      if (tag.name !== "video" && tag.name !== "audio") continue;
-      const elementId = readAttr(tag.raw, "id") || undefined;
-      findings.push({
-        code: "media_in_subcomposition",
-        severity: "error",
-        message: `<${tag.name}${elementId ? ` id="${elementId}"` : ""}> is inside a sub-composition. The runtime only drives media that is a DIRECT child of the host root (index.html); media inside a sub-comp <template> is never seeked/decoded and renders BLANK/black in preview and renders.`,
-        elementId,
-        fixHint:
-          "Move the media OUT of the sub-composition: place the <video>/<audio> as a direct child of #root in index.html, positioned over the scene, and drive any per-scene motion on the MAIN timeline at global time (a sub-comp timeline cannot reach host elements). See composition-patterns.md archetype B.",
-        snippet: truncateSnippet(tag.raw),
-      });
     }
     return findings;
   },

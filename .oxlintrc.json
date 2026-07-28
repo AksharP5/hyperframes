@@ -5,6 +5,7 @@
   },
   "plugins": ["react", "typescript"],
   "ignorePatterns": [
+    ".scratch/",
     "dist/",
     "coverage/",
     "node_modules/",
@@ -12,5 +13,19 @@
     "packages/producer/tests/**/src/vendor/**",
     "registry/blocks/**/lib/*.iife.js",
     "chrome/"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "packages/cli/src/capture/**/*.ts",
+        "packages/cli/src/registry/**/*.ts",
+        "packages/cli/src/templates/**/*.ts",
+        "packages/cli/src/telemetry/**/*.ts"
+      ],
+      "excludeFiles": ["**/*.test.ts", "**/*.test.tsx", "packages/cli/src/telemetry/feedback.ts"],
+      "rules": {
+        "no-console": ["error", { "allow": ["error", "warn"] }]
+      }
+    }
   ]
 }

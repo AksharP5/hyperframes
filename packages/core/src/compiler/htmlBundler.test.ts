@@ -95,6 +95,34 @@ describe("bundleToSingleHtml", () => {
     expect(bundled).not.toContain("./bg.svg");
   });
 
+  it("preserves external SVG fragment references used by <use>", async () => {
+    const spriteSvg = `<svg xmlns="http://www.w3.org/2000/svg">
+      <symbol id="patch-head" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" /></symbol>
+    </svg>`;
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><body>
+        <div data-composition-id="main" data-width="320" data-height="180" data-start="0" data-duration="1">
+          <svg>
+            <use id="href-use" href="assets/patch.svg#patch-head"></use>
+            <use id="xlink-use" xlink:href="assets/patch.svg#patch-head"></use>
+          </svg>
+        </div>
+        <script>window.__timelines = window.__timelines || {}; window.__timelines.main = {}</script>
+      </body></html>`,
+      "assets/patch.svg": spriteSvg,
+    });
+
+    const bundled = await bundleToSingleHtml(dir);
+    const { document } = parseHTML(bundled);
+    expect(document.getElementById("href-use")?.getAttribute("href")).toBe(
+      "assets/patch.svg#patch-head",
+    );
+    expect(document.getElementById("xlink-use")?.getAttribute("xlink:href")).toBe(
+      "assets/patch.svg#patch-head",
+    );
+    expect(bundled).not.toContain("data:image/svg+xml;base64");
+  });
+
   it("does not merge author scripts into the runtime bootstrap placeholder", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html>
@@ -403,6 +431,22 @@ describe("bundleToSingleHtml", () => {
     expect(bundled).toContain("window.PowerGlitch = { glitch()");
     expect(bundled).not.toContain('src="assets/scene-runtime.js"');
     expect(bundled).not.toContain('src="vendor/effect-plugin.js"');
+  });
+
+  it("preserves local module scripts and their import base URL", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><body>
+        <div data-composition-id="main" data-start="0" data-duration="1"></div>
+        <script type="module" src="./module.js"></script>
+      </body></html>`,
+      "module.js": `import { value } from "./value.js"; window.result = value;`,
+      "value.js": `export const value = "loaded";`,
+    });
+
+    const bundled = await bundleToSingleHtml(dir);
+
+    expect(bundled).toMatch(/<script\b[^>]*\btype="module"[^>]*\bsrc="\.\/module\.js"/);
+    expect(bundled).not.toContain('import { value } from "./value.js"');
   });
 
   it("preserves local sub-composition script order before inline scene scripts", async () => {
@@ -837,6 +881,44 @@ describe("bundleToSingleHtml", () => {
     expect(bundled).toMatch(/card__hf2[\s\S]*Enterprise[\s\S]*light/);
   });
 
+  it("does not redefine an authored CSS variable for a bundled sub-composition", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html>
+<html><head>
+  <style>:root { --accent: #4287f5; } .host-badge { color: var(--accent); }</style>
+</head><body>
+  <div
+    data-composition-id="main"
+    data-width="1920"
+    data-height="1080"
+    data-start="0"
+    data-duration="5">
+    <div
+      data-composition-id="card"
+      data-composition-src="compositions/card.html"
+      data-variable-values='{"accent":"blue"}'></div>
+  </div>
+  <script>window.__timelines={};</script>
+</body></html>`,
+      "compositions/card.html": `<!doctype html>
+<html data-composition-variables='[{"id":"accent","type":"string","label":"Accent","default":"red"}]'>
+  <body>
+    <div
+      data-composition-id="card"
+      data-width="1920"
+      data-height="1080"
+      data-start="0"
+      data-duration="5"></div>
+  </body>
+</html>`,
+    });
+
+    const bundled = await bundleToSingleHtml(dir);
+
+    expect(bundled).toContain(":root { --accent: #4287f5; }");
+    expect(bundled).not.toMatch(/\[data-composition-id="card[^"]*"\]\s*\{[^}]*--accent:\s*blue/);
+  });
+
   it("scopes external sub-composition styles and classic scripts", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html>
@@ -1262,5 +1344,47 @@ describe("bundleToSingleHtml", () => {
       "html,body,*{text-rendering:geometricPrecision}",
     );
     expect(styleEls[0]?.parentElement?.tagName.toLowerCase()).toBe("head");
+  });
+
+  // Regression: cli-feedback field cluster (crons 61-68, n=25+, cross-OS,
+  // versions 0.7.56-0.7.64). Reporter L3 cite (ts=1784519869):
+  // "bundleToSingleHtml compiles data-duration into data-end, then validates
+  // the compiled HTML and reports its own generated data-end as deprecated.
+  // Raw-source lint passes with 0 errors and 0 warnings." The end-to-end
+  // guarantee: source authored with only data-duration must round-trip through
+  // bundle + StaticGuard without producing a StaticGuard warning on the
+  // compiler's own consistent data-end. Facet-(a)/(e) fix.
+  it("does not emit a StaticGuard warning for source-authored data-duration on media", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html>
+<html>
+<head><title>t</title></head>
+<body>
+  <div data-composition-id="root" data-width="1920" data-height="1080" data-start="0" data-duration="18">
+    <audio id="bgm" src="bgm.mp3" data-start="0" data-duration="18"></audio>
+    <audio id="narration" src="narr.mp3" data-start="5" data-duration="10"></audio>
+  </div>
+  <script>window.__timelines = window.__timelines || {}; window.__timelines.root = { duration: () => 18, seek() {}, pause() {} };</script>
+</body></html>`,
+      "bgm.mp3": "",
+      "narr.mp3": "",
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const bundled = await bundleToSingleHtml(dir);
+      // Sanity: the compiler MUST have emitted data-end for both audio elements,
+      // so the linter is actually seeing the compiled shape (not the raw source).
+      expect(bundled).toContain('id="bgm"');
+      expect(bundled).toMatch(/id="bgm"[^>]*data-end="18"|data-end="18"[^>]*id="bgm"/);
+      expect(bundled).toMatch(/id="narration"[^>]*data-end="15"|data-end="15"[^>]*id="narration"/);
+
+      const staticGuardWarnings = warnSpy.mock.calls
+        .map((call) => String(call[0] ?? ""))
+        .filter((line) => line.includes("[StaticGuard]"));
+      expect(staticGuardWarnings).toEqual([]);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

@@ -48,6 +48,7 @@ interface UseTimelineClipDragInput {
   ppsRef: React.RefObject<number>;
   durationRef: React.RefObject<number>;
   trackOrderRef: React.RefObject<number[]>;
+  rowHeightsRef?: React.RefObject<readonly number[]>;
   onMoveElement?: (
     element: TimelineElement,
     updates: Pick<TimelineElement, "start" | "track">,
@@ -76,7 +77,8 @@ interface UseTimelineClipDragInput {
    * commitDraggedClipMove. Both optional → absent = no-op (backward compatible).
    */
   readZIndex?: (element: TimelineElement) => number;
-  onStackingPatches?: (patches: StackingPatch[]) => void;
+  onStackingPatches?: (patches: StackingPatch[]) => Promise<unknown> | void;
+  refreshAfterLaneMove?: () => void;
 }
 
 export function useTimelineClipDrag({
@@ -84,6 +86,7 @@ export function useTimelineClipDrag({
   ppsRef,
   durationRef,
   trackOrderRef,
+  rowHeightsRef,
   onMoveElement,
   onMoveElements,
   onResizeElement,
@@ -93,6 +96,7 @@ export function useTimelineClipDrag({
   setRangeSelectionRef,
   readZIndex,
   onStackingPatches,
+  refreshAfterLaneMove,
 }: UseTimelineClipDragInput) {
   const updateElement = usePlayerStore((s) => s.updateElement);
   const rawBeatTimes = usePlayerStore((s) => s.beatAnalysis?.beatTimes ?? EMPTY_BEAT_TIMES);
@@ -213,6 +217,8 @@ export function useTimelineClipDrag({
   readZIndexRef.current = readZIndex;
   const onStackingPatchesRef = useRef(onStackingPatches);
   onStackingPatchesRef.current = onStackingPatches;
+  const refreshAfterLaneMoveRef = useRef(refreshAfterLaneMove);
+  refreshAfterLaneMoveRef.current = refreshAfterLaneMove;
 
   const clipDragScrollRaf = useRef(0);
   const clipDragPointerRef = useRef<{
@@ -237,13 +243,14 @@ export function useTimelineClipDrag({
         pps: ppsRef.current,
         duration: durationRef.current,
         trackOrder: trackOrderRef.current,
+        rowHeights: rowHeightsRef?.current,
         elements: elementsRef.current,
         selectedKeys: usePlayerStore.getState().selectedElementIds,
         buildSnapTargets,
         audioTracks: dragAudioTracksRef.current,
       });
     },
-    [scrollRef, ppsRef, durationRef, trackOrderRef, buildSnapTargets],
+    [scrollRef, ppsRef, durationRef, trackOrderRef, rowHeightsRef, buildSnapTargets],
   );
 
   // Recompute the trim preview for a pointer x. Shared by the pointermove resize
@@ -499,6 +506,7 @@ export function useTimelineClipDrag({
         // deps (Timeline.tsx). Absent → commitDraggedClipMove skips the z-sync.
         readZIndex: readZIndexRef.current,
         onStackingPatches: onStackingPatchesRef.current,
+        refreshAfterLaneMove: refreshAfterLaneMoveRef.current,
       });
     };
 

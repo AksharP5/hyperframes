@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/core",
-  "version": "0.7.56",
+  "version": "0.7.78",
   "description": "",
   "repository": {
     "type": "git",
@@ -40,11 +40,23 @@
       "import": "./src/utils/htmlAttrSafety.ts",
       "types": "./src/utils/htmlAttrSafety.ts"
     },
+    "./composition-contract": {
+      "bun": "./src/compositionContract.ts",
+      "node": "./dist/compositionContract.js",
+      "import": "./src/compositionContract.ts",
+      "types": "./src/compositionContract.ts"
+    },
     "./editing": {
       "bun": "./src/editing/affordances.ts",
       "node": "./dist/editing/affordances.js",
       "import": "./src/editing/affordances.ts",
       "types": "./src/editing/affordances.ts"
+    },
+    "./editing/draft-markers": {
+      "bun": "./src/editing/draftMarkers.ts",
+      "node": "./dist/editing/draftMarkers.js",
+      "import": "./src/editing/draftMarkers.ts",
+      "types": "./src/editing/draftMarkers.ts"
     },
     "./variables": {
       "bun": "./src/variables.ts",
@@ -88,6 +100,12 @@
       "import": "./src/colorLuts.ts",
       "types": "./src/colorLuts.ts"
     },
+    "./media-grade-analyzer": {
+      "bun": "./src/mediaGradeAnalyzer.ts",
+      "node": "./dist/mediaGradeAnalyzer.js",
+      "import": "./src/mediaGradeAnalyzer.ts",
+      "types": "./src/mediaGradeAnalyzer.ts"
+    },
     "./storyboard": {
       "bun": "./src/storyboard/index.ts",
       "node": "./dist/storyboard/index.js",
@@ -107,11 +125,23 @@
       "import": "./src/runtime/startExpression.ts",
       "types": "./src/runtime/startExpression.ts"
     },
+    "./runtime/start-resolver": {
+      "bun": "./src/runtime/startResolver.ts",
+      "node": "./dist/runtime/startResolver.js",
+      "import": "./src/runtime/startResolver.ts",
+      "types": "./src/runtime/startResolver.ts"
+    },
     "./runtime/protocol": {
       "bun": "./src/runtime/protocol.ts",
       "node": "./dist/runtime/protocol.js",
       "import": "./src/runtime/protocol.ts",
       "types": "./src/runtime/protocol.ts"
+    },
+    "./runtime/stacking-context": {
+      "bun": "./src/runtime/stackingContext.ts",
+      "node": "./dist/runtime/stackingContext.js",
+      "import": "./src/runtime/stackingContext.ts",
+      "types": "./src/runtime/stackingContext.ts"
     },
     "./compiler/html-document": {
       "bun": "./src/compiler/htmlDocument.ts",
@@ -227,6 +257,12 @@
       "import": "./src/parsers/springEase.ts",
       "types": "./src/parsers/springEase.ts"
     },
+    "./wiggle-ease": {
+      "bun": "./src/runtime/wiggleEase.ts",
+      "node": "./dist/runtime/wiggleEase.js",
+      "import": "./src/runtime/wiggleEase.ts",
+      "types": "./src/runtime/wiggleEase.ts"
+    },
     "./fonts/aliases": {
       "bun": "./src/fonts/aliases.ts",
       "node": "./dist/fonts/aliases.js",
@@ -264,21 +300,17 @@
         "import": "./dist/utils/htmlAttrSafety.js",
         "types": "./dist/utils/htmlAttrSafety.d.ts"
       },
+      "./composition-contract": {
+        "import": "./dist/compositionContract.js",
+        "types": "./dist/compositionContract.d.ts"
+      },
       "./editing": {
         "import": "./dist/editing/affordances.js",
         "types": "./dist/editing/affordances.d.ts"
       },
-      "./figma": {
-        "import": "./dist/figma/index.js",
-        "types": "./dist/figma/index.d.ts"
-      },
-      "./generators": {
-        "import": "./dist/generators/hyperframes.js",
-        "types": "./dist/generators/hyperframes.d.ts"
-      },
-      "./lint": {
-        "import": "./dist/lint/index.js",
-        "types": "./dist/lint/index.d.ts"
+      "./editing/draft-markers": {
+        "import": "./dist/editing/draftMarkers.js",
+        "types": "./dist/editing/draftMarkers.d.ts"
       },
       "./variables": {
         "import": "./dist/variables.js",
@@ -287,6 +319,14 @@
       "./slideshow": {
         "import": "./dist/slideshow/index.js",
         "types": "./dist/slideshow/index.d.ts"
+      },
+      "./generators": {
+        "import": "./dist/generators/hyperframes.js",
+        "types": "./dist/generators/hyperframes.d.ts"
+      },
+      "./lint": {
+        "import": "./dist/lint/index.js",
+        "types": "./dist/lint/index.d.ts"
       },
       "./compiler": {
         "import": "./dist/compiler/index.js",
@@ -299,6 +339,10 @@
       "./color-luts": {
         "import": "./dist/colorLuts.js",
         "types": "./dist/colorLuts.d.ts"
+      },
+      "./media-grade-analyzer": {
+        "import": "./dist/mediaGradeAnalyzer.js",
+        "types": "./dist/mediaGradeAnalyzer.d.ts"
       },
       "./storyboard": {
         "import": "./dist/storyboard/index.js",
@@ -313,9 +357,17 @@
         "import": "./dist/runtime/startExpression.js",
         "types": "./dist/runtime/startExpression.d.ts"
       },
+      "./runtime/start-resolver": {
+        "import": "./dist/runtime/startResolver.js",
+        "types": "./dist/runtime/startResolver.d.ts"
+      },
       "./runtime/protocol": {
         "import": "./dist/runtime/protocol.js",
         "types": "./dist/runtime/protocol.d.ts"
+      },
+      "./runtime/stacking-context": {
+        "import": "./dist/runtime/stackingContext.js",
+        "types": "./dist/runtime/stackingContext.d.ts"
       },
       "./compiler/html-document": {
         "import": "./dist/compiler/htmlDocument.js",
@@ -393,6 +445,10 @@
         "import": "./dist/parsers/springEase.js",
         "types": "./dist/parsers/springEase.d.ts"
       },
+      "./wiggle-ease": {
+        "import": "./dist/runtime/wiggleEase.js",
+        "types": "./dist/runtime/wiggleEase.d.ts"
+      },
       "./fonts/aliases": {
         "import": "./dist/fonts/aliases.js",
         "types": "./dist/fonts/aliases.d.ts"
@@ -400,6 +456,10 @@
       "./fonts/system-locator": {
         "import": "./dist/fonts/systemFontLocator.js",
         "types": "./dist/fonts/systemFontLocator.d.ts"
+      },
+      "./figma": {
+        "import": "./dist/figma/index.js",
+        "types": "./dist/figma/index.d.ts"
       },
       "./schemas/registry.json": "./schemas/registry.json",
       "./schemas/registry-item.json": "./schemas/registry-item.json"

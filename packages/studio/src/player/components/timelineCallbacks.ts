@@ -3,6 +3,16 @@
 import type { TimelineElement } from "../store/playerStore";
 import type { TimelineMoveOperation } from "../../hooks/timelineMoveAdapter";
 import type { BlockedTimelineEditIntent } from "./timelineEditing";
+import type { PropertyGroupName } from "@hyperframes/core/gsap-parser";
+import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
+
+export interface TimelinePropertyGroupKeyframeToggle {
+  animationId: string;
+  propertyGroup: PropertyGroupName;
+  tweenPercentage: number;
+  properties: Record<string, number | string>;
+  remove: boolean;
+}
 
 /**
  * Shared callback signatures for timeline editing operations.
@@ -22,6 +32,10 @@ export interface TimelineDropCallbacks {
     blockName: string,
     placement: { start: number; track: number },
   ) => Promise<void> | void;
+  onCompositionDrop?: (
+    sourcePath: string,
+    placement: { start: number; track: number },
+  ) => Promise<void> | void;
 }
 
 export interface TimelineEditCallbacks {
@@ -31,11 +45,14 @@ export interface TimelineEditCallbacks {
   ) => Promise<void> | void;
   /** Atomic multi-clip move (single undo) for main-track ripple + track-insert.
    *  `coalesceKey` (drag-commit gesture id) merges the move history entry with a
-   *  lane change's follow-up z-reorder entry into one undo step. */
+   *  lane change's follow-up z-reorder entry into one undo step; `coalesceMs`
+   *  widens that entry's fold window when a server round-trip separates the
+   *  gesture's records (per-gesture-unique keys keep the fold gesture-scoped). */
   onMoveElements?: (
     edits: Array<{ element: TimelineElement; updates: Pick<TimelineElement, "start" | "track"> }>,
     coalesceKey?: string,
     operation?: TimelineMoveOperation,
+    coalesceMs?: number,
   ) => Promise<void> | void;
   onResizeElement?: (
     element: TimelineElement,
@@ -55,14 +72,19 @@ export interface TimelineEditCallbacks {
   onSplitElement?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplit?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplitAll?: (splitTime: number) => Promise<void> | void;
-  onDeleteKeyframe?: (elementId: string, percentage: number) => void;
-  onDeleteAllKeyframes?: (elementId: string) => void;
-  onChangeKeyframeEase?: (elementId: string, percentage: number, ease: string) => void;
-  onMoveKeyframeToPlayhead?: (elementId: string, percentage: number) => void;
+  onDeleteKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
+  onDeleteAllKeyframes?: (element: TimelineElement) => void;
+  onMoveKeyframeToPlayhead?: (element: TimelineElement, keyframe: TimelineKeyframeTarget) => void;
+  /** Drag-to-retime: `keyframe` identifies the dragged keyframe (its percentage
+   *  is clip-relative), `toClipPercentage` is the neighbour-clamped drop. */
   onMoveKeyframe?: (
     elementId: string,
-    fromClipPercentage: number,
+    keyframe: TimelineKeyframeTarget,
     toClipPercentage: number,
-  ) => void;
+  ) => Promise<boolean>;
   onToggleKeyframeAtPlayhead?: (element: TimelineElement) => void;
+  onTogglePropertyGroupKeyframe?: (
+    element: TimelineElement,
+    target: TimelinePropertyGroupKeyframeToggle,
+  ) => Promise<void> | void;
 }

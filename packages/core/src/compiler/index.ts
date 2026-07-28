@@ -17,6 +17,7 @@ export {
   extractResolvedMedia,
   clampDurations,
   shouldClampMediaDuration,
+  shouldClampResolvedMediaDuration,
   type UnresolvedElement,
   type ResolvedDuration,
   type ResolvedMediaElement,
@@ -37,6 +38,14 @@ export {
   emitRootCompositionVariableStyles,
 } from "./htmlBundler";
 export { readDeclaredDefaults, parseHostVariableValues } from "../runtime/getVariables";
+
+export {
+  extractCompiledHtmlParityContract,
+  type CompiledHtmlParityContract,
+  type HtmlParityComposition,
+  type HtmlParityResource,
+  type HtmlParityTimedElement,
+} from "./htmlParityContract";
 
 export {
   RUNTIME_BOOTSTRAP_ATTR,

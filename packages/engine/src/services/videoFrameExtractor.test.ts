@@ -1,3 +1,4 @@
+// fallow-ignore-file code-duplication
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   existsSync,
@@ -25,6 +26,9 @@ import {
   decoderForCodec,
   getFrameAtTime,
   analyzeClipMediaFit,
+  classifyVideoExtractionError,
+  runVideoExtractionWithRetry,
+  VideoSourceExtractionError,
   type VideoElement,
   type ExtractedFrames,
   type ExtractionResult,
@@ -40,6 +44,120 @@ import { COMPLETE_SENTINEL, GC_MARKER, SCHEMA_PREFIX } from "./extractionCache.j
 // below run too — they exercise the extractor in isolation against a
 // synthesized VFR fixture.
 const HAS_FFMPEG = spawnSync("ffmpeg", ["-version"]).status === 0;
+
+describe("video extraction failure taxonomy and bounded retry", () => {
+  it("classifies missing and transient HTTP sources without exposing retry ambiguity", () => {
+    expect(classifyVideoExtractionError(new Error("HTTP 404: Not Found"))).toMatchObject({
+      kind: "download_not_found",
+      retryable: false,
+    });
+    expect(classifyVideoExtractionError(new Error("HTTP 503: Service Unavailable"))).toMatchObject({
+      kind: "download_transient",
+      retryable: true,
+    });
+  });
+
+  it("retries one transient failure, cleaning partial output before the retry", async () => {
+    const retryDir = mkdtempSync(join(tmpdir(), "hf-extract-retry-"));
+    const partialPath = join(retryDir, "frame-00001.jpg");
+    let attempts = 0;
+    try {
+      const outcome = await runVideoExtractionWithRetry(
+        async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            writeFileSync(partialPath, "partial");
+            throw new VideoSourceExtractionError(
+              "ffmpeg_timeout",
+              true,
+              "Video frame extraction timed out",
+            );
+          }
+          expect(existsSync(partialPath)).toBe(false);
+          return "frames";
+        },
+        {
+          maxTransientRetries: 1,
+          onRetry: () => {
+            rmSync(retryDir, { recursive: true, force: true });
+            mkdirSync(retryDir, { recursive: true });
+          },
+        },
+      );
+
+      expect(outcome).toEqual({ result: "frames", retries: 1 });
+      expect(attempts).toBe(2);
+    } finally {
+      rmSync(retryDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not retry deterministic or caller-aborted failures", async () => {
+    let deterministicAttempts = 0;
+    await expect(
+      runVideoExtractionWithRetry(async () => {
+        deterministicAttempts += 1;
+        throw new VideoSourceExtractionError(
+          "zero_output",
+          false,
+          "Video source produced no decodable frames",
+        );
+      }),
+    ).rejects.toMatchObject({ kind: "zero_output", retryable: false });
+    expect(deterministicAttempts).toBe(1);
+
+    const controller = new AbortController();
+    controller.abort();
+    let abortedAttempts = 0;
+    await expect(
+      runVideoExtractionWithRetry(
+        async () => {
+          abortedAttempts += 1;
+          throw new VideoSourceExtractionError(
+            "download_transient",
+            true,
+            "Video source download failed transiently",
+          );
+        },
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ kind: "cancelled", retryable: false });
+    expect(abortedAttempts).toBe(0);
+  });
+
+  it("does not retry transient extraction failures unless the caller opts in", async () => {
+    let attempts = 0;
+    await expect(
+      runVideoExtractionWithRetry(async () => {
+        attempts += 1;
+        throw new VideoSourceExtractionError(
+          "ffmpeg_timeout",
+          true,
+          "Video frame extraction timed out",
+        );
+      }),
+    ).rejects.toMatchObject({ kind: "ffmpeg_timeout", retryable: true });
+    expect(attempts).toBe(1);
+  });
+
+  it("fails closed to zero retries for a non-finite runtime retry budget", async () => {
+    let attempts = 0;
+    await expect(
+      runVideoExtractionWithRetry(
+        async () => {
+          attempts += 1;
+          throw new VideoSourceExtractionError(
+            "ffmpeg_timeout",
+            true,
+            "Video frame extraction timed out",
+          );
+        },
+        { maxTransientRetries: Number.NaN },
+      ),
+    ).rejects.toMatchObject({ kind: "ffmpeg_timeout", retryable: true });
+    expect(attempts).toBe(1);
+  });
+});
 
 // Codec-based alpha defaulting replaces tag-based detection (the
 // alpha_mode/ALPHA_MODE case bug — see ffprobe.test.ts for the regression
@@ -139,6 +257,13 @@ describe("resolveProjectRelativeSrc — sub-composition path clamping", () => {
   it("returns the literal join when the file exists at projectDir/src", () => {
     const projectDir = join(tmp, "project");
     expect(resolveProjectRelativeSrc("assets/foo.mp4", projectDir)).toBe(
+      join(projectDir, "assets/foo.mp4"),
+    );
+  });
+
+  it("resolves a browser root-absolute URL from the project root", () => {
+    const projectDir = join(tmp, "project");
+    expect(resolveProjectRelativeSrc("/assets/foo.mp4", projectDir)).toBe(
       join(projectDir, "assets/foo.mp4"),
     );
   });
@@ -382,7 +507,7 @@ describe("FrameLookupTable", () => {
     expect(table.getActiveFramePayloads(4.5).get("hero")?.frameIndex).toBe(15);
   });
 
-  it("does not hold stale frames for non-looping clips after extracted frames end", () => {
+  it("holds the last frame for a non-looping clip until its authored slot ends", () => {
     const table = createFrameLookupTable(
       [
         {
@@ -399,7 +524,31 @@ describe("FrameLookupTable", () => {
     );
 
     expect(table.getActiveFramePayloads(0.5).has("hero")).toBe(true);
-    expect(table.getActiveFramePayloads(1.5).has("hero")).toBe(false);
+    expect(table.getActiveFramePayloads(1.5).get("hero")?.frameIndex).toBe(29);
+    expect(table.getActiveFramePayloads(4.5).get("hero")?.frameIndex).toBe(29);
+    expect(table.getFrame("hero", 4.5)).toBeTruthy();
+    expect(table.getActiveFramePayloads(5.1).has("hero")).toBe(false);
+    expect(table.getFrame("hero", 5.1)).toBeNull();
+  });
+
+  it("does not invent a held frame when extraction produced no frames", () => {
+    const table = createFrameLookupTable(
+      [
+        {
+          id: "hero",
+          src: "clip.webm",
+          start: 0,
+          end: 5,
+          mediaStart: 0,
+          loop: false,
+          hasAudio: false,
+        },
+      ],
+      [fakeExtracted(0, 30)],
+    );
+
+    expect(table.getActiveFramePayloads(4.5).has("hero")).toBe(false);
+    expect(table.getFrame("hero", 4.5)).toBeNull();
   });
 
   it("places a relative-reference video in its resolved window end-to-end (was blank)", () => {
@@ -441,10 +590,9 @@ describe("FrameLookupTable", () => {
     expect(table.getActiveFramePayloads(2.5).get("hero")?.frameIndex).toBe(45);
   });
 
-  it("holds the last frame at the clip end even when the source is shorter than the window", () => {
-    // clip [0,5] with only 1s of source (30 @ 30fps). The mid-clip tail stays
-    // blank (source exhausted), but t === end still holds the last frame to
-    // match the runtime's inclusive visibility.
+  it("holds the last frame across the tail when the source is shorter than the window", () => {
+    // clip [0,5] with only 1s of source (30 @ 30fps). The authored slot is the
+    // visibility contract, so the final source frame fills its remaining tail.
     const table = createFrameLookupTable(
       [
         {
@@ -459,7 +607,7 @@ describe("FrameLookupTable", () => {
       ],
       [fakeExtracted(30, 30)],
     );
-    expect(table.getActiveFramePayloads(1.5).has("hero")).toBe(false);
+    expect(table.getActiveFramePayloads(1.5).get("hero")?.frameIndex).toBe(29);
     expect(table.getActiveFramePayloads(5.0).get("hero")?.frameIndex).toBe(29);
   });
 
@@ -936,6 +1084,45 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
     return src;
   }
 
+  it("rejects a media start beyond source duration before invoking FFmpeg", async () => {
+    const src = await synthCfrClip("zero-output-src.mp4", 1);
+    const outputDir = join(FIXTURE_DIR, "out-zero-output");
+    await expect(
+      extractVideoFramesRange(src, "past-eof", 2, 1, { fps: 30, outputDir }),
+    ).rejects.toMatchObject({
+      kind: "media_start_out_of_range",
+      retryable: false,
+    });
+  }, 60_000);
+
+  it("preserves legacy metadata rejection unless typed aggregation is explicitly enabled", async () => {
+    const src = join(FIXTURE_DIR, "invalid-probe.mp4");
+    writeFileSync(src, "not a media container");
+    const video = cfrClipElement("invalid-probe", src, 1);
+
+    await expect(
+      extractAllVideoFrames([video], FIXTURE_DIR, {
+        fps: 30,
+        outputDir: join(FIXTURE_DIR, "out-invalid-probe-legacy"),
+      }),
+    ).rejects.toThrow();
+
+    const collected = await extractAllVideoFrames([video], FIXTURE_DIR, {
+      fps: 30,
+      outputDir: join(FIXTURE_DIR, "out-invalid-probe-typed"),
+      collectProbeFailures: true,
+    });
+    expect(collected.success).toBe(false);
+    expect(collected.extracted).toEqual([]);
+    expect(collected.errors).toEqual([
+      expect.objectContaining({
+        videoId: "invalid-probe",
+        kind: "invalid_media",
+        retryable: false,
+      }),
+    ]);
+  }, 60_000);
+
   async function synthHdrTaggedClip(name: string, durationSeconds: number): Promise<string> {
     const src = join(FIXTURE_DIR, name);
     const synth = await runFfmpeg([
@@ -959,6 +1146,12 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
       "smpte2084",
       "-colorspace",
       "bt2020nc",
+      // The -color_* flags above only tag the container/encoder context;
+      // whether they reach the H.264 VUI depends on the ffmpeg build (the
+      // pinned Windows CI build drops the transfer). Write the VUI directly
+      // so probing reports smpte2084 on every build (9/16/9 = bt2020/PQ/bt2020nc).
+      "-bsf:v",
+      "h264_metadata=colour_primaries=9:transfer_characteristics=16:matrix_coefficients=9",
       src,
     ]);
     if (!synth.success) {
@@ -1515,5 +1708,10 @@ describe("getFrameAtTime — IEEE 754 boundary precision", () => {
     const extracted = makeExtracted(25, 100);
     const frame = getFrameAtTime(extracted, 0, 0, false, 1.0);
     expect(frame).toBe("frame-0.jpg");
+  });
+
+  it("returns null after source exhaustion without an authored slot boundary", () => {
+    const extracted = makeExtracted(25, 25);
+    expect(getFrameAtTime(extracted, 3, 0)).toBeNull();
   });
 });

@@ -42,6 +42,10 @@ export interface EditorShellProps extends TimelineEditCallbackDeps {
     blockName: string,
     placement: TimelineDropPlacement,
   ) => Promise<void> | void;
+  handleTimelineCompositionDrop?: (
+    sourcePath: string,
+    placement: TimelineDropPlacement,
+  ) => Promise<void> | void;
   handlePreviewBlockDrop?: (
     blockName: string,
     position: { left: number; top: number },
@@ -52,6 +56,7 @@ export interface EditorShellProps extends TimelineEditCallbackDeps {
   ) => Promise<void> | void;
   setCompIdToSrc: (map: Map<string, string>) => void;
   setCompositionLoading: (loading: boolean) => void;
+  shouldShowMotionPath: boolean;
   shouldShowSelectedDomBounds: boolean;
   blockPreview?: BlockPreviewInfo | null;
   isGestureRecording?: boolean;
@@ -72,6 +77,7 @@ export function EditorShell({
   handleTimelineElementDelete,
   handleTimelineAssetDrop,
   handleTimelineBlockDrop,
+  handleTimelineCompositionDrop,
   handlePreviewBlockDrop,
   handleTimelineFileDrop,
   handleTimelineElementMove,
@@ -85,6 +91,7 @@ export function EditorShell({
   handleRazorSplitAll,
   setCompIdToSrc,
   setCompositionLoading,
+  shouldShowMotionPath,
   shouldShowSelectedDomBounds,
   isGestureRecording,
   recordingState,
@@ -140,9 +147,11 @@ export function EditorShell({
             onFileDrop={handleTimelineFileDrop}
             onAssetDrop={handleTimelineAssetDrop}
             onBlockDrop={handleTimelineBlockDrop}
+            onCompositionDrop={handleTimelineCompositionDrop}
             onDeleteElement={handleTimelineElementDelete}
             previewOverlay={
               <PreviewOverlays
+                shouldShowMotionPath={shouldShowMotionPath}
                 shouldShowSelectedDomBounds={shouldShowSelectedDomBounds}
                 blockPreview={blockPreview}
                 isGestureRecording={isGestureRecording}
@@ -174,6 +183,10 @@ interface EditorShellBodyProps {
   onFileDrop: (files: File[], placement?: TimelineDropPlacement) => Promise<void> | void;
   onAssetDrop: (assetPath: string, placement: TimelineDropPlacement) => Promise<void> | void;
   onBlockDrop?: (blockName: string, placement: TimelineDropPlacement) => Promise<void> | void;
+  onCompositionDrop?: (
+    sourcePath: string,
+    placement: TimelineDropPlacement,
+  ) => Promise<void> | void;
   onDeleteElement: (element: TimelineElement) => Promise<void> | void;
 }
 
@@ -189,6 +202,7 @@ function EditorShellBody({
   onFileDrop,
   onAssetDrop,
   onBlockDrop,
+  onCompositionDrop,
   onDeleteElement,
 }: EditorShellBodyProps) {
   const { compositionStack, updateCompositionStack, containerRef } = useNLEContext();
@@ -233,6 +247,7 @@ function EditorShellBody({
         onFileDrop={onFileDrop}
         onAssetDrop={onAssetDrop}
         onBlockDrop={onBlockDrop}
+        onCompositionDrop={onCompositionDrop}
         onDeleteElement={onDeleteElement}
         onSelectTimelineElement={onSelectTimelineElement}
         timelineFooter={

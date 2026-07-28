@@ -37,13 +37,18 @@ function createMockTimeline(duration: number): RuntimeTimelineLike {
 
 function createPaddableMockTimeline(duration: number): RuntimeTimelineLike {
   const timeline = createMockTimeline(duration) as RuntimeTimelineLike & {
-    to: (_target: object, vars: { duration: number }, position: number) => void;
+    to: (_target: object, vars: { duration: number }, position?: number) => void;
   };
   const baseDuration = timeline.duration;
   let paddedDuration = baseDuration();
   timeline.duration = () => paddedDuration;
+  // Mirrors GSAP: an omitted position appends sequentially at the current end.
   timeline.to = (_target, vars, position) => {
-    paddedDuration = Math.max(paddedDuration, position + Math.max(0, Number(vars.duration) || 0));
+    const resolvedPosition = position ?? paddedDuration;
+    paddedDuration = Math.max(
+      paddedDuration,
+      resolvedPosition + Math.max(0, Number(vars.duration) || 0),
+    );
   };
   return timeline;
 }
@@ -114,9 +119,225 @@ describe("initSandboxRuntimeModular", () => {
     delete (window as { __HF_EXPORT_RENDER_SEEK_CONFIG?: unknown }).__HF_EXPORT_RENDER_SEEK_CONFIG;
     delete window.__hfTimelinesBuilding;
     delete (window as { THREE?: unknown }).THREE;
+    delete (window as { __hfAutoNoopRegistered?: boolean }).__hfAutoNoopRegistered;
+    delete window.gsap;
     vi.restoreAllMocks();
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
+  });
+
+  it("resolves Studio hold as a deterministic step at the segment end", () => {
+    const defaultEase = (progress: number) => progress;
+    const originalParseEase = vi.fn(() => defaultEase);
+    window.gsap = {
+      timeline: () => createMockTimeline(1),
+      parseEase: originalParseEase,
+      registerPlugin: vi.fn(),
+    };
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "1");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    window.__timelines = { main: createMockTimeline(1) };
+
+    initSandboxRuntimeModular();
+
+    const first = window.gsap.parseEase?.("hold");
+    const second = window.gsap.parseEase?.("hold");
+    expect(first).toBeTypeOf("function");
+    expect(second).toBe(first);
+    if (typeof first !== "function") return;
+
+    expect([0, 0.25, 0.5, 0.99].map(first)).toEqual([0, 0, 0, 0]);
+    expect(first(1)).toBe(1);
+    expect(first(1.01)).toBe(1);
+    expect(originalParseEase).not.toHaveBeenCalledWith("hold");
+  });
+
+  it("repairs a keyframes tween's inner-timeline ease baked to undefined before custom-ease registration", () => {
+    // The composition inline script builds keyframes tweens BEFORE this runtime
+    // registers the custom eases, so a `{keyframes, ease:"hold"}` tween's inner
+    // timeline `_ease` bakes to undefined (GSAP resolves it once at build via the
+    // internal ease map). GSAP then throws "_ease is not a function" on the first
+    // render. The runtime must re-resolve that inner ease after registration.
+    window.gsap = {
+      timeline: () => createMockTimeline(20),
+      parseEase: vi.fn(() => (progress: number) => progress),
+      registerPlugin: vi.fn(),
+      registerEase: vi.fn(),
+    } as unknown as typeof window.gsap;
+
+    const innerTimeline: { _ease?: unknown } = { _ease: undefined };
+    const keyframesTween = {
+      vars: { ease: "hold", keyframes: { "0%": { x: 0 }, "100%": { x: 50 } } },
+      timeline: innerTimeline,
+      _ease: (progress: number) => progress,
+      targets: () => [document.createElement("div")],
+    };
+    const main = createMockTimeline(20);
+    main.getChildren = () => [keyframesTween as unknown as RuntimeTimelineLike];
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "20");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    window.__timelines = { main };
+
+    expect(innerTimeline._ease).toBeUndefined();
+    initSandboxRuntimeModular();
+    // Bind re-resolves the inner ease to a real function (the installed hold ease),
+    // so a subsequent render can call `timeline._ease(...)` without throwing.
+    expect(innerTimeline._ease).toBeTypeOf("function");
+  });
+
+  it("isolates a failed keyframe ease repair and reports it without skipping siblings", () => {
+    const outbound: Array<{ type?: string; event?: string }> = [];
+    vi.spyOn(window.parent, "postMessage").mockImplementation((message: unknown) => {
+      if (typeof message === "object" && message !== null) {
+        outbound.push(message as { type?: string; event?: string });
+      }
+    });
+    window.gsap = {
+      timeline: () => createMockTimeline(20),
+      parseEase: vi.fn((ease: unknown) => {
+        if (ease === "bad-ease") throw new Error("bad ease");
+        return (progress: number) => progress;
+      }),
+      registerPlugin: vi.fn(),
+      registerEase: vi.fn(),
+    } as unknown as typeof window.gsap;
+
+    const failedInner: { _ease?: unknown } = { _ease: undefined };
+    const repairedInner: { _ease?: unknown } = { _ease: undefined };
+    const main = createMockTimeline(20);
+    main.getChildren = () =>
+      [
+        { vars: { ease: "bad-ease", keyframes: {} }, timeline: failedInner },
+        { vars: { ease: "hold", keyframes: {} }, timeline: repairedInner },
+      ] as unknown as RuntimeTimelineLike[];
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-duration", "20");
+    document.body.appendChild(root);
+    window.__timelines = { main };
+
+    initSandboxRuntimeModular();
+
+    expect(failedInner._ease).toBeUndefined();
+    expect(repairedInner._ease).toBeTypeOf("function");
+    expect(outbound).toContainEqual(
+      expect.objectContaining({
+        type: "analytics",
+        event: "keyframe_ease_repair_failed",
+      }),
+    );
+  });
+
+  it("resolves Studio custom cubic-bezier eases on the composition GSAP instance", () => {
+    const defaultEase = (progress: number) => 1 - (1 - progress) ** 2;
+    const originalParseEase = vi.fn(() => defaultEase);
+    window.gsap = {
+      timeline: () => createMockTimeline(1),
+      parseEase: originalParseEase,
+      registerPlugin: vi.fn(),
+    };
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "1");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    window.__timelines = { main: createMockTimeline(1) };
+
+    initSandboxRuntimeModular();
+
+    const custom = "custom(M0,0 C0.42,0 0.58,1 1,1)";
+    const first = window.gsap.parseEase?.(custom);
+    const second = window.gsap.parseEase?.(custom);
+    expect(first).toBeTypeOf("function");
+    expect(second).toBe(first);
+    if (typeof first !== "function" || typeof second !== "function") return;
+
+    const progressSamples = [0, 0.25, 0.5, 0.75, 1];
+    expect(progressSamples.map(first)).toEqual(progressSamples.map(second));
+    expect(first(0.25)).toBeCloseTo(0.1292, 4);
+    expect(first(0.5)).toBeCloseTo(0.5, 6);
+    expect(first(0.5)).not.toBeCloseTo(defaultEase(0.5), 6);
+    expect(first(0.75)).toBeCloseTo(0.8708, 4);
+    expect(originalParseEase).not.toHaveBeenCalledWith(custom);
+
+    expect(window.gsap.parseEase?.("power1.out")).toBe(defaultEase);
+    expect(originalParseEase).toHaveBeenCalledWith("power1.out");
+    expect(window.gsap.parseEase?.("custom(not-a-path)")).toBe(defaultEase);
+    expect(originalParseEase).toHaveBeenCalledWith("custom(not-a-path)");
+
+    const installedParseEase = window.gsap.parseEase;
+    initSandboxRuntimeModular();
+    expect(window.gsap.parseEase).toBe(installedParseEase);
+
+    window.gsap = {
+      timeline: () => createMockTimeline(1),
+      parseEase: vi.fn(() => defaultEase),
+      registerPlugin: vi.fn(),
+    };
+    initSandboxRuntimeModular();
+    const freshResolution = window.gsap.parseEase?.(custom);
+    expect(freshResolution).toBeTypeOf("function");
+    if (typeof freshResolution === "function") {
+      expect(progressSamples.map(freshResolution)).toEqual(progressSamples.map(first));
+    }
+  });
+
+  it("resolves Studio spring eases as deterministic oscillations that settle exactly", () => {
+    const defaultEase = (progress: number) => progress;
+    const originalParseEase = vi.fn(() => defaultEase);
+    window.gsap = {
+      timeline: () => createMockTimeline(1),
+      parseEase: originalParseEase,
+      registerPlugin: vi.fn(),
+    };
+
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "1");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+    window.__timelines = { main: createMockTimeline(1) };
+
+    initSandboxRuntimeModular();
+
+    const first = window.gsap.parseEase?.("spring(0.5)");
+    const second = window.gsap.parseEase?.("spring(0.5)");
+    expect(first).toBeTypeOf("function");
+    expect(second).toBe(first);
+    if (typeof first !== "function" || typeof second !== "function") return;
+
+    const samples = Array.from({ length: 101 }, (_, index) => first(index / 100));
+    expect(first(0)).toBe(0);
+    expect(first(1)).toBe(1);
+    expect(Math.max(...samples)).toBeGreaterThan(1);
+    expect(samples).toEqual(Array.from({ length: 101 }, (_, index) => second(index / 100)));
+    expect(originalParseEase).not.toHaveBeenCalledWith("spring(0.5)");
+
+    expect(window.gsap.parseEase?.("power1.out")).toBe(defaultEase);
+    expect(originalParseEase).toHaveBeenCalledWith("power1.out");
   });
 
   it("keeps authored composition hosts visible when the live child timeline is shorter", () => {
@@ -325,6 +546,33 @@ describe("initSandboxRuntimeModular", () => {
     expect(child.style.visibility).toBe("hidden");
   });
 
+  it("uses a half-open interval around a timed element's end boundary", () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+
+    const clip = document.createElement("div");
+    clip.setAttribute("data-start", "0");
+    clip.setAttribute("data-duration", "2.5");
+    root.appendChild(clip);
+
+    window.__timelines = { main: createMockTimeline(5) };
+    initSandboxRuntimeModular();
+
+    window.__player?.renderSeek(2.5 - 1e-9);
+    expect(clip.style.visibility).toBe("visible");
+
+    window.__player?.renderSeek(2.5);
+    expect(clip.style.visibility).toBe("hidden");
+
+    window.__player?.renderSeek(2.5 + 1e-9);
+    expect(clip.style.visibility).toBe("hidden");
+  });
+
   it("keeps external composition hosts visible through their authored duration", async () => {
     const root = document.createElement("div");
     root.setAttribute("data-composition-id", "main");
@@ -365,6 +613,43 @@ describe("initSandboxRuntimeModular", () => {
     player?.renderSeek(2);
 
     expect(child.style.visibility).toBe("visible");
+  });
+
+  it("removes external composition head links during runtime teardown", async () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+
+    const child = document.createElement("div");
+    child.setAttribute("data-composition-id", "sub");
+    child.setAttribute("data-composition-src", "https://example.com/compositions/sub.html");
+    child.setAttribute("data-start", "0");
+    child.setAttribute("data-duration", "3");
+    root.appendChild(child);
+
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        `<html><head><link rel="stylesheet" href="./sub.css"></head><body><template id="sub-template"><div data-composition-id="sub">Sub</div></template></body></html>`,
+        { status: 200 },
+      ),
+    );
+    window.__timelines = { main: createMockTimeline(3), sub: createMockTimeline(3) };
+
+    initSandboxRuntimeModular();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+
+    const injectedLink = document.head.querySelector<HTMLLinkElement>(
+      'link[href="https://example.com/compositions/sub.css"]',
+    );
+    expect(injectedLink).not.toBeNull();
+
+    window.__hfRuntimeTeardown?.();
+
+    expect(injectedLink?.isConnected).toBe(false);
   });
 
   it("keeps compiled external composition hosts visible through their authored duration", async () => {
@@ -1033,6 +1318,33 @@ describe("initSandboxRuntimeModular", () => {
     expect(hookHost.style.visibility).toBe("visible");
   });
 
+  it("seeks child compositions in source time using host offset and playback rate", () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "20");
+    document.body.appendChild(root);
+
+    const child = document.createElement("div");
+    child.setAttribute("data-composition-id", "child");
+    child.setAttribute("data-start", "3");
+    child.setAttribute("data-duration", "8");
+    child.setAttribute("data-playback-start", "1.5");
+    child.setAttribute("data-playback-rate", "2");
+    root.appendChild(child);
+
+    const childTimeline = createMockTimeline(6);
+    window.__timelines = { main: createMockTimeline(20), child: childTimeline };
+    initSandboxRuntimeModular();
+
+    window.__player?.renderSeek(5);
+    expect(childTimeline.time()).toBeCloseTo(5.5);
+
+    window.__player?.renderSeek(10);
+    expect(childTimeline.time()).toBe(6);
+  });
+
   it("keeps the root GSAP render nudge for normal frames but not silent probes", () => {
     const root = document.createElement("div");
     root.setAttribute("data-composition-id", "main");
@@ -1224,6 +1536,53 @@ describe("initSandboxRuntimeModular", () => {
     expect(video.style.visibility).toBe("hidden");
   });
 
+  it("allocates color grading only for the active timed media", () => {
+    const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "4");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+
+    const futureComposition = document.createElement("div");
+    futureComposition.id = "future-composition";
+    futureComposition.setAttribute("data-start", "2");
+    root.appendChild(futureComposition);
+
+    for (const [id, start] of [
+      ["first", "0"],
+      ["second", "2"],
+    ]) {
+      const video = document.createElement("video");
+      video.id = id;
+      video.setAttribute("data-start", start);
+      video.setAttribute("data-duration", "2");
+      video.setAttribute("data-color-grading", '{"adjust":{"exposure":0.1}}');
+      Object.defineProperty(video, "paused", { value: true, configurable: true });
+      Object.defineProperty(video, "readyState", { value: 0, configurable: true });
+      video.load = () => {};
+      root.appendChild(video);
+    }
+
+    window.__timelines = { main: createMockTimeline(4) };
+    initSandboxRuntimeModular();
+
+    expect(getContextSpy).toHaveBeenCalledTimes(1);
+    expect(document.getElementById("first")?.style.visibility).toBe("visible");
+    expect(document.getElementById("second")?.style.visibility).toBe("hidden");
+    expect(futureComposition.style.visibility).toBe("");
+    expect(futureComposition.style.display).toBe("");
+
+    window.__player?.seek(3);
+
+    expect(getContextSpy).toHaveBeenCalledTimes(2);
+    expect(document.getElementById("first")?.style.visibility).toBe("hidden");
+    expect(document.getElementById("second")?.style.visibility).toBe("visible");
+  });
+
   it("plays scheduled child timelines without a captured root timeline when audio has failed", () => {
     const raf = createManualRaf();
     vi.spyOn(performance, "now").mockImplementation(() => raf.now());
@@ -1327,6 +1686,118 @@ describe("initSandboxRuntimeModular", () => {
     },
   );
 
+  it("ignores the async media-metadata duration rebind once render capture has started seeking frames (regression HF#2550)", async () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+
+    const video = document.createElement("video");
+    video.setAttribute("data-start", "0");
+    document.body.appendChild(video);
+
+    // A root timeline with no usable duration yet — mirrors a composition
+    // whose length is derived from a full-length <video> that hasn't reported
+    // its metadata. window.gsap is needed because resolveRootTimelineFromDocument
+    // builds a fresh duration-floor wrapper timeline via gsap.timeline().
+    (
+      window as unknown as {
+        gsap?: { timeline: () => ReturnType<typeof createPaddableMockTimeline> };
+      }
+    ).gsap = {
+      timeline: () => createPaddableMockTimeline(0),
+    };
+    window.__timelines = { main: createMockTimeline(0) };
+    // Only a real producer render/export page sets this (fileServer.ts's
+    // pre-head script) — required alongside renderCaptureSeekStarted so the
+    // gate doesn't also disable Studio's own preview-iframe rebind.
+    window.__HF_EXPORT_RENDER_SEEK_CONFIG = { fps: 30, fpsSource: "default" };
+
+    const postMessageSpy = vi.spyOn(window, "postMessage");
+
+    try {
+      initSandboxRuntimeModular();
+
+      // The render/producer capture protocol has claimed the timeline and is
+      // now driving frames deterministically (mirrors the engine's
+      // window.__hf.seek(t) -> player.renderSeek(t) bridge).
+      window.__player?.renderSeek(0);
+
+      // Let the runtime's own deferred re-bind attempt (init.ts's
+      // `setTimeout(() => maybePublishRenderReady(), 0)`, unrelated to media
+      // metadata) settle first, so only the metadata path below is under test.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Video metadata resolves late — after capture has started, the exact
+      // HF#2550 race (Docker/slow-I/O environments hit this; fast native
+      // environments resolve metadata before capture begins and never do).
+      Object.defineProperty(video, "duration", { value: 12, configurable: true });
+      video.dispatchEvent(new Event("loadedmetadata"));
+
+      // Clears init.ts's internal METADATA_REBIND_DEBOUNCE_MS (100ms, not exported).
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const rebindMessages = postMessageSpy.mock.calls
+        .map(([message]) => message as { code?: string } | undefined)
+        .filter((message) => message?.code === "timeline_rebind_after_media_metadata");
+      expect(rebindMessages).toHaveLength(0);
+    } finally {
+      delete (window as { gsap?: unknown }).gsap;
+    }
+  });
+
+  it("still applies the media-metadata duration rebind after renderSeek in Studio preview (no export render-seek config)", async () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+
+    const video = document.createElement("video");
+    video.setAttribute("data-start", "0");
+    document.body.appendChild(video);
+
+    (
+      window as unknown as {
+        gsap?: { timeline: () => ReturnType<typeof createPaddableMockTimeline> };
+      }
+    ).gsap = {
+      timeline: () => createPaddableMockTimeline(0),
+    };
+    window.__timelines = { main: createMockTimeline(0) };
+    // No window.__HF_EXPORT_RENDER_SEEK_CONFIG here — Studio's preview iframe
+    // never sets it, and useTimelinePlayer's overhang fallback drives
+    // renderSeek there too. The rebind must still fire for this case.
+
+    const postMessageSpy = vi.spyOn(window, "postMessage");
+
+    try {
+      initSandboxRuntimeModular();
+
+      window.__player?.renderSeek(0);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      Object.defineProperty(video, "duration", { value: 12, configurable: true });
+      video.dispatchEvent(new Event("loadedmetadata"));
+
+      // Clears init.ts's internal METADATA_REBIND_DEBOUNCE_MS (100ms, not exported).
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const rebindMessages = postMessageSpy.mock.calls
+        .map(([message]) => message as { code?: string } | undefined)
+        .filter((message) => message?.code === "timeline_rebind_after_media_metadata");
+      expect(rebindMessages).toHaveLength(1);
+    } finally {
+      delete (window as { gsap?: unknown }).gsap;
+    }
+  });
+
   it("sets __renderReady only after timeline is bound, not at __playerReady time", async () => {
     const root = document.createElement("div");
     root.setAttribute("data-composition-id", "main");
@@ -1369,6 +1840,36 @@ describe("initSandboxRuntimeModular", () => {
     expect(window.__playerReady).toBe(true);
     expect(window.__renderReady).toBe(false);
     expect(window.__player?.getDuration()).toBe(0);
+
+    timelineDuration = 10;
+    window.__hfTimelinesBuilding = false;
+    window.dispatchEvent(new CustomEvent("hf-timelines-built"));
+
+    expect(window.__renderReady).toBe(true);
+    expect(window.__player?.getDuration()).toBe(10);
+  });
+
+  it("resumes readiness when GSAP batching starts after runtime initialization", async () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+
+    let timelineDuration = 0;
+    const timeline = createMockTimeline(0);
+    timeline.duration = () => timelineDuration;
+    window.__timelines = { main: timeline };
+    window.__hfTimelinesBuilding = false;
+
+    initSandboxRuntimeModular();
+    expect(window.__renderReady).toBe(true);
+
+    window.__hfTimelinesBuilding = true;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(window.__renderReady).toBe(false);
 
     timelineDuration = 10;
     window.__hfTimelinesBuilding = false;
@@ -1607,6 +2108,59 @@ describe("initSandboxRuntimeModular", () => {
     expect(seekTimes[seekTimes.length - 1]).toBe(0);
   });
 
+  it("accepts replayed transport controls when the bridge announces ready without duplicate listeners", () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "root");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-duration", "5");
+    root.setAttribute("data-width", "1920");
+    root.setAttribute("data-height", "1080");
+    document.body.appendChild(root);
+
+    const timeline = createMockTimeline(5);
+    timeline.timeScale = vi.fn();
+    window.__timelines = { root: timeline };
+    const outbound: Array<Record<string, unknown>> = [];
+    vi.spyOn(window.parent, "postMessage").mockImplementation((message: unknown) => {
+      if (typeof message !== "object" || message === null) return;
+      const payload = message as Record<string, unknown>;
+      outbound.push(payload);
+      if (payload.source !== "hf-preview" || payload.type !== "ready") return;
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            source: "hf-parent",
+            type: "control",
+            action: "seek",
+            timeSeconds: 2,
+          },
+        }),
+      );
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: {
+            source: "hf-parent",
+            type: "control",
+            action: "set-playback-rate",
+            playbackRate: 2,
+          },
+        }),
+      );
+    });
+
+    expect(() => initSandboxRuntimeModular()).not.toThrow();
+    expect(() => initSandboxRuntimeModular()).not.toThrow();
+
+    expect(timeline.time()).toBe(2);
+    expect(timeline.timeScale).toHaveBeenLastCalledWith(2);
+    expect(outbound.filter((message) => message.type === "ready")).toHaveLength(2);
+    expect(
+      outbound.filter(
+        (message) => message.type === "analytics" && message.event === "composition_seeked",
+      ),
+    ).toHaveLength(2);
+  });
+
   it("restores timed element visibility after a forced timeline rebind", () => {
     document.body.innerHTML = `
       <div data-composition-id="root" data-root="true" data-duration="30" data-width="1920" data-height="1080">
@@ -1831,6 +2385,36 @@ describe("initSandboxRuntimeModular", () => {
     expect(seekTimes.length).toBeGreaterThan(beforeResume);
   });
 
+  it("redraws animated grading from the transport clock only during playback", () => {
+    const raf = createManualRaf();
+    vi.spyOn(performance, "now").mockImplementation(() => raf.now());
+    window.requestAnimationFrame = raf.requestAnimationFrame as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = raf.cancelAnimationFrame as typeof window.cancelAnimationFrame;
+
+    document.body.innerHTML = `
+      <div data-composition-id="root" data-duration="5" data-width="1920" data-height="1080"></div>
+    `;
+    window.__timelines = { root: createMockTimeline(5) };
+    initSandboxRuntimeModular();
+
+    const runtime = (
+      window as Window & { __hf?: { colorGrading?: { redrawAnimated: () => number } } }
+    ).__hf?.colorGrading;
+    if (!runtime) throw new Error("Expected color grading runtime");
+    const redrawAnimated = vi.spyOn(runtime, "redrawAnimated");
+
+    raf.step(16);
+    expect(redrawAnimated).not.toHaveBeenCalled();
+
+    window.__player?.play();
+    raf.step(16);
+    expect(redrawAnimated).toHaveBeenCalledTimes(1);
+
+    window.__player?.pause();
+    raf.step(16);
+    expect(redrawAnimated).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a usable bound timeline when the registry entry is replaced", () => {
     const raf = createManualRaf();
     vi.spyOn(performance, "now").mockImplementation(() => raf.now());
@@ -1939,6 +2523,37 @@ describe("initSandboxRuntimeModular", () => {
       expect(footer.style.position).toBe("");
       expect(footer.style.top).toBe("");
       expect(footer.style.left).toBe("");
+    });
+  });
+  describe("partial registry timelines", () => {
+    it("survives play/pause/seek when the sole registered timeline lacks pause()", () => {
+      const root = document.createElement("div");
+      root.setAttribute("data-composition-id", "main");
+      root.setAttribute("data-root", "true");
+      root.setAttribute("data-start", "0");
+      root.setAttribute("data-duration", "10");
+      root.setAttribute("data-width", "1920");
+      root.setAttribute("data-height", "1080");
+      document.body.appendChild(root);
+
+      // An authored composition can register a PARTIAL timeline — duration/seek
+      // only. It renders fine (the render path never pauses), so the interactive
+      // transport must tolerate the missing pause() instead of throwing
+      // "tl.pause is not a function" (top recurring studio unhandled error).
+      const partial = createMockTimeline(10) as RuntimeTimelineLike & { pause?: unknown };
+      delete partial.pause;
+      window.__timelines = { main: partial as RuntimeTimelineLike };
+
+      initSandboxRuntimeModular();
+      const player = window.__player;
+      expect(player).toBeDefined();
+
+      expect(() => {
+        player?.play();
+        player?.pause();
+        player?.seek(1);
+        player?.renderSeek(2);
+      }).not.toThrow();
     });
   });
 });

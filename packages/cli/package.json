@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/cli",
-  "version": "0.7.56",
+  "version": "0.7.78",
   "description": "HyperFrames CLI — create, preview, and render HTML video compositions",
   "license": "Apache-2.0",
   "repository": {
@@ -9,9 +9,10 @@
     "directory": "packages/cli"
   },
   "bin": {
-    "hyperframes": "./dist/cli.js"
+    "hyperframes": "./bin/hyperframes.mjs"
   },
   "files": [
+    "bin",
     "dist"
   ],
   "type": "module",
@@ -38,7 +39,8 @@
     "fontkit": "^2.0.4",
     "giget": "^3.2.0",
     "hono": "^4.0.0",
-    "onnxruntime-node": "^1.20.0",
+    "ignore": "^5.3.2",
+    "onnxruntime-node": "1.23.2",
     "open": "^10.0.0",
     "postcss": "^8.5.8",
     "prettier": "^3.8.1",
@@ -52,6 +54,7 @@
     "@hyperframes/engine": "workspace:*",
     "@hyperframes/gcp-cloud-run": "workspace:*",
     "@hyperframes/lint": "workspace:*",
+    "@hyperframes/parsers": "workspace:*",
     "@hyperframes/producer": "workspace:*",
     "@hyperframes/studio": "workspace:*",
     "@hyperframes/studio-server": "workspace:*",

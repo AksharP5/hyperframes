@@ -4,7 +4,7 @@ import type {
   TimelineGroupMoveChange,
 } from "./useTimelineGroupEditing";
 
-interface MoveEdit {
+export interface TimelineMoveEdit {
   element: TimelineElement;
   updates: Pick<TimelineElement, "start" | "track">;
 }
@@ -18,20 +18,30 @@ interface AtomicMoveDeps {
 
 export type TimelineMoveOperation = "timing" | "lane-reorder" | "track-insert";
 
+export type TimelineMoveEditsHandler = (
+  edits: TimelineMoveEdit[],
+  coalesceKey?: string,
+  operation?: TimelineMoveOperation,
+  coalesceMs?: number,
+) => Promise<void>;
+
 export function persistTimelineMoveEditsAtomically(
-  edits: MoveEdit[],
+  edits: TimelineMoveEdit[],
   coalesceKey: string | undefined,
   operation: TimelineMoveOperation,
   deps: AtomicMoveDeps,
+  coalesceMs?: number,
 ): Promise<void> {
   return deps.handleTimelineGroupMove(
     edits.map(({ element, updates }) => ({
       element,
       start: updates.start,
-      // A single vertical edit is the z-only reorder path. Multi-edit gestures
-      // are track inserts/ripples and must persist every resulting lane index.
-      track: operation === "track-insert" ? updates.track : undefined,
+      // Stable track lanes: a lane is the authored data-track-index, so every
+      // vertical gesture (lane-reorder AND track-insert) must persist the track;
+      // z is paint order only and is synced separately. Plain horizontal moves
+      // ("timing") omit it so they stay eligible for the SDK fast path.
+      track: operation === "timing" ? undefined : updates.track,
     })),
-    { coalesceKey },
+    { coalesceKey, coalesceMs },
   );
 }

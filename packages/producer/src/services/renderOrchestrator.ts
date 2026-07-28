@@ -43,8 +43,15 @@ import {
   copyFileSync,
   appendFileSync,
 } from "fs";
+import { tmpdir } from "node:os";
 import { parseHTML } from "linkedom";
-import { type CanvasResolution, type Fps, type FpsInput, toFps } from "@hyperframes/core";
+import {
+  type CanvasResolution,
+  type Fps,
+  type FpsInput,
+  fpsToNumber,
+  toFps,
+} from "@hyperframes/core";
 import {
   type EngineConfig,
   resolveConfig,
@@ -67,13 +74,20 @@ import {
   LOW_MEMORY_TOTAL_MB_THRESHOLD,
   assertConfiguredFfmpegBinariesExist,
   type CapturePerfSummary,
+  type CaptureWarning,
   type SubTimelineWaitOutcome,
+  type WorkerSizing,
   resolveBrowserGpuMode,
   resolveHeadlessShellPath,
+  applyConcreteGpuScreenshotClamp,
   scaleProtocolTimeoutForComposition,
+  classifyCaptureFailure,
+  cloneCaptureWarning,
   isMemoryExhaustionError,
-  isTransientBrowserError,
   isDrawElementVerificationError,
+  getDrawElementVerificationDetails,
+  augmentProtocolTimeoutError,
+  augmentPageNavigationTimeoutError,
 } from "@hyperframes/engine";
 import { join, dirname, resolve } from "path";
 import { totalmem } from "node:os";
@@ -88,13 +102,24 @@ import {
 } from "./fileServer.js";
 import { defaultLogger, type ProducerLogger } from "../logger.js";
 import { createMemorySampler, type MemorySampler, updateJobStatus } from "./render/shared.js";
-import { buildRenderErrorDetails, cleanupRenderResources, safeCleanup } from "./render/cleanup.js";
+import { buildRenderErrorDetails } from "./render/cleanup.js";
+import { publishRenderFailure } from "./render/renderEventPublisher.js";
+import { RenderExecutionContext } from "./render/renderExecutionContext.js";
+import { ArtifactTransaction } from "./render/artifactTransaction.js";
+import {
+  createCapturePlan,
+  replanAfterFailure,
+  type CapturePlan,
+  type SdrDiskCapturePlan,
+  type CaptureRouting,
+} from "./render/capturePlan.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { formatCaptureFrameName } from "../utils/paths.js";
 import { resolveEffectiveHdrMode } from "./render/hdrMode.js";
 import {
   buildRenderPerfSummary,
   pushWorkerDedupPerfs,
+  roundDb,
   worstSubTimelineWaitOutcome,
 } from "./render/perfSummary.js";
 import { getCaptureStageBrowserConsole } from "./render/captureStageError.js";
@@ -102,6 +127,7 @@ import { resolveVideoCaptureBeyondViewport } from "./render/captureBeyondViewpor
 import {
   type CaptureCalibrationSample,
   type CaptureCostEstimate,
+  buildHeapAdvisoryWarning,
   resolveRenderWorkerCount,
   runCaptureCalibration,
 } from "./render/captureCost.js";
@@ -114,9 +140,18 @@ import {
   type RenderObservationData,
   type RenderObservabilitySummary,
 } from "./render/observability.js";
+import { emitFallbackCaptureProfile } from "./render/fallbackCaptureProfile.js";
 import { type HdrPerfCollector, type HdrPerfSummary } from "./render/hdrPerf.js";
+import {
+  assertVideoFrameCoverage,
+  computeVideoFrameCoverage,
+  countAuthoredTimedClips,
+  resolveVideoCoverageThreshold,
+  type VideoFrameCoverageReport,
+} from "./render/videoFrameCoverage.js";
 import { runCompileStage } from "./render/stages/compileStage.js";
 import { runProbeStage } from "./render/stages/probeStage.js";
+import { validateRenderDuration } from "./render/planValidation.js";
 import {
   runExtractVideosStage,
   shouldCopyExtractedFrames,
@@ -165,11 +200,25 @@ function sampleDirectoryBytes(dir: string): number {
 function summarizeExtractionObservability(
   extractionResult: ExtractionResult | null,
   videoCount: number,
+  coverageReports?: readonly VideoFrameCoverageReport[],
+  authoredTimedClipCount?: number,
 ): RenderExtractionObservability {
   const extracted = extractionResult?.extracted ?? [];
   const totalFramesExtracted = extractionResult?.totalFramesExtracted ?? 0;
   const maxFramesPerVideo = extracted.reduce((max, item) => Math.max(max, item.totalFrames), 0);
   const phaseBreakdown = extractionResult?.phaseBreakdown;
+  // Only surface the coverage gauges when we actually ran the gate — a
+  // no-video render must not emit a spurious `minVideoFrameCoverageRatio`
+  // that dashboards interpret as "coverage measured, was 0/0=1".
+  const coverageGauges =
+    coverageReports && coverageReports.length > 0
+      ? {
+          minVideoFrameCoverageRatio: coverageReports.reduce(
+            (min, r) => Math.min(min, r.ratio),
+            Number.POSITIVE_INFINITY,
+          ),
+        }
+      : {};
   return {
     videoCount,
     extractedVideoCount: extracted.length,
@@ -182,6 +231,9 @@ function summarizeExtractionObservability(
     vfrPreflightCount: phaseBreakdown?.vfrPreflightCount,
     cacheHits: phaseBreakdown?.cacheHits,
     cacheMisses: phaseBreakdown?.cacheMisses,
+    transientRetries: phaseBreakdown?.transientRetries,
+    ...coverageGauges,
+    authoredTimedClipCount,
   };
 }
 
@@ -194,6 +246,13 @@ export type RenderStatus =
   | "complete"
   | "failed"
   | "cancelled";
+
+export type RenderOutcome = "completed" | "completed_with_warnings" | "failed" | "cancelled";
+export type RenderStrictness = "strict" | "best-effort";
+
+export interface RenderWarning extends CaptureWarning {
+  stage: "capture-readiness";
+}
 
 export interface RenderConfig {
   /**
@@ -252,6 +311,8 @@ export interface RenderConfig {
   workers?: number;
   useGpu?: boolean;
   debug?: boolean;
+  /** Strict rejects correctness warnings; best-effort returns a qualified outcome. */
+  strictness?: RenderStrictness;
   /** Entry HTML file relative to projectDir. Defaults to "index.html". */
   entryFile?: string;
   /** Full producer config. When provided, env vars are not read. */
@@ -293,6 +354,21 @@ export interface RenderConfig {
    * HDR constraints.
    */
   outputResolution?: CanvasResolution;
+  /**
+   * True when `outputResolution` was normalized from an aspect-agnostic alias
+   * (`1080p`, `hd`, `4k`, `uhd`) rather than a preset that names its own
+   * orientation (`landscape`, `portrait`, `1080p-portrait`, …). Set by the
+   * CLI + server layers via `isAspectAgnosticResolutionAlias(rawInput)` at
+   * flag/body parse time.
+   *
+   * When true, the compile stage adapts the preset to the composition's
+   * orientation before calling `resolveDeviceScaleFactor` — a portrait
+   * 1080×1920 composition with `--resolution 1080p` (normalized to
+   * `landscape`) is re-mapped to `portrait`, honoring the user's intent
+   * ("render at 1080p") without forcing them to know the aspect-suffixed
+   * alias (`1080p-portrait`). Explicit orientation presets stay strict.
+   */
+  outputResolutionAspectAgnostic?: boolean;
 }
 
 export interface RenderPerfSummary {
@@ -301,6 +377,14 @@ export interface RenderPerfSummary {
   fps: number;
   quality: string;
   workers: number;
+  /**
+   * Provenance of the auto worker-sizing decision (undefined when the
+   * htmlInCanvas / low-memory pins short-circuited sizing). `boundBy` names
+   * the binding constraint; the heap fields are the advisory budget being
+   * validated by fleet telemetry before enforcement — see
+   * `computeWorkerSizing` in @hyperframes/engine.
+   */
+  workerSizing?: WorkerSizing;
   chunkedEncode: boolean;
   chunkSizeFrames: number | null;
   compositionDurationSeconds: number;
@@ -414,6 +498,8 @@ export interface RenderPerfSummary {
     preRouterWorkers?: number;
     /** Engine init-time gate: swiftshader | css_effect:* | at_risk_timeline | 3d_init_failed | supersampling | render_mode_hint. */
     gateReason?: string;
+    /** Low-cardinality GPU bucket from DE session init (`<backend>/<vendor>`, e.g. `d3d11/nvidia`); |-joined across parallel sessions (bounded: one bucket per distinct backend on the host). */
+    gpuRenderer?: string;
     /** Worker-encode drain (the verified path) was active. */
     workerEncode: boolean;
     /** Self-verification ground-truth samples armed at init. */
@@ -433,6 +519,12 @@ export interface RenderPerfSummary {
     selfVerifyFallback: boolean;
     /** What tripped the fallback retry: psnr | blank | oom | capture_error. */
     fallbackReason?: string;
+    /** The failing PSNR (dB) when `fallbackReason === "psnr"`; undefined for blank/oom/capture_error (no score exists). */
+    fallbackFailedDb?: number;
+    /** Frame index the verification failure was detected at; set for both "psnr" and "blank" fallback reasons. */
+    fallbackFrameIndex?: number;
+    /** The HF_DE_VERIFY_MIN_DB threshold the failing dB breached; only set alongside fallbackFailedDb (psnr reason). */
+    fallbackThresholdDb?: number;
     /** Blank-guard counters. */
     blankSuspects: number;
     blankDeterministicAccepts: number;
@@ -476,6 +568,8 @@ export interface RenderJob {
   createdAt: Date;
   startedAt?: Date;
   completedAt?: Date;
+  outcome?: RenderOutcome;
+  warnings: RenderWarning[];
   error?: string;
   outputPath?: string;
   duration?: number;
@@ -497,7 +591,62 @@ export interface RenderJob {
   };
 }
 
-export type ProgressCallback = (job: RenderJob, message: string) => void;
+export type ProgressCallback = (job: RenderJob, message: string) => void | Promise<void>;
+
+export class RenderQualityError extends Error {
+  constructor(readonly warnings: readonly RenderWarning[]) {
+    super(
+      `Render blocked by ${warnings.length} correctness warning${warnings.length === 1 ? "" : "s"}: ` +
+        warnings.map((warning) => warning.code).join(", "),
+    );
+    this.name = "RenderQualityError";
+  }
+}
+
+export function applyRenderWarningPolicy(
+  job: RenderJob,
+  captureWarnings: readonly CaptureWarning[],
+  log: ProducerLogger = defaultLogger,
+): void {
+  job.warnings ??= [];
+  const existing = new Set(
+    job.warnings.map((warning) => `${warning.code}:${JSON.stringify(warning.details ?? {})}`),
+  );
+  for (const warning of captureWarnings) {
+    const key = `${warning.code}:${JSON.stringify(warning.details ?? {})}`;
+    if (existing.has(key)) continue;
+    existing.add(key);
+    job.warnings.push({
+      ...cloneCaptureWarning(warning),
+      stage: "capture-readiness",
+    });
+  }
+  if (job.warnings.length === 0) return;
+
+  const strictness = job.config.strictness ?? "best-effort";
+  const typedRetryability = job.warnings.flatMap((warning) =>
+    warning.details?.retryable === undefined ? [] : [warning.details.retryable],
+  );
+  log.warn("Render completed capture with correctness warnings", {
+    strictness,
+    warningCodes: job.warnings.map((warning) => warning.code),
+    warningReasons: job.warnings.flatMap((warning) => warning.details?.failureReasons ?? []),
+    warningStages: job.warnings.flatMap((warning) => warning.details?.failureStages ?? []),
+    warningOwners: job.warnings.flatMap((warning) =>
+      warning.details?.failureOwner ? [warning.details.failureOwner] : [],
+    ),
+    warningRetryable:
+      typedRetryability.length === 0
+        ? undefined
+        : typedRetryability.every((retryable) => retryable),
+  });
+  const hasAudioProcessingFailure = job.warnings.some(
+    (warning) => warning.code === "audio_processing_failed",
+  );
+  if (strictness === "strict" || hasAudioProcessingFailure) {
+    throw new RenderQualityError(job.warnings);
+  }
+}
 
 export class RenderCancelledError extends Error {
   reason: "user_cancelled" | "timeout" | "aborted";
@@ -511,41 +660,34 @@ export class RenderCancelledError extends Error {
   }
 }
 
-function installDebugLogger(logPath: string, log: ProducerLogger = defaultLogger): () => void {
-  const origLog = console.log;
-  const origError = console.error;
-  const origWarn = console.warn;
-
+export function createRenderFileLogger(
+  logPath: string,
+  base: ProducerLogger = defaultLogger,
+): ProducerLogger {
   const write = (prefix: string, args: unknown[]) => {
     const ts = new Date().toISOString();
     const line = `[${ts}] ${prefix} ${args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ")}\n`;
     try {
       appendFileSync(logPath, line);
     } catch (err) {
-      log.debug("Debug log write failed", {
+      base.debug("Debug log write failed", {
         logPath,
         error: err instanceof Error ? err.message : String(err),
       });
     }
   };
-
-  console.log = (...args: unknown[]) => {
-    write("LOG", args);
-    origLog(...args);
+  const wrap = (level: "error" | "warn" | "info" | "debug", prefix: string) => {
+    return (message: string, meta?: Record<string, unknown>) => {
+      write(prefix, meta ? [message, meta] : [message]);
+      base[level](message, meta);
+    };
   };
-  console.error = (...args: unknown[]) => {
-    write("ERR", args);
-    origError(...args);
-  };
-  console.warn = (...args: unknown[]) => {
-    write("WRN", args);
-    origWarn(...args);
-  };
-
-  return () => {
-    console.log = origLog;
-    console.error = origError;
-    console.warn = origWarn;
+  return {
+    error: wrap("error", "ERR"),
+    warn: wrap("warn", "WRN"),
+    info: wrap("info", "LOG"),
+    debug: wrap("debug", "DBG"),
+    isLevelEnabled: (level) => base.isLevelEnabled?.(level) ?? true,
   };
 }
 
@@ -658,6 +800,16 @@ export function getNextRetryWorkerCount(currentWorkers: number): number {
   return Math.max(1, Math.floor(currentWorkers / 2));
 }
 
+export function resolveRenderWorkDirPrefix(
+  outputPath: string,
+  jobId: string,
+  platform: NodeJS.Platform = process.platform,
+  systemTempDir: string = tmpdir(),
+): string {
+  if (platform === "win32") return join(systemTempDir, "hf-render-");
+  return join(dirname(outputPath), `work-${jobId}-`);
+}
+
 /**
  * Bounded number of retries for transient browser deaths (a `Target closed` /
  * `Page crashed` — the tab died, not the composition). Distinct from the
@@ -692,12 +844,9 @@ export function resetCaptureAttemptProgress(job: { framesRendered?: number }): v
 
 export function isRecoverableParallelCaptureError(error: unknown): boolean {
   const message = normalizeErrorMessage(error);
-  return (
-    message.includes("[Parallel] Capture failed") &&
-    /Runtime\.callFunctionOn timed out|HeadlessExperimental\.beginFrame timed out|Waiting failed|timeout exceeded|timed out|Navigation timeout|Protocol error|Target closed/i.test(
-      message,
-    )
-  );
+  if (!message.includes("[Parallel] Capture failed")) return false;
+  const kind = classifyCaptureFailure(error).kind;
+  return kind === "transient_browser" || kind === "protocol_timeout";
 }
 
 /**
@@ -871,11 +1020,26 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
       missingRanges = remaining;
       attempt++;
     } catch (error) {
+      const failure = classifyCaptureFailure(error, { signal: options.abortSignal });
       // A cancelled render tears the browser down, which surfaces as a
       // transient-looking `Target closed`. Rethrow immediately so cancellation
       // never burns a retry (or logs a misleading transient-failure warning) —
       // the caller's abort handling owns cancellation.
-      if (options.abortSignal?.aborted) {
+      if (failure.kind === "cancelled") {
+        throw error;
+      }
+      // A drawElement self-verify breach (a parallel disk worker's sampled
+      // frame diverged from its pre-injection ground truth) is a CORRECTNESS
+      // failure, not a missing-frame one: the damaged frames are written
+      // complete to disk, so the presence/size-only findMissingFrameRanges
+      // below would count them present and wrongly return success — shipping
+      // the exact compositor damage this verify exists to catch. Rethrow so
+      // the orchestrator's disk-stage screenshot retry fires (mirrors the
+      // `cancelled` guard; a worker-halving retry here would only re-run
+      // drawElement and re-damage). Structural detection walks the aggregated
+      // CaptureFailure → worker CaptureFailure → DrawElementVerificationError
+      // cause chain.
+      if (isDrawElementVerificationError(error)) {
         throw error;
       }
       const remaining = findMissingFrameRanges(
@@ -904,7 +1068,7 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
       // retry for the session-init phase they share.
       if (
         options.allowRetry &&
-        isTransientBrowserError(error) &&
+        failure.kind === "transient_browser" &&
         transientRetriesUsed < MAX_TRANSIENT_CAPTURE_RETRIES
       ) {
         transientRetriesUsed++;
@@ -958,11 +1122,16 @@ export type RenderConfigInput = Omit<RenderConfig, "fps"> & { fps: FpsInput };
 export function createRenderJob(config: RenderConfigInput): RenderJob {
   return {
     id: randomUUID(),
-    config: { ...config, fps: toFps(config.fps) },
+    config: {
+      ...config,
+      fps: toFps(config.fps),
+      strictness: config.strictness ?? "best-effort",
+    },
     status: "queued",
     progress: 0,
     currentStage: "Queued",
     createdAt: new Date(),
+    warnings: [],
   };
 }
 
@@ -1171,9 +1340,14 @@ export function resolveInversionRetryPlan(args: {
  * but the decision itself stays gated behind its own flag pending the
  * telemetry soak (revert rate, de_verify_min_db distribution) on real wild
  * traffic — there is currently none, since nothing routes here by default.
- * Takes priority over the single-worker inversion when both would fire (a
- * higher minFrames than HF_DE_SINGLE_MIN_FRAMES is the intended shape: this
- * only picks up the long tail the inversion's own benchmark didn't cover).
+ * Takes priority over the single-worker inversion when both would fire.
+ * Re-calibrated 2026-07-27: a controlled crossover sweep (three content
+ * profiles including a genuinely init-expensive 24-sub-composition comp;
+ * worker counts and capture modes verified per run) found par3 > single at
+ * every size from 350f up in every profile — workers init concurrently, so
+ * per-worker init duplication costs CPU, not wall-clock. minFrames therefore
+ * dropped below the inversion's threshold (700 vs 900): where both fire,
+ * parallel wins over the inversion's single-worker pick (+17–21% at 700f).
  */
 export function shouldPreferParallelDrawElement(args: {
   workerCount: number;
@@ -1192,6 +1366,16 @@ export function shouldPreferParallelDrawElement(args: {
   experimentalParallelDeOptIn: boolean;
   /** HF_DE_PARALLEL_ROUTER === "true" — the router's own kill switch, default off. */
   routerEnabled: boolean;
+  /**
+   * Whether verified parallel DE STREAMING can actually run for this render
+   * (`shouldUseStreamingEncode` at the router's worker count with
+   * forceParallelStream). The router's entire value is that path; without it
+   * firing would pin workerCount to 3 and skip calibration while delivering
+   * none of the benefit — e.g. a composition longer than
+   * `streamingEncodeMaxDurationSeconds` (240 s default), where the duration
+   * cap disables streaming before the router's force flag is consulted.
+   */
+  parallelStreamingAvailable: boolean;
   /** Machine RAM (os.totalmem, MB). */
   totalMemoryMb: number;
   /** RAM floor for routing; <=0 disables the guard. */
@@ -1199,6 +1383,7 @@ export function shouldPreferParallelDrawElement(args: {
 }): boolean {
   return (
     args.routerEnabled &&
+    args.parallelStreamingAvailable &&
     args.workerCount > 1 &&
     typeof args.requestedWorkers !== "number" &&
     args.useDrawElement &&
@@ -1310,6 +1495,31 @@ export function shouldRetryViaPinnedFallback(args: {
 }
 
 /**
+ * When a self-verify (or pinned-fallback) retry is triggered mid-capture, the
+ * caller may still hold a live probe session that the failed stage was passed
+ * but did not (or could not) close in its own `finally` before it threw. Left
+ * behind, that session's Chrome process orphans until the containing render
+ * exits — precisely when we are recovering from GPU/memory pressure and can
+ * least afford an unaccounted Chrome. Close it before the caller clears its
+ * reference; swallow any close error with a warn so the retry itself is never
+ * derailed by a shutdown hiccup.
+ */
+export async function closeOrphanedProbeForRetry(
+  probe: CaptureSession,
+  closer: (session: CaptureSession) => Promise<void>,
+  log: Pick<ProducerLogger, "warn">,
+  retryContext: string,
+): Promise<void> {
+  try {
+    await closer(probe);
+  } catch (closeErr) {
+    log.warn(`[Render] probe close before ${retryContext} retry failed; continuing with retry`, {
+      error: closeErr instanceof Error ? closeErr.message : String(closeErr),
+    });
+  }
+}
+
+/**
  * Parallel-streaming router for NON-drawElement capture (screenshot on
  * macOS/Windows/forced-screenshot, BeginFrame on Linux): should this
  * multi-worker render stream captured frame buffers straight into the single
@@ -1416,6 +1626,29 @@ export function extractStandaloneEntryFromIndex(
 }
 
 /**
+ * Telemetry fields a drawElement self-verify failure contributes to the
+ * fallback record. Shared by the streaming and parallel-disk verify catches
+ * so the `verifyDetails` → `de_fallback_*` mapping lives in one place — a new
+ * field is added once, not once per capture path. `kind` is read structurally
+ * off the error (never from message text), so a reworded/translated/
+ * cross-module-serialized error can't flip "blank" into "psnr".
+ */
+function deVerifyFallbackTelemetry(err: unknown): {
+  reason: "psnr" | "blank";
+  failedDb?: number;
+  frameIndex?: number;
+  thresholdDb?: number;
+} {
+  const details = getDrawElementVerificationDetails(err);
+  return {
+    reason: details?.kind ?? "psnr",
+    failedDb: roundDb(details?.failedDb),
+    frameIndex: details?.frameIndex,
+    thresholdDb: roundDb(details?.verifyThresholdDb),
+  };
+}
+
+/**
  * Render a `RenderJob` end-to-end: compile → probe → extract videos →
  * audio → capture → encode → assemble. The function body is a thin
  * sequencer over the eight stage modules in `./render/stages/`; the
@@ -1429,7 +1662,7 @@ export async function executeRenderJob(
   job: RenderJob,
   projectDir: string,
   outputPath: string,
-  onProgress?: ProgressCallback,
+  progressSink?: ProgressCallback,
   abortSignal?: AbortSignal,
 ): Promise<void> {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -1441,13 +1674,58 @@ export async function executeRenderJob(
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
   const workDir = job.config.debug
     ? join(debugDir, job.id)
-    : mkdtempSync(join(outputDir, `work-${job.id}-`));
+    : mkdtempSync(resolveRenderWorkDirPrefix(outputPath, job.id));
   const pipelineStart = Date.now();
-  const log = job.config.logger ?? defaultLogger;
+  const baseLog = job.config.logger ?? defaultLogger;
+  const logPath = job.config.debug ? join(workDir, "render.log") : null;
+  const execution = new RenderExecutionContext({
+    request: { renderJobId: job.id, projectDir, outputPath },
+    logger: logPath ? createRenderFileLogger(logPath, baseLog) : baseLog,
+    progressSink,
+    signal: abortSignal,
+  });
+  const log = execution.logger;
+  execution.defer("remove workDir", () => {
+    if (job.config.debug) return;
+    if (job.status === "complete" && process.env.KEEP_TEMP === "1") {
+      log.info("KEEP_TEMP=1 — leaving workDir on disk for inspection", { workDir });
+      return;
+    }
+    rmSync(workDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  });
+
+  try {
+    await executeRenderPipeline({
+      job,
+      projectDir,
+      outputPath,
+      workDir,
+      logPath,
+      pipelineStart,
+      execution,
+    });
+  } finally {
+    await execution.dispose();
+  }
+}
+
+async function executeRenderPipeline(input: {
+  job: RenderJob;
+  projectDir: string;
+  outputPath: string;
+  workDir: string;
+  logPath: string | null;
+  pipelineStart: number;
+  execution: RenderExecutionContext;
+}): Promise<void> {
+  const { job, projectDir, outputPath, workDir, logPath, pipelineStart, execution } = input;
+  const log = execution.logger;
+  const eventPublisher = execution.events;
+  const onProgress = execution.onProgress;
+  const executionSignal = execution.signal;
   let fileServer: FileServerHandle | null = null;
   let probeSession: CaptureSession | null = null;
   let lastBrowserConsole: string[] = [];
-  let restoreLogger: (() => void) | null = null;
   // Composition dimensions captured for the error path (OOM guidance). Assigned
   // once the composition metadata / frame count are resolved inside the try.
   let captureCompositionWidth: number | undefined;
@@ -1471,6 +1749,11 @@ export async function executeRenderJob(
   const isMov = outputFormat === "mov";
   const isPngSequence = outputFormat === "png-sequence";
   const isGif = outputFormat === "gif";
+  const artifactTransaction = new ArtifactTransaction(
+    outputPath,
+    isPngSequence ? "directory" : "file",
+  );
+  const stagedOutputPath = artifactTransaction.stagingPath;
   const needsAlpha = isWebm || isMov || isPngSequence;
   // `forceScreenshot` is resolved exactly once inside `compileStage` (alpha
   // output + composition `renderModeHints` are folded together there) and
@@ -1506,25 +1789,41 @@ export async function executeRenderJob(
   // the sub-timeline-wait outcome for a render that fails downstream of a
   // fail-fast (aggregated into the success-path perf summary below too).
   const dedupPerfs: CapturePerfSummary[] = [];
+  const layeredCaptureWarnings: CaptureWarning[] = [];
   const recordTransientRetryObservability = (): void => {
     const count = captureAttempts.filter((a) => a.reason === "transient-retry").length;
     if (count > 0) updateCaptureObservability({ transientRetries: count });
   };
-  // Declared outside the try so `finally` can stop the interval, but
-  // the sampler is created INSIDE the try so a synchronous throw
-  // between declaration and the try-block (currently impossible, but
-  // defensible if more setup ever lands here) can't leak the interval.
+  // The execution context's dynamic disposer reads this binding, so any
+  // sampler acquired by the pipeline is stopped by the unconditional outer
+  // finally even when setup or terminal reporting throws.
   let memSampler: MemorySampler | null = null;
   // "routed" = the parallel router fired and held; "reverted" = fired but
   // the self-verify retry rolled back; undefined = never fired.
   let deParallelRouter: "routed" | "reverted" | undefined;
+  let workerSizing: WorkerSizing | undefined;
+
+  execution.defer("rollback staged artifact", () => artifactTransaction.rollback());
+  execution.defer("close file server", () => {
+    if (!fileServer) return;
+    closeFileServerSafely(fileServer, "renderExecutionContext", log);
+    fileServer = null;
+  });
+  execution.defer("close probe session", async () => {
+    if (!probeSession) return;
+    const session = probeSession;
+    probeSession = null;
+    await closeCaptureSession(session);
+  });
+  execution.defer("stop memory sampler", () => {
+    memSampler?.stop();
+    memSampler = null;
+  });
 
   try {
     memSampler = createMemorySampler();
     const assertNotAborted = () => {
-      if (abortSignal?.aborted) {
-        throw new RenderCancelledError("render_cancelled");
-      }
+      execution.assertActive(() => new RenderCancelledError("render_cancelled"));
     };
 
     job.startedAt = new Date();
@@ -1534,8 +1833,6 @@ export async function executeRenderJob(
     if (!existsSync(workDir)) mkdirSync(workDir, { recursive: true });
 
     if (job.config.debug) {
-      const logPath = join(workDir, "render.log");
-      restoreLogger = installDebugLogger(logPath, log);
       log.info("[Render] Debug artifacts enabled", { workDir, logPath });
     }
 
@@ -1663,6 +1960,16 @@ export async function executeRenderJob(
     let captureParallelStreamForced = false;
     let deSelfVerifyFallback = false;
     let deFallbackReason: string | undefined;
+    // Structured detail behind deFallbackReason's "blank"/"psnr" bucket — the
+    // failing dB and frame index otherwise only exist as text inside the
+    // thrown error's message, unavailable to telemetry. Rounded once here
+    // (roundDb) so both downstream consumers — the render_complete
+    // perfSummary path and the crash-survival RenderCaptureObservability
+    // mirror — report the identical dB, not two different precisions for
+    // the same underlying score (review finding).
+    let deFallbackFailedDb: number | undefined;
+    let deFallbackFrameIndex: number | undefined;
+    let deFallbackThresholdDb: number | undefined;
     let deDrainStats: import("./render/stages/captureStreamingStage.js").DeDrainStats | undefined;
     updateCaptureObservability({ forceScreenshot: captureForceScreenshot });
     observability.checkpoint("compile", "composition metadata resolved", {
@@ -1728,7 +2035,7 @@ export async function executeRenderJob(
     const probeResult = await observeRenderStage(
       observability,
       "browser_probe",
-      { forceScreenshot: captureForceScreenshot },
+      { forceScreenshot: captureForceScreenshot, stagePhase: "calibrating" },
       () =>
         runProbeStage({
           projectDir,
@@ -1745,6 +2052,10 @@ export async function executeRenderJob(
           needsAlpha,
           deviceScaleFactor,
         }),
+      // Browser probe is pre-capture; report `browser calibrating` so a
+      // slow probe (~64s SwiftShader warm-up on Windows was the reported
+      // shape) doesn't read as a zero-frame stall. Field signal ts=1784019503.
+      { heartbeatMessage: "browser calibrating (frames not started)" },
     );
     compiled = probeResult.compiled;
     compositionHash = computeCompositionObservabilityHash(compiled.html);
@@ -1761,6 +2072,11 @@ export async function executeRenderJob(
     job.totalFrames = probeResult.totalFrames;
     const totalFrames = probeResult.totalFrames;
     captureTotalFrames = totalFrames;
+    validateRenderDuration({
+      duration: probeResult.duration,
+      totalFrames,
+      fps: fpsToNumber(job.config.fps),
+    });
 
     perfStages.browserProbeMs = probeResult.browserProbeMs;
     perfStages.compileMs = Date.now() - stage1Start;
@@ -1795,7 +2111,7 @@ export async function executeRenderJob(
           cfg,
           log,
           composition,
-          abortSignal,
+          abortSignal: executionSignal,
           assertNotAborted,
           // Copy (don't symlink) extracted frames on Windows — symlinkSync throws
           // EPERM there without Developer Mode/admin, which failed local renders.
@@ -1813,11 +2129,31 @@ export async function executeRenderJob(
       imageTransfers,
       hdrImageSrcPaths,
       imageColorSpaces,
+      failureToEnforce,
     } = extractResult;
     perfStages.videoExtractMs = extractResult.videoExtractMs;
+
+    // ── Parity gate: per-clip captured-vs-expected-frame coverage ───────
+    // Fail loudly BEFORE encode if any clip's delivered frames fall below
+    // the threshold — check/snapshot passes on individual frames while the
+    // encoded MP4 silently renders the clip blank (field signal
+    // ts=1784139267: 15-injection later-clip drop; see videoFrameCoverage.ts).
+    // Also count authored `[data-start]` clip windows as a coarse proxy
+    // for the ts=1784144554 authored-clip-count-scaled failure shape.
+    const coverageReports: VideoFrameCoverageReport[] = extractionResult
+      ? computeVideoFrameCoverage(
+          composition.videos,
+          extractionResult.extracted,
+          fpsToNumber(job.config.fps),
+        )
+      : [];
+    const coverageThreshold = resolveVideoCoverageThreshold();
+    const authoredTimedClipCount = countAuthoredTimedClips(compiled.html);
     extractionObservability = summarizeExtractionObservability(
       extractionResult,
       composition.videos.length,
+      coverageReports,
+      authoredTimedClipCount,
     );
     observability.checkpoint("video_extract", "frames resolved", {
       videoCount: extractionObservability.videoCount,
@@ -1829,7 +2165,17 @@ export async function executeRenderJob(
       vfrPreflightMs: extractionObservability.vfrPreflightMs ?? null,
       cacheHits: extractionObservability.cacheHits ?? null,
       cacheMisses: extractionObservability.cacheMisses ?? null,
+      transientRetries: extractionObservability.transientRetries ?? null,
+      minVideoFrameCoverageRatio: extractionObservability.minVideoFrameCoverageRatio ?? null,
+      authoredTimedClipCount: extractionObservability.authoredTimedClipCount ?? null,
     });
+    if (failureToEnforce) throw failureToEnforce;
+    // Gate AFTER the checkpoint so a coverage-failed render still emits
+    // the observability row (partial telemetry is still worth having).
+    // `assertVideoFrameCoverage` no-ops on an empty report list AND on a
+    // null threshold, so the gate is inert for no-video + opted-out
+    // renders alike.
+    assertVideoFrameCoverage(coverageReports, coverageThreshold);
 
     // ── HDR auto-detection ──────────────────────────────────────────────
     const effectiveHdr = resolveEffectiveHdrMode({
@@ -1860,14 +2206,41 @@ export async function executeRenderJob(
           compiledDir,
           duration: probeResult.duration,
           audios: composition.audios,
-          abortSignal,
+          abortSignal: executionSignal,
           assertNotAborted,
         }),
     );
     const { audioOutputPath, hasAudio } = audioResult;
     perfStages.audioProcessMs = audioResult.audioProcessMs;
     if (audioResult.audioError) {
-      log.warn(`[Render] Audio mix failed — output will be video-only: ${audioResult.audioError}`);
+      const audioFailures = audioResult.audioFailures ?? [];
+      const failureOwner =
+        audioFailures.length === 0
+          ? undefined
+          : audioFailures.some((failure) => failure.owner === "system")
+            ? "system"
+            : "user";
+      const retryable =
+        audioFailures.length === 0
+          ? undefined
+          : audioFailures.every((failure) => failure.retryable);
+      applyRenderWarningPolicy(
+        job,
+        [
+          {
+            code: "audio_processing_failed",
+            message: `Audio mix failed; output would be video-only: ${audioResult.audioError}`,
+            details: {
+              mediaType: "audio",
+              failureReasons: [...new Set(audioFailures.map((failure) => failure.reason))],
+              failureStages: [...new Set(audioFailures.map((failure) => failure.stage))],
+              failureOwner,
+              retryable,
+            },
+          },
+        ],
+        log,
+      );
     }
 
     // ── Stage 4: Frame capture ──────────────────────────────────────────
@@ -1908,7 +2281,28 @@ export async function executeRenderJob(
       chromePath: resolveHeadlessShellPath(cfg),
       browserTimeout: cfg.browserTimeout,
     });
-    updateCaptureObservability({ browserGpuMode: resolvedBrowserGpuMode });
+    // Apply the software-GPU→screenshot clamp to the AUTHORITATIVE local
+    // `captureForceScreenshot` (not just the observability copy) so all
+    // downstream strategy + telemetry code reads the corrected value.
+    // Otherwise: `frameCapture.ts` clamps its own local and routes
+    // screenshot, but the still-`false` orchestrator local (a) mislabels the
+    // parallel-stream logging as "beginframe" below and (b) overwrites the
+    // earlier observability correction back to BeginFrame at the
+    // capture_strategy telemetry site. `resolveConfig` couldn't see
+    // `browserGpuMode:"auto"` resolving to software at config time, so
+    // `captureForceScreenshot` was still `compileResult.forceScreenshot === false`
+    // on that path. Both env and programmatic opt-outs preserved via
+    // `applyConcreteGpuScreenshotClamp` (the programmatic one carried on the
+    // config as `forceScreenshotExplicitlyOptedOut`).
+    captureForceScreenshot = applyConcreteGpuScreenshotClamp(
+      captureForceScreenshot,
+      resolvedBrowserGpuMode,
+      cfg,
+    );
+    updateCaptureObservability({
+      browserGpuMode: resolvedBrowserGpuMode,
+      forceScreenshot: captureForceScreenshot,
+    });
     const videoCaptureBeyondViewport = resolveVideoCaptureBeyondViewport(composition.videos.length);
 
     const captureOptions: CaptureOptions = {
@@ -2036,18 +2430,27 @@ export async function executeRenderJob(
         process.env.HF_DE_PARALLEL_STREAM === "true",
     });
     // DE parallel-router eligibility — see shouldPreferParallelDrawElement.
-    // Default-off (HF_DE_PARALLEL_ROUTER); HF_DE_PARALLEL_MIN_FRAMES defaults
-    // higher than the single-worker inversion's threshold since it targets
-    // the long tail the inversion's own benchmark didn't cover.
+    // Default-off (HF_DE_PARALLEL_ROUTER); HF_DE_PARALLEL_MIN_FRAMES default
+    // 700, re-calibrated 2026-07-27 from the original safe-high 2000. A
+    // controlled frame-count sweep (fixed content-per-frame, three synthetic
+    // profiles × {350..3000f} × {single,par2,par3} × 3 reps, worker counts +
+    // capture modes verified per run) showed par3 beating single at EVERY
+    // size in every profile — +17–21% at 700f rising to +28–34% at 3000f —
+    // including a 24-sub-composition profile built to reproduce the
+    // "workers re-pay init" failure (92k tweens, ~2.5s
+    // pollSubCompositionTimelines per worker): workers init CONCURRENTLY, so
+    // duplicated init costs CPU, not wall-clock. Below ~700f the win thins
+    // toward ~+10% while still paying 3 hardware-GPU browsers, so the floor
+    // stays. Harness: plans/drawelement-fast-capture/de-crossover-bench.sh.
     const deParallelRouterEnabled = process.env.HF_DE_PARALLEL_ROUTER === "true";
     const deParallelMinFramesRaw = process.env.HF_DE_PARALLEL_MIN_FRAMES;
     const deParallelMinFramesNum =
       deParallelMinFramesRaw === undefined || deParallelMinFramesRaw.trim() === ""
-        ? 2000
+        ? 700
         : Number(deParallelMinFramesRaw);
     const deParallelMinFrames = Number.isFinite(deParallelMinFramesNum)
       ? deParallelMinFramesNum
-      : 2000;
+      : 700;
     // RAM floor default 24 GB: the wild black-slab report was a 16 GB
     // machine; every clean routed cohort in telemetry so far is >=24 GB.
     // HF_DE_PARALLEL_MIN_MEM_MB overrides (0 disables the guard).
@@ -2078,6 +2481,15 @@ export async function executeRenderJob(
         process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true" ||
         process.env.HF_DE_PARALLEL_STREAM === "true",
       routerEnabled: deParallelRouterEnabled,
+      // Router pins 3 workers for the streaming path; don't pin when the
+      // duration cap (or any other streaming gate) would turn that path off.
+      parallelStreamingAvailable: shouldUseStreamingEncode(
+        cfg,
+        outputFormat,
+        3,
+        job.duration,
+        true,
+      ),
       totalMemoryMb: Math.round(totalmem() / (1024 * 1024)),
       minMemoryMb: deParallelMinMemoryMb,
     });
@@ -2085,9 +2497,15 @@ export async function executeRenderJob(
     // captureStageObservationData can close over it for the calibration
     // stage itself — reads as undefined until resolveRenderWorkerCount runs.
     let workerCount: number;
+    // Default `stagePhase` — spread FIRST so a caller can override via
+    // `extra` (the calibration call site passes `stagePhase: "calibrating"`
+    // to distinguish healthy pre-capture waits from actual zero-frame stalls
+    // during capture; heartbeats in `capture_calibration` otherwise emit
+    // `framesCompleted: 0` and read as broken). Field signal ts=1784019503.
     const captureStageObservationData = (
       extra: RenderObservationData = {},
     ): RenderObservationData => ({
+      stagePhase: "capturing",
       ...extra,
       get workerCount() {
         return workerCount;
@@ -2137,7 +2555,14 @@ export async function executeRenderJob(
       const outcome = await observeRenderStage(
         observability,
         "capture_calibration",
-        captureStageObservationData({ forceScreenshot: captureForceScreenshot }),
+        captureStageObservationData({
+          forceScreenshot: captureForceScreenshot,
+          // Override the default `capturing` — calibration writes probe
+          // frames only, not `job.framesRendered`, so heartbeats reporting
+          // `framesCompleted: 0` misread as broken. Field signal
+          // ts=1784019503.
+          stagePhase: "calibrating",
+        }),
         () =>
           runCaptureCalibration({
             cfg,
@@ -2152,6 +2577,7 @@ export async function executeRenderJob(
             createRenderVideoFrameInjector,
             assertNotAborted,
           }),
+        { heartbeatMessage: "browser calibrating (frames not started)" },
       );
       captureCalibration = outcome.calibration;
       captureForceScreenshot = outcome.forceScreenshot;
@@ -2185,6 +2611,16 @@ export async function executeRenderJob(
       compiled,
       log,
       captureCalibration?.estimate,
+      (sizing) => {
+        workerSizing = sizing;
+        const heapAdvisory = buildHeapAdvisoryWarning(sizing, job.config.workers);
+        if (heapAdvisory) {
+          log.warn(heapAdvisory, {
+            heapLimitMb: sizing.heapLimitMb,
+            heapBasedWorkers: sizing.heapBasedWorkers,
+          });
+        }
+      },
     );
     // DE priority inversion — see shouldPreferSingleWorkerDrawElement for the
     // policy and benchmark rationale (eligibility resolved above, before
@@ -2242,6 +2678,11 @@ export async function executeRenderJob(
       // any resource-pressure failure unique to this cohort.
       dePreInversionWorkers: deWorkerInversion ? preRoutingWorkerCount : undefined,
       dePreRouterWorkers: deParallelRouter ? preRoutingWorkerCount : undefined,
+      // Same rationale as the counters above: carried on live capture
+      // observability, not only the success-path perfSummary, so a crash /
+      // OOM / timeout still reports which GPU backend it happened on. That
+      // is the cohort the win32 D3D11 rollout most needs to attribute.
+      deGpuRenderer: probeSession?.gpuRenderer,
     });
     observability.checkpoint("worker_resolution", "resolved", {
       workerCount,
@@ -2417,22 +2858,116 @@ export async function executeRenderJob(
         hasShaderTransitions: compiled.hasShaderTransitions && !isGif,
         isPngSequence,
       });
-    updateCaptureObservability({
+    const inversionFallback = resolveInversionRetryPlan({
+      deWorkerInversion,
+      preInversionWorkerCount: preRoutingWorkerCount,
+      cfg,
+      outputFormat,
+      durationSeconds: job.duration,
+      isMemoryExhaustion: false,
+    });
+    const inversionMemoryExhaustionFallback = resolveInversionRetryPlan({
+      deWorkerInversion,
+      preInversionWorkerCount: preRoutingWorkerCount,
+      cfg,
+      outputFormat,
+      durationSeconds: job.duration,
+      isMemoryExhaustion: true,
+    });
+    const parallelRouterFallback = resolveParallelRouterRetryPlan({
+      deParallelRouter,
+      preRouterWorkerCount: preRoutingWorkerCount,
+      cfg,
+      outputFormat,
+      durationSeconds: job.duration,
+      isMemoryExhaustion: false,
+    });
+    const parallelRouterMemoryExhaustionFallback = resolveParallelRouterRetryPlan({
+      deParallelRouter,
+      preRouterWorkerCount: preRoutingWorkerCount,
+      cfg,
+      outputFormat,
+      durationSeconds: job.duration,
+      isMemoryExhaustion: true,
+    });
+    const captureRouting: CaptureRouting =
+      inversionFallback && inversionMemoryExhaustionFallback
+        ? {
+            kind: "worker_inversion",
+            state: "active",
+            fallback: {
+              kind: inversionFallback.useStreamingEncode ? "sdr_streaming" : "sdr_disk",
+              workerCount: inversionFallback.workerCount,
+              forceParallelStream: false,
+            },
+            memoryExhaustionFallback: {
+              kind: inversionMemoryExhaustionFallback.useStreamingEncode
+                ? "sdr_streaming"
+                : "sdr_disk",
+              workerCount: inversionMemoryExhaustionFallback.workerCount,
+              forceParallelStream: false,
+            },
+          }
+        : parallelRouterFallback && parallelRouterMemoryExhaustionFallback
+          ? {
+              kind: "parallel_router",
+              state: "active",
+              fallback: {
+                kind: parallelRouterFallback.useStreamingEncode ? "sdr_streaming" : "sdr_disk",
+                workerCount: parallelRouterFallback.workerCount,
+                forceParallelStream: false,
+              },
+              memoryExhaustionFallback: {
+                kind: parallelRouterMemoryExhaustionFallback.useStreamingEncode
+                  ? "sdr_streaming"
+                  : "sdr_disk",
+                workerCount: parallelRouterMemoryExhaustionFallback.workerCount,
+                forceParallelStream: false,
+              },
+            }
+          : { kind: "default" };
+    let capturePlan: CapturePlan = createCapturePlan({
       workerCount,
+      forceScreenshot: captureForceScreenshot,
+      forceParallelStream: deParallelStreamForced || captureParallelStreamForced,
       useStreamingEncode,
       useLayeredComposite,
       usePageSideCompositing: usePageSideCompositingForTransitions,
       hasHdrContent,
-      forceScreenshot: captureForceScreenshot,
+      needsAlpha,
+      routing: captureRouting,
+    });
+    const syncCapturePlan = (): void => {
+      workerCount = capturePlan.workerCount;
+      captureForceScreenshot = capturePlan.forceScreenshot;
+      useStreamingEncode = capturePlan.kind === "sdr_streaming";
+      deParallelStreamForced =
+        capturePlan.kind === "sdr_streaming" && capturePlan.forceParallelStream;
+      if (capturePlan.routing.kind === "worker_inversion") {
+        deWorkerInversion = capturePlan.routing.state === "active" ? "inverted" : "reverted";
+      }
+      if (capturePlan.routing.kind === "parallel_router") {
+        deParallelRouter = capturePlan.routing.state === "active" ? "routed" : "reverted";
+      }
+    };
+    syncCapturePlan();
+    updateCaptureObservability({
+      workerCount: capturePlan.workerCount,
+      useStreamingEncode: capturePlan.kind === "sdr_streaming",
+      useLayeredComposite: capturePlan.kind === "hdr_layered",
+      usePageSideCompositing: capturePlan.usePageSideCompositing,
+      hasHdrContent: capturePlan.hasHdrContent,
+      forceScreenshot: capturePlan.forceScreenshot,
     });
     observability.checkpoint("capture_strategy", "resolved", {
-      workerCount,
-      forceScreenshot: captureForceScreenshot,
+      plan: capturePlan.kind,
+      workerCount: capturePlan.workerCount,
+      forceScreenshot: capturePlan.forceScreenshot,
       captureBeyondViewport: resolvedCaptureBeyondViewport ?? null,
-      useStreamingEncode,
-      useLayeredComposite,
-      usePageSideCompositing: usePageSideCompositingForTransitions,
-      hasHdrContent,
+      useStreamingEncode: capturePlan.kind === "sdr_streaming",
+      useLayeredComposite: capturePlan.kind === "hdr_layered",
+      usePageSideCompositing: capturePlan.usePageSideCompositing,
+      hasHdrContent: capturePlan.hasHdrContent,
       hasShaderTransitions: compiled.hasShaderTransitions,
       isPngSequence,
     });
@@ -2474,13 +3009,13 @@ export async function executeRenderJob(
     // into the active rgb48le signal space. Shader transitions use this same
     // path for SDR compositions so the engine can apply transition math to
     // isolated scene buffers instead of recording plain DOM screenshots.
-    if (useLayeredComposite) {
+    if (capturePlan.kind === "hdr_layered") {
+      const layeredPlan = capturePlan;
       // Layered composite always runs in screenshot mode — keep
       // `captureForceScreenshot` in sync so the perf summary and any
       // post-HDR diagnostic that reads the boolean see the same value
       // the stage uses internally.
-      captureForceScreenshot = true;
-      updateCaptureObservability({ forceScreenshot: captureForceScreenshot });
+      updateCaptureObservability({ forceScreenshot: layeredPlan.forceScreenshot });
       const hdrRes = await observeRenderStage(
         observability,
         "capture_hdr_layered",
@@ -2489,7 +3024,7 @@ export async function executeRenderJob(
           runCaptureHdrStage({
             job,
             cfg,
-            forceScreenshot: captureForceScreenshot,
+            plan: layeredPlan,
             log,
             projectDir,
             compiledDir,
@@ -2513,12 +3048,13 @@ export async function executeRenderJob(
             buildCaptureOptions,
             createRenderVideoFrameInjector,
             hdrDiagnostics,
-            abortSignal,
+            abortSignal: executionSignal,
             assertNotAborted,
             onProgress,
           }),
       );
       lastBrowserConsole = hdrRes.lastBrowserConsole;
+      layeredCaptureWarnings.push(...hdrRes.warnings);
       hdrPerf = hdrRes.hdrPerf;
       perfStages.captureMs = hdrRes.captureDurationMs;
       perfStages.captureFrameMs = hdrRes.captureDurationMs;
@@ -2531,9 +3067,13 @@ export async function executeRenderJob(
       // streaming spawn fails (non-abort) the stage returns { success: false }
       // and we fall back to the disk path below.
       let streamingHandled = false;
-      if (useStreamingEncode) {
+      if (capturePlan.kind === "sdr_streaming") {
         const captureFrameStart = Date.now();
         const invokeStreaming = () => {
+          if (capturePlan.kind !== "sdr_streaming") {
+            throw new Error(`Cannot invoke streaming stage with ${capturePlan.kind} plan`);
+          }
+          const streamingPlan = capturePlan;
           resetCaptureAttemptProgress(job);
           return observeRenderStage(
             observability,
@@ -2548,12 +3088,10 @@ export async function executeRenderJob(
                 job,
                 totalFrames,
                 cfg,
-                forceScreenshot: captureForceScreenshot,
+                plan: streamingPlan,
                 log,
-                workerCount,
                 probeSession,
                 outputFormat,
-                forceParallelStream: deParallelStreamForced || captureParallelStreamForced,
                 streamingEncoderOptions: {
                   fps: job.config.fps,
                   width,
@@ -2570,7 +3108,7 @@ export async function executeRenderJob(
                 },
                 buildCaptureOptions,
                 createRenderVideoFrameInjector,
-                abortSignal,
+                abortSignal: executionSignal,
                 assertNotAborted,
                 onProgress,
                 dedupPerfs,
@@ -2593,7 +3131,7 @@ export async function executeRenderJob(
           // which errors qualify.
           const isVerifyError = isDrawElementVerificationError(err);
           const isCancellation =
-            err instanceof RenderCancelledError || abortSignal?.aborted === true;
+            err instanceof RenderCancelledError || executionSignal?.aborted === true;
           if (
             !shouldRetryViaPinnedFallback({
               isVerifyError,
@@ -2605,13 +3143,15 @@ export async function executeRenderJob(
             throw err;
           const isMemoryExhaustion = !isVerifyError && isMemoryExhaustionError(err);
           deSelfVerifyFallback = isVerifyError;
-          deFallbackReason = isVerifyError
-            ? /blank/i.test(err instanceof Error ? err.message : "")
-              ? "blank"
-              : "psnr"
-            : isMemoryExhaustion
-              ? "oom"
-              : "capture_error";
+          if (isVerifyError) {
+            const t = deVerifyFallbackTelemetry(err);
+            deFallbackReason = t.reason;
+            deFallbackFailedDb = t.failedDb;
+            deFallbackFrameIndex = t.frameIndex;
+            deFallbackThresholdDb = t.thresholdDb;
+          } else {
+            deFallbackReason = isMemoryExhaustion ? "oom" : "capture_error";
+          }
           log.warn(
             isVerifyError
               ? "[Render] drawElement self-verification failed; re-rendering via screenshot"
@@ -2624,71 +3164,57 @@ export async function executeRenderJob(
               ? "drawElement self-verify failed; retrying with forceScreenshot"
               : "capture failed on pinned worker count; retrying with forceScreenshot",
           );
-          captureForceScreenshot = true;
+          const failedRouting = capturePlan.routing.kind;
+          capturePlan = replanAfterFailure(
+            capturePlan,
+            isVerifyError
+              ? { kind: "draw_element_verification" }
+              : { kind: "capture_failure", memoryExhaustion: isMemoryExhaustion },
+          );
+          syncCapturePlan();
           updateCaptureObservability({
-            forceScreenshot: true,
+            forceScreenshot: capturePlan.forceScreenshot,
             deSelfVerifyFallback,
             deFallbackReason,
-          });
-          probeSession = null;
-          // Must clear BEFORE resolveParallelRouterRetryPlan recomputes
-          // useStreamingEncode, or shouldUseStreamingEncode would keep
-          // resolving to the parallel-streaming shape on the retry instead
-          // of the well-tested parallel-disk fallback.
-          if (deParallelRouter === "routed") deParallelStreamForced = false;
-          const inversionRetryPlan = resolveInversionRetryPlan({
+            deFallbackFailedDb,
+            deFallbackFrameIndex,
+            deFallbackThresholdDb,
+            workerCount: capturePlan.workerCount,
+            useStreamingEncode: capturePlan.kind === "sdr_streaming",
             deWorkerInversion,
-            preInversionWorkerCount: preRoutingWorkerCount,
-            cfg,
-            outputFormat,
-            durationSeconds: job.duration,
-            isMemoryExhaustion,
-          });
-          const parallelRouterRetryPlan = resolveParallelRouterRetryPlan({
             deParallelRouter,
-            preRouterWorkerCount: preRoutingWorkerCount,
-            cfg,
-            outputFormat,
-            durationSeconds: job.duration,
-            isMemoryExhaustion,
           });
-          if (inversionRetryPlan) {
+          // Streaming stage aims to close the probe in its own finally; if it
+          // threw before doing so, the Chrome process would orphan through the
+          // pinned-fallback retry. Close defensively before we release the
+          // reference — see closeOrphanedProbeForRetry.
+          if (probeSession) {
+            lastBrowserConsole = probeSession.browserConsoleBuffer;
+            const orphaned = probeSession;
+            probeSession = null;
+            await closeOrphanedProbeForRetry(orphaned, closeCaptureSession, log, "streaming");
+          }
+          if (failedRouting === "worker_inversion") {
             // The inversion bet on drawElement and lost — re-render on the
             // pre-inversion parallel screenshot path instead of single-worker
             // screenshot streaming (the slowest capture shape for this size).
             // "reverted" (not cleared) so telemetry keeps the lost-inversion
             // cohort distinguishable from renders that never inverted.
-            deWorkerInversion = inversionRetryPlan.deWorkerInversion;
-            workerCount = inversionRetryPlan.workerCount;
-            useStreamingEncode = inversionRetryPlan.useStreamingEncode;
-            updateCaptureObservability({
-              workerCount,
-              useStreamingEncode,
-              deWorkerInversion,
-            });
             log.info(
-              `[Render] Reverting worker inversion for the retry: ${workerCount} workers, ` +
-                `streaming=${useStreamingEncode}.`,
+              `[Render] Reverting worker inversion for the retry: ${capturePlan.workerCount} workers, ` +
+                `plan=${capturePlan.kind}.`,
             );
-          } else if (parallelRouterRetryPlan) {
+          } else if (failedRouting === "parallel_router") {
             // The router's bet on verified parallel streaming lost — re-render
             // on the ordinary (non-DE) parallel path at the pre-router worker
             // count, same "reverted, not cleared" telemetry contract as the
             // inversion above.
-            deParallelRouter = parallelRouterRetryPlan.deParallelRouter;
-            workerCount = parallelRouterRetryPlan.workerCount;
-            useStreamingEncode = parallelRouterRetryPlan.useStreamingEncode;
-            updateCaptureObservability({
-              workerCount,
-              useStreamingEncode,
-              deParallelRouter,
-            });
             log.info(
-              `[Render] Reverting parallel router for the retry: ${workerCount} workers, ` +
-                `streaming=${useStreamingEncode}.`,
+              `[Render] Reverting parallel router for the retry: ${capturePlan.workerCount} workers, ` +
+                `plan=${capturePlan.kind}.`,
             );
           }
-          if (useStreamingEncode) {
+          if (capturePlan.kind === "sdr_streaming") {
             streamingRes = await invokeStreaming();
           } else {
             // Parallel retry goes through the disk path below.
@@ -2717,7 +3243,10 @@ export async function executeRenderJob(
           perfStages.captureSetupMs = Math.max(0, perfStages.captureMs - captureFrameMs);
           perfStages.encodeMs = streamingRes.encodeMs; // Overlapped with capture
         } else {
-          useStreamingEncode = false;
+          if (capturePlan.kind === "sdr_streaming") {
+            capturePlan = replanAfterFailure(capturePlan, { kind: "streaming_unavailable" });
+            syncCapturePlan();
+          }
           // The disk path has no drain-time self-verification — clamp
           // default-on drawElement here exactly like the pre-capture clamp
           // (verified-path confinement). Skipped when screenshots are already
@@ -2725,7 +3254,7 @@ export async function executeRenderJob(
           // opt-in, mirroring the clamp above.
           if (
             cfg.useDrawElement &&
-            !captureForceScreenshot &&
+            !capturePlan.forceScreenshot &&
             process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE !== "true"
           ) {
             cfg.useDrawElement = false;
@@ -2741,41 +3270,111 @@ export async function executeRenderJob(
               probeSession = null;
             }
           }
-          updateCaptureObservability({ useStreamingEncode });
+          updateCaptureObservability({ useStreamingEncode: false });
           observability.checkpoint("capture_streaming", "spawn failed; falling back to disk");
         }
       }
 
       if (!streamingHandled) {
+        if (capturePlan.kind !== "sdr_disk") {
+          throw new Error(`Disk capture requires sdr_disk plan; got ${capturePlan.kind}`);
+        }
         // ── Disk-based capture (original flow) ────────────────────────────
         resetCaptureAttemptProgress(job);
         const captureFrameStart = Date.now();
-        const captureRes = await observeRenderStage(
-          observability,
-          "capture_disk",
-          captureStageObservationData({ needsAlpha }),
-          () =>
-            runCaptureStage({
-              fileServer: activeFileServer,
-              workDir,
-              framesDir,
-              job,
-              totalFrames,
-              cfg,
-              forceScreenshot: captureForceScreenshot,
-              log,
-              workerCount,
-              probeSession,
-              needsAlpha,
-              captureAttempts,
-              dedupPerfs,
-              buildCaptureOptions,
-              createRenderVideoFrameInjector,
-              abortSignal,
-              assertNotAborted,
-              onProgress,
-            }),
-        );
+        const invokeDiskCapture = (diskPlan: SdrDiskCapturePlan) =>
+          observeRenderStage(
+            observability,
+            "capture_disk",
+            captureStageObservationData({ needsAlpha: diskPlan.needsAlpha }),
+            () =>
+              runCaptureStage({
+                fileServer: activeFileServer,
+                workDir,
+                framesDir,
+                job,
+                totalFrames,
+                cfg,
+                plan: diskPlan,
+                log,
+                probeSession,
+                captureAttempts,
+                dedupPerfs,
+                buildCaptureOptions,
+                createRenderVideoFrameInjector,
+                abortSignal: executionSignal,
+                assertNotAborted,
+                onProgress,
+              }),
+          );
+        let captureRes;
+        try {
+          captureRes = await invokeDiskCapture(capturePlan);
+        } catch (err) {
+          // Disk-path drawElement self-verification tripped (a parallel disk
+          // worker's sampled frame diverged from its pre-injection ground
+          // truth — reachable only under the explicit fast-capture opt-in).
+          // Same recovery contract as the streaming drain: re-render on the
+          // screenshot baseline. Anything else keeps its existing semantics.
+          if (
+            !isDrawElementVerificationError(err) ||
+            err instanceof RenderCancelledError ||
+            executionSignal?.aborted === true
+          ) {
+            throw err;
+          }
+          deSelfVerifyFallback = true;
+          const t = deVerifyFallbackTelemetry(err);
+          deFallbackReason = t.reason;
+          deFallbackFailedDb = t.failedDb;
+          deFallbackFrameIndex = t.frameIndex;
+          deFallbackThresholdDb = t.thresholdDb;
+          log.warn(
+            "[Render] drawElement self-verification failed on the parallel disk path; " +
+              "re-rendering via screenshot",
+            { error: err instanceof Error ? err.message : String(err) },
+          );
+          observability.checkpoint(
+            "capture_disk",
+            "drawElement self-verify failed; retrying with forceScreenshot",
+          );
+          // The failed attempt's frames are untrusted BUT satisfy the
+          // completeness check — wipe them so the retry re-captures everything
+          // instead of silently keeping damaged files.
+          rmSync(framesDir, { recursive: true, force: true });
+          mkdirSync(framesDir, { recursive: true });
+          resetCaptureAttemptProgress(job);
+          dedupPerfs.length = 0;
+          cfg.useDrawElement = false;
+          // Same shape as the streaming retry above: `runCaptureStage` was
+          // passed the probe and threw before it could close it, so we must
+          // release the Chrome process ourselves before starting the
+          // screenshot-baseline retry — otherwise it orphans until render
+          // exit. See closeOrphanedProbeForRetry.
+          if (probeSession) {
+            lastBrowserConsole = probeSession.browserConsoleBuffer;
+            const orphaned = probeSession;
+            probeSession = null;
+            await closeOrphanedProbeForRetry(orphaned, closeCaptureSession, log, "disk verify");
+          }
+          capturePlan = replanAfterFailure(capturePlan, { kind: "draw_element_verification" });
+          syncCapturePlan();
+          updateCaptureObservability({
+            forceScreenshot: capturePlan.forceScreenshot,
+            deSelfVerifyFallback,
+            deFallbackReason,
+            deFallbackFailedDb,
+            deFallbackFrameIndex,
+            deFallbackThresholdDb,
+          });
+          if (capturePlan.kind !== "sdr_disk") {
+            throw new Error(`Disk verify retry requires sdr_disk plan; got ${capturePlan.kind}`);
+          }
+          captureRes = await invokeDiskCapture(capturePlan);
+          // The first attempt's error marked the phase failed; the retry
+          // recovered it — don't brand the render as failed in telemetry.
+          observability.clearFailure("capture_disk");
+        }
         const captureFrameMs = Date.now() - captureFrameStart;
         workerCount = captureRes.workerCount;
         updateCaptureObservability({ workerCount });
@@ -2804,7 +3403,7 @@ export async function executeRenderJob(
             runEncodeStage({
               job,
               log,
-              outputPath,
+              outputPath: stagedOutputPath,
               framesDir,
               videoOnlyPath,
               width,
@@ -2820,7 +3419,7 @@ export async function executeRenderJob(
               enableChunkedEncode,
               chunkedEncodeSize,
               engineConfig: cfg,
-              abortSignal,
+              abortSignal: executionSignal,
               assertNotAborted,
               onProgress,
             }),
@@ -2828,6 +3427,23 @@ export async function executeRenderJob(
         perfStages.encodeMs = encodeRes.encodeMs;
       }
     } // end SDR capture paths block
+
+    // Opt-in per-frame timing summary for the fast-capture fallback path
+    // (drawElement → screenshot when composition uses filter:blur,
+    // filter:drop-shadow, clip-path, backdrop-filter, or hits any other
+    // fallback gate). Emits a `capture_fallback_profile` observability
+    // checkpoint per fallback-engaged session behind
+    // `HF_PROFILE_FALLBACK_CAPTURE=true`. No-op otherwise, and no-op
+    // when no session's capture engaged the fallback path — healthy
+    // (drawElement) renders pay zero overhead. See
+    // `fallbackCaptureProfile.ts` for the framing rationale.
+    emitFallbackCaptureProfile(observability, dedupPerfs);
+
+    applyRenderWarningPolicy(
+      job,
+      [...layeredCaptureWarnings, ...dedupPerfs.flatMap((perf) => perf.warnings ?? [])],
+      log,
+    );
 
     if (probeSession !== null) {
       const remainingProbeSession: CaptureSession = probeSession;
@@ -2856,9 +3472,9 @@ export async function executeRenderJob(
             job,
             videoOnlyPath,
             audioOutputPath,
-            outputPath,
+            outputPath: stagedOutputPath,
             hasAudio,
-            abortSignal,
+            abortSignal: executionSignal,
             assertNotAborted,
             onProgress,
           }),
@@ -2868,9 +3484,7 @@ export async function executeRenderJob(
       observability.checkpoint("assemble", `skipped for ${outputFormat}`);
     }
 
-    // ── Complete ─────────────────────────────────────────────────────────
-    job.outputPath = outputPath;
-    updateJobStatus(job, "complete", "Render complete", 100, onProgress);
+    artifactTransaction.validate();
 
     const totalElapsed = Date.now() - pipelineStart;
 
@@ -2878,7 +3492,7 @@ export async function executeRenderJob(
     // Record transient-tab-death retry burn (recovered case) so it's visible on
     // dashboard 1783183, not just logs. The catch mirrors this for the failed case.
     recordTransientRetryObservability();
-    observability.checkpoint("pipeline", "completed", { totalElapsedMs: totalElapsed });
+    observability.checkpoint("pipeline", "artifact validated", { totalElapsedMs: totalElapsed });
     const observabilitySummary = observability.summary({
       lastBrowserConsole,
       capture: captureObservability,
@@ -2889,6 +3503,7 @@ export async function executeRenderJob(
     const perfSummary = buildRenderPerfSummary({
       job,
       workerCount,
+      workerSizing,
       enableChunkedEncode,
       chunkedEncodeSize,
       compositionDurationSeconds: composition.duration,
@@ -2913,6 +3528,9 @@ export async function executeRenderJob(
         preRouterWorkers: deParallelRouter ? preRoutingWorkerCount : undefined,
         selfVerifyFallback: deSelfVerifyFallback,
         fallbackReason: deFallbackReason,
+        fallbackFailedDb: deFallbackFailedDb,
+        fallbackFrameIndex: deFallbackFrameIndex,
+        fallbackThresholdDb: deFallbackThresholdDb,
         drainStats: deDrainStats,
       },
       hdrDiagnostics,
@@ -2933,42 +3551,26 @@ export async function executeRenderJob(
       }
     }
 
-    // ── Cleanup ─────────────────────────────────────────────────────────
     if (job.config.debug) {
       // Copy output MP4 (or single-file alpha output) into the debug dir for
       // easy access. Skipped for png-sequence: outputPath is a directory, not
       // a single file — the captured frames already live in `framesDir` under
       // workDir during a debug run anyway.
-      if (!isPngSequence && existsSync(outputPath)) {
+      if (!isPngSequence && existsSync(stagedOutputPath)) {
         const debugOutput = join(workDir, `output${videoExt}`);
-        copyFileSync(outputPath, debugOutput);
+        copyFileSync(stagedOutputPath, debugOutput);
       }
-    } else if (process.env.KEEP_TEMP === "1") {
-      log.info("KEEP_TEMP=1 — leaving workDir on disk for inspection", { workDir });
-    } else {
-      await safeCleanup(
-        "remove workDir",
-        () => {
-          rmSync(workDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-        },
-        log,
-      );
     }
 
-    if (restoreLogger) restoreLogger();
+    artifactTransaction.commit();
+    job.outputPath = outputPath;
+    updateJobStatus(job, "complete", "Render complete", 100, onProgress);
+    await eventPublisher.flush();
   } catch (error) {
-    if (error instanceof RenderCancelledError || abortSignal?.aborted) {
+    if (error instanceof RenderCancelledError || executionSignal?.aborted) {
       job.error = error instanceof Error ? error.message : "render_cancelled";
       updateJobStatus(job, "cancelled", "Render cancelled", job.progress, onProgress);
-      await cleanupRenderResources({
-        fileServer,
-        probeSession,
-        workDir,
-        debug: Boolean(job.config.debug),
-        log,
-        label: "cancel",
-      });
-      if (restoreLogger) restoreLogger();
+      await eventPublisher.flush();
       throw error instanceof RenderCancelledError
         ? error
         : new RenderCancelledError("render_cancelled");
@@ -2986,7 +3588,41 @@ export async function executeRenderJob(
     // Retry burn on a render that STILL failed — the actionable signal for tuning
     // MAX_TRANSIENT_CAPTURE_RETRIES (mirrors the success-path record above).
     recordTransientRetryObservability();
-    const errorMessage = memoryGuidance ?? normalizeErrorMessage(error);
+    // Surface HyperFrames' PRODUCER_PUPPETEER_PROTOCOL_TIMEOUT_MS env +
+    // --protocol-timeout CLI in Puppeteer CDP protocol-timeout errors. Puppeteer's
+    // stock "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout'
+    // setting" text doesn't name the HyperFrames knob and doesn't state the
+    // effective timeout that was already applied (300000 ms base + auto-scaling
+    // via `scaleProtocolTimeoutForComposition`). Field signal ts=1784047847
+    // reporter gave up on HF and switched to FFmpeg because the error didn't
+    // point them at the lever. `augmentProtocolTimeoutError` returns the input
+    // unchanged when the message doesn't match, so non-timeout failures (memory
+    // exhaustion, other CDP errors) flow through with no change.
+    const protocolTimeoutError = augmentProtocolTimeoutError(error, cfg.protocolTimeout);
+    // Surface HyperFrames' PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS env +
+    // --browser-timeout CLI + HYPERFRAMES_BROWSER_PATH escape hatch in
+    // Puppeteer `page.goto` navigation-timeout errors. Puppeteer's stock
+    // "Navigation timeout of 60000 ms exceeded" text names none of these
+    // levers. Field signal ts=1784146416 (darwin/arm64, CLI 0.7.58): host
+    // page.goto hit Navigation timeout twice on a CSS 3D + audio composition;
+    // Docker rendered the same composition successfully. Mirrors #2443's
+    // HYPERFRAMES_BROWSER_PATH surfacing at the runtime-navigation layer
+    // (vs download-time). `augmentPageNavigationTimeoutError` returns the
+    // input unchanged when the message doesn't match the Nav-timeout regex,
+    // so protocol-timeout / memory / other CDP errors flow through unchanged.
+    // hasCss3D + hasAudio are both left undefined here — no compile-time
+    // CSS-3D signal is currently threaded through the render pipeline, and
+    // `hasAudio` from the audio_process stage is block-scoped inside the
+    // try. Per the helper's fallback docs, unknown flags route to the
+    // generic env + browser-path hints (Docker compound hint suppressed).
+    // A future compile-time CSS-3D scan (e.g. htmlCompiler.ts pass over
+    // `transform-style: preserve-3d`, `perspective:`, `rotateX(`, etc.) can
+    // thread both flags here to enable the full compound Docker hint.
+    const navigationTimeoutError = augmentPageNavigationTimeoutError(
+      protocolTimeoutError,
+      cfg.pageNavigationTimeout,
+    );
+    const errorMessage = memoryGuidance ?? normalizeErrorMessage(navigationTimeoutError);
     const carriedBrowserConsole = getCaptureStageBrowserConsole(error);
     if (carriedBrowserConsole.length > 0) {
       lastBrowserConsole = [...lastBrowserConsole, ...carriedBrowserConsole].slice(-200);
@@ -3015,16 +3651,14 @@ export async function executeRenderJob(
       );
     }
 
-    job.error = errorMessage;
-    updateJobStatus(job, "failed", `Failed: ${errorMessage}`, job.progress, onProgress);
-    job.failedStage = job.currentStage;
+    const failedStage = job.currentStage || "pipeline";
     const observabilitySummary = observability.summary({
       lastBrowserConsole,
       capture: captureObservability,
       extraction: extractionObservability,
       compositionHash,
     });
-    job.errorDetails = buildRenderErrorDetails({
+    const errorDetails = buildRenderErrorDetails({
       error,
       pipelineStartMs: pipelineStart,
       lastBrowserConsole,
@@ -3033,9 +3667,19 @@ export async function executeRenderJob(
       observability: observabilitySummary,
       subTimelineWait: worstSubTimelineWaitOutcome(dedupPerfs),
     });
+    publishRenderFailure(
+      job,
+      {
+        error: errorMessage,
+        failedStage,
+        errorDetails,
+      },
+      onProgress,
+    );
+    await eventPublisher.flush();
 
     log.info("[Render] Failure summary", {
-      failedStage: job.currentStage,
+      failedStage,
       error: errorMessage,
       elapsedMs: Date.now() - pipelineStart,
       stageTimings: perfStages,
@@ -3059,18 +3703,6 @@ export async function executeRenderJob(
         .slice(-5),
     });
 
-    await cleanupRenderResources({
-      fileServer,
-      probeSession,
-      workDir,
-      debug: Boolean(job.config.debug),
-      log,
-      label: "error",
-    });
-
-    if (restoreLogger) restoreLogger();
     throw error;
-  } finally {
-    memSampler?.stop();
   }
 }

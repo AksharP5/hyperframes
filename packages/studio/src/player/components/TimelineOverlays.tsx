@@ -1,4 +1,4 @@
-import type { KeyframeCacheEntry, TimelineElement } from "../store/playerStore";
+import type { TimelineElement } from "../store/playerStore";
 import type { TimelineTheme } from "./timelineTheme";
 import type { TimelineRangeSelection } from "./timelineEditing";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
@@ -8,12 +8,23 @@ import {
   type KeyframeDiamondContextMenuState,
 } from "./KeyframeDiamondContextMenu";
 import { ClipContextMenu } from "./ClipContextMenu";
+import { TrackGapContextMenu } from "./TrackGapContextMenu";
 import { TimelineShortcutHint } from "./TimelineShortcutHint";
 
 interface ClipContextMenuState {
   x: number;
   y: number;
   element: TimelineElement;
+}
+
+/** Resolved model for the empty-lane-space (track gap) context menu. */
+interface TrackGapContextMenuState {
+  x: number;
+  y: number;
+  gapWidth: number | null;
+  canCloseGap: boolean;
+  canCloseAllGaps: boolean;
+  hasAnyGaps: boolean;
 }
 
 interface TimelineOverlaysProps {
@@ -27,15 +38,18 @@ interface TimelineOverlaysProps {
   setKfContextMenu: (value: KeyframeDiamondContextMenuState | null) => void;
   onDeleteKeyframe: TimelineEditCallbacks["onDeleteKeyframe"];
   onDeleteAllKeyframes: TimelineEditCallbacks["onDeleteAllKeyframes"];
-  onChangeKeyframeEase: TimelineEditCallbacks["onChangeKeyframeEase"];
   onMoveKeyframeToPlayhead: TimelineEditCallbacks["onMoveKeyframeToPlayhead"];
-  keyframeCache: Map<string, KeyframeCacheEntry>;
   clipContextMenu: ClipContextMenuState | null;
   setClipContextMenu: (value: ClipContextMenuState | null) => void;
   currentTime: number;
   onSplitElement: TimelineEditCallbacks["onSplitElement"];
   pinZoomBeforeEdit: () => void;
   onDeleteElement?: (element: TimelineElement) => Promise<void> | void;
+  gapContextMenu: TrackGapContextMenuState | null;
+  onDismissGapContextMenu: () => void;
+  onCloseTrackGap: () => void;
+  onCloseAllTrackGaps: () => void;
+  onHoverGapAction: (action: "close-gap" | "close-all" | null) => void;
 }
 
 // The timeline's floating overlays, rendered as siblings above the scroll area:
@@ -52,15 +66,18 @@ export function TimelineOverlays({
   setKfContextMenu,
   onDeleteKeyframe,
   onDeleteAllKeyframes,
-  onChangeKeyframeEase,
   onMoveKeyframeToPlayhead,
-  keyframeCache,
   clipContextMenu,
   setClipContextMenu,
   currentTime,
   onSplitElement,
   pinZoomBeforeEdit,
   onDeleteElement,
+  gapContextMenu,
+  onDismissGapContextMenu,
+  onCloseTrackGap,
+  onCloseAllTrackGaps,
+  onHoverGapAction,
 }: TimelineOverlaysProps) {
   return (
     <>
@@ -85,21 +102,11 @@ export function TimelineOverlays({
         <KeyframeDiamondContextMenu
           state={kfContextMenu}
           onClose={() => setKfContextMenu(null)}
-          onDelete={(elId, pct) => onDeleteKeyframe?.(elId, pct)}
-          onDeleteAll={(elId) => onDeleteAllKeyframes?.(elId)}
-          onChangeEase={(elId, pct, ease) => onChangeKeyframeEase?.(elId, pct, ease)}
+          onDelete={(elId, keyframe) => onDeleteKeyframe?.(elId, keyframe)}
+          onDeleteAll={(element) => onDeleteAllKeyframes?.(element)}
           onMoveToPlayhead={
-            onMoveKeyframeToPlayhead
-              ? (elId, pct) => onMoveKeyframeToPlayhead(elId, pct)
-              : undefined
+            onMoveKeyframeToPlayhead ? (...args) => onMoveKeyframeToPlayhead(...args) : undefined
           }
-          onCopyProperties={(elId, pct) => {
-            const kfData = keyframeCache.get(elId);
-            const kf = kfData?.keyframes.find((k) => k.percentage === pct);
-            if (kf) {
-              void navigator.clipboard.writeText(JSON.stringify(kf.properties, null, 2));
-            }
-          }}
         />
       )}
 
@@ -115,6 +122,21 @@ export function TimelineOverlays({
             pinZoomBeforeEdit();
             onDeleteElement?.(el);
           }}
+        />
+      )}
+
+      {gapContextMenu && (
+        <TrackGapContextMenu
+          x={gapContextMenu.x}
+          y={gapContextMenu.y}
+          gapWidth={gapContextMenu.gapWidth}
+          canCloseGap={gapContextMenu.canCloseGap}
+          canCloseAllGaps={gapContextMenu.canCloseAllGaps}
+          hasAnyGaps={gapContextMenu.hasAnyGaps}
+          onClose={onDismissGapContextMenu}
+          onCloseGap={onCloseTrackGap}
+          onCloseAllGaps={onCloseAllTrackGaps}
+          onHoverAction={onHoverGapAction}
         />
       )}
     </>

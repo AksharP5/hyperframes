@@ -18,7 +18,7 @@ import {
   injectDurations,
   extractResolvedMedia,
   clampDurations,
-  shouldClampMediaDuration,
+  shouldClampResolvedMediaDuration,
   CSS_URL_RE,
   isNonRelativeUrl,
   type ResolvedDuration,
@@ -26,6 +26,7 @@ import {
 } from "@hyperframes/core";
 import {
   assignBundledRuntimeCompositionIds,
+  type BundledHostCompositionIdentity,
   buildVariablesByCompScript,
   inlineSubCompositions as inlineSubCompositionsShared,
   prepareFlattenedInnerRoot,
@@ -478,7 +479,8 @@ async function compileHtmlFile(
   let compiledHtml =
     resolutions.length > 0 ? injectDurations(staticCompiled, resolutions) : staticCompiled;
 
-  // Phase 2: Validate pre-resolved media — clamp data-duration to actual source duration (parallel ffprobe)
+  // Phase 2: Bound authored audio to playable source (parallel ffprobe).
+  // Explicit video slots may outlive their source and hold the final frame.
   const preResolved = extractResolvedMedia(compiledHtml);
   const clampResults = await Promise.all(
     preResolved
@@ -496,16 +498,17 @@ async function compileHtmlFile(
   );
   const clampList: ResolvedDuration[] = [];
   for (const r of clampResults) {
-    if (r.maxDuration > 0 && shouldClampMediaDuration(r.duration, r.maxDuration)) {
+    if (
+      r.maxDuration > 0 &&
+      shouldClampResolvedMediaDuration(r.tagName, r.duration, r.maxDuration)
+    ) {
       clampList.push({ id: r.id, duration: r.maxDuration });
       // This clip's `data-duration` is being silently shortened to its source.
       // Surface it so the author can confirm the longer slot wasn't intended.
-      // ponytail: top-level only — sub-composition clips still get clamped (and
-      // videos still hold the last frame); thread `log` through
-      // parseSubCompositions to warn for them too.
-      const kind = r.tagName === "audio" ? "Audio" : "Video";
+      // ponytail: top-level only — sub-composition audio still gets clamped;
+      // thread `log` through parseSubCompositions to warn for it too.
       log?.warn(
-        `[compile] ${kind} "${r.id}" (${r.src}) is ${r.maxDuration.toFixed(2)}s but its ` +
+        `[compile] Audio "${r.id}" (${r.src}) is ${r.maxDuration.toFixed(2)}s but its ` +
           `data-duration is ${r.duration.toFixed(2)}s — the slot is shortened to the media ` +
           `length. Set data-duration to ~${r.maxDuration.toFixed(2)}s, trim data-media-start, ` +
           `or use a longer/looping source if that isn't intended.`,
@@ -751,6 +754,55 @@ function promoteCssImportsToLinkTags(html: string): string {
   return document.toString();
 }
 
+class ProducerHostIdentityMap extends Map<Element, BundledHostCompositionIdentity> {
+  readonly #document: Document;
+  readonly #lateInstanceByCompositionId = new Map<string, number>();
+
+  constructor(document: Document, initialHosts: Element[]) {
+    super(assignBundledRuntimeCompositionIds(initialHosts));
+    this.#document = document;
+  }
+
+  override get(host: Element): BundledHostCompositionIdentity | undefined {
+    const existing = super.get(host);
+    if (existing) return existing;
+
+    // The shared inliner discovers nested hosts after the producer's initial
+    // DOM scan. Assign those late hosts on first use so their scope and
+    // variables key are fixed before any content is processed.
+    const authoredCompositionId =
+      (
+        host.getAttribute("data-hf-original-composition-id") ||
+        host.getAttribute("data-composition-id") ||
+        ""
+      ).trim() || null;
+    if (!authoredCompositionId) {
+      const identity = { authoredCompositionId: null, runtimeCompositionId: null };
+      this.set(host, identity);
+      return identity;
+    }
+
+    let instanceIndex = this.#lateInstanceByCompositionId.get(authoredCompositionId) || 0;
+    let runtimeCompositionId: string;
+    do {
+      instanceIndex += 1;
+      runtimeCompositionId = `${authoredCompositionId}__hf${instanceIndex}`;
+    } while (
+      Array.from(this.#document.querySelectorAll("[data-composition-id]")).some(
+        (element) =>
+          element !== host && element.getAttribute("data-composition-id") === runtimeCompositionId,
+      )
+    );
+    this.#lateInstanceByCompositionId.set(authoredCompositionId, instanceIndex);
+
+    host.setAttribute("data-hf-original-composition-id", authoredCompositionId);
+    host.setAttribute("data-composition-id", runtimeCompositionId);
+    const identity = { authoredCompositionId, runtimeCompositionId };
+    this.set(host, identity);
+    return identity;
+  }
+}
+
 /**
  * Merge all `<head>` `<style>` blocks into a single tag with `@import` rules
  * at the top, and merge all inline `<body>` `<script>` blocks into one at the
@@ -858,8 +910,10 @@ function inlineSubCompositions(
     return emitted ? document.toString() : html;
   }
 
-  // Assign per-instance runtime composition ids BEFORE inlining, mirroring the
-  // preview bundler. When the same sub-composition (same authored
+  // Assign per-instance runtime composition ids before each host is inlined,
+  // mirroring the preview bundler. Initial hosts are assigned as one pre-pass;
+  // hosts discovered by the shared inliner's queue are assigned lazily by the
+  // map above. When the same sub-composition (same authored
   // data-composition-id) is mounted more than once — the reusable-template
   // pattern from issue #2064 — each host is rewritten to a unique runtime id
   // (`card__hf1`, `card__hf2`). Without this, every instance shares one
@@ -867,7 +921,10 @@ function inlineSubCompositions(
   // data-variable-values clobbers the earlier ones and all-but-one instance
   // renders blank. #2066 fixed the single-instance case but left this
   // divergence (snapshot/preview correct, render wrong).
-  const hostIdentityByElement = assignBundledRuntimeCompositionIds(hosts as unknown as Element[]);
+  const hostIdentityByElement = new ProducerHostIdentityMap(
+    document as unknown as Document,
+    hosts as unknown as Element[],
+  );
 
   const result = inlineSubCompositionsShared(
     document as unknown as Document,
@@ -1906,7 +1963,9 @@ export async function compileForRender(
           );
         }
         if (metadata.isVFR) {
-          console.info(
+          // defaultLogger (stderr), not console.info (stdout) — matches the sibling
+          // warning above; a stdout line here corrupts `check --json` / `validate --json`.
+          defaultLogger.warn(
             `[Compiler] Video "${video.id}" is variable frame rate (VFR); ` +
               `the engine will normalize it to CFR before frame extraction. ` +
               `If rendering feels slow on this video, pre-encode once with: ${reencode}`,
@@ -2075,10 +2134,10 @@ export async function discoverAudioVolumeAutomationFromTimeline(
         const endAttr = Number.parseFloat(el.dataset.end ?? "");
         const durationAttr = Number.parseFloat(el.dataset.duration ?? "");
         const end =
-          Number.isFinite(endAttr) && endAttr > start
-            ? endAttr
-            : Number.isFinite(durationAttr) && durationAttr > 0
-              ? start + durationAttr
+          Number.isFinite(durationAttr) && durationAttr > 0
+            ? start + durationAttr
+            : Number.isFinite(endAttr) && endAttr > start
+              ? endAttr
               : duration;
         const sampleStart = Math.max(0, start);
         const sampleEnd = Math.min(duration, end);

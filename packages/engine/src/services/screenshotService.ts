@@ -8,13 +8,13 @@
 // fallow-ignore-file code-duplication
 import { type Page } from "puppeteer-core";
 import { type CaptureOptions } from "../types.js";
+import { COLOR_GRADING_SOURCE_HIDDEN_ATTR } from "@hyperframes/core/color-grading";
 import {
   HF_COLOR_GRADING_CANVAS_ID_PREFIX,
   MEDIA_VISUAL_STYLE_PROPERTIES,
 } from "@hyperframes/core";
 
 export const cdpSessionCache = new WeakMap<Page, import("puppeteer-core").CDPSession>();
-const COLOR_GRADING_SOURCE_HIDDEN_ATTR = "data-hf-color-grading-source-hidden";
 
 export async function getCdpSession(page: Page): Promise<import("puppeteer-core").CDPSession> {
   let client = cdpSessionCache.get(page);
@@ -180,6 +180,30 @@ export async function beginFrameCapture(
     buffer,
     hasDamage: result.hasDamage,
   };
+}
+
+/**
+ * True if the page's actual rendered content is taller than the requested
+ * capture height. `captureBeyondViewport` exists for exactly one reason
+ * (#1094): a native `<video>` surface whose content genuinely overflows the
+ * viewport-bound capture path clips its bottom edge to black. A video that
+ * fits entirely inside its composition's declared viewport doesn't have that
+ * problem — ground-truth measurement beats the coarser "has a video, so
+ * always request beyond-viewport" heuristic, which also unnecessarily routes
+ * every video render through a CDP capture path prone to producing phantom
+ * duplicate content on SwiftShader (#2550).
+ *
+ * Callers measure once after page settle. Hyperframes compositions have a
+ * fixed-height, overflow-clipped render surface; timeline animation may move
+ * pixels within that surface but must not grow document flow during capture.
+ */
+export async function pageContentExceedsCaptureHeight(
+  page: Page,
+  requestedHeight: number,
+): Promise<boolean> {
+  const scrollHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+  // Small tolerance for subpixel layout rounding, not a real overflow signal.
+  return scrollHeight > requestedHeight + 1;
 }
 
 /**
@@ -765,6 +789,11 @@ export async function injectVideoFramesBatch(
       if (pendingDecodes.length > 0) {
         await Promise.all(pendingDecodes);
       }
+      if (injectedIds.length > 0) {
+        const redraw = (window as Window & { __hf?: { colorGrading?: { redraw?: () => void } } })
+          .__hf?.colorGrading?.redraw;
+        redraw?.();
+      }
       return injectedIds;
     },
     updates,
@@ -801,6 +830,13 @@ export async function syncVideoFrameVisibility(
         return false;
       };
       const active = new Set(ids);
+      const setColorGradingVisibility = (
+        window as Window & {
+          __hf?: {
+            colorGrading?: { setSourceVisibility?: (target: Element, visible: boolean) => boolean };
+          };
+        }
+      ).__hf?.colorGrading?.setSourceVisibility;
       const videos = Array.from(
         document.querySelectorAll("video[data-start]"),
       ) as HTMLVideoElement[];
@@ -808,7 +844,8 @@ export async function syncVideoFrameVisibility(
         const img = video.nextElementSibling as HTMLElement | null;
         const hasImg = img && img.classList.contains("__render_frame__");
         const ancestorHidden = isVisualAncestorHidden(video);
-        if (active.has(video.id) && !ancestorHidden) {
+        const visible = active.has(video.id) && !ancestorHidden;
+        if (visible) {
           // Active video: show injected <img>, hide native <video>.
           // Do NOT clobber inline opacity here — GSAP-controlled opacity must
           // survive until injectVideoFramesBatch reads it via getComputedStyle.
@@ -835,6 +872,7 @@ export async function syncVideoFrameVisibility(
             img.style.setProperty("visibility", "hidden", "important");
           }
         }
+        setColorGradingVisibility?.(video, visible);
       }
     },
     activeVideoIds,

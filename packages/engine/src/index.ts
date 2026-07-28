@@ -40,15 +40,24 @@ export type {
   CaptureResult,
   CaptureBufferResult,
   CapturePerfSummary,
+  CaptureWarning,
+  CaptureWarningCode,
   SubTimelineWaitOutcome,
 } from "./types.js";
 
 // ── Configuration ──────────────────────────────────────────────────────────────
 export {
   resolveConfig,
+  validateEngineConfigSnapshot,
   DEFAULT_CONFIG,
   scaleProtocolTimeoutForComposition,
+  shouldClampToScreenshotForConcreteGpu,
+  applyConcreteGpuScreenshotClamp,
+  resolveExtractCacheDir,
+  defaultExtractCacheDir,
+  EXTRACT_CACHE_DIR_DISABLED_ALIASES,
   type EngineConfig,
+  type ExtractCacheDirResolution,
 } from "./config.js";
 export {
   DEFAULT_VP9_CPU_USED,
@@ -71,10 +80,23 @@ export {
   resolveBrowserGpuMode,
   buildChromeArgs,
   ENABLE_BROWSER_POOL,
+  BrowserLeasePool,
   type BuildChromeArgsOptions,
+  type BrowserLaunchFingerprint,
+  type BrowserLease,
+  type BrowserPoolState,
   type CaptureMode,
   type AcquiredBrowser,
 } from "./services/browserManager.js";
+export {
+  augmentProtocolTimeoutError,
+  isProtocolTimeoutError,
+} from "./services/protocolTimeoutErrorHint.js";
+export {
+  augmentPageNavigationTimeoutError,
+  isPageNavigationTimeoutError,
+  type NavigationTimeoutHintContext,
+} from "./services/pageNavigationTimeoutErrorHint.js";
 
 // ── Frame capture pipeline ──────────────────────────────────────────────────────
 export {
@@ -87,12 +109,15 @@ export {
   captureFramesBatchPipelined,
   DrawElementVerificationError,
   isDrawElementVerificationError,
+  getDrawElementVerificationDetails,
+  type DrawElementVerificationDetails,
   recaptureDrawElementFrameForVerify,
   completeDeferredDrawElementInit,
   writeCapturedFrame,
   discardWarmupCapture,
   getCompositionDuration,
   getCapturePerfSummary,
+  percentileOf,
   prepareCaptureSessionForReuse,
   type CaptureSession,
   isTransientBrowserError,
@@ -100,6 +125,13 @@ export {
   type BeforeCaptureHook,
   type DiscardWarmupInnerCapture,
 } from "./services/frameCapture.js";
+export {
+  CaptureFailure,
+  classifyCaptureFailure,
+  isFatalCaptureFailure,
+  type CaptureFailureKind,
+  type CaptureWorkerDiagnostic,
+} from "./services/captureFailure.js";
 
 // ── Screenshot (BeginFrame) ─────────────────────────────────────────────────────
 export {
@@ -152,12 +184,18 @@ export {
   createFrameLookupTable,
   FrameLookupTable,
   analyzeClipMediaFit,
+  classifyVideoExtractionError,
+  isVideoSourceExtractionError,
+  runVideoExtractionWithRetry,
+  VideoSourceExtractionError,
   type VideoElement,
   type ImageElement,
   type ExtractedFrames,
   type ExtractionOptions,
   type ExtractionResult,
   type ExtractionPhaseBreakdown,
+  type VideoExtractionFailure,
+  type VideoExtractionFailureKind,
   type VideoFrameFormat,
   VIDEO_FRAME_FORMATS,
   isVideoFrameFormat,
@@ -166,8 +204,12 @@ export {
 export { createVideoFrameInjector } from "./services/videoFrameInjector.js";
 
 export { parseAudioElements, processCompositionAudio } from "./services/audioMixer.js";
+export { cloneCaptureWarning, cloneCaptureWarnings } from "./services/captureWarning.js";
 export type {
   AudioElement,
+  AudioFailureReason,
+  AudioFailureStage,
+  AudioProcessingFailure,
   AudioTrack,
   AudioVolumeKeyframe,
   MixResult,
@@ -176,6 +218,9 @@ export type {
 // ── Parallel rendering ─────────────────────────────────────────────────────────
 export {
   calculateOptimalWorkers,
+  computeWorkerSizing,
+  selectVerifySampleIndicesForTask,
+  verifyDiskDrawElementSamples,
   distributeFrames,
   distributeFramesInterleaved,
   executeParallelCapture,
@@ -183,6 +228,8 @@ export {
   getSystemResources,
   type WorkerTask,
   type WorkerResult,
+  type WorkerSizing,
+  type WorkerSizingBound,
   type ParallelProgress,
 } from "./services/parallelCoordinator.js";
 
@@ -223,6 +270,12 @@ export {
   type RunFfmpegResult,
 } from "./utils/runFfmpeg.js";
 export {
+  ManagedChildProcess,
+  type ManagedChildProcessOptions,
+  type ManagedChildProcessOutcome,
+  type ManagedProcessTerminationReason,
+} from "./utils/managedChildProcess.js";
+export {
   assertConfiguredFfmpegBinariesExist,
   getFfmpegBinary,
   getFfprobeBinary,
@@ -231,6 +284,10 @@ export {
 } from "./utils/ffmpegBinaries.js";
 
 export { trackChildProcess, killTrackedProcesses } from "./utils/processTracker.js";
+
+// drawElement self-verify comparison — shared by the streaming drain
+// (producer) and the parallel disk-path verify (parallelCoordinator).
+export { psnrDb, resolveDeVerifyMinDb } from "./utils/psnr.js";
 
 export {
   decodePng,
@@ -246,6 +303,17 @@ export {
 } from "./utils/alphaBlit.js";
 
 export { groupIntoLayers, type CompositeLayer } from "./utils/layerCompositor.js";
+
+export {
+  diffGpuParityFrames,
+  diffGpuParityPngs,
+  verifyGpuParity,
+  type RgbaFrame,
+  type GpuParityDiffOptions,
+  type GpuParityDiffResult,
+  type BlackOnlyInARegion,
+  type VerifyGpuParityResult,
+} from "./utils/gpuParityDiff.js";
 
 // ── Shader transitions ────────────────────────────────────────────────────────
 export {

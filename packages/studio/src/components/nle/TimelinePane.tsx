@@ -21,7 +21,9 @@ export function forwardRebasedTimelineMoveElements(
     edits: TimelineMoveEdit[],
     coalesceKey?: string,
     operation?: TimelineMoveOperation,
+    coalesceMs?: number,
   ) => Promise<void> | void,
+  coalesceMs?: number,
 ) {
   return onMoveElements(
     edits.map(({ element, updates }) => {
@@ -34,6 +36,7 @@ export function forwardRebasedTimelineMoveElements(
     }),
     coalesceKey,
     operation,
+    coalesceMs,
   );
 }
 
@@ -93,6 +96,10 @@ export interface TimelinePaneProps {
     blockName: string,
     placement: Pick<TimelineElement, "start" | "track">,
   ) => Promise<void> | void;
+  onCompositionDrop?: (
+    sourcePath: string,
+    placement: Pick<TimelineElement, "start" | "track">,
+  ) => Promise<void> | void;
   onBlockedEditAttempt?: (element: TimelineElement, intent: BlockedTimelineEditIntent) => void;
   onSelectTimelineElement?: (element: TimelineElement | null) => void;
 }
@@ -106,6 +113,7 @@ export function TimelinePane({
   onDeleteElement,
   onAssetDrop,
   onBlockDrop,
+  onCompositionDrop,
   onBlockedEditAttempt,
   onSelectTimelineElement,
 }: TimelinePaneProps) {
@@ -160,6 +168,7 @@ export function TimelinePane({
       edits: Array<{ element: TimelineElement; updates: Pick<TimelineElement, "start" | "track"> }>,
       coalesceKey?: string,
       operation?: TimelineMoveOperation,
+      coalesceMs?: number,
     ) => {
       // Match the sibling handlers: report the telemetry when the batch touches at
       // least one expanded sub-comp child (the clips being rebased to local coords).
@@ -167,7 +176,13 @@ export function TimelinePane({
         trackStudioExpandedClipEdit({ action: "move" });
       }
       if (!onMoveElements) return;
-      return forwardRebasedTimelineMoveElements(edits, coalesceKey, operation, onMoveElements);
+      return forwardRebasedTimelineMoveElements(
+        edits,
+        coalesceKey,
+        operation,
+        onMoveElements,
+        coalesceMs,
+      );
     },
     [onMoveElements],
   );
@@ -263,6 +278,7 @@ export function TimelinePane({
             onDeleteElement={handleDeleteElement}
             onAssetDrop={onAssetDrop}
             onBlockDrop={onBlockDrop}
+            onCompositionDrop={onCompositionDrop}
             onMoveElement={handleMoveElement}
             onMoveElements={handleMoveElements}
             onResizeElement={handleResizeElement}

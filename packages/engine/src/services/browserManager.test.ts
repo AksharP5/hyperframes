@@ -1,10 +1,18 @@
+// fallow-ignore-file code-duplication
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { Browser, PuppeteerNode } from "puppeteer-core";
 
 import {
   _resetAutoBrowserGpuModeCacheForTests,
   _resetBrowserPoolForTests,
+  _closeBrowserAfterFailedProbeForTests,
+  _createBrowserLaunchFingerprintForTests,
+  _probeBeginFrameSupportForTests,
   _setPuppeteerForTests,
   acquireBrowser,
   buildChromeArgs,
@@ -14,6 +22,102 @@ import {
   resolveHeadlessShellPath,
   resolveBrowserGpuMode,
 } from "./browserManager.js";
+
+describe("BeginFrame capability probe", () => {
+  it("waits for a document and validates a PNG-returning frame", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ hasDamage: true, screenshotData: png.toString("base64") });
+    const detach = vi.fn().mockResolvedValue(undefined);
+    const goto = vi.fn().mockResolvedValue(null);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto,
+        createCDPSession: vi.fn().mockResolvedValue({ send, detach }),
+        close,
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser);
+
+    expect(result.supported).toBe(true);
+    expect(goto).toHaveBeenCalledWith(expect.stringContaining("hf-beginframe-probe"), {
+      waitUntil: "domcontentloaded",
+      timeout: 2000,
+    });
+    expect(send.mock.calls.map(([method]) => method)).toEqual([
+      "HeadlessExperimental.enable",
+      "HeadlessExperimental.beginFrame",
+      "HeadlessExperimental.beginFrame",
+    ]);
+    expect(detach).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("reports an empty screenshot as unsupported", async () => {
+    const send = vi.fn().mockResolvedValue({ hasDamage: false });
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(null),
+        createCDPSession: vi.fn().mockResolvedValue({
+          send,
+          detach: vi.fn().mockResolvedValue(undefined),
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser);
+
+    expect(result.supported).toBe(false);
+    expect(result.detail).toContain("returned 0 bytes after 10 attempts");
+  });
+
+  it("bounds a screenshot-bearing CDP call that never resolves", async () => {
+    const never = new Promise<never>(() => {});
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockReturnValueOnce(never);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(null),
+        createCDPSession: vi.fn().mockResolvedValue({
+          send,
+          detach: vi.fn().mockResolvedValue(undefined),
+        }),
+        close,
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser, 25);
+
+    expect(result.supported).toBe(false);
+    expect(result.detail).toContain("timeout during screenshot beginFrame attempt 1");
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("force-kills and disconnects when graceful browser cleanup never resolves", async () => {
+    const kill = vi.fn();
+    const disconnect = vi.fn().mockResolvedValue(undefined);
+    const browser = {
+      close: vi.fn().mockReturnValue(new Promise<never>(() => {})),
+      process: vi.fn().mockReturnValue({ kill }),
+      disconnect,
+    } as unknown as Browser;
+
+    await _closeBrowserAfterFailedProbeForTests(browser, 25);
+
+    expect(kill).toHaveBeenCalledWith("SIGKILL");
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+});
 
 describe("buildChromeArgs browser GPU mode", () => {
   const base = { width: 1920, height: 1080 };
@@ -26,6 +130,25 @@ describe("buildChromeArgs browser GPU mode", () => {
     expect(args).toContain("--use-angle=swiftshader");
     expect(args).toContain("--enable-unsafe-swiftshader");
     expect(args).not.toContain("--enable-gpu-rasterization");
+  });
+
+  it("disables GPU compositing only for software BeginFrame capture", () => {
+    const softwareBeginFrame = buildChromeArgs(
+      { ...base, captureMode: "beginframe" },
+      { browserGpuMode: "software" },
+    );
+    const softwareScreenshot = buildChromeArgs(
+      { ...base, captureMode: "screenshot" },
+      { browserGpuMode: "software" },
+    );
+    const hardwareBeginFrame = buildChromeArgs(
+      { ...base, captureMode: "beginframe", platform: "linux" },
+      { browserGpuMode: "hardware" },
+    );
+
+    expect(softwareBeginFrame).toContain("--disable-gpu-compositing");
+    expect(softwareScreenshot).not.toContain("--disable-gpu-compositing");
+    expect(hardwareBeginFrame).not.toContain("--disable-gpu-compositing");
   });
 
   it("uses Metal-backed ANGLE for hardware browser GPU mode on macOS", () => {
@@ -63,6 +186,31 @@ describe("buildChromeArgs browser GPU mode", () => {
     expect(args).toContain("--disable-gpu");
     expect(args).toContain("--use-angle=swiftshader");
     expect(args).not.toContain("--use-angle=metal");
+  });
+});
+
+describe("browser launch capture-mode contract", () => {
+  it("derives BeginFrame from the actual launch flags, not forceScreenshot alone", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-browser-fingerprint-"));
+    const chromePath = join(dir, "chrome-headless-shell");
+    writeFileSync(chromePath, "");
+    try {
+      const withoutControl = _createBrowserLaunchFingerprintForTests([], {
+        chromePath,
+        forceScreenshot: false,
+      });
+      const withControl = _createBrowserLaunchFingerprintForTests(
+        ["--enable-begin-frame-control"],
+        { chromePath, forceScreenshot: false },
+      );
+
+      expect(withoutControl.requestedCaptureMode).toBe("screenshot");
+      expect(withControl.requestedCaptureMode).toBe(
+        process.platform === "linux" ? "beginframe" : "screenshot",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -222,10 +370,13 @@ describe("resolveBrowserGpuMode", () => {
 
 describe("resolveHeadlessShellPath", () => {
   const originalHeadlessShellPath = process.env.PRODUCER_HEADLESS_SHELL_PATH;
+  const originalHyperframesBrowserPath = process.env.HYPERFRAMES_BROWSER_PATH;
 
   afterEach(() => {
     if (originalHeadlessShellPath === undefined) delete process.env.PRODUCER_HEADLESS_SHELL_PATH;
     else process.env.PRODUCER_HEADLESS_SHELL_PATH = originalHeadlessShellPath;
+    if (originalHyperframesBrowserPath === undefined) delete process.env.HYPERFRAMES_BROWSER_PATH;
+    else process.env.HYPERFRAMES_BROWSER_PATH = originalHyperframesBrowserPath;
   });
 
   it("throws a clear error when PRODUCER_HEADLESS_SHELL_PATH points at a missing binary", () => {
@@ -234,6 +385,59 @@ describe("resolveHeadlessShellPath", () => {
     expect(() => resolveHeadlessShellPath({})).toThrow(
       /Chrome binary not found at PRODUCER_HEADLESS_SHELL_PATH/,
     );
+  });
+
+  it("uses HYPERFRAMES_BROWSER_PATH when the CLI resolved a browser explicitly", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-env-"));
+    try {
+      const binary = join(dir, "chrome-headless-shell");
+      writeFileSync(binary, "");
+      delete process.env.PRODUCER_HEADLESS_SHELL_PATH;
+      process.env.HYPERFRAMES_BROWSER_PATH = binary;
+
+      expect(resolveHeadlessShellPath({})).toBe(binary);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reuses chrome-headless-shell from the HyperFrames-managed cache", () => {
+    const home = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-cache-"));
+    try {
+      const binary = join(
+        home,
+        ".cache",
+        "hyperframes",
+        "chrome",
+        "chrome-headless-shell",
+        "linux-152.0.7928.2",
+        "chrome-headless-shell-linux64",
+        "chrome-headless-shell",
+      );
+      mkdirSync(join(binary, ".."), { recursive: true });
+      writeFileSync(binary, "");
+      const olderBinary = binary.replace("linux-152.0.7928.2", "linux-99.0.1.1");
+      mkdirSync(join(olderBinary, ".."), { recursive: true });
+      writeFileSync(olderBinary, "");
+
+      // os.homedir() reads HOME on POSIX and USERPROFILE on Windows.
+      const env = { ...process.env, HOME: home, USERPROFILE: home };
+      delete env.PRODUCER_HEADLESS_SHELL_PATH;
+      delete env.HYPERFRAMES_BROWSER_PATH;
+      const moduleUrl = new URL("./browserManager.ts", import.meta.url).href;
+      const stdout = execFileSync(
+        "bun",
+        [
+          "--eval",
+          `import(${JSON.stringify(moduleUrl)}).then(({ resolveHeadlessShellPath }) => process.stdout.write(resolveHeadlessShellPath({}) ?? ""))`,
+        ],
+        { encoding: "utf8", env },
+      );
+
+      expect(stdout).toBe(binary);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 
@@ -305,8 +509,8 @@ describe("browser pool", () => {
     expect(first.browser).toBe(second.browser);
     expect(launchFn).toHaveBeenCalledTimes(1);
 
-    await releaseBrowser(first.browser, poolCfg);
-    await releaseBrowser(second.browser, poolCfg);
+    await first.release();
+    await second.release();
   });
 
   it("concurrent acquires via Promise.all trigger exactly one launch", async () => {
@@ -320,14 +524,14 @@ describe("browser pool", () => {
     expect(a.browser).toBe(b.browser);
     expect(b.browser).toBe(c.browser);
 
-    await releaseBrowser(a.browser, poolCfg);
-    await releaseBrowser(b.browser, poolCfg);
-    await releaseBrowser(c.browser, poolCfg);
+    await a.release();
+    await b.release();
+    await c.release();
   });
 
   it("pool recovers from a disconnected browser", async () => {
     const first = await acquireBrowser(["--no-sandbox"], poolCfg);
-    await releaseBrowser(first.browser, poolCfg);
+    await first.release();
 
     // Simulate Chrome crash
     (first.browser as unknown as { connected: boolean }).connected = false;
@@ -340,15 +544,40 @@ describe("browser pool", () => {
     expect(second.browser).not.toBe(first.browser);
     expect(launchFn).toHaveBeenCalledTimes(2);
 
-    await releaseBrowser(second.browser, poolCfg);
+    await second.release();
   });
 
   it("release at refCount 0 closes the browser", async () => {
     const result = await acquireBrowser(["--no-sandbox"], poolCfg);
     const closeFn = result.browser.close as ReturnType<typeof vi.fn>;
 
-    await releaseBrowser(result.browser, poolCfg);
+    await result.release();
     expect(closeFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("releaseBrowser preserves the sole-owner legacy path", async () => {
+    const result = await acquireBrowser(["--no-sandbox"], poolCfg);
+    const closeFn = result.browser.close as ReturnType<typeof vi.fn>;
+
+    await releaseBrowser(result.browser);
+
+    expect(closeFn).toHaveBeenCalledTimes(1);
+    await result.release();
+    expect(closeFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("releaseBrowser rejects an ambiguous pooled browser handle", async () => {
+    const first = await acquireBrowser(["--no-sandbox"], poolCfg);
+    const second = await acquireBrowser(["--no-sandbox"], poolCfg);
+    const closeFn = first.browser.close as ReturnType<typeof vi.fn>;
+
+    await expect(releaseBrowser(first.browser)).rejects.toThrow(
+      "Cannot release a pooled browser by handle while 2 leases are active",
+    );
+    expect(closeFn).not.toHaveBeenCalled();
+
+    await first.release();
+    await second.release();
   });
 
   it("pool returns a separate browser when forceScreenshot mismatches pooled mode", async () => {
@@ -360,8 +589,8 @@ describe("browser pool", () => {
     expect(second.browser).toBe(first.browser);
     expect(launchFn).toHaveBeenCalledTimes(1);
 
-    await releaseBrowser(first.browser, poolCfg);
-    await releaseBrowser(second.browser, poolCfg);
+    await first.release();
+    await second.release();
   });
 
   it("forceReleaseBrowser does not kill Chrome when other sessions hold refs", async () => {
@@ -375,8 +604,9 @@ describe("browser pool", () => {
     // Should NOT have disconnected — other session still holds a ref
     expect(disconnectFn).not.toHaveBeenCalled();
 
-    // Release the remaining ref normally
-    await releaseBrowser(second.browser, poolCfg);
+    // Each owner releases its own identity; neither can consume the other.
+    result.forceRelease();
+    await second.release();
   });
 
   it("drainBrowserPool is safe to call when no browser is pooled", async () => {

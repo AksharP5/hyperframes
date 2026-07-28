@@ -1,3 +1,4 @@
+import { failCommand } from "../../utils/commandResult.js";
 /**
  * `hyperframes auth login` — sign in to HeyGen.
  *
@@ -91,7 +92,7 @@ async function runOAuthLogin(): Promise<void> {
     // (IdP misconfig, network) instead of lumping everything as flow_error.
     trackAuthLoginFailed("oauth", /timed out/i.test(message) ? "flow_timeout" : "flow_error");
     console.error(c.error(`Sign-in failed: ${message}`));
-    process.exit(1);
+    failCommand();
   }
 
   await reportIdentity();
@@ -105,7 +106,7 @@ async function reportIdentity(): Promise<void> {
   if (!credential) {
     trackAuthLoginFailed("oauth", "no_credential");
     console.error(c.warn("Sign-in completed but no credential was persisted."));
-    process.exit(1);
+    failCommand();
   }
   // Wire the refresh hook here too — a freshly-minted token shouldn't
   // need it, but a fast IdP-side rotation (or a misconfigured short
@@ -211,12 +212,12 @@ async function runApiKeyLogin(inlineKey: string): Promise<void> {
   } catch (err) {
     trackAuthLoginFailed("api_key", "aborted");
     console.error(c.error((err as Error).message || "Sign-in aborted."));
-    process.exit(1);
+    failCommand();
   }
   if (!key) {
     trackAuthLoginFailed("api_key", "invalid_input");
     console.error(c.error("No API key provided."));
-    process.exit(1);
+    failCommand();
   }
   if (!isHeaderSafe(key)) {
     // CR/LF in the value would smuggle headers when the key is sent
@@ -224,12 +225,12 @@ async function runApiKeyLogin(inlineKey: string): Promise<void> {
     // header-injection has to be caught here.
     trackAuthLoginFailed("api_key", "invalid_input");
     console.error(c.error("API key must not contain newline or control characters."));
-    process.exit(1);
+    failCommand();
   }
   if (key.length < MIN_KEY_LENGTH) {
     trackAuthLoginFailed("api_key", "invalid_input");
     console.error(c.error(`API key looks too short (got ${key.length} chars).`));
-    process.exit(1);
+    failCommand();
   }
 
   const previous = await snapshotStore();
@@ -240,7 +241,7 @@ async function runApiKeyLogin(inlineKey: string): Promise<void> {
   if (!user) {
     trackAuthLoginFailed("api_key", "rejected");
     await rollback(previous);
-    process.exit(1);
+    failCommand();
   }
   const id = identityKey(user);
   if (id) identifyUser(id);

@@ -1,44 +1,83 @@
 // fallow-ignore-file code-duplication complexity
 import { spawn } from "child_process";
 import { readFileSync } from "fs";
-import { extname } from "path";
+import { basename, extname } from "path";
+import { redactTelemetryString } from "@hyperframes/core";
 import { FFPROBE_PATH_ENV, getFfprobeBinary } from "./ffmpegBinaries.js";
+import { ManagedChildProcess } from "./managedChildProcess.js";
+import { trackChildProcess } from "./processTracker.js";
+
+const FFPROBE_STDERR_MAX_BYTES = 8 * 1024;
+const FFPROBE_ERROR_MAX_CHARS = 4 * 1024;
+
+function redactFfprobeInput(stderr: string, filePath: string): string {
+  if (!filePath) return stderr;
+
+  let redacted = stderr.split(filePath).join("[input]");
+  const inputBasename = basename(filePath);
+  if (inputBasename) redacted = redacted.split(inputBasename).join("[input]");
+
+  // ManagedChildProcess retains an 8 KiB byte tail. When that boundary lands
+  // inside the input path, stderr starts with only a suffix of the path, so
+  // neither exact-path nor generic absolute-path redaction can recognize it.
+  if (!redacted.startsWith("[input]")) {
+    for (let offset = 1; offset < filePath.length; offset += 1) {
+      const suffix = filePath.slice(offset);
+      if (suffix.length < 4 || !redacted.startsWith(suffix)) continue;
+      const boundary = redacted[suffix.length];
+      if (boundary !== undefined && !/[\s:'")\]}]/.test(boundary)) continue;
+      redacted = `[input]${redacted.slice(suffix.length)}`;
+      break;
+    }
+  }
+
+  return redacted;
+}
+
+function sanitizeFfprobeDiagnostic(stderr: string, filePath: string): string {
+  const stderrWithoutInput = redactFfprobeInput(stderr, filePath);
+  const redacted = redactTelemetryString(stderrWithoutInput, FFPROBE_STDERR_MAX_BYTES);
+  if (redacted.length <= FFPROBE_ERROR_MAX_CHARS) return redacted;
+  return `…${redacted.slice(-(FFPROBE_ERROR_MAX_CHARS - 1))}`;
+}
 
 /** Spawn ffprobe with given args, return stdout. Throws on non-zero exit or missing binary. */
-function runFfprobe(args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const command = getFfprobeBinary();
-    const proc = spawn(command, args);
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
-    proc.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-    proc.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`[FFmpeg] ffprobe exited with code ${code}: ${stderr}`));
-      } else {
-        resolve(stdout);
-      }
-    });
-    proc.on("error", (err) => {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        const configured = process.env[FFPROBE_PATH_ENV]?.trim();
-        reject(
-          new Error(
-            configured
-              ? `[FFmpeg] ffprobe not found at ${FFPROBE_PATH_ENV}="${configured}". Please install FFmpeg.`
-              : "[FFmpeg] ffprobe not found. Please install FFmpeg.",
-          ),
-        );
-      } else {
-        reject(err);
-      }
-    });
+async function runFfprobe(
+  filePath: string,
+  argsWithoutInput: string[],
+  signal?: AbortSignal,
+): Promise<string> {
+  const command = getFfprobeBinary();
+  const proc = spawn(command, ["-v", "error", ...argsWithoutInput, filePath]);
+  trackChildProcess(proc);
+  let stdout = "";
+  proc.stdout.on("data", (data) => {
+    stdout += data.toString();
   });
+  const managed = new ManagedChildProcess(proc, {
+    signal,
+    deadlineAtMs: Date.now() + 30_000,
+    stderrMaxBytes: FFPROBE_STDERR_MAX_BYTES,
+  });
+  const outcome = await managed.wait();
+  if (outcome.reason === "spawn_error") {
+    if ((outcome.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      const configured = process.env[FFPROBE_PATH_ENV]?.trim();
+      throw new Error(
+        configured
+          ? `[FFmpeg] ffprobe not found at ${FFPROBE_PATH_ENV}="${configured}". Please install FFmpeg.`
+          : "[FFmpeg] ffprobe not found. Please install FFmpeg.",
+      );
+    }
+    throw outcome.error ?? new Error(outcome.stderr);
+  }
+  if (outcome.reason !== "exit" || outcome.exitCode !== 0) {
+    const diagnostic = sanitizeFfprobeDiagnostic(outcome.stderr, filePath);
+    throw new Error(
+      `[FFmpeg] ffprobe ${outcome.reason} with code ${outcome.exitCode}: ${diagnostic}`,
+    );
+  }
+  return stdout;
 }
 
 function parseProbeJson(stdout: string): FFProbeOutput {
@@ -53,6 +92,8 @@ function parseProbeJson(stdout: string): FFProbeOutput {
 
 const videoMetadataCache = new Map<string, Promise<VideoMetadata>>();
 const audioMetadataCache = new Map<string, Promise<AudioMetadata>>();
+// FFmpeg's built-in AAC encoder emits AAC-LC, which has 1024 samples per packet.
+const AAC_LC_SAMPLES_PER_PACKET = 1024;
 
 export interface VideoColorSpace {
   /** Color transfer characteristics, e.g. "bt709", "smpte2084", "arib-std-b67" */
@@ -98,6 +139,7 @@ interface FFProbeStream {
   height?: number;
   duration?: string;
   nb_frames?: string;
+  nb_read_packets?: string;
   pix_fmt?: string;
   r_frame_rate?: string;
   avg_frame_rate?: string;
@@ -262,14 +304,11 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
 
     let output: FFProbeOutput | null = null;
     try {
-      const stdout = await runFfprobe([
-        "-v",
-        "quiet",
+      const stdout = await runFfprobe(filePath, [
         "-print_format",
         "json",
         "-show_format",
         "-show_streams",
-        filePath,
       ]);
       output = parseProbeJson(stdout);
     } catch (error) {
@@ -348,37 +387,58 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
  */
 export const extractVideoMetadata = extractMediaMetadata;
 
-export async function extractAudioMetadata(filePath: string): Promise<AudioMetadata> {
-  const cached = audioMetadataCache.get(filePath);
+export async function extractAudioMetadata(
+  filePath: string,
+  options?: { signal?: AbortSignal },
+): Promise<AudioMetadata> {
+  // A caller-owned abort signal cannot safely share a cached in-flight probe:
+  // cancelling one consumer would also cancel unrelated consumers. Signal-bound
+  // probes therefore bypass the process-promise cache.
+  const cached = options?.signal ? undefined : audioMetadataCache.get(filePath);
   if (cached) return cached;
 
   const probePromise = (async (): Promise<AudioMetadata> => {
-    const stdout = await runFfprobe([
-      "-v",
-      "quiet",
-      "-print_format",
-      "json",
-      "-show_format",
-      "-show_streams",
+    const stdout = await runFfprobe(
       filePath,
-    ]);
+      ["-print_format", "json", "-show_format", "-show_streams"],
+      options?.signal,
+    );
     const output = parseProbeJson(stdout);
     const audioStream = output.streams.find((s) => s.codec_type === "audio");
     if (!audioStream) throw new Error("[FFmpeg] No audio stream found");
 
-    const durationSeconds = output.format.duration ? parseFloat(output.format.duration) : 0;
+    let durationSeconds = output.format.duration ? parseFloat(output.format.duration) : 0;
     const streamDuration = audioStream.duration ? parseFloat(audioStream.duration) : undefined;
+    const sampleRate = audioStream.sample_rate ? parseInt(audioStream.sample_rate) : 44100;
+    const audioCodec = audioStream.codec_name || "unknown";
+    if (audioCodec === "aac" && sampleRate > 0) {
+      const packetStdout = await runFfprobe(filePath, [
+        "-select_streams",
+        "a:0",
+        "-count_packets",
+        "-show_entries",
+        "stream=nb_read_packets",
+        "-print_format",
+        "json",
+      ]);
+      const packetOutput = parseProbeJson(packetStdout);
+      const packetCount = Number(packetOutput.streams[0]?.nb_read_packets);
+      if (Number.isFinite(packetCount) && packetCount > 0) {
+        durationSeconds = (packetCount * AAC_LC_SAMPLES_PER_PACKET) / sampleRate;
+      }
+    }
 
     return {
       durationSeconds,
       streamDurationSeconds: streamDuration && streamDuration > 0 ? streamDuration : undefined,
-      sampleRate: audioStream.sample_rate ? parseInt(audioStream.sample_rate) : 44100,
+      sampleRate,
       channels: audioStream.channels || 2,
-      audioCodec: audioStream.codec_name || "unknown",
+      audioCodec,
       bitrate: output.format.bit_rate ? parseInt(output.format.bit_rate) : undefined,
     };
   })();
 
+  if (options?.signal) return probePromise;
   audioMetadataCache.set(filePath, probePromise);
   probePromise.catch(() => {
     if (audioMetadataCache.get(filePath) === probePromise) {
@@ -417,9 +477,7 @@ export async function analyzeKeyframeIntervals(filePath: string): Promise<Keyfra
 }
 
 async function analyzeKeyframeIntervalsUncached(filePath: string): Promise<KeyframeAnalysis> {
-  const stdout = await runFfprobe([
-    "-v",
-    "quiet",
+  const stdout = await runFfprobe(filePath, [
     "-select_streams",
     "v:0",
     "-skip_frame",
@@ -428,7 +486,6 @@ async function analyzeKeyframeIntervalsUncached(filePath: string): Promise<Keyfr
     "frame=pts_time",
     "-of",
     "csv=p=0",
-    filePath,
   ]);
 
   const timestamps = stdout

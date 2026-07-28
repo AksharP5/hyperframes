@@ -40,6 +40,8 @@ import { defaultLogger, type ProducerLogger } from "../../logger.js";
 import { formatExportFrameName } from "../../utils/paths.js";
 import { padOrTrimAudioToVideoFrameCount } from "../render/audioPadTrim.js";
 import type { ChunkSliceJson } from "../render/stages/freezePlan.js";
+import { DISTRIBUTED_RENDER_CAPABILITIES, readPlanProtocolV1 } from "./planProtocol.js";
+import { validatePlanV2MaterializedTarget } from "./planV2.js";
 import type { DistributedFormat } from "./shared.js";
 
 /**
@@ -56,6 +58,7 @@ export interface AssembleResult {
 
 /** Shape of the planDir's top-level `plan.json` — only the fields `assemble` needs. */
 interface PlanJsonForAssemble {
+  protocol?: unknown;
   planHash: string;
   totalFrames: number;
   hasAudio: boolean;
@@ -118,10 +121,12 @@ export async function assemble(
   if (!existsSync(planJsonPath)) {
     throw new Error(`[assemble] planDir missing plan.json: ${planJsonPath}`);
   }
+  const plan = JSON.parse(readFileSync(planJsonPath, "utf-8")) as PlanJsonForAssemble;
+  readPlanProtocolV1(plan, DISTRIBUTED_RENDER_CAPABILITIES.roles.assembler);
+  validatePlanV2MaterializedTarget(planDir, { role: "assembler" });
   if (!existsSync(chunksJsonPath)) {
     throw new Error(`[assemble] planDir missing meta/chunks.json: ${chunksJsonPath}`);
   }
-  const plan = JSON.parse(readFileSync(planJsonPath, "utf-8")) as PlanJsonForAssemble;
   const chunks = JSON.parse(readFileSync(chunksJsonPath, "utf-8")) as ChunkSliceJson[];
   if (chunkPaths.length !== chunks.length) {
     throw new Error(
@@ -289,18 +294,25 @@ export async function assemble(
     }
 
     // ── 3. Audio: pad-or-trim then mux ────────────────────────────────────
-    let audioForMux: string | null = null;
+    let normalizedAudio: {
+      path: string;
+      preserveAudioPrimingEditList: boolean;
+    } | null = null;
     if (audioPath !== null && existsSync(audioPath)) {
-      const paddedAudioPath = join(workDir, "audio-padded.aac");
+      const paddedAudioPath = join(workDir, "audio-padded.m4a");
       const padTrimResult = await padOrTrimAudioToVideoFrameCount({
         videoPath: postConcatPath,
         audioPath,
         outputPath: paddedAudioPath,
+        signal: abortSignal,
       });
       if (!padTrimResult.success) {
         throw new Error(`[assemble] audio pad/trim failed: ${padTrimResult.error}`);
       }
-      audioForMux = paddedAudioPath;
+      normalizedAudio = {
+        path: paddedAudioPath,
+        preserveAudioPrimingEditList: padTrimResult.operation !== "copy",
+      };
       log.info("[assemble] audio normalized for mux", {
         operation: padTrimResult.operation,
         targetDurationSeconds: padTrimResult.targetDurationSeconds,
@@ -313,14 +325,17 @@ export async function assemble(
     // because it operates on a `RenderJob` and emits `updateJobStatus`
     // payloads — the distributed activity has no job to thread through.
     const muxOutputPath =
-      audioForMux !== null ? join(workDir, `mux.${plan.dimensions.format}`) : postConcatPath;
-    if (audioForMux !== null) {
+      normalizedAudio !== null ? join(workDir, `mux.${plan.dimensions.format}`) : postConcatPath;
+    if (normalizedAudio !== null) {
       const muxResult = await muxVideoWithAudio(
         postConcatPath,
-        audioForMux,
+        normalizedAudio.path,
         muxOutputPath,
         abortSignal,
-        { audioCodec: "aac" },
+        {
+          audioCodec: "aac",
+          preserveAudioPrimingEditList: normalizedAudio.preserveAudioPrimingEditList,
+        },
         { num: plan.dimensions.fpsNum, den: plan.dimensions.fpsDen },
       );
       if (!muxResult.success) {

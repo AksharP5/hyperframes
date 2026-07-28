@@ -1,12 +1,12 @@
 # lint, check, snapshot
 
-The correctness pipeline: `lint` (static, fast) while iterating, then `check` (one browser session: runtime + layout + motion + contrast) as the gate. `snapshot` is the standalone utility for capturing still frames and zoomed crops. `validate`, `inspect`, and `layout` still run but are deprecated: `check` covers all of them in one invocation.
+Use `lint` for fast static feedback while iterating. Use `check` as the required final gate: it reruns the same linter, then audits runtime, layout, motion, and contrast in one browser session. Do not chain a redundant standalone `lint` immediately before `check`. `snapshot` is the standalone utility for capturing still frames and zoomed crops. `validate`, `inspect`, and `layout` still run but are deprecated: `check` covers all of them in one invocation.
 
 ## Discipline (motion-heavy work)
 
 When the composition is animation-driven, run the checks before you reach for `preview` or `render`:
 
-- Run `lint` after the first HTML pass, earlier rather than later.
+- Run `lint` after the first HTML pass for early feedback. It is an iteration aid, not a separate final gate.
 - Run `check --snapshots` at the first full pass: the overview frames and per-finding crops show you what the auditor saw.
 - Look at the PNGs before tuning automated warnings: your eye catches what the auditor misses, and the auditor catches what your eye misses.
 - Treat layout errors as defects unless a snapshot proves the layering is intentional, in which case mark it with `data-layout-allow-overflow` / `data-layout-allow-overlap` / `data-layout-allow-occlusion`.
@@ -23,13 +23,7 @@ npx hyperframes lint --json           # machine-readable
 
 Lints `index.html` and all files in `compositions/`. Reports errors (must fix), warnings (should fix), and info (with `--verbose`). Catches missing `data-composition-id`, overlapping tracks on the same `data-track-index`, unregistered timelines, and GSAP/CSS transform conflicts.
 
-**Blind spot — media inside a sub-composition (not yet a lint rule).** A `<video>`/`<audio>` inside a `compositions/*.html` `<template>` (or nested in a wrapper `<div>` anywhere) is never seeked/decoded and renders blank/black; the automated checks all pass. Media must be a direct child of the host root (`index.html`) — see `hyperframes-core` → `variables-and-media.md`. Until a rule exists, check manually before render:
-
-```bash
-grep -nE '<(video|audio)\b' compositions/*.html   # expect NO matches; media belongs in index.html
-```
-
-A non-empty result is a defect. Then `snapshot` each scene that has a video and confirm the panel actually shows footage (a blank/black panel where a clip should play is a bug, not a placeholder — treat it as render-blocking).
+`<video>`/`<audio>` work at any nesting depth, including inside a `compositions/*.html` sub-composition or a wrapper `<div>`: the runtime discovers media with a flat DOM query and seeks/decodes it wherever it lives (`packages/core/src/runtime/{media,startResolver}.ts`). After a render, `snapshot` each scene that has a video and confirm the panel actually shows footage (a blank/black panel where a clip should play is a real bug, not a placeholder).
 
 ## check
 
@@ -56,7 +50,7 @@ One command, one Chrome boot. `check` runs the linter first and skips the browse
 
 Every finding carries a selector, the element's `data-*` identity, the composition source file, a bbox, and the sample time: jump straight from the JSON to the HTML you must edit and re-run.
 
-**Severity is persistence-aware.** A dynamic issue observed at a single grid sample (an entrance/exit transient) demotes to info and never gates. Issues held across samples gate the exit code, a held `content_overlap` is an error, and a held, partially-visible `canvas_overflow` breaching ≥5% of the canvas promotes to warning. Coordinate-frame findings (`escaped_container`, `panel_out_of_canvas`, `connector_detached`) flag geometry computed in one frame but rendered in another — an element far outside its offset parent, a painted panel stuck across the canvas edge, a connector line detached from every node. If a 3s+ composition shows zero geometry change across every sample, `check` fails with `sweep_static`: a frozen timeline makes every green verdict unreliable, so it refuses to pass.
+**Severity is persistence-aware.** A dynamic issue observed at a single grid sample (an entrance/exit transient) demotes to info and never gates. Issues held across samples gate the exit code, a held `content_overlap` is an error, and a held, partially-visible `canvas_overflow` breaching ≥5% of the canvas promotes to warning. Coordinate-frame findings (`escaped_container`, `panel_out_of_canvas`, `connector_detached`) flag geometry computed in one frame but rendered in another — an element far outside its offset parent, a painted panel stuck across the canvas edge, a connector line detached from every node. If a 3s+ composition shows zero geometry change across every sample, `check` fails with `sweep_static`: a frozen timeline makes every green verdict unreliable, so it refuses to pass. The fingerprint includes per-element opacity, so opacity-only reveals (code typing, staggered fades) count as motion — but only while they're still in flight at the sampled times. The classic trap is a reveal that completes early and then holds a static frame for the rest of the duration: every sample lands on the settled state and the run fails. Spread the reveal across the timeline or keep one continuously animated element alive (a blinking caret is idiomatic for code typing) — don't bolt on a slow position drift just to appease the check.
 
 **Escape hatches** (mark intent in the HTML, then re-run):
 

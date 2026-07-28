@@ -34,6 +34,8 @@ jobs:
       code: ${{ steps.filter.outputs.code }}
       cli: ${{ steps.filter.outputs.cli }}
       skills: ${{ steps.filter.outputs.skills }}
+      codex_plugin: ${{ steps.filter.outputs.codex_plugin }}
+      gcp_beginframe: ${{ steps.filter.outputs.gcp_beginframe }}
     steps:
       # Force git-based change detection instead of the pull_request REST API.
       # The API path can fail the whole workflow on transient listFiles
@@ -61,9 +63,47 @@ jobs:
               - ".github/workflows/ci.yml"
             skills:
               - "skills/**"
+              - ".claude/skills/**"
+              - ".agents/skills/**"
               - "skills-manifest.json"
+              - "scripts/lint-skills.ts"
+              - "scripts/check-skill-mirror.mjs"
               - "package.json"
               - ".github/workflows/ci.yml"
+            codex_plugin:
+              - ".codex-plugin/**"
+              - "assets/**"
+              - "skills/**"
+              - "scripts/package-codex-plugin.mjs"
+              - "package.json"
+              - ".github/workflows/ci.yml"
+            gcp_beginframe:
+              - "packages/gcp-cloud-run/Dockerfile"
+              - "packages/aws-lambda/scripts/probe-beginframe.ts"
+              - "packages/engine/src/services/browserManager.ts"
+              - "package.json"
+              - "bun.lock"
+              - ".github/workflows/ci.yml"
+
+  gcp-beginframe-contract:
+    name: GCP BeginFrame image contract
+    needs: changes
+    if: needs.changes.outputs.gcp_beginframe == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          lfs: true
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          file: packages/gcp-cloud-run/Dockerfile
+          target: beginframe-contract
+          push: false
+          cache-from: type=gha,scope=gcp-beginframe-contract
+          cache-to: type=gha,mode=max,scope=gcp-beginframe-contract
 
   build:
     name: Build
@@ -315,6 +355,39 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Verify skills-manifest.json matches skills/
         run: bun packages/cli/scripts/gen-skills-manifest.ts --check
+
+  # Repo-native project skills live under .claude/skills/ (Claude Code) and
+  # .agents/skills/ (Codex CLI). Runs the skill validator against all three
+  # locations (skills/, .claude/skills/, .agents/skills/) and verifies the two
+  # project-skill trees stay byte-identical mirrors of each other. Fires on
+  # any change to the skill dirs or the two validating scripts.
+  project-skills-check:
+    name: "Skills: project-native lint + mirror"
+    needs: changes
+    if: needs.changes.outputs.skills == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Lint SKILL.md files across skills/, .claude/skills/, .agents/skills/
+        run: bun scripts/lint-skills.ts
+      - name: Verify .claude/skills/ and .agents/skills/ are byte-identical
+        run: node scripts/check-skill-mirror.mjs
+
+  codex-plugin-package:
+    name: "Codex plugin package"
+    needs: changes
+    if: needs.changes.outputs.codex_plugin == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Build upload-ready Codex plugin
+        run: node scripts/package-codex-plugin.mjs
 
   cli-npx-shim:
     name: "CLI: npx shim (${{ matrix.os }})"

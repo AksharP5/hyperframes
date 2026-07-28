@@ -6,12 +6,10 @@
  * Videos are replaced with <img> elements during capture.
  */
 
-import { spawn } from "child_process";
 import { copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, rmSync } from "fs";
 import { isAbsolute, join, posix, resolve, sep } from "path";
 import { parseHTML } from "linkedom";
 import { decodeUrlPathVariants, MEDIA_DURATION_CLAMP_EPSILON_SECONDS } from "@hyperframes/core";
-import { trackChildProcess } from "../utils/processTracker.js";
 import { resolveReferencedStart, type RefResolverEl } from "./referenceResolver.js";
 import { extractMediaMetadata, type VideoMetadata } from "../utils/ffprobe.js";
 import {
@@ -19,8 +17,8 @@ import {
   isHdrColorSpace as isHdrColorSpaceUtil,
   type HdrTransfer,
 } from "../utils/hdr.js";
-import { downloadToTemp, isHttpUrl } from "../utils/urlDownloader.js";
-import { getFfmpegBinary } from "../utils/ffmpegBinaries.js";
+import { downloadToTemp, isHttpUrl, UrlDownloadError } from "../utils/urlDownloader.js";
+import { runFfmpeg } from "../utils/runFfmpeg.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { unwrapTemplate } from "../utils/htmlTemplate.js";
 import {
@@ -85,6 +83,17 @@ export interface ExtractionOptions {
   quality?: number;
   format?: VideoFrameFormat;
   sdrToHdrTransfer?: HdrTransfer;
+  /**
+   * Bounded per-source FFmpeg retries. Default 0 preserves stable behavior;
+   * the producer may canary at most one retry after observing typed failures.
+   */
+  maxTransientRetries?: number;
+  /**
+   * Collect metadata-probe failures into `ExtractionResult.errors` instead
+   * of preserving the legacy Promise rejection. Default false; only the
+   * candidate enforce lane may opt into typed aggregation.
+   */
+  collectProbeFailures?: boolean;
 }
 
 const EXTRACT_CACHE_MIN_AGE_MS = 60 * 60 * 1000;
@@ -138,12 +147,267 @@ export interface ExtractionPhaseBreakdown {
   extractMs: number;
   cacheHits: number;
   cacheMisses: number;
+  /** Number of per-source transient failures retried inside this extraction. */
+  transientRetries?: number;
+}
+
+export type VideoExtractionFailureKind =
+  | "cancelled"
+  | "source_missing"
+  | "source_rejected"
+  | "download_not_found"
+  | "download_transient"
+  | "invalid_media"
+  | "media_start_out_of_range"
+  | "ffmpeg_unavailable"
+  | "ffmpeg_timeout"
+  | "ffmpeg_transient"
+  | "ffmpeg_failed"
+  | "zero_output"
+  | "internal";
+
+export interface VideoExtractionFailure {
+  videoId: string;
+  /** Always populated by this engine version; optional for source compatibility with older consumers. */
+  kind?: VideoExtractionFailureKind;
+  /** Always populated by this engine version; absent legacy values fail closed. */
+  retryable?: boolean;
+  /**
+   * Operator diagnostic retained inside the engine result. Producer-facing
+   * errors must summarize `kind`/counts and must not forward this field: it
+   * can contain a local path or a signed source URL.
+   */
+  error: string;
+}
+
+export class VideoSourceExtractionError extends Error {
+  readonly hyperframesVideoSourceExtractionError = true as const;
+
+  constructor(
+    readonly kind: VideoExtractionFailureKind,
+    readonly retryable: boolean,
+    message: string,
+    readonly diagnostic: string = message,
+  ) {
+    super(message);
+    this.name = "VideoSourceExtractionError";
+  }
+}
+
+export function isVideoSourceExtractionError(error: unknown): error is VideoSourceExtractionError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "hyperframesVideoSourceExtractionError" in error &&
+    error.hyperframesVideoSourceExtractionError === true
+  );
+}
+
+function boundedTransientRetryBudget(value: number | undefined): 0 | 1 {
+  return Number.isFinite(value) && (value ?? 0) >= 1 ? 1 : 0;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Convert legacy/raw downloader and filesystem errors into the bounded
+ * extraction taxonomy. New extraction code should throw
+ * `VideoSourceExtractionError` directly; this classifier keeps older utility
+ * boundaries safe while they migrate.
+ */
+export function classifyVideoExtractionError(error: unknown): VideoSourceExtractionError {
+  if (isVideoSourceExtractionError(error)) return error;
+  const diagnostic = errorText(error);
+  const lowered = diagnostic.toLowerCase();
+
+  if (error instanceof UrlDownloadError) {
+    if (error.kind === "cancelled") {
+      return new VideoSourceExtractionError(
+        "cancelled",
+        false,
+        "Video extraction cancelled",
+        diagnostic,
+      );
+    }
+    if (error.kind === "http_not_found") {
+      return new VideoSourceExtractionError(
+        "download_not_found",
+        false,
+        "Video source was not found",
+        diagnostic,
+      );
+    }
+    if (error.kind === "http_rejected") {
+      return new VideoSourceExtractionError(
+        "source_rejected",
+        false,
+        "Video source download was rejected",
+        diagnostic,
+      );
+    }
+    if (error.retryable) {
+      return new VideoSourceExtractionError(
+        "download_transient",
+        true,
+        "Video source download failed transiently",
+        diagnostic,
+      );
+    }
+    return new VideoSourceExtractionError(
+      "internal",
+      false,
+      "Video source download failed internally",
+      diagnostic,
+    );
+  }
+  if (lowered.includes("cancelled") || lowered.includes("aborted")) {
+    return new VideoSourceExtractionError(
+      "cancelled",
+      false,
+      "Video extraction cancelled",
+      diagnostic,
+    );
+  }
+  if (lowered.includes("video file not found")) {
+    return new VideoSourceExtractionError(
+      "source_missing",
+      false,
+      "Video source is missing",
+      diagnostic,
+    );
+  }
+  if (
+    lowered.includes("only https urls are permitted") ||
+    lowered.includes("private/reserved address") ||
+    lowered.includes("invalid url")
+  ) {
+    return new VideoSourceExtractionError(
+      "source_rejected",
+      false,
+      "Video source URL is not permitted",
+      diagnostic,
+    );
+  }
+  const httpStatus = diagnostic.match(/\bHTTP\s+(\d{3})\b/i)?.[1];
+  if (httpStatus) {
+    const status = Number(httpStatus);
+    if (status === 404 || status === 410) {
+      return new VideoSourceExtractionError(
+        "download_not_found",
+        false,
+        "Video source was not found",
+        diagnostic,
+      );
+    }
+    if (status === 408 || status === 429 || status >= 500) {
+      return new VideoSourceExtractionError(
+        "download_transient",
+        true,
+        "Video source download failed transiently",
+        diagnostic,
+      );
+    }
+    return new VideoSourceExtractionError(
+      "source_rejected",
+      false,
+      "Video source download was rejected",
+      diagnostic,
+    );
+  }
+  if (
+    lowered.includes("[urldownloader] download timeout") ||
+    lowered.includes("[urldownloader] download failed") ||
+    lowered.includes("fetch failed") ||
+    lowered.includes("network")
+  ) {
+    return new VideoSourceExtractionError(
+      "download_transient",
+      true,
+      "Video source download failed transiently",
+      diagnostic,
+    );
+  }
+  if (lowered.includes("ffprobe not found")) {
+    return new VideoSourceExtractionError(
+      "ffmpeg_unavailable",
+      false,
+      "FFprobe is unavailable",
+      diagnostic,
+    );
+  }
+  if (lowered.includes("ffprobe deadline")) {
+    return new VideoSourceExtractionError(
+      "ffmpeg_timeout",
+      true,
+      "Video inspection timed out",
+      diagnostic,
+    );
+  }
+  if (
+    lowered.includes("ffprobe") ||
+    lowered.includes("failed to parse ffprobe output") ||
+    lowered.includes("no video stream found")
+  ) {
+    return new VideoSourceExtractionError(
+      "invalid_media",
+      false,
+      "Video source could not be inspected",
+      diagnostic,
+    );
+  }
+  return new VideoSourceExtractionError(
+    "internal",
+    false,
+    "Video extraction failed internally",
+    diagnostic,
+  );
+}
+
+export async function runVideoExtractionWithRetry<T>(
+  operation: () => Promise<T>,
+  options: {
+    signal?: AbortSignal;
+    onRetry?: () => Promise<void> | void;
+    maxTransientRetries?: number;
+  } = {},
+): Promise<{ result: T; retries: number }> {
+  const maxTransientRetries = boundedTransientRetryBudget(options.maxTransientRetries);
+  let retries = 0;
+  for (;;) {
+    if (options.signal?.aborted) {
+      throw new VideoSourceExtractionError("cancelled", false, "Video extraction cancelled");
+    }
+    try {
+      return { result: await operation(), retries };
+    } catch (error) {
+      const classified = classifyVideoExtractionError(error);
+      if (options.signal?.aborted) {
+        throw new VideoSourceExtractionError(
+          "cancelled",
+          false,
+          "Video extraction cancelled",
+          classified.diagnostic,
+        );
+      }
+      if (
+        classified.kind === "cancelled" ||
+        !classified.retryable ||
+        retries >= maxTransientRetries
+      ) {
+        throw classified;
+      }
+      retries += 1;
+      await options.onRetry?.();
+    }
+  }
 }
 
 export interface ExtractionResult {
   success: boolean;
   extracted: ExtractedFrames[];
-  errors: Array<{ videoId: string; error: string }>;
+  errors: VideoExtractionFailure[];
   totalFramesExtracted: number;
   durationMs: number;
   phaseBreakdown: ExtractionPhaseBreakdown;
@@ -272,7 +536,28 @@ export async function extractVideoFramesRange(
   const videoOutputDir = outputDirOverride ?? join(outputDir, videoId);
   if (!existsSync(videoOutputDir)) mkdirSync(videoOutputDir, { recursive: true });
 
-  const metadata = await extractMediaMetadata(videoPath);
+  let metadata: VideoMetadata;
+  try {
+    metadata = await extractMediaMetadata(videoPath);
+  } catch (error) {
+    throw classifyVideoExtractionError(error);
+  }
+  if (!(metadata.durationSeconds > 0)) {
+    throw new VideoSourceExtractionError(
+      "invalid_media",
+      false,
+      "Video source has no positive duration",
+      `Video source duration is ${metadata.durationSeconds}s`,
+    );
+  }
+  if (startTime >= metadata.durationSeconds) {
+    throw new VideoSourceExtractionError(
+      "media_start_out_of_range",
+      false,
+      "Video media start is outside the source duration",
+      `Video media start ${startTime}s is outside source duration ${metadata.durationSeconds}s`,
+    );
+  }
   const format = resolveFrameFormat(metadata, options.format);
   const framePattern = `${FRAME_FILENAME_PREFIX}%05d.${format}`;
   const outputPattern = join(videoOutputDir, framePattern);
@@ -328,78 +613,101 @@ export async function extractVideoFramesRange(
   if (format === "png") args.push("-compression_level", "1");
   args.push("-y", outputPattern);
 
-  return new Promise((resolve, reject) => {
-    const ffmpeg = spawn(getFfmpegBinary(), args);
-    trackChildProcess(ffmpeg);
-    let stderr = "";
-    const onAbort = () => {
-      ffmpeg.kill("SIGTERM");
-    };
-    if (signal) {
-      if (signal.aborted) {
-        ffmpeg.kill("SIGTERM");
-      } else {
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
+  const processResult = await runFfmpeg(args, { signal, timeout: ffmpegProcessTimeout });
+  if (processResult.terminationReason === "abort") {
+    throw new VideoSourceExtractionError("cancelled", false, "Video extraction cancelled");
+  }
+  if (processResult.terminationReason === "spawn_error") {
+    throw classifyFfmpegSpawnError(processResult.error, processResult.stderr);
+  }
+  if (!processResult.success) {
+    // With the SDR-to-HDR remap folded into this pass, a filter failure
+    // (e.g. an ffmpeg built without the colorspace filter) would otherwise
+    // surface as a generic extract error and the operator has to grep the
+    // filter chain to learn it was the HDR conversion. Attribute it.
+    const hdrPrefix = options.sdrToHdrTransfer
+      ? `SDR→HDR conversion failed (colorspace filter in extract pass, target ${options.sdrToHdrTransfer}): `
+      : "";
+    const timedOut = processResult.terminationReason === "deadline";
+    const timeoutSuffix = timedOut ? ` (timed out after ${ffmpegProcessTimeout} ms)` : "";
+    const diagnostic =
+      `${hdrPrefix}FFmpeg exited with code ${processResult.exitCode}${timeoutSuffix}: ` +
+      processResult.stderr.slice(-500);
+    if (timedOut) {
+      throw new VideoSourceExtractionError(
+        "ffmpeg_timeout",
+        true,
+        "Video frame extraction timed out",
+        diagnostic,
+      );
     }
+    const transientIo =
+      /resource temporarily unavailable|device or resource busy|input\/output error/i.test(
+        processResult.stderr,
+      );
+    throw new VideoSourceExtractionError(
+      transientIo ? "ffmpeg_transient" : "ffmpeg_failed",
+      transientIo,
+      transientIo
+        ? "Video frame extraction hit a transient I/O failure"
+        : "Video source could not be decoded",
+      diagnostic,
+    );
+  }
 
-    const timer = setTimeout(() => {
-      ffmpeg.kill("SIGTERM");
-    }, ffmpegProcessTimeout);
-
-    ffmpeg.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    ffmpeg.on("close", (code) => {
-      clearTimeout(timer);
-      if (signal) signal.removeEventListener("abort", onAbort);
-      if (signal?.aborted) {
-        reject(new Error("Video frame extraction cancelled"));
-        return;
-      }
-      if (code !== 0) {
-        // With the SDR-to-HDR remap folded into this pass, a filter failure
-        // (e.g. an ffmpeg built without the colorspace filter) would otherwise
-        // surface as a generic extract error and the operator has to grep the
-        // filter chain to learn it was the HDR conversion. Attribute it.
-        const hdrPrefix = options.sdrToHdrTransfer
-          ? `SDR→HDR conversion failed (colorspace filter in extract pass, target ${options.sdrToHdrTransfer}): `
-          : "";
-        reject(new Error(`${hdrPrefix}FFmpeg exited with code ${code}: ${stderr.slice(-500)}`));
-        return;
-      }
-
-      const framePaths = new Map<number, string>();
-      const files = readdirSync(videoOutputDir)
-        .filter((f) => f.startsWith(FRAME_FILENAME_PREFIX) && f.endsWith(`.${format}`))
-        .sort();
-      files.forEach((file, index) => {
-        framePaths.set(index, join(videoOutputDir, file));
-      });
-
-      resolve({
-        videoId,
-        srcPath: videoPath,
-        outputDir: videoOutputDir,
-        framePattern,
-        fps,
-        totalFrames: framePaths.size,
-        metadata,
-        framePaths,
-      });
-    });
-
-    ffmpeg.on("error", (err) => {
-      clearTimeout(timer);
-      if (signal) signal.removeEventListener("abort", onAbort);
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        reject(new Error("[FFmpeg] ffmpeg not found"));
-      } else {
-        reject(err);
-      }
-    });
+  const framePaths = new Map<number, string>();
+  const files = readdirSync(videoOutputDir)
+    .filter((f) => f.startsWith(FRAME_FILENAME_PREFIX) && f.endsWith(`.${format}`))
+    .sort();
+  files.forEach((file, index) => {
+    framePaths.set(index, join(videoOutputDir, file));
   });
+  if (framePaths.size === 0 && duration > 0) {
+    throw new VideoSourceExtractionError(
+      "zero_output",
+      false,
+      "Video source produced no decodable frames",
+      `FFmpeg exited successfully but produced no frames (start=${startTime}, duration=${duration})`,
+    );
+  }
+
+  return {
+    videoId,
+    srcPath: videoPath,
+    outputDir: videoOutputDir,
+    framePattern,
+    fps,
+    totalFrames: framePaths.size,
+    metadata,
+    framePaths,
+  };
+}
+
+const TRANSIENT_FFMPEG_SPAWN_CODES = new Set(["EAGAIN", "EMFILE", "ENFILE"]);
+
+export function classifyFfmpegSpawnError(error: unknown, stderr = ""): VideoSourceExtractionError {
+  const code =
+    typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "";
+  if (code === "ENOENT") {
+    return new VideoSourceExtractionError(
+      "ffmpeg_unavailable",
+      false,
+      "FFmpeg is unavailable",
+      "[FFmpeg] ffmpeg not found",
+    );
+  }
+  const diagnostic = error instanceof Error ? error.message : stderr;
+  const retryable = TRANSIENT_FFMPEG_SPAWN_CODES.has(code);
+  return new VideoSourceExtractionError(
+    retryable ? "ffmpeg_transient" : "ffmpeg_failed",
+    retryable,
+    retryable
+      ? "FFmpeg could not be started due to transient resource pressure"
+      : "FFmpeg could not be started",
+    diagnostic,
+  );
 }
 
 /**
@@ -670,6 +978,12 @@ export function resolveProjectRelativeSrc(
 ): string {
   const qIdx = src.indexOf("?");
   const cleanSrc = qIdx >= 0 ? src.slice(0, qIdx) : src;
+
+  // Preserve explicit filesystem paths when they really exist. Otherwise a
+  // leading slash is a browser origin-root URL (`/assets/foo.mp4`), which the
+  // file server serves from the project root rather than the host filesystem.
+  if (isAbsolute(cleanSrc) && existsSync(cleanSrc)) return cleanSrc;
+
   const candidates: string[] = [];
 
   const addCandidate = (candidate: string): void => {
@@ -717,7 +1031,7 @@ export async function extractAllVideoFrames(
 ): Promise<ExtractionResult> {
   const startTime = Date.now();
   const extracted: ExtractedFrames[] = [];
-  const errors: Array<{ videoId: string; error: string }> = [];
+  const errors: VideoExtractionFailure[] = [];
   let totalFramesExtracted = 0;
   const breakdown: ExtractionPhaseBreakdown = {
     resolveMs: 0,
@@ -734,6 +1048,10 @@ export async function extractAllVideoFrames(
     extractMs: 0,
     cacheHits: 0,
     cacheMisses: 0,
+    transientRetries: 0,
+  };
+  const recordTransientRetries = (count: number): void => {
+    breakdown.transientRetries = (breakdown.transientRetries ?? 0) + count;
   };
 
   // Phase 1: Resolve paths and download remote videos
@@ -746,18 +1064,16 @@ export async function extractAllVideoFrames(
     if (signal?.aborted) break;
     try {
       let videoPath = video.src;
-      // Use isAbsolute() rather than startsWith("/"). On Windows, absolute paths
-      // like "C:\…" are not detected by the latter, so we'd re-join them under
-      // baseDir and produce duplicated, nonexistent paths
-      // (e.g. C:\tmp\hf-vfr-test-X\C:\tmp\hf-vfr-test-X\vfr_screen.mp4).
-      if (!isAbsolute(videoPath) && !isHttpUrl(videoPath)) {
+      if (!isHttpUrl(videoPath)) {
         videoPath = resolveProjectRelativeSrc(video.src, baseDir, compiledDir);
       }
 
       if (isHttpUrl(videoPath)) {
         const downloadDir = join(options.outputDir, "_downloads");
         mkdirSync(downloadDir, { recursive: true });
-        videoPath = await downloadToTemp(videoPath, downloadDir);
+        videoPath = await downloadToTemp(videoPath, downloadDir, undefined, signal, () =>
+          recordTransientRetries(1),
+        );
       }
 
       if (!existsSync(videoPath)) {
@@ -774,12 +1090,23 @@ export async function extractAllVideoFrames(
               `(e.g. src="assets/foo.mp4") over "../assets/foo.mp4".\n`,
           );
         }
-        errors.push({ videoId: video.id, error: `Video file not found: ${videoPath}` });
+        errors.push({
+          videoId: video.id,
+          kind: "source_missing",
+          retryable: false,
+          error: `Video file not found: ${videoPath}`,
+        });
         continue;
       }
       resolvedVideos.push({ video, videoPath });
     } catch (err) {
-      errors.push({ videoId: video.id, error: err instanceof Error ? err.message : String(err) });
+      const classified = classifyVideoExtractionError(err);
+      errors.push({
+        videoId: video.id,
+        kind: classified.kind,
+        retryable: classified.retryable,
+        error: classified.diagnostic,
+      });
     }
   }
 
@@ -809,9 +1136,46 @@ export async function extractAllVideoFrames(
 
   // Phase 2: Probe color spaces and normalize if mixed HDR/SDR
   const phase2ProbeStart = Date.now();
-  const videoMetadata = await Promise.all(
-    resolvedVideos.map(({ videoPath }) => extractMediaMetadata(videoPath)),
+  const metadataResults = await Promise.all(
+    resolvedVideos.map(async ({ video, videoPath }, index) => {
+      try {
+        // Keep the default/off path byte-for-byte compatible with the legacy
+        // Promise.all rejection. Classification is introduced only when a
+        // bounded retry or explicit typed aggregation is enabled.
+        const attempted =
+          !options.collectProbeFailures &&
+          boundedTransientRetryBudget(options.maxTransientRetries) === 0
+            ? { result: await extractMediaMetadata(videoPath), retries: 0 }
+            : await runVideoExtractionWithRetry(() => extractMediaMetadata(videoPath), {
+                signal,
+                maxTransientRetries: options.maxTransientRetries,
+                onRetry: () => recordTransientRetries(1),
+              });
+        return {
+          video,
+          videoPath,
+          metadata: attempted.result,
+          cacheKeyInput: cacheKeyInputs[index] ?? null,
+        };
+      } catch (error) {
+        if (!options.collectProbeFailures) throw error;
+        errors.push(extractionError(video.id, error));
+        return null;
+      }
+    }),
   );
+  const probedVideos = metadataResults.filter((entry) => entry !== null);
+  resolvedVideos.splice(
+    0,
+    resolvedVideos.length,
+    ...probedVideos.map(({ video, videoPath }) => ({ video, videoPath })),
+  );
+  cacheKeyInputs.splice(
+    0,
+    cacheKeyInputs.length,
+    ...probedVideos.map(({ cacheKeyInput }) => cacheKeyInput),
+  );
+  const videoMetadata = probedVideos.map(({ metadata }) => metadata);
   const videoColorSpaces = videoMetadata.map((m) => m.colorSpace);
   // Canonical per-index record of the SDR-to-HDR transform decision. BOTH the
   // cache key (transform discriminator) and the extraction options read from
@@ -856,6 +1220,8 @@ export async function extractAllVideoFrames(
         if (entry.video.mediaStart >= metadata.durationSeconds) {
           errors.push({
             videoId: entry.video.id,
+            kind: "media_start_out_of_range",
+            retryable: false,
             error: `SDR→HDR conversion skipped: mediaStart (${entry.video.mediaStart}s) ≥ source duration (${metadata.durationSeconds}s)`,
           });
           hdrSkippedIndices.add(i);
@@ -892,12 +1258,10 @@ export async function extractAllVideoFrames(
   const vfrPreflightStart = Date.now();
   for (let i = 0; i < resolvedVideos.length; i++) {
     if (signal?.aborted) break;
-    const entry = resolvedVideos[i];
-    if (!entry) continue;
     const vfrProbeStart = Date.now();
-    const metadata = await extractMediaMetadata(entry.videoPath);
+    const metadata = videoMetadata[i];
     breakdown.vfrProbeMs += Date.now() - vfrProbeStart;
-    if (metadata.isVFR) breakdown.vfrPreflightCount += 1;
+    if (metadata?.isVFR) breakdown.vfrPreflightCount += 1;
   }
   breakdown.vfrPreflightMs = Date.now() - vfrPreflightStart;
 
@@ -915,17 +1279,19 @@ export async function extractAllVideoFrames(
     }
   }
 
-  function extractionError(videoId: string, err: unknown): { videoId: string; error: string } {
-    return { videoId, error: err instanceof Error ? err.message : String(err) };
+  function extractionError(videoId: string, err: unknown): VideoExtractionFailure {
+    const classified = classifyVideoExtractionError(err);
+    return {
+      videoId,
+      kind: classified.kind,
+      retryable: classified.retryable,
+      error: classified.diagnostic,
+    };
   }
 
-  type PreparedExtractionResult =
-    | { work: PreparedExtraction }
-    | { error: { videoId: string; error: string } };
+  type PreparedExtractionResult = { work: PreparedExtraction } | { error: VideoExtractionFailure };
 
-  type ExtractionOutcome =
-    | { result: ExtractedFrames }
-    | { error: { videoId: string; error: string } };
+  type ExtractionOutcome = { result: ExtractedFrames } | { error: VideoExtractionFailure };
 
   function scopedExtractionOptions(work: PreparedExtraction): ExtractionOptions {
     return { ...options, format: work.format, sdrToHdrTransfer: work.sdrToHdrTransfer };
@@ -978,32 +1344,62 @@ export async function extractAllVideoFrames(
     };
   }
 
-  async function extractDirectMiss(miss: UniqueExtractionMiss): Promise<ExtractedFrames> {
+  async function extractDirectMiss(
+    miss: UniqueExtractionMiss,
+    maxTransientRetries = options.maxTransientRetries ?? 0,
+  ): Promise<ExtractedFrames> {
     const { work, cacheTarget } = miss;
     if (!cacheTarget) {
-      return extractVideoFramesRange(
-        work.videoPath,
-        work.video.id,
-        work.video.mediaStart,
-        work.videoDuration,
-        scopedExtractionOptions(work),
-        signal,
-        config,
+      const outputDir = join(options.outputDir, work.video.id);
+      const attempted = await runVideoExtractionWithRetry(
+        () =>
+          extractVideoFramesRange(
+            work.videoPath,
+            work.video.id,
+            work.video.mediaStart,
+            work.videoDuration,
+            scopedExtractionOptions(work),
+            signal,
+            config,
+          ),
+        {
+          signal,
+          maxTransientRetries,
+          onRetry: () => {
+            recordTransientRetries(1);
+            rmSync(outputDir, { recursive: true, force: true });
+          },
+        },
       );
+      return attempted.result;
     }
 
     const partialDir = partialCacheEntryDir(cacheTarget.entry);
+    rmSync(partialDir, { recursive: true, force: true });
     mkdirSync(partialDir, { recursive: true });
-    const result = await extractVideoFramesRange(
-      work.videoPath,
-      work.video.id,
-      work.video.mediaStart,
-      work.videoDuration,
-      scopedExtractionOptions(work),
-      signal,
-      config,
-      partialDir,
+    const attempted = await runVideoExtractionWithRetry(
+      () =>
+        extractVideoFramesRange(
+          work.videoPath,
+          work.video.id,
+          work.video.mediaStart,
+          work.videoDuration,
+          scopedExtractionOptions(work),
+          signal,
+          config,
+          partialDir,
+        ),
+      {
+        signal,
+        maxTransientRetries,
+        onRetry: () => {
+          recordTransientRetries(1);
+          rmSync(partialDir, { recursive: true, force: true });
+          mkdirSync(partialDir, { recursive: true });
+        },
+      },
     );
+    const result = attempted.result;
     const published = publishCacheEntry(cacheTarget.entry, partialDir);
     if (!published.published) {
       breakdown.cachePublishFailures += 1;
@@ -1012,9 +1408,12 @@ export async function extractAllVideoFrames(
     return rehydratePublishedCache(work, cacheTarget);
   }
 
-  async function executeDirectMiss(miss: UniqueExtractionMiss): Promise<ExtractionOutcome> {
+  async function executeDirectMiss(
+    miss: UniqueExtractionMiss,
+    maxTransientRetries = options.maxTransientRetries ?? 0,
+  ): Promise<ExtractionOutcome> {
     try {
-      return { result: await extractDirectMiss(miss) };
+      return { result: await extractDirectMiss(miss, maxTransientRetries) };
     } catch (err) {
       return { error: extractionError(miss.work.video.id, err) };
     }
@@ -1063,6 +1462,10 @@ export async function extractAllVideoFrames(
 
     try {
       rmSync(tempDir, { recursive: true, force: true });
+      // A long union can hit the fixed FFmpeg deadline even when each shorter
+      // member range succeeds. Do not retry the optimization itself; preserve
+      // the established grouped→direct fallback and apply bounded retries only
+      // to the individual source ranges below.
       const superset = await extractVideoFramesRange(
         first.videoPath,
         group.groupId,
@@ -1191,7 +1594,14 @@ export async function extractAllVideoFrames(
       const message = isFollower
         ? `[shared extraction, leader ${outcome.error.videoId}] ${outcome.error.error}`
         : outcome.error.error;
-      return { error: { videoId: prepared.work.video.id, error: message } };
+      return {
+        error: {
+          videoId: prepared.work.video.id,
+          kind: outcome.error.kind,
+          retryable: outcome.error.retryable,
+          error: message,
+        },
+      };
     }
     return { result: { ...outcome.result, videoId: prepared.work.video.id } };
   });
@@ -1233,13 +1643,14 @@ export async function extractAllVideoFrames(
   };
 }
 
-export function getFrameAtTime(
+function getFrameIndexAtTime(
   extracted: ExtractedFrames,
   globalTime: number,
   videoStart: number,
   loop = false,
   mediaStart = 0,
-): string | null {
+  holdLastFrame = false,
+): number | null {
   let localTime = globalTime - videoStart;
   if (localTime < 0) return null;
   const loopDuration = Math.max(0, extracted.metadata.durationSeconds - mediaStart);
@@ -1249,21 +1660,29 @@ export function getFrameAtTime(
   // Add epsilon before flooring to avoid IEEE 754 boundary errors where
   // e.g. 0.28 * 25 === 6.999999999999999 instead of 7.
   const frameIndex = Math.floor(localTime * extracted.fps + 1e-9);
-  if (loop && frameIndex >= extracted.totalFrames && extracted.totalFrames > 0) {
-    return extracted.framePaths.get(extracted.totalFrames - 1) || null;
+  if (frameIndex < 0 || extracted.totalFrames <= 0) return null;
+  if (frameIndex >= extracted.totalFrames) {
+    return loop || holdLastFrame ? extracted.totalFrames - 1 : null;
   }
-  if (frameIndex < 0 || frameIndex >= extracted.totalFrames) return null;
-  return extracted.framePaths.get(frameIndex) || null;
+  return frameIndex;
 }
 
-const HOLD_LAST_FRAME_TOLERANCE_FRAMES = 2;
+export function getFrameAtTime(
+  extracted: ExtractedFrames,
+  globalTime: number,
+  videoStart: number,
+  loop = false,
+  mediaStart = 0,
+): string | null {
+  const frameIndex = getFrameIndexAtTime(extracted, globalTime, videoStart, loop, mediaStart);
+  return frameIndex == null ? null : extracted.framePaths.get(frameIndex) || null;
+}
 
 /**
- * Whether a clip's source is shorter than its `data-duration` slot by more than
- * the compiler tolerates before clamping the slot to the media
- * (MEDIA_DURATION_CLAMP_EPSILON_SECONDS) — the case worth warning about. Shared
- * by the render and `validate` warnings. `null` when the media covers the slot,
- * the clip loops, or inputs are unusable.
+ * Whether a media source is shorter than its `data-duration` slot by more than
+ * the compiler tolerance. The calculation stays tag-agnostic; current in-repo
+ * warnings call it for audio only because video slots may intentionally outlive
+ * their source and hold the final frame.
  */
 export function analyzeClipMediaFit(params: {
   /** Timeline slot length in seconds — `end - start` (a.k.a. data-duration). */
@@ -1323,7 +1742,15 @@ export class FrameLookupTable {
     const video = this.videos.get(videoId);
     if (!video) return null;
     if (globalTime < video.start || globalTime > video.end) return null;
-    return getFrameAtTime(video.extracted, globalTime, video.start, video.loop, video.mediaStart);
+    const frameIndex = getFrameIndexAtTime(
+      video.extracted,
+      globalTime,
+      video.start,
+      video.loop,
+      video.mediaStart,
+      true,
+    );
+    return frameIndex == null ? null : video.extracted.framePaths.get(frameIndex) || null;
   }
 
   private resetActiveState(): void {
@@ -1384,37 +1811,15 @@ export class FrameLookupTable {
     for (const videoId of this.activeVideoIds) {
       const video = this.videos.get(videoId);
       if (!video) continue;
-      let localTime = globalTime - video.start;
-      const loopDuration = Math.max(0, video.extracted.metadata.durationSeconds - video.mediaStart);
-      if (video.loop && loopDuration > 0 && localTime >= loopDuration) {
-        localTime %= loopDuration;
-      }
-      const frameIndex = Math.floor(localTime * video.extracted.fps + 1e-9);
-      if (video.loop && frameIndex >= video.extracted.totalFrames) {
-        const framePath = video.extracted.framePaths.get(video.extracted.totalFrames - 1);
-        if (framePath) {
-          frames.set(videoId, { framePath, frameIndex: video.extracted.totalFrames - 1 });
-        }
-        continue;
-      }
-      if (frameIndex < 0 || frameIndex >= video.extracted.totalFrames) {
-        // Source exhausted. Hold the last frame near the clip end so a media that
-        // falls a hair short of its slot (e.g. `ffmpeg -t 1.45` → 1.433s at 30fps)
-        // doesn't flash the background for one frame. A clip that's substantially
-        // shorter than its slot still blanks for the tail. Tolerance floored at
-        // the clamp epsilon so the seam is covered at any fps (see that const).
-        const fps = video.extracted.fps;
-        const holdTolerance = Math.max(
-          fps > 0 ? HOLD_LAST_FRAME_TOLERANCE_FRAMES / fps : 0,
-          MEDIA_DURATION_CLAMP_EPSILON_SECONDS,
-        );
-        if (globalTime >= video.end - holdTolerance && video.extracted.totalFrames > 0) {
-          const lastIndex = video.extracted.totalFrames - 1;
-          const lastPath = video.extracted.framePaths.get(lastIndex);
-          if (lastPath) frames.set(videoId, { framePath: lastPath, frameIndex: lastIndex });
-        }
-        continue;
-      }
+      const frameIndex = getFrameIndexAtTime(
+        video.extracted,
+        globalTime,
+        video.start,
+        video.loop,
+        video.mediaStart,
+        true,
+      );
+      if (frameIndex == null) continue;
       const framePath = video.extracted.framePaths.get(frameIndex);
       if (!framePath) continue;
       frames.set(videoId, { framePath, frameIndex });

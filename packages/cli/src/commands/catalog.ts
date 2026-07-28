@@ -1,3 +1,4 @@
+import { failCommand, finishCommand } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
 
@@ -51,7 +52,7 @@ export default defineCommand({
     else if (args.type === "component") typeFilter = "hyperframes:component";
     else if (args.type) {
       console.error(`Invalid --type: "${args.type}". Use "block" or "component".`);
-      process.exit(1);
+      failCommand();
     }
 
     const entries = await listRegistryItems(typeFilter ? { type: typeFilter } : undefined, {
@@ -106,7 +107,7 @@ export default defineCommand({
 
       if (clack.isCancel(selected)) {
         clack.cancel("Cancelled.");
-        process.exit(0);
+        finishCommand(0);
       }
 
       const result = await runAdd({

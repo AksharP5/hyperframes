@@ -3,6 +3,7 @@ import { markFlattenedInnerRoot } from "./flattenedRoot";
 import {
   applyCssVariables,
   clearAppliedCssVariables,
+  filterVariablesIfAbsent,
   parseHostVariableValues,
   readDeclaredDefaults,
   readRenderOverrides,
@@ -11,6 +12,7 @@ import {
 type LoadExternalCompositionsParams = {
   injectedStyles: HTMLStyleElement[];
   injectedScripts: HTMLScriptElement[];
+  injectedLinks: HTMLLinkElement[];
   parseDimensionPx: (value: string | null) => string | null;
   onDiagnostic?: (payload: {
     code: string;
@@ -193,7 +195,11 @@ function resolveScriptSourceUrl(scriptSrc: string, compositionUrl: URL | null): 
   const trimmedSrc = scriptSrc.trim();
   if (!trimmedSrc) return scriptSrc;
   try {
-    if (BARE_RELATIVE_PATH_RE.test(trimmedSrc)) {
+    if (
+      BARE_RELATIVE_PATH_RE.test(trimmedSrc) &&
+      !trimmedSrc.startsWith("#") &&
+      !trimmedSrc.startsWith("?")
+    ) {
       // Composition payloads may use root-relative semantics without a leading slash.
       return new URL(trimmedSrc, document.baseURI).toString();
     }
@@ -203,6 +209,22 @@ function resolveScriptSourceUrl(scriptSrc: string, compositionUrl: URL | null): 
     return new URL(trimmedSrc, document.baseURI).toString();
   } catch {
     return scriptSrc;
+  }
+}
+
+function isSameDocumentUrl(candidate: string | URL, compositionUrl: URL): boolean {
+  try {
+    const candidateDocumentUrl = new URL(candidate);
+    const compositionDocumentUrl = new URL(compositionUrl);
+    candidateDocumentUrl.search = "";
+    candidateDocumentUrl.hash = "";
+    compositionDocumentUrl.search = "";
+    compositionDocumentUrl.hash = "";
+    return candidateDocumentUrl.href === compositionDocumentUrl.href;
+  } catch {
+    // Invalid authored URLs are not self-references. Preserve the existing
+    // browser-load path so its failure remains isolated to the script itself.
+    return false;
   }
 }
 
@@ -345,6 +367,7 @@ async function mountCompositionContent(params: {
   compositionUrl: URL | null;
   injectedStyles: HTMLStyleElement[];
   injectedScripts: HTMLScriptElement[];
+  injectedLinks: HTMLLinkElement[];
   parseDimensionPx: (value: string | null) => string | null;
   /** Extra <style> elements from the parsed document <head> (non-template sub-compositions). */
   headStyles?: HTMLStyleElement[];
@@ -390,10 +413,15 @@ async function mountCompositionContent(params: {
 
   if (params.headLinks) {
     for (const link of params.headLinks) {
-      const href = link.getAttribute("href") || "";
-      if (!href) continue;
+      const rawHref = (link.getAttribute("href") || "").trim();
+      if (!rawHref) continue;
+      const href = params.compositionUrl ? new URL(rawHref, params.compositionUrl).href : rawHref;
+      if (params.compositionUrl && isSameDocumentUrl(href, params.compositionUrl)) continue;
       if (document.head.querySelector(`link[href="${CSS.escape(href)}"]`)) continue;
-      document.head.appendChild(link.cloneNode(true));
+      const clonedLink = link.cloneNode(true) as HTMLLinkElement;
+      clonedLink.href = href;
+      document.head.appendChild(clonedLink);
+      params.injectedLinks.push(clonedLink);
     }
   }
 
@@ -433,6 +461,9 @@ async function mountCompositionContent(params: {
       const scriptSrc = script.getAttribute("src")?.trim() ?? "";
       if (scriptSrc) {
         const resolvedSrc = resolveScriptSourceUrl(scriptSrc, params.compositionUrl);
+        if (params.compositionUrl && isSameDocumentUrl(resolvedSrc, params.compositionUrl)) {
+          continue;
+        }
         headScriptPayloads.push({ kind: "external", src: resolvedSrc, type: scriptType });
       } else {
         const scriptText = script.textContent?.trim() ?? "";
@@ -455,6 +486,10 @@ async function mountCompositionContent(params: {
     const scriptSrc = script.getAttribute("src")?.trim() ?? "";
     if (scriptSrc) {
       const resolvedSrc = resolveScriptSourceUrl(scriptSrc, params.compositionUrl);
+      if (params.compositionUrl && isSameDocumentUrl(resolvedSrc, params.compositionUrl)) {
+        script.parentNode?.removeChild(script);
+        continue;
+      }
       scriptPayloads.push({
         kind: "external",
         src: resolvedSrc,
@@ -586,6 +621,7 @@ export async function loadInlineTemplateCompositions(
       compositionUrl: null,
       injectedStyles: params.injectedStyles,
       injectedScripts: params.injectedScripts,
+      injectedLinks: params.injectedLinks,
       parseDimensionPx: params.parseDimensionPx,
       onDiagnostic: params.onDiagnostic,
     });
@@ -636,6 +672,7 @@ export async function loadExternalCompositions(
             compositionUrl,
             injectedStyles: params.injectedStyles,
             injectedScripts: params.injectedScripts,
+            injectedLinks: params.injectedLinks,
             parseDimensionPx: params.parseDimensionPx,
             onDiagnostic: params.onDiagnostic,
           });
@@ -677,13 +714,11 @@ export async function loadExternalCompositions(
         const headScripts = !template
           ? Array.from(doc.head.querySelectorAll<HTMLScriptElement>("script"))
           : undefined;
-        const headLinks = !template
-          ? Array.from(
-              doc.head.querySelectorAll<HTMLLinkElement>(
-                'link[rel="stylesheet"], link[rel="preconnect"]',
-              ),
-            )
-          : undefined;
+        const headLinks = Array.from(
+          doc.head.querySelectorAll<HTMLLinkElement>(
+            'link[rel="stylesheet"], link[rel="preconnect"]',
+          ),
+        );
         await mountCompositionContent({
           host,
           authoredCompositionId,
@@ -695,6 +730,7 @@ export async function loadExternalCompositions(
           compositionUrl,
           injectedStyles: params.injectedStyles,
           injectedScripts: params.injectedScripts,
+          injectedLinks: params.injectedLinks,
           parseDimensionPx: params.parseDimensionPx,
           headStyles,
           headScripts,
@@ -729,9 +765,11 @@ export async function loadExternalCompositions(
  * as CSS custom properties on the host so imported var(--slug, literal)
  * fills inside the sub-comp resolve per instance (cascade beats the document
  * root). Inline templates carry declared defaults on the content root;
- * external loads pass them explicitly. Render-time overrides (--variables)
- * always win. Stale custom properties from a previous mount are cleared
- * before (re)applying.
+ * external loads pass them explicitly. A composition variable, whether a
+ * declared default or an explicit data-variable-values value, never
+ * redefines a custom property already defined on the host. Render-time
+ * overrides (--variables) remain explicit user intent and always win. Stale
+ * custom properties from a previous mount are cleared before (re)applying.
  */
 function stashInstanceVariables(
   params: { host: Element; declaredVariableDefaults?: Record<string, unknown> },
@@ -749,7 +787,10 @@ function stashInstanceVariables(
   if (Object.keys(merged).length > 0) {
     if (!window.__hfVariablesByComp) window.__hfVariablesByComp = {};
     window.__hfVariablesByComp[runtimeScopeCompositionId] = merged;
-    applyCssVariables(params.host, { ...merged, ...readRenderOverrides() });
+    applyCssVariables(params.host, {
+      ...filterVariablesIfAbsent(params.host, merged, window),
+      ...readRenderOverrides(),
+    });
   } else if (window.__hfVariablesByComp) {
     delete window.__hfVariablesByComp[runtimeScopeCompositionId];
   }

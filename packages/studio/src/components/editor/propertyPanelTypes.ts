@@ -19,18 +19,44 @@ export interface BackgroundRemovalResult {
   provider?: string;
 }
 
+export interface MediaOverlayPlacement {
+  start: number;
+  duration?: number;
+  track?: number;
+  compositionPath?: string;
+}
+
+export type AddMediaOverlayHandler = (
+  blockName: string,
+  placement: MediaOverlayPlacement,
+) => Promise<void>;
+
 export interface PropertyPanelProps {
   projectId: string;
   projectDir: string | null;
   assets: string[];
   element: DomEditSelection | null;
   multiSelectCount?: number;
+  multiSelectedElements?: DomEditSelection[];
+  onGroupSelection?: () => void;
+  onHideAllSelected?: () => void;
   copiedAgentPrompt: boolean;
   onClearSelection: () => void;
   onUngroup?: () => void;
   onSetStyle: (prop: string, value: string) => void | Promise<void>;
+  onPreviewStyle?: (prop: string, value: string) => void;
   onSetAttribute: (attr: string, value: string) => void | Promise<void>;
-  onSetAttributeLive: (attr: string, value: string | null) => void | Promise<void>;
+  /** Commits several data-* attributes on the SAME element in ONE atomic
+   *  persist call — e.g. a pinned timing range's start+duration together, so
+   *  a selection change or a partial failure mid-commit can't misdirect one
+   *  of the two writes or leave them half-applied. Falls back to sequential
+   *  `onSetAttribute` calls where omitted. */
+  onSetAttributes?: (selection: DomEditSelection, attrs: Record<string, string>) => Promise<void>;
+  onSetAttributeLive: (
+    attr: string,
+    value: string | null,
+    onSettled?: (ok: boolean) => void,
+  ) => void | Promise<void>;
   onApplyColorGradingScope?: (
     scope: "source-file" | "project",
     value: string | null,
@@ -49,11 +75,13 @@ export interface PropertyPanelProps {
   onSetManualRotation: (element: DomEditSelection, next: { angle: number }) => void;
   onSetText: (value: string, fieldKey?: string) => void;
   onSetTextFieldStyle: (fieldKey: string, property: string, value: string) => void;
+  onPreviewTextFieldStyle?: (fieldKey: string, property: string, value: string) => void;
   onAddTextField: (afterFieldKey?: string) => string | Promise<string | null> | null;
   onRemoveTextField: (fieldKey: string) => void;
   onAskAgent: () => void;
   onToggleElementHidden?: (elementKey: string, hidden: boolean) => void | Promise<void>;
   onImportAssets?: (files: FileList, dir?: string) => Promise<string[]>;
+  onAddMediaOverlay?: AddMediaOverlayHandler;
   fontAssets?: ImportedFontAsset[];
   onImportFonts?: (files: FileList | File[]) => Promise<ImportedFontAsset[]>;
   previewIframeRef?: RefObject<HTMLIFrameElement | null>;

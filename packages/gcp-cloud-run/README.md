@@ -50,7 +50,11 @@ decompresses `@sparticuz/chromium` into `/tmp` at runtime — Cloud Run runs a
 container image. The `Dockerfile` installs the same pinned
 `chrome-headless-shell` build and font set the production renderer uses, at a
 fixed path, and exports `HYPERFRAMES_CHROME_PATH`. CDP-level `BeginFrame`
-works because the command lives in the protocol, not the binary. There is no
+support is a binary/runtime capability, so the image build launches that
+exact executable and requires an enable + warm-up + PNG-returning
+`HeadlessExperimental.beginFrame` probe to pass. The end-to-end smoke also
+requires every chunk to report effective `CaptureMode: "beginframe"`, which
+catches runtime fallback separately from build-time packaging. There is no
 runtime decompression step and no packaging ceiling.
 
 ## Deploying

@@ -14,19 +14,20 @@
  *     "audio cuts off early" or "video shows a frozen final frame" bugs.
  *
  * The fix: post-pad/trim audio to *exactly* `frameCount / fps` seconds at
- * assemble time. Pad by concat-copying a generated silence tail, trim with
- * `-t`, and avoid re-encoding the already mixed source AAC in either case.
+ * assemble time. Both branches decode/filter and re-encode AAC. Concatenating
+ * ADTS packets with `-c:a copy` is unsafe because concat timestamp estimation
+ * can stretch the terminal packet in the final MP4.
  */
 
 import { spawn } from "node:child_process";
 import { rmSync } from "node:fs";
-import { pathToFileURL } from "node:url";
 import {
   extractAudioMetadata,
   formatFfmpegError,
-  getFfmpegBinary,
   getFfprobeBinary,
+  ManagedChildProcess,
   runFfmpeg,
+  trackChildProcess,
   type AudioMetadata,
 } from "@hyperframes/engine";
 
@@ -64,16 +65,14 @@ export interface PadTrimAudioInput {
   audioPath: string;
   /** Path the helper writes the duration-corrected audio to. */
   outputPath: string;
+  signal?: AbortSignal;
   /**
    * Optional injectables for unit tests. Production callers omit them and
    * get the real `ffprobe`/`ffmpeg`-backed implementations.
    */
   probeVideoFrameInfo?: (videoPath: string) => Promise<ProbeVideoFrameInfo>;
-  probeAudioInfo?: (audioPath: string) => Promise<AudioProbeInfo>;
-  runFfmpeg?: (
-    args: string[],
-    options?: { stdin?: string },
-  ) => Promise<{ success: boolean; error?: string }>;
+  probeAudioInfo?: (audioPath: string, signal?: AbortSignal) => Promise<AudioProbeInfo>;
+  runFfmpeg?: (args: string[]) => Promise<{ success: boolean; error?: string }>;
 }
 
 export type PadTrimOperation = "pad" | "trim" | "copy";
@@ -91,12 +90,11 @@ export interface PadTrimAudioResult {
   error?: string;
 }
 
-export type PadTrimAudioStepKind = "copy" | "trim" | "pad-silence" | "pad-concat";
+export type PadTrimAudioStepKind = "copy" | "trim" | "normalize";
 
 export interface PadTrimAudioStep {
   kind: PadTrimAudioStepKind;
   args: string[];
-  stdin?: string;
 }
 
 export interface PadTrimAudioPlan {
@@ -114,8 +112,8 @@ export interface PadTrimAudioPlan {
  *     tail, then concat-copy the source AAC plus that tail. This avoids
  *     re-encoding the already mixed `audio.aac`; the pad branch remains the
  *     inverse of trim instead of becoming a second full-source AAC encode.
- *   - `sourceDuration > targetDuration` → trim with `-t target`. `-c:a copy`
- *     is preserved when the input is already AAC.
+ *   - `sourceDuration > targetDuration` → filter to the exact target and
+ *     re-encode AAC so packet padding cannot outlast the video.
  *   - `|Δ| < AUDIO_DURATION_TOLERANCE_SECONDS` → no-op `copy`, but we still
  *     run ffmpeg with `-c:a copy` to materialize the output path.
  */
@@ -124,7 +122,6 @@ export function buildPadTrimAudioPlan(
   outputPath: string,
   sourceDurationSeconds: number,
   targetDurationSeconds: number,
-  audioInfo: Pick<AudioProbeInfo, "sampleRate" | "channels"> = {},
 ): PadTrimAudioPlan {
   const delta = targetDurationSeconds - sourceDurationSeconds;
   const targetSec = formatSeconds(targetDurationSeconds);
@@ -136,57 +133,57 @@ export function buildPadTrimAudioPlan(
     };
   }
   if (delta > 0) {
-    const padDur = formatSeconds(delta);
-    const silencePath = `${outputPath}.pad-silence.aac`;
     return {
       operation: "pad",
       steps: [
         {
-          kind: "pad-silence",
+          kind: "normalize",
           args: [
-            "-f",
-            "lavfi",
             "-i",
-            `anullsrc=channel_layout=${channelLayoutForChannels(audioInfo.channels)}:sample_rate=${sampleRateForFilter(audioInfo.sampleRate)}`,
+            audioPath,
+            "-af",
+            `apad,atrim=0:${targetSec}`,
             "-t",
-            padDur,
+            targetSec,
             "-c:a",
             "aac",
             "-b:a",
             "192k",
             "-y",
-            silencePath,
-          ],
-        },
-        {
-          kind: "pad-concat",
-          args: [
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-protocol_whitelist",
-            "file,pipe,crypto,data",
-            "-i",
-            "pipe:0",
-            "-c:a",
-            "copy",
-            "-y",
             outputPath,
           ],
-          stdin: `${concatFileLine(audioPath)}\n${concatFileLine(silencePath)}\n`,
         },
       ],
-      cleanupPaths: [silencePath],
+      cleanupPaths: [],
     };
   }
-  // Trim. `-t` truncates AAC without re-encoding because AAC frames are
-  // independently decodable; ffmpeg snaps the cut point to the nearest
-  // packet boundary, fine for the ±1ms tolerance we care about here.
+  // Packet-copy trimming snaps to AAC frame boundaries (typically 1024
+  // samples), which can leave ~20ms beyond the target. Decode/filter/re-encode
+  // into M4A so ffmpeg records the exact presentation duration.
   return {
     operation: "trim",
     steps: [
-      { kind: "trim", args: ["-i", audioPath, "-t", targetSec, "-c:a", "copy", "-y", outputPath] },
+      {
+        kind: "trim",
+        args: [
+          "-i",
+          audioPath,
+          "-af",
+          `atrim=duration=${targetSec},asetpts=PTS-STARTPTS`,
+          // `atrim` limits decoded samples but does not cap muxer timestamps
+          // introduced by encoder delay/flush.  The output duration contract
+          // is enforced at the container boundary as well; without `-t`, a
+          // long primed source can retain its original tail after re-encode.
+          "-t",
+          targetSec,
+          "-c:a",
+          "aac",
+          "-b:a",
+          "192k",
+          "-y",
+          outputPath,
+        ],
+      },
     ],
     cleanupPaths: [],
   };
@@ -217,24 +214,6 @@ function formatSeconds(sec: number): string {
   return sec.toFixed(6);
 }
 
-function sampleRateForFilter(sampleRate: number | undefined): number {
-  return sampleRate !== undefined && Number.isFinite(sampleRate) && sampleRate > 0
-    ? Math.round(sampleRate)
-    : 48000;
-}
-
-function channelLayoutForChannels(channels: number | undefined): string {
-  if (channels === 1) return "mono";
-  if (channels === 6) return "5.1";
-  if (channels === 8) return "7.1";
-  return "stereo";
-}
-
-function concatFileLine(path: string): string {
-  const normalized = pathToFileURL(path).href;
-  return `file '${normalized.replace(/'/g, "'\\''")}'`;
-}
-
 /**
  * Pad or trim `audio.aac` so its exact duration matches `frameCount / fps`
  * for the assembled video.
@@ -242,15 +221,17 @@ function concatFileLine(path: string): string {
 export async function padOrTrimAudioToVideoFrameCount(
   input: PadTrimAudioInput,
 ): Promise<PadTrimAudioResult> {
-  const probeVideo = input.probeVideoFrameInfo ?? defaultProbeVideoFrameInfo;
+  const probeVideo =
+    input.probeVideoFrameInfo ??
+    ((videoPath: string) => defaultProbeVideoFrameInfo(videoPath, input.signal));
   const probeAudio = input.probeAudioInfo ?? defaultProbeAudioInfo;
-  const runner = input.runFfmpeg ?? defaultRunFfmpeg;
+  const runner = input.runFfmpeg ?? ((args: string[]) => defaultRunFfmpeg(args, input.signal));
 
   // Probe video and audio in parallel — the two ffprobe invocations are
   // independent and account for most of this function's wall-clock time.
   const [videoResult, audioResult] = await Promise.allSettled([
     probeVideo(input.videoPath),
-    probeAudio(input.audioPath),
+    probeAudio(input.audioPath, input.signal),
   ]);
 
   if (videoResult.status === "rejected") {
@@ -295,12 +276,11 @@ export async function padOrTrimAudioToVideoFrameCount(
     input.outputPath,
     audioInfo.durationSeconds,
     targetDurationSeconds,
-    audioInfo,
   );
 
   try {
     for (const step of plan.steps) {
-      const ffmpegResult = await runner(step.args, { stdin: step.stdin });
+      const ffmpegResult = await runner(step.args);
       if (!ffmpegResult.success) {
         return {
           success: false,
@@ -363,39 +343,48 @@ interface FfprobeOutput {
   streams?: FfprobeStreamInfo[];
 }
 
-async function defaultProbeVideoFrameInfo(videoPath: string): Promise<ProbeVideoFrameInfo> {
+async function defaultProbeVideoFrameInfo(
+  videoPath: string,
+  signal?: AbortSignal,
+): Promise<ProbeVideoFrameInfo> {
   // Try the container header (`nb_frames`) first — single moov atom read,
   // no decode. Closed-GOP, B-frame-free streams (the only ones we'll ever
   // ask to pad/trim) reliably set it. Fall back to `-count_packets` which
   // walks the packet stream when the header doesn't carry the count.
-  const fastInfo = await runFfprobeJson<FfprobeOutput>([
-    "-v",
-    "error",
-    "-select_streams",
-    "v:0",
-    "-show_entries",
-    "stream=nb_frames,r_frame_rate",
-    "-of",
-    "json",
-    videoPath,
-  ]);
+  const fastInfo = await runFfprobeJson<FfprobeOutput>(
+    [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=nb_frames,r_frame_rate",
+      "-of",
+      "json",
+      videoPath,
+    ],
+    signal,
+  );
   let stream = fastInfo.streams?.[0];
   const fastCount = Number(stream?.nb_frames);
   if (stream && Number.isFinite(fastCount) && fastCount > 0) {
     return { frameCount: fastCount, ...parseFrameRate(stream.r_frame_rate ?? "") };
   }
-  const slowInfo = await runFfprobeJson<FfprobeOutput>([
-    "-v",
-    "error",
-    "-select_streams",
-    "v:0",
-    "-count_packets",
-    "-show_entries",
-    "stream=nb_read_packets,r_frame_rate",
-    "-of",
-    "json",
-    videoPath,
-  ]);
+  const slowInfo = await runFfprobeJson<FfprobeOutput>(
+    [
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-count_packets",
+      "-show_entries",
+      "stream=nb_read_packets,r_frame_rate",
+      "-of",
+      "json",
+      videoPath,
+    ],
+    signal,
+  );
   stream = slowInfo.streams?.[0];
   if (!stream) throw new Error(`ffprobe found no video stream in ${videoPath}`);
   const slowCount = Number(stream.nb_read_packets);
@@ -415,9 +404,13 @@ function parseFrameRate(rate: string): { fpsNum: number; fpsDen: number } {
   return { fpsNum, fpsDen };
 }
 
-async function defaultProbeAudioInfo(audioPath: string): Promise<AudioProbeInfo> {
-  // extractAudioMetadata is the shared ffprobe wrapper (caches results).
-  const metadata: AudioMetadata = await extractAudioMetadata(audioPath);
+async function defaultProbeAudioInfo(
+  audioPath: string,
+  signal?: AbortSignal,
+): Promise<AudioProbeInfo> {
+  // The shared ffprobe wrapper derives AAC-LC duration from packet count so
+  // every consumer sees the same VBR-safe metadata while preserving cancellation.
+  const metadata: AudioMetadata = await extractAudioMetadata(audioPath, { signal });
   return {
     durationSeconds: metadata.durationSeconds,
     sampleRate: metadata.sampleRate,
@@ -428,11 +421,9 @@ async function defaultProbeAudioInfo(audioPath: string): Promise<AudioProbeInfo>
 
 async function defaultRunFfmpeg(
   args: string[],
-  options?: { stdin?: string },
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; error?: string }> {
-  if (options?.stdin !== undefined) return runFfmpegWithStdin(args, options.stdin);
-
-  const result = await runFfmpeg(args);
+  const result = await runFfmpeg(args, { signal });
   if (result.success) return { success: true };
   return {
     success: false,
@@ -440,70 +431,32 @@ async function defaultRunFfmpeg(
   };
 }
 
-async function runFfmpegWithStdin(
-  args: string[],
-  stdin: string,
-): Promise<{ success: boolean; error?: string }> {
-  return new Promise((resolve) => {
-    const proc = spawn(getFfmpegBinary(), args);
-    let stderr = "";
-
-    proc.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
-    });
-
-    proc.on("error", (err) => {
-      resolve({
-        success: false,
-        error: `[audioPadTrim] ${err instanceof Error ? err.message : String(err)}`,
-      });
-    });
-
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve({ success: true });
-        return;
-      }
-      resolve({
-        success: false,
-        error: `[audioPadTrim] ${formatFfmpegError(code, stderr)}`,
-      });
-    });
-
-    proc.stdin.end(stdin);
-  });
-}
-
 // ── ffprobe JSON runner (shared between fast/slow video probe paths) ─────
 
-function runFfprobeJson<T>(args: string[]): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(getFfprobeBinary(), args);
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
-    });
-    proc.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
-    });
-    proc.on("error", (err) => {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        reject(new Error("[audioPadTrim] ffprobe not found. Please install FFmpeg."));
-      } else {
-        reject(err);
-      }
-    });
-    proc.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`ffprobe exited ${code}: ${stderr}`));
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout) as T);
-      } catch (err) {
-        reject(new Error(`Failed to parse ffprobe output: ${(err as Error).message}`));
-      }
-    });
+async function runFfprobeJson<T>(args: string[], signal?: AbortSignal): Promise<T> {
+  const proc = spawn(getFfprobeBinary(), args);
+  trackChildProcess(proc);
+  let stdout = "";
+  proc.stdout.on("data", (data: Buffer) => {
+    stdout += data.toString();
   });
+  const managed = new ManagedChildProcess(proc, {
+    signal,
+    deadlineAtMs: Date.now() + 30_000,
+  });
+  const outcome = await managed.wait();
+  if (outcome.reason === "spawn_error") {
+    if ((outcome.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      throw new Error("[audioPadTrim] ffprobe not found. Please install FFmpeg.");
+    }
+    throw outcome.error ?? new Error(outcome.stderr);
+  }
+  if (outcome.reason !== "exit" || outcome.exitCode !== 0) {
+    throw new Error(`ffprobe ${outcome.reason}: ${outcome.stderr}`);
+  }
+  try {
+    return JSON.parse(stdout) as T;
+  } catch (err) {
+    throw new Error(`Failed to parse ffprobe output: ${(err as Error).message}`);
+  }
 }

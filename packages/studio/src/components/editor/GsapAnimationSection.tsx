@@ -2,9 +2,15 @@ import { memo, useState } from "react";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { Film } from "../../icons/SystemIcons";
 import { Section } from "./propertyPanelPrimitives";
-import { ADD_METHODS, ADD_METHOD_LABELS, METHOD_TOOLTIPS } from "./gsapAnimationConstants";
 import { AnimationCard } from "./AnimationCard";
-import type { GsapAnimationEditCallbacks } from "./gsapAnimationCallbacks";
+import {
+  type GsapAnimationEditCallbacks,
+  withTrackedGsapAnimationCallbacks,
+  clearFocusedEaseSegment,
+} from "./gsapAnimationCallbacks";
+import { useTrackDesignInput } from "../../contexts/DesignPanelInputContext";
+import { usePlayerStore } from "../../player";
+import { GsapAddAnimationControl } from "./GsapAddAnimationControl";
 
 interface GsapAnimationSectionProps extends GsapAnimationEditCallbacks {
   animations: GsapAnimation[];
@@ -17,24 +23,13 @@ export const GsapAnimationSection = memo(function GsapAnimationSection({
   animations,
   multipleTimelines,
   unsupportedTimelinePattern,
-  onUpdateProperty,
-  onUpdateMeta,
-  onDeleteAnimation,
-  onAddProperty,
-  onRemoveProperty,
-  onUpdateFromProperty,
-  onAddFromProperty,
-  onRemoveFromProperty,
   onAddAnimation,
-  onLivePreview,
-  onLivePreviewEnd,
-  onSetArcPath,
-  onUpdateArcSegment,
-  onUpdateKeyframeEase,
-  onSetAllKeyframeEases,
-  onUnroll,
+  ...callbacks
 }: GsapAnimationSectionProps) {
+  const track = useTrackDesignInput();
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const trackedCallbacks = withTrackedGsapAnimationCallbacks(callbacks, track);
+  const focusedEaseSegment = usePlayerStore((s) => s.focusedEaseSegment);
 
   return (
     <Section title="Animation" icon={<Film size={15} />}>
@@ -55,63 +50,24 @@ export const GsapAnimationSection = memo(function GsapAnimationSection({
         <div className="space-y-2">
           {animations.map((anim, index) => (
             <AnimationCard
+              {...trackedCallbacks}
               key={anim.id}
               animation={anim}
               defaultExpanded={index === 0}
-              onUpdateProperty={onUpdateProperty}
-              onUpdateMeta={onUpdateMeta}
-              onDeleteAnimation={onDeleteAnimation}
-              onAddProperty={onAddProperty}
-              onRemoveProperty={onRemoveProperty}
-              onUpdateFromProperty={onUpdateFromProperty}
-              onAddFromProperty={onAddFromProperty}
-              onRemoveFromProperty={onRemoveFromProperty}
-              onLivePreview={onLivePreview}
-              onLivePreviewEnd={onLivePreviewEnd}
-              onSetArcPath={onSetArcPath}
-              onUpdateArcSegment={onUpdateArcSegment}
-              onUpdateKeyframeEase={onUpdateKeyframeEase}
-              onSetAllKeyframeEases={onSetAllKeyframeEases}
-              onUnroll={onUnroll}
+              focusedSegment={
+                focusedEaseSegment?.animationId === anim.id ? focusedEaseSegment : null
+              }
+              onFocusSegmentConsumed={clearFocusedEaseSegment}
             />
           ))}
 
-          <div className="relative pt-1">
-            {addMenuOpen ? (
-              <div className="flex gap-1.5">
-                {ADD_METHODS.map((method) => (
-                  <button
-                    key={method}
-                    type="button"
-                    title={METHOD_TOOLTIPS[method]}
-                    onClick={() => {
-                      onAddAnimation(method);
-                      setAddMenuOpen(false);
-                    }}
-                    className="rounded-lg border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-[11px] font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:text-white"
-                  >
-                    {ADD_METHOD_LABELS[method] ?? method}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setAddMenuOpen(false)}
-                  className="px-1.5 text-[11px] text-neutral-500 hover:text-neutral-300"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setAddMenuOpen(true)}
-                className="text-[11px] font-medium text-neutral-400 transition-colors hover:text-neutral-200"
-                title="Add a new animation effect to this element"
-              >
-                + Add effect
-              </button>
-            )}
-          </div>
+          <GsapAddAnimationControl
+            open={addMenuOpen}
+            setOpen={setAddMenuOpen}
+            onAddAnimation={onAddAnimation}
+            track={track}
+            variant="classic"
+          />
         </div>
       )}
     </Section>

@@ -7,7 +7,20 @@ import {
   getTimelineClipRect,
   computeMarqueeSelection,
 } from "./timelineMarquee";
-import { GUTTER, TRACK_H, RULER_H, CLIP_Y, getTimelineRowTop } from "./timelineLayout";
+import {
+  GUTTER,
+  LANE_H,
+  TRACK_H,
+  RULER_H,
+  CLIP_Y,
+  TRACKS_LEFT_PAD,
+  getTimelineRowTop,
+} from "./timelineLayout";
+
+// Canvas-space time origin used by the breathing-pad (default) test cases: right
+// edge of the sticky gutter + the left pad. Other cases pass GUTTER or LABEL_COL_W
+// directly as contentOrigin to test the plain/keyframe-label-column origins.
+const ORIGIN = GUTTER + TRACKS_LEFT_PAD;
 
 describe("isTimelineRulerPress", () => {
   const rectTop = 500; // scroll container's viewport top
@@ -84,7 +97,7 @@ describe("getTimelineClipRect", () => {
   const trackOrder = [0, 2, 5];
 
   it("maps start/duration to x via pps and the track row to y via the shared row→y helper", () => {
-    const rect = getTimelineClipRect({ start: 2, duration: 3, track: 2 }, trackOrder, 100);
+    const rect = getTimelineClipRect({ start: 2, duration: 3, track: 2 }, trackOrder, 100, GUTTER);
     expect(rect).toEqual({
       left: GUTTER + 200,
       top: getTimelineRowTop(1) + CLIP_Y,
@@ -94,25 +107,55 @@ describe("getTimelineClipRect", () => {
   });
 
   it("places the first visible track below the ruler + top breathing pad", () => {
-    const rect = getTimelineClipRect({ start: 0, duration: 1, track: 0 }, trackOrder, 50);
+    const rect = getTimelineClipRect({ start: 0, duration: 1, track: 0 }, trackOrder, 50, GUTTER);
     expect(rect?.top).toBe(getTimelineRowTop(0) + CLIP_Y);
     expect(rect?.left).toBe(GUTTER);
   });
 
   it("uses the row index in trackOrder, not the raw track number", () => {
-    const rect = getTimelineClipRect({ start: 0, duration: 1, track: 5 }, trackOrder, 50);
+    const rect = getTimelineClipRect({ start: 0, duration: 1, track: 5 }, trackOrder, 50, GUTTER);
     expect(rect?.top).toBe(getTimelineRowTop(2) + CLIP_Y);
   });
 
+  it("uses cumulative tops and the resolved height for an expanded row", () => {
+    const rowHeights = [TRACK_H + 2 * LANE_H, TRACK_H, TRACK_H];
+    const rect = getTimelineClipRect(
+      { start: 0, duration: 1, track: 0 },
+      trackOrder,
+      50,
+      GUTTER,
+      rowHeights,
+    );
+    expect(rect).toMatchObject({
+      top: getTimelineRowTop(0, rowHeights) + CLIP_Y,
+      height: rowHeights[0] - CLIP_Y * 2,
+    });
+    expect(
+      getTimelineClipRect({ start: 0, duration: 1, track: 2 }, trackOrder, 50, GUTTER, rowHeights)
+        ?.top,
+    ).toBe(getTimelineRowTop(1, rowHeights) + CLIP_Y);
+  });
+
   it("enforces the 4px minimum rendered width", () => {
-    const rect = getTimelineClipRect({ start: 0, duration: 0.01, track: 0 }, trackOrder, 10);
+    const rect = getTimelineClipRect(
+      { start: 0, duration: 0.01, track: 0 },
+      trackOrder,
+      10,
+      GUTTER,
+    );
     expect(rect?.width).toBe(4);
   });
 
   it("returns null for a track that is not displayed or an invalid pps", () => {
-    expect(getTimelineClipRect({ start: 0, duration: 1, track: 9 }, trackOrder, 100)).toBeNull();
-    expect(getTimelineClipRect({ start: 0, duration: 1, track: 0 }, trackOrder, 0)).toBeNull();
-    expect(getTimelineClipRect({ start: 0, duration: 1, track: 0 }, trackOrder, NaN)).toBeNull();
+    expect(
+      getTimelineClipRect({ start: 0, duration: 1, track: 9 }, trackOrder, 100, GUTTER),
+    ).toBeNull();
+    expect(
+      getTimelineClipRect({ start: 0, duration: 1, track: 0 }, trackOrder, 0, GUTTER),
+    ).toBeNull();
+    expect(
+      getTimelineClipRect({ start: 0, duration: 1, track: 0 }, trackOrder, NaN, GUTTER),
+    ).toBeNull();
   });
 });
 
@@ -129,21 +172,39 @@ describe("computeMarqueeSelection", () => {
   const row1Top = getTimelineRowTop(1) + CLIP_Y;
 
   it("selects only the clips the marquee rect intersects", () => {
-    const marquee = { left: GUTTER, top: row0Top, width: 50, height: 10 };
-    const { ids, primaryId } = computeMarqueeSelection({ clips, trackOrder, pps, marquee });
+    const marquee = { left: ORIGIN, top: row0Top, width: 50, height: 10 };
+    const { ids, primaryId } = computeMarqueeSelection({
+      clips,
+      trackOrder,
+      pps,
+      contentOrigin: ORIGIN,
+      marquee,
+    });
     expect(ids).toEqual(new Set(["a"]));
     expect(primaryId).toBe("a");
   });
 
   it("selects across tracks when the rect spans multiple rows", () => {
-    const marquee = { left: GUTTER, top: row0Top, width: 60, height: row1Top - row0Top + 5 };
-    const { ids } = computeMarqueeSelection({ clips, trackOrder, pps, marquee });
+    const marquee = { left: ORIGIN, top: row0Top, width: 60, height: row1Top - row0Top + 5 };
+    const { ids } = computeMarqueeSelection({
+      clips,
+      trackOrder,
+      pps,
+      contentOrigin: ORIGIN,
+      marquee,
+    });
     expect(ids).toEqual(new Set(["a", "c"]));
   });
 
   it("excludes clips outside the rect horizontally", () => {
-    const marquee = { left: GUTTER + 140, top: row0Top, width: 50, height: 10 };
-    const { ids } = computeMarqueeSelection({ clips, trackOrder, pps, marquee });
+    const marquee = { left: ORIGIN + 140, top: row0Top, width: 50, height: 10 };
+    const { ids } = computeMarqueeSelection({
+      clips,
+      trackOrder,
+      pps,
+      contentOrigin: ORIGIN,
+      marquee,
+    });
     expect(ids).toEqual(new Set());
   });
 
@@ -153,6 +214,7 @@ describe("computeMarqueeSelection", () => {
       clips,
       trackOrder,
       pps,
+      contentOrigin: GUTTER,
       marquee,
       baseSelection: ["b"],
     });
@@ -166,6 +228,7 @@ describe("computeMarqueeSelection", () => {
       clips,
       trackOrder,
       pps,
+      contentOrigin: GUTTER,
       marquee,
       baseSelection: ["b"],
     });
@@ -174,14 +237,15 @@ describe("computeMarqueeSelection", () => {
   });
 
   it("shrinking the rect live drops clips it no longer covers", () => {
-    const wide = { left: GUTTER, top: row0Top, width: 320, height: 10 };
-    const narrow = { left: GUTTER, top: row0Top, width: 80, height: 10 };
-    expect(computeMarqueeSelection({ clips, trackOrder, pps, marquee: wide }).ids).toEqual(
-      new Set(["a", "b"]),
-    );
-    expect(computeMarqueeSelection({ clips, trackOrder, pps, marquee: narrow }).ids).toEqual(
-      new Set(["a"]),
-    );
+    const wide = { left: ORIGIN, top: row0Top, width: 320, height: 10 };
+    const narrow = { left: ORIGIN, top: row0Top, width: 80, height: 10 };
+    expect(
+      computeMarqueeSelection({ clips, trackOrder, pps, contentOrigin: ORIGIN, marquee: wide }).ids,
+    ).toEqual(new Set(["a", "b"]));
+    expect(
+      computeMarqueeSelection({ clips, trackOrder, pps, contentOrigin: ORIGIN, marquee: narrow })
+        .ids,
+    ).toEqual(new Set(["a"]));
   });
 
   it("ignores clips on hidden/undisplayed tracks", () => {
@@ -190,6 +254,7 @@ describe("computeMarqueeSelection", () => {
       clips: [{ id: "x", start: 0, duration: 1, track: 7 }],
       trackOrder,
       pps,
+      contentOrigin: GUTTER,
       marquee,
     });
     expect(ids).toEqual(new Set());

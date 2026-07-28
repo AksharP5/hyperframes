@@ -4,70 +4,73 @@
  */
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { usePlayerStore, type KeyframeCacheEntry } from "../player/store/playerStore";
-import { toAbsoluteTime } from "./gsapShared";
+import { resolveClipTimingBasis, resolveSelectorElementIds, toClipKeyframes } from "./gsapShared";
+import { deduplicateKeyframes, synthesizeFlatTweenKeyframes } from "./gsapTweenSynth";
 
 export function updateKeyframeCacheFromParsed(
   animations: GsapAnimation[],
   targetPath: string,
   selectionId: string | undefined,
   mutation: Record<string, unknown>,
+  doc?: Document | null,
 ): void {
-  const { setKeyframeCache, elements } = usePlayerStore.getState();
+  const { setKeyframeCache, elements, domClipChildren } = usePlayerStore.getState();
   const idsWithKeyframes = new Set<string>();
   const merged = new Map<string, KeyframeCacheEntry>();
+  const sourceAnimations = new Map<string, GsapAnimation[]>();
   for (const anim of animations) {
-    const id = anim.targetSelector.match(/^#([\w-]+)/)?.[1];
-    if (!id || !anim.keyframes) continue;
-    idsWithKeyframes.add(id);
+    const kfSource =
+      anim.keyframes?.keyframes ?? synthesizeFlatTweenKeyframes(anim)?.keyframes ?? [];
+    if (kfSource.length === 0) continue;
+    // Attribute the tween to every element it actually animates. A leading-id
+    // match filed `#stat3 .block` under `#stat3`: the child's diamonds landed on
+    // its ancestor AND collided with the ancestor's own tween at the shared
+    // percentage, which the same-% merge then resolved by dropping the ease.
+    for (const id of resolveSelectorElementIds(anim.targetSelector, doc)) {
+      idsWithKeyframes.add(id);
+      // Every tween that fed keyframeCache also lands in gsapAnimations, group or
+      // not: a mixed-group tween (`{ x, opacity }` classifies to undefined) used to
+      // cache diamonds with no source animation behind them, so the collapsed row
+      // drew keyframes the expanded lanes couldn't render. Lane consumers do the
+      // group filtering themselves (animationContributesLane).
+      sourceAnimations.set(id, [...(sourceAnimations.get(id) ?? []), anim]);
 
-    // Convert tween-relative percentages to clip-relative so diamonds
-    // render at the correct position within the timeline clip.
-    const tweenPos = anim.resolvedStart ?? (typeof anim.position === "number" ? anim.position : 0);
-    const tweenDur = anim.duration ?? 1;
-    const timelineEl = elements.find(
-      (el) => el.domId === id || (el.key ?? el.id) === `${targetPath}#${id}`,
-    );
-    const elStart = timelineEl?.start ?? 0;
-    const elDuration = timelineEl?.duration ?? 1;
-    const clipKeyframes = anim.keyframes.keyframes.map((kf) => {
-      const absTime = toAbsoluteTime(tweenPos, tweenDur, kf.percentage);
-      const clipPct =
-        elDuration > 0 ? Math.round(((absTime - elStart) / elDuration) * 1000) / 10 : kf.percentage;
-      return {
-        ...kf,
-        percentage: clipPct,
-        tweenPercentage: kf.percentage,
-        propertyGroup: anim.propertyGroup,
-      };
-    });
+      // Convert tween-relative percentages to clip-relative so diamonds
+      // render at the correct position within the timeline clip. The basis comes
+      // from the shared resolver, so this writer agrees with the AST load on both
+      // the sub-comp host fallback and the tween's own time frame.
+      const { elStart, elDuration } = resolveClipTimingBasis(
+        id,
+        targetPath,
+        elements,
+        domClipChildren,
+      );
+      const clipKeyframes = toClipKeyframes(kfSource, anim, elStart, elDuration);
 
-    const existing = merged.get(id);
-    if (existing) {
-      const byPct = new Map<number, (typeof existing.keyframes)[0]>();
-      for (const kf of [...existing.keyframes, ...clipKeyframes]) {
-        const prev = byPct.get(kf.percentage);
-        if (prev) {
-          prev.properties = { ...prev.properties, ...kf.properties };
-          if (kf.ease) prev.ease = kf.ease;
-        } else {
-          byPct.set(kf.percentage, { ...kf, properties: { ...kf.properties } });
-        }
+      const existing = merged.get(id);
+      if (existing) {
+        // deduplicateKeyframes owns the same-% merge (including the easeAmbiguous
+        // flag downstream lanes read); a second copy of that rule here is how the
+        // two writers drift.
+        existing.keyframes = deduplicateKeyframes([...existing.keyframes, ...clipKeyframes]);
+      } else {
+        merged.set(id, {
+          ...anim.keyframes,
+          format: anim.keyframes?.format ?? "percentage",
+          keyframes: clipKeyframes,
+        });
       }
-      existing.keyframes = Array.from(byPct.values()).sort((a, b) => a.percentage - b.percentage);
-    } else {
-      merged.set(id, { ...anim.keyframes, keyframes: clipKeyframes });
     }
   }
   for (const [id, entry] of merged) {
-    setKeyframeCache(`${targetPath}#${id}`, entry);
-    setKeyframeCache(id, entry);
-    if (targetPath !== "index.html") setKeyframeCache(`index.html#${id}`, entry);
+    for (const key of elementCacheKeys(targetPath, id)) setKeyframeCache(key, entry);
+    writeGsapAnimationsForElement(targetPath, id, sourceAnimations.get(id));
   }
-  const targetId =
-    (mutation as { targetSelector?: string }).targetSelector?.match(/^#([\w-]+)/)?.[1] ??
-    selectionId;
-  if (targetId && !idsWithKeyframes.has(targetId)) {
-    clearKeyframeCacheForElement(targetPath, targetId);
+  const mutationSelector = (mutation as { targetSelector?: string }).targetSelector;
+  const mutated = mutationSelector ? resolveSelectorElementIds(mutationSelector, doc) : [];
+  const targetIds = mutated.length > 0 ? mutated : selectionId ? [selectionId] : [];
+  for (const targetId of targetIds) {
+    if (!idsWithKeyframes.has(targetId)) clearKeyframeCacheForElement(targetPath, targetId);
   }
 }
 
@@ -84,37 +87,82 @@ export function updateKeyframeCacheFromParsed(
  * a new cache map and re-render every subscriber.
  */
 export function clearKeyframeCacheForElement(sourceFile: string, elementId: string): void {
-  const { keyframeCache, setKeyframeCache } = usePlayerStore.getState();
-  const keys =
-    sourceFile === "index.html"
-      ? [`index.html#${elementId}`, elementId]
-      : [`${sourceFile}#${elementId}`, `index.html#${elementId}`, elementId];
+  const { keyframeCache, setKeyframeCache, gsapAnimations, setGsapAnimations } =
+    usePlayerStore.getState();
+  const keys = elementCacheKeys(sourceFile, elementId);
   for (const key of keys) {
     if (keyframeCache.has(key)) setKeyframeCache(key, undefined);
+    if (gsapAnimations.has(key)) setGsapAnimations(key, undefined);
   }
 }
 
 /**
  * Clear every cached element of `sourceFile` before a full re-scan repopulates
- * it. Collects the element ids that currently have a prefixed or index.html
- * fallback key for the file and drops each through clearKeyframeCacheForElement
- * so the bare key goes too — an element whose keyframes were removed (and so is
- * absent from the re-scan) leaves no stale bare entry behind.
+ * it. Only the file's OWN prefixed keys name the ids to clear: every write sets
+ * the prefixed key (see elementCacheKeys), so the file's elements are all
+ * reachable that way, and clearKeyframeCacheForElement then takes the
+ * index.html alias and the bare key with them — an element whose keyframes were
+ * removed (and so is absent from the re-scan) leaves no stale bare entry
+ * behind. Reading the alias prefix here instead would collect ids owned by
+ * OTHER files, and several files re-scan concurrently, so this file's clear
+ * would wipe the entries a sibling file had just written.
  */
 export function clearKeyframeCacheForFile(sourceFile: string): void {
-  const { keyframeCache } = usePlayerStore.getState();
+  const { keyframeCache, gsapAnimations } = usePlayerStore.getState();
   const sfPrefix = `${sourceFile}#`;
-  const fallbackPrefix = "index.html#";
   const ids = new Set<string>();
-  for (const key of keyframeCache.keys()) {
-    const matchesFile =
-      key.startsWith(sfPrefix) || (sourceFile !== "index.html" && key.startsWith(fallbackPrefix));
-    if (!matchesFile) continue;
-    const hashIdx = key.indexOf("#");
-    if (hashIdx !== -1) ids.add(key.slice(hashIdx + 1));
+  for (const key of [...keyframeCache.keys(), ...gsapAnimations.keys()]) {
+    if (!key.startsWith(sfPrefix)) continue;
+    ids.add(key.slice(sfPrefix.length));
   }
   for (const id of ids) {
     clearKeyframeCacheForElement(sourceFile, id);
+  }
+}
+
+/**
+ * Drop every cached element owned by a file that is no longer on screen. Each
+ * file only ever clears its OWN entries (see clearKeyframeCacheForFile), so
+ * switching composition left the previous composition's elements cached forever
+ * — 240 entries per switch on a 120-clip comp, in both keyframeCache and
+ * gsapAnimations, with nothing to evict them. Called once before a re-scan, with
+ * the full set of files that scan covers.
+ */
+export function pruneKeyframeCacheToFiles(files: readonly string[]): void {
+  const keep = new Set(files);
+  const { keyframeCache, gsapAnimations } = usePlayerStore.getState();
+  const stale = new Map<string, Set<string>>();
+  for (const key of [...keyframeCache.keys(), ...gsapAnimations.keys()]) {
+    const hash = key.indexOf("#");
+    // Bare-id aliases carry no owner; clearKeyframeCacheForElement takes them
+    // with their prefixed key, so skipping them here loses nothing.
+    if (hash < 0) continue;
+    const sourceFile = key.slice(0, hash);
+    if (keep.has(sourceFile)) continue;
+    const ids = stale.get(sourceFile) ?? new Set<string>();
+    ids.add(key.slice(hash + 1));
+    stale.set(sourceFile, ids);
+  }
+  for (const [sourceFile, ids] of stale) {
+    for (const id of ids) clearKeyframeCacheForElement(sourceFile, id);
+  }
+}
+
+/** Every cache key a write for this element sets, in read-preference order. */
+export function elementCacheKeys(sourceFile: string, elementId: string): string[] {
+  return sourceFile === "index.html"
+    ? [`index.html#${elementId}`, elementId]
+    : [`${sourceFile}#${elementId}`, `index.html#${elementId}`, elementId];
+}
+
+export function writeGsapAnimationsForElement(
+  sourceFile: string,
+  elementId: string,
+  animations: GsapAnimation[] | undefined,
+): void {
+  const { setGsapAnimations } = usePlayerStore.getState();
+  for (const key of elementCacheKeys(sourceFile, elementId)) {
+    setGsapAnimations(key, animations);
   }
 }
 

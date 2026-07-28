@@ -1,9 +1,47 @@
 import { swallow } from "./diagnostics";
 import { interpolateVolumeGain, type VolumeKeyframe } from "./mediaVolumeEnvelope.js";
+import { normalizePlaybackRate } from "./playbackRate.js";
 
-export function readElementPlaybackRate(el: HTMLMediaElement): number {
-  const raw = el.defaultPlaybackRate;
-  return Number.isFinite(raw) && raw > 0 ? Math.max(0.1, Math.min(5, raw)) : 1;
+export function readElementPlaybackRate(el: Element): number {
+  const authored = Number.parseFloat(el.getAttribute("data-playback-rate") ?? "");
+  const raw =
+    Number.isFinite(authored) && authored > 0
+      ? authored
+      : el instanceof HTMLMediaElement
+        ? el.defaultPlaybackRate
+        : 1;
+  return normalizePlaybackRate(raw);
+}
+
+export function readElementPlaybackStart(el: Element): number {
+  const raw = Number.parseFloat(
+    el.getAttribute("data-playback-start") ?? el.getAttribute("data-media-start") ?? "",
+  );
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0;
+}
+
+/**
+ * Resolve a media element's timeline window without conflating a video's
+ * authored display slot with the amount of source left to decode.
+ *
+ * An explicit video slot may outlive its source and holds the final frame.
+ * Audio remains source-bounded because it has no visual hold state.
+ */
+export function resolveRuntimeMediaClipDuration(params: {
+  isVideo: boolean;
+  sourceDuration: number | null;
+  hostRemaining: number | null;
+  explicitDuration: number | null;
+}): number | null {
+  const mediaDuration = params.isVideo
+    ? (params.explicitDuration ?? params.sourceDuration)
+    : params.sourceDuration;
+  const candidates = (
+    params.isVideo
+      ? [mediaDuration, params.hostRemaining]
+      : [mediaDuration, params.hostRemaining, params.explicitDuration]
+  ).filter((value): value is number => value != null && Number.isFinite(value) && value > 0);
+  return candidates.length > 0 ? Math.min(...candidates) : null;
 }
 
 export type RuntimeMediaClip = {
@@ -128,6 +166,33 @@ function clampVolume(volume: number): number {
   return Math.max(0, Math.min(1, volume));
 }
 
+/**
+ * Drop every per-source sync baseline tracked for `el` — offset drift
+ * samples, the seek-past-buffered-range retry latch, and the last
+ * runtime-applied volume — so the next `syncRuntimeMedia` tick treats it as
+ * a first tick (hard resync, fresh drift baseline) instead of comparing
+ * against state computed for a different file. Used both when a clip leaves
+ * its active window (below) and by the runtime's proxy-swap helper
+ * (mediaProxy.ts) right after an in-place `src` swap, which points the same
+ * element at a different file without ever leaving its active window.
+ */
+export function evictMediaSyncState(el: HTMLMediaElement): void {
+  lastOffset.delete(el);
+  strictDriftSamples.delete(el);
+  seekLoadRetried.delete(el);
+  lastRuntimeAppliedVolume.delete(el);
+}
+
+/** Test-only seam: whether any per-source sync state is still tracked for `el`. */
+export function hasMediaSyncStateForTest(el: HTMLMediaElement): boolean {
+  return (
+    lastOffset.has(el) ||
+    strictDriftSamples.has(el) ||
+    seekLoadRetried.has(el) ||
+    lastRuntimeAppliedVolume.has(el)
+  );
+}
+
 // fallow-ignore-next-line complexity
 export function syncRuntimeMedia(params: {
   clips: RuntimeMediaClip[];
@@ -167,15 +232,30 @@ export function syncRuntimeMedia(params: {
     const { el } = clip;
     if (!el.isConnected) continue;
     let relTime = (params.timeSeconds - clip.start) * clip.playbackRate + clip.mediaStart;
-    // An ended non-loop element has played its file to natural completion.
-    // Don't restart it — if the authored duration extends past the file's
-    // actual length, the element sits silently until the composition ends.
-    // (el.ended resets to false when the user scrubs back, so seeks work.)
+    const isNonLoopVideo = el.tagName === "VIDEO" && !clip.loop;
+    const isHeldVideoTail =
+      isNonLoopVideo &&
+      clip.sourceDuration != null &&
+      relTime >= clip.sourceDuration &&
+      params.timeSeconds >= clip.start &&
+      params.timeSeconds < clip.end;
+    if (isHeldVideoTail && clip.sourceDuration != null) {
+      relTime = clip.sourceDuration;
+    }
+    const canSeekEndedVideoBackward =
+      isNonLoopVideo &&
+      clip.sourceDuration != null &&
+      relTime >= clip.mediaStart &&
+      relTime < clip.sourceDuration;
+    // Audio that ended naturally stays silent. A non-loop video remains an
+    // active visual through its authored window: tail seeks clamp to the final
+    // frame, and backward seeks can re-enter playable source without depending
+    // on the browser having reset `ended` first.
     const isActive =
       params.timeSeconds >= clip.start &&
-      params.timeSeconds <= clip.end &&
+      params.timeSeconds < clip.end &&
       relTime >= 0 &&
-      (!el.ended || clip.loop);
+      (!el.ended || clip.loop || isHeldVideoTail || canSeekEndedVideoBackward);
     if (isActive) {
       // Loop wrapping: when media reaches end, restart from mediaStart
       if (clip.loop && clip.sourceDuration != null && clip.sourceDuration > 0) {
@@ -258,7 +338,10 @@ export function syncRuntimeMedia(params: {
       const firstTickOfClip = prevOffset === undefined;
       const offsetJumped = !firstTickOfClip && Math.abs(offset - prevOffset!) > 0.5;
       const catastrophicDrift = drift > 3;
-      const hardSync = drift > 0.5 && (firstTickOfClip || offsetJumped || catastrophicDrift);
+      const hardSync =
+        (isHeldVideoTail && drift > 0.001) ||
+        (el.ended && canSeekEndedVideoBackward && drift > 0.001) ||
+        (drift > 0.5 && (firstTickOfClip || offsetJumped || catastrophicDrift));
       // Playing video elements use the browser's native decoder pipeline for
       // timing. Seeking a playing video resets the decoder, causing a ~150ms
       // freeze while it re-buffers — during which the monotonic clock advances,
@@ -321,7 +404,9 @@ export function syncRuntimeMedia(params: {
         }
         playRequested.delete(el);
       }
-      if (params.playing && el.paused && !playRequested.has(el) && !isUnplayable(el)) {
+      if (isHeldVideoTail) {
+        if (!el.paused) el.pause();
+      } else if (params.playing && el.paused && !playRequested.has(el) && !isUnplayable(el)) {
         // `HTMLMediaElement.play()` is spec'd to queue playback and resolve
         // once enough data is buffered, so we can unconditionally call it —
         // no need to gate on `readyState` or defer to a `canplay` listener.
@@ -356,10 +441,7 @@ export function syncRuntimeMedia(params: {
     }
     // Clip left its active window — drop the offset baseline so the next
     // activation (e.g. re-entering a sub-composition) gets a hard resync.
-    lastOffset.delete(el);
-    strictDriftSamples.delete(el);
-    seekLoadRetried.delete(el);
-    lastRuntimeAppliedVolume.delete(el);
+    evictMediaSyncState(el);
     if (!el.paused) el.pause();
   }
 }

@@ -200,6 +200,24 @@ function isInsideGlobalAtRule(rule: Rule): boolean {
   return false;
 }
 
+/**
+ * A Rule nested inside another Rule (CSS Nesting Module Level 1) already
+ * inherits scope from its parent's `&` prefix at match time — re-applying
+ * the composition scope to the nested selector produces
+ * `<scope> <scope> .child`, which matches nothing when the composition
+ * root only appears once in the DOM. Only top-level rules get scoped;
+ * their nested descendants inherit the scope naturally via CSS nesting.
+ * See #2721 for the reproducer that motivated this.
+ */
+function isNestedInsideAnotherRule(rule: Rule): boolean {
+  let current: Node["parent"] = rule.parent;
+  while (current) {
+    if (current.type === "rule") return true;
+    current = current.parent;
+  }
+  return false;
+}
+
 export function scopeCssToComposition(
   css: string,
   compositionId: string,
@@ -216,6 +234,7 @@ export function scopeCssToComposition(
 
   root.walkRules((rule) => {
     if (isInsideGlobalAtRule(rule)) return;
+    if (isNestedInsideAnotherRule(rule)) return;
     rule.selectors = rule.selectors.map((selector) =>
       scopeSelector(
         selector,
@@ -408,10 +427,25 @@ export function wrapScopedCompositionScript(
     if (!__hfTimelineRegistryProxy) {
       __hfTimelineRegistryProxy = new Proxy(window.__timelines, {
         get: function(target, prop, receiver) {
-          return Reflect.get(target, prop === __hfCompId ? __hfTimelineCompId : prop, target);
+          if (prop !== __hfCompId) {
+            return Reflect.get(target, prop, target);
+          }
+          var authoredValue = Reflect.get(target, prop, target);
+          return authoredValue === undefined
+            ? Reflect.get(target, __hfTimelineCompId, target)
+            : authoredValue;
         },
         set: function(target, prop, value, receiver) {
-          return Reflect.set(target, prop === __hfCompId ? __hfTimelineCompId : prop, value, target);
+          if (prop !== __hfCompId) {
+            return Reflect.set(target, prop, value, target);
+          }
+          // The authored node remains in the compiled DOM when its local id
+          // differs from the runtime mount id, so readiness legitimately sees
+          // both compositions. Publish the same timeline under both identities
+          // instead of replacing one with the other.
+          var authoredSet = Reflect.set(target, __hfCompId, value, target);
+          var runtimeSet = Reflect.set(target, __hfTimelineCompId, value, target);
+          return authoredSet && runtimeSet;
         },
       });
     }
@@ -435,6 +469,11 @@ export function wrapScopedCompositionScript(
         },
         set: function(target, prop, value, receiver) {
           if (prop === "__timelines") {
+            // Common authoring boilerplate assigns the registry back to
+            // itself (window.__timelines = window.__timelines || {}). The
+            // getter above returns our proxy; do not replace the canonical
+            // registry with that proxy or later wrappers will stack proxies.
+            if (value === __hfTimelineRegistryProxy) return true;
             target.__timelines = value || {};
             __hfTimelineRegistryProxy = null;
             return true;

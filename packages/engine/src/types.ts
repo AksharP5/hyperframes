@@ -13,6 +13,29 @@ import type { Fps } from "@hyperframes/core";
  */
 export type SubTimelineWaitOutcome = "ready" | "timeout" | "script_failure";
 
+export type CaptureWarningCode =
+  | "media_readiness_timeout"
+  | "media_load_failed"
+  | "audio_processing_failed"
+  | "sub_timeline_readiness_timeout"
+  | "sub_timeline_script_failure"
+  | "live_map_detected";
+
+/** Structured correctness warning produced while preparing a capture session. */
+export interface CaptureWarning {
+  code: CaptureWarningCode;
+  message: string;
+  details?: {
+    mediaType?: "image" | "video" | "audio";
+    sources?: string[];
+    timeoutMs?: number;
+    failureReasons?: string[];
+    failureStages?: string[];
+    failureOwner?: "user" | "system";
+    retryable?: boolean;
+  };
+}
+
 // ── Seek Protocol ──────────────────────────────────────────────────────────────
 
 /**
@@ -200,8 +223,26 @@ export interface CapturePerfSummary {
    * averages). Basis for in-the-wild speedup estimates. 0 when no frames.
    */
   p50TotalMs: number;
+  /**
+   * 95th-percentile per-frame capture time (nearest-rank). Emitted alongside
+   * p50 so the fast-capture-fallback-profile diagnostic (opt-in via
+   * `HF_PROFILE_FALLBACK_CAPTURE=true`) can distinguish "steady-state slow"
+   * from "long-tail spikes"; the p50 alone hides the tail on any sample set
+   * with a heavy right-skew (typical of screenshot capture on GC pauses or
+   * paint-heavy frames). 0 when no frames.
+   */
+  p95TotalMs: number;
+  /**
+   * 99th-percentile per-frame capture time (nearest-rank). Same purpose as
+   * `p95TotalMs` — the extreme-tail counterpart, useful for characterizing
+   * the WORST frame you're likely to encounter on the fallback path. 0 when
+   * no frames.
+   */
+  p99TotalMs: number;
   /** Sub-composition timeline wait outcome (absent pre-init). */
   subTimelineWaitOutcome?: SubTimelineWaitOutcome;
+  /** Correctness warnings observed before or during capture. */
+  warnings?: CaptureWarning[];
   /**
    * Frames served from the static-dedup cache instead of a real seek+screenshot
    * (opt-out HF_STATIC_DEDUP=false). 0 when dedup was off or never armed. NOT counted
@@ -236,12 +277,32 @@ export interface CapturePerfSummary {
   /** Final capture mode this session used: "drawelement" | "screenshot" | "beginframe". */
   captureMode: string;
   /**
+   * Low-cardinality GPU bucket from DE session init: `<backend>/<vendor>`
+   * (e.g. `metal/apple`, `d3d11/nvidia`). Undefined when drawElement was
+   * never attempted. Lets telemetry cluster backend-specific damage now that
+   * DE engages on both Metal (darwin) and D3D11 (win32). Bucketed, not raw —
+   * see `classifyGpuRenderer`.
+   */
+  gpuRenderer?: string;
+  /**
    * Low-cardinality init-time gate that routed a drawElement-eligible session
    * to the baseline: `swiftshader` | `css_effect:<fx>` | `at_risk_timeline` |
    * `3d_init_failed` | `supersampling` | `render_mode_hint`. Undefined when
    * drawElement ran or was never attempted.
    */
   deGateReason?: string;
+  /**
+   * Full-fidelity fallback trigger — the specific reason (CSS FX + property,
+   * e.g. `filter:blur`, `filter:drop-shadow`, `backdrop-filter`, `clip-path`,
+   * or an unsanitized gate name like `at_risk_timeline`, `swiftshader`,
+   * `unsupported_chrome`, `render_mode_hint`, `supersampling`, `3d_init_failed`)
+   * that gated drawElement off. Complementary to {@link deGateReason}, which
+   * sanitizes down to a low-cardinality bucket for aggregation; this field
+   * keeps the specific CSS FX so the `capture_fallback_profile` observability
+   * checkpoint can characterize per-frame perf by the exact trigger. Undefined
+   * when drawElement ran (no fallback) or was never attempted.
+   */
+  deFallbackTrigger?: string;
   /** Worker-encode pipeline active (the drain that runs self-verification). */
   deWorkerEncode: boolean;
   /** Self-verification ground-truth samples armed at init (0 = verification off/skipped). */

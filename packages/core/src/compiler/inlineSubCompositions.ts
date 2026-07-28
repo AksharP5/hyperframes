@@ -130,6 +130,8 @@ function defaultBuildScopeSelector(compId: string): string {
   return `[data-composition-id="${escaped}"]`;
 }
 
+const MAX_SUB_COMPOSITION_DEPTH = 20;
+
 // ---------------------------------------------------------------------------
 // Core implementation
 // ---------------------------------------------------------------------------
@@ -177,7 +179,9 @@ export function inlineSubCompositions(
   const seenLinkHrefs = new Set<string>();
   const variablesByComp: Record<string, Record<string, unknown>> = {};
 
-  for (const hostEl of hosts) {
+  const queue = hosts.map((element) => ({ element, ancestry: [] as string[] }));
+  for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
+    const { element: hostEl, ancestry } = queue[queueIndex]!;
     const src = hostEl.getAttribute("data-composition-src");
     if (!src) continue;
 
@@ -228,13 +232,21 @@ export function inlineSubCompositions(
       continue;
     }
 
-    // Find the inner composition root
+    // Keep structural flattening tied to an exact mount-id match. A template
+    // may intentionally use a different local id (for example, a
+    // `captions-comp` host mounting a `captions` template); flattening that
+    // fallback root changes the compiled DOM and can invalidate selectors and
+    // regression goldens. Discover it separately so script timeline
+    // registration can still map the authored id onto the runtime mount id.
     const innerRoot = compId
       ? queryByAttr(contentDoc, "data-composition-id", compId)
       : contentDoc.querySelector("[data-composition-id]");
-    const inferredCompId = innerRoot?.getAttribute("data-composition-id")?.trim() || "";
+    const authoredCompositionRoot = innerRoot ?? contentDoc.querySelector("[data-composition-id]");
+    const inferredCompId =
+      authoredCompositionRoot?.getAttribute("data-composition-id")?.trim() || "";
     const authoredRootId = innerRoot?.getAttribute("id")?.trim() || null;
     const scopeCompId = compId || inferredCompId;
+    const scriptCompositionId = inferredCompId || scopeCompId;
     const runtimeScope = runtimeCompId ? buildScopeSelector(runtimeCompId) : "";
 
     // Variable merging (bundler feature). Read declared defaults from the
@@ -312,13 +324,13 @@ export function inlineSubCompositions(
         }
         scriptItems.push({ kind: "external", src: externalSrc });
       } else {
-        const wrappedScript = scopeCompId
+        const wrappedScript = scriptCompositionId
           ? wrapScopedCompositionScript(
               s.textContent || "",
-              scopeCompId,
+              scriptCompositionId,
               scriptErrorLabel,
               runtimeScope || undefined,
-              runtimeCompId || scopeCompId,
+              runtimeCompId || scopeCompId || scriptCompositionId,
               authoredRootId,
             )
           : wrapInlineScriptWithErrorBoundary(s.textContent || "", scriptErrorLabel);
@@ -407,6 +419,21 @@ export function inlineSubCompositions(
 
     hostEl.setAttribute("data-composition-file", src);
     hostEl.removeAttribute("data-composition-src");
+
+    const nestedAncestry = [...ancestry, src];
+    for (const nestedHost of [...hostEl.querySelectorAll("[data-composition-src]")]) {
+      const nestedSrc = nestedHost.getAttribute("data-composition-src");
+      if (!nestedSrc) continue;
+      if (nestedAncestry.includes(nestedSrc)) {
+        onMissingComposition?.(nestedSrc, "circular composition reference");
+        continue;
+      }
+      if (nestedAncestry.length >= MAX_SUB_COMPOSITION_DEPTH) {
+        onMissingComposition?.(nestedSrc, "nesting depth exceeded");
+        continue;
+      }
+      queue.push({ element: nestedHost, ancestry: nestedAncestry });
+    }
   }
 
   return { styles, scripts, externalScriptSrcs, scriptItems, externalLinks, variablesByComp };

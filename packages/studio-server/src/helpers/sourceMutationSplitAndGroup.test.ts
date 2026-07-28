@@ -32,6 +32,21 @@ describe("splitElementInHtml", () => {
     expect(result.html).toContain('data-duration="4"');
   });
 
+  it("canonicalizes legacy timing attributes on both split halves", () => {
+    const legacy = source.replace(
+      'data-start="1" data-duration="6"',
+      'data-start="1" data-end="7" data-layer="3"',
+    );
+    const result = splitElementInHtml(legacy, { id: "box" }, 3, "box-split");
+
+    expect(result.matched).toBe(true);
+    expect(result.html).not.toContain("data-end=");
+    expect(result.html).not.toContain("data-layer=");
+    expect(result.html.match(/data-track-index="3"/g)).toHaveLength(2);
+    expect(result.html).toContain('data-duration="2"');
+    expect(result.html).toContain('data-duration="4"');
+  });
+
   it("duplicates CSS rules for the new element ID", () => {
     const result = splitElementInHtml(source, { id: "box" }, 3, "box-split");
     expect(result.html).toContain("#box-split");
@@ -53,6 +68,25 @@ describe("splitElementInHtml", () => {
   it("keeps clip class on the cloned element", () => {
     const result = splitElementInHtml(source, { id: "box" }, 3, "box-split");
     expect(result.html).toMatch(/id="box-split"[^>]*class="clip"/);
+  });
+
+  it("gives a split composition host a unique composition id", () => {
+    const composition = source.replace(
+      'id="box" class="clip"',
+      'id="box" class="clip" data-composition-id="headline" data-composition-src="headline.html"',
+    );
+
+    const first = splitElementInHtml(composition, { id: "box" }, 3, "box-split");
+    const second = splitElementInHtml(first.html, { id: "box-split" }, 4, "box-split-2");
+
+    const { document } = parseHTML(second.html);
+    const compositionIds = Array.from(
+      document.querySelectorAll("[data-composition-id]"),
+      (element) => element.getAttribute("data-composition-id"),
+    );
+    expect(compositionIds).toHaveLength(4);
+    expect(new Set(compositionIds)).toHaveLength(4);
+    expect(compositionIds).toEqual(expect.arrayContaining(["root", "headline", "headline-split"]));
   });
 
   it("returns matched false for out-of-range split time", () => {
@@ -87,6 +121,20 @@ describe("splitElementInHtml", () => {
     );
     const result = splitElementInHtml(mediaSource, { id: "box" }, 3, "box-split");
     expect(result.html).toMatch(/id="box-split"[^>]*data-playback-start="2"/);
+  });
+
+  it("stamps a legacy composition offset and advances the second half by playback rate", () => {
+    const result = splitElementInHtml(source, { id: "box" }, 3, "box-split", {
+      start: 1,
+      duration: 6,
+      playbackStart: 1.5,
+      playbackRate: 2,
+      stampPlaybackStart: true,
+    });
+
+    const { document } = parseHTML(result.html);
+    expect(document.getElementById("box")?.getAttribute("data-playback-start")).toBe("1.5");
+    expect(document.getElementById("box-split")?.getAttribute("data-playback-start")).toBe("5.5");
   });
 });
 

@@ -3,26 +3,25 @@ import type { ZoomMode } from "../store/playerStore";
 
 /* ── Layout constants ──────────────────────────────────────────────── */
 export const GUTTER = 32;
+export const LABEL_COL_W = 232;
 export const TRACK_H = 48;
+export const LANE_H = 28;
 export const RULER_H = 24;
 export const CLIP_Y = 3;
 export const CLIP_HANDLE_W = 18;
+
+export function getTimelineLaneTop(laneIndex: number): number {
+  return TRACK_H + Math.max(0, Math.trunc(laneIndex)) * LANE_H;
+}
 /**
- * Half-width (as a fraction of TRACK_H) of the new-track INSERT band that
- * straddles each lane boundary. Deliberately equals the clip's vertical inset
- * (`CLIP_Y / TRACK_H`): a clip body fills [CLIP_Y, TRACK_H − CLIP_Y] of its row,
- * so the ONLY region this band covers is the visible empty gutter between two
- * clip bodies (plus the top/bottom breathing pads, handled separately by the
- * rowFloat ≤ 0 / ≥ trackCount extremes). Aiming at a clip body is therefore a
- * move-to-that-lane; only the inter-clip gap arms an insert — see resolveInsertRow.
- * Threaded into resolveInsertRow by the drag preview so the hit band can never
- * drift from the rendered clip geometry.
+ * Collapsed-row characterization value for the new-track INSERT band. Runtime
+ * hit-testing uses getTimelineInsertBoundaryBand with the concrete row height.
  */
 export const INSERT_BOUNDARY_BAND = CLIP_Y / TRACK_H;
 /**
  * Breathing room INSIDE the scroll area (CapCut-style), threaded through every
  * track-row y computation via {@link getTimelineRowTop} — never inline a magic
- * offset; a track row's top is always `RULER_H + TRACKS_TOP_PAD + row*TRACK_H`.
+ * offset; a track row's top is always ruler + top pad + cumulative row heights.
  *
  * - TRACKS_TOP_PAD: empty space between the (sticky) ruler and the first track
  *   (~half a track height) so the first clip isn't jammed under the ruler.
@@ -31,6 +30,90 @@ export const INSERT_BOUNDARY_BAND = CLIP_Y / TRACK_H;
  */
 export const TRACKS_TOP_PAD = 50;
 export const TRACKS_BOTTOM_PAD = Math.round(TRACK_H * 1.5);
+/**
+ * Breathing room LEFT of t=0 (CapCut-style), inside the scroll content — the
+ * horizontal sibling of TRACKS_TOP_PAD: empty lane surface between the sticky
+ * gutter and where the ruler's 00:00 / the clips actually start, scrolling
+ * WITH the content. Time↔pixel mapping: content x = GUTTER + TRACKS_LEFT_PAD
+ * + t·pps, and every pointer→time inverse subtracts it symmetrically. The
+ * lanes and the ruler realize it as a plain flow spacer between the sticky
+ * gutter cell and the time-mapped content div, so all content-relative math
+ * (clip left = t·pps, beat lines, lane-menu time) is untouched.
+ */
+export const TRACKS_LEFT_PAD = 48;
+
+export interface TimelineTrackHeightClip {
+  clipId: string;
+  laneCount: number;
+}
+
+type TimelineTrackHeightInput = readonly (readonly TimelineTrackHeightClip[])[];
+
+/**
+ * Resolve each track's full height. Without expansion state every row is the
+ * legacy TRACK_H; if multiple clips in one track expand, the tallest one owns
+ * the shared row height.
+ */
+export function trackHeights(
+  tracks: TimelineTrackHeightInput,
+  expandedClipIds?: ReadonlySet<string>,
+): number[] {
+  return tracks.map((clips) => {
+    let laneCount = 0;
+    if (expandedClipIds) {
+      for (const clip of clips) {
+        if (expandedClipIds.has(clip.clipId)) laneCount = Math.max(laneCount, clip.laneCount);
+      }
+    }
+    return TRACK_H + Math.max(0, Math.trunc(laneCount)) * LANE_H;
+  });
+}
+
+function validRowHeight(height: number | undefined): number {
+  if (height === undefined || !Number.isFinite(height) || height <= 0) return TRACK_H;
+  return height;
+}
+
+/**
+ * Memoized by the rowHeights array identity: a marquee/drag pointer tick calls
+ * getTimelineRowTop once per clip, and each call would otherwise rebuild the
+ * whole cumulative array (O(clips x rows) allocations per tick). rowHeights is
+ * itself memoized upstream (useTimelineTrackLayout), so the identity is stable
+ * for the life of a gesture. Callers must treat the result as read-only.
+ */
+const rowOffsetsCache = new WeakMap<readonly number[], number[]>();
+
+/** Cumulative top offsets, including the final bottom boundary. */
+export function getTimelineRowOffsets(rowHeights: readonly number[]): number[] {
+  const cached = rowOffsetsCache.get(rowHeights);
+  if (cached) return cached;
+  const offsets = [0];
+  for (const height of rowHeights) {
+    offsets.push((offsets[offsets.length - 1] ?? 0) + validRowHeight(height));
+  }
+  rowOffsetsCache.set(rowHeights, offsets);
+  return offsets;
+}
+
+export function getTimelineRowHeight(row: number, rowHeights: readonly number[] = []): number {
+  return validRowHeight(rowHeights[row]);
+}
+
+function getTimelineRowOffset(row: number, rowHeights: readonly number[]): number {
+  if (rowHeights.length === 0) return row * TRACK_H;
+  const offsets = getTimelineRowOffsets(rowHeights);
+  if (row <= 0) return row * getTimelineRowHeight(0, rowHeights);
+  if (row >= rowHeights.length) {
+    // Deliberately TRACK_H, not the last row's height: rows past the end do not
+    // exist yet, and a row created by dropping there starts unexpanded. The
+    // pre-first-row branch above uses row 0's concrete height instead because
+    // that row DOES exist — the pointer is in the top pad above a real lane.
+    return (offsets[rowHeights.length] ?? 0) + (row - rowHeights.length) * TRACK_H;
+  }
+  const wholeRow = Math.floor(row);
+  const fraction = row - wholeRow;
+  return (offsets[wholeRow] ?? 0) + fraction * getTimelineRowHeight(wholeRow, rowHeights);
+}
 
 /**
  * The y (content-space) of the top edge of track ROW index `row` (0 = first
@@ -39,17 +122,48 @@ export const TRACKS_BOTTOM_PAD = Math.round(TRACK_H * 1.5);
  * placeholder/insertion top and every pointer-y→row inversion goes through this
  * (or its inverse in {@link getTimelineRowFromY}) so the pad can never drift.
  */
-export function getTimelineRowTop(row: number): number {
-  return RULER_H + TRACKS_TOP_PAD + row * TRACK_H;
+export function getTimelineRowTop(row: number, rowHeights: readonly number[] = []): number {
+  return RULER_H + TRACKS_TOP_PAD + getTimelineRowOffset(row, rowHeights);
 }
 
 /**
  * Inverse of {@link getTimelineRowTop}: the fractional row index for a content-
- * space y (used for insert-row / drop-lane decisions). Subtracts the ruler and
- * top pad before dividing by the track height.
+ * space y (used for insert-row / drop-lane decisions). Locates the concrete row
+ * from cumulative offsets, then returns its local fractional position.
  */
-export function getTimelineRowFromY(contentY: number): number {
-  return (contentY - RULER_H - TRACKS_TOP_PAD) / TRACK_H;
+export function getTimelineRowFromY(contentY: number, rowHeights: readonly number[] = []): number {
+  const y = contentY - RULER_H - TRACKS_TOP_PAD;
+  if (rowHeights.length === 0) return y / TRACK_H;
+  if (y < 0) return y / getTimelineRowHeight(0, rowHeights);
+
+  const offsets = getTimelineRowOffsets(rowHeights);
+  for (let row = 0; row < rowHeights.length; row += 1) {
+    const bottom = offsets[row + 1] ?? 0;
+    if (y < bottom) {
+      const top = offsets[row] ?? 0;
+      return row + (y - top) / getTimelineRowHeight(row, rowHeights);
+    }
+  }
+  return rowHeights.length + (y - (offsets[rowHeights.length] ?? 0)) / TRACK_H;
+}
+
+export function getTimelineRowPositionFromY(
+  contentY: number,
+  rowHeights: readonly number[] = [],
+): { rowFloat: number; row: number; fraction: number; rowHeight: number } {
+  const rowFloat = getTimelineRowFromY(contentY, rowHeights);
+  const row = Math.floor(rowFloat);
+  return {
+    rowFloat,
+    row,
+    fraction: rowFloat - row,
+    rowHeight: getTimelineRowHeight(row, rowHeights),
+  };
+}
+
+/** Fractional insert band for the concrete row under a pointer. */
+export function getTimelineInsertBoundaryBand(rowHeight: number): number {
+  return CLIP_Y / validRowHeight(rowHeight);
 }
 /**
  * While a clip drag is live, the rendered timeline extends this far past the
@@ -67,51 +181,105 @@ export const DRAG_EXTEND_MARGIN_PX = 160;
  * with 60s of ruler after it.
  */
 export const MIN_TIMELINE_EXTENT_S = 60;
+/**
+ * Fit-mode headroom (CapCut-style): "fit" maps `duration * 1.2` — not the bare
+ * duration — onto the viewport, so the composition ends at ~83% of the width
+ * and the trailing ~17% stays empty ruler + droppable lane surface (room to
+ * drag clips past the current end without first zooming out). Applied ONLY
+ * inside {@link getTimelineFitPps}, the single fit-pps source, so the ruler,
+ * lanes, playhead, marquee, and drag math all inherit it consistently. Manual
+ * zoom percentages stay defined relative to this fit basis (100% == fit).
+ */
+export const FIT_ZOOM_HEADROOM = 1.2;
 
 /* ── Tick generation ──────────────────────────────────────────────── */
-function getMajorTickInterval(duration: number, pixelsPerSecond?: number): number {
-  const zoomIntervals = [0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+// fallow-ignore-next-line complexity
+function getMajorTickInterval(
+  duration: number,
+  pixelsPerSecond?: number,
+  frameRate?: number,
+): number {
+  // "Nice" NLE steps: 1-2-5 sub-second decades, then 1s/2s/5s/10s/15s/30s,
+  // minute multiples, and 15m/30m/1h so ultra-zoomed-out long comps still get
+  // readable (non-colliding) labels instead of the old 10m fallback everywhere.
+  const zoomIntervals = [
+    0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600,
+  ];
+  let interval: number;
   if (Number.isFinite(pixelsPerSecond) && (pixelsPerSecond ?? 0) > 0) {
     const targetMajorPx = 88;
-    return (
-      zoomIntervals.find((interval) => interval * (pixelsPerSecond ?? 0) >= targetMajorPx) ?? 600
-    );
+    interval =
+      zoomIntervals.find((candidate) => candidate * (pixelsPerSecond ?? 0) >= targetMajorPx) ??
+      3600;
+  } else {
+    const durationIntervals = [0.25, 0.5, 1, 2, 5, 10, 15, 30, 60];
+    const target = duration / 6;
+    interval = durationIntervals.find((candidate) => candidate >= target) ?? 60;
   }
-  const durationIntervals = [0.25, 0.5, 1, 2, 5, 10, 15, 30, 60];
-  const target = duration / 6;
-  return durationIntervals.find((interval) => interval >= target) ?? 60;
+  // Frame display mode: labels are frame numbers, so a major step must be a
+  // WHOLE number of frames — sub-frame steps produce duplicate/uneven labels
+  // (e.g. 0.02s at 30fps is 0.6 frames → "0, 1, 1, 2, 2…"). Snap UP (ceil) so
+  // the label spacing never drops below the readability target.
+  if (Number.isFinite(frameRate) && (frameRate ?? 0) > 0) {
+    const fps = frameRate ?? 0;
+    return Math.max(1, Math.ceil(interval * fps - 1e-6)) / fps;
+  }
+  return interval;
 }
 
 // How many equal parts to split each major interval into for minor ticks. Prefer
 // quarters (4) so the midpoint stays a minor tick; fall back to halves (2) then
-// none (0) as ticks get too dense to read (< ~8px apart).
-function getMinorSubdivisions(majorInterval: number, pixelsPerSecond?: number): number {
+// none (0) as ticks get too dense to read (< ~8px apart). In frame display mode
+// the subdivision must also keep minor ticks on WHOLE frames (a minor tick at a
+// sub-frame time is not a seekable position), so only divisors of the major
+// step's frame count qualify — quarters, then fifths (15/30-frame majors),
+// thirds, halves.
+// fallow-ignore-next-line complexity
+function getMinorSubdivisions(
+  majorInterval: number,
+  pixelsPerSecond?: number,
+  frameRate?: number,
+): number {
   const pps = Number.isFinite(pixelsPerSecond) ? (pixelsPerSecond ?? 0) : 0;
   if (pps <= 0) return 4; // no zoom info (duration-fit mode): quarter ticks
-  if ((majorInterval / 4) * pps >= 8) return 4;
-  if ((majorInterval / 2) * pps >= 8) return 2;
+  const fps = Number.isFinite(frameRate) ? (frameRate ?? 0) : 0;
+  const majorFrames = fps > 0 ? Math.round(majorInterval * fps) : 0;
+  const candidates = fps > 0 ? [4, 5, 3, 2] : [4, 2];
+  for (const parts of candidates) {
+    if (fps > 0 && majorFrames % parts !== 0) continue;
+    if ((majorInterval / parts) * pps >= 8) return parts;
+  }
   return 0;
+}
+
+// Ticks are exact multiples of the interval (multiplied per index, never
+// accumulated with `+=`, so long rulers don't drift), then rounded to 1µs to
+// keep values/keys clean without disturbing frame-exact positions like 2/30s.
+function roundTickValue(t: number): number {
+  return Math.round(t * 1e6) / 1e6;
 }
 
 export function generateTicks(
   duration: number,
   pixelsPerSecond?: number,
+  frameRate?: number,
 ): { major: number[]; minor: number[] } {
-  if (duration <= 0 || !Number.isFinite(duration) || duration > 7200)
+  if (duration <= 0 || !Number.isFinite(duration) || duration > 14400)
     return { major: [], minor: [] };
-  const majorInterval = getMajorTickInterval(duration, pixelsPerSecond);
-  const subdivisions = getMinorSubdivisions(majorInterval, pixelsPerSecond);
+  const majorInterval = getMajorTickInterval(duration, pixelsPerSecond, frameRate);
+  const subdivisions = getMinorSubdivisions(majorInterval, pixelsPerSecond, frameRate);
   const minorInterval = subdivisions > 0 ? majorInterval / subdivisions : 0;
   const major: number[] = [];
   const minor: number[] = [];
   const maxTicks = 2000; // Safety cap to prevent runaway tick generation
-  for (let t = 0; t <= duration + 0.001 && major.length < maxTicks; t += majorInterval) {
-    const rounded = Math.round(t * 100) / 100;
-    major.push(rounded);
+  for (let i = 0; major.length < maxTicks; i++) {
+    const t = i * majorInterval;
+    if (t > duration + 0.001) break;
+    major.push(roundTickValue(t));
     // Emit the (subdivisions - 1) minor ticks between this major and the next.
     for (let k = 1; k < subdivisions && major.length + minor.length < maxTicks; k++) {
-      const m = Math.round((t + k * minorInterval) * 100) / 100;
-      if (m <= duration + 0.001) minor.push(m);
+      const m = t + k * minorInterval;
+      if (m <= duration + 0.001) minor.push(roundTickValue(m));
     }
   }
   return { major, minor };
@@ -144,17 +312,23 @@ export function formatTimelineTickLabel(time: number, duration: number, majorInt
 
 /* ── Width / duration derivation ──────────────────────────────────── */
 /**
- * Fit-mode pixels-per-second: fill the viewport with the composition, but
- * never map fewer than MIN_TIMELINE_EXTENT_S seconds onto it — a short comp
- * takes a fraction of the width and the remaining ruler runs to 1:00.
+ * Fit-mode pixels-per-second: fill the viewport with the composition plus
+ * FIT_ZOOM_HEADROOM trailing headroom (CapCut-style — the comp never slams
+ * into the right edge), and never map fewer than MIN_TIMELINE_EXTENT_S
+ * seconds onto it — a short comp takes a fraction of the width and the
+ * remaining ruler runs to 1:00.
  * Manual zoom multiplies this base, so the floor only anchors the default.
  */
-export function getTimelineFitPps(viewportWidth: number, effectiveDuration: number): number {
+export function getTimelineFitPps(
+  viewportWidth: number,
+  effectiveDuration: number,
+  contentOrigin: number,
+): number {
   const safeDuration =
     Number.isFinite(effectiveDuration) && effectiveDuration > 0 ? effectiveDuration : 0;
-  const span = Math.max(safeDuration, MIN_TIMELINE_EXTENT_S);
-  if (!Number.isFinite(viewportWidth) || viewportWidth <= GUTTER) return 100;
-  return (viewportWidth - GUTTER - 2) / span;
+  const span = Math.max(safeDuration * FIT_ZOOM_HEADROOM, MIN_TIMELINE_EXTENT_S);
+  if (!Number.isFinite(viewportWidth) || viewportWidth <= contentOrigin) return 100;
+  return (viewportWidth - contentOrigin - 2) / span;
 }
 
 /**
@@ -167,6 +341,7 @@ export function getTimelineFitPps(viewportWidth: number, effectiveDuration: numb
 export function getTimelineDisplayContentWidth(input: {
   trackContentWidth: number;
   viewportWidth: number;
+  contentOrigin: number;
   pps: number;
   dragGhostEndPx?: number;
   resizeGhostEndPx?: number;
@@ -174,7 +349,7 @@ export function getTimelineDisplayContentWidth(input: {
   const safePps = Number.isFinite(input.pps) ? Math.max(input.pps, 0) : 0;
   return Math.max(
     input.trackContentWidth,
-    input.viewportWidth - GUTTER - 2,
+    input.viewportWidth - input.contentOrigin - 2,
     input.dragGhostEndPx ?? 0,
     input.resizeGhostEndPx ?? 0,
     MIN_TIMELINE_EXTENT_S * safePps,
@@ -182,6 +357,15 @@ export function getTimelineDisplayContentWidth(input: {
 }
 
 /* ── Scroll / zoom helpers ────────────────────────────────────────── */
+export function getTimelineContentXFromClient(input: {
+  clientX: number;
+  rectLeft: number;
+  scrollLeft: number;
+  contentOrigin: number;
+}): number {
+  return input.clientX - input.rectLeft + input.scrollLeft - input.contentOrigin;
+}
+
 export function shouldAutoScrollTimeline(
   zoomMode: ZoomMode,
   scrollWidth: number,
@@ -204,7 +388,7 @@ export function getTimelineScrollLeftForZoomTransition(
 export function getTimelineScrollLeftForZoomAnchor(input: {
   pointerX: number;
   currentScrollLeft: number;
-  gutter: number;
+  contentOrigin: number;
   currentPixelsPerSecond: number;
   nextPixelsPerSecond: number;
   duration: number;
@@ -221,22 +405,81 @@ export function getTimelineScrollLeftForZoomAnchor(input: {
   ) {
     return Math.max(0, input.currentScrollLeft);
   }
-  const timelineX = Math.max(0, input.currentScrollLeft + input.pointerX - input.gutter);
+  const timelineX = Math.max(
+    0,
+    getTimelineContentXFromClient({
+      clientX: input.pointerX,
+      rectLeft: 0,
+      scrollLeft: input.currentScrollLeft,
+      contentOrigin: input.contentOrigin,
+    }),
+  );
   const timeAtPointer = Math.max(0, Math.min(input.duration, timelineX / currentPps));
-  return Math.max(0, input.gutter + timeAtPointer * nextPps - input.pointerX);
+  return Math.max(0, input.contentOrigin + timeAtPointer * nextPps - input.pointerX);
 }
 
 /* ── Playhead / canvas ────────────────────────────────────────────── */
-export function getTimelinePlayheadLeft(time: number, pixelsPerSecond: number): number {
-  if (!Number.isFinite(time) || !Number.isFinite(pixelsPerSecond)) return GUTTER;
-  return GUTTER + Math.max(0, time) * Math.max(0, pixelsPerSecond);
+/**
+ * Width of the playhead wrapper element (== the diamond head chip's layout
+ * width, which the wrapper shrink-wraps to). The 1px vertical line inside
+ * PlayheadIndicator is centered at 50% of this wrapper, so the wrapper must be
+ * shifted LEFT by half this width for the line's center to land exactly on
+ * `contentOrigin + time * pps` — see {@link getTimelinePlayheadLeft}.
+ */
+export const PLAYHEAD_HEAD_W = 9;
+
+/**
+ * The `left` for the playhead WRAPPER such that the vertical line's CENTER
+ * sits exactly on `contentOrigin + time * pps` (the same x the ruler ticks center
+ * on) at every zoom level. Without the half-head offset the line sat
+ * `PLAYHEAD_HEAD_W / 2` px to the right of its ruler tick.
+ */
+export function getTimelinePlayheadLeft(
+  time: number,
+  pixelsPerSecond: number,
+  contentOrigin: number,
+): number {
+  if (!Number.isFinite(time) || !Number.isFinite(pixelsPerSecond)) {
+    return contentOrigin - PLAYHEAD_HEAD_W / 2;
+  }
+  return contentOrigin + Math.max(0, time) * Math.max(0, pixelsPerSecond) - PLAYHEAD_HEAD_W / 2;
 }
 
-export function getTimelineCanvasHeight(trackCount: number): number {
+/**
+ * Inverse of {@link getTimelinePlayheadLeft}: the scrub time under a viewport
+ * clientX. Clamped to [0, duration], NOT rejected — the scrub surface starts
+ * `contentOrigin` px right of the viewport edge, so any pointer left of t=0
+ * maps to a negative offset. Callers used to bail on that instead of
+ * clamping, which made the last 80px of the drag to zero silently do nothing:
+ * the playhead stuck wherever the last in-range sample landed, and only a very
+ * slow drag that happened to sample inside the sliver before the origin reached
+ * 0. Every scrub path shares this so they cannot diverge on the edge again.
+ */
+export function getTimelineScrubTime(input: {
+  clientX: number;
+  viewportLeft: number;
+  scrollLeft: number;
+  contentOrigin: number;
+  pixelsPerSecond: number;
+  duration: number;
+}): number {
+  const { clientX, viewportLeft, scrollLeft, contentOrigin, pixelsPerSecond, duration } = input;
+  if (!(pixelsPerSecond > 0) || !Number.isFinite(duration)) return 0;
+  const x = getTimelineContentXFromClient({
+    clientX,
+    rectLeft: viewportLeft,
+    scrollLeft,
+    contentOrigin,
+  });
+  return Math.max(0, Math.min(duration, x / pixelsPerSecond));
+}
+
+export function getTimelineCanvasHeight(rowHeights: readonly number[]): number {
   // RULER_H + top pad + lanes + bottom pad. The old TIMELINE_SCROLL_BUFFER is
   // subsumed by TRACKS_BOTTOM_PAD (which is larger), so the drag-into-void space
   // below the last lane is real scrollable surface, not a hidden buffer.
-  return RULER_H + TRACKS_TOP_PAD + Math.max(0, trackCount) * TRACK_H + TRACKS_BOTTOM_PAD;
+  const rowsHeight = getTimelineRowOffsets(rowHeights).at(-1) ?? 0;
+  return RULER_H + TRACKS_TOP_PAD + rowsHeight + TRACKS_BOTTOM_PAD;
 }
 
 /* ── UI helpers ───────────────────────────────────────────────────── */
@@ -292,24 +535,32 @@ export function resolveTimelineAssetDrop(
     rectTop: number;
     scrollLeft: number;
     scrollTop: number;
+    contentOrigin: number;
     pixelsPerSecond: number;
     duration: number;
-    trackHeight: number;
+    clampStartToDuration?: boolean;
+    rowHeights?: readonly number[];
     trackOrder: number[];
   },
   clientX: number,
   clientY: number,
 ): { start: number; track: number } {
-  const x = clientX - input.rectLeft + input.scrollLeft - GUTTER;
+  const x = getTimelineContentXFromClient({
+    clientX,
+    rectLeft: input.rectLeft,
+    scrollLeft: input.scrollLeft,
+    contentOrigin: input.contentOrigin,
+  });
   const contentY = clientY - input.rectTop + input.scrollTop;
+  const pointerStart = Math.round((x / Math.max(input.pixelsPerSecond, 1)) * 100) / 100;
   const start = Math.max(
     0,
-    Math.min(input.duration, Math.round((x / Math.max(input.pixelsPerSecond, 1)) * 100) / 100),
+    input.clampStartToDuration === false ? pointerStart : Math.min(input.duration, pointerStart),
   );
   // Row from the shared row→y inverse so the top pad is honoured; a drop in the
   // pad above the first lane floors to row 0, a drop in the bottom pad rounds
   // past the last lane (getDefaultDroppedTrack then appends a new track).
-  const rowIndex = Math.floor(getTimelineRowFromY(contentY));
+  const rowIndex = Math.floor(getTimelineRowFromY(contentY, input.rowHeights));
   return {
     start,
     track: getDefaultDroppedTrack(input.trackOrder, rowIndex),

@@ -1,3 +1,4 @@
+import { failCommand } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import { resolve } from "node:path";
 import type { Example } from "./_examples.js";
@@ -88,14 +89,14 @@ export default defineCommand({
       console.error(
         "Missing URL. Pass a website URL, or use --video <project> for video download.",
       );
-      process.exit(1);
+      failCommand();
     }
 
     try {
       new URL(url);
     } catch {
       console.error(`Invalid URL: ${url}`);
-      process.exit(1);
+      failCommand();
     }
 
     const isDefaultOutput = !args.output;
@@ -114,7 +115,7 @@ export default defineCommand({
       }
       if (existsSync(outputDir)) {
         console.error(`./capture-{2..99} are all taken. Pass -o <name> to pick a directory.`);
-        process.exit(1);
+        failCommand();
       }
     }
 
@@ -236,7 +237,7 @@ export default defineCommand({
       } else {
         console.error(`\n  ✗ Capture failed: ${errMsg}\n`);
       }
-      process.exit(1);
+      failCommand();
     }
   },
 });

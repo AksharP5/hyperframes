@@ -28,9 +28,9 @@ A launch or promo that *sells*: SaaS promos, feature reveals, product demos, app
 | You want… | Route |
 | --- | --- |
 | To market, launch, promote, or reveal a product (the default for any commercial URL) | `/product-launch-video` |
-| A video *of* a general site — a portfolio / blog / docs / landing-page tour or showcase, not a sales pitch | `/website-to-video` (see the [guide](/guides/website-to-video)) |
+| A video *of* a general site — a portfolio / blog / docs / landing-page tour or showcase, not a sales pitch | `/product-launch-video` too — say *tour* or *showcase* in the brief (see the [website-to-video guide](/guides/website-to-video)) |
 
-"Promo for our site" is a launch, even though it names a site — use `/product-launch-video`. A neutral walkthrough of a docs site is a tour — use `/website-to-video`. Unsure → start at `/hyperframes` and let it route.
+Both route to the same workflow now; what changes is the brief. "Promo for our site" is a launch — sell it. A neutral walkthrough of a docs site is a tour — say so, and the workflow shows the site's own captured screens instead of pitching. Unsure → start at `/hyperframes` and let it route.
 
 ## The knobs that matter
 
@@ -71,8 +71,8 @@ What you can already steer from the prompt, before you've learned any technique.
 
     Given a name instead of a link, the workflow searches for the official URL, confirms it in one line, then captures — you get the site-grounded result without pasting the link yourself.
   </Accordion>
-  <Accordion title="Site tour instead (website-to-video)">
-    > /website-to-video Make a 30-second 1920x1080 tour of https://example.com built from its own screenshots. Calm, editorial pace — show the homepage, two inner pages, and the footer. Full narration, warm male voice. This is a showcase, not a sales pitch.
+  <Accordion title="Site tour instead (same workflow, tour brief)">
+    > /product-launch-video Make a 30-second 1920x1080 tour of https://example.com built from its own screenshots. Calm, editorial pace — show the homepage, two inner pages, and the footer. Full narration, warm male voice. This is a showcase, not a sales pitch.
 
     Reach for this when the goal is to *show the site*, not sell a product. It builds from captured screenshots and the site's brand assets. A launch or promo — even from the same URL — belongs to `/product-launch-video`.
   </Accordion>

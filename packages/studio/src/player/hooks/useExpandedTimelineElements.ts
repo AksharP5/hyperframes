@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { usePlayerStore, type TimelineElement, type DomClipChild } from "../store/playerStore";
 import type { ClipManifestClip } from "../lib/playbackTypes";
 import { createTimelineElementFromManifestClip } from "../lib/timelineDOM";
-import { buildTimelineElementKey } from "../lib/timelineElementHelpers";
+import { buildTimelineElementKey, splitTimelineElementKey } from "../lib/timelineElementHelpers";
 
 function findTopLevelAncestor(id: string, parentMap: Map<string, string>): string | null {
   let current = parentMap.get(id);
@@ -19,18 +19,13 @@ function findTopLevelAncestor(id: string, parentMap: Map<string, string>): strin
   return current;
 }
 
-function extractDomId(key: string): string {
-  const hashIdx = key.lastIndexOf("#");
-  return hashIdx >= 0 ? key.slice(hashIdx + 1) : key;
-}
-
 function resolveRawId(
   selectedId: string | null,
   manifest: ClipManifestClip[],
   parentMap: Map<string, string>,
 ): string | null {
   if (!selectedId) return null;
-  const rawId = extractDomId(selectedId);
+  const rawId = splitTimelineElementKey(selectedId).domId;
   if (parentMap.has(rawId)) return rawId;
   if (parentMap.has(selectedId)) return selectedId;
   const clip = manifest.find((c) => c.label === selectedId || c.label === rawId);
@@ -48,6 +43,11 @@ interface TimelineExpansionRawIdInput {
 
 function clipContainsTime(clip: ClipManifestClip, time: number): boolean {
   return Number.isFinite(time) && time >= clip.start && time < clip.start + clip.duration;
+}
+
+/** Half-open containment plus the closing boundary — see the fallback below. */
+function clipTouchesTime(clip: ClipManifestClip, time: number): boolean {
+  return Number.isFinite(time) && time >= clip.start && time <= clip.start + clip.duration;
 }
 
 function getActiveParentDepth(id: string, parentMap: Map<string, string>, activeIds: Set<string>) {
@@ -70,11 +70,20 @@ function findActiveExpandableCompositionId(
   parentMap: Map<string, string>,
 ): string | null {
   const parentIds = new Set(parentMap.values());
-  const activeIds = new Set<string>();
-  for (const clip of manifest) {
-    if (!clip.id || !parentIds.has(clip.id) || !clipContainsTime(clip, currentTime)) continue;
-    activeIds.add(clip.id);
-  }
+  const collect = (matches: (clip: ClipManifestClip, time: number) => boolean) => {
+    const ids = new Set<string>();
+    for (const clip of manifest) {
+      if (clip.id && parentIds.has(clip.id) && matches(clip, currentTime)) ids.add(clip.id);
+    }
+    return ids;
+  };
+  // Clip windows are half-open, so a playhead parked exactly on a clip's end is
+  // inside nothing — at the end of the timeline that collapsed every expanded
+  // sub-composition row and its keyframe lanes. Only when the strict pass finds
+  // nothing do we accept the closing boundary, so a playhead landing on the seam
+  // between two adjacent clips still expands the one that is starting.
+  const strict = collect(clipContainsTime);
+  const activeIds = strict.size > 0 ? strict : collect(clipTouchesTime);
   let bestId: string | null = null;
   let bestDepth = -1;
   for (const id of activeIds) {
@@ -133,6 +142,7 @@ function buildChildElements(
   siblings: ClipManifestClip[],
   display: DisplayBounds,
   editBasis: { start: number; sourceFile: string | undefined },
+  expandedHostKey: string,
 ): TimelineElement[] {
   const result: TimelineElement[] = [];
   for (const child of siblings) {
@@ -163,8 +173,26 @@ function buildChildElements(
       key,
       start: clamped.start,
       duration: clamped.duration,
-      track: display.track + result.length,
+      // `track` becomes a synthetic display row under the expanded host, but the
+      // factory-set `authoredTrack` (the child's data-track-index in ITS OWN
+      // file's coordinate space) and the runtime-computed `stackingContextId`
+      // must survive verbatim — lane persists and z-sync read them, they are
+      // never reconstructed from display lanes.
+      //
+      // COLLISION-FREE synthetic rows: the old `display.track + index` scheme
+      // could equal a REAL clip's integer lane (host on track 0 with two
+      // children puts child #2 on track 1 — where an unrelated top-level clip
+      // may live). Lane grouping merges purely by track number, so that
+      // collision fused clips from DIFFERENT source files into one display
+      // lane, and lane-scoped actions (gap close) then batch-persisted foreign
+      // clips. Fractions strictly between the host's lane and the next integer
+      // can never equal a normalized (integer) lane, while still rendering the
+      // children as their own ordered rows directly under the host.
+      track: display.track + (result.length + 1) / (siblings.length + 2),
+      authoredTrack: base.authoredTrack,
+      stackingContextId: base.stackingContextId,
       expandedParentStart: editBasis.start,
+      expandedHostKey,
       domId,
       selector,
       sourceFile: editBasis.sourceFile,
@@ -181,7 +209,13 @@ function buildChildElements(
 function domSiblingClips(
   domClipChildren: DomClipChild[],
   siblingParentId: string,
-  host: TimelineElement,
+  host: {
+    id: string | null;
+    start: number;
+    duration: number;
+    track: number;
+    compositionSrc?: string | null;
+  },
 ): ClipManifestClip[] {
   return domClipChildren
     .filter((c) => c.parentId === siblingParentId)
@@ -198,6 +232,7 @@ function domSiblingClips(
         parentCompositionId: host.id ?? null,
         compositionSrc: host.compositionSrc ?? null,
         assetUrl: null,
+        stackingContextId: c.stackingContextId,
       }),
     );
 }
@@ -214,20 +249,23 @@ export function buildExpandedElements(
   const topLevelElement = elements.find((el) => el.id === topLevelId || el.domId === topLevelId);
   if (!topLevelElement) return filterToTopLevel(elements, parentMap);
 
+  // The sub-comp host the children actually live in: top-level host for 1-level
+  // nesting, a nested host for deeper nesting. Its start/file anchor edits.
+  const parentHost = manifest.find((c) => c.id === siblingParentId);
+
   // Prefer real manifest children; fall back to DOM-only sub-comp children
   // (groups/pills) that have no data-start and thus never enter the manifest.
+  // Those are synthesized against the host they actually live in, not the
+  // top-level element, or every child row reads the whole top-level window.
   const siblings = (() => {
     const fromManifest = manifest.filter(
       (c) => c.id != null && parentMap.get(c.id) === siblingParentId,
     );
     if (fromManifest.length > 0) return fromManifest;
-    return domSiblingClips(domClipChildren, siblingParentId, topLevelElement);
+    return domSiblingClips(domClipChildren, siblingParentId, parentHost ?? topLevelElement);
   })();
   if (siblings.length === 0) return filterToTopLevel(elements, parentMap);
 
-  // The sub-comp host the children actually live in: top-level host for 1-level
-  // nesting, a nested host for deeper nesting. Its start/file anchor edits.
-  const parentHost = manifest.find((c) => c.id === siblingParentId);
   const editBasis = {
     start: parentHost?.start ?? topLevelElement.start,
     sourceFile: parentHost?.compositionSrc ?? topLevelElement.compositionSrc ?? undefined,
@@ -242,12 +280,43 @@ export function buildExpandedElements(
       track: topLevelElement.track,
     },
     editBasis,
+    parentKey,
   );
   if (expanded.length === 0) return filterToTopLevel(elements, parentMap);
 
+  // Every host between the drilled one and the top level owns a row, so the
+  // drill has to spare all of them, not just the top. A middle host is still a
+  // host: dropping its row drops its keyframe lane with it.
+  const drillPath = new Set<string>();
+  for (let cursor: string | undefined = siblingParentId; cursor; ) {
+    if (drillPath.has(cursor)) break;
+    drillPath.add(cursor);
+    if (cursor === topLevelId) break;
+    cursor = parentMap.get(cursor);
+  }
+  // Children hang under the DEEPEST host on that path, so anchor them there
+  // when it has a row of its own and fall back to the top-level row when it
+  // does not (a host that lives only in the manifest never had one).
+  const anchorsChildren = (el: TimelineElement): boolean =>
+    drillPath.has(siblingParentId) && elements.some((e) => (e.domId ?? e.id) === siblingParentId)
+      ? (el.domId ?? el.id) === siblingParentId
+      : (el.key ?? el.id) === parentKey;
+
+  // ADDITIVE drill-in: the host row stays and its children are appended under
+  // it. Expansion is also triggered by the playhead alone (paused auto-expand),
+  // so substituting the host row made it vanish on an ordinary seek, and with
+  // it the host's keyframe lane, since diamonds render per row from
+  // `keyframeCache.get(elementKey)`. The synthetic fractional lanes above sit
+  // strictly between the host's lane and the next integer, so the children have
+  // their own rows without the host having to give up its own.
   return elements
-    .filter((el) => (el.key ?? el.id) === parentKey || !parentMap.has(el.domId ?? el.id))
-    .flatMap((el) => ((el.key ?? el.id) === parentKey ? expanded : [el]));
+    .filter(
+      (el) =>
+        (el.key ?? el.id) === parentKey ||
+        drillPath.has(el.domId ?? el.id) ||
+        !parentMap.has(el.domId ?? el.id),
+    )
+    .flatMap((el) => (anchorsChildren(el) ? [el, ...expanded] : [el]));
 }
 
 export function useExpandedTimelineElements(): TimelineElement[] {

@@ -1,3 +1,4 @@
+import { failCommand } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
 
@@ -297,7 +298,7 @@ export default defineCommand({
         const msg = singleErr instanceof Error ? singleErr.message : String(singleErr);
         if (json) console.log(JSON.stringify({ ok: false, error: msg }));
         else console.error(c.error(msg));
-        process.exit(1);
+        failCommand();
       }
 
       let config = loadProjectConfig(projectDir);
@@ -320,7 +321,7 @@ export default defineCommand({
         const msg = singleErr instanceof Error ? singleErr.message : String(singleErr);
         if (json) console.log(JSON.stringify({ ok: false, error: msg }));
         else console.error(c.error(msg));
-        process.exit(1);
+        failCommand();
       }
 
       if (!json) {
