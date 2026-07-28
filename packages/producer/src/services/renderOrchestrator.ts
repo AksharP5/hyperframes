@@ -498,6 +498,8 @@ export interface RenderPerfSummary {
     preRouterWorkers?: number;
     /** Engine init-time gate: swiftshader | css_effect:* | at_risk_timeline | 3d_init_failed | supersampling | render_mode_hint. */
     gateReason?: string;
+    /** Raw WebGL renderer string from DE session init (ANGLE backend + GPU vendor); |-joined across parallel sessions. */
+    gpuRenderer?: string;
     /** Worker-encode drain (the verified path) was active. */
     workerEncode: boolean;
     /** Self-verification ground-truth samples armed at init. */

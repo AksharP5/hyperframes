@@ -183,6 +183,8 @@ export function trackRenderComplete(
     deParallelRouter?: string;
     dePreRouterWorkers?: number;
     deGateReason?: string;
+    /** Raw WebGL renderer string from DE session init (ANGLE backend + GPU vendor). */
+    gpuRenderer?: string;
     deWorkerEncode?: boolean;
     deVerifyArmed?: number;
     deVerifyChecked?: number;
@@ -280,6 +282,7 @@ export function trackRenderComplete(
       de_parallel_router: props.deParallelRouter,
       de_pre_router_workers: props.dePreRouterWorkers,
       de_gate_reason: props.deGateReason,
+      gpu_renderer: props.gpuRenderer,
       de_worker_encode: props.deWorkerEncode,
       de_verify_armed: props.deVerifyArmed,
       de_verify_checked: props.deVerifyChecked,

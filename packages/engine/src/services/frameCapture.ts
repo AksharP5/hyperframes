@@ -34,7 +34,7 @@ import {
   shouldDefaultCaptureBeyondViewport,
 } from "./screenshotService.js";
 import {
-  detectSwiftShader,
+  detectGpuBackend,
   injectDrawElementCanvas,
   captureDrawElementFrame,
   resolveDrawElementCaptureMode,
@@ -146,6 +146,13 @@ export interface CaptureSession {
   config?: Partial<EngineConfig>;
   /** True if running on SwiftShader (detected at init). Undefined before init. */
   isSwiftShader?: boolean;
+  /**
+   * Raw WebGL UNMASKED_RENDERER_WEBGL string, captured alongside the
+   * SwiftShader probe at DE session init (e.g. "ANGLE (NVIDIA, D3D11 ...)").
+   * Surfaces in CapturePerfSummary → render telemetry so backend-specific
+   * drawElement damage (Metal vs D3D11 vs GL) clusters attributably.
+   */
+  gpuRenderer?: string;
   /** drawElementImage canvas was injected and is ready for capture. */
   drawElementReady?: boolean;
   /**
@@ -704,7 +711,9 @@ async function initDrawElementOrTransparentBackground(
     );
   }
   if (useDrawElement) {
-    session.isSwiftShader = await detectSwiftShader(page);
+    const gpuBackend = await detectGpuBackend(page);
+    session.isSwiftShader = gpuBackend.isSwiftShader;
+    session.gpuRenderer = gpuBackend.renderer ?? undefined;
     const transparent = session.options.format === "png";
     async function routeToFallback(): Promise<void> {
       session.captureMode = session.launchCaptureMode;
@@ -3784,6 +3793,7 @@ export function getCapturePerfSummary(session: CaptureSession): CapturePerfSumma
     beginFrameNoDamage: session.beginFrameNoDamageCount,
     beginFrameHasDamage: session.beginFrameHasDamageCount,
     captureMode: session.captureMode,
+    gpuRenderer: session.gpuRenderer,
     deGateReason: session.deGateReason,
     deFallbackTrigger: session.deFallbackTrigger,
     deWorkerEncode: session.workerEncodeEnabled ?? false,

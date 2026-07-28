@@ -1102,7 +1102,6 @@ let deParallelRouterTrialFiredThisProcess = false;
  * resetting outside a test process where many independent test cases share
  * one imported module instance.
  */
-// fallow-ignore-next-line unused-export
 export function __resetDeParallelRouterTrialStateForTests(): void {
   deParallelRouterTrialManagedByUs = false;
   deParallelRouterTrialFiredThisProcess = false;
@@ -1429,6 +1428,7 @@ function trackRenderMetrics(
     deParallelRouter: perf?.drawElement?.parallelRouter,
     dePreRouterWorkers: perf?.drawElement?.preRouterWorkers,
     deGateReason: perf?.drawElement?.gateReason,
+    gpuRenderer: perf?.drawElement?.gpuRenderer,
     deWorkerEncode: perf?.drawElement?.workerEncode,
     deVerifyArmed: perf?.drawElement?.verifyArmed,
     deVerifyChecked: perf?.drawElement?.verifyChecked,

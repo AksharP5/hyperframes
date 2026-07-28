@@ -105,25 +105,48 @@ export function instrumentAcceleratedCanvases(): void {
   };
 }
 
+export interface GpuBackendInfo {
+  /** SwiftShader (software rasterizer) — e.g. Docker headless-shell. */
+  isSwiftShader: boolean;
+  /**
+   * Raw UNMASKED_RENDERER_WEBGL string (e.g. "ANGLE (Apple, ANGLE Metal
+   * Renderer: Apple M4 Pro, ...)", "ANGLE (NVIDIA, D3D11 ...)"), or null when
+   * WebGL / the debug extension is unavailable. Carried to render telemetry:
+   * drawElement failure modes proved compositor-backend-specific during the
+   * macOS rollout, so the win32/D3D11 cohort needs damage clusters
+   * attributable to a GPU vendor + ANGLE backend, not just `os`.
+   */
+  renderer: string | null;
+}
+
 /**
- * Detect whether the page is running on SwiftShader (software rasterizer).
+ * Detect the page's WebGL backend: SwiftShader vs a real GPU, plus the raw
+ * renderer string for telemetry.
  *
- * Returns true inside Docker headless-shell with --use-angle=swiftshader.
- * Returns false on macOS / Linux with a real GPU.
- * Call once after window.__hf is ready; cache result on session.
+ * `isSwiftShader` is true inside Docker headless-shell with
+ * --use-angle=swiftshader. Call once after window.__hf is ready; cache the
+ * result on the session.
  */
-export async function detectSwiftShader(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
+export async function detectGpuBackend(page: Page): Promise<GpuBackendInfo> {
+  return page.evaluate((): GpuBackendInfo => {
     const canvas = document.createElement("canvas");
     const gl =
       canvas.getContext("webgl") ||
       (canvas.getContext("experimental-webgl") as WebGLRenderingContext | null);
-    if (!gl) return false;
+    if (!gl) return { isSwiftShader: false, renderer: null };
     const ext = gl.getExtension("WEBGL_debug_renderer_info");
-    if (!ext) return false;
+    if (!ext) return { isSwiftShader: false, renderer: null };
     const renderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) as string;
-    return renderer.toLowerCase().includes("swiftshader");
+    return { isSwiftShader: renderer.toLowerCase().includes("swiftshader"), renderer };
   });
+}
+
+/**
+ * Back-compat wrapper over {@link detectGpuBackend} for callers that only
+ * need the SwiftShader boolean.
+ */
+export async function detectSwiftShader(page: Page): Promise<boolean> {
+  return (await detectGpuBackend(page)).isSwiftShader;
 }
 
 /**
