@@ -10,6 +10,8 @@ export const SMOKE_COMPOSITION_HTML =
   '<!doctype html><html><body><div data-composition-id="root" data-width="1920" ' +
   'data-height="1080" data-duration="1" data-start="0"><div class="clip" ' +
   'data-hf-id="title" data-start="0" data-duration="1">Test</div></div></body></html>';
+const SMOKE_THUMBNAIL_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="9"><rect width="16" height="9"/></svg>';
 
 function json(body, status = 200) {
   return { status, contentType: "application/json", body: JSON.stringify(body) };
@@ -75,6 +77,11 @@ function projectPreviewResponse(pathname) {
     : text(SMOKE_COMPOSITION_HTML, "text/html");
 }
 
+function projectThumbnailResponse(pathname) {
+  if (!pathname.startsWith(`${PROJECT_PATH}/thumbnail/`)) return undefined;
+  return text(SMOKE_THUMBNAIL_SVG, "image/svg+xml");
+}
+
 function gsapAnimationsResponse(pathname) {
   if (!pathname.startsWith(`${PROJECT_PATH}/gsap-animations/`)) return undefined;
   return json({ animations: [], timelineVar: "tl", preamble: "", postamble: "" });
@@ -85,6 +92,7 @@ function getStudioSmokeResponse(pathname) {
     GET_RESPONSES.get(pathname) ??
     projectFileResponse(pathname) ??
     projectPreviewResponse(pathname) ??
+    projectThumbnailResponse(pathname) ??
     gsapAnimationsResponse(pathname)
   );
 }

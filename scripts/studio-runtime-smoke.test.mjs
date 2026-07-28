@@ -44,6 +44,15 @@ describe("Studio runtime smoke fixtures", () => {
     assert.deepEqual(bodyOf("GET", "/api/projects/smoke-test/lint"), { findings: [] });
   });
 
+  it("returns an image for composition thumbnail requests", () => {
+    const response = studioSmokeApiResponse(
+      "GET",
+      "http://localhost:5199/api/projects/smoke-test/thumbnail/index.html?t=3",
+    );
+    assert.ok(response && response !== null);
+    assert.equal(response.contentType, "image/svg+xml");
+  });
+
   it("marks unknown API requests as fixture failures", () => {
     assert.equal(studioSmokeApiResponse("GET", "http://localhost:5199/api/new-endpoint"), null);
     assert.equal(studioSmokeApiResponse("GET", "http://localhost:5199/src/main.tsx"), undefined);
