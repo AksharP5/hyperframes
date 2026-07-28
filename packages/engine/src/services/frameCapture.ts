@@ -34,6 +34,7 @@ import {
   shouldDefaultCaptureBeyondViewport,
 } from "./screenshotService.js";
 import {
+  classifyGpuRenderer,
   detectGpuBackend,
   injectDrawElementCanvas,
   captureDrawElementFrame,
@@ -147,10 +148,12 @@ export interface CaptureSession {
   /** True if running on SwiftShader (detected at init). Undefined before init. */
   isSwiftShader?: boolean;
   /**
-   * Raw WebGL UNMASKED_RENDERER_WEBGL string, captured alongside the
-   * SwiftShader probe at DE session init (e.g. "ANGLE (NVIDIA, D3D11 ...)").
-   * Surfaces in CapturePerfSummary → render telemetry so backend-specific
-   * drawElement damage (Metal vs D3D11 vs GL) clusters attributably.
+   * Low-cardinality GPU bucket (`<backend>/<vendor>`, e.g. `d3d11/nvidia`)
+   * derived from the WebGL renderer at DE session init. Surfaces in
+   * CapturePerfSummary → render telemetry so backend-specific drawElement
+   * damage (Metal vs D3D11 vs GL) clusters attributably. The raw
+   * driver-supplied string is deliberately NOT retained — see
+   * classifyGpuRenderer.
    */
   gpuRenderer?: string;
   /** drawElementImage canvas was injected and is ready for capture. */
@@ -713,7 +716,7 @@ async function initDrawElementOrTransparentBackground(
   if (useDrawElement) {
     const gpuBackend = await detectGpuBackend(page);
     session.isSwiftShader = gpuBackend.isSwiftShader;
-    session.gpuRenderer = gpuBackend.renderer ?? undefined;
+    session.gpuRenderer = classifyGpuRenderer(gpuBackend.renderer);
     const transparent = session.options.format === "png";
     async function routeToFallback(): Promise<void> {
       session.captureMode = session.launchCaptureMode;

@@ -498,7 +498,7 @@ export interface RenderPerfSummary {
     preRouterWorkers?: number;
     /** Engine init-time gate: swiftshader | css_effect:* | at_risk_timeline | 3d_init_failed | supersampling | render_mode_hint. */
     gateReason?: string;
-    /** Raw WebGL renderer string from DE session init (ANGLE backend + GPU vendor); |-joined across parallel sessions. */
+    /** Low-cardinality GPU bucket from DE session init (`<backend>/<vendor>`, e.g. `d3d11/nvidia`); |-joined across parallel sessions (bounded: one bucket per distinct backend on the host). */
     gpuRenderer?: string;
     /** Worker-encode drain (the verified path) was active. */
     workerEncode: boolean;
@@ -2644,6 +2644,11 @@ async function executeRenderPipeline(input: {
       // any resource-pressure failure unique to this cohort.
       dePreInversionWorkers: deWorkerInversion ? preRoutingWorkerCount : undefined,
       dePreRouterWorkers: deParallelRouter ? preRoutingWorkerCount : undefined,
+      // Same rationale as the counters above: carried on live capture
+      // observability, not only the success-path perfSummary, so a crash /
+      // OOM / timeout still reports which GPU backend it happened on. That
+      // is the cohort the win32 D3D11 rollout most needs to attribute.
+      deGpuRenderer: probeSession?.gpuRenderer,
     });
     observability.checkpoint("worker_resolution", "resolved", {
       workerCount,
