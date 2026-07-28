@@ -33,6 +33,7 @@ import {
   resolveParallelRouterRetryPlan,
   resetCaptureAttemptProgress,
   shouldRetryViaPinnedFallback,
+  isDeParallelRouterEnabled,
   shouldPreferParallelDrawElement,
   shouldPreferSingleWorkerDrawElement,
   shouldStreamParallelCapture,
@@ -1824,6 +1825,27 @@ describe("resolveInversionRetryPlan (self-verify retry rollback)", () => {
       useStreamingEncode: true,
       deWorkerInversion: "reverted",
     });
+  });
+});
+
+describe("isDeParallelRouterEnabled (kill switch parsing)", () => {
+  it("defaults ON when unset or set-but-empty", () => {
+    expect(isDeParallelRouterEnabled({})).toBe(true);
+    expect(isDeParallelRouterEnabled({ HF_DE_PARALLEL_ROUTER: "" })).toBe(true);
+    expect(isDeParallelRouterEnabled({ HF_DE_PARALLEL_ROUTER: "   " })).toBe(true);
+  });
+
+  it("honours every conventional spelling of off — an opt-out must never fail OPEN", () => {
+    // A naive `!== "false"` would enable the router for all of these, handing
+    // 3-worker parallel DE to a user who explicitly asked for none.
+    for (const v of ["false", "FALSE", "False", "0", "off", "OFF", "no", "No", " false "]) {
+      expect(isDeParallelRouterEnabled({ HF_DE_PARALLEL_ROUTER: v })).toBe(false);
+    }
+  });
+
+  it("treats any other value as enabled", () => {
+    expect(isDeParallelRouterEnabled({ HF_DE_PARALLEL_ROUTER: "true" })).toBe(true);
+    expect(isDeParallelRouterEnabled({ HF_DE_PARALLEL_ROUTER: "1" })).toBe(true);
   });
 });
 
