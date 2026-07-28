@@ -159,13 +159,26 @@ and failing any of them is a bug to fix before shipping a real rollout.
 
 Check 2 will NOT come back flat, and that is expected rather than a defect.
 Per-install cohorts never flip, but a *person* who wipes their config gets a
-new id and a fresh roll of the dice. Preventing that needs a stable identity
-across resets, and both candidates were rejected: hardware fingerprinting
-correlates the cohort with hardware (fatal for a rendering experiment, and it
-survives uninstall), and account identity covers only ~3.6% of local
-rendering installs. So the drift is a measured, accepted limit — the reason to
-run this calibration is to learn its real magnitude and pick canary window
-lengths accordingly.
+new id and a fresh roll of the dice. Preventing that entirely needs a stable
+identity across resets, and both candidates were rejected: hardware
+fingerprinting correlates the cohort with hardware (fatal for a rendering
+experiment, and it survives uninstall), and account identity covers only
+~3.6% of local rendering installs. So the drift itself stands as a measured,
+accepted limit — but its worst consequence is mitigated, and its size is now
+directly measurable rather than inferred:
+
+- **A re-rolled install cannot re-enter a path that already failed on that
+  machine.** The circuit breaker's tripped state is mirrored to the
+  machine-local state file, so it survives the same config wipe that re-rolls
+  the cohort.
+- **`install_predecessor_found`** on every event says whether this install's
+  mint found a previous install's state marker. Its true-share splits check
+  2's drift into the recoverable part (config wiped, machine persisted) and
+  the part no local mechanism can link (fresh machine, container, new user).
+
+The calibration read is therefore two numbers — total drift, and the fraction
+the rollover already covers — and canary window lengths get picked from the
+residual, not the raw turnover.
 
 ## Behaviour worth knowing
 
