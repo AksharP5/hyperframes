@@ -69,7 +69,6 @@ import {
   writeConfigWithResult,
   type HyperframesConfig,
 } from "../telemetry/config.js";
-import { shouldTrack } from "../telemetry/client.js";
 import { renderJobObservabilityTelemetryPayload } from "../telemetry/renderObservability.js";
 import { bytesToMb } from "../telemetry/system.js";
 import { VERSION } from "../version.js";
@@ -1185,8 +1184,16 @@ function applyDeParallelRouterBreaker(): void {
 function applyDeParallelRouterCircuitBreaker(quiet: boolean): boolean {
   // Latch the user's own choice on first observation, BEFORE the breaker can
   // write the var itself and make the two indistinguishable.
+  //
+  // Ownership uses the SAME normalization as the two parsers: a set-but-empty
+  // (or whitespace) value means "unset / default ON", so it is NOT a user
+  // choice and must stay breaker-managed. Treating any defined value as
+  // user-managed would let `HF_DE_PARALLEL_ROUTER=` route the render (empty
+  // parses as ON) while exempting that install from the breaker — it would
+  // keep retrying a failing router forever, losing exactly the first-fallback
+  // protection this PR exists to provide (review finding).
   if (!deParallelRouterUserManagedResolved) {
-    deParallelRouterUserManaged = process.env.HF_DE_PARALLEL_ROUTER !== undefined;
+    deParallelRouterUserManaged = (process.env.HF_DE_PARALLEL_ROUTER ?? "").trim() !== "";
     deParallelRouterUserManagedResolved = true;
   }
   if (deParallelRouterUserManaged) {
@@ -1326,7 +1333,11 @@ function maybeConsumeDeParallelRouterTrial(
     applyDeParallelRouterBreaker();
   }
   writeConfig(config);
-  if (fired) reportDeParallelRouterBreakerTrip(quiet);
+  // Only announce a trip the breaker could actually act on. With an explicit
+  // user opt-in the breaker is a no-op, so "now off for this install" would
+  // be false — and would reprint on every subsequent revert, since the user's
+  // value keeps the router active (review finding).
+  if (fired && !deParallelRouterUserManaged) reportDeParallelRouterBreakerTrip(quiet);
 }
 
 /**
