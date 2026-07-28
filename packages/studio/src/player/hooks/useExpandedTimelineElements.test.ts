@@ -240,8 +240,73 @@ describe("buildExpandedElements", () => {
     expect(pills[0]!.duration).toBe(6);
     expect(pills[0]!.sourceFile).toBe("scene.html");
     expect(pills.map((pill) => pill.stackingContextId)).toEqual(["css:0.0", "css:0.1", "css:0.1"]);
-    // The host row is replaced by its children.
-    expect(out.some((e) => e.domId === "scene-host")).toBe(false);
+    // The host row survives the expansion; its children are added under it.
+    expect(out.some((e) => e.id === "scene-host")).toBe(true);
+  });
+
+  // fallow-ignore-next-line code-duplication
+  it("keeps the host row and appends its children directly below it", () => {
+    const elements = [
+      el({
+        id: "s3",
+        domId: "s3",
+        key: "index.html#s3",
+        start: 16,
+        duration: 7,
+        compositionSrc: "stats.html",
+      }),
+      el({ id: "outro", start: 23, duration: 3, track: 1 }),
+    ];
+    const manifest = [
+      clip({ id: "s3", start: 16, duration: 7, compositionSrc: "stats.html" }),
+      clip({ id: "stat-1", start: 16.5, duration: 5 }),
+      clip({ id: "stat-2", start: 16.9, duration: 5 }),
+    ];
+    const parentMap = new Map([
+      ["stat-1", "s3"],
+      ["stat-2", "s3"],
+    ]);
+
+    const out = buildExpandedElements(elements, manifest, parentMap, "s3", "s3");
+
+    const hostIndex = out.findIndex((e) => e.id === "s3");
+    expect(hostIndex).toBeGreaterThanOrEqual(0);
+    // Host row untouched (same key → same keyframe lane), children nested under it.
+    expect(out[hostIndex]!.key).toBe("index.html#s3");
+    expect(out[hostIndex]!.track).toBe(0);
+    expect(out[hostIndex + 1]!.domId).toBe("stat-1");
+    expect(out[hostIndex + 2]!.domId).toBe("stat-2");
+    // Exactly one more row than the old substitution behaviour (host + 2 children + outro).
+    expect(out).toHaveLength(4);
+  });
+
+  it("keeps the host row present at every playhead position (keyframe lane repro)", () => {
+    // Live repro with no drag at all: seek 0 gave 3 diamonds, seek 7.68 gave 0,
+    // seek 0.2 gave 3. Diamonds render per row from keyframeCache.get(elementKey),
+    // so the whole lane went with the host row whenever the paused drill-in
+    // substituted it for its children.
+    const elements = [
+      el({ id: "scene", domId: "scene", key: "index.html#scene", start: 0, duration: 12 }),
+    ];
+    const manifest = [
+      clip({ id: "scene", start: 0, duration: 12, compositionSrc: "scene.html" }),
+      clip({ id: "headline", start: 0, duration: 12 }),
+    ];
+    const parentMap = new Map([["headline", "scene"]]);
+
+    for (const currentTime of [0, 7.68, 0.2]) {
+      const rawId = resolveTimelineExpansionRawId({
+        selectedElementId: null,
+        isPlaying: false,
+        currentTime,
+        manifest,
+        parentMap,
+      });
+      const rows = rawId
+        ? buildExpandedElements(elements, manifest, parentMap, rawId, rawId)
+        : elements;
+      expect(rows.map((row) => row.key)).toContain("index.html#scene");
+    }
   });
 
   // Regression: DOM-only children were synthesized against the TOP-LEVEL element

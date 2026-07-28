@@ -284,9 +284,16 @@ export function buildExpandedElements(
   );
   if (expanded.length === 0) return filterToTopLevel(elements, parentMap);
 
+  // ADDITIVE drill-in: the host row stays and its children are appended under
+  // it. Expansion is also triggered by the playhead alone (paused auto-expand),
+  // so substituting the host row made it vanish on an ordinary seek — and with
+  // it the host's keyframe lane, since diamonds render per row from
+  // `keyframeCache.get(elementKey)`. The synthetic fractional lanes above sit
+  // strictly between the host's lane and the next integer, so the children have
+  // their own rows without the host having to give up its own.
   return elements
     .filter((el) => (el.key ?? el.id) === parentKey || !parentMap.has(el.domId ?? el.id))
-    .flatMap((el) => ((el.key ?? el.id) === parentKey ? expanded : [el]));
+    .flatMap((el) => ((el.key ?? el.id) === parentKey ? [el, ...expanded] : [el]));
 }
 
 export function useExpandedTimelineElements(): TimelineElement[] {
