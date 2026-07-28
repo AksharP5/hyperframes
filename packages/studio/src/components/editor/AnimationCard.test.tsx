@@ -45,17 +45,22 @@ function selectPreset(host: HTMLElement, presetId: string): string {
   return presetConfig.ease;
 }
 
-function renderExpandedCard({
-  animation,
+/** Every test mounts the same card; only expansion, flat mode, and the spies differ. */
+function renderCard({
+  animation = baseAnimation(),
+  defaultExpanded = true,
   flat,
   onUpdateMeta = vi.fn(),
   onUpdateKeyframeEase = vi.fn(),
+  onDeleteAnimation = noop,
 }: {
-  animation: GsapAnimation;
+  animation?: GsapAnimation;
+  defaultExpanded?: boolean;
   flat?: boolean;
   onUpdateMeta?: ReturnType<typeof vi.fn>;
   onUpdateKeyframeEase?: ReturnType<typeof vi.fn>;
-}) {
+  onDeleteAnimation?: (id: string) => void;
+} = {}) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -63,11 +68,11 @@ function renderExpandedCard({
     root.render(
       <AnimationCard
         animation={animation}
-        defaultExpanded
+        defaultExpanded={defaultExpanded}
         flat={flat}
         onUpdateProperty={noop}
         onUpdateMeta={onUpdateMeta}
-        onDeleteAnimation={noop}
+        onDeleteAnimation={onDeleteAnimation}
         onAddProperty={noop}
         onRemoveProperty={noop}
         onUpdateKeyframeEase={onUpdateKeyframeEase}
@@ -90,7 +95,7 @@ describe("AnimationCard ease editing", () => {
         ],
       },
     });
-    const view = renderExpandedCard({ animation, onUpdateKeyframeEase });
+    const view = renderCard({ animation, onUpdateKeyframeEase });
 
     const segment = Array.from(view.host.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("0% → 50%"),
@@ -101,6 +106,7 @@ describe("AnimationCard ease editing", () => {
 
     expect(onUpdateKeyframeEase).toHaveBeenCalledExactlyOnceWith(animation.id, 50, ease);
     expect(trackStudioSegmentEaseEdit).toHaveBeenCalledExactlyOnceWith({
+      action: "commit",
       ease,
     });
     act(() => view.root.unmount());
@@ -110,7 +116,7 @@ describe("AnimationCard ease editing", () => {
     const onUpdateMeta = vi.fn();
     const onUpdateKeyframeEase = vi.fn();
     const animation = baseAnimation({ id: "flat-tween" });
-    const view = renderExpandedCard({
+    const view = renderCard({
       animation,
       flat: true,
       onUpdateMeta,
@@ -128,23 +134,7 @@ describe("AnimationCard ease editing", () => {
 
 describe("AnimationCard flat branch", () => {
   it("renders a mint border-left and panel-token colors when flat", () => {
-    const host = document.createElement("div");
-    document.body.append(host);
-    const root = createRoot(host);
-    act(() => {
-      root.render(
-        <AnimationCard
-          animation={baseAnimation()}
-          defaultExpanded={false}
-          flat
-          onUpdateProperty={noop}
-          onUpdateMeta={noop}
-          onDeleteAnimation={noop}
-          onAddProperty={noop}
-          onRemoveProperty={noop}
-        />,
-      );
-    });
+    const { host, root } = renderCard({ defaultExpanded: false, flat: true });
     const card = host.querySelector('[data-flat-effect-card="true"]');
     expect(card).not.toBeNull();
     expect(card?.className).toContain("border-panel-accent");
@@ -152,22 +142,7 @@ describe("AnimationCard flat branch", () => {
   });
 
   it("still renders the legacy (non-flat) appearance when flat is omitted", () => {
-    const host = document.createElement("div");
-    document.body.append(host);
-    const root = createRoot(host);
-    act(() => {
-      root.render(
-        <AnimationCard
-          animation={baseAnimation()}
-          defaultExpanded={false}
-          onUpdateProperty={noop}
-          onUpdateMeta={noop}
-          onDeleteAnimation={noop}
-          onAddProperty={noop}
-          onRemoveProperty={noop}
-        />,
-      );
-    });
+    const { host, root } = renderCard({ defaultExpanded: false });
     expect(host.querySelector('[data-flat-effect-card="true"]')).toBeNull();
     expect(host.textContent).toContain("power2.out");
     act(() => root.unmount());
@@ -175,23 +150,7 @@ describe("AnimationCard flat branch", () => {
 
   it("toggles expanded state when the collapsed header button is clicked, in both modes", () => {
     for (const flat of [false, true]) {
-      const host = document.createElement("div");
-      document.body.append(host);
-      const root = createRoot(host);
-      act(() => {
-        root.render(
-          <AnimationCard
-            animation={baseAnimation()}
-            defaultExpanded={false}
-            flat={flat || undefined}
-            onUpdateProperty={noop}
-            onUpdateMeta={noop}
-            onDeleteAnimation={noop}
-            onAddProperty={noop}
-            onRemoveProperty={noop}
-          />,
-        );
-      });
+      const { host, root } = renderCard({ defaultExpanded: false, flat: flat || undefined });
       expect(host.textContent).not.toContain("Remove");
       const button = host.querySelector("button");
       expect(button).not.toBeNull();
@@ -205,23 +164,7 @@ describe("AnimationCard flat branch", () => {
 
   it("invokes onDeleteAnimation with the animation id when Remove is clicked, in flat mode", () => {
     const onDeleteAnimation = vi.fn();
-    const host = document.createElement("div");
-    document.body.append(host);
-    const root = createRoot(host);
-    act(() => {
-      root.render(
-        <AnimationCard
-          animation={baseAnimation()}
-          defaultExpanded={true}
-          flat
-          onUpdateProperty={noop}
-          onUpdateMeta={noop}
-          onDeleteAnimation={onDeleteAnimation}
-          onAddProperty={noop}
-          onRemoveProperty={noop}
-        />,
-      );
-    });
+    const { host, root } = renderCard({ flat: true, onDeleteAnimation });
     const buttons = Array.from(host.querySelectorAll("button"));
     const removeButton = buttons.find((b) => b.textContent === "Remove");
     expect(removeButton).not.toBeUndefined();

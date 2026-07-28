@@ -40,10 +40,10 @@ export function TimelineEditProvider({
       value.onRazorSplitAll,
       value.onDeleteKeyframe,
       value.onDeleteAllKeyframes,
-      value.onChangeKeyframeEase,
       value.onMoveKeyframeToPlayhead,
       value.onMoveKeyframe,
       value.onToggleKeyframeAtPlayhead,
+      value.onTogglePropertyGroupKeyframe,
     ],
   );
   return <TimelineEditContext.Provider value={memoized}>{children}</TimelineEditContext.Provider>;

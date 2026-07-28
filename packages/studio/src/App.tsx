@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect, useLayoutEffect } from "react";
 import type { LeftSidebarHandle, SidebarTab } from "./components/sidebar/LeftSidebar";
 import { useRenderQueue } from "./components/renders/useRenderQueue";
-import { usePlayerStore, type TimelineElement } from "./player";
+import { usePlayerStore } from "./player";
 import { StudioOverlays } from "./components/StudioOverlays";
 import { SaveQueuePausedBanner } from "./components/SaveQueuePausedBanner";
 import { useCaptionStore } from "./captions/store";
@@ -12,9 +12,12 @@ import { useFileManager } from "./hooks/useFileManager";
 import { usePreviewPersistence } from "./hooks/usePreviewPersistence";
 import { usePreviewDocumentVersion } from "./hooks/usePreviewDocumentVersion";
 import { useTimelineEditing } from "./hooks/useTimelineEditing";
-import { persistTimelineMoveEditsAtomically } from "./hooks/timelineMoveAdapter";
+import {
+  persistTimelineMoveEditsAtomically,
+  type TimelineMoveEditsHandler,
+  type TimelineMoveOperation,
+} from "./hooks/timelineMoveAdapter";
 import type { TimelineZIndexReorderCommit } from "./hooks/useTimelineEditingTypes";
-import type { TimelineStackingReorderIntent } from "./player/components/timelineStacking";
 import type { BlockPreviewInfo } from "./components/sidebar/BlocksTab";
 import { useDomEditSession } from "./hooks/useDomEditSession";
 import { useSdkSelectionSync } from "./hooks/useSdkSelectionSync";
@@ -62,7 +65,6 @@ import {
 } from "./utils/studioUrlState";
 import { trackStudioSessionStart } from "./telemetry/events";
 import { hasFiredSessionStart, markSessionStartFired } from "./telemetry/config";
-type TimelineMoveOperation = Parameters<typeof persistTimelineMoveEditsAtomically>[2];
 // fallow-ignore-next-line complexity
 export function StudioApp() {
   const { projectId, resolving, waitingForServer } = useServerConnection();
@@ -154,6 +156,10 @@ export function StudioApp() {
     reloadPreview: () => setRefreshKey((k) => k + 1),
     pendingTimelineEditPathRef,
   });
+  const invalidateGsapCacheRef = useRef<() => void>(() => {});
+  // Stable identity — what the ref indirection is for. An inline arrow re-created
+  // the memoized timeline handlers (it is in their deps) on every render.
+  const invalidateGsapCache = useCallback(() => invalidateGsapCacheRef.current(), []);
   const timelineEditing = useTimelineEditing({
     projectId,
     activeCompPath,
@@ -171,20 +177,11 @@ export function StudioApp() {
     sdkSession: editFlowSdkSession,
     publishSdkSession: sdkHandle.publish,
     forceReloadSdkSession: sdkHandle.forceReload,
+    invalidateGsapCache,
     handleDomZIndexReorderCommitRef,
   });
-  const handleTimelineElementsMove = useCallback(
-    async (
-      edits: Array<{
-        element: TimelineElement;
-        updates: Pick<TimelineElement, "start" | "track"> & {
-          stackingReorder?: TimelineStackingReorderIntent | null;
-        };
-      }>,
-      coalesceKey?: string,
-      operation: TimelineMoveOperation = "timing",
-      coalesceMs?: number,
-    ) => {
+  const handleTimelineElementsMove: TimelineMoveEditsHandler = useCallback(
+    async (edits, coalesceKey, operation: TimelineMoveOperation = "timing", coalesceMs) => {
       const deps = { handleTimelineGroupMove: timelineEditing.handleTimelineGroupMove };
       await persistTimelineMoveEditsAtomically(edits, coalesceKey, operation, deps, coalesceMs);
     },
@@ -228,7 +225,6 @@ export function StudioApp() {
   const domEditDeleteBridge = (s: DomEditSelection) => handleDomEditElementDeleteRef.current(s);
   const resetKeyframesRef = useRef<() => boolean>(() => false);
   const deleteSelectedKeyframesRef = useRef<() => void>(() => {});
-  const invalidateGsapCacheRef = useRef<() => void>(() => {});
   const { handleCopy, handlePaste, handleCut } = useClipboard({
     projectId,
     activeCompPath,
@@ -402,12 +398,14 @@ export function StudioApp() {
     designPanelActive,
     inspectorPanelActive,
     inspectorButtonActive,
+    shouldShowMotionPath,
     shouldShowSelectedDomBounds,
   } = useInspectorState(
     panelLayout.rightPanelTab,
     panelLayout.rightInspectorPanes,
     panelLayout.rightCollapsed,
     isPlaying,
+    domEditSession.domEditSelection,
     gestureState === "recording",
   );
   useStudioUrlState({
@@ -558,6 +556,7 @@ export function StudioApp() {
                     handleRazorSplitAll={timelineEditing.handleRazorSplitAll}
                     setCompIdToSrc={setCompIdToSrc}
                     setCompositionLoading={setCompositionLoading}
+                    shouldShowMotionPath={shouldShowMotionPath}
                     shouldShowSelectedDomBounds={shouldShowSelectedDomBounds}
                     isGestureRecording={gestureState === "recording"}
                     recordingState={gestureState}

@@ -63,9 +63,17 @@ export function trackStudioExpandedClipEdit(props: {
   trackEvent("studio_expanded_clip_edit", { action: props.action });
 }
 
-// Adoption signal for committing an edit to a segment's ease.
-export function trackStudioSegmentEaseEdit(props: { ease: string }): void {
-  trackEvent("studio_segment_ease_edit", { action: "commit", ease: props.ease });
+// Adoption signal for the per-clip keyframe-lane caret toggle.
+export function trackStudioKeyframeLaneExpand(props: { expanded: boolean }): void {
+  trackEvent("studio_keyframe_lane_expand", { expanded: props.expanded });
+}
+
+// Adoption signal for opening and committing the per-segment ease editor.
+export function trackStudioSegmentEaseEdit(props: {
+  action: "open" | "commit";
+  ease?: string;
+}): void {
+  trackEvent("studio_segment_ease_edit", { action: props.action, ease: props.ease });
 }
 
 export function trackStudioFeedback(props: { rating: number; comment?: string }): void {

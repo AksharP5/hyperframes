@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type DragEvent } from "react";
 import { STUDIO_INSPECTOR_PANELS_ENABLED } from "../components/editor/manualEditingAvailability";
+import type { DomEditSelection } from "../components/editor/domEditing";
 import type { StudioContextValue } from "../contexts/StudioContext";
 import type { RightInspectorPanes } from "../utils/studioHelpers";
 import type { TimelineFileDropHandler } from "./useTimelineEditingTypes";
@@ -69,6 +70,7 @@ export interface InspectorState {
   designPanelActive: boolean;
   inspectorPanelActive: boolean;
   inspectorButtonActive: boolean;
+  shouldShowMotionPath: boolean;
   shouldShowSelectedDomBounds: boolean;
 }
 
@@ -77,6 +79,7 @@ export function useInspectorState(
   rightInspectorPanes: RightInspectorPanes,
   rightCollapsed: boolean,
   isPlaying: boolean,
+  domEditSelection: DomEditSelection | null,
   isGestureRecording?: boolean,
 ): InspectorState {
   // fallow-ignore-next-line complexity
@@ -93,8 +96,12 @@ export function useInspectorState(
       inspectorPanelActive,
       inspectorButtonActive:
         STUDIO_INSPECTOR_PANELS_ENABLED && !rightCollapsed && inspectorPanelActive,
-      // Keep the selection box + motion path drawn even when the Inspector is
-      // collapsed — closing the panel shouldn't visually deselect the element.
+      // Deliberately wider than shouldShowSelectedDomBounds: the on-canvas path
+      // handles ARE the arc-drag affordance, so gating them on an open Inspector
+      // would make keyframe path editing reachable only from a side panel.
+      shouldShowMotionPath: !!domEditSelection && !isPlaying && !isGestureRecording,
+      // Keep the selection box drawn even when the Inspector is collapsed —
+      // closing the panel shouldn't visually deselect the element.
       // The Variables tab also works against the canvas selection (bind card),
       // so the selection outline stays visible there too.
       shouldShowSelectedDomBounds:
@@ -102,7 +109,14 @@ export function useInspectorState(
         !isPlaying &&
         !isGestureRecording,
     };
-  }, [rightPanelTab, rightInspectorPanes, rightCollapsed, isPlaying, isGestureRecording]);
+  }, [
+    rightPanelTab,
+    rightInspectorPanes,
+    rightCollapsed,
+    isPlaying,
+    isGestureRecording,
+    domEditSelection,
+  ]);
 }
 
 // fallow-ignore-next-line complexity

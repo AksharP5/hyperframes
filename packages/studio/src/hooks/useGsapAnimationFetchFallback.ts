@@ -36,7 +36,7 @@ export type ElementAnimationsOutcome =
  * so the caller can apply the right retry budget to each.
  */
 export function selectElementAnimationsOrRetry(
-  parsed: ParsedGsap | null,
+  parsed: Pick<ParsedGsap, "animations"> | null,
   target: { id: string | null; selector: string | null },
 ): ElementAnimationsOutcome {
   if (!parsed) return { kind: "fetch-error" };
