@@ -1,6 +1,6 @@
 /**
- * Reading a composition file's GSAP tweens into the keyframe cache: fetch,
- * selector -> element id resolution, and the clip-relative timing basis.
+ * Reading a composition file's GSAP tweens into the keyframe cache: fetch and
+ * selector -> element id resolution.
  * Split from useGsapTweenCache to keep that file under the 600-line limit.
  */
 import type { GsapAnimation, GsapKeyframesData, ParsedGsap } from "@hyperframes/core/gsap-parser";
@@ -11,7 +11,7 @@ import {
   elementCacheKeys,
   writeGsapAnimationsForElement,
 } from "./gsapKeyframeCacheHelpers";
-import { idFromSelector, toClipKeyframes } from "./gsapShared";
+import { idFromSelector, resolveClipTimingBasis, toClipKeyframes } from "./gsapShared";
 import {
   deduplicateKeyframes,
   isStaticPositionHold,
@@ -101,37 +101,6 @@ export async function fetchParsedAnimations(
   } catch {
     return null;
   }
-}
-
-/**
- * Clip-relative timing basis for an element. Sub-composition internals (e.g. pills
- * inside a scene) aren't timeline clips themselves — they're derived at expand time
- * — so they're absent from `elements`. Without a basis, elDuration defaulted to 1
- * and clip-relative keyframe percentages blew past 100% (rendering off the clip).
- * Fall back to the sub-comp HOST's bounds, resolved via domClipChildren (the host's
- * data-composition-src is stripped in the rendered DOM, so we can't query it).
- */
-export function resolveClipTimingBasis(
-  elementId: string,
-  sourceFile: string,
-  elements: ReadonlyArray<{
-    domId?: string;
-    key?: string;
-    id: string;
-    start: number;
-    duration: number;
-  }>,
-  domClipChildren: ReadonlyArray<{ id: string; hostId: string }>,
-): { elStart: number; elDuration: number } {
-  const direct = elements.find(
-    (el) => el.domId === elementId || (el.key ?? el.id) === `${sourceFile}#${elementId}`,
-  );
-  if (direct) return { elStart: direct.start, elDuration: direct.duration };
-  const hostId = domClipChildren.find((c) => c.id === elementId)?.hostId;
-  const host = hostId
-    ? elements.find((el) => el.domId === hostId || (el.key ?? el.id) === `index.html#${hostId}`)
-    : undefined;
-  return { elStart: host?.start ?? 0, elDuration: host?.duration ?? 1 };
 }
 
 /**

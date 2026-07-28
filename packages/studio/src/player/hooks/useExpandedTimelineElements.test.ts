@@ -143,6 +143,51 @@ describe("buildExpandedElements", () => {
     expect(child.sourceFile).toBe("c.html"); // C's file, not b.html or a.html
   });
 
+  it("keeps the middle host's row when drilling two levels deep", () => {
+    // A embeds B; C lives in B. Drilling into B must leave BOTH host rows
+    // standing: sparing only the top-level one drops B's row, and its keyframe
+    // lane goes with it because diamonds render per row.
+    const elements = [
+      el({ id: "A", domId: "A", start: 10, duration: 8, compositionSrc: "a.html" }),
+      el({ id: "B", domId: "B", start: 12, duration: 4, track: 1, compositionSrc: "b.html" }),
+    ];
+    const manifest = [
+      clip({ id: "A", start: 10, duration: 8, compositionSrc: "a.html" }),
+      clip({ id: "B", start: 12, duration: 4, compositionSrc: "b.html" }),
+      clip({ id: "C", start: 13, duration: 2 }),
+    ];
+    const parentMap = new Map([
+      ["B", "A"],
+      ["C", "B"],
+    ]);
+
+    const out = buildExpandedElements(elements, manifest, parentMap, "A", "B");
+    const rows = out.map((e) => e.domId ?? e.id);
+    expect(rows).toContain("B");
+    // The child sits under its own host, not under the top-level row.
+    expect(rows.indexOf("C")).toBeGreaterThan(rows.indexOf("B"));
+  });
+
+  it("still drills a host that exists only in the manifest, without a row for it", () => {
+    // Same shape, but B has no store element, so there is no row to spare. The
+    // children stay anchored to the top-level row rather than vanishing.
+    const elements = [
+      el({ id: "A", domId: "A", start: 10, duration: 8, compositionSrc: "a.html" }),
+    ];
+    const manifest = [
+      clip({ id: "A", start: 10, duration: 8, compositionSrc: "a.html" }),
+      clip({ id: "B", start: 12, duration: 4, compositionSrc: "b.html" }),
+      clip({ id: "C", start: 13, duration: 2 }),
+    ];
+    const parentMap = new Map([
+      ["B", "A"],
+      ["C", "B"],
+    ]);
+
+    const out = buildExpandedElements(elements, manifest, parentMap, "A", "B");
+    expect(out.map((e) => e.domId ?? e.id)).toEqual(["A", "C"]);
+  });
+
   // Regression: an expanded child must share one identity (`key`) with the flat
   // store element for the same DOM id. Before the fix the child key fell back to
   // the colon form (`index.html:eyebrow:N`) while the store/selection used the
@@ -240,8 +285,112 @@ describe("buildExpandedElements", () => {
     expect(pills[0]!.duration).toBe(6);
     expect(pills[0]!.sourceFile).toBe("scene.html");
     expect(pills.map((pill) => pill.stackingContextId)).toEqual(["css:0.0", "css:0.1", "css:0.1"]);
-    // The host row is replaced by its children.
-    expect(out.some((e) => e.domId === "scene-host")).toBe(false);
+    // The host row survives the expansion; its children are added under it.
+    expect(out.some((e) => e.id === "scene-host")).toBe(true);
+  });
+
+  // fallow-ignore-next-line code-duplication
+  it("keeps the host row and appends its children directly below it", () => {
+    const elements = [
+      el({
+        id: "s3",
+        domId: "s3",
+        key: "index.html#s3",
+        start: 16,
+        duration: 7,
+        compositionSrc: "stats.html",
+      }),
+      el({ id: "outro", start: 23, duration: 3, track: 1 }),
+    ];
+    const manifest = [
+      clip({ id: "s3", start: 16, duration: 7, compositionSrc: "stats.html" }),
+      clip({ id: "stat-1", start: 16.5, duration: 5 }),
+      clip({ id: "stat-2", start: 16.9, duration: 5 }),
+    ];
+    const parentMap = new Map([
+      ["stat-1", "s3"],
+      ["stat-2", "s3"],
+    ]);
+
+    const out = buildExpandedElements(elements, manifest, parentMap, "s3", "s3");
+
+    const hostIndex = out.findIndex((e) => e.id === "s3");
+    expect(hostIndex).toBeGreaterThanOrEqual(0);
+    // Host row untouched (same key → same keyframe lane), children nested under it.
+    expect(out[hostIndex]!.key).toBe("index.html#s3");
+    expect(out[hostIndex]!.track).toBe(0);
+    expect(out[hostIndex + 1]!.domId).toBe("stat-1");
+    expect(out[hostIndex + 2]!.domId).toBe("stat-2");
+    // Exactly one more row than the old substitution behaviour (host + 2 children + outro).
+    expect(out).toHaveLength(4);
+  });
+
+  it("keeps the host row present at every playhead position (keyframe lane repro)", () => {
+    // Live repro with no drag at all: seek 0 gave 3 diamonds, seek 7.68 gave 0,
+    // seek 0.2 gave 3. Diamonds render per row from keyframeCache.get(elementKey),
+    // so the whole lane went with the host row whenever the paused drill-in
+    // substituted it for its children.
+    const elements = [
+      el({ id: "scene", domId: "scene", key: "index.html#scene", start: 0, duration: 12 }),
+    ];
+    const manifest = [
+      clip({ id: "scene", start: 0, duration: 12, compositionSrc: "scene.html" }),
+      clip({ id: "headline", start: 0, duration: 12 }),
+    ];
+    const parentMap = new Map([["headline", "scene"]]);
+
+    for (const currentTime of [0, 7.68, 0.2]) {
+      const rawId = resolveTimelineExpansionRawId({
+        selectedElementId: null,
+        isPlaying: false,
+        currentTime,
+        manifest,
+        parentMap,
+      });
+      const rows = rawId
+        ? buildExpandedElements(elements, manifest, parentMap, rawId, rawId)
+        : elements;
+      expect(rows.map((row) => row.key)).toContain("index.html#scene");
+    }
+  });
+
+  // Regression: DOM-only children were synthesized against the TOP-LEVEL element
+  // instead of the sub-comp host they actually live in, so every child row read
+  // the whole top-level window rather than its host's.
+  it("spans DOM-only children over their nested host's window, not the top-level one", () => {
+    const elements = [
+      el({ id: "scene-host", start: 0, duration: 20, compositionSrc: "scene.html" }),
+    ];
+    const manifest = [
+      clip({ id: "scene-host", start: 0, duration: 20, compositionSrc: "scene.html" }),
+      clip({ id: "sub-host", start: 5, duration: 6, compositionSrc: "sub.html" }),
+    ];
+    const parentMap = new Map([
+      ["sub-host", "scene-host"],
+      ["pill-1", "sub-host"],
+    ]);
+    const domClipChildren = [
+      {
+        id: "pill-1",
+        parentId: "sub-host",
+        hostId: "sub-host",
+        label: "pill-1",
+        stackingContextId: "css:0.0",
+      },
+    ];
+
+    const out = buildExpandedElements(
+      elements,
+      manifest,
+      parentMap,
+      "scene-host",
+      "sub-host",
+      domClipChildren,
+    );
+    const pill = out.find((e) => e.domId === "pill-1")!;
+    expect(pill.start).toBe(5);
+    expect(pill.duration).toBe(6);
+    expect(pill.sourceFile).toBe("sub.html");
   });
 });
 

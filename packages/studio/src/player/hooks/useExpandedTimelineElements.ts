@@ -209,7 +209,13 @@ function buildChildElements(
 function domSiblingClips(
   domClipChildren: DomClipChild[],
   siblingParentId: string,
-  host: TimelineElement,
+  host: {
+    id: string | null;
+    start: number;
+    duration: number;
+    track: number;
+    compositionSrc?: string | null;
+  },
 ): ClipManifestClip[] {
   return domClipChildren
     .filter((c) => c.parentId === siblingParentId)
@@ -243,20 +249,23 @@ export function buildExpandedElements(
   const topLevelElement = elements.find((el) => el.id === topLevelId || el.domId === topLevelId);
   if (!topLevelElement) return filterToTopLevel(elements, parentMap);
 
+  // The sub-comp host the children actually live in: top-level host for 1-level
+  // nesting, a nested host for deeper nesting. Its start/file anchor edits.
+  const parentHost = manifest.find((c) => c.id === siblingParentId);
+
   // Prefer real manifest children; fall back to DOM-only sub-comp children
   // (groups/pills) that have no data-start and thus never enter the manifest.
+  // Those are synthesized against the host they actually live in, not the
+  // top-level element, or every child row reads the whole top-level window.
   const siblings = (() => {
     const fromManifest = manifest.filter(
       (c) => c.id != null && parentMap.get(c.id) === siblingParentId,
     );
     if (fromManifest.length > 0) return fromManifest;
-    return domSiblingClips(domClipChildren, siblingParentId, topLevelElement);
+    return domSiblingClips(domClipChildren, siblingParentId, parentHost ?? topLevelElement);
   })();
   if (siblings.length === 0) return filterToTopLevel(elements, parentMap);
 
-  // The sub-comp host the children actually live in: top-level host for 1-level
-  // nesting, a nested host for deeper nesting. Its start/file anchor edits.
-  const parentHost = manifest.find((c) => c.id === siblingParentId);
   const editBasis = {
     start: parentHost?.start ?? topLevelElement.start,
     sourceFile: parentHost?.compositionSrc ?? topLevelElement.compositionSrc ?? undefined,
@@ -275,9 +284,39 @@ export function buildExpandedElements(
   );
   if (expanded.length === 0) return filterToTopLevel(elements, parentMap);
 
+  // Every host between the drilled one and the top level owns a row, so the
+  // drill has to spare all of them, not just the top. A middle host is still a
+  // host: dropping its row drops its keyframe lane with it.
+  const drillPath = new Set<string>();
+  for (let cursor: string | undefined = siblingParentId; cursor; ) {
+    if (drillPath.has(cursor)) break;
+    drillPath.add(cursor);
+    if (cursor === topLevelId) break;
+    cursor = parentMap.get(cursor);
+  }
+  // Children hang under the DEEPEST host on that path, so anchor them there
+  // when it has a row of its own and fall back to the top-level row when it
+  // does not (a host that lives only in the manifest never had one).
+  const anchorsChildren = (el: TimelineElement): boolean =>
+    drillPath.has(siblingParentId) && elements.some((e) => (e.domId ?? e.id) === siblingParentId)
+      ? (el.domId ?? el.id) === siblingParentId
+      : (el.key ?? el.id) === parentKey;
+
+  // ADDITIVE drill-in: the host row stays and its children are appended under
+  // it. Expansion is also triggered by the playhead alone (paused auto-expand),
+  // so substituting the host row made it vanish on an ordinary seek, and with
+  // it the host's keyframe lane, since diamonds render per row from
+  // `keyframeCache.get(elementKey)`. The synthetic fractional lanes above sit
+  // strictly between the host's lane and the next integer, so the children have
+  // their own rows without the host having to give up its own.
   return elements
-    .filter((el) => (el.key ?? el.id) === parentKey || !parentMap.has(el.domId ?? el.id))
-    .flatMap((el) => ((el.key ?? el.id) === parentKey ? expanded : [el]));
+    .filter(
+      (el) =>
+        (el.key ?? el.id) === parentKey ||
+        drillPath.has(el.domId ?? el.id) ||
+        !parentMap.has(el.domId ?? el.id),
+    )
+    .flatMap((el) => (anchorsChildren(el) ? [el, ...expanded] : [el]));
 }
 
 export function useExpandedTimelineElements(): TimelineElement[] {
