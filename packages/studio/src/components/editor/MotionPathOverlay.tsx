@@ -6,6 +6,11 @@ import { usePlayerStore } from "../../player/store/playerStore";
 import { parkPlayheadOnKeyframe } from "../../hooks/gsapDragCommit";
 import { commitWholePropertyOffset } from "../../hooks/gsapWholePropertyOffsetCommit";
 import { nearestPointOnPath, type MotionNodeRef } from "./motionPathGeometry";
+import {
+  buildTweenTrajectory,
+  interpolatedKeyframePct,
+  trajectorySegmentAt,
+} from "./motionPathTrajectory";
 import { editableAnimationId, selectorFor } from "./motionPathSelection";
 import { ACCENT, MotionPathNode } from "./MotionPathNode";
 import {
@@ -47,29 +52,21 @@ type DragState = {
   ref: MotionNodeRef;
 };
 
-/**
- * Tween-% for a stop inserted at fraction `t` along the segment between two
- * nodes. null when either end is not a keyframe (arc waypoints carry no %).
- */
-function interpolatedKeyframePct(
-  a: MotionNodeRef | undefined,
-  b: MotionNodeRef | undefined,
-  t: number,
-): number | null {
-  if (a?.type !== "keyframe" || b?.type !== "keyframe") return null;
-  return Math.round((a.pct + (b.pct - a.pct) * t) * 1000) / 1000;
-}
-
 const NODE_PX = 6; // node radius in screen pixels (kept constant across zoom)
 // Click-vs-drag cutoff in SCREEN pixels. Below this the pointer-up is a click
 // (select the keyframe); at or above it the gesture commits a move. Screen-space
 // (not composition px) so it behaves identically at any zoom.
 const DRAG_THRESHOLD_PX = 3;
+// Dots dropped at equal steps of time along the path, After Effects style: where
+// they crowd the element is slow, where they spread it is fast. 24 reads as speed
+// on a long path without turning a short one into a solid line.
+const SPEED_DOTS = 24;
 
 /**
- * Draws the selected element's GSAP motion path over the canvas — a dashed
- * polyline through its x/y keyframes (or motionPath waypoints) with a draggable
- * node at each. Dragging an x/y node rewrites the keyframe; dragging a waypoint
+ * Draws the selected element's GSAP motion path over the canvas — the route it
+ * actually travels through its x/y keyframes (or motionPath waypoints), dotted
+ * at equal steps of time so the spacing reads as speed, with a draggable node at
+ * each anchor. Dragging an x/y node rewrites the keyframe; dragging a waypoint
  * rewrites the motionPath point; both commit to source (undoable). Renders in
  * declared composition coordinates so the path doesn't drift under GSAP
  * transforms. Read-only (no drag) while playing or when the tween isn't
@@ -279,7 +276,14 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
     ax: home.x + n.x * pScale,
     ay: home.y + n.y * pScale,
   }));
-  const points = abs.map((p) => `${p.ax},${p.ay}`).join(" ");
+  // The route the element actually travels between those anchors, plus where it
+  // sits at equal steps of time along it.
+  const trajectory = buildTweenTrajectory(
+    selectedGsapAnimations?.find((a) => a.id === animId),
+    geometry.kind,
+    abs,
+    SPEED_DOTS,
+  );
   // Map a VIEWPORT pointer to composition space. Use the iframe's LIVE viewport
   // rect, not `rect` — `rect.left/top` are stored pan-surface-relative (for the
   // absolute-positioned SVG), so subtracting them from a viewport clientX/Y would
@@ -396,26 +400,26 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
     }
   };
 
+  // Project a pointer onto the DRAWN path. Hit testing runs over the sampled
+  // polyline, not the anchors, so on a curve the ghost lands on the line the
+  // author can see; `trajectorySegmentAt` maps the sample back to the anchor
+  // segment a new node would be inserted into.
+  const projectOntoPath = (e: React.PointerEvent) => {
+    const c = clientToComp(e);
+    const np = nearestPointOnPath(c.x, c.y, trajectory.polyline);
+    if (!np) return null;
+    const seg = trajectorySegmentAt(trajectory.kind, np.segIndex, np.t, abs.length - 1);
+    return { x: np.x, y: np.y, ...seg };
+  };
   // Ghost "add" affordance: project the cursor onto the path; click inserts.
   const onPathHover = (e: React.PointerEvent) => {
-    const c = clientToComp(e);
-    const np = nearestPointOnPath(
-      c.x,
-      c.y,
-      abs.map((p) => ({ x: p.ax, y: p.ay })),
-    );
-    setGhost(np ? { x: np.x, y: np.y, segIndex: np.segIndex } : null);
+    setGhost(projectOntoPath(e));
   };
   const onPathDown = (e: React.PointerEvent) => {
     if (!animId) return;
     // Compute the insertion point from the event directly so a click works
     // without (or faster than) a preceding hover.
-    const c = clientToComp(e);
-    const np = nearestPointOnPath(
-      c.x,
-      c.y,
-      abs.map((p) => ({ x: p.ax, y: p.ay })),
-    );
+    const np = projectOntoPath(e);
     if (!np) return;
     const x = Math.round(np.x - home.x);
     const y = Math.round(np.y - home.y);
@@ -502,8 +506,8 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
         {/* Wide transparent hit path drives the add-ghost; drawn under the nodes.
             Renders for keyframe paths and non-cubic arcs (see `addable`). */}
         {addable && (
-          <polyline
-            points={points}
+          <path
+            d={trajectory.d}
             fill="none"
             stroke="transparent"
             strokeWidth={14 / scale}
@@ -514,17 +518,30 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
             onPointerDown={onPathDown}
           />
         )}
-        <polyline
-          points={points}
+        <path
+          d={trajectory.d}
           fill="none"
           style={{ stroke: ACCENT }}
           strokeWidth={1.5}
-          strokeDasharray="5 5"
           strokeLinejoin="round"
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
-          opacity={0.85}
+          opacity={0.55}
         />
+        {/* Speed dots: equal steps of TIME, so their spacing reads as velocity.
+            Drawn instead of a dash pattern, which spaces by distance and says
+            nothing about how fast the element crosses it. */}
+        {trajectory.dots.map((dot, i) => (
+          <circle
+            key={i}
+            cx={dot.x}
+            cy={dot.y}
+            r={nodeR * 0.22}
+            className="pointer-events-none"
+            style={{ fill: ACCENT }}
+            opacity={0.9}
+          />
+        ))}
         {ghost && (
           <rect
             x={ghost.x - nodeR * 0.707}

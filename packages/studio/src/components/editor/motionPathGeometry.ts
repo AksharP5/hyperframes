@@ -31,10 +31,9 @@ export interface MotionPathGeometry {
  * keyframes are the arc waypoints (anchors), index-aligned with the source path
  * — so a waypoint node at index `i` rewrites source waypoint `i`.
  *
- * ponytail: the arc is drawn as a polyline through its waypoints (matching the
- * angular dotted look of the reference), not GSAP's resolved curve. Dense
- * curve sampling is a later refinement if the straight-segment preview proves
- * insufficient.
+ * The nodes are the anchors only. What the element travels BETWEEN them is
+ * `buildMotionPathTrajectory`'s job: straight for a keyframe path, GSAP's
+ * resolved curve for an arc.
  */
 /**
  * Nearest point on a polyline to (px, py), with the index of the segment it
