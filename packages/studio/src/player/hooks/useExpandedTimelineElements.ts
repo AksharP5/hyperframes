@@ -134,6 +134,27 @@ interface DisplayBounds {
   track: number;
 }
 
+/**
+ * State that lives on the live host element, not in the clip manifest:
+ * `data-hidden`, `data-timeline-locked`, `data-timeline-role`. A child row is
+ * built from a manifest clip with no hostEl to read, so
+ * createTimelineElementFromManifestClip cannot see any of it. The flat store
+ * element for the same child WAS built with one, so it is inherited from there.
+ *
+ * Without this the eye on an expanded child always reported the row visible, so
+ * clicking it wrote data-hidden again instead of removing it, and a hidden child
+ * could never be shown again (not even after a reload, since the attribute is in
+ * the source).
+ */
+function hostElementState(flat: TimelineElement | undefined): Partial<TimelineElement> {
+  if (!flat) return {};
+  return {
+    hidden: flat.hidden,
+    timelineLocked: flat.timelineLocked,
+    timelineRole: flat.timelineRole,
+  };
+}
+
 // `display` bounds come from the top-level scene clip (where the expanded row is
 // drawn). `editBasis` comes from the child's immediate sub-comp host: its absolute
 // start anchors local-time edits and its compositionSrc is the file edits write to.
@@ -143,6 +164,7 @@ function buildChildElements(
   display: DisplayBounds,
   editBasis: { start: number; sourceFile: string | undefined },
   expandedHostKey: string,
+  elements: readonly TimelineElement[],
 ): TimelineElement[] {
   const result: TimelineElement[] = [];
   for (const child of siblings) {
@@ -170,6 +192,7 @@ function buildChildElements(
     });
     result.push({
       ...base,
+      ...hostElementState(elements.find((element) => element.key === key)),
       key,
       start: clamped.start,
       duration: clamped.duration,
@@ -281,6 +304,7 @@ export function buildExpandedElements(
     },
     editBasis,
     parentKey,
+    elements,
   );
   if (expanded.length === 0) return filterToTopLevel(elements, parentMap);
 

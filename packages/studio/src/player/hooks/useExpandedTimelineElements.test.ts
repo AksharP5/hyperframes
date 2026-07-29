@@ -221,6 +221,35 @@ describe("buildExpandedElements", () => {
     expect(child.key).toBe(expectedStoreKey);
   });
 
+  // Regression: a child row is built from a manifest clip, which carries none of
+  // the host element's attributes. Reading hidden off the manifest left every
+  // expanded row reporting itself visible, so the eye wrote data-hidden a second
+  // time instead of removing it and the element could never be shown again.
+  it("inherits hidden and locked state from the flat store element", () => {
+    const elements = [
+      el({ id: "s1", domId: "s1", start: 0, duration: 14 }),
+      el({
+        id: "eyebrow",
+        key: "index.html#eyebrow",
+        domId: "eyebrow",
+        start: 0,
+        duration: 14,
+        hidden: true,
+        timelineLocked: true,
+      }),
+    ];
+    const manifest = [
+      clip({ id: "s1", start: 0, duration: 14 }),
+      clip({ id: "eyebrow", start: 0, duration: 14 }),
+    ];
+    const parentMap = new Map([["eyebrow", "s1"]]);
+
+    const out = buildExpandedElements(elements, manifest, parentMap, "s1", "s1");
+    const child = out.find((e) => e.domId === "eyebrow")!;
+    expect(child.hidden).toBe(true);
+    expect(child.timelineLocked).toBe(true);
+  });
+
   // Sub-comp internals (group + pills) have no data-start, so they're not in the
   // manifest. They arrive as DOM children and must still expand under their host.
   it("expands DOM-only sub-comp children (no manifest clip) under the host", () => {
