@@ -57,15 +57,14 @@
               "introduction",
               "quickstart",
               "workflows",
-              "guides/project-tour",
-              "guides/authentication",
-              "guides/mcp"
+              "studio/index"
             ]
           },
           {
             "group": "Create with an agent",
             "pages": [
               "guides/prompting",
+              "guides/mcp",
               "guides/pipeline",
               "guides/design-tools",
               "guides/figma"
@@ -88,6 +87,7 @@
             "group": "Learn",
             "pages": [
               "concepts/index",
+              "guides/project-tour",
               "concepts/compositions",
               "concepts/variables",
               "concepts/data-attributes",
@@ -417,6 +417,7 @@
           {
             "group": "Agent setup",
             "pages": [
+              "guides/authentication",
               "guides/skills",
               "guides/antigravity",
               "guides/copilot-cli"

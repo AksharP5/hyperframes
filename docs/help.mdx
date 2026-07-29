@@ -4,85 +4,83 @@ sidebarTitle: "Get unstuck"
 description: "Start with what you can see, try the smallest useful fix, and get back to your HyperFrames task."
 ---
 
-Open the symptom that looks most like yours. You should not need to understand the rendering architecture to solve a normal problem.
+Find the symptom that looks like yours below — the contents list on the right jumps straight to it. You should not need to understand the rendering architecture to solve a normal problem.
 
-<AccordionGroup>
-  <Accordion title="Studio will not open" icon="window">
-    The browser never opens, the page is unreachable, or the project does not load.
+## Studio will not open
 
-    1. Open a terminal in the HyperFrames project folder.
-    2. Run `npx hyperframes preview`.
-    3. Keep that process running while Studio is open.
-    4. Use the local URL printed in the terminal.
+The browser never opens, the page is unreachable, or the project does not load.
 
-    If the command cannot find a project, check that you are inside the project folder rather than its parent.
-  </Accordion>
+1. Open a terminal in the HyperFrames project folder.
+2. Run `npx hyperframes preview`.
+3. Keep that process running while Studio is open.
+4. Use the local URL printed in the terminal.
 
-  <Accordion title="Preview is wrong or stale" icon="rotate">
-    A saved change is missing, playback looks old, or the preview is blank. Try these in order:
+If the command cannot find a project, check that you are inside the project folder rather than its parent.
 
-    1. Save the changed file.
-    2. Reload Studio once.
-    3. Check the terminal for a build or runtime error.
-    4. Run the project checks:
+## Preview is wrong or stale
 
-    ```bash
-    npx hyperframes lint
-    npx hyperframes check
-    ```
+A saved change is missing, playback looks old, or the preview is blank. Try these in order:
 
-    `lint` checks the composition structure. `check` opens the project in a browser gate and catches runtime, layout, motion, and contrast problems.
-  </Accordion>
+1. Save the changed file.
+2. Reload Studio once.
+3. Check the terminal for a build or runtime error.
+4. Run the project checks:
 
-  <Accordion title="I cannot select or edit something" icon="arrow-pointer">
-    Selection, canvas controls, timing, or an Inspector field is unavailable.
+```bash
+npx hyperframes lint
+npx hyperframes check
+```
 
-    - Open **Layers** and select the element there when clicking the canvas is difficult.
-    - Confirm you are in **Preview**, not Storyboard.
-    - Scrub to a time where the element is actually visible.
-    - Check whether the visual lives inside a nested composition.
-    - Ask the agent when the change affects source structure rather than one visible element.
+`lint` checks the composition structure. `check` opens the project in a browser gate and catches runtime, layout, motion, and contrast problems.
 
-    [Open Studio troubleshooting →](/studio/troubleshooting)
-  </Accordion>
+## I cannot select or edit something
 
-  <Accordion title="Media is missing or black" icon="photo-film">
-    An image, video, font, or audio file is absent or does not render. Check that:
+Selection, canvas controls, timing, or an Inspector field is unavailable.
 
-    - the file still exists inside the project;
-    - the path and filename capitalisation match;
-    - the source is local and available during rendering;
-    - the browser can decode the format;
-    - the media is visible at the current time;
-    - the terminal reports no download, decode, or CORS error.
+- Open **Layers** and select the element there when clicking the canvas is difficult.
+- Confirm you are in **Preview**, not Storyboard.
+- Scrub to a time where the element is actually visible.
+- Check whether the visual lives inside a nested composition.
+- Ask the agent when the change affects source structure rather than one visible element.
 
-    Never rely on a temporary signed URL or a render-time network request. Ask the agent to copy required media into the project.
-  </Accordion>
+[Open Studio troubleshooting →](/studio/troubleshooting)
 
-  <Accordion title="Animation is wrong" icon="wand-magic-sparkles">
-    Motion jumps, drifts, starts at the wrong time, or changes after seeking. First decide whether it happens:
+## Media is missing or black
 
-    - during normal playback;
-    - only after scrubbing;
-    - only in the final render.
+An image, video, font, or audio file is absent or does not render. Check that:
 
-    That distinction separates a timeline mistake from non-deterministic animation. HyperFrames animation must be seekable: the same frame should look the same every time it is requested.
+- the file still exists inside the project;
+- the path and filename capitalisation match;
+- the source is local and available during rendering;
+- the browser can decode the format;
+- the media is visible at the current time;
+- the terminal reports no download, decode, or CORS error.
 
-    Run `npx hyperframes check`, then give your agent the smallest affected scene and the exact timestamp.
-  </Accordion>
+Never rely on a temporary signed URL or a render-time network request. Ask the agent to copy required media into the project.
 
-  <Accordion title="Render failed or differs from preview" icon="film">
-    Export stops, produces the wrong result, or disagrees with Studio.
+## Animation is wrong
 
-    1. Preserve the complete render error.
-    2. Run `npx hyperframes check`.
-    3. Confirm fonts and media are local and load before capture.
-    4. Check the affected timestamp in Studio.
-    5. Try the normal MP4 preset before changing codecs or advanced flags.
+Motion jumps, drifts, starts at the wrong time, or changes after seeking. First decide whether it happens:
 
-    The [complete troubleshooting guide](/guides/troubleshooting) covers codec, browser, FFmpeg, GPU, HDR, and deployment-specific failures.
-  </Accordion>
-</AccordionGroup>
+- during normal playback;
+- only after scrubbing;
+- only in the final render.
+
+That distinction separates a timeline mistake from non-deterministic animation. HyperFrames animation must be seekable: the same frame should look the same every time it is requested.
+
+Run `npx hyperframes check`, then give your agent the smallest affected scene and the exact timestamp.
+
+## Render failed or differs from preview
+
+Export stops, produces the wrong result, or disagrees with Studio.
+
+1. Preserve the complete render error.
+2. Run `npx hyperframes check`.
+3. Confirm fonts and media are local and load before capture.
+4. Check the affected timestamp in Studio.
+5. Try the normal MP4 preset before changing codecs or advanced flags.
+
+The [complete troubleshooting guide](/guides/troubleshooting) covers codec, browser, FFmpeg, GPU, HDR, and deployment-specific failures.
 
 ## Copy a useful diagnostic
 

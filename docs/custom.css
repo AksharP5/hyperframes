@@ -126,6 +126,45 @@ h3 {
   letter-spacing: -0.01em;
 }
 
+/* ── Content width ──
+ *
+ * The theme caps the article shell at max-w-6xl (72rem) and reserves 28rem of
+ * every wide viewport for the table of contents, which left the actual reading
+ * column at ~664px on a 1600px screen. That is too narrow for a product whose
+ * pages carry 16:9 video: a full-width clip rendered smaller than a phone held
+ * sideways. These raise the shell and hand ~9rem back from the TOC gutter,
+ * taking the column to roughly 950px.
+ *
+ * ID selectors deliberately: they outrank the theme's utility classes without
+ * needing !important, so the cascade stays debuggable. */
+@media (min-width: 1280px) {
+  #content-container {
+    max-width: 90rem;
+  }
+
+  #content-area {
+    width: calc(100% - 19rem);
+  }
+}
+
+/* Running prose stays inside a comfortable measure even though the column is
+ * now wide — long lines are measurably harder to read. Tables, media, cards,
+ * and code blocks are free to use the full width. */
+@media (min-width: 1280px) {
+  #content-area > div > p,
+  #content-area > div > ul,
+  #content-area > div > ol {
+    max-width: 80ch;
+  }
+}
+
+/* Media that should escape the prose measure entirely. Use on a Frame or a
+ * bare video/image wrapper when the visual is the point of the section. */
+.hf-wide {
+  width: 100%;
+  max-width: none;
+}
+
 /* Code font — IBM Plex Mono (loaded via Google Fonts above).
  *
  * Deliberately scoped to real code elements. The previous rule also matched

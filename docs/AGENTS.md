@@ -41,6 +41,42 @@ Most human-facing pages should contain:
 
 Do not force this structure where it makes a page worse. Reference pages may stay reference-shaped.
 
+## Component doctrine
+
+One component per job. If two components on a page render the same list, delete one.
+
+| The job | Use | Never use |
+| --- | --- | --- |
+| Choose between destinations | `CardGroup` + `Card`, max 2 columns, linking to the real page | An accordion, or cards pointing at anchors on the same page |
+| Ordered instructions | `Steps` | A flow diagram that repeats the same steps |
+| Parallel variants of one instruction (source type, OS, language) | `Tabs` | Repeating the whole block per variant |
+| Compare attributes across items | A table | Prose paragraphs per item |
+| Any media | `Frame` with a caption that says what it is | A bare `img` with no context |
+| Genuinely out-of-band aside | One `Note`, `Tip`, or `Warning` per page | Stacked callouts, or a callout for ordinary prose |
+
+**Accordions are not used.** They hide the thing the reader is choosing between, cost a click, break `Cmd+F` and printing, and render as grey bars. Long symptom or reference lists become visible `##` sections instead — they get anchors the support team can link directly, and they appear in the page contents.
+
+**No diagram that restates adjacent prose.** A four-node flow beside a four-step list is the same content twice. Keep whichever is more useful and delete the other.
+
+**Cards link to pages, never to anchors on the current page.** A card that scrolls the reader a short distance to the same words is the worst pattern in these docs; it has been removed twice.
+
+**Two columns is the practical maximum** for anything containing text. Three columns in this content width hyphenates titles mid-word.
+
+### Custom React components
+
+Mintlify compiles `.jsx` / `.tsx` from `docs/snippets/`. Use one when a native component genuinely cannot express the idea — a scrubber, a comparison slider, a live player — not for styling.
+
+- Named exports only: `export const Thing = () => ...`. Default exports do not work.
+- `useState`, `useEffect`, `useRef`, `useCallback`, `useMemo`, `useContext`, `useReducer` are pre-injected; do not import React.
+- **No third-party packages and no CDN scripts.** Browser built-ins only (`fetch`, `IntersectionObserver`, Canvas, `<video>`). This rules out importing `@hyperframes/player` as a package — embed a hosted composition in an `iframe` instead.
+- A snippet cannot import another snippet. Keep each self-contained.
+- Client-side only: guard anything touching `window` and give every component a sensible first paint.
+- Respect `prefers-reduced-motion`, give interactive elements a visible focus state, and never make a component the only route to information.
+
+### Width and media
+
+The content column is widened in `custom.css`; running prose is held near 80 characters because longer lines measurably hurt reading. Tables, cards, code, and media already use the full width. Add `className="hf-wide"` when a visual should escape the prose measure entirely.
+
 ## Verification
 
 After navigation or MDX changes:
