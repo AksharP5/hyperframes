@@ -73,6 +73,22 @@ Mintlify compiles `.jsx` / `.tsx` from `docs/snippets/`. Use one when a native c
 - Client-side only: guard anything touching `window` and give every component a sensible first paint.
 - Respect `prefers-reduced-motion`, give interactive elements a visible focus state, and never make a component the only route to information.
 
+### Raw HTML gotchas
+
+The theme's prose styles win against utility classes on media elements. `img`
+gets `width: 100%`, so a class like `sm:w-64` on the image itself is ignored and a
+side-by-side card collapses into a full-width picture with its text pushed out of
+view. Put the width on a wrapper element and let the image fill it:
+
+```html
+<div className="w-full sm:w-64 shrink-0 aspect-video overflow-hidden">
+  <img className="w-full h-full object-cover" src="..." alt="..." />
+</div>
+```
+
+The same styles add a 2em margin to media, which shows as a band inside any
+wrapper that has its own background. Zero it when the wrapper is the frame.
+
 ### Width and media
 
 The content column is widened in `custom.css` — a measured 888px at a 1600px viewport, 1048px at 1920px, where it used to be stuck at 664px. There is no paragraph measure cap: these pages are built from lists, tables, cards, and code, so a whole guide contains roughly three `<p>` elements and capping them changed nothing. Add `className="hf-wide"` when a visual should escape any inherited measure.
