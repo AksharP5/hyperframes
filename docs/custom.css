@@ -227,6 +227,13 @@ a:not([class]):hover {
   }
 }
 
+/* Preserve a useful search field on smaller desktop widths. */
+@media (min-width: 1024px) and (max-width: 1199px) {
+  #navbar #assistant-entry {
+    display: none;
+  }
+}
+
 /* Use main's quieter structural border color across Aspen surfaces. */
 #body-content [class*="border-gray-200"],
 #body-content [class*="border-gray-100"] {
