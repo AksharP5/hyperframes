@@ -92,9 +92,13 @@ function writeInstallState(next: InstallState): void {
 function nextInstallState(state: InstallState | null, wantFired: boolean): InstallState | null {
   const hadFired = state?.deParallelRouterTrialFired === true;
   if (state !== null && (hadFired || !wantFired)) return null;
+  // Every path reaching here has hadFired === false (state is either null, or
+  // the guard above already returned when hadFired was true) — the field is
+  // simply wantFired, not a merge of the two (review nit, two independent
+  // reviewers).
   return {
     markerAt: state?.markerAt ?? new Date().toISOString(),
-    deParallelRouterTrialFired: wantFired || hadFired || undefined,
+    deParallelRouterTrialFired: wantFired || undefined,
   };
 }
 
