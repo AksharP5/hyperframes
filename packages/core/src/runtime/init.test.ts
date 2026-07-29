@@ -964,6 +964,42 @@ describe("initSandboxRuntimeModular", () => {
     expect(secondVideo.style.visibility).toBe("visible");
   });
 
+  it("keeps the APPS-982 late local-time video visible for snapshot capture at global 20s", () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-root", "true");
+    root.setAttribute("data-start", "0");
+    root.setAttribute("data-duration", "25");
+    root.setAttribute("data-width", "360");
+    root.setAttribute("data-height", "640");
+    document.body.appendChild(root);
+
+    const host = document.createElement("div");
+    host.setAttribute("data-composition-id", "late");
+    host.setAttribute("data-composition-file", "compositions/late.html");
+    host.setAttribute("data-start", "15");
+    host.setAttribute("data-duration", "10");
+    root.appendChild(host);
+
+    const video = document.createElement("video");
+    video.setAttribute("data-start", "5");
+    video.setAttribute("data-duration", "3");
+    video.setAttribute("data-media-start", "3");
+    host.appendChild(video);
+
+    window.__timelines = {
+      main: createMockTimeline(25),
+      late: createMockTimeline(10),
+    };
+
+    initSandboxRuntimeModular();
+    window.__player?.renderSeek(20);
+
+    expect(window.__hfResolveMediaStartSeconds?.(video)).toBe(20);
+    expect(host.style.visibility).toBe("visible");
+    expect(video.style.visibility).toBe("visible");
+  });
+
   it("resolves media starts through arbitrarily nested composition hosts", () => {
     const root = document.createElement("div");
     root.setAttribute("data-composition-id", "main");
