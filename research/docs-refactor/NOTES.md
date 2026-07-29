@@ -86,7 +86,7 @@ New navigation should be task-shaped:
 - Add GitHub and a primary action.
 - Confirm the canonical Studio URL before adding the primary action.
 - The temporary primary action is **Get started** and points to Quickstart.
-- Do not add custom header CSS unless a later requirement cannot be met through the theme and navigation configuration.
+- Keep Aspen's full-width header. A desktop-only layout override is intentional so the logo, tabs, search, actions, and theme toggle fit on one row.
 
 ## Questions to verify during implementation
 
@@ -196,6 +196,13 @@ New navigation should be task-shaped:
 - Kept the refactored page inventory and the new Guides, Studio, Catalog, and Developers information architecture.
 - Removed all custom sidebar hierarchy and **On this page** CSS so both surfaces use Mintlify's unchanged default rendering.
 - Confirmed the result in a local Mintlify preview; validation and broken-link checks still pass.
+
+### 2026-07-28 — final navigation visual correction
+
+- Kept the Aspen theme, four refactored tabs, and current page groupings.
+- Added a visual-only vertical rail to every ordinary sidebar group; groups remain open and non-collapsible.
+- Kept Mintlify's right-side **On this page** surface completely unchanged.
+- Fit the Aspen desktop header into one row, with the GitHub destination shown as a compact icon.
 
 ## Maintenance issue
 
