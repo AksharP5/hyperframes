@@ -11,7 +11,7 @@ The skills enforce these automatically, but if you hand-edit compositions or deb
 
 1. **Register all timelines** on `window.__timelines` — the renderer can't seek animations it doesn't know about.
 2. **Video elements must be `muted`** — audio goes in separate `<audio>` elements so the renderer can mix it.
-3. **No `Math.random()`** — random values produce different frames on each render, breaking determinism. Use a seeded PRNG (e.g. mulberry32) if you need pseudo-random values. See [Handmade, still deterministic](/prompting/motion#handmade-still-deterministic).
+3. **No `Math.random()`** — random values produce different frames on each render, breaking determinism. Use a seeded PRNG (e.g. mulberry32) if you need pseudo-random values. And when you want a stepped, stop-motion hold, quantize it on the **integer frame index**, not on elapsed seconds — seek times don't land on exact 1/fps doubles, so second-domain arithmetic drifts and the hold length stutters. See [Handmade, still deterministic](/prompting/motion#handmade-still-deterministic).
 4. **Synchronous timeline construction** — no `async`/`await` or `fetch()` during GSAP timeline setup.
 5. **Timed elements need `class="clip"`** — plus `data-start`, `data-duration`, and `data-track-index`.
 6. **Add entrance animations to every scene** — elements appearing without animation feel broken on video.

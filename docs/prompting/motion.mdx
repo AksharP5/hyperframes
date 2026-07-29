@@ -78,7 +78,14 @@ Rule 1's ambient idle is *continuous* — a slow, smooth breathing scale. Rule 7
 
 > A paper-cutout garden scene: flowers, leaves, and a bee drifting on visible wires, like stop-motion. Seed a random offset per element at the start (same seed every render) so each leaf sways to a slightly different rhythm, but hold each position for exactly two frames before stepping to the next — discrete jumps, not a smooth tween. It should read as intentionally handmade, not glitchy.
 
-Name the seed and the hold length explicitly — "seeded" and "two-frame hold" are the two words that keep an agent from reaching for `Math.random()` and quietly breaking every re-render. Ask for it, and seeking to frame 214 twice gives you the identical frame twice, exactly like every other HyperFrames render — the imperfection is designed in, not left to chance.
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-handmade.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Rendered from the prompt above, unedited — paper cutouts on visible wires, every position held for exactly two frames, and byte-identical across two separate renders.*
+
+Name the seed and the hold length explicitly — "seeded" and "two-frame hold" are the two words that keep an agent from reaching for `Math.random()` and quietly breaking every re-render.
+
+<Warning>
+  **Ask for the hold in frames, not seconds.** Validating this prompt surfaced a real trap: quantizing the hold in the *time* domain (`Math.floor(t / 0.0667)`) produces irregular holds — a three-frame group here, a one-frame group there — because the renderer's seek times don't land on exact 1/30-second doubles, so the arithmetic drifts across step boundaries. Quantize on the integer frame index instead (`Math.floor(Math.round(t * fps) / 2)`), which tolerates any seek error under half a frame. The visible symptom is a stop-motion cadence that stutters unevenly instead of ticking, and it is worth naming in the prompt: "hold each position for exactly two frames, quantized on the frame index." Note also that a hold specified in frames is coupled to the composition's fps — re-rendering at a different frame rate changes the hold's duration.
+</Warning> Ask for it, and seeking to frame 214 twice gives you the identical frame twice, exactly like every other HyperFrames render — the imperfection is designed in, not left to chance.
 
 Unseeded randomness is the obvious way to break cold-render correctness, but a handful of GSAP lint rules catch subtler seek-order mistakes — relative tweens colliding with another writer, `repeatRefresh` combined with a relative value, function-valued tween vars, DOM measurement inside timeline callbacks — see the [seek-order safety rows](/prompting/rules-and-anti-patterns#seek-order-safety) in the appendix if the linter ever flags one.
 
