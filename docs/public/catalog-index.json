@@ -42,6 +42,23 @@
     "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/blue-sweater-intro-video.png"
   },
   {
+    "name": "camcorder-hud",
+    "type": "block",
+    "title": "Camcorder HUD",
+    "description": "Responsive REC, battery, editable date placeholder, and timeline-driven counter overlay for creator-camera and camcorder treatments",
+    "tags": [
+      "camcorder",
+      "camera",
+      "recording",
+      "hud",
+      "overlay",
+      "creator",
+      "media-treatment-overlay"
+    ],
+    "href": "/catalog/blocks/camcorder-hud",
+    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/camcorder-hud.png"
+  },
+  {
     "name": "caption-blend-difference",
     "type": "component",
     "title": "Blend Difference",
@@ -830,6 +847,23 @@
     "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/domain-warp-dissolve.png"
   },
   {
+    "name": "editorial-flash-overlay",
+    "type": "block",
+    "title": "Editorial Flash Overlay",
+    "description": "Finite neutral-warm light layers for a seek-safe camera-flash cut or social reveal",
+    "tags": [
+      "flash",
+      "editorial",
+      "social",
+      "light",
+      "transition",
+      "overlay",
+      "media-treatment-overlay"
+    ],
+    "href": "/catalog/blocks/editorial-flash-overlay",
+    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/editorial-flash-overlay.png"
+  },
+  {
     "name": "flash-through-white",
     "type": "block",
     "title": "Flash Through White",
@@ -867,6 +901,23 @@
     ],
     "href": "/catalog/blocks/flowchart-vertical",
     "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/flowchart-vertical.png"
+  },
+  {
+    "name": "freeze-frame-dressing",
+    "type": "block",
+    "title": "Freeze-Frame Dressing",
+    "description": "Timeline-driven paper, tape, and flash dressing for a freeze-frame or background-removed subject",
+    "tags": [
+      "freeze-frame",
+      "cutout",
+      "scrapbook",
+      "paper",
+      "social",
+      "overlay",
+      "media-treatment-overlay"
+    ],
+    "href": "/catalog/blocks/freeze-frame-dressing",
+    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/freeze-frame-dressing.png"
   },
   {
     "name": "glitch",
@@ -1294,6 +1345,22 @@
     ],
     "href": "/catalog/blocks/nyc-paris-flight",
     "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/nyc-paris-flight.png"
+  },
+  {
+    "name": "organic-light-leak-overlay",
+    "type": "block",
+    "title": "Organic Light Leak Overlay",
+    "description": "Finite CSS light-leak overlay for memory beats and motivated transitions",
+    "tags": [
+      "light-leak",
+      "film",
+      "memory",
+      "transition",
+      "overlay",
+      "media-treatment-overlay"
+    ],
+    "href": "/catalog/blocks/organic-light-leak-overlay",
+    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/organic-light-leak-overlay.png"
   },
   {
     "name": "parallax-unzoom",

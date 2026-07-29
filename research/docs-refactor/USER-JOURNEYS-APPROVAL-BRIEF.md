@@ -40,7 +40,10 @@ Navigation, page order, videos, diagrams, examples, redirects, and content remov
 2. **Make your first video** — a 75–90 second real walkthrough from source material to MP4.
 3. **Studio in 90 seconds** — a real screen recording explaining the workspace and one complete edit.
 
-Each must work muted, include captions, and have an equivalent written path. Short 6–12 second loops can later demonstrate individual tasks such as trimming, changing text, keyframing, and exporting.
+Each must include captions and have an equivalent written path. User-controlled
+videos keep audio available; silent autoplay loops remain muted. Short 6–12
+second loops can later demonstrate individual tasks such as trimming, changing
+text, keyframing, and exporting.
 
 ## Approval needed
 

@@ -15,7 +15,7 @@ The approved journeys become the source of truth for:
 
 The route-to-journey contract is maintained in `JOURNEY-IMPLEMENTATION-MAP.md`.
 
-Status: implementation complete; post-release measurement remains
+Status: implementation correction in progress; visual QA and final validation remain
 Started: 2026-07-28
 Primary audience: people who want to make, edit, and share videos with HyperFrames
 Secondary audience: developers integrating or extending HyperFrames

@@ -1,113 +1,35 @@
 ---
 title: "What is HyperFrames?"
 sidebarTitle: "What HyperFrames is"
-description: "See how an AI agent, a real project, and HyperFrames Studio work together to create a finished video."
 ---
 
-HyperFrames lets an AI agent create a real video project, then gives you a visual Studio to review, edit, and export it.
+import { PromptGallery } from "/snippets/PromptGallery.jsx";
 
-You can begin with an idea, website, script, pull request, recording, or music track. The agent handles the first build. You stay in control of the direction and the visible result.
+<PromptGallery />
 
-<Frame caption="A finished HyperFrames product video. This is the kind of result the agent and Studio produce together.">
-  <video
-    className="aspect-video w-full object-cover bg-zinc-100 dark:bg-zinc-900"
-    src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/hyperframes-launch-preview.mp4"
-    poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/hyperframes-launch-poster.jpg"
-    controls
-    muted
-    playsInline
-    preload="metadata"
-  />
-</Frame>
+## How it works
 
-<CardGroup cols={2}>
-  <Card title="See how it works" icon="arrow-down" href="#from-request-to-finished-result">
-    Understand the complete loop without learning the technical architecture.
-  </Card>
-  <Card title="Make your first video" icon="sparkles" href="/quickstart">
-    Go from your own source material to a reviewable result in Studio.
-  </Card>
-</CardGroup>
+<div className="not-prose my-8 grid items-center gap-3 text-center sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr]">
+  <div className="rounded-xl border border-gray-200 px-4 py-4 font-semibold dark:border-gray-800">Your request</div>
+  <div className="hidden text-gray-400 sm:block">→</div>
+  <div className="rounded-xl border border-gray-200 px-4 py-4 font-semibold dark:border-gray-800">AI agent</div>
+  <div className="hidden text-gray-400 sm:block">→</div>
+  <div className="rounded-xl border border-gray-200 px-4 py-4 font-semibold dark:border-gray-800">HyperFrames project</div>
+  <div className="hidden text-gray-400 sm:block">→</div>
+  <div className="rounded-xl border border-gray-200 px-4 py-4 font-semibold dark:border-gray-800">Video</div>
+</div>
 
-## From request to finished result
+The project stays editable. Open it in [Studio](/studio) when you want to change the story, timing, design, animation, or export.
 
-```mermaid
-flowchart LR
-    A["Your idea or source"] --> B["AI agent"]
-    B --> C["HyperFrames project"]
-    C --> D["Studio review and edits"]
-    D --> E["Finished video or presentation"]
-```
+## More things you can make
 
-<Steps>
-  <Step title="Describe the result">
-    Tell the agent what you want the viewer to understand, feel, or do. Attach a website, text, footage, code change, music, or other source when you have one.
-  </Step>
-  <Step title="Approve the direction">
-    The agent confirms the important creative choices before spending time on the build.
-  </Step>
-  <Step title="Review a real project">
-    The first version opens in HyperFrames Studio. It is not a flattened mystery file: the scenes, timing, media, text, and animation remain editable.
-  </Step>
-  <Step title="Improve what you can see">
-    Make direct changes in Studio or ask the agent for a broader revision.
-  </Step>
-  <Step title="Export the result">
-    Render a normal video, a transparent overlay, a high-resolution file, or keep the work as a navigable presentation.
-  </Step>
-</Steps>
+<div className="not-prose my-6 grid gap-x-8 gap-y-2 sm:grid-cols-2">
+  <a className="border-b border-gray-200 py-3 font-medium no-underline dark:border-gray-800" href="/guides/faceless-explainer">Visual explainers →</a>
+  <a className="border-b border-gray-200 py-3 font-medium no-underline dark:border-gray-800" href="/guides/captions-and-recuts">Captions and video overlays →</a>
+  <a className="border-b border-gray-200 py-3 font-medium no-underline dark:border-gray-800" href="/guides/motion-graphics">Motion graphics →</a>
+  <a className="border-b border-gray-200 py-3 font-medium no-underline dark:border-gray-800" href="/guides/music-to-video">Music-driven videos →</a>
+  <a className="border-b border-gray-200 py-3 font-medium no-underline dark:border-gray-800" href="/guides/slideshow">Interactive presentations →</a>
+  <a className="border-b border-gray-200 py-3 font-medium no-underline dark:border-gray-800" href="/examples">More finished work →</a>
+</div>
 
-## What can it make?
-
-<CardGroup cols={2}>
-  <Card title="Product and website videos" icon="rocket" href="/guides/product-launch-video">
-    Launch videos, tours, promos, and showcases using the real product interface.
-  </Card>
-  <Card title="Visual explainers" icon="lightbulb" href="/guides/faceless-explainer">
-    Turn notes, articles, and difficult ideas into clear visual stories.
-  </Card>
-  <Card title="Captions and designed recuts" icon="closed-captioning" href="/guides/captions-and-recuts">
-    Add subtitles, titles, lower thirds, quotes, and information overlays to footage.
-  </Card>
-  <Card title="Motion graphics" icon="wand-magic-sparkles" href="/guides/motion-graphics">
-    Create animated titles, statistics, charts, logo stings, and transparent overlays.
-  </Card>
-  <Card title="Music-driven videos" icon="music" href="/guides/music-to-video">
-    Cut footage, images, lyrics, and motion to the structure of a music track.
-  </Card>
-  <Card title="Interactive presentations" icon="display" href="/workflows#a-presentation">
-    Build decks with reveals, notes, branches, presenter mode, and clickable navigation.
-  </Card>
-</CardGroup>
-
-[Watch more finished work →](/examples)
-
-## What the person controls
-
-HyperFrames is built so an agent can do the source-heavy work without hiding the result from you.
-
-| Use Studio when… | Ask the agent when… |
-| --- | --- |
-| You can point at the exact text or visual. | The story or message needs to change. |
-| A clip needs to move, trim, or split. | Several scenes need coordinated changes. |
-| Color, size, position, or timing needs a direct adjustment. | New media, research, narration, or source work is required. |
-| You want to compare and export versions. | You know the outcome but not the implementation. |
-
-You do not need to understand HTML, packages, schemas, or the rendering engine to create and review a video. Those details remain available in [Developers](/developers) when somebody is integrating or extending the framework.
-
-## Choose your next step
-
-<CardGroup cols={2}>
-  <Card title="Try it in the browser" icon="browser" href="https://www.hyperframes.dev/">
-    Explore the Playground without beginning in a local project.
-  </Card>
-  <Card title="Make your first video" icon="play" href="/quickstart">
-    Follow the shortest complete path from source material to export.
-  </Card>
-  <Card title="Choose a workflow" icon="route" href="/workflows">
-    Find the correct path for a product, idea, recording, PR, motion graphic, song, or presentation.
-  </Card>
-  <Card title="Open an existing project" icon="palette" href="/studio">
-    Learn how to review, edit, and export work that an agent or teammate already created.
-  </Card>
-</CardGroup>
+[Make your first video →](/quickstart)

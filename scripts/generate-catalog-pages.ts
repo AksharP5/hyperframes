@@ -327,8 +327,6 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
   ];
   lines.push("---", "");
 
-  lines.push(manifest.description, "");
-
   if (tagBadges) {
     lines.push(tagBadges, "");
   }
@@ -427,10 +425,6 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
     const w = manifest.dimensions.width;
     const h = manifest.dimensions.height;
     lines.push(
-      "## Use it",
-      "",
-      "Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.",
-      "",
       '<Accordion title="HTML for agents and developers">',
       "",
       "The installed block can be added to a host composition with:",
@@ -452,10 +446,6 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
       );
     } else {
       lines.push(
-        "## Use it",
-        "",
-        "Ask your agent to apply the component to the intended element and preserve the project’s existing timing.",
-        "",
         '<Accordion title="Instructions for agents and developers">',
         "",
         `Open \`${primaryTarget}\` and paste its contents into your composition. The comment header in that file contains any item-specific instructions.`,
@@ -584,14 +574,18 @@ function main(): void {
   if (catalogGroups.length > 0) {
     // Replace or insert the Catalog tab
     const existingIdx = tabs.findIndex((t) => t.tab === "Catalog");
-    const catalogTab = { tab: "Catalog", groups: catalogGroups };
-    // Remove existing Catalog tab if present, then insert at position 1
-    // (after Documentation, before Packages).
+    const catalogTab = {
+      tab: "Catalog",
+      icon: "grid-2",
+      groups: [{ group: "Overview", pages: ["catalog/index"] }, ...catalogGroups],
+    };
+
+    // Keep the human-designed order: Guides, Studio, Catalog, Developers.
     if (existingIdx >= 0) {
       tabs.splice(existingIdx, 1);
     }
-    const docsIdx = tabs.findIndex((t) => t.tab === "Documentation");
-    tabs.splice(docsIdx >= 0 ? docsIdx + 1 : 1, 0, catalogTab);
+    const studioIdx = tabs.findIndex((t) => t.tab === "Studio");
+    tabs.splice(studioIdx >= 0 ? studioIdx + 1 : 1, 0, catalogTab);
     writeFileSync(docsJsonPath, JSON.stringify(docsJson, null, 2) + "\n", "utf-8");
     const totalPages = catalogGroups.reduce((n, g) => n + g.pages.length, 0);
     console.log(`  ✓ docs.json updated with ${catalogGroups.length} groups, ${totalPages} pages`);

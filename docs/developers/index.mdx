@@ -3,46 +3,16 @@ title: "Developers"
 description: "CLI, SDK, packages, schemas, deployment, integrations, and contribution guides."
 ---
 
-This section is for people integrating HyperFrames, automating it, extending the editor, deploying rendering infrastructure, or working directly with composition source.
-
-If you only want to create or edit a video, begin with [Guides](/guides) or [Studio](/studio).
-
 ## Choose the smallest surface
 
-```mermaid
-flowchart TD
-    A["What does your system need to do?"] --> B["Run commands or CI jobs"]
-    A --> C["Inspect or edit compositions in an app"]
-    A --> D["Embed playback"]
-    A --> E["Operate custom render infrastructure"]
-    A --> F["Generate or validate raw composition source"]
-    B --> G["CLI"]
-    C --> H["SDK"]
-    D --> I["Player"]
-    E --> J["Focused packages and deployment guides"]
-    F --> K["HTML schema and animation reference"]
-```
-
-<CardGroup cols={2}>
-  <Card title="CLI" icon="terminal" href="/developers/cli">
-    Create, check, render, publish, and automate projects from a terminal or CI job.
-  </Card>
-  <Card title="SDK quickstart" icon="code" href="/sdk/quickstart">
-    Open a composition, query or edit it, persist changes, and build custom editing surfaces.
-  </Card>
-  <Card title="Player" icon="circle-play" href="/packages/player">
-    Embed a seekable HyperFrames composition and control playback from an application.
-  </Card>
-  <Card title="Packages" icon="boxes-stacked" href="/packages/core">
-    Add focused parsing, playback, rendering, Studio, or infrastructure capabilities.
-  </Card>
-  <Card title="Deployment" icon="cloud" href="/deploy/cloud">
-    Render with managed cloud infrastructure, AWS Lambda, or Google Cloud Run.
-  </Card>
-  <Card title="HTML schema" icon="brackets-curly" href="/reference/html-schema">
-    Reference composition elements, timing attributes, tracks, variables, and the media contract.
-  </Card>
-</CardGroup>
+<div className="hf-route-grid">
+  <a href="/developers/cli"><strong>CLI</strong><span>Create, check, render, publish, and automate.</span></a>
+  <a href="/sdk/quickstart"><strong>SDK</strong><span>Open, query, edit, and persist compositions.</span></a>
+  <a href="/packages/player"><strong>Player</strong><span>Embed and control a seekable composition.</span></a>
+  <a href="/packages/core"><strong>Packages</strong><span>Use one focused HyperFrames capability.</span></a>
+  <a href="/deploy/cloud"><strong>Deployment</strong><span>Render on managed or self-hosted infrastructure.</span></a>
+  <a href="/reference/html-schema"><strong>HTML schema</strong><span>Composition elements, timing, tracks, and variables.</span></a>
+</div>
 
 ## A good first technical result
 

@@ -1,16 +1,11 @@
 ---
 title: "Review and edit a project in Studio"
 sidebarTitle: "Studio overview"
-description: "Understand an existing HyperFrames project, make the right kind of change, and export a version."
 ---
 
-HyperFrames Studio is the visual workspace for a project that an agent or teammate has already created.
+import { StudioExplorer } from "/snippets/StudioExplorer.jsx";
 
-Use it to review the story, play the built result, make direct visual changes, ask the agent for broader revisions, and export finished versions. You do not need to understand the project's HTML architecture to start.
-
-<Frame caption="The Studio workspace: project navigation, canvas, Inspector, playback, and timeline remain connected to the same project files.">
-  <img src="/images/studio/overview.jpg" alt="HyperFrames Studio showing the canvas, Inspector, playback controls, and timeline" />
-</Frame>
+<StudioExplorer />
 
 ## Open the project
 
@@ -20,7 +15,7 @@ From the HyperFrames project folder, run:
 npx hyperframes preview
 ```
 
-Keep the terminal process running and open the local URL it prints.
+Open the local URL it prints.
 
 ## First, understand the two views
 

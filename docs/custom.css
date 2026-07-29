@@ -126,6 +126,11 @@ h3 {
   letter-spacing: -0.01em;
 }
 
+/* Group names already appear in the sidebar; repeating them above every page title adds noise. */
+#header .eyebrow {
+  display: none !important;
+}
+
 /* Code font — IBM Plex Mono (loaded via Google Fonts above) */
 code, pre, pre code, kbd,
 [class*="code"],
@@ -598,4 +603,208 @@ a:not([class]):hover {
   .hf-texture-animate-word {
     animation: none;
   }
+}
+
+.hf-prompt-demo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  margin: 28px 0 44px;
+  overflow: hidden;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  border-radius: 14px;
+  background: rgba(127, 127, 127, 0.04);
+}
+
+.hf-prompt-demo__brief {
+  display: flex;
+  min-height: 280px;
+  flex-direction: column;
+  padding: 22px;
+}
+
+.hf-prompt-demo__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.hf-prompt-demo__tab {
+  padding: 6px 10px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+  opacity: 0.68;
+}
+
+.hf-prompt-demo__tab:hover,
+.hf-prompt-demo__tab.is-active {
+  border-color: currentColor;
+  opacity: 1;
+}
+
+.hf-prompt-demo__tab.is-active {
+  border-color: #181818;
+  background: #181818;
+  color: #fff;
+}
+
+.dark .hf-prompt-demo__tab.is-active {
+  border-color: #f5f5f5;
+  background: #f5f5f5;
+  color: #111;
+}
+
+.hf-prompt-demo__prompt {
+  margin: auto 0 !important;
+  padding: 30px 0;
+  color: inherit !important;
+  font-size: 19px;
+  font-weight: 560;
+  line-height: 1.45;
+}
+
+.hf-prompt-demo__link {
+  color: inherit !important;
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none !important;
+}
+
+.hf-prompt-demo__result {
+  background: #050505;
+}
+
+.hf-prompt-demo__result video {
+  display: block;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  background: #050505;
+  object-fit: contain;
+}
+
+@media (max-width: 760px) {
+  .hf-prompt-demo {
+    grid-template-columns: 1fr;
+  }
+
+  .hf-prompt-demo__brief {
+    min-height: 300px;
+  }
+}
+
+.hf-studio-explorer {
+  margin: 28px 0 40px;
+  overflow: hidden;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  border-radius: 14px;
+}
+
+.hf-studio-explorer__tabs {
+  display: flex;
+  gap: 4px;
+  padding: 7px;
+  overflow-x: auto;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.28);
+}
+
+.hf-studio-explorer__tab {
+  flex: 1 0 auto;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.58;
+}
+
+.hf-studio-explorer__tab:hover,
+.hf-studio-explorer__tab.is-active {
+  background: rgba(127, 127, 127, 0.13);
+  opacity: 1;
+}
+
+.hf-studio-explorer img {
+  display: block;
+  width: 100%;
+}
+
+.hf-catalog-showcase {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin: 28px 0 40px;
+}
+
+.hf-catalog-showcase a {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  border-radius: 12px;
+  background: #050505;
+  color: #fff !important;
+  text-decoration: none !important;
+}
+
+.hf-catalog-showcase video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  transition: transform 220ms ease;
+}
+
+.hf-catalog-showcase a:hover video {
+  transform: scale(1.025);
+}
+
+.hf-catalog-showcase span {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 32px 12px 10px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.88));
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.hf-route-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  column-gap: 28px;
+  margin: 18px 0 34px;
+}
+
+.hf-route-grid a {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 13px 0;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.24);
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
+.hf-route-grid a:hover strong {
+  opacity: 0.62;
+}
+
+.hf-route-grid strong {
+  font-size: 15px;
+  line-height: 1.3;
+  transition: opacity 150ms ease;
+}
+
+.hf-route-grid span {
+  color: rgba(127, 127, 127, 0.88);
+  font-size: 13px;
+  line-height: 1.35;
 }

@@ -1,37 +1,18 @@
 ---
 title: "Get unstuck"
 sidebarTitle: "Get unstuck"
-description: "Start with what you can see, try the smallest useful fix, and return to your HyperFrames task."
 ---
 
-Choose the symptom that looks most like yours. You should not need to read the entire documentation site or understand the rendering architecture to solve a normal problem.
-
-<CardGroup cols={2}>
-  <Card title="Studio will not open" icon="window" href="#studio-will-not-open">
-    The browser never opens, the page is unreachable, or the project does not load.
-  </Card>
-  <Card title="Preview is wrong or stale" icon="rotate" href="#preview-is-wrong-or-stale">
-    A saved change is missing, playback looks old, or the preview is blank.
-  </Card>
-  <Card title="I cannot select or edit something" icon="arrow-pointer" href="#i-cannot-select-or-edit-something">
-    Selection, canvas controls, timing, or an Inspector field is unavailable.
-  </Card>
-  <Card title="Media is missing or black" icon="photo-film" href="#media-is-missing-or-black">
-    An image, video, font, or audio file is absent or does not render correctly.
-  </Card>
-  <Card title="Animation is wrong" icon="wand-magic-sparkles" href="#animation-is-wrong">
-    Motion jumps, drifts, starts at the wrong time, or differs after seeking.
-  </Card>
-  <Card title="Render failed or differs from preview" icon="film" href="#render-failed-or-differs-from-preview">
-    Export stops, produces the wrong result, or disagrees with Studio.
-  </Card>
-  <Card title="I have an error message" icon="triangle-exclamation" href="#copy-a-useful-diagnostic">
-    Preserve the exact message and collect enough context for an agent or issue.
-  </Card>
-  <Card title="I need a person" icon="life-ring" href="#ask-for-help">
-    Search known issues or report a reproducible problem.
-  </Card>
-</CardGroup>
+<div className="hf-route-grid">
+  <a href="#studio-will-not-open"><strong>Studio will not open</strong><span>The browser or project does not load.</span></a>
+  <a href="#preview-is-wrong-or-stale"><strong>Preview is wrong or stale</strong><span>A change is missing or the preview is blank.</span></a>
+  <a href="#i-cannot-select-or-edit-something"><strong>I cannot edit something</strong><span>Selection or a control is unavailable.</span></a>
+  <a href="#media-is-missing-or-black"><strong>Media is missing or black</strong><span>An image, video, font, or audio file is absent.</span></a>
+  <a href="#animation-is-wrong"><strong>Animation is wrong</strong><span>Motion jumps, drifts, or seeks incorrectly.</span></a>
+  <a href="#render-failed-or-differs-from-preview"><strong>Render failed or looks different</strong><span>Export stops or disagrees with Studio.</span></a>
+  <a href="#copy-a-useful-diagnostic"><strong>I have an error message</strong><span>Collect useful details for an agent or issue.</span></a>
+  <a href="#ask-for-help"><strong>I need a person</strong><span>Search known issues or report the problem.</span></a>
+</div>
 
 ## Studio will not open
 
@@ -147,4 +128,3 @@ Add a screenshot or short recording when the failure is visual. Do not paste acc
     Find known problems or open a reproducible issue.
   </Card>
 </CardGroup>
-

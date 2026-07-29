@@ -8,7 +8,8 @@ The written journeys are complete without these assets. These videos and loops a
 
 - Build the videos with HyperFrames so the documentation proves the product through its own output.
 - Use real product states and honest claims.
-- Every video must work muted.
+- Every video must remain understandable without audio, but user-controlled
+  videos must not be forced muted.
 - Include captions and a written equivalent.
 - Avoid rapid UI montage that looks impressive but teaches nothing.
 - Show the cursor only when its action matters.
