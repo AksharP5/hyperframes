@@ -66,4 +66,25 @@ describe("KeyframeDiamondContextMenu", () => {
     expect(onDelete).toHaveBeenCalledWith("box", target);
     expect(onMoveToPlayhead).toHaveBeenCalledWith(element, target);
   });
+
+  // An arc waypoint on a two-anchor path cannot be dropped on its own, so the
+  // caller withholds onDelete rather than offering an entry that does nothing.
+  it("hides the single-node delete when no handler is given", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    act(() =>
+      root.render(
+        <KeyframeDiamondContextMenu state={state} onClose={() => {}} onDeleteAll={vi.fn()} />,
+      ),
+    );
+
+    const labels = Array.from(document.body.querySelectorAll("button")).map(
+      (button) => button.textContent,
+    );
+    expect(labels).toEqual(["Delete All Keyframes"]);
+
+    act(() => root.unmount());
+    host.remove();
+  });
 });

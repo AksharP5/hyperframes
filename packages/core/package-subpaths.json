@@ -110,6 +110,12 @@
       "types": "./dist/runtime/clipTree.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./runtime/custom-ease": {
+      "source": "./src/runtime/customEase.ts",
+      "runtime": "./dist/runtime/customEase.js",
+      "types": "./dist/runtime/customEase.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./runtime/start-expression": {
       "source": "./src/runtime/startExpression.ts",
       "runtime": "./dist/runtime/startExpression.js",

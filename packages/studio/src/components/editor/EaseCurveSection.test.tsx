@@ -3,7 +3,11 @@
 import React, { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { parseSpringBounce } from "@hyperframes/core/spring-ease";
+import { parseWiggleEase } from "@hyperframes/core/wiggle-ease";
 import { EaseCurveSection, MiniCurveSvg } from "./EaseCurveSection";
+import { resolveEaseCurveTuple } from "./gsapAnimationConstants";
+import type { AnimationKeyframeTarget } from "../../hooks/gsapTweenSynth";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -11,12 +15,22 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function renderSection(ease = "none", onCustomEaseCommit = vi.fn()) {
+function renderSection(
+  ease = "none",
+  onCustomEaseCommit = vi.fn(),
+  collidingAnimationTargets?: AnimationKeyframeTarget[],
+) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
   act(() => {
-    root.render(<EaseCurveSection ease={ease} onCustomEaseCommit={onCustomEaseCommit} />);
+    root.render(
+      <EaseCurveSection
+        ease={ease}
+        onCustomEaseCommit={onCustomEaseCommit}
+        collidingAnimationTargets={collidingAnimationTargets}
+      />,
+    );
   });
   return { host, root, onCustomEaseCommit };
 }
@@ -65,6 +79,19 @@ function renderStatefulSection(initialEase = "none", onCustomEaseCommit = vi.fn(
   return { host, root, onCustomEaseCommit };
 }
 
+function renderControlledSection(initialEase = "none", onCustomEaseCommit = vi.fn()) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const renderEase = (ease: string) => {
+    act(() =>
+      root.render(<EaseCurveSection ease={ease} onCustomEaseCommit={onCustomEaseCommit} />),
+    );
+  };
+  renderEase(initialEase);
+  return { host, root, onCustomEaseCommit, renderEase };
+}
+
 function clickMode(host: HTMLElement, mode: "curve" | "spring" | "wiggle"): void {
   const toggle = host.querySelector<HTMLButtonElement>(`[data-ease-mode="${mode}"]`);
   expect(toggle).not.toBeNull();
@@ -82,6 +109,29 @@ function editorLabel(host: HTMLElement): string | null {
 }
 
 describe("EaseCurveSection preset grid", () => {
+  it("shows the number of animations for a multi-id segment", () => {
+    const { host, root } = renderSection("power2.out", vi.fn(), [
+      { animationId: "move-x", tweenPercentage: 20 },
+      { animationId: "move-y", tweenPercentage: 50 },
+      { animationId: "fade", tweenPercentage: 80 },
+    ]);
+
+    expect(host.textContent).toContain("Applies to 3 animations");
+
+    act(() => root.unmount());
+  });
+
+  it.each([undefined, [{ animationId: "move-x", tweenPercentage: 20 }]])(
+    "does not show a property count for a non-colliding segment",
+    (collidingAnimationTargets) => {
+      const { host, root } = renderSection("power2.out", vi.fn(), collidingAnimationTargets);
+
+      expect(host.textContent).not.toContain("Applies to");
+
+      act(() => root.unmount());
+    },
+  );
+
   it.each([
     ["curve", "none", "linear", ["flow-7", "spring-bouncy"]],
     ["spring", "spring(0.42)", "spring-bouncy", ["linear", "flow-7"]],
@@ -257,12 +307,107 @@ describe("EaseCurveSection preset grid", () => {
 
     clickMode(host, "spring");
     expect(onCustomEaseCommit).toHaveBeenLastCalledWith("spring(0.42)");
+    expect(parseSpringBounce(onCustomEaseCommit.mock.lastCall![0])).toBe(0.42);
 
     clickMode(host, "curve");
     expect(onCustomEaseCommit).toHaveBeenLastCalledWith("custom(M0,0 C0.16,1 0.3,1 1,1)");
+    expect(resolveEaseCurveTuple(onCustomEaseCommit.mock.lastCall![0])).toEqual([0.16, 1, 0.3, 1]);
 
     clickMode(host, "wiggle");
     expect(onCustomEaseCommit).toHaveBeenLastCalledWith("wiggle(3,easeInOut,0.12)");
+    expect(parseWiggleEase(onCustomEaseCommit.mock.lastCall![0])).toEqual({
+      wiggles: 3,
+      type: "easeInOut",
+      amplitude: 0.12,
+    });
+    expect(onCustomEaseCommit).toHaveBeenCalledTimes(3);
+
+    act(() => root.unmount());
+  });
+
+  it("keeps an optimistic mode visible through its canonical prop round-trip", () => {
+    const { host, root, onCustomEaseCommit, renderEase } = renderControlledSection();
+
+    clickMode(host, "spring");
+    expect(host.querySelector('[data-ease-mode="spring"]')?.getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(host.querySelector('[aria-label="Spring bounce"]')).not.toBeNull();
+
+    renderEase("spring(0.42)");
+    expect(host.querySelector('[data-ease-mode="spring"]')?.getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(host.querySelector('[aria-label="Spring bounce"]')).not.toBeNull();
+    expect(onCustomEaseCommit).toHaveBeenCalledExactlyOnceWith("spring(0.42)");
+
+    act(() => root.unmount());
+  });
+
+  // Two switches before the first commit round-trips: the commits serialize, so
+  // the older value arrives while the newer one is still in flight. Repainting
+  // it would flash wiggle, spring, wiggle in the panel.
+  it("ignores an older in-flight commit arriving after a newer switch", () => {
+    const { host, root, renderEase } = renderControlledSection();
+
+    clickMode(host, "spring");
+    clickMode(host, "wiggle");
+    renderEase("spring(0.42)");
+
+    expect(host.querySelector('[data-ease-mode="wiggle"]')?.getAttribute("aria-checked")).toBe(
+      "true",
+    );
+
+    renderEase("wiggle(3,easeInOut,0.12)");
+    expect(host.querySelector('[data-ease-mode="wiggle"]')?.getAttribute("aria-checked")).toBe(
+      "true",
+    );
+
+    act(() => root.unmount());
+  });
+
+  // The commit is fire-and-forget: a rejected write or one that lands as a
+  // no-op never changes `ease`, so nothing else can retire the optimistic
+  // value and the panel would keep claiming a curve that was never saved.
+  it("falls back to the committed ease when the commit never round-trips", () => {
+    vi.useFakeTimers();
+    try {
+      const { host, root } = renderControlledSection("power2.out");
+
+      clickMode(host, "spring");
+      expect(host.querySelector('[data-ease-mode="spring"]')?.getAttribute("aria-checked")).toBe(
+        "true",
+      );
+
+      act(() => vi.advanceTimersByTime(2000));
+
+      expect(host.querySelector('[data-ease-mode="spring"]')?.getAttribute("aria-checked")).toBe(
+        "false",
+      );
+      expect(host.querySelector('[data-ease-mode="curve"]')?.getAttribute("aria-checked")).toBe(
+        "true",
+      );
+
+      act(() => root.unmount());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("replaces an optimistic mode when the canonical prop changes externally", () => {
+    const { host, root, renderEase } = renderControlledSection();
+
+    clickMode(host, "spring");
+    renderEase("wiggle(2,uniform,0.3)");
+
+    expect(host.querySelector('[data-ease-mode="spring"]')?.getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(host.querySelector('[data-ease-mode="wiggle"]')?.getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(host.querySelector('[aria-label="Wiggle count"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="Spring bounce"]')).toBeNull();
 
     act(() => root.unmount());
   });

@@ -90,13 +90,13 @@ export function TimelineDiamondConnectors({
 
 /**
  * The ease control targets one segment, so it needs the keyframe's own
- * animationId/tweenPercentage. On a merged inline row it is hidden where two
- * source animations collide at this percentage (one button cannot honestly
- * stand for several curves) or the keyframe has no source animation id
- * (runtime-scanned) so there is no tween to target.
+ * animationId. A merged keyframe now shows one too: the editor edits every
+ * colliding tween together, so one button standing for several curves is
+ * honest. Only a keyframe with no source animation id (runtime-scanned) is left
+ * out, because there is no tween to target.
  */
 function showsEaseControl(kf: TimelineDiamondKeyframe): boolean {
-  return (kf.collidingAnimationTargets?.length ?? 0) <= 1 && kf.animationId !== undefined;
+  return kf.animationId !== undefined;
 }
 
 /**
