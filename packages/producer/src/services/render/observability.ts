@@ -81,13 +81,17 @@ export interface RenderCaptureObservability {
    */
   compositionElementCount?: number;
   /**
-   * Why the short-comp band did or did not apply to this render:
-   * "applied" (frames landed in 250-899 and the element count cleared the
-   * ceiling), "skipped_elements" (band was open by frame count but the comp
-   * was too large), or undefined when the frame count made the band
-   * irrelevant either way. Distinguishes "the new routing chose this" from
-   * "the pre-existing 900 floor chose this" — otherwise a fleet perf shift is
-   * unattributable.
+   * Short-comp band decision, emitted only when the band is DECISIVE — every
+   * other inversion-eligibility condition passed and only the floor (250 vs
+   * 900) differed. "applied": the element count cleared the ceiling too, so
+   * with routing enabled (HF_DE_SHORT_BAND_ROUTE) this render inverts; in the
+   * baseline release the same value is the COUNTERFACTUAL "would have
+   * inverted". "skipped_elements": the element ceiling was the only blocker.
+   * Unset: the band could not have affected this render (ineligible for some
+   * other reason, or already inverting at 900+). The selector is computed
+   * identically before and after the routing flip, and the skipped/oversize
+   * renders form the concurrent control for the difference-in-differences
+   * read — that is the entire point of the field.
    */
   deShortBand?: "applied" | "skipped_elements";
   /** DE parallel-router outcome: "routed" (fired, held) | "reverted" (fired, self-verify retry rolled back). */

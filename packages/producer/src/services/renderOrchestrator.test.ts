@@ -1695,63 +1695,67 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     expect(shouldPreferSingleWorkerDrawElement(eligible)).toBe(true);
   });
 
-  // ── Short-comp band ────────────────────────────────────────────────────
-  // The band lowers the effective floor from 900 to 250 for SMALL comps only.
-  // The predicate itself is unchanged — the call site picks the floor — so
-  // these pin the arithmetic the call site performs.
+  // ── Short-comp band ──────────────────────────────────────────────────────────────────────
+  // The call site evaluates the predicate TWICE — once at the 900 floor, once
+  // at the 250 band floor — and the band is DECISIVE only when the calls
+  // disagree. These pin that arithmetic, including the property the design
+  // depends on: the band can only ADD inversions, never remove one.
   //
-  // Measured basis (400f, single-DE vs parallel-screenshot-W4, 2 reps, ratio
-  // = ss4/de1 so >1 means DE wins):
-  //   24 movers /     0 nodes -> 1.05   DE wins
-  //  320 movers /     0 nodes -> 1.24   DE wins
-  //  320 movers /  7000 nodes -> 1.09   DE wins
-  //   24 movers /  7000 nodes -> 0.96   DE LOSES
-  //   24 movers / 20000 nodes -> 0.71   DE loses badly
-  //   24 movers / 40000 nodes -> 0.55   DE loses very badly
-  // Motion helps DE, DOM size punishes it; the ceiling is calibrated at the
-  // lowest-motion case so every higher-motion comp is covered too.
-  describe("short-comp band floor arithmetic", () => {
-    const shortBandFloor = (elementCount: number, maxElements = 2500): number =>
-      elementCount <= maxElements ? Math.min(900, 250) : 900;
+  // Measured basis (400f, single-DE vs parallel-screenshot-W4, ratio = ss4/de1
+  // so >1 means DE wins):
+  //   24 movers /     0 nodes -> 1.05   |   24 movers /  7000 nodes -> 0.96
+  //  320 movers /     0 nodes -> 1.24   |   24 movers / 20000 nodes -> 0.71
+  //  320 movers /  7000 nodes -> 1.09   |   24 movers / 40000 nodes -> 0.55
+  // Motion helps DE, DOM size punishes it; the element ceiling is calibrated
+  // at the lowest-motion case so every higher-motion comp is covered too.
+  describe("short-comp band decisiveness (two-floor evaluation)", () => {
+    const BAND_FLOOR = Math.min(900, 250);
+    const atBase = (totalFrames: number, over?: Partial<typeof eligible>) =>
+      shouldPreferSingleWorkerDrawElement({ ...eligible, ...over, totalFrames, minFrames: 900 });
+    const atBand = (totalFrames: number, over?: Partial<typeof eligible>) =>
+      shouldPreferSingleWorkerDrawElement({
+        ...eligible,
+        ...over,
+        totalFrames,
+        minFrames: BAND_FLOOR,
+      });
 
-    it("opens the 250-frame floor for a small comp", () => {
-      expect(shortBandFloor(800)).toBe(250);
+    it("is decisive exactly in the 250-899 window for an otherwise-eligible render", () => {
+      expect(atBand(400) && !atBase(400)).toBe(true);
+      expect(atBand(250) && !atBase(250)).toBe(true);
+      expect(atBand(899) && !atBase(899)).toBe(true);
+    });
+
+    it("is NOT decisive below the band floor — nothing fires either way", () => {
+      expect(atBand(200)).toBe(false);
+      expect(atBase(200)).toBe(false);
+    });
+
+    it("is NOT decisive at 900+ — the pre-existing floor already inverts, unchanged", () => {
+      expect(atBase(2380)).toBe(true);
+      expect(atBand(2380) && !atBase(2380)).toBe(false);
+    });
+
+    it("is NOT decisive when the render is ineligible for any other reason — the attribution cohort must exclude renders the band cannot affect", () => {
+      for (const over of [
+        { requestedWorkers: 3 as const },
+        { useDrawElement: false },
+        { deCompileGate: "css_effect:filter" },
+        { forceScreenshot: true },
+        { outputFormat: "webm" as const },
+        { singleWorkerStreamingOk: false },
+        { probeDeGated: true },
+      ]) {
+        expect(atBand(400, over)).toBe(false);
+      }
+    });
+
+    it("HF_DE_SHORT_MIN_FRAMES=0 disables via the predicate's own minFrames guard", () => {
       expect(
         shouldPreferSingleWorkerDrawElement({
           ...eligible,
           totalFrames: 400,
-          minFrames: shortBandFloor(800),
-        }),
-      ).toBe(true);
-    });
-
-    it("keeps the 900-frame floor for a large comp — the measured 1.8x regression case", () => {
-      expect(shortBandFloor(40000)).toBe(900);
-      expect(
-        shouldPreferSingleWorkerDrawElement({
-          ...eligible,
-          totalFrames: 400,
-          minFrames: shortBandFloor(40000),
-        }),
-      ).toBe(false);
-    });
-
-    it("never RAISES the floor: a large comp at 900+ frames still inverts as it did before", () => {
-      expect(
-        shouldPreferSingleWorkerDrawElement({
-          ...eligible,
-          totalFrames: 2380,
-          minFrames: shortBandFloor(40000),
-        }),
-      ).toBe(true);
-    });
-
-    it("leaves comps below the band floor alone", () => {
-      expect(
-        shouldPreferSingleWorkerDrawElement({
-          ...eligible,
-          totalFrames: 200,
-          minFrames: shortBandFloor(800),
+          minFrames: Math.min(900, 0),
         }),
       ).toBe(false);
     });
@@ -1762,8 +1766,18 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
       expect(countElementTags("<div><span>a</span></div>")).toBe(2);
     });
 
-    it("undercounts void elements — biases the count DOWN, so the ceiling must stay conservative", () => {
-      expect(countElementTags("<img><br><hr>")).toBe(0);
+    it("counts void elements — an image gallery must not read as a tiny comp", () => {
+      expect(countElementTags("<img><br><hr>")).toBe(3);
+      expect(countElementTags('<img src="a.png"><IMG SRC="b.png">')).toBe(2);
+    });
+
+    it("does not false-positive on inline-script comparisons or void-prefixed words", () => {
+      // Only the </script> closer counts: "<breadth" and "<imgWidth" hit the
+      // br/img alternatives but fail the \b word boundary (next char is a
+      // word char), and bare "a < b" comparisons match nothing.
+      expect(countElementTags("<script>if (a < b && x <breadth && y <imgWidth) {}</script>")).toBe(
+        1,
+      );
     });
 
     it("is stable on empty and malformed input rather than throwing", () => {

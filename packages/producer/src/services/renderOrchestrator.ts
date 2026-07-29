@@ -1247,13 +1247,22 @@ export function envInt(name: string, fallback: number): number {
  * routing decision, and a full linkedom parse of the exact documents that
  * matter here — the 20k-40k node ones — is the most expensive case. Precision
  * is not needed. It feeds a threshold whose measured crossover is ~3.9k and
- * whose default sits at 2500, so counting closing tags is comfortably inside
- * the margin. Undercounts void elements (`<img>`, `<br>`) and self-closing
- * SVG nodes, which biases the count DOWN — the direction that opens the band
- * — so the ceiling is the thing to keep conservative.
+ * whose default sits at 2500, so tag counting is comfortably inside the
+ * margin. Closing tags plus HTML void elements (`<img>`, `<br>`, …) — voids
+ * matter because they skew EXPENSIVE to paint (images), and counting only
+ * closers would read an image gallery as a tiny comp and open the band on
+ * exactly the content most likely to lose it. Opening tags are deliberately
+ * NOT counted: compiled comps embed inline scripts where `a < b` would
+ * false-positive. Self-closing SVG children still undercount; acceptable.
+ *
+ * These semantics are FROZEN while the short-band baseline is being read —
+ * the fleet distribution recorded by the baseline release must be measured
+ * by the same counter that later gates routing, or the baseline is invalid.
  */
 export function countElementTags(html: string): number {
-  const matches = html.match(/<\/[a-zA-Z]/g);
+  const matches = html.match(
+    /<\/[a-zA-Z]|<(?:img|br|hr|input|source|track|area|base|col|embed|link|meta|param|wbr)\b/gi,
+  );
   return matches === null ? 0 : matches.length;
 }
 
@@ -2462,20 +2471,21 @@ async function executeRenderPipeline(input: {
       deShortBandMinFrames > 0 &&
       deShortBandMaxElements > 0 &&
       compositionElementCount <= deShortBandMaxElements;
-    const deEffectiveMinFrames = deShortBandOpen
-      ? Math.min(deSingleMinFrames, deShortBandMinFrames)
-      : deSingleMinFrames;
-    // Does the band even matter for this render? Only when the frame count
-    // falls in the newly-opened window — at or above the original floor the
-    // inversion fires regardless, and below `deShortBandMinFrames` nothing
-    // fires either way. Keeps the telemetry reason from claiming credit (or
-    // blame) on renders the change could not have affected.
-    const deShortBandApplies =
-      totalFrames >= deShortBandMinFrames && totalFrames < deSingleMinFrames;
+    // Baseline-first sequencing: this release EVALUATES the band on every
+    // render and emits the decision, but only routes on it when
+    // HF_DE_SHORT_BAND_ROUTE=true (flipped by default in a follow-up release).
+    // The point is a difference-in-differences read: the cohort selector
+    // (`de_short_band`) is computed identically before and after the flip —
+    // "applied" is counterfactual in the baseline release and factual after —
+    // and the skipped/oversize renders in the same frame band form a
+    // concurrent control that absorbs secular drift (content mix, version-
+    // correlated populations, hardware). A plain before/after cannot
+    // attribute a fleet perf shift to this change; this can.
+    const deShortBandRoute = process.env.HF_DE_SHORT_BAND_ROUTE === "true";
     // "Would ANY multi-worker resolution be inverted?" — if workers resolve
     // to 1 naturally the outcome is identical either way.
     const WOULD_RESOLVE_MULTI_WORKER = 2;
-    const deInversionEligible = shouldPreferSingleWorkerDrawElement({
+    const deInversionArgs = {
       workerCount: WOULD_RESOLVE_MULTI_WORKER,
       requestedWorkers: job.config.workers,
       useDrawElement: cfg.useDrawElement,
@@ -2483,7 +2493,7 @@ async function executeRenderPipeline(input: {
       forceScreenshot: captureForceScreenshot,
       outputFormat,
       totalFrames,
-      minFrames: deEffectiveMinFrames,
+      minFrames: deSingleMinFrames,
       singleWorkerStreamingOk: shouldUseStreamingEncode(cfg, outputFormat, 1, job.duration),
       layeredOrEffectRoute: hasHdrContent || compiled.hasShaderTransitions,
       supersampling: deviceScaleFactor > 1,
@@ -2495,7 +2505,29 @@ async function executeRenderPipeline(input: {
         process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true" ||
         // Verified parallel DE streaming (opt-in) wants its parallelism kept.
         process.env.HF_DE_PARALLEL_STREAM === "true",
+    };
+    const invertAtBaseFloor = shouldPreferSingleWorkerDrawElement(deInversionArgs);
+    // Same render, same eligibility, band floor instead of 900. Math.min so a
+    // user override of HF_DE_SINGLE_MIN_FRAMES below the band floor keeps
+    // winning; HF_DE_SHORT_MIN_FRAMES=0 disables via the predicate's own
+    // minFrames > 0 check.
+    const invertAtBandFloor = shouldPreferSingleWorkerDrawElement({
+      ...deInversionArgs,
+      minFrames: Math.min(deSingleMinFrames, deShortBandMinFrames),
     });
+    // The band is DECISIVE only when it alone flips the decision — every
+    // other eligibility condition already passed and only the floor differed.
+    // Renders the band could not have affected (ineligible for any other
+    // reason, or already inverting at 900+) stay unset, so the telemetry
+    // cohort contains exactly the renders whose routing this change decides.
+    const deShortBandDecisive = invertAtBandFloor && !invertAtBaseFloor;
+    const deShortBand = deShortBandDecisive
+      ? deShortBandOpen
+        ? ("applied" as const)
+        : ("skipped_elements" as const)
+      : undefined;
+    const deInversionEligible =
+      deShortBandRoute && deShortBand === "applied" ? invertAtBandFloor : invertAtBaseFloor;
     // DE parallel-router eligibility — see shouldPreferParallelDrawElement.
     // Default-off (HF_DE_PARALLEL_ROUTER); HF_DE_PARALLEL_MIN_FRAMES default
     // 700, re-calibrated 2026-07-27 from the original safe-high 2000. A
@@ -2749,11 +2781,7 @@ async function executeRenderPipeline(input: {
       // render so the fleet element-count distribution is readable, and so a
       // perf shift can be split into "the new band did it" vs "unchanged".
       compositionElementCount,
-      deShortBand: deShortBandApplies
-        ? deShortBandOpen
-          ? "applied"
-          : "skipped_elements"
-        : undefined,
+      deShortBand,
       // Same rationale as the counters above: carried on live capture
       // observability, not only the success-path perfSummary, so a crash /
       // OOM / timeout still reports which GPU backend it happened on. That
@@ -3601,11 +3629,7 @@ async function executeRenderPipeline(input: {
         workerInversion: deWorkerInversion,
         preInversionWorkers: deWorkerInversion ? preRoutingWorkerCount : undefined,
         compositionElementCount,
-        shortBand: deShortBandApplies
-          ? deShortBandOpen
-            ? "applied"
-            : "skipped_elements"
-          : undefined,
+        shortBand: deShortBand,
         parallelRouter: deParallelRouter,
         preRouterWorkers: deParallelRouter ? preRoutingWorkerCount : undefined,
         selfVerifyFallback: deSelfVerifyFallback,
