@@ -61,7 +61,11 @@ The `vfx-*` blocks are single cinematic beats — spend them on a transition or 
 | HTML floating over an organic liquid surface     | [`vfx-liquid-background`](/catalog/blocks/vfx-liquid-background) | 12s |
 | A dramatic text reveal with chromatic shadow rays | [`vfx-text-cursor`](/catalog/blocks/vfx-text-cursor) | 8s    |
 
-> /motion-graphics 8-second 1920x1080 video. Beat 1 (0-4s): a landing-page hero holds under directional light. Beat 2 (4-6s): the whole page shatters into glass fragments that scatter. Beat 3 (6-8s): bold white text slams in on black. Use the `vfx-shatter` registry block. No narration, no image or media files.
+> /motion-graphics 8-second 1920x1080 video. Beat 1 (0-4s): a landing-page hero holds under directional light. Beat 2 (4-6s): the whole page shatters into glass fragments that scatter. Beat 3 (6-8s): bold white text slams in on black. Use the `vfx-shatter` registry block; the final beat reads "HTML IS VIDEO". No narration, no image or media files.
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/vfx-shatter.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Rendered from the prompt above, unedited.*
+
 
 **Name the exact effect — "explode," "break," "burst" don't map.** Each block is a specific simulation.
 - ❌ `make the UI explode`
@@ -82,7 +86,11 @@ The [Effects](/catalog/components/vignette) components are lightweight, pure-CSS
 
 These are the ambient layer of the [motion grammar](/prompting/motion): grain and a slow `parallax-zoom` keep a "held" beat alive instead of freezing. Never write "holds motionless" — a still final second is the biggest cheap-motion tell; let a grain overlay and a 2% push carry the hold.
 
-> /motion-graphics 6-second 1920x1080 video. A product logo settles center-frame, then holds — but keep it alive with a film grain overlay and a slow 3% push-in, plus one shimmer sweep across the wordmark at 4s. Use the `grain-overlay`, `parallax-zoom`, and `shimmer-sweep` registry components. No audio.
+> /motion-graphics 6-second 1920x1080 video. A wordmark logo — "HYPERFRAMES" in platinum on near-black — settles center-frame, then holds — but keep it alive with a film grain overlay and a slow 3% push-in, plus one shimmer sweep across the wordmark at 4s. Use the `grain-overlay`, `parallax-zoom`, and `shimmer-sweep` registry components. No audio.
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/logo-polish.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Rendered from the prompt above, unedited — the "hold" stays alive on grain, a 3% push, and one shimmer pass.*
+
 
 **Reach for grain over a literal freeze.** The engine holds the final state exactly as written.
 - ❌ `logo appears and holds still to the end`
