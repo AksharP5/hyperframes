@@ -190,6 +190,14 @@ New navigation should be task-shaped:
   - `oxlint` passed for changed scripts;
   - `git diff --check` passed.
 
+### 2026-07-28 — navigation polish after preview review
+
+- Removed the redundant Guides, Studio, Catalog, and Developers parent groups beneath tabs with the same names.
+- Kept each tab overview as a normal first page and placed collapsible sections directly below it.
+- Restored the clearer **Concepts** label and made all multi-page sections collapsible.
+- Added a lightweight visual rail, active marker, and nested branch to Mintlify's generated **On this page** navigation.
+- Confirmed the result in a local Mintlify preview; validation and broken-link checks still pass.
+
 ## Maintenance issue
 
 - The repo instructions refer to `.agents/skills/hyperframes/SKILL.md`, but that repo-local path is absent in this checkout. The installed current router at `/Users/ularkimsanov/.agents/skills/hyperframes/SKILL.md` was used as the workflow source of truth for this pass.

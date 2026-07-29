@@ -61,12 +61,8 @@ config.navigation = {
     {
       tab: "Guides",
       icon: "book-open",
-      groups: [
-        {
-          group: "Guides",
-          root: "guides/index",
-          directory: "card",
-          pages: [
+      pages: [
+        "guides/index",
             {
               group: "Start here",
               root: "introduction",
@@ -110,7 +106,7 @@ config.navigation = {
               ],
             },
             {
-              group: "Learn",
+              group: "Concepts",
               root: "concepts/index",
               expanded: false,
               pages: [
@@ -150,11 +146,7 @@ config.navigation = {
                 "guides/performance",
               ],
             },
-            {
-              group: "Examples",
-              expanded: false,
-              pages: ["examples"],
-            },
+            "examples",
             {
               group: "Help",
               root: "guides/help",
@@ -163,22 +155,17 @@ config.navigation = {
             },
             {
               group: "What's new",
+              root: "product-updates",
               expanded: false,
-              pages: ["product-updates", "weekly-updates", "changelog"],
+              pages: ["weekly-updates", "changelog"],
             },
-          ],
-        },
       ],
     },
     {
       tab: "Studio",
       icon: "palette",
-      groups: [
-        {
-          group: "Studio",
-          root: "studio/index",
-          directory: "card",
-          pages: [
+      pages: [
+        "studio/index",
             "studio/tour",
             {
               group: "Review",
@@ -217,31 +204,21 @@ config.navigation = {
                 "studio/troubleshooting",
               ],
             },
-          ],
-        },
       ],
     },
     {
       tab: "Catalog",
       icon: "grid-2",
-      groups: [
-        {
-          group: "Catalog",
-          root: "catalog/index",
-          directory: "card",
-          pages: collapsedCatalogGroups,
-        },
+      pages: [
+        "catalog/index",
+        ...collapsedCatalogGroups,
       ],
     },
     {
       tab: "Developers",
       icon: "code",
-      groups: [
-        {
-          group: "Developers",
-          root: "developers/index",
-          directory: "card",
-          pages: [
+      pages: [
+        "developers/index",
             {
               group: "Command line",
               expanded: true,
@@ -314,8 +291,6 @@ config.navigation = {
                 "community/adopters",
               ],
             },
-          ],
-        },
       ],
     },
   ],

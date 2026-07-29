@@ -50,12 +50,8 @@
       {
         "tab": "Guides",
         "icon": "book-open",
-        "groups": [
-          {
-            "group": "Guides",
-            "root": "guides/index",
-            "directory": "card",
-            "pages": [
+        "pages": [
+          "guides/index",
               {
                 "group": "Start here",
                 "root": "introduction",
@@ -99,7 +95,7 @@
                 ]
               },
               {
-                "group": "Learn",
+                "group": "Concepts",
                 "root": "concepts/index",
                 "expanded": false,
                 "pages": [
@@ -139,13 +135,7 @@
                   "guides/performance"
                 ]
               },
-              {
-                "group": "Examples",
-                "expanded": false,
-                "pages": [
-                  "examples"
-                ]
-              },
+              "examples",
               {
                 "group": "Help",
                 "root": "guides/help",
@@ -158,26 +148,20 @@
               },
               {
                 "group": "What's new",
+                "root": "product-updates",
                 "expanded": false,
                 "pages": [
-                  "product-updates",
                   "weekly-updates",
                   "changelog"
                 ]
               }
-            ]
-          }
         ]
       },
       {
         "tab": "Studio",
         "icon": "palette",
-        "groups": [
-          {
-            "group": "Studio",
-            "root": "studio/index",
-            "directory": "card",
-            "pages": [
+        "pages": [
+          "studio/index",
               "studio/tour",
               {
                 "group": "Review",
@@ -218,19 +202,13 @@
                   "studio/troubleshooting"
                 ]
               }
-            ]
-          }
         ]
       },
       {
         "tab": "Catalog",
         "icon": "grid-2",
-        "groups": [
-          {
-            "group": "Catalog",
-            "root": "catalog/index",
-            "directory": "card",
-            "pages": [
+        "pages": [
+          "catalog/index",
               {
                 "group": "Code Animations",
                 "pages": [
@@ -431,19 +409,13 @@
                 ],
                 "expanded": false
               }
-            ]
-          }
         ]
       },
       {
         "tab": "Developers",
         "icon": "code",
-        "groups": [
-          {
-            "group": "Developers",
-            "root": "developers/index",
-            "directory": "card",
-            "pages": [
+        "pages": [
+          "developers/index",
               {
                 "group": "Command line",
                 "expanded": true,
@@ -524,8 +496,6 @@
                   "community/adopters"
                 ]
               }
-            ]
-          }
         ]
       }
     ]
