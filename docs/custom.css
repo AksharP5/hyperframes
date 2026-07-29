@@ -599,3 +599,10 @@ a:not([class]):hover {
     animation: none;
   }
 }
+
+/* Hide the section/group label ("Start here", etc.) that the theme renders
+ * above every page title. It repeats the sidebar grouping and adds noise on
+ * every page; each page leads with its own H1 instead. */
+.eyebrow {
+  display: none;
+}
