@@ -1,0 +1,57 @@
+---
+title: "Start in Claude Design or Open Design"
+description: "Create a visual first draft, then hand the project to a coding agent and HyperFrames Studio."
+---
+
+Claude Design and Open Design can create a visual first draft of a HyperFrames project. They are useful when you want to explore layout, palette, type, and scene direction before a deeper production pass.
+
+They do not replace final validation and rendering.
+
+## Choose a surface
+
+| Surface | Good fit |
+| --- | --- |
+| Claude Design | You already use Claude’s hosted design experience and want a downloadable first draft |
+| Open Design | You want an open-source, local-first design workspace that can use your coding-agent tools |
+| Your coding agent directly | You already have a clear brief or need production-ready iteration from the start |
+
+## Claude Design
+
+1. Download the current [`claude-design-hyperframes.md`](https://github.com/heygen-com/hyperframes/blob/main/docs/guides/claude-design-hyperframes.md) instruction file.
+2. Attach the file to a new Claude Design chat.
+3. Describe the video and provide brand material.
+4. Download the generated project.
+5. Open the folder with your coding agent.
+
+## Open Design
+
+1. Follow the [Open Design installation instructions](https://github.com/nexu-io/open-design).
+2. Add the current [`open-design-hyperframes.md`](https://github.com/heygen-com/hyperframes/blob/main/docs/guides/open-design-hyperframes.md) handoff skill, or attach it to a fresh chat.
+3. Create and save the project to disk.
+4. Open that project with your coding agent.
+
+Open Design changes quickly. Use its own README for current installation and supported-agent details rather than relying on copied version counts here.
+
+## Finish the handoff
+
+Inside the generated project:
+
+```bash
+npx hyperframes skills update
+npx hyperframes lint
+npx hyperframes preview
+```
+
+Then review the result in [Studio](/studio).
+
+## Set expectations
+
+A design-tool draft should establish:
+
+- a credible visual direction;
+- scene hierarchy;
+- real or honest placeholder content;
+- a valid project structure;
+- a useful starting animation pass.
+
+The next agent pass should still check timing, motion, media, captions, accessibility, and the final render.

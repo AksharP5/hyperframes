@@ -1,0 +1,69 @@
+---
+title: "Understand a HyperFrames project"
+description: "Know which files hold the story, media, scenes, settings, and finished renders."
+---
+
+A HyperFrames project is an ordinary folder. An agent, Studio, and the renderer all work with the same files.
+
+You do not need every file in every project. A short title card may only have `index.html`; a larger launch video may include a storyboard, narration, several scenes, and many assets.
+
+## The files you will see most often
+
+<Tree>
+  <Tree.Folder name="my-video" defaultOpen>
+    <Tree.File name="BRIEF.md" />
+    <Tree.File name="STORYBOARD.md" />
+    <Tree.File name="SCRIPT.md" />
+    <Tree.File name="index.html" />
+    <Tree.File name="hyperframes.json" />
+    <Tree.Folder name="compositions" defaultOpen>
+      <Tree.File name="intro.html" />
+      <Tree.File name="feature.html" />
+      <Tree.File name="outro.html" />
+    </Tree.Folder>
+    <Tree.Folder name="assets">
+      <Tree.File name="product-demo.mp4" />
+      <Tree.File name="logo.svg" />
+      <Tree.File name="music.wav" />
+    </Tree.Folder>
+    <Tree.Folder name="renders">
+      <Tree.File name="launch-v1.mp4" />
+    </Tree.Folder>
+  </Tree.Folder>
+</Tree>
+
+| File or folder | What it is for | Change it when |
+| --- | --- | --- |
+| `BRIEF.md` | The agreed goal, audience, format, and direction | The project is solving the wrong problem |
+| `STORYBOARD.md` | The planned sequence and direction for each beat | The story, order, or purpose of a scene changes |
+| `SCRIPT.md` | Narration or planned on-screen copy | Spoken or written messaging changes |
+| `index.html` | The main composition and project timeline | The overall assembly or timing changes |
+| `compositions/` | Individual scenes or reusable parts | One scene needs source-level work |
+| `assets/` | Video, images, audio, fonts, and other media | Media is added, prepared, renamed, or replaced |
+| `hyperframes.json` | Project and tool settings | A command or project-wide behavior needs configuration |
+| `renders/` | Finished output files | You export a version |
+
+## What Studio edits
+
+Studio reads the project and writes supported changes back to its files. A canvas move, timeline trim, keyframe adjustment, or property edit is not stored in a separate proprietary Studio document.
+
+That means:
+
+- the next agent session can see your Studio edits;
+- validation and rendering use the same project;
+- Git can show what changed;
+- source editing and visual editing must not compete at the same moment.
+
+## Story files are checkpoints
+
+The brief and storyboard are useful because they preserve intent. When a later edit drifts, compare it with the agreed message instead of judging every scene from scratch.
+
+For a tiny project, these files may be unnecessary. Use them when another person or agent needs to understand why the video was built a certain way.
+
+## Nested compositions
+
+Larger videos split scenes into files under `compositions/`. The main `index.html` places those scenes on the timeline.
+
+In Studio, open a nested composition when you want to edit the scene itself. Return to the parent when you want to change where the complete scene appears.
+
+Read [Compositions](/concepts/compositions) for the source format and [Layers and groups](/studio/layers) for the visual workflow.

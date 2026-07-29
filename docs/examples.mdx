@@ -1,274 +1,177 @@
 ---
-title: Examples
-description: "Built-in examples for common video patterns. Hover to preview animations."
+title: "Examples"
+description: "Watch finished HyperFrames videos, inspect real production projects, or start from a working template."
 ---
 
-Hyperframes includes starter examples to help you scaffold compositions quickly. Each example gives you a working project with the correct [composition structure](/concepts/compositions), [data attributes](/concepts/data-attributes), and a [GSAP timeline](/guides/gsap-animation) already wired up.
+Use examples in three different ways:
 
-<Note>
-  Looking for finished videos and production projects? Start with the [Showcase](/showcase).
-</Note>
+- **Watch** a finished result to understand what HyperFrames can make.
+- **Inspect** a production project to learn how story, media, scenes, and motion fit together.
+- **Start** from a template when you want working structure immediately.
 
-```bash Terminal
+## Finished production videos
+
+These are real HyperFrames projects with public source.
+
+<div className="not-prose grid grid-cols-1 md:grid-cols-2 gap-5 my-8">
+  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <video
+      className="aspect-video w-full object-cover bg-zinc-100 dark:bg-zinc-900"
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/hyperframes-launch-preview.mp4"
+      poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/hyperframes-launch-poster.jpg"
+      controls
+      muted
+      playsInline
+      preload="metadata"
+    />
+    <div className="p-4">
+      <div className="text-xs uppercase tracking-wide text-zinc-500">Product launch</div>
+      <h3 className="mt-1 text-lg font-semibold">HyperFrames launch</h3>
+      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+        A complete announcement using product UI, typography, footage, captions,
+        voiceover, sound, and several animation techniques.
+      </p>
+      <a className="mt-3 block text-sm font-medium" href="https://github.com/heygen-com/hyperframes-launches/tree/main/hyperframes-launch">
+        Inspect the source →
+      </a>
+    </div>
+  </div>
+
+  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <video
+      className="aspect-video w-full object-cover bg-zinc-100 dark:bg-zinc-900"
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/timeline-editor-preview.mp4"
+      poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/timeline-editor-poster.jpg"
+      controls
+      muted
+      playsInline
+      preload="metadata"
+    />
+    <div className="p-4">
+      <div className="text-xs uppercase tracking-wide text-zinc-500">Feature reveal</div>
+      <h3 className="mt-1 text-lg font-semibold">Timeline editor launch</h3>
+      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+        A product reveal built around the pain of repeated editing prompts,
+        followed by the visual editor as the answer.
+      </p>
+      <a className="mt-3 block text-sm font-medium" href="https://github.com/heygen-com/hyperframes-launches/tree/main/timeline-launch">
+        Inspect the source →
+      </a>
+    </div>
+  </div>
+
+  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <video
+      className="aspect-video w-full object-cover bg-zinc-100 dark:bg-zinc-900"
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/website-to-hyperframes-preview.mp4"
+      poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/website-to-hyperframes-poster.jpg"
+      controls
+      muted
+      playsInline
+      preload="metadata"
+    />
+    <div className="p-4">
+      <div className="text-xs uppercase tracking-wide text-zinc-500">Product and website video</div>
+      <h3 className="mt-1 text-lg font-semibold">Website to HyperFrames</h3>
+      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+        Captured product material turned into a structured promo rather than a
+        simple scrolling screen recording.
+      </p>
+      <a className="mt-3 block text-sm font-medium" href="https://github.com/heygen-com/hyperframes-launches/tree/main/website-to-hyperframes">
+        Inspect the source →
+      </a>
+    </div>
+  </div>
+
+  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <video
+      className="aspect-video w-full object-cover bg-zinc-100 dark:bg-zinc-900"
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/texture-launch-preview.mp4"
+      poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/texture-launch-poster.jpg"
+      controls
+      muted
+      playsInline
+      preload="metadata"
+    />
+    <div className="p-4">
+      <div className="text-xs uppercase tracking-wide text-zinc-500">Motion and title design</div>
+      <h3 className="mt-1 text-lg font-semibold">Texture launch</h3>
+      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+        Expressive typography, texture masks, shader backgrounds, and compact
+        transition-led storytelling.
+      </p>
+      <a className="mt-3 block text-sm font-medium" href="https://github.com/heygen-com/hyperframes-launches/tree/main/texture-launch-video">
+        Inspect the source →
+      </a>
+    </div>
+  </div>
+</div>
+
+## What to learn from the source
+
+The [hyperframes-launches repository](https://github.com/heygen-com/hyperframes-launches) contains complete project folders. Depending on the project, you may find:
+
+- `BRIEF.md`, `STORYBOARD.md`, or design notes;
+- the main `index.html`;
+- separate scene compositions;
+- local media and fonts;
+- narration, captions, music, and sound effects;
+- a finished render to compare against the source.
+
+These projects are useful references, not universal templates. Copy the production thinking and patterns that fit your work; do not copy an entire visual identity by default.
+
+## Start from a template
+
+Create a project with a working example:
+
+```bash
 npx hyperframes init my-video --example <name>
 ```
 
-## Landscape Templates
-
 <div className="not-prose grid grid-cols-2 gap-4 my-6">
-  <div className="tpl-card relative rounded-xl overflow-hidden bg-zinc-900 transition-transform hover:-translate-y-0.5 hover:shadow-xl">
-    <video className="w-full aspect-video object-cover block" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/warm-grain.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/warm-grain.png" muted loop playsInline preload="metadata" />
-    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 px-3" style={{background: "linear-gradient(transparent, rgba(0,0,0,0.7))"}}><strong className="text-sm font-semibold text-white block">Warm Grain</strong><span className="text-xs text-zinc-300">Branding & lifestyle</span></div>
+  <div className="relative overflow-hidden rounded-xl bg-zinc-900">
+    <video className="aspect-video w-full object-cover" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/warm-grain.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/warm-grain.png" muted loop playsInline preload="metadata" />
+    <div className="p-3 text-white"><strong>warm-grain</strong><div className="text-xs text-zinc-300">Organic brand and editorial work</div></div>
   </div>
-  <div className="tpl-card relative rounded-xl overflow-hidden bg-zinc-900 transition-transform hover:-translate-y-0.5 hover:shadow-xl">
-    <video className="w-full aspect-video object-cover block" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/play-mode.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/play-mode.png" muted loop playsInline preload="metadata" />
-    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 px-3" style={{background: "linear-gradient(transparent, rgba(0,0,0,0.75))"}}><strong className="text-sm font-semibold text-white block">Play Mode</strong><span className="text-xs text-zinc-300">Social media</span></div>
+  <div className="relative overflow-hidden rounded-xl bg-zinc-900">
+    <video className="aspect-video w-full object-cover" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/play-mode.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/play-mode.png" muted loop playsInline preload="metadata" />
+    <div className="p-3 text-white"><strong>play-mode</strong><div className="text-xs text-zinc-300">Energetic social and product work</div></div>
   </div>
-  <div className="tpl-card relative rounded-xl overflow-hidden bg-zinc-900 transition-transform hover:-translate-y-0.5 hover:shadow-xl">
-    <video className="w-full aspect-video object-cover block" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/swiss-grid.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/swiss-grid.png" muted loop playsInline preload="metadata" />
-    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 px-3" style={{background: "linear-gradient(transparent, rgba(0,0,0,0.75))"}}><strong className="text-sm font-semibold text-white block">Swiss Grid</strong><span className="text-xs text-zinc-300">Corporate & technical</span></div>
+  <div className="relative overflow-hidden rounded-xl bg-zinc-900">
+    <video className="aspect-video w-full object-cover" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/swiss-grid.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/swiss-grid.png" muted loop playsInline preload="metadata" />
+    <div className="p-3 text-white"><strong>swiss-grid</strong><div className="text-xs text-zinc-300">Structured technical or corporate stories</div></div>
   </div>
-  <div className="tpl-card relative rounded-xl overflow-hidden bg-zinc-900 transition-transform hover:-translate-y-0.5 hover:shadow-xl">
-    <video className="w-full aspect-video object-cover block" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/kinetic-type.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/kinetic-type.png" muted loop playsInline preload="metadata" />
-    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 px-3" style={{background: "linear-gradient(transparent, rgba(0,0,0,0.75))"}}><strong className="text-sm font-semibold text-white block">Kinetic Type</strong><span className="text-xs text-zinc-300">Promos & title cards</span></div>
-  </div>
-  <div className="tpl-card relative rounded-xl overflow-hidden bg-zinc-900 transition-transform hover:-translate-y-0.5 hover:shadow-xl">
-    <video className="w-full aspect-video object-cover block" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/decision-tree.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/decision-tree.png" muted loop playsInline preload="metadata" />
-    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 px-3" style={{background: "linear-gradient(transparent, rgba(0,0,0,0.75))"}}><strong className="text-sm font-semibold text-white block">Decision Tree</strong><span className="text-xs text-zinc-300">Explainers & tutorials</span></div>
-  </div>
-  <div className="tpl-card relative rounded-xl overflow-hidden bg-zinc-900 transition-transform hover:-translate-y-0.5 hover:shadow-xl">
-    <video className="w-full aspect-video object-cover block" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/product-promo.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/product-promo.png" muted loop playsInline preload="metadata" />
-    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 px-3" style={{background: "linear-gradient(transparent, rgba(0,0,0,0.75))"}}><strong className="text-sm font-semibold text-white block">Product Promo</strong><span className="text-xs text-zinc-300">Product showcases</span></div>
-  </div>
-  <div className="tpl-card relative rounded-xl overflow-hidden bg-zinc-900 transition-transform hover:-translate-y-0.5 hover:shadow-xl">
-    <video className="w-full aspect-video object-cover block" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/nyt-graph.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/nyt-graph.png" muted loop playsInline preload="metadata" />
-    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 px-3" style={{background: "linear-gradient(transparent, rgba(0,0,0,0.75))"}}><strong className="text-sm font-semibold text-white block">NYT Graph</strong><span className="text-xs text-zinc-300">Data stories</span></div>
+  <div className="relative overflow-hidden rounded-xl bg-zinc-900">
+    <video className="aspect-video w-full object-cover" src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/kinetic-type.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/kinetic-type.png" muted loop playsInline preload="metadata" />
+    <div className="p-3 text-white"><strong>kinetic-type</strong><div className="text-xs text-zinc-300">Promos, intros, and title cards</div></div>
   </div>
 </div>
 
-## Portrait Templates
-
-<div className="not-prose grid grid-cols-3 gap-3 my-6">
-  <div className="tpl-card relative rounded-xl overflow-hidden bg-zinc-900 transition-transform hover:-translate-y-0.5 hover:shadow-xl">
-    <video className="w-full object-cover block" style={{aspectRatio: "9/16"}} src="https://static.heygen.ai/hyperframes-oss/docs/images/templates/vignelli.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/templates/vignelli.png" muted loop playsInline preload="metadata" />
-    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 px-3" style={{background: "linear-gradient(transparent, rgba(0,0,0,0.75))"}}><strong className="text-sm font-semibold text-white block">Vignelli</strong><span className="text-xs text-zinc-300">Headlines & announcements</span></div>
-  </div>
-</div>
+| Example | Good starting point for |
+| --- | --- |
+| `warm-grain` | Branding, lifestyle, and editorial work |
+| `play-mode` | Energetic social videos and product launches |
+| `swiss-grid` | Technical, structured, and corporate stories |
+| `kinetic-type` | Type-led promos, intros, and title cards |
+| `decision-tree` | Explainable diagrams and tutorials |
+| `product-promo` | Multi-scene product showcases |
+| `nyt-graph` | Editorial charts and data stories |
+| `vignelli` | Bold portrait announcements |
+| `blank` | Agent-generated or fully custom work |
 
 <Tip>
-  Looking for a minimal starting point? Use **blank** — it gives you an empty composition with just the scaffolding, no visual design.
-
-  ```bash Terminal
-  npx hyperframes init my-video --example blank
-  ```
+  Choose a template for its structure and tone, then replace the sample content. If none fits, start with `blank` and let the agent build from the brief.
 </Tip>
 
-## Choosing an Example
+## Run a production project locally
 
-| Example | Style | Format | Best for |
-|----------|-------|--------|----------|
-| `warm-grain` | Organic, textured | Landscape | Lifestyle, branding, editorial |
-| `play-mode` | Energetic, elastic | Landscape | Social media, product launches |
-| `swiss-grid` | Clean, structured | Landscape | Corporate, data, technical |
-| `kinetic-type` | Dramatic type | Landscape | Promos, intros, title cards |
-| `decision-tree` | Diagrammatic | Landscape | Explainers, tutorials |
-| `product-promo` | Multi-scene | Landscape | Product showcases, demos |
-| `nyt-graph` | Editorial data | Landscape | Data stories, reports |
-| `vignelli` | Bold, typographic | Portrait | Headlines, announcements |
-| `blank` | Minimal scaffolding | — | Full control, agent-generated |
+The launch repository uses Git LFS for large media:
 
-## Example Details
-
-<Tabs>
-  <Tab title="warm-grain">
-    ### warm-grain
-
-    Cream-toned aesthetic with grain texture overlay.
-
-    **What it produces:** A composition with warm color grading, textured grain, and smooth transitions. Includes an intro sub-composition and captions support.
-
-    ```
-    my-video/
-    ├── meta.json
-    ├── index.html
-    ├── compositions/
-    │   ├── intro.html
-    │   ├── graphics.html
-    │   └── captions.html
-    └── assets/
-    ```
-  </Tab>
-  <Tab title="play-mode">
-    ### play-mode
-
-    Playful elastic animations with bold, energetic motion.
-
-    ```
-    my-video/
-    ├── meta.json
-    ├── index.html
-    ├── compositions/
-    │   ├── intro.html
-    │   ├── stats.html
-    │   └── captions.html
-    └── assets/
-    ```
-  </Tab>
-  <Tab title="swiss-grid">
-    ### swiss-grid
-
-    Structured grid layout inspired by Swiss/International Typographic Style.
-
-    ```
-    my-video/
-    ├── meta.json
-    ├── index.html
-    ├── compositions/
-    │   ├── intro.html
-    │   ├── graphics.html
-    │   └── captions.html
-    └── assets/
-    ```
-  </Tab>
-  <Tab title="vignelli">
-    ### vignelli
-
-    Bold typography with red accents (1080×1920 portrait).
-
-    ```
-    my-video/
-    ├── meta.json
-    ├── index.html
-    ├── compositions/
-    │   ├── overlays.html
-    │   └── captions.html
-    └── assets/
-    ```
-  </Tab>
-  <Tab title="kinetic-type">
-    ### kinetic-type
-
-    Bold kinetic typography promo with dramatic text animations.
-
-    ```
-    my-video/
-    ├── meta.json
-    ├── index.html
-    └── compositions/
-        └── main-graphics.html
-    ```
-  </Tab>
-  <Tab title="decision-tree">
-    ### decision-tree
-
-    Animated flowchart with branching paths and progressive reveal.
-
-    ```
-    my-video/
-    ├── meta.json
-    ├── index.html
-    └── compositions/
-        └── decision_tree.html
-    ```
-  </Tab>
-  <Tab title="product-promo">
-    ### product-promo
-
-    Multi-scene product showcase with SVG assets.
-
-    ```
-    my-video/
-    ├── meta.json
-    ├── index.html
-    ├── compositions/
-    │   ├── scene1-logo-intro.html
-    │   ├── scene2-4-canvas.html
-    │   └── scene5-logo-outro.html
-    └── assets/
-        ├── figma-cursors.svg
-        ├── figma-logo-pieces.svg
-        └── figma-logo-pills.svg
-    ```
-  </Tab>
-  <Tab title="nyt-graph">
-    ### nyt-graph
-
-    Animated data chart in print editorial style.
-
-    ```
-    my-video/
-    ├── meta.json
-    ├── index.html
-    └── compositions/
-        └── nyt-chart.html
-    ```
-  </Tab>
-  <Tab title="blank">
-    ### blank
-
-    Empty composition with just the scaffolding.
-
-    ```
-    my-video/
-    ├── meta.json
-    ├── index.html
-    └── compositions/
-        └── captions.html
-    ```
-  </Tab>
-</Tabs>
-
-## Passing a Source Video
-
-```bash Terminal
-npx hyperframes init my-video --example warm-grain --video ./my-clip.mp4
+```bash
+git lfs install
+git clone https://github.com/heygen-com/hyperframes-launches.git
+cd hyperframes-launches/hyperframes-launch
+npx hyperframes preview
 ```
 
-The CLI will probe the video for duration, resolution, and codec. If the video uses an incompatible codec, it will be automatically transcoded to H.264 MP4 if FFmpeg is available.
-
-## Custom Examples
-
-Any directory with an `index.html` can serve as an example. Your custom example needs:
-
-1. An `index.html` with a [`data-composition-id`](/concepts/data-attributes#composition-attributes) root element
-2. A [GSAP timeline](/guides/gsap-animation) registered in `window.__timelines`
-3. Any assets in the same directory or a subdirectory
-
-```html index.html
-<div id="root" data-composition-id="my-example"
-     data-start="0" data-width="1920" data-height="1080">
-
-  <!-- Your elements here -->
-
-  <script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
-  <script>
-    const tl = gsap.timeline({ paused: true });
-    // Add your animations...
-    window.__timelines = window.__timelines || {};
-    window.__timelines["my-example"] = tl;
-  </script>
-</div>
-```
-
-After creating a custom example, validate it with the [linter](/packages/cli#lint):
-
-```bash Terminal
-npx hyperframes lint
-```
-
-## Next Steps
-
-<CardGroup cols={2}>
-  <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Create, preview, and render your first video
-  </Card>
-  <Card title="Launch Videos" icon="github" href="/launch-videos">
-    Real production projects from HeyGen's launches — open-source for you to read and remix.
-  </Card>
-  <Card title="GSAP Animation" icon="wand-magic-sparkles" href="/guides/gsap-animation">
-    Add animations to your example
-  </Card>
-  <Card title="Compositions" icon="layer-group" href="/concepts/compositions">
-    Understand the composition data model
-  </Card>
-</CardGroup>
+If you only need a starting structure, use a built-in template instead. It is smaller and faster to understand.

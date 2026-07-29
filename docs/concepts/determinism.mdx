@@ -3,7 +3,7 @@ title: Deterministic Rendering
 description: "Same input, identical output. Every time."
 ---
 
-Hyperframes is built around a core guarantee: **the same [composition](/concepts/compositions) always produces the same video**. This is what makes automated pipelines, CI testing, and AI-driven workflows reliable.
+HyperFrames is built around a core guarantee: **the same [composition](/concepts/compositions) always produces the same video**. This is what makes automated pipelines, CI testing, and AI-driven workflows reliable.
 
 ## How It Works
 
@@ -64,7 +64,7 @@ See the [Rendering guide](/guides/rendering) for all rendering options.
 
 ## Preview vs. Render Parity
 
-The browser preview and the rendered MP4 should match. Hyperframes achieves this through:
+The browser preview and the rendered MP4 should match. HyperFrames achieves this through:
 
 - **One runtime** -- the same `hyperframe.runtime` drives both preview and render
 - **Producer-canonical behavior** -- the [producer's](/packages/producer) seek semantics are the source of truth
@@ -97,7 +97,7 @@ If you are building a [frame adapter](/concepts/frame-adapters), your adapter mu
   <Card title="@hyperframes/producer" icon="clapperboard" href="/packages/producer">
     The full rendering pipeline that orchestrates deterministic output
   </Card>
-  <Card title="Common Mistakes" icon="triangle-exclamation" href="/guides/common-mistakes">
+  <Card title="Troubleshooting" icon="triangle-exclamation" href="/guides/troubleshooting">
     Pitfalls that break determinism and how to avoid them
   </Card>
 </CardGroup>

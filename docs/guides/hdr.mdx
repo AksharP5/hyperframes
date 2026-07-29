@@ -3,17 +3,17 @@ title: HDR Rendering
 description: "Render compositions to HDR10 MP4 (BT.2020 PQ or HLG, 10-bit H.265) when sources contain HDR video or images."
 ---
 
-Hyperframes can render to HDR10 MP4 (H.265 10-bit, BT.2020) when your composition references HDR video or HDR still images. HDR is auto-detected by default from your media sources and falls back to SDR when none are present.
+HyperFrames can render to HDR10 MP4 (H.265 10-bit, BT.2020) when your composition references HDR video or HDR still images. HDR is auto-detected by default from your media sources and falls back to SDR when none are present.
 
 <Note>
-  By default, Hyperframes probes your media and enables HDR only when HDR sources are present. Use `--hdr` to force HDR even without HDR sources, or `--sdr` to force SDR even when HDR sources are present.
+  By default, HyperFrames probes your media and enables HDR only when HDR sources are present. Use `--hdr` to force HDR even without HDR sources, or `--sdr` to force SDR even when HDR sources are present.
 </Note>
 
 ## Quickstart
 
 <Steps>
   <Step title="Add an HDR source to your composition">
-    Hyperframes detects HDR from the source's color space metadata. The most reliable HDR sources are:
+    HyperFrames detects HDR from the source's color space metadata. The most reliable HDR sources are:
 
     - **HDR video** tagged BT.2020 with PQ (`smpte2084`) or HLG (`arib-std-b67`) transfer
     - **HDR still images** as 16-bit PNG with BT.2020 PQ encoding
@@ -25,7 +25,7 @@ Hyperframes can render to HDR10 MP4 (H.265 10-bit, BT.2020) when your compositio
     npx hyperframes render --output output.mp4
     ```
 
-    HDR output requires `--format mp4`. If Hyperframes detects HDR sources, it renders HDR automatically. If you also pass `--format mov` or `--format webm`, Hyperframes logs a warning and falls back to SDR.
+    HDR output requires `--format mp4`. If HyperFrames detects HDR sources, it renders HDR automatically. If you also pass `--format mov` or `--format webm`, HyperFrames logs a warning and falls back to SDR.
   </Step>
   <Step title="Verify the output is HDR">
     Use `ffprobe` to confirm the encoded stream carries HDR color tagging and HDR10 metadata:
@@ -61,7 +61,7 @@ During render, the producer:
 
 ### HDR video
 
-Hyperframes recognizes HDR video from its `ffprobe` color space metadata:
+HyperFrames recognizes HDR video from its `ffprobe` color space metadata:
 
 | Indicator | Recognized as HDR |
 |-----------|-------------------|
@@ -71,7 +71,7 @@ Hyperframes recognizes HDR video from its `ffprobe` color space metadata:
 | `color_transfer = arib-std-b67` (HLG) | Yes — HLG |
 | All else (e.g. `bt709`, `smpte170m`) | No — treated as SDR |
 
-A valid HDR source is any MP4 whose stream metadata reports BT.2020 primaries plus PQ or HLG transfer. Hyperframes will detect it automatically:
+A valid HDR source is any MP4 whose stream metadata reports BT.2020 primaries plus PQ or HLG transfer. HyperFrames will detect it automatically:
 
 ```bash Terminal
 ffprobe -v error -show_streams assets/clip.mp4 | grep color
@@ -82,7 +82,7 @@ ffprobe -v error -show_streams assets/clip.mp4 | grep color
 
 ### HDR still images
 
-Hyperframes supports HDR still images delivered as **16-bit PNGs** tagged with BT.2020 primaries and PQ transfer. Drop them into the composition as a normal `<img>`:
+HyperFrames supports HDR still images delivered as **16-bit PNGs** tagged with BT.2020 primaries and PQ transfer. Drop them into the composition as a normal `<img>`:
 
 ```html index.html
 <img class="clip" data-start="0" data-duration="3"
@@ -114,7 +114,7 @@ This is the same pipeline that handles compositions where, for example, an HDR d
 | `webm` | No — falls back to SDR |
 | `gif` | No — falls back to SDR |
 
-If HDR is enabled and you also pass `--format mov`, `--format webm`, or `--format gif`, Hyperframes logs a message and produces the equivalent SDR render. There is no error — the render still completes — so check the logs (or your verification step) to confirm you got HDR.
+If HDR is enabled and you also pass `--format mov`, `--format webm`, or `--format gif`, HyperFrames logs a message and produces the equivalent SDR render. There is no error — the render still completes — so check the logs (or your verification step) to confirm you got HDR.
 
 ## Verifying HDR Output
 
@@ -191,7 +191,7 @@ The container runs the same probe → composite → encode pipeline as the local
   <Card title="Engine: HDR APIs" icon="gear" href="/packages/engine#hdr-apis">
     Public HDR utilities exported from `@hyperframes/engine`
   </Card>
-  <Card title="Common Mistakes" icon="triangle-exclamation" href="/guides/common-mistakes">
+  <Card title="Troubleshooting" icon="triangle-exclamation" href="/guides/troubleshooting">
     Pitfalls that affect render output
   </Card>
 </CardGroup>

@@ -1,0 +1,59 @@
+---
+title: "Check quality before export"
+description: "Review the story, visuals, motion, media, accessibility, and technical health of a project."
+---
+
+Validation catches many technical problems. It cannot decide whether the video communicates clearly.
+
+Use this checklist before the final render.
+
+## Story
+
+- The opening makes the subject clear soon enough.
+- Every scene has a useful job.
+- Claims are current and supported.
+- The final action is clear.
+- Nothing important appears only in narration or only on screen by accident.
+
+## Readability
+
+- Text is large enough at delivery size.
+- Captions and labels stay on screen long enough.
+- Contrast remains readable over moving backgrounds.
+- Important content stays inside safe areas for the destination.
+- No accidental overflow, clipping, or off-canvas element is visible.
+
+## Motion and timing
+
+- Entrances direct attention instead of delaying information.
+- Several elements are not competing at the same moment.
+- Cuts and transitions support the story.
+- The ending completes cleanly.
+- The project works when played from the beginning, not only when scrubbing isolated frames.
+
+## Media and audio
+
+- Every image and video loads.
+- Crops and aspect ratios are intentional.
+- Captions match the speech.
+- Voice remains clear over music.
+- No click, pop, abrupt cut, or missing final frame appears.
+
+## Run the checks
+
+```bash
+npx hyperframes lint
+npx hyperframes check
+```
+
+Use snapshots for important moments:
+
+```bash
+npx hyperframes snapshot --at 0,3.5,8
+```
+
+Studio can surface lint issues and copy them to your agent. See [Fix issues with your agent](/studio/lint-and-agent).
+
+## Watch the exported file
+
+The final check is the actual output. Confirm its dimensions, duration, format, audio, opening, ending, captions, and most complex transition.

@@ -1,9 +1,9 @@
 ---
 title: Contributing
-description: "How to contribute to Hyperframes."
+description: "How to contribute to HyperFrames."
 ---
 
-Thanks for your interest in contributing to Hyperframes! This guide covers everything you need to get set up, run tests, and submit a pull request.
+Thanks for your interest in contributing to HyperFrames! This guide covers everything you need to get set up, run tests, and submit a pull request.
 
 ## Getting Started
 
@@ -16,7 +16,7 @@ Thanks for your interest in contributing to Hyperframes! This guide covers every
     ```
   </Step>
   <Step title="Install dependencies">
-    Hyperframes uses [bun](https://bun.sh/) for package management:
+    HyperFrames uses [bun](https://bun.sh/) for package management:
     ```bash
     bun install
     ```
@@ -53,13 +53,13 @@ bun run build                        # Build all packages
 bun run --filter '*' typecheck       # Type-check all packages
 ```
 
-### Studio Editing Work
+### Studio editing work
 
-If you are changing Studio's visual editing surface, read
-[Studio Manual DOM Editing](/contributing/studio-manual-dom-editing) before
-editing code. The inspector intentionally exposes only interactions it can
-persist safely back to HTML, so changes should preserve the capability gates,
-source patching model, and documented limitations.
+Before changing Studio's visual editing surface, read the user-facing
+[Canvas](/studio/canvas), [Layers](/studio/layers),
+[Timeline](/studio/timeline), and [Design](/studio/design) guides. Preserve
+Studio's capability gates and source-patching behavior, and use the existing
+tests and implementation as the technical source of truth.
 
 ### Running Tests
 
@@ -149,7 +149,7 @@ All of the following must pass before your PR can be merged:
 - For bug reports, include:
   - Steps to reproduce
   - Expected behavior vs. actual behavior
-  - Hyperframes version (`npx hyperframes info`)
+  - HyperFrames version (`npx hyperframes info`)
   - Operating system and Node.js version
 
 ## Community

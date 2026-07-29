@@ -1,0 +1,52 @@
+---
+title: "Publish and share a project"
+description: "Choose between sharing a finished video, a review link, or the editable source."
+---
+
+Different people need different forms of the project.
+
+| Recipient needs | Share |
+| --- | --- |
+| A video to watch or upload | The exported MP4, WebM, or MOV |
+| A stable link to review the current project | A published project link |
+| The ability to edit and render independently | The project source and assets |
+| A reusable public example | A repository or community project |
+
+## Publish a review link
+
+From the project folder:
+
+```bash
+npx hyperframes publish
+```
+
+Publishing returns a stable public URL. Publishing the project again updates that link rather than forcing reviewers to find a new one.
+
+Use a shared space when a team should publish to the same destination:
+
+```bash
+npx hyperframes publish --space <space>
+```
+
+## Share source carefully
+
+Include the composition files, local assets, configuration, and any brief or storyboard needed to understand the work.
+
+Do not include:
+
+- API keys or `.env` secrets;
+- private media without permission;
+- unnecessary caches;
+- credentials embedded in remote URLs.
+
+## Explain what kind of feedback you need
+
+Tell the reviewer whether the link is for:
+
+- story and message;
+- visual direction;
+- timing and motion;
+- factual approval;
+- final sign-off.
+
+A generic “thoughts?” review creates scattered feedback. A clear review stage produces usable decisions.

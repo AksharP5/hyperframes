@@ -3,7 +3,7 @@ title: "@hyperframes/core"
 description: "Types, HTML generation, runtime, and linter — the foundation every other package depends on."
 ---
 
-The core package provides the foundational types, HTML parsing/generation, runtime, and composition linter that all other Hyperframes packages build on. If you are building tooling, writing a custom integration, or extending Hyperframes itself, this is the package you need.
+The core package provides the foundational types, HTML parsing/generation, runtime, and composition linter that all other HyperFrames packages build on. If you are building tooling, writing a custom integration, or extending HyperFrames itself, this is the package you need.
 
 ```bash
 npm install @hyperframes/core
@@ -19,8 +19,8 @@ npm install @hyperframes/core
 - Lint compositions programmatically (CI pipelines, editor plugins)
 - Parse HTML compositions into structured TypeScript objects
 - Generate composition HTML from data (e.g., from an API or AI agent)
-- Access the Hyperframes type system for your own tooling
-- Embed the Hyperframes runtime in a custom player
+- Access the HyperFrames type system for your own tooling
+- Embed the HyperFrames runtime in a custom player
 
 **Use a different package if you want to:**
 - Preview compositions in the browser — use the [CLI](/packages/cli) (`npx hyperframes preview`) or [studio](/packages/studio)
@@ -277,7 +277,7 @@ Detected issues include:
 - Invalid `data-start` references to nonexistent clip IDs
 
 <Info>
-  For a full list of what the linter catches and how to fix each issue, see [Common Mistakes](/guides/common-mistakes) and [Troubleshooting](/guides/troubleshooting).
+  For common failures and fixes, see [Troubleshooting](/guides/troubleshooting).
 </Info>
 
 ## Compiler
@@ -343,7 +343,7 @@ const guard: HyperframeStaticGuardResult = validateHyperframeHtmlContract(html);
 
 ## Runtime
 
-The Hyperframes runtime manages playback, seeking, and clip lifecycle in the browser. The core package provides utilities for building and loading the runtime:
+The HyperFrames runtime manages playback, seeking, and clip lifecycle in the browser. The core package provides utilities for building and loading the runtime:
 
 ```typescript
 import {

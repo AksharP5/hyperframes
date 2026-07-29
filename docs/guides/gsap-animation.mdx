@@ -1,9 +1,9 @@
 ---
 title: GSAP Animation
-description: "Add animations to your Hyperframes compositions with GSAP."
+description: "Add animations to your HyperFrames compositions with GSAP."
 ---
 
-Hyperframes uses [GSAP](https://gsap.com/) for animation. Timelines are paused and controlled by the runtime — you define the animations, the framework handles playback. For background on how animation runtimes plug into Hyperframes, see [Frame Adapters](/concepts/frame-adapters).
+HyperFrames uses [GSAP](https://gsap.com/) for animation. Timelines are paused and controlled by the runtime — you define the animations, the framework handles playback. For background on how animation runtimes plug into HyperFrames, see [Frame Adapters](/concepts/frame-adapters).
 
 ## Setup
 
@@ -73,7 +73,7 @@ tl.set({}, {}, 283);
 ```
 
 <Warning>
-  This is one of the most common mistakes in Hyperframes. If your video cuts off early, the timeline is too short. See [Common Mistakes: Composition Duration Shorter Than Video](/guides/common-mistakes) for more details.
+  This is one of the most common mistakes in HyperFrames. If your video cuts off early, the timeline is too short. See [Troubleshooting: Composition Duration Shorter Than Video](/guides/troubleshooting) for more details.
 </Warning>
 
 ## What NOT to Do
@@ -113,7 +113,7 @@ window.__timelines["intro-anim"] = tl;
 ```
 
 <Warning>
-  Don't animate `width`, `height`, `top`, or `left` directly on `<video>` elements — this can cause the browser to stop rendering frames. Wrap the video in a `<div>` and animate the wrapper instead. See [Common Mistakes](/guides/common-mistakes) for a detailed explanation.
+  Don't animate `width`, `height`, `top`, or `left` directly on `<video>` elements — this can cause the browser to stop rendering frames. Wrap the video in a `<div>` and animate the wrapper instead. See [Troubleshooting](/guides/troubleshooting) for a detailed explanation.
 </Warning>
 
 ## Next Steps
@@ -125,7 +125,7 @@ window.__timelines["intro-anim"] = tl;
   <Card title="Frame Adapters" icon="plug" href="/concepts/frame-adapters">
     Learn how GSAP plugs into the render pipeline
   </Card>
-  <Card title="Common Mistakes" icon="triangle-exclamation" href="/guides/common-mistakes">
+  <Card title="Troubleshooting" icon="triangle-exclamation" href="/guides/troubleshooting">
     Avoid pitfalls that break animations
   </Card>
   <Card title="HTML Schema Reference" icon="code" href="/reference/html-schema">

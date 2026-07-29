@@ -320,15 +320,14 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
   const source = manifest as RegistryItem & SourceMetadata;
   const textureGroups = textureGroupsFor(manifest);
 
-  const lines: string[] = ["---", `title: ${yamlString(manifest.title)}`];
-  if (textureGroups.length === 0) {
-    lines.push(`description: ${yamlString(manifest.description)}`);
-  }
+  const lines: string[] = [
+    "---",
+    `title: ${yamlString(manifest.title)}`,
+    `description: ${yamlString(manifest.description)}`,
+  ];
   lines.push("---", "");
 
-  if (textureGroups.length === 0) {
-    lines.push(`# ${manifest.title}`, "", manifest.description, "");
-  }
+  lines.push(manifest.description, "");
 
   if (tagBadges) {
     lines.push(tagBadges, "");
@@ -363,9 +362,18 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
     );
   }
 
-  // Install command
+  // Human-first install path, with the terminal command kept as an alternative.
   lines.push(
-    "## Install",
+    "## Add it to a project",
+    "",
+    "Ask your agent:",
+    "",
+    "```text",
+    `Add the ${manifest.title} ${kind} from the HyperFrames Catalog to this project.`,
+    "Replace the demo content with mine and match the existing design and timing.",
+    "```",
+    "",
+    "Or install it from the project folder:",
     "",
     "<CodeGroup>",
     "",
@@ -377,11 +385,10 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
     "",
   );
 
-  // Details
+  // Keep registry metadata available without making it the main reading path.
+  lines.push('<Accordion title="Technical details">', "");
   if (kind === "block" && manifest.dimensions && manifest.duration) {
     lines.push(
-      "## Details",
-      "",
       `| Property | Value |`,
       `| --- | --- |`,
       `| Type | ${typeLabel(kind)} |`,
@@ -390,29 +397,23 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
       "",
     );
   } else {
-    lines.push(
-      "## Details",
-      "",
-      `| Property | Value |`,
-      `| --- | --- |`,
-      `| Type | ${typeLabel(kind)} |`,
-      "",
-    );
+    lines.push(`| Property | Value |`, `| --- | --- |`, `| Type | ${typeLabel(kind)} |`, "");
   }
+
+  // Files
+  if (textureGroups.length === 0) {
+    lines.push("**Installed files**", "", "| File | Target | Type |", "| --- | --- | --- |");
+    for (const f of manifest.files) {
+      lines.push(`| \`${f.path}\` | \`${f.target}\` | ${f.type} |`);
+    }
+    lines.push("");
+  }
+  lines.push("</Accordion>", "");
 
   if (textureGroups.length > 0) {
     lines.push(...generateTextureAgentUsage(manifest, textureGroups));
     lines.push(...generateTextureAnimationExample(manifest, textureGroups));
     lines.push(...generateTextureExamples(manifest, textureGroups));
-  }
-
-  // Files
-  if (textureGroups.length === 0) {
-    lines.push("## Files", "", "| File | Target | Type |", "| --- | --- | --- |");
-    for (const f of manifest.files) {
-      lines.push(`| \`${f.path}\` | \`${f.target}\` | ${f.type} |`);
-    }
-    lines.push("");
   }
 
   // Usage hint — find the primary file by type, not array position.
@@ -426,28 +427,40 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
     const w = manifest.dimensions.width;
     const h = manifest.dimensions.height;
     lines.push(
-      "## Usage",
+      "## Use it",
       "",
-      "After installing, add the block to your host composition:",
+      "Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.",
+      "",
+      '<Accordion title="HTML for agents and developers">',
+      "",
+      "The installed block can be added to a host composition with:",
       "",
       "```html",
       `<div data-composition-id="${manifest.name}" data-composition-src="${primaryTarget}" data-start="0" data-duration="${manifest.duration}" data-track-index="1" data-width="${w}" data-height="${h}"></div>`,
       "```",
       "",
+      "</Accordion>",
+      "",
     );
   } else {
     if (textureGroups.length > 0) {
       lines.push(
-        "## Usage",
+        "## Use it",
         "",
         `After \`${installCmd}\`, the installed snippet lives at \`${primaryTarget}\` inside your current HyperFrames project. Open that file and paste the real \`<style>\` element near the bottom into your composition once; it defines \`hf-texture-text\` and every \`hf-texture-*\` class used by the examples above. Keep the installed texture PNGs in \`assets/${manifest.name}/masks/\`; the CSS references them with project-root URLs.`,
         "",
       );
     } else {
       lines.push(
-        "## Usage",
+        "## Use it",
         "",
-        `Open \`${primaryTarget}\` and paste its contents into your composition. See the comment header in the file for detailed instructions.`,
+        "Ask your agent to apply the component to the intended element and preserve the project’s existing timing.",
+        "",
+        '<Accordion title="Instructions for agents and developers">',
+        "",
+        `Open \`${primaryTarget}\` and paste its contents into your composition. The comment header in that file contains any item-specific instructions.`,
+        "",
+        "</Accordion>",
         "",
       );
     }

@@ -10,7 +10,7 @@ Google Antigravity is Google's agent-first IDE built on VS Code. Its agent disco
 Install the HyperFrames skill package into your project:
 
 ```bash
-npx skills add heygen-com/hyperframes
+npx hyperframes skills update
 ```
 
 This places skill directories inside `.agents/skills/` at your workspace root â€” the location Antigravity scans for workspace-scoped skills.
@@ -19,7 +19,7 @@ This places skill directories inside `.agents/skills/` at your workspace root â€
   If you want the skills available across all your Antigravity projects, install them to the global scope instead:
 
   ```bash
-  npx skills add heygen-com/hyperframes --agent antigravity --global
+  npx skills add heygen-com/hyperframes --agent antigravity --global --full-depth
   ```
 
   Global skills live in `~/.gemini/antigravity/skills/` and load in every workspace.

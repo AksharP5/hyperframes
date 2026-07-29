@@ -26,7 +26,7 @@ The skills split into three groups:
     npx skills add heygen-com/hyperframes --full-depth
     ```
 
-    In a terminal this opens a picker — the core set under the "Core Skills" group, the on-demand creation workflows under "Other", nothing pre-selected. Keep `--full-depth`: it installs the current `main`; without it `skills add` fetches the skills.sh registry blob, which lags `main` by hours. The picker is interactive-only: a non-interactive or agent run without `--skill` installs all 19, so agents should use `npx hyperframes skills update` above.
+    In a terminal this opens a picker — the core set under the "Core Skills" group, the on-demand creation workflows under "Other", nothing pre-selected. Keep `--full-depth`: it installs the current `main`; without it `skills add` fetches the skills.sh registry blob, which lags `main` by hours. The picker is interactive-only: a non-interactive or agent run without `--skill` installs the full set, so agents should use `npx hyperframes skills update` above.
   </Step>
   <Step title="Or install everything at once (skip the picker)">
     ```bash
@@ -119,7 +119,7 @@ The one-line "use when" for each skill comes from its own `SKILL.md` frontmatter
   <Card title="Quickstart" icon="rocket" href="/quickstart">
     Install skills, scaffold a project, and render your first video.
   </Card>
-  <Card title="Claude Design" icon="palette" href="/guides/claude-design">
+  <Card title="Claude Design" icon="palette" href="/guides/design-tools">
     Produce a valid first draft in Claude Design, then refine in any AI coding agent.
   </Card>
   <Card title="GitHub Copilot CLI" icon="terminal" href="/guides/copilot-cli">

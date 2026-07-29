@@ -1,9 +1,7 @@
 ---
-title: "Monokai"
-description: "The iconic warm-toned dark theme beloved by developers worldwide."
+title: "Code Snippet - Monokai"
+description: "VS Code workbench with per-character typing animation in the Monokai theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar."
 ---
-
-# Monokai
 
 VS Code workbench with per-character typing animation in the Monokai theme. Full editor chrome with activity bar, sidebar, tabs, terminal, and status bar.
 
@@ -11,7 +9,16 @@ VS Code workbench with per-character typing animation in the Monokai theme. Full
 
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-monokai.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-monokai.png" autoPlay muted loop playsInline />
 
-## Install
+## Add it to a project
+
+Ask your agent:
+
+```text
+Add the Code Snippet - Monokai block from the HyperFrames Catalog to this project.
+Replace the demo content with mine and match the existing design and timing.
+```
+
+Or install it from the project folder:
 
 <CodeGroup>
 
@@ -21,13 +28,7 @@ npx hyperframes add code-snippet-monokai
 
 </CodeGroup>
 
-Install all code snippet themes at once:
-
-```bash Terminal
-npx hyperframes add code
-```
-
-## Details
+<Accordion title="Technical details">
 
 | Property | Value |
 | --- | --- |
@@ -35,33 +36,25 @@ npx hyperframes add code
 | Dimensions | 1920×1080 |
 | Duration | 11s |
 
-## Files
+**Installed files**
 
 | File | Target | Type |
 | --- | --- | --- |
 | `code-snippet-monokai.html` | `compositions/code-snippet-monokai.html` | hyperframes:composition |
 | `background.jpeg` | `assets/background.jpeg` | hyperframes:asset |
 
-## Usage
+</Accordion>
 
-After installing, add the block to your host composition:
+## Use it
+
+Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
+
+<Accordion title="HTML for agents and developers">
+
+The installed block can be added to a host composition with:
 
 ```html
-<div
-  data-composition-id="code-snippet-monokai"
-  data-composition-src="compositions/code-snippet-monokai.html"
-  data-start="0"
-  data-duration="11"
-  data-track-index="1"
-  data-width="1920"
-  data-height="1080"
-></div>
+<div data-composition-id="code-snippet-monokai" data-composition-src="compositions/code-snippet-monokai.html" data-start="0" data-duration="11" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
 
-## Features
-
-- Full VS Code workbench recreation — activity bar, sidebar, explorer tree, editor tabs, breadcrumbs, terminal panel, status bar
-- Per-character typing animation with cursor tracking and active line highlight
-- Colors sourced from official `microsoft/vscode` built-in theme JSON
-- 3D perspective tilt at the end of the typing sequence
-- Terminal panel with mock test output
+</Accordion>

@@ -16,7 +16,7 @@ GitHub Copilot CLI brings AI-powered coding assistance to your terminal. HyperFr
 Install the HyperFrames skill package into your project:
 
 ```bash
-npx skills add heygen-com/hyperframes
+npx hyperframes skills update
 ```
 
 This writes skill directories to `.agents/skills/` in your project — the path Copilot CLI scans automatically for workspace-scoped skills.
@@ -25,7 +25,7 @@ This writes skill directories to `.agents/skills/` in your project — the path 
   To make skills available across all your projects, install them globally:
 
   ```bash
-  npx skills add heygen-com/hyperframes --agent github-copilot --global
+  npx skills add heygen-com/hyperframes --agent github-copilot --global --full-depth
   ```
 
   Global skills live in `~/.copilot/skills/` and load in every Copilot CLI session.

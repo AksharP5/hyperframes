@@ -3,7 +3,7 @@ title: CLI
 description: "Create, preview, and render HTML video compositions from the command line."
 ---
 
-The `hyperframes` CLI is the primary way to work with Hyperframes. It handles project creation, live preview, rendering, linting, and diagnostics — all from your terminal.
+The `hyperframes` CLI is the primary way to work with HyperFrames. It handles project creation, live preview, rendering, linting, and diagnostics — all from your terminal.
 
 ```bash
 npm install -g hyperframes
@@ -30,7 +30,7 @@ npx hyperframes <command>
 - Parse or generate composition HTML in code — use [core](/packages/core)
 
 <Tip>
-  The CLI is the recommended starting point for all Hyperframes users. It wraps the producer, engine, and studio packages so you do not need to install them separately.
+  The CLI is the recommended starting point for all HyperFrames users. It wraps the producer, engine, and studio packages so you do not need to install them separately.
 </Tip>
 
 ## Agent-Friendly by Default
@@ -114,7 +114,7 @@ This is suppressed in CI environments, non-TTY shells, and when `HYPERFRAMES_NO_
     cd my-video
     npx hyperframes preview
     ```
-    The Hyperframes Studio opens in your browser. Edit `index.html` and the preview updates instantly.
+    The HyperFrames Studio opens in your browser. Edit `index.html` and the preview updates instantly.
   </Step>
   <Step title="Lint your composition">
     Check for structural issues before rendering:
@@ -215,7 +215,7 @@ This is suppressed in CI environments, non-TTY shells, and when `HYPERFRAMES_NO_
     | `--no-clipboard` | Skip copying the include snippet to the clipboard |
     | `--json` | Print a machine-readable summary (written files + snippet) to stdout |
 
-    `add` reads [`hyperframes.json`](#hyperframes-json) at the project root to know which registry to pull from and where to drop files. If the file is missing but the directory looks like a Hyperframes project (has `index.html`), a default `hyperframes.json` is written the first time you run `add`.
+    `add` reads [`hyperframes.json`](#hyperframes-json) at the project root to know which registry to pull from and where to drop files. If the file is missing but the directory looks like a HyperFrames project (has `index.html`), a default `hyperframes.json` is written the first time you run `add`.
 
     Output for a block or component is a set of files plus a **paste snippet** — the `<iframe>` tag (for blocks) or the fragment path (for components) to include in your host composition. The snippet is copied to the clipboard by default; add `--no-clipboard` for CI or headless environments.
 
@@ -441,7 +441,7 @@ Word-level transcripts (whisper output) are grouped into readable caption cues o
 
     Output is a self-contained directory with a `CLAUDE.md` file that any AI agent can read to understand the captured site. Used by the `/product-launch-video` workflow as step 1 of the video production pipeline.
 
-    Set `GEMINI_API_KEY` in a `.env` file for AI-powered image descriptions via Gemini vision (~$0.001/image), or set `OPENROUTER_API_KEY` to use any vision model through [OpenRouter](https://openrouter.ai) instead (takes priority if both are set; override the model with `HYPERFRAMES_OPENROUTER_MODEL`). See the [Website to Video](/guides/website-to-video#enriching-captures-with-gemini-vision) guide for details.
+    Set `GEMINI_API_KEY` in a `.env` file for AI-powered image descriptions via Gemini vision (~$0.001/image), or set `OPENROUTER_API_KEY` to use any vision model through [OpenRouter](https://openrouter.ai) instead (takes priority if both are set; override the model with `HYPERFRAMES_OPENROUTER_MODEL`). See the [Product launch video](/guides/product-launch-video#enriching-captures-with-gemini-vision) guide for details.
 
   </Tab>
   <Tab title="Preview">
@@ -458,7 +458,7 @@ Word-level transcripts (whisper output) are grouped into readable caption cues o
     |------|-------------|
     | `--port` | Port to run the preview server on (default: 3002) |
 
-    Opens your composition in the Hyperframes Studio with live preview. Edits to `index.html` and any referenced sub-compositions are reflected automatically. The preview uses the same Hyperframes runtime as production rendering, so what you see is what you get.
+    Opens your composition in the HyperFrames Studio with live preview. Edits to `index.html` and any referenced sub-compositions are reflected automatically. The preview uses the same HyperFrames runtime as production rendering, so what you see is what you get.
 
     <Note>
       Visual output matches render exactly. Playback *performance* does not: preview plays in real time in your browser, so paint-heavy compositions (large images, stacked `backdrop-filter` layers, many shadowed elements) may stutter depending on your hardware. The rendered mp4 is always accurate regardless — render captures frames one at a time, so per-frame cost shows up as longer render duration, not dropped frames. See [Performance](/guides/performance) for details.
@@ -468,7 +468,7 @@ Word-level transcripts (whisper output) are grouped into readable caption cues o
 
     1. **Embedded mode** (default for `npx`) — runs a standalone server with the studio bundled in the CLI. Zero extra dependencies.
     2. **Local studio mode** — if `@hyperframes/studio` is installed in your project's `node_modules`, spawns Vite with full HMR for faster iteration.
-    3. **Monorepo mode** — if running from the Hyperframes source repo, spawns the studio dev server directly.
+    3. **Monorepo mode** — if running from the HyperFrames source repo, spawns the studio dev server directly.
 
     ### `publish`
 
@@ -519,7 +519,7 @@ Word-level transcripts (whisper output) are grouped into readable caption cues o
     - **Warning** (`⚠`) — likely issues that may cause unexpected behavior
     - **Info** (`ℹ`) — informational notices, shown only with `--verbose`
 
-    The linter detects missing attributes, missing adapter libraries (GSAP, Lottie, Three.js), structural problems, and more. See [Common Mistakes](/guides/common-mistakes) for details on each rule.
+    The linter detects missing attributes, missing adapter libraries (GSAP, Lottie, Three.js), structural problems, and more. See [Troubleshooting](/guides/troubleshooting) for details on each rule.
 
     ### `check`
 
@@ -668,7 +668,7 @@ Word-level transcripts (whisper output) are grouped into readable caption cues o
     | `--at` | Comma-separated timestamps in seconds (e.g., `3.0,10.5,18.0`) |
     | `--timeout` | Ms to wait for runtime to initialize (default: 5000) |
 
-    The snapshot command bundles the project, serves it locally, launches headless Chrome, seeks to each timestamp, and captures a 1920×1080 PNG. Useful for visual verification during the build step of the [website-to-video](/guides/website-to-video) workflow.
+    The snapshot command bundles the project, serves it locally, launches headless Chrome, seeks to each timestamp, and captures a 1920×1080 PNG. It is useful for visual verification during the [product launch video](/guides/product-launch-video) workflow.
   </Tab>
   <Tab title="Build">
     ### `render`
@@ -979,10 +979,10 @@ Word-level transcripts (whisper output) are grouped into readable caption cues o
 
     **Using `hyperframes skills` is already fine** — as of v0.4.5 the CLI sets `GIT_CLONE_PROTECTION_ACTIVE=0` on the child environment, which is the opt-in knob Git provides for exactly this case. You don't need to do anything.
 
-    **If you ran `npx skills add heygen-com/hyperframes` directly** (bypassing the HyperFrames CLI), set the env var yourself:
+    **If you ran `npx skills add heygen-com/hyperframes --full-depth` directly** (bypassing the HyperFrames CLI), set the env var yourself:
 
     ```bash
-    GIT_CLONE_PROTECTION_ACTIVE=0 npx skills add heygen-com/hyperframes
+    GIT_CLONE_PROTECTION_ACTIVE=0 npx skills add heygen-com/hyperframes --full-depth
     ```
 
     This is tracked in [GH #316](https://github.com/heygen-com/hyperframes/issues/316). An upstream fix in the `skills` CLI itself is the right long-term answer; until that lands, the env var is the correct workaround.
@@ -1384,7 +1384,7 @@ Same trade-off as `lambda`, on Google Cloud instead of AWS. Pick `cloudrun` when
 
 | Field | Description |
 |-------|-------------|
-| `registry` | Base URL of the registry `add` pulls from. Defaults to the public Hyperframes registry. |
+| `registry` | Base URL of the registry `add` pulls from. Defaults to the public HyperFrames registry. |
 | `paths.blocks` | Where block `.html` files land (relative to project root). |
 | `paths.components` | Where component files land (relative to project root). |
 | `paths.assets` | Where referenced asset files (images, fonts) land. |

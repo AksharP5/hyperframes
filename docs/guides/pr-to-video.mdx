@@ -1,0 +1,35 @@
+---
+title: "Turn a pull request into a video"
+description: "Explain a GitHub pull request as a changelog, feature reveal, fix, or technical walkthrough."
+---
+
+Use this workflow when the source is a GitHub pull request or a specific code change.
+
+The agent reads the PR, identifies what changed and why it matters, then turns that into a short visual explanation.
+
+## Start with the PR
+
+```text
+/hyperframes Turn https://github.com/owner/repo/pull/123 into a
+45-second release video for existing users. Focus on the visible behavior,
+not implementation details. Show the before and after, and include the
+migration note from the PR description.
+```
+
+Say who the video is for:
+
+- users need the outcome and any action they must take;
+- contributors may need architecture and tradeoffs;
+- a social audience needs one clear change and visible proof.
+
+## Check the facts
+
+Before export:
+
+- verify the PR is the intended source;
+- distinguish shipped behavior from planned follow-up;
+- do not turn test coverage or refactoring into a user-facing claim;
+- include breaking changes and migration steps;
+- confirm issue, version, and product names.
+
+Use [Studio Storyboard](/studio/storyboard) to review the explanation and [Source](/studio/source) when a code excerpt needs adjustment.

@@ -1,13 +1,13 @@
 ---
 title: HTML Schema Reference
-description: "Complete reference for authoring Hyperframes HTML compositions."
+description: "Complete reference for authoring HyperFrames HTML compositions."
 ---
 
-This is the full schema reference for Hyperframes compositions. For a gentler introduction, see [Compositions](/concepts/compositions) and [Data Attributes](/concepts/data-attributes).
+This is the full schema reference for HyperFrames compositions. For a gentler introduction, see [Compositions](/concepts/compositions) and [Data Attributes](/concepts/data-attributes).
 
 ## Overview
 
-Hyperframes uses HTML as the source of truth for describing a video:
+HyperFrames uses HTML as the source of truth for describing a video:
 
 - **HTML clips** = video, image, audio, composition
 - **[Data attributes](/concepts/data-attributes)** = timing, metadata, styling
@@ -27,7 +27,7 @@ The framework reads data attributes and automatically manages:
 Mounting/unmounting controls **presence**, not appearance. Transitions (fade in, slide in) are animated in scripts.
 
 <Warning>
-  Do not manually call `video.play()`, `video.pause()`, set `audio.currentTime`, or mount/unmount clips in scripts. The framework owns media playback and clip lifecycle. See [Common Mistakes](/guides/common-mistakes) for more details.
+  Do not manually call `video.play()`, `video.pause()`, set `audio.currentTime`, or mount/unmount clips in scripts. The framework owns media playback and clip lifecycle. See [Troubleshooting](/guides/troubleshooting) for more details.
 </Warning>
 
 ## Viewport
@@ -91,7 +91,7 @@ Common sizes:
     - Do **not** add `class="clip"` to video elements — the framework manages their visibility directly
 
     <Warning>
-      Do not animate `width`, `height`, `top`, or `left` directly on `<video>` elements with GSAP. This can cause Chrome to stop rendering video frames. Wrap the video in a `<div>` and animate the wrapper instead. See [Common Mistakes](/guides/common-mistakes).
+      Do not animate `width`, `height`, `top`, or `left` directly on `<video>` elements with GSAP. This can cause Chrome to stop rendering video frames. Wrap the video in a `<div>` and animate the wrapper instead. See [Troubleshooting](/guides/troubleshooting).
     </Warning>
   </Accordion>
 

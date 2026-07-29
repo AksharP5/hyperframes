@@ -35,7 +35,7 @@ The producer orchestrates the full render pipeline:
   <Step title="Load the composition HTML">
     Reads your `index.html` and any referenced sub-compositions.
   </Step>
-  <Step title="Inject the Hyperframes runtime">
+  <Step title="Inject the HyperFrames runtime">
     Adds the runtime script that manages timeline seeking, clip lifecycle, and media playback.
   </Step>
   <Step title="Wait for readiness gates">
@@ -219,7 +219,7 @@ The producer supports hardware-accelerated encoding for faster renders:
 | Intel | QSV | Auto-detected |
 | AMD on Windows | AMF | Auto-detected |
 
-When GPU encoding is enabled, Hyperframes detects the available FFmpeg hardware encoder automatically. To check your system's capabilities:
+When GPU encoding is enabled, HyperFrames detects the available FFmpeg hardware encoder automatically. To check your system's capabilities:
 
 ```bash
 npx hyperframes doctor

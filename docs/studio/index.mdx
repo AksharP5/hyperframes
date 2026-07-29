@@ -1,0 +1,70 @@
+---
+title: "HyperFrames Studio"
+description: "Review, edit, animate, and export a HyperFrames project in the browser."
+---
+
+HyperFrames Studio is the visual workspace that opens when you preview a project.
+
+Use it to understand what an agent built, make direct changes, and export the finished result. The edits stay with the project, so the visual editor, source files, and final render are working on the same composition.
+
+## Open Studio
+
+From a HyperFrames project folder, run:
+
+```bash
+npx hyperframes preview
+```
+
+Your browser opens the project in Studio. Keep the terminal process running while you work.
+
+## What you can do
+
+<CardGroup cols={2}>
+  <Card title="Review the storyboard" icon="table-cells-large" href="/studio/storyboard">
+    Check each planned frame, its direction, status, voiceover, and agent feedback.
+  </Card>
+  <Card title="Edit on the canvas" icon="arrow-pointer" href="/studio/canvas">
+    Select, move, resize, rotate, crop, and style visible elements.
+  </Card>
+  <Card title="Change timing" icon="timeline" href="/studio/timeline">
+    Move, trim, split, align, and organize clips.
+  </Card>
+  <Card title="Edit animation" icon="wand-magic-sparkles" href="/studio/animation">
+    Work with keyframes, easing, motion paths, and recorded movement.
+  </Card>
+  <Card title="Add media and Catalog items" icon="photo-film" href="/studio/assets-and-blocks">
+    Import media, reuse project assets, and add Catalog items.
+  </Card>
+  <Card title="Export versions" icon="download" href="/studio/export">
+    Render MP4, WebM, or MOV files and manage the render queue.
+  </Card>
+</CardGroup>
+
+## Two ways to look at a project
+
+Use **Storyboard** when you are reviewing the idea and the planned sequence.
+
+Use **Preview** when you are editing the built video: canvas, Inspector, timeline, Code, Comps, Assets, Catalog, Variables, and Renders.
+
+Switching views does not create a different project. It changes what you are focusing on.
+
+## Studio and your agent work together
+
+Studio is best for direct, visible changes. The agent is best for changes that require broader reasoning or source work.
+
+| Change | Good place to start |
+| --- | --- |
+| Move a title or adjust its color | Studio |
+| Trim a clip or split it at the playhead | Studio |
+| Make the opening explain the product sooner | Agent |
+| Add a completely new scene with new media | Agent |
+| Fix a lint issue you do not understand | Copy it to the agent from Studio |
+| Export a vertical and landscape version | Studio or agent, depending on whether the layout must change |
+
+<Tip>
+  If you can point at the thing you want to change, try Studio. If you need to describe a new outcome, ask the agent.
+</Tip>
+
+## Start with a five-minute tour
+
+Open [Tour the workspace](/studio/tour), then keep the relevant task page nearby while you edit.

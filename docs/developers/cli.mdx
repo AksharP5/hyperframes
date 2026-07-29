@@ -1,0 +1,54 @@
+---
+title: "CLI guide"
+description: "Find the HyperFrames command for creating, checking, rendering, publishing, and automating projects."
+---
+
+Use this page to choose a command. The [complete CLI reference](/packages/cli) contains every flag and environment variable.
+
+## Everyday project loop
+
+| Task | Command |
+| --- | --- |
+| Create a project | `npx hyperframes init my-video` |
+| Open Studio | `npx hyperframes preview` |
+| Check HTML structure | `npx hyperframes lint` |
+| Run browser, layout, motion, and contrast checks | `npx hyperframes check` |
+| Capture review frames | `npx hyperframes snapshot --at 0,2,5` |
+| Render a video | `npx hyperframes render --output output.mp4` |
+| Publish a stable review link | `npx hyperframes publish` |
+| Diagnose the machine | `npx hyperframes doctor` |
+
+## Work with media
+
+| Task | Command |
+| --- | --- |
+| Inspect media and project information | `npx hyperframes info` |
+| Transcribe speech | `npx hyperframes transcribe <file>` |
+| Generate narration | `npx hyperframes tts <script>` |
+| Capture a website | `npx hyperframes capture <url>` |
+
+## Reuse and inspect
+
+| Task | Command |
+| --- | --- |
+| Add a Catalog item | `npx hyperframes add <name>` |
+| List compositions | `npx hyperframes compositions` |
+| Inspect keyframe behavior | `npx hyperframes keyframes` |
+| Compare outputs | `npx hyperframes compare` |
+
+## Rendering and automation
+
+The CLI also supports:
+
+- batch and variable-driven output;
+- image sequences and several video formats;
+- managed cloud rendering;
+- AWS Lambda and Google Cloud Run workflows;
+- machine-readable JSON output;
+- publishing and shared spaces.
+
+Start with the simple command, then open the [full reference](/packages/cli) for the exact options needed by automation or infrastructure.
+
+<Tip>
+  Run `npx hyperframes <command> --help` for the installed version’s exact syntax.
+</Tip>

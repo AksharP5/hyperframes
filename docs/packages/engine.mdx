@@ -3,7 +3,7 @@ title: "@hyperframes/engine"
 description: "Seekable page-to-video capture engine using Chrome's BeginFrame API."
 ---
 
-The engine package provides the low-level video capture pipeline: it loads an HTML page in headless Chrome, seeks to each frame independently, and captures pixel buffers using Chrome's `HeadlessExperimental.beginFrame` API. This is the layer that makes Hyperframes rendering deterministic.
+The engine package provides the low-level video capture pipeline: it loads an HTML page in headless Chrome, seeks to each frame independently, and captures pixel buffers using Chrome's `HeadlessExperimental.beginFrame` API. This is the layer that makes HyperFrames rendering deterministic.
 
 ```bash
 npm install @hyperframes/engine
@@ -17,7 +17,7 @@ npm install @hyperframes/engine
 
 **Use `@hyperframes/engine` when you need to:**
 - Build a custom rendering pipeline with full control over frame capture
-- Integrate Hyperframes capture into an existing video processing system
+- Integrate HyperFrames capture into an existing video processing system
 - Capture individual frames (e.g., for thumbnails or sprite sheets) without encoding to video
 - Implement a custom encoding backend (not FFmpeg)
 
@@ -35,7 +35,7 @@ The engine implements a **seek-and-capture** loop that is fundamentally differen
     The engine starts `chrome-headless-shell`, a minimal headless Chrome binary optimized for programmatic control via the Chrome DevTools Protocol (CDP).
   </Step>
   <Step title="Load the composition">
-    Your HTML composition is loaded into a browser page. The Hyperframes runtime is injected to manage timeline seeking.
+    Your HTML composition is loaded into a browser page. The HyperFrames runtime is injected to manage timeline seeking.
   </Step>
   <Step title="Seek to each frame">
     For every frame in the video (e.g., 900 frames for a 30-second video at 30fps), the engine calls `window.__hf.seek(time)` to advance the composition to the exact timestamp. No wall clock is involved — each frame is independently positioned.
@@ -351,7 +351,7 @@ const pqRgb = float16ToPqRgb(rgba16, width, height, bytesPerRow);
 
 ## The `window.__hf` Protocol
 
-The engine communicates with the browser page via the `window.__hf` protocol. Any page that implements this protocol can be captured by the engine — you are not limited to Hyperframes compositions.
+The engine communicates with the browser page via the `window.__hf` protocol. Any page that implements this protocol can be captured by the engine — you are not limited to HyperFrames compositions.
 
 ```typescript
 // The page must expose this on window.__hf
@@ -386,7 +386,7 @@ For more on how this enables deterministic output, see [Deterministic Rendering]
 
 ### Seek Contract
 
-The engine relies on the Hyperframes runtime's `window.__hf.seek(time)` function. When called, `seek`:
+The engine relies on the HyperFrames runtime's `window.__hf.seek(time)` function. When called, `seek`:
 
 1. Pauses all GSAP timelines
 2. Seeks every timeline to the exact timestamp

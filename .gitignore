@@ -22,6 +22,10 @@ Thumbs.db
 # with `bun run upload:docs-images`. Add explicit negations below for any
 # non-generated assets (logos, svgs) that should stay in the repo.
 docs/images/
+!docs/images/
+docs/images/*
+!docs/images/studio/
+!docs/images/studio/*.jpg
 
 videos/
 

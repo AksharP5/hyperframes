@@ -1,9 +1,9 @@
 ---
 title: Deploy
-description: "Run a Hyperframes preview + render API in the cloud from an official template."
+description: "Run a HyperFrames preview + render API in the cloud from an official template."
 ---
 
-Hyperframes ships three official deployment templates that wrap a composition in a small web app: an in-browser preview and a `/api/render` endpoint that produces an MP4 server-side. All are open source, Apache-2.0 — Vercel and Cloudflare deploy from a single button, Modal from a single `modal deploy`.
+HyperFrames ships three official deployment templates that wrap a composition in a small web app: an in-browser preview and a `/api/render` endpoint that produces an MP4 server-side. All are open source, Apache-2.0 — Vercel and Cloudflare deploy from a single button, Modal from a single `modal deploy`.
 
 | Template | Compute | Storage | Deploy |
 |----------|---------|---------|--------|
@@ -155,7 +155,7 @@ All three templates ship with one bundled composition (`ui-3d-reveal`). To use y
 
 ## When to use a template vs. roll your own
 
-Templates are optimized for **a single render endpoint behind a preview UI**. They're the fastest way to get a hosted Hyperframes render API running. If you need:
+Templates are optimized for **a single render endpoint behind a preview UI**. They're the fastest way to get a hosted HyperFrames render API running. If you need:
 
 - A **render queue** with retries, deduplication, or priorities — start from a template, then add your own queue (e.g. Vercel Queues, Cloudflare Queues, SQS).
 - **Multi-tenant rendering** with per-user composition uploads — start from a template, replace the bundled composition with a runtime-fetched one.

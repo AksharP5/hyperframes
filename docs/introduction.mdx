@@ -1,135 +1,84 @@
 ---
-title: Introduction
-description: "Write HTML. Render video. Built for agents."
+title: "Welcome to HyperFrames"
+description: "Make videos with an AI agent, refine them in Studio, and export the finished result."
 ---
 
-Hyperframes is an open-source framework that turns HTML into deterministic, frame-by-frame rendered video — so you can define a video the same way you build a web page.
+HyperFrames is a way to create videos with an AI agent and still keep full control over the result.
 
-## See It in Action
+Tell your agent what you want to make. It can plan the story, gather media, build the scenes, add motion, and open the project in **HyperFrames Studio**. In Studio, you can watch the video, rearrange timing, edit text and design, adjust animation, and export the finished file.
 
-Here is a video defined entirely as HTML:
-
-```html
-<div id="root" data-composition-id="demo"
-     data-start="0" data-width="1920" data-height="1080">
-
-  <video id="clip-1" data-start="0" data-duration="5"
-         data-track-index="0" src="intro.mp4" muted playsinline></video>
-
-  <h1 id="title" class="clip"
-      data-start="1" data-duration="4" data-track-index="1"
-      style="font-size: 72px; color: white;">
-    Welcome to Hyperframes
-  </h1>
-
-  <audio id="bg-music" data-start="0" data-duration="5"
-         data-track-index="2" data-volume="0.5" src="music.wav"></audio>
-</div>
-```
-
-Run `npx hyperframes render --output demo.mp4` and this produces an MP4 with deterministic, frame-by-frame capture. Same input, identical output, every time. No timeline editor. No proprietary format. Just HTML.
+You do not need to understand the rendering engine or write HTML to get started.
 
 <CardGroup cols={2}>
-  <Card title="Watch the Showcase" icon="play" href="/showcase">
-    Finished HyperFrames videos you can watch, read, run, and remix — product launches, website-to-video demos, UI reveals, and VFX experiments.
+  <Card title="Try the browser Playground" icon="browser" href="https://www.hyperframes.dev/">
+    Explore and remix HyperFrames work without beginning in a local project.
   </Card>
-  <Card title="Browse the Catalog" icon="grid-2" href="/catalog/blocks/data-chart">
-    50+ ready-to-use blocks and components — social overlays, shader transitions, data visualizations, and cinematic effects. Install any of them with one command.
+  <Card title="Make something with an agent" icon="sparkles" href="/quickstart">
+    Describe the outcome you want. Your agent chooses the right workflow and builds a first version.
   </Card>
-  <Card title="Quick Start" icon="rocket" href="/quickstart">
-    Go from zero to rendered video in under 5 minutes.
+  <Card title="Learn HyperFrames Studio" icon="palette" href="/studio">
+    See how to review, edit, animate, and export a project in the visual editor.
   </Card>
-  <Card title="Skills catalog" icon="sparkles" href="/guides/skills">
-    Every HyperFrames AI agent skill — router, creation workflows, and domain skills. Install with `npx skills add heygen-com/hyperframes`.
+  <Card title="Browse reusable visuals" icon="grid-2" href="/catalog">
+    Find transitions, captions, charts, overlays, code animations, and complete scenes.
+  </Card>
+  <Card title="Build with the framework" icon="code" href="/developers">
+    Use the CLI, SDK, packages, schemas, and deployment tools.
   </Card>
 </CardGroup>
 
-## Why Hyperframes?
+## What can you make?
 
-<Tabs>
-  <Tab title="For developers">
-    **You already know the stack.** Compositions are HTML files with data attributes. Animations use GSAP, Lottie, CSS, or any runtime that can seek to a given frame. There is no custom DSL, no proprietary component system, and no React requirement. If you can build a web page, you can build a video.
-  </Tab>
-  <Tab title="For AI agents">
-    **Agents already speak HTML.** Most video tools require complex APIs or drag-and-drop interfaces that agents cannot operate. Hyperframes compositions are plain HTML documents — the format LLMs are best at generating. The CLI is non-interactive by default — all inputs via flags, plain text output, fail-fast on errors — so agents can drive every command without prompts or parsing.
-  </Tab>
-  <Tab title="For automated pipelines">
-    **Determinism by design.** The rendering pipeline is seek-driven with no wall-clock dependencies. `frame = floor(time * fps)` — every frame is independently captured via Chrome's `beginFrame` API and encoded with FFmpeg. Same input always produces identical output, making CI testing and batch rendering reliable.
-  </Tab>
-</Tabs>
+HyperFrames is useful for more than one kind of video.
 
-<Tip>
-  Hyperframes was designed from the ground up for AI agent integration. Compositions are plain HTML that any LLM can generate. The CLI is non-interactive by default — flag-driven with plain text output — so agents can scaffold, render, and lint without interactive prompts. Add `--human-friendly` for the interactive terminal UI. See [CLI](/packages/cli) for details.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Product and website videos" icon="rocket">
+    Turn a product, website, or launch brief into a polished promo, tour, or social video.
+  </Card>
+  <Card title="Explainers" icon="lightbulb">
+    Turn notes, an article, or a difficult idea into a visual story with narration and motion.
+  </Card>
+  <Card title="Captions and video overlays" icon="closed-captioning">
+    Add subtitles, kinetic titles, lower thirds, quotes, and information cards to existing footage.
+  </Card>
+  <Card title="Motion graphics" icon="wand-magic-sparkles">
+    Create title sequences, animated statistics, charts, logo stings, and transparent overlays.
+  </Card>
+  <Card title="Music-driven videos" icon="music">
+    Cut images, footage, lyrics, and motion to the beat of a music track.
+  </Card>
+  <Card title="Interactive slideshows" icon="display">
+    Build presentations with reveals, speaker notes, branches, and clickable hotspots.
+  </Card>
+</CardGroup>
 
-## How It Works
+## How the pieces fit together
 
 <Steps>
-  <Step title="Write HTML">
-    Define your video as an HTML document. Each element gets data attributes for timing (`data-start`, `data-duration`) and layout (`data-track-index`). Add animations with GSAP, Lottie, CSS transitions, or any seekable runtime via the Frame Adapter pattern.
+  <Step title="You describe the result">
+    Give an agent a product link, a script, a piece of footage, a pull request, a song, or a plain-language idea.
   </Step>
-  <Step title="Preview in the browser">
-    Run `npx hyperframes preview` to open a live preview in your browser. Edit your HTML and see changes instantly — no build step, no compilation.
+  <Step title="The agent builds a project">
+    The agent chooses the matching HyperFrames workflow, confirms the important creative choices, and creates the scenes and media.
   </Step>
-  <Step title="Render to MP4">
-    Run `npx hyperframes render --output output.mp4` to produce a final video. The engine seeks each frame in headless Chrome, captures it with `beginFrame`, and pipes the result through FFmpeg. Run locally or in Docker for fully reproducible output.
+  <Step title="You review it in Studio">
+    Play the result, leave direction, edit visible elements, change timing, adjust animation, and check the final frame.
+  </Step>
+  <Step title="You export or share it">
+    Render a standard video, a transparent overlay, a high-resolution file, or a shareable published project.
   </Step>
 </Steps>
 
-## Packages
+<Note>
+  HyperFrames projects are stored as normal files rather than a locked proprietary project format. That matters to agents and developers, but you can use the visual Studio without working directly with those files.
+</Note>
 
-<CardGroup cols={2}>
-  <Card title="@hyperframes/core" icon="cube" href="/packages/core">
-    Types, HTML parsing, runtime, and composition linter — the foundation everything else builds on.
-  </Card>
-  <Card title="@hyperframes/sdk" icon="code" href="/packages/sdk">
-    Headless composition editing engine for agents, custom editors, patch events, and persistence.
-  </Card>
-  <Card title="@hyperframes/engine" icon="gear" href="/packages/engine">
-    Seekable page-to-video capture engine. Loads HTML in headless Chrome and captures frame-by-frame.
-  </Card>
-  <Card title="@hyperframes/player" icon="play" href="/packages/player">
-    Embeddable web component for playing HyperFrames compositions in any web page.
-  </Card>
-  <Card title="@hyperframes/producer" icon="video" href="/packages/producer">
-    Full rendering pipeline combining capture and FFmpeg encoding into a single API call.
-  </Card>
-  <Card title="@hyperframes/shader-transitions" icon="sparkles" href="/packages/shader-transitions">
-    WebGL shader transitions for scene-to-scene motion and render-time compositing.
-  </Card>
-  <Card title="@hyperframes/aws-lambda" icon="cloud" href="/packages/aws-lambda">
-    AWS Lambda and Step Functions adapter for distributed rendering.
-  </Card>
-  <Card title="@hyperframes/gcp-cloud-run" icon="cloud" href="/packages/gcp-cloud-run">
-    Google Cloud Run and Workflows adapter for distributed rendering.
-  </Card>
-  <Card title="@hyperframes/studio" icon="palette" href="/packages/studio">
-    Visual composition editor UI for building and previewing timelines interactively.
-  </Card>
-  <Card title="hyperframes (CLI)" icon="terminal" href="/packages/cli">
-    Command-line tool for creating, previewing, and rendering compositions.
-  </Card>
-</CardGroup>
+## Choose the shortest path
 
-## Next Steps
+- If you have an idea or source material, start with [Make your first video](/quickstart).
+- If you want to explore first, open the [browser Playground](https://www.hyperframes.dev/).
+- If an agent already created a project for you, open [Studio](/studio).
+- If you want a ready-made visual, browse the [Catalog](/catalog).
+- If you are integrating HyperFrames into another product, go to [Developers](/developers).
 
-<CardGroup cols={2}>
-  <Card title="Showcase" icon="play" href="/showcase">
-    Get inspired by finished videos and production launch projects.
-  </Card>
-  <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Build and render your first video in 60 seconds
-  </Card>
-  <Card title="Skills catalog" icon="sparkles" href="/guides/skills">
-    Every HyperFrames AI agent skill — router, creation workflows, and domain skills
-  </Card>
-  <Card title="Compositions" icon="layer-group" href="/concepts/compositions">
-    Understand the HTML-based data model behind every video
-  </Card>
-  <Card title="GSAP Animation" icon="wand-magic-sparkles" href="/guides/gsap-animation">
-    Add timeline-driven animations with GSAP
-  </Card>
-  <Card title="Rendering" icon="film" href="/guides/rendering">
-    Render locally, in Docker, or in a CI pipeline
-  </Card>
-</CardGroup>
+Not sure which one fits? [Choose your path](/guides/choose-your-path) gives you a simple decision guide.

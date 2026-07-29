@@ -1,0 +1,41 @@
+---
+title: "Transcribe media and create captions"
+description: "Turn speech into editable text, synchronize it, and finish the captions in Studio."
+---
+
+Transcription creates timed words from audio or video. Captions turn those words into a readable visual layer.
+
+## A practical workflow
+
+<Steps>
+  <Step title="Transcribe the media">
+    Ask the agent to transcribe the source, or use the CLI:
+
+    ```bash
+    npx hyperframes transcribe interview.mp4
+    ```
+  </Step>
+  <Step title="Correct the text">
+    Fix names, product terms, numbers, punctuation, and obvious recognition errors before styling.
+  </Step>
+  <Step title="Create caption segments">
+    Group words into short readable phrases while keeping their timing connected to the speech.
+  </Step>
+  <Step title="Edit in Studio">
+    Open [Captions](/studio/captions) to adjust text, timing, placement, style, and animation.
+  </Step>
+  <Step title="Review twice">
+    Watch once with sound for synchronization and once muted for readability.
+  </Step>
+</Steps>
+
+## Good caption decisions
+
+- Keep lines short enough to scan.
+- Break on meaning rather than an arbitrary word count.
+- Do not cover faces or product controls.
+- Use emphasis sparingly.
+- Keep contrast reliable as the background changes.
+- Preserve the exact spoken meaning.
+
+Use [Captions or recuts](/guides/captions-and-recuts) when starting from existing talking-head footage.

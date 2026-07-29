@@ -3,8 +3,6 @@ title: "VFX Text Cursor"
 description: "Dramatic text reveal with cursor glow, chromatic shadow rays, and directional lighting on a black stage. Canvas-based shader post-processing with spectral color edges."
 ---
 
-# VFX Text Cursor
-
 Dramatic text reveal with cursor glow, chromatic shadow rays, and directional lighting on a black stage. Canvas-based shader post-processing with spectral color edges.
 
 `html-in-canvas` `text` `shader` `cursor` `chromatic`
@@ -15,7 +13,16 @@ Dramatic text reveal with cursor glow, chromatic shadow rays, and directional li
 
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-text-cursor.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-text-cursor.png" autoPlay muted loop playsInline />
 
-## Install
+## Add it to a project
+
+Ask your agent:
+
+```text
+Add the VFX Text Cursor block from the HyperFrames Catalog to this project.
+Replace the demo content with mine and match the existing design and timing.
+```
+
+Or install it from the project folder:
 
 <CodeGroup>
 
@@ -25,7 +32,7 @@ npx hyperframes add vfx-text-cursor
 
 </CodeGroup>
 
-## Details
+<Accordion title="Technical details">
 
 | Property | Value |
 | --- | --- |
@@ -33,16 +40,24 @@ npx hyperframes add vfx-text-cursor
 | Dimensions | 1920×1080 |
 | Duration | 8s |
 
-## Files
+**Installed files**
 
 | File | Target | Type |
 | --- | --- | --- |
 | `vfx-text-cursor.html` | `compositions/vfx-text-cursor.html` | hyperframes:composition |
 
-## Usage
+</Accordion>
 
-After installing, add the block to your host composition:
+## Use it
+
+Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
+
+<Accordion title="HTML for agents and developers">
+
+The installed block can be added to a host composition with:
 
 ```html
 <div data-composition-id="vfx-text-cursor" data-composition-src="compositions/vfx-text-cursor.html" data-start="0" data-duration="8" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
+
+</Accordion>

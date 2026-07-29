@@ -1,0 +1,39 @@
+---
+title: "Developers"
+description: "CLI, SDK, packages, schemas, deployment, integrations, and contribution guides."
+---
+
+This section is for people integrating HyperFrames, automating it, extending the editor, deploying rendering infrastructure, or working directly with composition source.
+
+If you only want to create or edit a video, begin with [Guides](/guides) or [Studio](/studio).
+
+<CardGroup cols={2}>
+  <Card title="CLI" icon="terminal" href="/developers/cli">
+    Choose the command for creating, checking, rendering, publishing, and automating projects.
+  </Card>
+  <Card title="SDK" icon="code" href="/sdk/overview">
+    Query and edit compositions, persist changes, and build custom editing surfaces.
+  </Card>
+  <Card title="Packages" icon="boxes-stacked" href="/packages/core">
+    Use the framework as focused packages for parsing, playback, rendering, Studio, and infrastructure.
+  </Card>
+  <Card title="HTML schema" icon="brackets-curly" href="/reference/html-schema">
+    Reference the composition elements, timing attributes, tracks, variables, and media contract.
+  </Card>
+  <Card title="Deployment" icon="cloud" href="/deploy/cloud">
+    Render with managed cloud infrastructure, AWS Lambda, or Google Cloud Run.
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="/contributing">
+    Work on the framework, Catalog, tests, and releases.
+  </Card>
+</CardGroup>
+
+## Start with the smallest surface
+
+- Use the **CLI** for normal project and render automation.
+- Use the **SDK** when your application needs to inspect or edit compositions.
+- Use the **Player** when you need embedded playback.
+- Install individual **packages** when you are building infrastructure or a custom product surface.
+- Read the raw **schema** when generating or validating composition source.
+
+Most applications do not need to depend on every package.

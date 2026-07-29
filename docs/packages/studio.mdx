@@ -3,7 +3,7 @@ title: "@hyperframes/studio"
 description: "Visual composition editor with live preview, timeline view, and hot reload."
 ---
 
-The studio package provides a browser-based visual editor for creating and previewing Hyperframes compositions. It gives you a real-time preview of your video, a visual timeline of all clips, and player controls for seeking and playback — all updating live as you edit your HTML.
+The studio package provides a browser-based visual editor for creating and previewing HyperFrames compositions. It gives you a real-time preview of your video, a visual timeline of all clips, and player controls for seeking and playback — all updating live as you edit your HTML.
 
 ```bash
 npm install @hyperframes/studio
@@ -13,7 +13,7 @@ npm install @hyperframes/studio
 
 **Use `@hyperframes/studio` when you need to:**
 - Build a custom composition editor UI (e.g., embedded in your own web application)
-- Integrate the Hyperframes preview player into a larger product
+- Integrate the HyperFrames preview player into a larger product
 - Extend the editor with custom panels, toolbars, or integrations
 
 **Use a different package if you want to:**
@@ -165,7 +165,7 @@ const picker = useElementPicker(iframeRef);
 
 ### Live Preview
 
-The studio renders your composition in an iframe using the Hyperframes runtime. What you see in the preview is exactly what will be captured during rendering — the same runtime code, the same seek logic, the same clip lifecycle.
+The studio renders your composition in an iframe using the HyperFrames runtime. What you see in the preview is exactly what will be captured during rendering — the same runtime code, the same seek logic, the same clip lifecycle.
 
 Changes to your HTML are picked up automatically through hot reload, so you can edit `index.html` in your editor and see the result in the browser within milliseconds.
 
@@ -195,7 +195,7 @@ For a full breakdown of:
 - which clip types support start trim
 - current limitations and mental models
 
-see [Timeline Editing](/guides/timeline-editing).
+see [Timeline Editing in Studio](/studio/timeline).
 
 ### Player Controls
 
@@ -214,7 +214,7 @@ File changes are detected and applied without restarting the server. The preview
 
 The studio is a React application with the following structure:
 
-1. **Iframe preview** — your composition HTML is loaded in an isolated iframe with the Hyperframes runtime injected. This ensures the preview uses the same rendering path as production.
+1. **Iframe preview** — your composition HTML is loaded in an isolated iframe with the HyperFrames runtime injected. This ensures the preview uses the same rendering path as production.
 
 2. **Runtime bridge** — the studio communicates with the iframe via `postMessage` to control playback (play, pause, seek) and receive state updates (current time, duration, readiness).
 

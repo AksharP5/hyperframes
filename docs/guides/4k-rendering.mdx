@@ -3,7 +3,7 @@ title: 4K Rendering
 description: "Render any composition to 4K (3840×2160) without rewriting it — the CLI supersamples a 1080p composition via Chrome's device scale factor."
 ---
 
-Hyperframes renders to 4K (3840×2160) two ways. Both produce a true 4K MP4; pick the one that matches your project.
+HyperFrames renders to 4K (3840×2160) two ways. Both produce a true 4K MP4; pick the one that matches your project.
 
 <CardGroup cols={2}>
   <Card title="Author at 4K" icon="ruler">
@@ -73,7 +73,7 @@ npx hyperframes render --resolution 1080p       # explicit 1080p (no-op on 1080p
 
 ## How `--resolution` works (supersampling)
 
-The composition stays at its authored dimensions. Hyperframes computes a `deviceScaleFactor` from the ratio of output to composition dimensions and passes it to Chrome:
+The composition stays at its authored dimensions. HyperFrames computes a `deviceScaleFactor` from the ratio of output to composition dimensions and passes it to Chrome:
 
 | Composition | `--resolution` | `deviceScaleFactor` | Output |
 |-------------|---------------|--------------------|--------|
@@ -122,7 +122,7 @@ hyperframes render --resolution portrait-4k  # composition is 1920×1080
 
 ### The scale must be an integer
 
-The width ratio (output ÷ composition) must be a positive integer. 1080p → 4K is exactly `2×`. 720p → 4K would be `3×` and works. Non-integer scales like 900p → 4K (`2.4×`) introduce aliasing on subpixel-positioned text — Hyperframes refuses rather than producing a blurry render.
+The width ratio (output ÷ composition) must be a positive integer. 1080p → 4K is exactly `2×`. 720p → 4K would be `3×` and works. Non-integer scales like 900p → 4K (`2.4×`) introduce aliasing on subpixel-positioned text — HyperFrames refuses rather than producing a blurry render.
 
 ### Downsampling is not supported
 

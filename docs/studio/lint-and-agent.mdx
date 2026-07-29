@@ -1,0 +1,48 @@
+---
+title: "Fix issues with your agent"
+description: "Run Studio checks, understand the result, and send useful context to an AI agent."
+---
+
+Studio can surface composition issues before you spend time on a final render.
+
+## Run the check
+
+Choose **Lint** at the bottom of the left sidebar. Studio runs the check and opens **HyperFrame Lint Results**.
+
+Read each result as:
+
+- what is wrong;
+- where it appears;
+- why it matters;
+- what evidence or source location is available.
+
+## Fix simple issues directly
+
+You may be able to correct a visible text, layout, timing, or media problem in Studio.
+
+Run the check again after the change.
+
+## Copy the problem to your agent
+
+Use **Copy to Agent** when the issue requires source work or the explanation is unfamiliar. Studio copies the findings and project context; paste that prompt into your agent chat.
+
+Add what you were doing and what you expected:
+
+```text
+This appeared after I shortened the intro clip. I expected the title
+animation to keep its current timing. Please fix the issue without
+changing the rest of the opening.
+```
+
+The copied technical context helps the agent locate the problem; your human description tells it what must remain true.
+
+## Validate before delivery
+
+The agent or terminal workflow should also run:
+
+```bash
+npx hyperframes lint
+npx hyperframes check
+```
+
+Passing checks reduce avoidable failures, but you should still watch the final output.

@@ -1,261 +1,139 @@
 ---
-title: Quickstart
-description: "Create, preview, and render your first Hyperframes video in under two minutes."
+title: "Make your first video"
+description: "Ask an AI agent to create a HyperFrames project, review it in Studio, and export the result."
 ---
 
-Go from zero to a rendered MP4 — either by prompting your AI agent or by starting a project manually.
+The simplest way to start is to tell an AI coding agent what you want to make. HyperFrames gives the agent the product knowledge and workflows it needs; Studio gives you a visual place to review and improve the result.
 
-## Option 1: With an AI coding agent (recommended)
+## Before you start
 
-Install the HyperFrames skills, then describe the video you want:
+You need:
 
-```bash
-npx skills add heygen-com/hyperframes
-```
+- an AI coding agent such as Claude Code, Cursor, Codex, Gemini CLI, or GitHub Copilot CLI;
+- Node.js installed on your computer;
+- a folder where the agent can create the project.
 
-The installer shows a picker. Select the **core set** every project needs — these register as slash commands in Claude Code (Cursor, Gemini CLI, Codex, [Google Antigravity](/guides/antigravity), and [GitHub Copilot CLI](/guides/copilot-cli) load them too):
+You do **not** need to design the timeline or write a technical specification before you begin.
 
-| Core skill (install all) | What it does |
-|--------------------------|--------------|
-| `/hyperframes` | **The entry skill — read it first.** Orients you to the whole surface and routes "make me a video" to the right workflow |
-| `/hyperframes-core` | Composition contract — HTML structure, `data-*` attributes, clips, tracks |
-| `/hyperframes-animation` | All animation + the GSAP / Lottie / Three.js / Anime.js / CSS / WAAPI / TypeGPU runtime adapters |
-| `/hyperframes-creative` | Design direction — palettes, typography, narration, beat planning |
-| `/hyperframes-cli` | Dev-loop CLI — init, lint, preview, render, doctor |
-| `/media-use` | Asset preprocessing — TTS, transcription, background removal |
-| `/hyperframes-registry` | Install catalog blocks and components |
-| `/general-video` | The general authoring workflow — the fallback for any video that doesn't match a specific workflow |
-
-The **workflow skills** are optional — add the ones that match your inputs, and `/hyperframes` routes to whichever you've installed: `/product-launch-video`, `/faceless-explainer`, `/pr-to-video`, `/embedded-captions`, `/talking-head-recut`, `/motion-graphics`, `/music-to-video`, `/slideshow`, `/general-video`, `/remotion-to-hyperframes`. See the [skills catalog](/guides/skills) for the full list with one-line "use when" descriptions.
-
-<Tip>
-  To skip the picker and install everything (core + every workflow) in one shot, run `npx skills add heygen-com/hyperframes --all`.
-</Tip>
-
-These skills teach your agent how to write correct compositions, GSAP and runtime-adapter animations, Tailwind v4 browser-runtime styles, captions, and voiceovers. Invoking a slash command loads its context explicitly, which produces correct output the first time — and **starting at `/hyperframes` lets it route your request to the right workflow.**
-
-<Note>
-  Claude Design uses a different entry path. Open [`docs/guides/claude-design-hyperframes.md`](https://github.com/heygen-com/hyperframes/blob/main/docs/guides/claude-design-hyperframes.md) on GitHub, click the download button (↓) to save it, then attach to your Claude Design chat. It produces a valid first draft you can refine in any AI coding agent. See the [Claude Design guide](/guides/claude-design).
-</Note>
-
-### Try it: example prompts
-
-Copy any of these into your agent to get started.
-
-<CardGroup cols={1}>
-  <Card title="Cold start — describe what you want">
-    > Using `/hyperframes`, create a 10-second product intro with a fade-in title over a dark background and subtle background music.
-  </Card>
-  <Card title="Warm start — turn existing context into a video">
-    > Take a look at this GitHub repo https://github.com/heygen-com/hyperframes and explain its uses and architecture to me using `/hyperframes`.
-
-    > Summarize the attached PDF into a 45-second pitch video using `/hyperframes`.
-
-    > Turn this CSV into an animated bar chart race using `/hyperframes`.
-  </Card>
-  <Card title="Format-specific">
-    > Make a 9:16 TikTok-style hook video about [topic] using `/hyperframes`, with bouncy captions synced to a TTS narration.
-  </Card>
-  <Card title="Iterate — talk to the agent like a video editor">
-    > Make the title 2x bigger, swap to dark mode, and add a fade-out at the end.
-
-    > Add a lower third at 0:03 with my name and title.
-  </Card>
-</CardGroup>
-
-The agent handles scaffolding, animation, and rendering. See the [prompting guide](/guides/prompting) for more patterns, or the [pipeline guide](/guides/pipeline) for the 7-step structure (DESIGN, SCRIPT, STORYBOARD, …) that AI agents follow for multi-beat videos.
-
-<Tip>
-  Skills encode HyperFrames-specific patterns — like required `class="clip"` on timed elements, GSAP timeline registration, adapter registries such as `window.__hfLottie`, and `data-*` attribute semantics — that are not in generic web docs. Using skills produces correct compositions from the start.
-</Tip>
-
-## Option 2: Start a project manually
-
-### Prerequisites
-
-- **Node.js 22+** — runtime for the CLI and dev server
-- **FFmpeg** — video encoding for local renders
-
-<Accordion title="Install instructions">
-  <Steps>
-    <Step title="Install Node.js 22+">
-      Hyperframes requires Node.js 22 or later. Check your version:
-
-      ```bash
-      node --version
-      ```
-
-      ```bash Expected output
-      v22.0.0   # or any version >= 22
-      ```
-    </Step>
-
-    <Step title="Install FFmpeg">
-      FFmpeg is required for local video rendering (encoding captured frames into MP4).
-
-      <CodeGroup>
-      ```bash macOS
-      brew install ffmpeg
-      ```
-      ```bash Ubuntu / Debian
-      sudo apt install ffmpeg
-      ```
-      ```bash Windows
-      # Download from https://ffmpeg.org/download.html
-      # or install via winget:
-      winget install ffmpeg
-      ```
-      </CodeGroup>
-
-      Verify the installation:
-
-      ```bash
-      ffmpeg -version
-      ```
-
-      ```bash Expected output
-      ffmpeg version 7.x ...
-      ```
-    </Step>
-  </Steps>
-</Accordion>
-
-### Create your first video
+## Create the first version
 
 <Steps>
-  <Step title="Scaffold the project">
-    ```bash
-    npx hyperframes init my-video
-    cd my-video
-    ```
-
-    This starts an interactive wizard that walks you through example selection and media import. To skip prompts (e.g. in CI or from an agent), use `--non-interactive`:
+  <Step title="Install the HyperFrames skills">
+    Run this in your project folder:
 
     ```bash
-    npx hyperframes init my-video --non-interactive --example blank
+    npx hyperframes skills update
     ```
 
-    See [Examples](/examples) for all available examples.
-
-    This generates a project structure like:
-
-    <Tree>
-      <Tree.Folder name="my-video" defaultOpen>
-        <Tree.File name="meta.json" />
-        <Tree.File name="index.html" />
-        <Tree.Folder name="compositions" defaultOpen>
-          <Tree.File name="intro.html" />
-          <Tree.File name="captions.html" />
-        </Tree.Folder>
-        <Tree.Folder name="assets" defaultOpen>
-          <Tree.File name="video.mp4" />
-        </Tree.Folder>
-      </Tree.Folder>
-    </Tree>
-
-    | Path | Purpose |
-    |------|---------|
-    | `meta.json` | Project metadata (name, ID, creation date) |
-    | `index.html` | Root composition — your video's entry point |
-    | `compositions/` | Sub-compositions loaded via `data-composition-src` |
-    | `assets/` | Media files (video, audio, images) |
-
-    If you have a source video, pass it with `--video` for automatic transcription and captions:
-
-    ```bash
-    npx hyperframes init my-video --example warm-grain --video ./intro.mp4
-    ```
-
-    `hyperframes init` installs AI agent skills automatically, so you can hand off to your AI agent at any point.
+    This installs the core guidance. The `/hyperframes` router adds a specialized workflow later when your request needs one.
   </Step>
+  <Step title="Describe what you want">
+    Start your request with `/hyperframes`, then explain the result in normal language.
 
-  <Step title="Preview in the browser">
-    ```bash
-    npx hyperframes preview
+    ```text
+    /hyperframes Make a 30-second launch video for https://example.com.
+    It should feel calm and premium, use the product's real interface,
+    and end with “Start creating today.”
     ```
 
-    This starts the Hyperframes Studio and opens your composition in the browser. Edits to `index.html` reload automatically.
+    A useful request usually includes:
 
-    <Tip>
-      The dev server supports hot reload — save your HTML file and the preview updates instantly, no manual refresh needed.
-    </Tip>
+    - the subject or source;
+    - who the video is for;
+    - the rough length and format, if they matter;
+    - the feeling you want;
+    - anything that must appear or must not appear.
+
+    If something important is missing, the agent will ask. You do not need to know which HyperFrames workflow to choose.
   </Step>
+  <Step title="Approve the direction">
+    For a new project, the agent confirms the important creative choices before building. Read this like a short creative brief:
 
-  <Step title="Edit the composition">
-    Open the project with your AI coding agent (Claude Code, Cursor, etc.) — skills are installed automatically and your agent knows how to create and edit compositions.
+    - Is the main message right?
+    - Does the proposed style fit?
+    - Is the length realistic?
+    - Are the required words, visuals, and call to action included?
 
-    Or edit `index.html` directly — here's a minimal composition:
-
-    ```html index.html
-    <div id="root" data-composition-id="my-video"
-         data-start="0" data-width="1920" data-height="1080">
-
-      <!-- 1. Define a timed text clip on track 0 -->
-      <h1 id="title" class="clip"
-          data-start="0" data-duration="5" data-track-index="0"
-          style="font-size: 72px; color: white; text-align: center;
-                 position: absolute; top: 50%; left: 50%;
-                 transform: translate(-50%, -50%);">
-        Hello, Hyperframes!
-      </h1>
-
-      <!-- 2. Load GSAP for animation -->
-      <script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
-
-      <!-- 3. Create a paused timeline and register it -->
-      <script>
-        const tl = gsap.timeline({ paused: true });
-        tl.from("#title", { opacity: 0, y: -50, duration: 1 }, 0);
-        window.__timelines = window.__timelines || {};
-        window.__timelines["my-video"] = tl;
-      </script>
-    </div>
-    ```
-
-    Three rules to remember:
-
-    - **Root element** must have `data-composition-id`, `data-width`, and `data-height`
-    - **Timed elements** need `data-start`, `data-duration`, `data-track-index`, and `class="clip"`
-    - **GSAP timeline** must be created with `{ paused: true }` and registered on `window.__timelines`
+    Fix the direction here if needed. It is faster than rebuilding a finished video around the wrong idea.
   </Step>
+  <Step title="Review the result in Studio">
+    The agent starts HyperFrames Studio and gives you a local project link. You can then:
 
-  <Step title="Render to MP4">
-    ```bash
-    npx hyperframes render --output output.mp4
+    - play the full video;
+    - inspect the storyboard;
+    - move and trim clips on the timeline;
+    - select text and visual elements on the canvas;
+    - adjust design and animation;
+    - ask the agent for broader changes.
+
+    See the [Studio tour](/studio/tour) when you want to understand the workspace.
+  </Step>
+  <Step title="Ask for changes">
+    Give feedback using the result you can see:
+
+    ```text
+    Make the opening faster and reveal the product by three seconds.
+    Keep the current colors. Replace the final line with “Try it free.”
     ```
 
-    ```bash Expected output
-    ✔ Capturing frames... 150/150
-    ✔ Encoding MP4...
-    ✔ output.mp4 (1920x1080, 5.0s, 30fps)
-    ```
+    Use Studio for direct visual adjustments. Use the agent when a change affects the story, several scenes, source files, or new media.
+  </Step>
+  <Step title="Export">
+    Open the **Renders** panel in Studio, choose the format and resolution, and start the export.
 
-    Your video is now at `output.mp4`. Open it with any media player.
+    MP4 is the normal choice for a finished video. WebM or MOV may be more useful for transparent overlays or another editing workflow.
   </Step>
 </Steps>
 
-## Requirements summary
-
-| Dependency | Required | Notes |
-|-----------|----------|-------|
-| **Node.js** 22+ | Yes | Runtime for CLI and dev server |
-| **npm** or bun | Yes | Package manager |
-| **FFmpeg** | Yes | Video encoding for local renders |
-| **Docker** | No | Optional — for deterministic, reproducible renders |
-
-## Next steps
+## Pick a request that matches your material
 
 <CardGroup cols={2}>
-  <Card title="Browse the Catalog" icon="grid-2" href="/catalog/blocks/data-chart">
-    50+ ready-to-use blocks — transitions, overlays, data visualizations, and effects
+  <Card title="A product or website" icon="globe" href="/guides/create-with-agent">
+    Share the URL and explain what the video should help the audience understand or do.
   </Card>
-  <Card title="GSAP Animation" icon="wand-magic-sparkles" href="/guides/gsap-animation">
-    Add fade, slide, scale, and custom animations to your videos
+  <Card title="Notes or an idea" icon="lightbulb" href="/guides/create-with-agent">
+    Ask for an explainer when there is no website or existing footage to show.
   </Card>
-  <Card title="Examples" icon="rocket" href="/examples">
-    Start from built-in examples like Warm Grain and Swiss Grid
+  <Card title="Existing footage" icon="video" href="/guides/create-with-agent">
+    Ask for captions or designed overlays, and say whether the underlying footage should remain untouched.
   </Card>
-  <Card title="Rendering" icon="film" href="/guides/rendering">
-    Explore render options: quality presets, Docker mode, and GPU acceleration
+  <Card title="A song or audio track" icon="music" href="/guides/create-with-agent">
+    Say that the music should drive the pacing and attach the media you want cut to the beat.
+  </Card>
+</CardGroup>
+
+## If you prefer to start manually
+
+<Accordion title="Create and open a blank project">
+  Create a project:
+
+  ```bash
+  npx hyperframes init my-video
+  cd my-video
+  ```
+
+  Open it in Studio:
+
+  ```bash
+  npx hyperframes preview
+  ```
+
+  HyperFrames projects use HTML files, but you can make many changes visually in Studio or hand the folder to an agent at any point.
+</Accordion>
+
+## If something goes wrong
+
+- If the agent does not recognize `/hyperframes`, restart the agent session after installing the skills.
+- If Studio does not open, run `npx hyperframes preview` inside the project folder.
+- If a render fails, open [Troubleshooting](/guides/troubleshooting) and copy the error into your agent.
+
+## Next
+
+<CardGroup cols={2}>
+  <Card title="Choose your path" icon="route" href="/guides/choose-your-path">
+    See which workflow fits your source material and intended result.
+  </Card>
+  <Card title="Tour Studio" icon="palette" href="/studio/tour">
+    Learn what the storyboard, canvas, inspector, timeline, and render queue are for.
   </Card>
 </CardGroup>

@@ -3,15 +3,22 @@ title: "Code Scroll To Line"
 description: "The camera scrolls a long file to bring a target line to center and spotlights it — for walking through real modules."
 ---
 
-# Code Scroll To Line
-
 The camera scrolls a long file to bring a target line to center and spotlights it — for walking through real modules.
 
 `code` `code-animation` `scroll` `developer`
 
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-scroll.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-scroll.png" autoPlay muted loop playsInline />
 
-## Install
+## Add it to a project
+
+Ask your agent:
+
+```text
+Add the Code Scroll To Line block from the HyperFrames Catalog to this project.
+Replace the demo content with mine and match the existing design and timing.
+```
+
+Or install it from the project folder:
 
 <CodeGroup>
 
@@ -21,7 +28,7 @@ npx hyperframes add code-scroll
 
 </CodeGroup>
 
-## Details
+<Accordion title="Technical details">
 
 | Property | Value |
 | --- | --- |
@@ -29,16 +36,24 @@ npx hyperframes add code-scroll
 | Dimensions | 1920×1080 |
 | Duration | 6s |
 
-## Files
+**Installed files**
 
 | File | Target | Type |
 | --- | --- | --- |
 | `code-scroll.html` | `compositions/code-scroll.html` | hyperframes:composition |
 
-## Usage
+</Accordion>
 
-After installing, add the block to your host composition:
+## Use it
+
+Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
+
+<Accordion title="HTML for agents and developers">
+
+The installed block can be added to a host composition with:
 
 ```html
 <div data-composition-id="code-scroll" data-composition-src="compositions/code-scroll.html" data-start="0" data-duration="6" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
+
+</Accordion>

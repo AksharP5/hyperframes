@@ -1,0 +1,104 @@
+---
+title: "Create with an agent"
+description: "Give an AI agent the right input and let HyperFrames choose the matching creation workflow."
+---
+
+You do not need to memorize the HyperFrames workflows. Start with `/hyperframes`, describe the result, and let the router choose.
+
+## Install once
+
+```bash
+npx hyperframes skills update
+```
+
+Then begin your request with `/hyperframes`.
+
+## Choose by what you have
+
+| Starting material | Ask for | HyperFrames workflow |
+| --- | --- | --- |
+| A product URL, website, app, or launch brief | A promo, launch video, site tour, or product showcase | Product launch video |
+| Notes, an article, or a topic without a product site | A visual explainer with invented visuals | Faceless explainer |
+| A GitHub pull request | A change summary, feature reveal, or fix explanation | PR to video |
+| Talking-head footage that only needs subtitles | Captions without changing the footage | Embedded captions |
+| Talking-head, interview, or podcast footage | Designed titles, quotes, lower thirds, and information overlays | Talking-head recut |
+| A short motion-first idea | A title, statistic, chart, logo sting, or overlay | Motion graphics |
+| A music track | A beat-synced lyric video, slideshow, or promo | Music to video |
+| A presentation | An interactive deck with reveals, notes, and navigation | Slideshow |
+| An existing Remotion composition | A source migration to HyperFrames HTML | Remotion to HyperFrames |
+| Anything else | A custom video or composition | General video |
+
+## Write a useful request
+
+The agent needs direction, not a technical implementation.
+
+```text
+/hyperframes Create a 45-second product video for https://example.com.
+The audience is small design teams. Focus on how quickly they can go
+from an idea to a shared result. Use the real product interface, keep
+the pacing confident rather than frantic, and end with “Try it together.”
+```
+
+Good information to include:
+
+- **Goal:** what should the viewer understand, feel, or do?
+- **Audience:** who is watching?
+- **Source:** URL, file, text, PR, or music.
+- **Format:** landscape, vertical, square, or presentation.
+- **Length:** only when it matters.
+- **Tone:** a few useful words, preferably with a reference.
+- **Must-haves:** exact claims, visuals, words, or constraints.
+
+Avoid filling the request with animation instructions unless a particular motion is essential. Let the first creative direction solve the communication problem.
+
+## Review the brief before the build
+
+For a fresh project, the agent confirms the direction before building. Check the message, audience, format, pacing, and required content.
+
+This is the cheapest moment to correct a misunderstanding.
+
+## Give feedback on the visible result
+
+Useful feedback names the moment, the problem, and the desired effect:
+
+```text
+At the opening, I cannot tell what the product is until too late.
+Show the interface by three seconds, but keep the first headline.
+```
+
+Less useful feedback describes a mood without locating the problem:
+
+```text
+Make it pop more.
+```
+
+You can combine both:
+
+```text
+The proof section feels flat. Keep the copy, but make the three numbers
+arrive one at a time and hold long enough to read.
+```
+
+## Use Studio during the review
+
+Open [Studio](/studio) to inspect the storyboard, play the project, select elements, adjust timing, edit animation, and export versions.
+
+Ask the agent for changes that affect several scenes or require new assets. Make direct adjustments in Studio when the target is visible and specific.
+
+## Install options for advanced users
+
+<Accordion title="Pick or install every skill manually">
+  Open the interactive picker:
+
+  ```bash
+  npx skills add heygen-com/hyperframes --full-depth
+  ```
+
+  Install the full set only when you explicitly want every workflow available up front:
+
+  ```bash
+  npx skills add heygen-com/hyperframes --all --full-depth
+  ```
+
+  Agent and non-interactive environments should normally use `npx hyperframes skills update`.
+</Accordion>

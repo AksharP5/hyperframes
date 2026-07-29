@@ -3,8 +3,6 @@ title: "Liquid Glass Widgets"
 description: "Frosted glass stat cards, showcase panel and pill chips over an aurora shader background"
 ---
 
-# Liquid Glass Widgets
-
 Frosted glass stat cards, showcase panel and pill chips over an aurora shader background
 
 `html-in-canvas` `liquid-glass-html-in-canvas` `webgpu`
@@ -15,7 +13,16 @@ Frosted glass stat cards, showcase panel and pill chips over an aurora shader ba
 
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/liquid-glass-widgets.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/liquid-glass-widgets.png" autoPlay muted loop playsInline />
 
-## Install
+## Add it to a project
+
+Ask your agent:
+
+```text
+Add the Liquid Glass Widgets block from the HyperFrames Catalog to this project.
+Replace the demo content with mine and match the existing design and timing.
+```
+
+Or install it from the project folder:
 
 <CodeGroup>
 
@@ -25,7 +32,7 @@ npx hyperframes add liquid-glass-widgets
 
 </CodeGroup>
 
-## Details
+<Accordion title="Technical details">
 
 | Property | Value |
 | --- | --- |
@@ -33,16 +40,26 @@ npx hyperframes add liquid-glass-widgets
 | Dimensions | 1920×1080 |
 | Duration | 8s |
 
-## Files
+**Installed files**
 
 | File | Target | Type |
 | --- | --- | --- |
 | `liquid-glass-widgets.html` | `compositions/liquid-glass-widgets.html` | hyperframes:composition |
+| `assets/hyperframes-logo-dark.svg` | `compositions/assets/hyperframes-logo-dark.svg` | registry:asset |
+| `lib/liquid-glass.iife.js` | `compositions/lib/liquid-glass.iife.js` | registry:asset |
 
-## Usage
+</Accordion>
 
-After installing, add the block to your host composition:
+## Use it
+
+Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
+
+<Accordion title="HTML for agents and developers">
+
+The installed block can be added to a host composition with:
 
 ```html
 <div data-composition-id="liquid-glass-widgets" data-composition-src="compositions/liquid-glass-widgets.html" data-start="0" data-duration="8" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
+
+</Accordion>

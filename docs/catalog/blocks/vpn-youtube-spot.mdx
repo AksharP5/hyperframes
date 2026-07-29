@@ -3,8 +3,6 @@ title: "VPN YouTube Spot"
 description: "Snappy Apple-style YouTube insert showing a phone finding and installing a friendly VPN app with sound effects."
 ---
 
-# VPN YouTube Spot
-
 Snappy Apple-style YouTube insert showing a phone finding and installing a friendly VPN app with sound effects.
 
 `app` `showcase` `youtube` `sfx`
@@ -19,7 +17,16 @@ HyperFrames by HeyGen make me a 7s video with Apple-style bold font and styling:
 
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vpn-youtube-spot.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vpn-youtube-spot.png" autoPlay muted loop playsInline />
 
-## Install
+## Add it to a project
+
+Ask your agent:
+
+```text
+Add the VPN YouTube Spot block from the HyperFrames Catalog to this project.
+Replace the demo content with mine and match the existing design and timing.
+```
+
+Or install it from the project folder:
 
 <CodeGroup>
 
@@ -29,7 +36,7 @@ npx hyperframes add vpn-youtube-spot
 
 </CodeGroup>
 
-## Details
+<Accordion title="Technical details">
 
 | Property | Value |
 | --- | --- |
@@ -37,17 +44,25 @@ npx hyperframes add vpn-youtube-spot
 | Dimensions | 1920×1080 |
 | Duration | 7s |
 
-## Files
+**Installed files**
 
 | File | Target | Type |
 | --- | --- | --- |
 | `vpn-youtube-spot.html` | `compositions/vpn-youtube-spot.html` | hyperframes:composition |
 | `assets/vpn-sfx.wav` | `assets/vpn-sfx.wav` | hyperframes:asset |
 
-## Usage
+</Accordion>
 
-After installing, add the block to your host composition:
+## Use it
+
+Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
+
+<Accordion title="HTML for agents and developers">
+
+The installed block can be added to a host composition with:
 
 ```html
 <div data-composition-id="vpn-youtube-spot" data-composition-src="compositions/vpn-youtube-spot.html" data-start="0" data-duration="7" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
+
+</Accordion>

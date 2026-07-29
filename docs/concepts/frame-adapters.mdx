@@ -1,13 +1,13 @@
 ---
 title: Frame Adapters
-description: "Bring your own animation runtime to Hyperframes."
+description: "Bring your own animation runtime to HyperFrames."
 ---
 
-The Frame Adapter pattern is how Hyperframes supports multiple animation runtimes. The core question every adapter answers:
+The Frame Adapter pattern is how HyperFrames supports multiple animation runtimes. The core question every adapter answers:
 
 > What should the screen look like at frame N?
 
-If a runtime can answer that, it can plug into Hyperframes.
+If a runtime can answer that, it can plug into HyperFrames.
 
 <Info>
   The Adapter API is currently at **v0** (experimental). Breaking changes are possible until v1. The core contract (seek-by-frame, deterministic output) is stable, but method signatures may evolve.
@@ -92,7 +92,7 @@ await adapter.destroy?.();
 
 ## Determinism Contract
 
-These rules are non-negotiable for any adapter. They are the foundation of Hyperframes' [deterministic rendering](/concepts/determinism) guarantee.
+These rules are non-negotiable for any adapter. They are the foundation of HyperFrames' [deterministic rendering](/concepts/determinism) guarantee.
 
 - Canonical clock: `t = frame / fps`
 - No wall-clock dependencies (`Date.now`, drift-dependent logic)
@@ -118,7 +118,7 @@ All runtime adapters live in the `/hyperframes-animation` skill — invoke it fo
 | Web Animations API | `document.getAnimations()` and `animation.currentTime` | `/hyperframes-animation` |
 | TypeGPU / WebGPU | GPU compute shaders with deterministic seek via `hf-seek` events | `/hyperframes-animation` |
 
-Community adapters are welcome -- if it can seek by frame, it belongs in Hyperframes.
+Community adapters are welcome -- if it can seek by frame, it belongs in HyperFrames.
 
 ## Conformance Tests
 
