@@ -131,7 +131,9 @@
           },
           {
             "group": "Examples",
-            "pages": ["examples"]
+            "pages": [
+              "examples"
+            ]
           },
           {
             "group": "Help",
@@ -144,349 +146,347 @@
           },
           {
             "group": "What's new",
-            "pages": ["product-updates", "weekly-updates", "changelog"]
+            "pages": [
+              "product-updates",
+              "weekly-updates",
+              "changelog"
+            ]
           }
         ]
       },
       {
         "tab": "Studio",
         "icon": "palette",
-        "pages": [
-          "studio/index",
-              "studio/tour",
-              {
-                "group": "Review",
-                "expanded": true,
-                "pages": [
-                  "studio/storyboard"
-                ]
-              },
-              {
-                "group": "Edit",
-                "expanded": false,
-                "pages": [
-                  "studio/canvas",
-                  "studio/layers",
-                  "studio/timeline",
-                  "studio/design",
-                  "studio/animation"
-                ]
-              },
-              {
-                "group": "Build",
-                "expanded": false,
-                "pages": [
-                  "studio/assets-and-blocks",
-                  "studio/captions",
-                  "studio/variables",
-                  "studio/slideshows",
-                  "studio/source"
-                ]
-              },
-              {
-                "group": "Finish",
-                "expanded": false,
-                "pages": [
-                  "studio/lint-and-agent",
-                  "studio/export",
-                  "studio/shortcuts",
-                  "studio/troubleshooting"
-                ]
-              }
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "studio/index",
+              "studio/tour"
+            ]
+          },
+          {
+            "group": "Review",
+            "pages": [
+              "studio/storyboard"
+            ]
+          },
+          {
+            "group": "Edit",
+            "pages": [
+              "studio/canvas",
+              "studio/layers",
+              "studio/timeline",
+              "studio/design",
+              "studio/animation"
+            ]
+          },
+          {
+            "group": "Build",
+            "pages": [
+              "studio/assets-and-blocks",
+              "studio/captions",
+              "studio/variables",
+              "studio/slideshows",
+              "studio/source"
+            ]
+          },
+          {
+            "group": "Finish",
+            "pages": [
+              "studio/lint-and-agent",
+              "studio/export",
+              "studio/shortcuts",
+              "studio/troubleshooting"
+            ]
+          }
         ]
       },
       {
         "tab": "Catalog",
         "icon": "grid-2",
-        "pages": [
-          "catalog/index",
-              {
-                "group": "Code Animations",
-                "pages": [
-                  "catalog/blocks/code-3d-extrude",
-                  "catalog/blocks/code-diff",
-                  "catalog/blocks/code-highlight",
-                  "catalog/blocks/code-morph",
-                  "catalog/blocks/code-particle-assemble",
-                  "catalog/blocks/code-scroll",
-                  "catalog/blocks/code-shader-dissolve",
-                  "catalog/blocks/code-snippet-flight",
-                  "catalog/blocks/code-typing"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "Captions",
-                "pages": [
-                  "catalog/components/caption-clip-wipe",
-                  "catalog/components/caption-editorial-emphasis",
-                  "catalog/components/caption-emoji-pop",
-                  "catalog/components/caption-glitch-rgb",
-                  "catalog/components/caption-gradient-fill",
-                  "catalog/components/caption-highlight",
-                  "catalog/components/caption-kinetic-slam",
-                  "catalog/components/caption-matrix-decode",
-                  "catalog/components/caption-neon-accent",
-                  "catalog/components/caption-neon-glow",
-                  "catalog/components/caption-parallax-layers",
-                  "catalog/components/caption-particle-burst",
-                  "catalog/components/caption-pill-karaoke",
-                  "catalog/components/caption-texture",
-                  "catalog/components/caption-weight-shift"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "HTML-in-Canvas",
-                "pages": [
-                  "catalog/blocks/ios26-liquid-glass",
-                  "catalog/blocks/liquid-glass-context-menu",
-                  "catalog/blocks/liquid-glass-media-controls",
-                  "catalog/blocks/liquid-glass-notification",
-                  "catalog/blocks/liquid-glass-widgets",
-                  "catalog/blocks/macos-tahoe-liquid-glass",
-                  "catalog/blocks/vfx-iphone-device",
-                  "catalog/blocks/vfx-liquid-background",
-                  "catalog/blocks/vfx-liquid-glass",
-                  "catalog/blocks/vfx-magnetic",
-                  "catalog/blocks/vfx-portal",
-                  "catalog/blocks/vfx-shatter",
-                  "catalog/blocks/vfx-text-cursor"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "Social Overlays",
-                "pages": [
-                  "catalog/blocks/instagram-follow",
-                  "catalog/blocks/macos-notification",
-                  "catalog/blocks/reddit-post",
-                  "catalog/blocks/spotify-card",
-                  "catalog/blocks/tiktok-follow",
-                  "catalog/blocks/x-post",
-                  "catalog/blocks/yt-lower-third"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "Lower Thirds",
-                "pages": [
-                  "catalog/blocks/lower-third-bild",
-                  "catalog/blocks/lt-accent-underline",
-                  "catalog/blocks/lt-bold-block",
-                  "catalog/blocks/lt-clean-bar",
-                  "catalog/blocks/lt-color-block",
-                  "catalog/blocks/lt-dark-card",
-                  "catalog/blocks/lt-kicker-name",
-                  "catalog/blocks/lt-mask-reveal",
-                  "catalog/blocks/lt-side-rule",
-                  "catalog/blocks/lt-soft-pill",
-                  "catalog/blocks/lt-stack-bars",
-                  "catalog/blocks/news-ticker"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "Shader Transitions",
-                "pages": [
-                  "catalog/blocks/chromatic-radial-split",
-                  "catalog/blocks/cinematic-zoom",
-                  "catalog/blocks/cross-warp-morph",
-                  "catalog/blocks/domain-warp-dissolve",
-                  "catalog/blocks/flash-through-white",
-                  "catalog/blocks/glitch",
-                  "catalog/blocks/gravitational-lens",
-                  "catalog/blocks/light-leak",
-                  "catalog/blocks/ridged-burn",
-                  "catalog/blocks/ripple-waves",
-                  "catalog/blocks/sdf-iris",
-                  "catalog/blocks/swirl-vortex",
-                  "catalog/blocks/thermal-distortion",
-                  "catalog/blocks/whip-pan"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "CSS Transitions",
-                "pages": [
-                  "catalog/blocks/transitions-3d",
-                  "catalog/blocks/transitions-blur",
-                  "catalog/blocks/transitions-cover",
-                  "catalog/blocks/transitions-destruction",
-                  "catalog/blocks/transitions-dissolve",
-                  "catalog/blocks/transitions-distortion",
-                  "catalog/blocks/transitions-grid",
-                  "catalog/blocks/transitions-light",
-                  "catalog/blocks/transitions-mechanical",
-                  "catalog/blocks/transitions-other",
-                  "catalog/blocks/transitions-push",
-                  "catalog/blocks/transitions-radial",
-                  "catalog/blocks/transitions-scale"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "Showcases",
-                "pages": [
-                  "catalog/blocks/app-showcase",
-                  "catalog/blocks/apple-money-count",
-                  "catalog/blocks/blue-sweater-intro-video",
-                  "catalog/blocks/code-snippet-apple-terminal-basic",
-                  "catalog/blocks/code-snippet-apple-terminal-clear-dark",
-                  "catalog/blocks/code-snippet-apple-terminal-clear-light",
-                  "catalog/blocks/code-snippet-apple-terminal-grass",
-                  "catalog/blocks/code-snippet-apple-terminal-homebrew",
-                  "catalog/blocks/code-snippet-apple-terminal-man-page",
-                  "catalog/blocks/code-snippet-apple-terminal-novel",
-                  "catalog/blocks/code-snippet-apple-terminal-ocean",
-                  "catalog/blocks/code-snippet-apple-terminal-pro",
-                  "catalog/blocks/code-snippet-apple-terminal-red-sands",
-                  "catalog/blocks/code-snippet-apple-terminal-silver-aerogel",
-                  "catalog/blocks/code-snippet-apple-terminal-solid-colors",
-                  "catalog/blocks/code-snippet-dark-2026",
-                  "catalog/blocks/code-snippet-dark-modern",
-                  "catalog/blocks/code-snippet-dark-plus",
-                  "catalog/blocks/code-snippet-high-contrast",
-                  "catalog/blocks/code-snippet-high-contrast-light",
-                  "catalog/blocks/code-snippet-light-2026",
-                  "catalog/blocks/code-snippet-light-modern",
-                  "catalog/blocks/code-snippet-light-plus",
-                  "catalog/blocks/code-snippet-monokai",
-                  "catalog/blocks/code-snippet-solarized-light",
-                  "catalog/blocks/code-snippet-visual-studio-dark",
-                  "catalog/blocks/code-snippet-visual-studio-light",
-                  "catalog/blocks/north-korea-locked-down",
-                  "catalog/blocks/nyc-paris-flight",
-                  "catalog/blocks/ui-3d-reveal",
-                  "catalog/blocks/vpn-youtube-spot"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "Data",
-                "pages": [
-                  "catalog/blocks/data-chart",
-                  "catalog/blocks/spain-map",
-                  "catalog/blocks/us-map",
-                  "catalog/blocks/us-map-bubble",
-                  "catalog/blocks/us-map-flow",
-                  "catalog/blocks/us-map-hex",
-                  "catalog/blocks/world-map"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "Effects",
-                "pages": [
-                  "catalog/components/caption-blend-difference",
-                  "catalog/components/grain-overlay",
-                  "catalog/components/grid-pixelate-wipe",
-                  "catalog/components/morph-text",
-                  "catalog/components/motion-blur",
-                  "catalog/components/parallax-unzoom",
-                  "catalog/components/parallax-zoom",
-                  "catalog/components/shimmer-sweep",
-                  "catalog/components/texture-mask-text",
-                  "catalog/components/vignette"
-                ],
-                "expanded": false
-              },
-              {
-                "group": "Blocks",
-                "pages": [
-                  "catalog/blocks/flowchart",
-                  "catalog/blocks/flowchart-vertical",
-                  "catalog/blocks/logo-outro"
-                ],
-                "expanded": false
-              }
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "catalog/index"
+            ]
+          },
+          {
+            "group": "Code Animations",
+            "pages": [
+              "catalog/blocks/code-3d-extrude",
+              "catalog/blocks/code-diff",
+              "catalog/blocks/code-highlight",
+              "catalog/blocks/code-morph",
+              "catalog/blocks/code-particle-assemble",
+              "catalog/blocks/code-scroll",
+              "catalog/blocks/code-shader-dissolve",
+              "catalog/blocks/code-snippet-flight",
+              "catalog/blocks/code-typing"
+            ]
+          },
+          {
+            "group": "Captions",
+            "pages": [
+              "catalog/components/caption-clip-wipe",
+              "catalog/components/caption-editorial-emphasis",
+              "catalog/components/caption-emoji-pop",
+              "catalog/components/caption-glitch-rgb",
+              "catalog/components/caption-gradient-fill",
+              "catalog/components/caption-highlight",
+              "catalog/components/caption-kinetic-slam",
+              "catalog/components/caption-matrix-decode",
+              "catalog/components/caption-neon-accent",
+              "catalog/components/caption-neon-glow",
+              "catalog/components/caption-parallax-layers",
+              "catalog/components/caption-particle-burst",
+              "catalog/components/caption-pill-karaoke",
+              "catalog/components/caption-texture",
+              "catalog/components/caption-weight-shift"
+            ]
+          },
+          {
+            "group": "HTML-in-Canvas",
+            "pages": [
+              "catalog/blocks/ios26-liquid-glass",
+              "catalog/blocks/liquid-glass-context-menu",
+              "catalog/blocks/liquid-glass-media-controls",
+              "catalog/blocks/liquid-glass-notification",
+              "catalog/blocks/liquid-glass-widgets",
+              "catalog/blocks/macos-tahoe-liquid-glass",
+              "catalog/blocks/vfx-iphone-device",
+              "catalog/blocks/vfx-liquid-background",
+              "catalog/blocks/vfx-liquid-glass",
+              "catalog/blocks/vfx-magnetic",
+              "catalog/blocks/vfx-portal",
+              "catalog/blocks/vfx-shatter",
+              "catalog/blocks/vfx-text-cursor"
+            ]
+          },
+          {
+            "group": "Social Overlays",
+            "pages": [
+              "catalog/blocks/instagram-follow",
+              "catalog/blocks/macos-notification",
+              "catalog/blocks/reddit-post",
+              "catalog/blocks/spotify-card",
+              "catalog/blocks/tiktok-follow",
+              "catalog/blocks/x-post",
+              "catalog/blocks/yt-lower-third"
+            ]
+          },
+          {
+            "group": "Lower Thirds",
+            "pages": [
+              "catalog/blocks/lower-third-bild",
+              "catalog/blocks/lt-accent-underline",
+              "catalog/blocks/lt-bold-block",
+              "catalog/blocks/lt-clean-bar",
+              "catalog/blocks/lt-color-block",
+              "catalog/blocks/lt-dark-card",
+              "catalog/blocks/lt-kicker-name",
+              "catalog/blocks/lt-mask-reveal",
+              "catalog/blocks/lt-side-rule",
+              "catalog/blocks/lt-soft-pill",
+              "catalog/blocks/lt-stack-bars",
+              "catalog/blocks/news-ticker"
+            ]
+          },
+          {
+            "group": "Shader Transitions",
+            "pages": [
+              "catalog/blocks/chromatic-radial-split",
+              "catalog/blocks/cinematic-zoom",
+              "catalog/blocks/cross-warp-morph",
+              "catalog/blocks/domain-warp-dissolve",
+              "catalog/blocks/flash-through-white",
+              "catalog/blocks/glitch",
+              "catalog/blocks/gravitational-lens",
+              "catalog/blocks/light-leak",
+              "catalog/blocks/ridged-burn",
+              "catalog/blocks/ripple-waves",
+              "catalog/blocks/sdf-iris",
+              "catalog/blocks/swirl-vortex",
+              "catalog/blocks/thermal-distortion",
+              "catalog/blocks/whip-pan"
+            ]
+          },
+          {
+            "group": "CSS Transitions",
+            "pages": [
+              "catalog/blocks/transitions-3d",
+              "catalog/blocks/transitions-blur",
+              "catalog/blocks/transitions-cover",
+              "catalog/blocks/transitions-destruction",
+              "catalog/blocks/transitions-dissolve",
+              "catalog/blocks/transitions-distortion",
+              "catalog/blocks/transitions-grid",
+              "catalog/blocks/transitions-light",
+              "catalog/blocks/transitions-mechanical",
+              "catalog/blocks/transitions-other",
+              "catalog/blocks/transitions-push",
+              "catalog/blocks/transitions-radial",
+              "catalog/blocks/transitions-scale"
+            ]
+          },
+          {
+            "group": "Showcases",
+            "pages": [
+              "catalog/blocks/app-showcase",
+              "catalog/blocks/apple-money-count",
+              "catalog/blocks/blue-sweater-intro-video",
+              "catalog/blocks/code-snippet-apple-terminal-basic",
+              "catalog/blocks/code-snippet-apple-terminal-clear-dark",
+              "catalog/blocks/code-snippet-apple-terminal-clear-light",
+              "catalog/blocks/code-snippet-apple-terminal-grass",
+              "catalog/blocks/code-snippet-apple-terminal-homebrew",
+              "catalog/blocks/code-snippet-apple-terminal-man-page",
+              "catalog/blocks/code-snippet-apple-terminal-novel",
+              "catalog/blocks/code-snippet-apple-terminal-ocean",
+              "catalog/blocks/code-snippet-apple-terminal-pro",
+              "catalog/blocks/code-snippet-apple-terminal-red-sands",
+              "catalog/blocks/code-snippet-apple-terminal-silver-aerogel",
+              "catalog/blocks/code-snippet-apple-terminal-solid-colors",
+              "catalog/blocks/code-snippet-dark-2026",
+              "catalog/blocks/code-snippet-dark-modern",
+              "catalog/blocks/code-snippet-dark-plus",
+              "catalog/blocks/code-snippet-high-contrast",
+              "catalog/blocks/code-snippet-high-contrast-light",
+              "catalog/blocks/code-snippet-light-2026",
+              "catalog/blocks/code-snippet-light-modern",
+              "catalog/blocks/code-snippet-light-plus",
+              "catalog/blocks/code-snippet-monokai",
+              "catalog/blocks/code-snippet-solarized-light",
+              "catalog/blocks/code-snippet-visual-studio-dark",
+              "catalog/blocks/code-snippet-visual-studio-light",
+              "catalog/blocks/north-korea-locked-down",
+              "catalog/blocks/nyc-paris-flight",
+              "catalog/blocks/ui-3d-reveal",
+              "catalog/blocks/vpn-youtube-spot"
+            ]
+          },
+          {
+            "group": "Data",
+            "pages": [
+              "catalog/blocks/data-chart",
+              "catalog/blocks/spain-map",
+              "catalog/blocks/us-map",
+              "catalog/blocks/us-map-bubble",
+              "catalog/blocks/us-map-flow",
+              "catalog/blocks/us-map-hex",
+              "catalog/blocks/world-map"
+            ]
+          },
+          {
+            "group": "Effects",
+            "pages": [
+              "catalog/components/caption-blend-difference",
+              "catalog/components/grain-overlay",
+              "catalog/components/grid-pixelate-wipe",
+              "catalog/components/morph-text",
+              "catalog/components/motion-blur",
+              "catalog/components/parallax-unzoom",
+              "catalog/components/parallax-zoom",
+              "catalog/components/shimmer-sweep",
+              "catalog/components/texture-mask-text",
+              "catalog/components/vignette"
+            ]
+          },
+          {
+            "group": "Blocks",
+            "pages": [
+              "catalog/blocks/flowchart",
+              "catalog/blocks/flowchart-vertical",
+              "catalog/blocks/logo-outro"
+            ]
+          }
         ]
       },
       {
         "tab": "Developers",
         "icon": "code",
-        "pages": [
-          "developers/index",
-              {
-                "group": "Command line",
-                "expanded": true,
-                "pages": [
-                  "developers/cli",
-                  "packages/cli",
-                  "packages/lint"
-                ]
-              },
-              {
-                "group": "SDK",
-                "expanded": false,
-                "pages": [
-                  "sdk/overview",
-                  "sdk/quickstart",
-                  "sdk/guides/querying-and-editing",
-                  "sdk/guides/timing-and-animation",
-                  "sdk/guides/undo-redo-and-patches",
-                  "sdk/guides/persistence",
-                  "sdk/guides/embedded-override-mode",
-                  "sdk/guides/canvas-integration",
-                  "sdk/guides/editing-affordances",
-                  "sdk/reference/open-composition",
-                  "sdk/reference/composition",
-                  "sdk/reference/edit-operations",
-                  "sdk/reference/types",
-                  "sdk/reference/adapters",
-                  "sdk/reference/utilities"
-                ]
-              },
-              {
-                "group": "Packages",
-                "expanded": false,
-                "pages": [
-                  "packages/core",
-                  "packages/parsers",
-                  "packages/studio-server",
-                  "packages/sdk",
-                  "packages/engine",
-                  "packages/player",
-                  "packages/producer",
-                  "packages/shader-transitions",
-                  "packages/studio"
-                ]
-              },
-              {
-                "group": "Schema and animation",
-                "expanded": false,
-                "pages": [
-                  "reference/html-schema",
-                  "guides/gsap-animation",
-                  "guides/keyframes"
-                ]
-              },
-              {
-                "group": "Deployment",
-                "expanded": false,
-                "pages": [
-                  "deploy/cloud",
-                  "guides/deploy",
-                  "deploy/aws-lambda",
-                  "deploy/gcp-cloud-run",
-                  "deploy/templates-on-lambda",
-                  "deploy/migrating-to-hyperframes-lambda",
-                  "packages/aws-lambda",
-                  "packages/gcp-cloud-run"
-                ]
-              },
-              {
-                "group": "Contributing",
-                "expanded": false,
-                "pages": [
-                  "contributing",
-                  "contributing/catalog",
-                  "contributing/release-channels",
-                  "contributing/changelog-process",
-                  "contributing/testing-local-changes",
-                  "community/adopters"
-                ]
-              }
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "developers/index"
+            ]
+          },
+          {
+            "group": "Command line",
+            "pages": [
+              "developers/cli",
+              "packages/cli",
+              "packages/lint"
+            ]
+          },
+          {
+            "group": "SDK",
+            "pages": [
+              "sdk/overview",
+              "sdk/quickstart",
+              "sdk/guides/querying-and-editing",
+              "sdk/guides/timing-and-animation",
+              "sdk/guides/undo-redo-and-patches",
+              "sdk/guides/persistence",
+              "sdk/guides/embedded-override-mode",
+              "sdk/guides/canvas-integration",
+              "sdk/guides/editing-affordances",
+              "sdk/reference/open-composition",
+              "sdk/reference/composition",
+              "sdk/reference/edit-operations",
+              "sdk/reference/types",
+              "sdk/reference/adapters",
+              "sdk/reference/utilities"
+            ]
+          },
+          {
+            "group": "Packages",
+            "pages": [
+              "packages/core",
+              "packages/parsers",
+              "packages/studio-server",
+              "packages/sdk",
+              "packages/engine",
+              "packages/player",
+              "packages/producer",
+              "packages/shader-transitions",
+              "packages/studio"
+            ]
+          },
+          {
+            "group": "Schema and animation",
+            "pages": [
+              "reference/html-schema",
+              "guides/gsap-animation",
+              "guides/keyframes"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deploy/cloud",
+              "guides/deploy",
+              "deploy/aws-lambda",
+              "deploy/gcp-cloud-run",
+              "deploy/templates-on-lambda",
+              "deploy/migrating-to-hyperframes-lambda",
+              "packages/aws-lambda",
+              "packages/gcp-cloud-run"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "contributing",
+              "contributing/catalog",
+              "contributing/release-channels",
+              "contributing/changelog-process",
+              "contributing/testing-local-changes",
+              "community/adopters"
+            ]
+          }
         ]
       }
     ]
@@ -508,9 +508,6 @@
       "label": "Playground",
       "href": "https://www.hyperframes.dev/"
     }
-  },
-  "interaction": {
-    "drilldown": false
   },
   "redirects": [
     {

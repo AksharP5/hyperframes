@@ -10,22 +10,18 @@ if (!currentCatalog) {
   throw new Error("Could not find the Catalog tab in docs/docs.json");
 }
 
-const catalogGroups =
-  currentCatalog.groups?.length === 1 && currentCatalog.groups[0].group === "Catalog"
-    ? currentCatalog.groups[0].pages
-    : currentCatalog.groups;
+const catalogGroups = currentCatalog.groups?.filter((group) => group.group !== "Overview");
 
 if (!Array.isArray(catalogGroups) || catalogGroups.length === 0) {
   throw new Error("Could not recover the existing Catalog groups");
 }
 
-const collapsedCatalogGroups = catalogGroups.map((group) => ({
+const completeCatalogGroups = catalogGroups.map((group) => ({
   ...group,
   pages:
     group.group === "Effects" && !group.pages.includes("catalog/components/motion-blur")
       ? [...group.pages, "catalog/components/motion-blur"]
       : group.pages,
-  expanded: false,
 }));
 
 config.appearance = {
@@ -52,9 +48,7 @@ config.navbar = {
   },
 };
 
-config.interaction = {
-  drilldown: false,
-};
+delete config.interaction;
 
 config.navigation = {
   tabs: [
@@ -162,133 +156,131 @@ config.navigation = {
     {
       tab: "Studio",
       icon: "palette",
-      pages: [
-        "studio/index",
-            "studio/tour",
-            {
-              group: "Review",
-              expanded: true,
-              pages: ["studio/storyboard"],
-            },
-            {
-              group: "Edit",
-              expanded: false,
-              pages: [
-                "studio/canvas",
-                "studio/layers",
-                "studio/timeline",
-                "studio/design",
-                "studio/animation",
-              ],
-            },
-            {
-              group: "Build",
-              expanded: false,
-              pages: [
-                "studio/assets-and-blocks",
-                "studio/captions",
-                "studio/variables",
-                "studio/slideshows",
-                "studio/source",
-              ],
-            },
-            {
-              group: "Finish",
-              expanded: false,
-              pages: [
-                "studio/lint-and-agent",
-                "studio/export",
-                "studio/shortcuts",
-                "studio/troubleshooting",
-              ],
-            },
+      groups: [
+        {
+          group: "Overview",
+          pages: ["studio/index", "studio/tour"],
+        },
+        {
+          group: "Review",
+          pages: ["studio/storyboard"],
+        },
+        {
+          group: "Edit",
+          pages: [
+            "studio/canvas",
+            "studio/layers",
+            "studio/timeline",
+            "studio/design",
+            "studio/animation",
+          ],
+        },
+        {
+          group: "Build",
+          pages: [
+            "studio/assets-and-blocks",
+            "studio/captions",
+            "studio/variables",
+            "studio/slideshows",
+            "studio/source",
+          ],
+        },
+        {
+          group: "Finish",
+          pages: [
+            "studio/lint-and-agent",
+            "studio/export",
+            "studio/shortcuts",
+            "studio/troubleshooting",
+          ],
+        },
       ],
     },
     {
       tab: "Catalog",
       icon: "grid-2",
-      pages: [
-        "catalog/index",
-        ...collapsedCatalogGroups,
+      groups: [
+        {
+          group: "Overview",
+          pages: ["catalog/index"],
+        },
+        ...completeCatalogGroups,
       ],
     },
     {
       tab: "Developers",
       icon: "code",
-      pages: [
-        "developers/index",
-            {
-              group: "Command line",
-              expanded: true,
-              pages: ["developers/cli", "packages/cli", "packages/lint"],
-            },
-            {
-              group: "SDK",
-              expanded: false,
-              pages: [
-                "sdk/overview",
-                "sdk/quickstart",
-                "sdk/guides/querying-and-editing",
-                "sdk/guides/timing-and-animation",
-                "sdk/guides/undo-redo-and-patches",
-                "sdk/guides/persistence",
-                "sdk/guides/embedded-override-mode",
-                "sdk/guides/canvas-integration",
-                "sdk/guides/editing-affordances",
-                "sdk/reference/open-composition",
-                "sdk/reference/composition",
-                "sdk/reference/edit-operations",
-                "sdk/reference/types",
-                "sdk/reference/adapters",
-                "sdk/reference/utilities",
-              ],
-            },
-            {
-              group: "Packages",
-              expanded: false,
-              pages: [
-                "packages/core",
-                "packages/parsers",
-                "packages/studio-server",
-                "packages/sdk",
-                "packages/engine",
-                "packages/player",
-                "packages/producer",
-                "packages/shader-transitions",
-                "packages/studio",
-              ],
-            },
-            {
-              group: "Schema and animation",
-              expanded: false,
-              pages: ["reference/html-schema", "guides/gsap-animation", "guides/keyframes"],
-            },
-            {
-              group: "Deployment",
-              expanded: false,
-              pages: [
-                "deploy/cloud",
-                "guides/deploy",
-                "deploy/aws-lambda",
-                "deploy/gcp-cloud-run",
-                "deploy/templates-on-lambda",
-                "deploy/migrating-to-hyperframes-lambda",
-                "packages/aws-lambda",
-                "packages/gcp-cloud-run",
-              ],
-            },
-            {
-              group: "Contributing",
-              expanded: false,
-              pages: [
-                "contributing",
-                "contributing/catalog",
-                "contributing/release-channels",
-                "contributing/changelog-process",
-                "contributing/testing-local-changes",
-                "community/adopters",
-              ],
-            },
+      groups: [
+        {
+          group: "Overview",
+          pages: ["developers/index"],
+        },
+        {
+          group: "Command line",
+          pages: ["developers/cli", "packages/cli", "packages/lint"],
+        },
+        {
+          group: "SDK",
+          pages: [
+            "sdk/overview",
+            "sdk/quickstart",
+            "sdk/guides/querying-and-editing",
+            "sdk/guides/timing-and-animation",
+            "sdk/guides/undo-redo-and-patches",
+            "sdk/guides/persistence",
+            "sdk/guides/embedded-override-mode",
+            "sdk/guides/canvas-integration",
+            "sdk/guides/editing-affordances",
+            "sdk/reference/open-composition",
+            "sdk/reference/composition",
+            "sdk/reference/edit-operations",
+            "sdk/reference/types",
+            "sdk/reference/adapters",
+            "sdk/reference/utilities",
+          ],
+        },
+        {
+          group: "Packages",
+          pages: [
+            "packages/core",
+            "packages/parsers",
+            "packages/studio-server",
+            "packages/sdk",
+            "packages/engine",
+            "packages/player",
+            "packages/producer",
+            "packages/shader-transitions",
+            "packages/studio",
+          ],
+        },
+        {
+          group: "Schema and animation",
+          pages: ["reference/html-schema", "guides/gsap-animation", "guides/keyframes"],
+        },
+        {
+          group: "Deployment",
+          pages: [
+            "deploy/cloud",
+            "guides/deploy",
+            "deploy/aws-lambda",
+            "deploy/gcp-cloud-run",
+            "deploy/templates-on-lambda",
+            "deploy/migrating-to-hyperframes-lambda",
+            "packages/aws-lambda",
+            "packages/gcp-cloud-run",
+          ],
+        },
+        {
+          group: "Contributing",
+          pages: [
+            "contributing",
+            "contributing/catalog",
+            "contributing/release-channels",
+            "contributing/changelog-process",
+            "contributing/testing-local-changes",
+            "community/adopters",
+          ],
+        },
       ],
     },
   ],

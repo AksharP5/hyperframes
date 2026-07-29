@@ -43,10 +43,10 @@ Global header:
 
 Navigation behavior:
 
-- Major sections have clickable overview pages.
-- Nested groups are collapsed by default.
-- Selecting a group expands it without surprising navigation.
-- The active section is expanded.
+- Every tab uses ordinary top-level groups, matching `origin/main`.
+- Group labels are static section headings; only actual pages navigate.
+- Do not add `root`, `directory`, `expanded`, or drilldown behavior.
+- Keep Mintlify's default sidebar and **On this page** rendering unchanged.
 - Human-facing labels describe tasks, not repository packages.
 - Updates is not a top-level tab.
 

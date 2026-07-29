@@ -183,7 +183,7 @@ New navigation should be task-shaped:
   - zero orphan pages;
   - zero missing navigation targets;
   - every MDX page has frontmatter, a title, and a description.
-- Final visual review confirmed the full-width Aspen header, Playground action, rewritten guide rendering, Studio images, Catalog accordions, and after-state dashboard.
+- Final visual review confirmed the full-width Aspen header, Playground action, rewritten guide rendering, Studio images, default Mintlify navigation behavior, and after-state dashboard.
 - Final checks:
   - `mint validate` passed;
   - `mint broken-links` passed;
@@ -192,11 +192,9 @@ New navigation should be task-shaped:
 
 ### 2026-07-28 — navigation polish after preview review
 
-- Removed the redundant Guides, Studio, Catalog, and Developers parent groups beneath tabs with the same names.
-- Kept each tab overview as a normal first page.
-- Made Guides a permanently expanded reading map with non-clickable section labels and vertical hierarchy lines. Collapsible sections remain only where the denser Studio, Catalog, and Developers trees benefit from them.
-- Kept the task-oriented **Learn** label.
-- Added a lightweight visual rail, active marker, and nested branch to Mintlify's generated **On this page** navigation.
+- Restored the navigation behavior used on `origin/main`: ordinary top-level groups in every tab, with no nested root, directory, expanded, or drilldown behavior.
+- Kept the refactored page inventory and the new Guides, Studio, Catalog, and Developers information architecture.
+- Removed all custom sidebar hierarchy and **On this page** CSS so both surfaces use Mintlify's unchanged default rendering.
 - Confirmed the result in a local Mintlify preview; validation and broken-link checks still pass.
 
 ## Maintenance issue

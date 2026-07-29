@@ -18,7 +18,7 @@ These rules are persistent and apply to every documentation session:
 - Do not preserve a page merely because it already exists. Merge, rewrite, redirect, or remove it when that improves the user journey.
 - Do not publish empty, duplicated, outdated, or aspirational content as fact.
 - A page should answer a real question or help complete a real task.
-- Keep navigation shallow. Use clickable overview pages and collapsed nested groups.
+- Keep navigation behavior aligned with `origin/main`: ordinary top-level groups inside each tab, with no nested `root`, `directory`, `expanded`, or custom sidebar/TOC behavior.
 - Record important findings, uncertainties, and decisions in `../research/docs-refactor/NOTES.md`.
 - Update progress and changed decisions in `../research/docs-refactor/PLAN.md`.
 
