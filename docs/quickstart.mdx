@@ -135,11 +135,18 @@ Open **Renders**, choose the format and resolution, and start the export.
 
 You have a video that plays in Studio or an exported file you can watch. Installation alone is not the finish line.
 
-<CardGroup cols={2}>
-  <Card title="Choose another workflow" icon="route" href="/workflows">
-    Make a product video, explainer, recut, PR video, motion graphic, music video, or presentation.
-  </Card>
-  <Card title="Get unstuck" icon="life-ring" href="/help">
-    Start with the visible symptom when Studio, media, animation, or export is not behaving.
-  </Card>
-</CardGroup>
+<a href="/workflows" className="not-prose group flex flex-col sm:flex-row no-underline overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors my-6">
+  <video
+    className="w-full sm:w-64 shrink-0 aspect-video object-cover bg-zinc-100 dark:bg-zinc-900"
+    src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/flowchart.mp4"
+    poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/flowchart.png"
+    autoPlay muted loop playsInline
+  />
+  <div className="p-5">
+    <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Now make something specific</span>
+    <span className="mt-1 block text-lg font-semibold text-zinc-900 dark:text-zinc-100">Choose a workflow →</span>
+    <span className="mt-1 block text-sm text-zinc-600 dark:text-zinc-400">A launch video, an explainer, captions on footage, a PR walkthrough, a motion graphic, a music-driven cut, or a presentation. Each path tells you what to give the agent.</span>
+  </div>
+</a>
+
+Also useful from here: learn the workspace properly in [Studio](/studio), find a ready-made scene in the [Catalog](/catalog), or start from a visible symptom in [Get unstuck](/help).
