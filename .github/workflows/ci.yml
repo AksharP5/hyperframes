@@ -555,19 +555,29 @@ jobs:
 
           # The default build first. It is the one users get, and the arm that
           # caught the regression this gate exists for.
+          # Capture both statuses so either failure still leaves two evidence files.
+          DEFAULT_STATUS=0
           STUDIO_URL="http://localhost:5313/#project/timeline-virtualization" \
             TIMELINE_ROW_VIRTUALIZATION=off \
             TIMELINE_ELEMENT_COUNT=1000 \
             TIMELINE_TIER=ci \
             node packages/studio/tests/e2e/timeline-virtualization.mjs \
-            | tee /tmp/timeline-gate-default.json
+            | tee /tmp/timeline-gate-default.json \
+            || DEFAULT_STATUS=$?
 
+          VIRTUALIZED_STATUS=0
           STUDIO_URL="http://localhost:5314/#project/timeline-virtualization" \
             TIMELINE_ROW_VIRTUALIZATION=on \
             TIMELINE_ELEMENT_COUNT=50000 \
             TIMELINE_TIER=ci \
             node packages/studio/tests/e2e/timeline-virtualization.mjs \
-            | tee /tmp/timeline-gate-virtualized.json
+            | tee /tmp/timeline-gate-virtualized.json \
+            || VIRTUALIZED_STATUS=$?
+
+          if (( DEFAULT_STATUS != 0 || VIRTUALIZED_STATUS != 0 )); then
+            echo "FAIL: default=${DEFAULT_STATUS}, virtualized=${VIRTUALIZED_STATUS}"
+            exit 1
+          fi
       - name: Upload gate evidence
         # The gate's whole output is machine-readable evidence, and a red run is
         # exactly when someone needs to read it. Keep it on failure too.
