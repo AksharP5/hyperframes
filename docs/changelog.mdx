@@ -9,6 +9,23 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.7.81"
+  description="Released - 2026-07-29"
+  tags={["Release", "Producer"]}
+>
+HyperFrames now retries transient Google Fonts CSS and font-file failures during distributed
+planning without misclassifying them as deterministic project errors. Retries remain tightly
+bounded, respect cancellation and `Retry-After` within a shared budget, and surface exhaustion
+as `FONT_FETCH_UNAVAILABLE` for orchestration-level recovery.
+
+## Fixes
+
+- **Producer:** Retry transient deterministic font fetches ([20f4f8f49](https://github.com/heygen-com/hyperframes/commit/20f4f8f49c19181adfb4194f1965ee00845219f9), [#2865](https://github.com/heygen-com/hyperframes/pull/2865))
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.7.80...v0.7.81).
+</Update>
+
+<Update
   label="HyperFrames v0.7.80"
   description="Released - 2026-07-29"
   tags={["Release", "Studio"]}
