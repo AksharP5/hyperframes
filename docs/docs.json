@@ -54,7 +54,6 @@
           {
             "group": "Start here",
             "pages": [
-              "guides/index",
               "introduction",
               "quickstart",
               "workflows",
@@ -512,6 +511,10 @@
     }
   },
   "redirects": [
+    {
+      "source": "/guides",
+      "destination": "/introduction"
+    },
     {
       "source": "/showcase",
       "destination": "/examples"
