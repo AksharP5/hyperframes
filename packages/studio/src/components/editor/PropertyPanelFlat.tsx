@@ -1,11 +1,9 @@
 import { scopedElementKey } from "../../hooks/gsapKeyframeCacheHelpers";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { resolveEditingSections } from "@hyperframes/core/editing";
 import { DesignPanelInputProvider } from "../../contexts/DesignPanelInputContext";
 import { slugifyDesignInput } from "../../utils/designInputTracking";
-import type { DomEditSelection } from "./domEditing";
 import { isTextEditableSelection } from "./domEditing";
-import type { PropertyPanelProps } from "./propertyPanelHelpers";
+import type { PropertyPanelFlatProps } from "./propertyPanelFlatProps";
 import { formatPxMetricValue } from "./propertyPanelHelpers";
 import { PropertyPanelFlatHeader } from "./PropertyPanelFlatHeader";
 import { PropertyPanelFlatFooter } from "./PropertyPanelFlatFooter";
@@ -34,8 +32,6 @@ import {
   deriveMediaOverlayPlacement,
   FlatOverlaysSection,
 } from "./propertyPanelFlatOverlaysSection";
-
-type EditingSections = ReturnType<typeof resolveEditingSections>;
 
 type FlatGroupDescriptor = {
   id: string;
@@ -138,92 +134,7 @@ export function PropertyPanelFlat({
   onUpdateKeyframeEase,
   onUpdateSegmentEase,
   onSetAllKeyframeEases,
-}: Pick<
-  PropertyPanelProps,
-  | "projectId"
-  | "projectDir"
-  | "assets"
-  | "previewIframeRef"
-  | "onClearSelection"
-  | "onUngroup"
-  | "onSetStyle"
-  | "onPreviewStyle"
-  | "onSetAttribute"
-  | "onSetAttributes"
-  | "onSetAttributeLive"
-  | "onApplyColorGradingScope"
-  | "onSetHtmlAttribute"
-  | "onRemoveBackground"
-  | "onSetText"
-  | "onSetTextFieldStyle"
-  | "onPreviewTextFieldStyle"
-  | "onAddTextField"
-  | "onRemoveTextField"
-  | "onAskAgent"
-  | "onToggleElementHidden"
-  | "onImportAssets"
-  | "onAddMediaOverlay"
-  | "onImportFonts"
-  | "fontAssets"
-  | "gsapAnimations"
-  | "gsapMultipleTimelines"
-  | "gsapUnsupportedTimelinePattern"
-  | "onUpdateGsapProperty"
-  | "onUpdateGsapMeta"
-  | "onDeleteGsapAnimation"
-  | "onAddGsapProperty"
-  | "onRemoveGsapProperty"
-  | "onUpdateGsapFromProperty"
-  | "onAddGsapFromProperty"
-  | "onRemoveGsapFromProperty"
-  | "onAddGsapAnimation"
-  | "onSetArcPath"
-  | "onUpdateArcSegment"
-  | "onUnroll"
-  | "onUpdateKeyframeEase"
-  | "onSetAllKeyframeEases"
-  | "onUpdateSegmentEase"
-  | "recordingState"
-  | "recordingDuration"
-  | "onToggleRecording"
-> &
-  Pick<
-    Parameters<typeof FlatLayoutSection>[0],
-    | "displayX"
-    | "displayY"
-    | "displayW"
-    | "displayH"
-    | "displayR"
-    | "manualOffsetEditingDisabled"
-    | "manualSizeEditingDisabled"
-    | "manualRotationEditingDisabled"
-    | "commitManualOffset"
-    | "commitManualSize"
-    | "commitManualRotation"
-    | "gsapAnimId"
-    | "navKeyframes"
-    | "animIdForProp"
-    | "gsapRuntimeValues"
-    | "elStart"
-    | "elDuration"
-    | "onCommitAnimatedProperty"
-    | "onCommitAnimatedProperties"
-    | "onSeekToTime"
-    | "onRemoveKeyframe"
-    | "onConvertToKeyframes"
-  > & {
-    element: DomEditSelection;
-    styles: Record<string, string>;
-    sections: EditingSections;
-    sourceLabel: string;
-    gsapBorderRadius: { tl: number; tr: number; br: number; bl: number } | null;
-    showEditableSections: boolean;
-    selectedElementHidden: boolean;
-    selectedElementId: string | null;
-    clipboardCopied: boolean;
-    onCopyElementInfo: () => void;
-    currentTime: number;
-  }) {
+}: PropertyPanelFlatProps) {
   // PropertyPanel keys this component by selection, so the default is per element.
   const [openGroupId, setOpenGroupId] = useState<string>(() =>
     isTextEditableSelection(element)
