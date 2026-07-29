@@ -495,7 +495,7 @@ export interface RenderPerfSummary {
     /** Rough compiled-composition element count — the variable the short-comp inversion band is gated on. Always set. */
     compositionElementCount?: number;
     /** Short-comp band attribution: "applied" | "skipped_elements"; unset when the frame count made the band irrelevant. */
-    shortBand?: string;
+    shortBand?: "applied" | "skipped_elements";
     /** DE parallel-router outcome: "routed" (fired, held), "reverted" (fired, self-verify retry rolled back), "none". Mutually exclusive with workerInversion. */
     parallelRouter?: string;
     /** Worker count the auto-resolution chose BEFORE the router pinned it to 3 — the single-worker-inversion counterfactual. Only set when the router fired. */
@@ -1248,12 +1248,27 @@ export function envInt(name: string, fallback: number): number {
  * matter here — the 20k-40k node ones — is the most expensive case. Precision
  * is not needed. It feeds a threshold whose measured crossover is ~3.9k and
  * whose default sits at 2500, so tag counting is comfortably inside the
- * margin. Closing tags plus HTML void elements (`<img>`, `<br>`, …) — voids
- * matter because they skew EXPENSIVE to paint (images), and counting only
- * closers would read an image gallery as a tiny comp and open the band on
- * exactly the content most likely to lose it. Opening tags are deliberately
- * NOT counted: compiled comps embed inline scripts where `a < b` would
- * false-positive. Self-closing SVG children still undercount; acceptable.
+ * margin — PROVIDED the count is not unboundedly low for some real content
+ * shape. Three sources are counted, each catching a case the others miss:
+ *
+ *   1. Closing tags (`</div>`) — the base count for ordinary HTML.
+ *   2. Named HTML void elements (`<img>`, `<br>`, …), bare or self-closed —
+ *      voids matter because they skew EXPENSIVE to paint (images), and
+ *      counting only closers would read an image gallery as a tiny comp and
+ *      open the band on exactly the content most likely to lose it.
+ *   3. Any self-closing tag (`<circle/>`, `<path d="…"/>`) — SVG's own
+ *      elements are neither closing-tag-shaped nor in the void list, so
+ *      without this a self-closing-SVG-heavy composition (`<circle/>` x 40k)
+ *      counted as ZERO — an unbounded undercount, not a rounding error, and
+ *      exactly the shape of comp the 1.8x regression case is made of
+ *      (review finding: the ceiling cannot compensate for an error with no
+ *      bound).
+ *
+ * Opening (non-self-closing, non-void) tags are deliberately NOT counted:
+ * compiled comps embed inline scripts, and `a < b` or `x <breadth` would
+ * false-positive on a bare `<letter` scan. All three counted forms require a
+ * literal closing marker (`</`, a void name at a word boundary, or `/>`), so
+ * ordinary JS comparisons and divisions don't qualify — verified by test.
  *
  * These semantics are FROZEN while the short-band baseline is being read —
  * the fleet distribution recorded by the baseline release must be measured
@@ -1261,7 +1276,7 @@ export function envInt(name: string, fallback: number): number {
  */
 export function countElementTags(html: string): number {
   const matches = html.match(
-    /<\/[a-zA-Z]|<(?:img|br|hr|input|source|track|area|base|col|embed|link|meta|param|wbr)\b/gi,
+    /<\/[a-zA-Z]|<(?:img|br|hr|input|source|track|area|base|col|embed|link|meta|param|wbr)\b|<[a-zA-Z][-a-zA-Z0-9]*\b[^>]*\/>/gi,
   );
   return matches === null ? 0 : matches.length;
 }
@@ -1271,8 +1286,9 @@ export function countElementTags(html: string): number {
  * success-path channel for PARALLEL renders, whose worker console buffers
  * (and so the `[FrameCapture:INIT]` line) only propagate on failure. Max
  * matches summarizeInitObservability's own multi-session semantics: keep the
- * worst observed startup cost, and tween count is per-composition so any
- * worker's reading is the reading.
+ * worst observed startup cost for duration. Tween count is per-composition,
+ * so workers should agree — max is a defensive read against a worker that
+ * initializes before the timeline is fully wired, not an expected disagreement.
  */
 export function mergeWorkerInitObservability(
   perfs: ReadonlyArray<{ initDurationMs?: number; initTweenCount?: number }>,
@@ -1293,6 +1309,34 @@ export function mergeWorkerInitObservability(
   }
   if (initDurationMs === undefined && tweenCount === undefined) return undefined;
   return { initDurationMs, tweenCount };
+}
+
+/**
+ * The short-comp band's attribution decision, extracted as a pure function so
+ * the gating fixes below are independently testable rather than living inline
+ * where only a full render pipeline run could exercise them.
+ *
+ * "applied" / "skipped_elements" are emitted ONLY when the band is DECISIVE —
+ * every other inversion-eligibility condition already passed (both floor
+ * evaluations agree on everything except which floor they used) and the band
+ * floor alone flipped the answer. `bandEnabled` gates that decisiveness
+ * itself: `HF_DE_SHORT_MAX_ELEMENTS=0` is a documented kill switch (symmetric
+ * with `HF_DE_SHORT_MIN_FRAMES=0`, which already disables via the predicate's
+ * own `minFrames > 0` guard), and without this gate a fired kill switch left
+ * every in-band render decisive against a real floor comparison — reporting
+ * "skipped_elements" (comp too large) instead of undefined (band disabled)
+ * and corrupting the DiD control cohort with kill-switched renders (review
+ * finding).
+ */
+export function resolveDeShortBand(args: {
+  invertAtBaseFloor: boolean;
+  invertAtBandFloor: boolean;
+  bandEnabled: boolean;
+  bandOpen: boolean;
+}): "applied" | "skipped_elements" | undefined {
+  const decisive = args.bandEnabled && args.invertAtBandFloor && !args.invertAtBaseFloor;
+  if (!decisive) return undefined;
+  return args.bandOpen ? "applied" : "skipped_elements";
 }
 
 /**
@@ -2496,9 +2540,17 @@ async function executeRenderPipeline(input: {
     const deShortBandMinFrames = envInt("HF_DE_SHORT_MIN_FRAMES", 250);
     const deShortBandMaxElements = envInt("HF_DE_SHORT_MAX_ELEMENTS", 2500);
     const compositionElementCount = countElementTags(compiled.html);
+    // HF_DE_SHORT_MAX_ELEMENTS=0 is the documented kill switch (symmetric
+    // with HF_DE_SHORT_MIN_FRAMES=0, which disables via the predicate's own
+    // minFrames > 0 guard). Gated explicitly here too — without it, a fired
+    // max-elements kill switch left every in-band render decisive against a
+    // real floor comparison, so it reported "skipped_elements" (comp too
+    // large) instead of undefined (band disabled), corrupting the DiD
+    // control cohort with kill-switched renders (review finding).
+    const deShortBandEnabled = deShortBandMaxElements > 0;
     const deShortBandOpen =
+      deShortBandEnabled &&
       deShortBandMinFrames > 0 &&
-      deShortBandMaxElements > 0 &&
       compositionElementCount <= deShortBandMaxElements;
     // Baseline-first sequencing: this release EVALUATES the band on every
     // render and emits the decision, but only routes on it when
@@ -2544,19 +2596,21 @@ async function executeRenderPipeline(input: {
       ...deInversionArgs,
       minFrames: Math.min(deSingleMinFrames, deShortBandMinFrames),
     });
-    // The band is DECISIVE only when it alone flips the decision — every
-    // other eligibility condition already passed and only the floor differed.
-    // Renders the band could not have affected (ineligible for any other
-    // reason, or already inverting at 900+) stay unset, so the telemetry
-    // cohort contains exactly the renders whose routing this change decides.
-    const deShortBandDecisive = invertAtBandFloor && !invertAtBaseFloor;
-    const deShortBand = deShortBandDecisive
-      ? deShortBandOpen
-        ? ("applied" as const)
-        : ("skipped_elements" as const)
-      : undefined;
+    const deShortBand = resolveDeShortBand({
+      invertAtBaseFloor,
+      invertAtBandFloor,
+      bandEnabled: deShortBandEnabled,
+      bandOpen: deShortBandOpen,
+    });
     const deInversionEligible =
       deShortBandRoute && deShortBand === "applied" ? invertAtBandFloor : invertAtBaseFloor;
+    // The floor that actually decided this render — for the human-facing log
+    // below, so it never claims e.g. "400 frames >= 900" for a band-routed
+    // inversion (review finding).
+    const deInversionEffectiveMinFrames =
+      deShortBandRoute && deShortBand === "applied"
+        ? Math.min(deSingleMinFrames, deShortBandMinFrames)
+        : deSingleMinFrames;
     // DE parallel-router eligibility — see shouldPreferParallelDrawElement.
     // Default-off (HF_DE_PARALLEL_ROUTER); HF_DE_PARALLEL_MIN_FRAMES default
     // 700, re-calibrated 2026-07-27 from the original safe-high 2000. A
@@ -2790,7 +2844,7 @@ async function executeRenderPipeline(input: {
       log.info(
         "[Render] Fast capture: single-worker drawElement streaming preferred over " +
           `${workerCount}-worker screenshot capture (${totalFrames} frames >= ` +
-          `${deSingleMinFrames}; verified path, measured faster at every worker count). ` +
+          `${deInversionEffectiveMinFrames}; verified path, measured faster at every worker count). ` +
           "Set HF_DE_SINGLE_MIN_FRAMES=0 or --workers N to override.",
       );
       workerCount = 1;

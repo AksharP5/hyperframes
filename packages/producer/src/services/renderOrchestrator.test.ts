@@ -37,6 +37,7 @@ import {
   countElementTags,
   envInt,
   mergeWorkerInitObservability,
+  resolveDeShortBand,
   shouldPreferParallelDrawElement,
   shouldPreferSingleWorkerDrawElement,
   shouldStreamParallelCapture,
@@ -1762,6 +1763,67 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     });
   });
 
+  describe("resolveDeShortBand", () => {
+    it("reports applied only when decisive and the element ceiling cleared", () => {
+      expect(
+        resolveDeShortBand({
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: true,
+        }),
+      ).toBe("applied");
+    });
+
+    it("reports skipped_elements when decisive but the comp is oversized", () => {
+      expect(
+        resolveDeShortBand({
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: false,
+        }),
+      ).toBe("skipped_elements");
+    });
+
+    it("is undefined when the base floor already inverts — the band changed nothing", () => {
+      expect(
+        resolveDeShortBand({
+          invertAtBaseFloor: true,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: true,
+        }),
+      ).toBeUndefined();
+    });
+
+    it("is undefined when neither floor inverts — the render was ineligible for some other reason", () => {
+      expect(
+        resolveDeShortBand({
+          invertAtBaseFloor: false,
+          invertAtBandFloor: false,
+          bandEnabled: true,
+          bandOpen: true,
+        }),
+      ).toBeUndefined();
+    });
+
+    // Review finding (R1 + R2, both reviewers): HF_DE_SHORT_MAX_ELEMENTS=0
+    // must read as "band disabled" (undefined), never "comp too large"
+    // (skipped_elements) — the latter would poison the DiD control cohort by
+    // mislabeling a kill-switch event as a real oversize measurement.
+    it("HF_DE_SHORT_MAX_ELEMENTS=0 (bandEnabled=false) reports undefined even when the render would otherwise be decisive", () => {
+      expect(
+        resolveDeShortBand({
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true, // an otherwise-eligible in-band render
+          bandEnabled: false, // the kill switch
+          bandOpen: false, // deShortBandOpen also false when the switch is off
+        }),
+      ).toBeUndefined();
+    });
+  });
+
   describe("mergeWorkerInitObservability", () => {
     it("max-merges across workers and ignores workers that reported nothing", () => {
       expect(
@@ -1787,6 +1849,32 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     it("counts void elements — an image gallery must not read as a tiny comp", () => {
       expect(countElementTags("<img><br><hr>")).toBe(3);
       expect(countElementTags('<img src="a.png"><IMG SRC="b.png">')).toBe(2);
+    });
+
+    // Review-flagged blocker (v1): SVG elements are neither closing-tag-shaped
+    // nor in the HTML void list, so a self-closing-SVG-heavy comp read as
+    // element count 0 — an UNBOUNDED undercount, the same failure class as
+    // the original <img> counterexample, and the exact shape of comp the
+    // measured 1.8x regression case is made of. The ceiling cannot bound an
+    // error that has no bound of its own.
+    it("counts self-closing SVG elements — the 40k-node regression case must not read as empty", () => {
+      expect(countElementTags("<circle/>".repeat(40000))).toBe(40000);
+      expect(countElementTags('<path d="M0 0 L1 1" stroke="red" />')).toBe(1);
+      expect(countElementTags("<feGaussianBlur stdDeviation='2'/>")).toBe(1);
+    });
+
+    it("does not double-count a self-closed void element (still just 1)", () => {
+      expect(countElementTags('<img src="a.png"/>')).toBe(1);
+      expect(countElementTags('<img src="a.png" />')).toBe(1);
+    });
+
+    it("does not false-positive on minified JS division-after-comparison (the self-closing alt's real risk)", () => {
+      // Unspaced "<b/c>" is the adversarial case: "<" IS immediately
+      // followed by a letter, so the generic self-closing alt gets as far as
+      // starting a match — but it still requires the literal two-char "/>"
+      // sequence, and here a "c" sits between the "/" and the ">", so
+      // backtracking never finds one and it correctly fails to match.
+      expect(countElementTags("if(a<b/c>d){}")).toBe(0);
     });
 
     it("does not false-positive on inline-script comparisons or void-prefixed words", () => {
