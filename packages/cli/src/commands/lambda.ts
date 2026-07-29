@@ -1,3 +1,4 @@
+import { failCommand } from "../utils/commandResult.js";
 /**
  * `hyperframes lambda` — top-level dispatcher for AWS Lambda subcommands.
  *
@@ -238,7 +239,7 @@ export default defineCommand({
               `Or, for an opt-in dev setup:\n` +
               `  ${c.accent("npm install @hyperframes/aws-lambda")}`,
           );
-          process.exit(1);
+          failCommand();
         }
         throw err;
       }
@@ -263,14 +264,14 @@ export default defineCommand({
           console.error(
             `[lambda sites] unknown verb "${String(args.target)}". Only "create" is supported.`,
           );
-          process.exit(1);
+          failCommand();
         }
         const projectDir = args.extra as string | undefined;
         if (!projectDir) {
           console.error(
             "[lambda sites create] usage: hyperframes lambda sites create <projectDir>",
           );
-          process.exit(1);
+          failCommand();
         }
         const { runSitesCreate } = await import("./lambda/sites.js");
         await runSitesCreate({
@@ -287,13 +288,13 @@ export default defineCommand({
           console.error(
             "[lambda render] usage: hyperframes lambda render <projectDir> --width <px> --height <px>",
           );
-          process.exit(1);
+          failCommand();
         }
         const width = parsePositiveInt(args.width, "--width");
         const height = parsePositiveInt(args.height, "--height");
         if (width === undefined || height === undefined) {
           console.error("[lambda render] --width and --height are required.");
-          process.exit(1);
+          failCommand();
         }
         const fpsRaw =
           parseIntFlag(args.fps) ??
@@ -301,7 +302,7 @@ export default defineCommand({
           30;
         if (fpsRaw !== 24 && fpsRaw !== 30 && fpsRaw !== 60) {
           console.error(`[lambda render] --fps must be 24, 30, or 60; got ${fpsRaw}.`);
-          process.exit(1);
+          failCommand();
         }
         const { runRender } = await import("./lambda/render.js");
         const renderResolution = parseOutputResolution(args["output-resolution"]);
@@ -337,20 +338,20 @@ export default defineCommand({
           console.error(
             "[lambda render-batch] usage: hyperframes lambda render-batch <projectDir> --batch <path.jsonl> --width <px> --height <px>",
           );
-          process.exit(1);
+          failCommand();
         }
         const batch = args.batch as string | undefined;
         if (!batch) {
           console.error(
             "[lambda render-batch] --batch <path.jsonl> is required. Each line is a JSON object with at least { outputKey: '...' }.",
           );
-          process.exit(1);
+          failCommand();
         }
         const width = parsePositiveInt(args.width, "--width");
         const height = parsePositiveInt(args.height, "--height");
         if (width === undefined || height === undefined) {
           console.error("[lambda render-batch] --width and --height are required.");
-          process.exit(1);
+          failCommand();
         }
         const fpsRaw =
           parseIntFlag(args.fps) ??
@@ -358,7 +359,7 @@ export default defineCommand({
           30;
         if (fpsRaw !== 24 && fpsRaw !== 30 && fpsRaw !== 60) {
           console.error(`[lambda render-batch] --fps must be 24, 30, or 60; got ${fpsRaw}.`);
-          process.exit(1);
+          failCommand();
         }
         const { runRenderBatch } = await import("./lambda/render-batch.js");
         const batchResolution = parseOutputResolution(args["output-resolution"]);
@@ -391,7 +392,7 @@ export default defineCommand({
           console.error(
             "[lambda progress] usage: hyperframes lambda progress <renderId | executionArn>",
           );
-          process.exit(1);
+          failCommand();
         }
         const { runProgress } = await import("./lambda/progress.js");
         await runProgress({ target, stackName, json: Boolean(args.json) });
@@ -408,7 +409,7 @@ export default defineCommand({
           console.error(
             `[lambda policies] usage: hyperframes lambda policies <role|user|validate> [args]`,
           );
-          process.exit(1);
+          failCommand();
         }
         const { runPolicies } = await import("./lambda/policies.js");
         await runPolicies({
@@ -420,7 +421,7 @@ export default defineCommand({
       }
       default:
         console.error(`${c.error("Unknown subcommand:")} ${subcommand}\n${HELP}`);
-        process.exit(1);
+        failCommand();
     }
   },
 });

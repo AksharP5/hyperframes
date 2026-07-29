@@ -3,6 +3,7 @@ import type { Example } from "./_examples.js";
 import { parseAt } from "./layout.js";
 import { c } from "../ui/colors.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
+import { setCommandExitCode } from "../utils/commandResult.js";
 import { formatLayoutIssue } from "../utils/layoutAudit.js";
 import { resolveProject, type ProjectDir } from "../utils/project.js";
 import { withMeta } from "../utils/updateCheck.js";
@@ -15,7 +16,7 @@ import {
   type CheckReport,
   type CheckSection,
 } from "../utils/checkPipeline.js";
-import type { CaptionZoneOptions, FrameCheckOptions } from "../utils/checkTypes.js";
+import type { CaptionZoneOptions, FrameCheckOptions, LayoutOptions } from "../utils/checkTypes.js";
 
 export const examples: Example[] = [
   ["Run the full verification gate", "hyperframes check"],
@@ -119,6 +120,10 @@ export function createCheckCommand(
         description:
           'Bare --frame-check uses defaults (tol=2px, severity=warning, seek=.5; breach floor=max(120px, 6% of shorter canvas edge)); or pass "severity=error;seek=.25,.75;tol=4" to tune',
       },
+      layout: {
+        type: "string",
+        description: 'Layout knobs: "proseCoverageFloor=0.05" (0–1; default 0.15).',
+      },
     },
     async run({ args }) {
       const asJson = args.json === true;
@@ -135,7 +140,7 @@ export function createCheckCommand(
         } else {
           printHumanReport(report);
         }
-        process.exitCode = checkExitCode(report);
+        setCommandExitCode(checkExitCode(report));
       } catch (error) {
         const message = normalizeErrorMessage(error);
         if (asJson) {
@@ -145,7 +150,7 @@ export function createCheckCommand(
         } else {
           console.error(`${c.error("✗")} Check failed: ${message}`);
         }
-        process.exitCode = 1;
+        setCommandExitCode(1);
       }
     },
   });
@@ -167,6 +172,7 @@ function parseCheckOptions(args: Record<string, unknown>): CheckOptions {
     snapshots: args.snapshots === true,
     captionZone: parseCaptionZone(args["caption-zone"]),
     frameCheck: parseFrameCheck(args["frame-check"]),
+    layout: parseLayout(args.layout),
     autoProxy: args.proxy as boolean | undefined,
   };
 }
@@ -174,6 +180,8 @@ function parseCheckOptions(args: Record<string, unknown>): CheckOptions {
 const CAPTION_ZONE_FIELDS = new Set(["x0", "y0", "x1", "y1", "severity", "seek"]);
 
 const FRAME_CHECK_FIELDS = new Set(["severity", "seek", "tol"]);
+
+const LAYOUT_FIELDS = new Set(["proseCoverageFloor"]);
 
 // Mirrors --caption-zone's spec grammar so the EF bridge's severity/seek/tol
 // options survive the migration instead of being silently dropped by a
@@ -205,8 +213,8 @@ function parseFrameCheckFields(value: string): Map<string, string> {
 
 function parseFrameCheckTolerance(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
-  const tol = Number.parseFloat(raw);
-  if (!Number.isFinite(tol) || tol < 0) throw frameCheckError();
+  const tol = parseNumberStrict(raw);
+  if (tol === null || tol < 0) throw frameCheckError();
   return tol;
 }
 
@@ -214,6 +222,52 @@ function frameCheckError(): Error {
   return new Error(
     'Invalid --frame-check: use bare --frame-check or "severity=warning|error;seek=.25,.75;tol=4" (all fields optional)',
   );
+}
+
+/** Parse `--layout "proseCoverageFloor=0.05"` (semicolon-separated key=value, like caption-zone). */
+export function parseLayout(value: unknown): LayoutOptions | undefined {
+  if (value === undefined || value === null || value === false) return undefined;
+  if (value === true || value === "") throw layoutError();
+  if (typeof value !== "string") throw layoutError();
+  const fields = parseLayoutFields(value);
+  const proseCoverageFloor = parseProseCoverageFloor(fields.get("proseCoverageFloor"));
+  if (proseCoverageFloor === undefined) throw layoutError();
+  return { proseCoverageFloor };
+}
+
+function parseLayoutFields(value: string): Map<string, string> {
+  const fields = new Map<string, string>();
+  for (const part of value.split(";")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) throw layoutError();
+    const key = trimmed.slice(0, separator).trim();
+    const entry = trimmed.slice(separator + 1).trim();
+    if (!LAYOUT_FIELDS.has(key) || fields.has(key)) throw layoutError();
+    fields.set(key, entry);
+  }
+  return fields;
+}
+
+function parseProseCoverageFloor(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const floor = parseNumberStrict(raw);
+  if (floor === null || floor < 0 || floor > 1) throw layoutError();
+  return floor;
+}
+
+function layoutError(): Error {
+  return new Error(
+    'Invalid --layout: use "proseCoverageFloor=0.05" with a fraction from 0 to 1 (inclusive)',
+  );
+}
+
+/** Reject trailing garbage that Number.parseFloat would silently accept (`4px`, `0.05abc`). */
+function parseNumberStrict(raw: string): number | null {
+  if (raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
 }
 
 function parseCaptionZone(value: unknown): CaptionZoneOptions | undefined {
@@ -278,8 +332,8 @@ function requiredCaptionFraction(fields: Map<string, string>, key: string): numb
 
 function captionFraction(value: string | undefined): number | null {
   if (value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : null;
+  const parsed = parseNumberStrict(value);
+  return parsed !== null && parsed >= 0 && parsed <= 1 ? parsed : null;
 }
 
 function captionSeverity(value: string | undefined): "error" | "warning" | undefined {

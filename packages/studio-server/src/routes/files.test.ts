@@ -193,6 +193,36 @@ describe("registerFileRoutes", () => {
     expect(response.status).toBe(404);
   });
 
+  it("returns a clean 400 for an invalid GSAP writer flag", async () => {
+    const previous = process.env.HYPERFRAMES_GSAP_WRITER;
+    process.env.HYPERFRAMES_GSAP_WRITER = "true";
+    try {
+      const projectDir = createProjectDir();
+      writeFileSync(
+        join(projectDir, "index.html"),
+        '<div id="box"></div><script>const tl = gsap.timeline(); tl.to("#box", { x: 10 });</script>',
+      );
+      const app = new Hono();
+      registerFileRoutes(app, createAdapter(projectDir));
+
+      const response = await app.request(
+        "http://localhost/projects/demo/gsap-mutations/index.html",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "shift-positions", targetSelector: "#box", delta: 1 }),
+        },
+      );
+      const payload = (await response.json()) as { error?: string };
+
+      expect(response.status).toBe(400);
+      expect(payload.error).toContain("expected recast or acorn");
+    } finally {
+      if (previous === undefined) delete process.env.HYPERFRAMES_GSAP_WRITER;
+      else process.env.HYPERFRAMES_GSAP_WRITER = previous;
+    }
+  });
+
   it("returns empty content for missing files when caller marks the read optional", async () => {
     const projectDir = createProjectDir();
     const app = new Hono();
@@ -1798,6 +1828,47 @@ tl.to("#box", { opacity: 1, duration: 1 }, 0);
     expect(result.ok).toBe(true);
     expect(result.after).not.toContain("--hf-studio-rotation");
     expect(result.after).not.toContain("data-hf-studio-rotation");
+  });
+
+  it("replace-with-keyframes preserves per-segment easing for exact temporal keyframes", async () => {
+    const projectDir = createProjectDir();
+    const PATH_COMP = `<!DOCTYPE html><html><body data-duration="32">
+<div id="box"></div>
+<script data-hyperframes-gsap>
+const tl = gsap.timeline();
+tl.to("#box", { motionPath: { path: [{ x: 0, y: 0 }, { x: 100, y: 100 }] }, duration: 16.055, ease: "power1.inOut" }, 12.17);
+</script>
+</body></html>`;
+    writeHtml(projectDir, "path.html", PATH_COMP);
+    const app = new Hono();
+    registerFileRoutes(app, createAdapter(projectDir));
+
+    const anim = await getFirstAnimation(app, "path.html");
+    const res = await app.request("http://localhost/projects/demo/gsap-mutations/path.html", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "replace-with-keyframes",
+        animationId: anim.id,
+        targetSelector: "#box",
+        position: 12.17,
+        duration: 16.055,
+        keyframes: [
+          { percentage: 0, properties: { x: 0, y: 0 } },
+          { percentage: 23.2, properties: { x: 25, y: 30 } },
+          { percentage: 100, properties: { x: 100, y: 100 } },
+        ],
+        ease: "none",
+      }),
+    });
+    const result = (await res.json()) as { ok: boolean; after: string };
+
+    expect(res.status).toBe(200);
+    expect(result.ok).toBe(true);
+    expect(result.after).toContain('"23.2%"');
+    expect(result.after).toContain('easeEach: "power1.inOut"');
+    expect(result.after).toContain('ease: "none"');
+    expect(result.after).not.toContain("motionPath");
   });
 
   it("edits a template-wrapped tween in place, preserving gsap.set and the IIFE", async () => {

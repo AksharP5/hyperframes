@@ -63,6 +63,7 @@ Common sizes:
 | `data-variable-values` | div | No | JSON object of values passed to a nested composition. Read via `getVariables()` in scripts, or consumed automatically by declarative bindings. |
 | `data-var-src` | img, video, audio | No | Binds the element's `src` to a declared variable id — the runtime substitutes the value (URL string or image `{url}`); the authored `src` is the fallback. |
 | `data-var-text` | any | No | Binds the element's own text to a scalar variable id. Element children are preserved. |
+| `data-color-grading` | img, video | No | Validated JSON payload for media-level correction, grading, LUT, finishing, and shader effects. Prefer Studio or `hyperframes media-treatment` to author it. |
 | `data-width` | div | On compositions | Composition width in pixels. |
 | `data-height` | div | On compositions | Composition height in pixels. |
 
@@ -161,6 +162,34 @@ Common sizes:
     For more on how compositions work, see [Compositions](/concepts/compositions).
   </Accordion>
 </AccordionGroup>
+
+## Media Treatments
+
+Real `<img>` and `<video>` elements may carry a `data-color-grading` payload:
+
+```html index.html
+<video
+  id="hero"
+  src="assets/hero.mp4"
+  data-start="0"
+  data-track-index="0"
+  muted
+  playsinline
+  data-color-grading='{
+    "preset":"clean-studio",
+    "intensity":0.8,
+    "adjust":{"highlights":-0.08,"shadows":0.06},
+    "effects":{"bloom":0.12},
+    "colorSpace":"rec709"
+  }'
+></video>
+```
+
+The runtime renders the complete payload on a sibling WebGL canvas. It does not
+apply to text, SVG, arbitrary DOM, or CSS background images. Use Studio or
+[`media-treatment`](/packages/cli#media-treatment) for normal authoring; see
+[Color Grading](/guides/color-grading) and [Media Effects](/guides/media-effects)
+for the supported workflow and current SDR/HDR boundary.
 
 ## Relative Timing
 

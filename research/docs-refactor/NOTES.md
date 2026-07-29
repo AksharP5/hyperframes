@@ -178,8 +178,8 @@ New navigation should be task-shaped:
 - Added Playground as a no-local-setup path in Introduction and Choose your path.
 - Added `research/docs-audit/current-state.html`, a visual after-state dashboard alongside the baseline audit.
 - Final structural inventory:
-  - 247 MDX pages;
-  - 247 pages represented in navigation;
+  - 253 public documentation pages after syncing the latest `main` branch;
+  - 253 pages represented in navigation;
   - zero orphan pages;
   - zero missing navigation targets;
   - every MDX page has frontmatter, a title, and a description.

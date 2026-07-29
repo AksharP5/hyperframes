@@ -1,3 +1,4 @@
+import { failCommand, setCommandExitCode } from "../../utils/commandResult.js";
 /**
  * `hyperframes lambda render-batch <projectDir> --batch <path.jsonl>` —
  * fan out N personalised renders of the same project, one per JSONL line.
@@ -167,12 +168,12 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
   const batchPath = resolvePath(args.batch);
   if (!existsSync(batchPath)) {
     errorBox("Batch file not found", `No such file: ${batchPath}`);
-    process.exit(1);
+    failCommand();
   }
   const entries = parseBatchFile(batchPath);
   if (entries.length === 0) {
     errorBox("Empty batch", `${batchPath} contains zero entries (every line was blank).`);
-    process.exit(1);
+    failCommand();
   }
 
   warnOnDimensionMismatch({
@@ -213,7 +214,7 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
       "Variable validation failed",
       "Aborting batch due to variable issues in one or more entries (--strict-variables mode).",
     );
-    process.exit(1);
+    failCommand();
   }
 
   const config: SerializableDistributedRenderConfig = buildLambdaBatchRenderConfig(args);
@@ -325,7 +326,7 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
         : (row.executionArn ?? c.dim("(no execution)"));
     console.log(`  ${tag} line ${row.inputLine}  ${c.dim(row.outputKey)}  ${detail}`);
   }
-  if (failed > 0) process.exitCode = 1;
+  if (failed > 0) setCommandExitCode(1);
 }
 
 /**
@@ -396,14 +397,14 @@ export function parseBatchFile(path: string): Array<{ entry: BatchEntry; lineNum
       parsed = JSON.parse(line);
     } catch (err) {
       errorBox(`Invalid JSON in batch file on line ${i + 1}`, normalizeErrorMessage(err));
-      process.exit(1);
+      failCommand();
     }
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
       errorBox(
         `Invalid batch entry on line ${i + 1}`,
         'Each line must be a JSON object with at least { "outputKey": "..." }.',
       );
-      process.exit(1);
+      failCommand();
     }
     const obj = parsed as Record<string, unknown>;
     const outputKey = obj.outputKey;
@@ -412,7 +413,7 @@ export function parseBatchFile(path: string): Array<{ entry: BatchEntry; lineNum
         `Missing outputKey on line ${i + 1}`,
         'Each batch entry needs a non-empty "outputKey" string (e.g. "renders/alice.mp4").',
       );
-      process.exit(1);
+      failCommand();
     }
     if (obj.variables !== undefined) {
       if (
@@ -424,7 +425,7 @@ export function parseBatchFile(path: string): Array<{ entry: BatchEntry; lineNum
           `Invalid variables on line ${i + 1}`,
           '"variables" must be a JSON object (or omitted).',
         );
-        process.exit(1);
+        failCommand();
       }
     }
     if (obj.executionName !== undefined && typeof obj.executionName !== "string") {
@@ -432,7 +433,7 @@ export function parseBatchFile(path: string): Array<{ entry: BatchEntry; lineNum
         `Invalid executionName on line ${i + 1}`,
         '"executionName" must be a string (or omitted).',
       );
-      process.exit(1);
+      failCommand();
     }
     out.push({
       entry: {

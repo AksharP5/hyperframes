@@ -2,6 +2,7 @@ import type { RefObject } from "react";
 import type { ArcPathSegment, GsapAnimation } from "@hyperframes/parsers/gsap-parser";
 import type { DomEditSelection } from "./domEditing";
 import type { ImportedFontAsset } from "./fontAssets";
+import type { GsapAnimationEditCallbacks } from "./gsapAnimationCallbacks";
 
 export interface BackgroundRemovalProgress {
   status: "processing" | "complete" | "failed";
@@ -18,6 +19,18 @@ export interface BackgroundRemovalResult {
   backgroundOutputPath?: string;
   provider?: string;
 }
+
+export interface MediaOverlayPlacement {
+  start: number;
+  duration?: number;
+  track?: number;
+  compositionPath?: string;
+}
+
+export type AddMediaOverlayHandler = (
+  blockName: string,
+  placement: MediaOverlayPlacement,
+) => Promise<void>;
 
 export interface PropertyPanelProps {
   projectId: string;
@@ -69,6 +82,7 @@ export interface PropertyPanelProps {
   onAskAgent: () => void;
   onToggleElementHidden?: (elementKey: string, hidden: boolean) => void | Promise<void>;
   onImportAssets?: (files: FileList, dir?: string) => Promise<string[]>;
+  onAddMediaOverlay?: AddMediaOverlayHandler;
   fontAssets?: ImportedFontAsset[];
   onImportFonts?: (files: FileList | File[]) => Promise<ImportedFontAsset[]>;
   previewIframeRef?: RefObject<HTMLIFrameElement | null>;
@@ -110,6 +124,7 @@ export interface PropertyPanelProps {
   onRemoveKeyframe?: (animationId: string, percentage: number) => void;
   onUpdateKeyframeEase?: (animationId: string, percentage: number, ease: string) => void;
   onSetAllKeyframeEases?: (animationId: string, ease: string) => void;
+  onUpdateSegmentEase?: NonNullable<GsapAnimationEditCallbacks["onUpdateSegmentEase"]>;
   onConvertToKeyframes?: (animationId: string, duration?: number) => void;
   onCommitAnimatedProperty?: (
     selection: DomEditSelection,

@@ -89,6 +89,39 @@ describe("composition timing contract", () => {
       codes: ["deprecated-end", "conflicting-end", "deprecated-layer", "conflicting-layer"],
     },
     {
+      // Regression: compiler-derived `data-end` matching `data-duration` used
+      // to fire `deprecated-end`, which surfaced as a false-positive
+      // `deprecated_data_end` from StaticGuard whenever bundler output was
+      // re-validated. Field cluster: cli-feedback crons 61-68, n=25+ across
+      // darwin/linux/win32 and versions 0.7.56-0.7.64. Reporter L3 cite
+      // (ts=1784519869): "bundleToSingleHtml compiles data-duration into
+      // data-end, then validates the compiled HTML and reports its own
+      // generated data-end as deprecated." Consistent pairs are silent.
+      name: "compiler-derived end consistent with canonical duration is silent",
+      attrs: {
+        "data-start": "0",
+        "data-duration": "18",
+        "data-end": "18",
+      },
+      expected: { start: 0, duration: 18, end: 18, trackIndex: 0 },
+      codes: [],
+    },
+    {
+      name: "compiler-derived end within float epsilon of canonical duration is silent",
+      // data-start="0.1" + data-duration="0.2" evaluates to 0.30000000000000004
+      // under IEEE-754. The compiler serializes that residual verbatim, so the
+      // parsed derived-end and the reader-computed canonical end differ by ~2 ulps.
+      // A byte-exact comparison would refire the false positive; the epsilon
+      // gate keeps it silent.
+      attrs: {
+        "data-start": "0.1",
+        "data-duration": "0.2",
+        "data-end": "0.30000000000000004",
+      },
+      expected: { start: 0.1, duration: 0.2 },
+      codes: [],
+    },
+    {
       name: "invalid values are diagnosed rather than coerced",
       attrs: { "data-start": "wat +", "data-duration": "-1", "data-track-index": "1.5" },
       expected: { start: null, duration: null, end: null, trackIndex: 0 },

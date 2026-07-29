@@ -3,6 +3,7 @@ import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WhisperUnavailableError } from "../whisper/manager.js";
+import { CliRuntimeError, consumeCommandResult } from "../utils/commandResult.js";
 
 // Make the whisper core report "unavailable" so we exercise the soft-skip path.
 const transcribeMock = vi.fn();
@@ -26,12 +27,9 @@ function dummyAudio(): { dir: string; input: string } {
 
 describe("transcribe command", () => {
   let dirs: string[] = [];
-  let priorExitCode: typeof process.exitCode;
-
   beforeEach(() => {
     dirs = [];
-    priorExitCode = process.exitCode;
-    process.exitCode = undefined;
+    consumeCommandResult();
     transcribeMock.mockReset();
     trackTranscribeUnavailable.mockReset();
     trackCommandFailure.mockReset();
@@ -42,7 +40,7 @@ describe("transcribe command", () => {
   });
 
   afterEach(() => {
-    process.exitCode = priorExitCode;
+    consumeCommandResult();
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
@@ -52,7 +50,7 @@ describe("transcribe command", () => {
     dirs.push(dir);
     await transcribeCmd.run!({ args: { input, json: true, optional: false } } as never);
 
-    expect(process.exitCode).toBe(1);
+    expect(consumeCommandResult().exitCode).toBe(1);
     expect(trackTranscribeUnavailable).toHaveBeenCalledWith({ optional: false });
     expect(trackCommandFailure).not.toHaveBeenCalled();
   });
@@ -62,7 +60,7 @@ describe("transcribe command", () => {
     dirs.push(dir);
     await transcribeCmd.run!({ args: { input, json: true, optional: true } } as never);
 
-    expect(process.exitCode).toBe(0);
+    expect(consumeCommandResult().exitCode).toBe(0);
     expect(trackTranscribeUnavailable).toHaveBeenCalledWith({ optional: true });
     expect(trackCommandFailure).not.toHaveBeenCalled();
   });
@@ -103,16 +101,13 @@ Render video. Built for agents.
     const { dir, input } = dummyAudio();
     dirs.push(dir);
     const consoleLog = vi.mocked(console.log);
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`__exit_${code}__`);
-    }) as never);
 
     // 100 is well below the 5000ms minimum — must fail loud instead of silently
     // reverting to the auto-scaled default (the whole point of the flag is
     // that the user explicitly asked for a specific value).
     await expect(
       transcribeCmd.run!({ args: { input, json: true, timeout: "100" } } as never),
-    ).rejects.toThrow("__exit_1__");
+    ).rejects.toThrow(CliRuntimeError);
 
     const log = consoleLog.mock.calls.at(-1)?.[0];
     expect(typeof log).toBe("string");
@@ -121,8 +116,6 @@ Render video. Built for agents.
     expect(parsed.ok).toBe(false);
     expect(parsed.error).toContain("--timeout");
     expect(parsed.error).toContain("5000");
-
-    exitSpy.mockRestore();
   });
 
   it("--preserve-cues keeps single-word cues separate when exporting from JSON", async () => {

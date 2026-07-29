@@ -95,7 +95,9 @@ describe("toggleTimelineTrackHidden", () => {
     expect(pendingRef.current).toEqual(new Set(["index.html", "scene.html"]));
     expect(timestampRef.current).toBeGreaterThan(0);
     expect(recordEdit).toHaveBeenCalledTimes(1);
-    expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Hide track 0");
+    // Display row, not the raw key: track 0 is the first row, so it reads "1",
+    // the same number the track header announces for that row.
+    expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Hide track 1");
     expect(Object.keys(recordEdit.mock.calls[0]?.[0]?.files ?? {}).sort()).toEqual([
       "index.html",
       "scene.html",
@@ -133,6 +135,64 @@ describe("toggleTimelineTrackHidden", () => {
     });
 
     expect(writes.get("index.html")).not.toContain("data-hidden");
+  });
+
+  // An expanded sub-comp child gets a synthesized FRACTIONAL track key
+  // (`display.track + n / (siblings + 2)`), so a label built from the raw key
+  // reads "Hide track 0.16666666666666666" in the undo history. Track 0 would
+  // format cleanly and prove nothing, hence 1 / 6.
+  it("labels the undo entry with the display row, not the fractional track key", async () => {
+    const files = new Map([
+      ["index.html", `<div id="child" data-start="0" data-duration="2"></div>`],
+    ]);
+    stubProjectFiles(files);
+
+    const recordEdit = vi.fn();
+
+    await toggleTimelineTrackHidden({
+      projectId: "project-1",
+      activeCompPath: "index.html",
+      timelineElements: [
+        element({ id: "host", domId: "host", track: 0 }),
+        element({ id: "child", domId: "child", track: 1 / 6 }),
+      ],
+      track: 1 / 6,
+      hidden: true,
+      previewIframe: null,
+      writeProjectFile: async () => {},
+      recordEdit,
+      domEditSaveTimestampRef: { current: 0 },
+      pendingTimelineEditPathRef: { current: new Set() },
+    });
+
+    expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Hide track 2");
+  });
+
+  it("labels a show back with the display row too", async () => {
+    const files = new Map([
+      ["index.html", `<div id="child" data-start="0" data-duration="2" data-hidden=""></div>`],
+    ]);
+    stubProjectFiles(files);
+
+    const recordEdit = vi.fn();
+
+    await toggleTimelineTrackHidden({
+      projectId: "project-1",
+      activeCompPath: "index.html",
+      timelineElements: [
+        element({ id: "host", domId: "host", track: 0 }),
+        element({ id: "child", domId: "child", track: 1 / 6, hidden: true }),
+      ],
+      track: 1 / 6,
+      hidden: false,
+      previewIframe: null,
+      writeProjectFile: async () => {},
+      recordEdit,
+      domEditSaveTimestampRef: { current: 0 },
+      pendingTimelineEditPathRef: { current: new Set() },
+    });
+
+    expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Show track 2");
   });
 });
 

@@ -298,6 +298,20 @@ export function buildTimelineElementKey(params: {
   return `${scope}:${params.id}:${params.fallbackIndex}`;
 }
 
+/**
+ * Inverse of {@link buildTimelineElementKey} for the `sourceFile#domId` form.
+ * A key with no `#` is a bare dom id and carries no source file of its own, so
+ * the caller supplies the scope it wants to look that id up in.
+ */
+export function splitTimelineElementKey(key: string): {
+  sourceFile: string | null;
+  domId: string;
+} {
+  const hashIndex = key.lastIndexOf("#");
+  if (hashIndex < 0) return { sourceFile: null, domId: key };
+  return { sourceFile: key.slice(0, hashIndex), domId: key.slice(hashIndex + 1) };
+}
+
 export function buildTimelineElementIdentity(params: {
   preferredId?: string | null;
   label: string;
@@ -366,20 +380,21 @@ function numbersNearlyEqual(a: number, b: number): boolean {
   return Math.abs(a - b) < 0.001;
 }
 
+const MANIFEST_CLIP_ATTRS: ReadonlyArray<[string, (clip: ClipManifestClip) => number]> = [
+  ["data-start", (clip) => clip.start],
+  ["data-duration", (clip) => clip.duration],
+  ["data-track-index", (clip) => clip.track],
+];
+
 function nodeMatchesManifestClip(node: Element, clip: ClipManifestClip): boolean {
   const tagName = clip.tagName?.toLowerCase();
   if (tagName && node.tagName.toLowerCase() !== tagName) return false;
-
-  const start = Number.parseFloat(node.getAttribute("data-start") ?? "");
-  if (Number.isFinite(start) && !numbersNearlyEqual(start, clip.start)) return false;
-
-  const duration = Number.parseFloat(node.getAttribute("data-duration") ?? "");
-  if (Number.isFinite(duration) && !numbersNearlyEqual(duration, clip.duration)) return false;
-
-  const track = Number.parseInt(node.getAttribute("data-track-index") ?? "", 10);
-  if (Number.isFinite(track) && track !== clip.track) return false;
-
-  return true;
+  // An attribute only constrains the match when it parses to a finite number:
+  // missing or garbled reads as "unknown", not "mismatch".
+  return MANIFEST_CLIP_ATTRS.every(([attr, expected]) => {
+    const actual = Number.parseFloat(node.getAttribute(attr) ?? "");
+    return !Number.isFinite(actual) || numbersNearlyEqual(actual, expected(clip));
+  });
 }
 
 function findTimelineDomNode(doc: Document, id: string): Element | null {

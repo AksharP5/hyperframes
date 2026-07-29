@@ -14,28 +14,29 @@ describe("executeParallelCapture peer abort", () => {
     const root = mkdtempSync(join(tmpdir(), "hf-peer-abort-"));
     const captureFrame = vi.fn().mockResolvedValue(undefined);
     const closeCaptureSession = vi.fn().mockResolvedValue(undefined);
-    vi.doMock("./frameCapture.js", async (importOriginal) => {
-      const original = await importOriginal<typeof import("./frameCapture.js")>();
-      return {
-        ...original,
-        createCaptureSession: vi.fn(async (_url: string, outputDir: string) => {
-          const workerId = outputDir.endsWith("worker-0") ? 0 : 1;
-          return {
-            workerId,
-            browserConsoleBuffer: workerId === 0 ? ["[Browser:ERROR] bad source"] : [],
-          } as unknown as CaptureSession & { workerId: number };
-        }),
-        initializeSession: vi.fn(async (session: CaptureSession & { workerId: number }) => {
-          if (session.workerId === 0) {
-            throw new Error("Composition has zero duration. Runtime ready: true");
-          }
-          await Promise.resolve();
-        }),
-        captureFrame,
-        closeCaptureSession,
-        getCapturePerfSummary: vi.fn(() => ({ frames: 0 })),
-      };
-    });
+    // Keep this regression isolated from frameCapture's very large module graph.
+    // Importing the real module here made the test exceed Vitest's 5s budget
+    // only when every workspace suite competed for CPU during the CI matrix.
+    vi.doMock("./frameCapture.js", () => ({
+      createCaptureSession: vi.fn(async (_url: string, outputDir: string) => {
+        const workerId = outputDir.endsWith("worker-0") ? 0 : 1;
+        return {
+          workerId,
+          browserConsoleBuffer: workerId === 0 ? ["[Browser:ERROR] bad source"] : [],
+        } as unknown as CaptureSession & { workerId: number };
+      }),
+      initializeSession: vi.fn(async (session: CaptureSession & { workerId: number }) => {
+        if (session.workerId === 0) {
+          throw new Error("Composition has zero duration. Runtime ready: true");
+        }
+        await Promise.resolve();
+      }),
+      captureFrame,
+      captureFrameToBuffer: vi.fn(),
+      captureFrameToBufferPipelined: vi.fn(),
+      closeCaptureSession,
+      getCapturePerfSummary: vi.fn(() => ({ frames: 0 })),
+    }));
 
     try {
       const { executeParallelCapture } = await import("./parallelCoordinator.js");

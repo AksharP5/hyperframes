@@ -4,7 +4,7 @@
  */
 
 import { fpsToNumber } from "@hyperframes/core";
-import type { CapturePerfSummary, SubTimelineWaitOutcome } from "@hyperframes/engine";
+import type { CapturePerfSummary, SubTimelineWaitOutcome, WorkerSizing } from "@hyperframes/engine";
 import type { CaptureCalibrationSample, CaptureCostEstimate } from "./captureCost.js";
 import type {
   CaptureAttemptSummary,
@@ -111,6 +111,9 @@ function aggregateDrawElement(
   const gateReasons = [
     ...new Set(perfs.map((p) => p.deGateReason).filter((r): r is string => !!r)),
   ].sort();
+  const gpuRenderers = [
+    ...new Set(perfs.map((p) => p.gpuRenderer).filter((r): r is string => !!r)),
+  ].sort();
   const drain = de.drainStats;
   return {
     mode: modes.join("|") || "unknown",
@@ -121,6 +124,7 @@ function aggregateDrawElement(
     parallelRouter: de.parallelRouter ?? "none",
     preRouterWorkers: de.preRouterWorkers,
     gateReason: gateReasons.length > 0 ? gateReasons.join("|") : undefined,
+    gpuRenderer: gpuRenderers.length > 0 ? gpuRenderers.join("|") : undefined,
     workerEncode: perfs.some((p) => p.deWorkerEncode),
     verifyArmed: perfs.reduce((sum, p) => sum + (p.deVerifyArmed ?? 0), 0),
     verifyChecked: drain?.verifyChecked ?? 0,
@@ -181,6 +185,8 @@ function aggregateBeginFrameReuse(
 export function buildRenderPerfSummary(input: {
   job: RenderJob;
   workerCount: number;
+  /** Auto-sizing provenance; undefined when a pin (htmlInCanvas / low-memory) short-circuited sizing. */
+  workerSizing?: WorkerSizing;
   enableChunkedEncode: boolean;
   chunkedEncodeSize: number;
   compositionDurationSeconds: number;
@@ -217,6 +223,7 @@ export function buildRenderPerfSummary(input: {
     fps: fpsToNumber(input.job.config.fps),
     quality: input.job.config.quality,
     workers: input.workerCount,
+    workerSizing: input.workerSizing,
     chunkedEncode: input.enableChunkedEncode,
     chunkSizeFrames: input.enableChunkedEncode ? input.chunkedEncodeSize : null,
     compositionDurationSeconds: input.compositionDurationSeconds,

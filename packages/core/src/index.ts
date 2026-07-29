@@ -95,7 +95,6 @@ export {
   keyframesToGsapAnimations,
   gsapAnimationsToKeyframes,
 } from "@hyperframes/parsers";
-
 export type { ParsedHtml, CompositionMetadata } from "@hyperframes/parsers";
 
 export {
@@ -169,11 +168,24 @@ export { parseAnimatedGifMetadata, type AnimatedGifMetadata } from "./media/gif"
 export {
   HF_COLOR_GRADING_ATTR,
   HF_COLOR_GRADING_ADJUST_KEYS,
+  HF_COLOR_GRADING_ACTIVE_EFFECT_KEYS,
+  HF_COLOR_GRADING_ANIMATABLE_PROPERTIES,
   HF_COLOR_GRADING_CANVAS_ID_PREFIX,
   HF_COLOR_GRADING_COLOR_SPACE,
+  HF_COLOR_GRADING_CURVE_KEYS,
   HF_COLOR_GRADING_DETAIL_KEYS,
+  HF_COLOR_GRADING_EFFECT_APPLY_DEFAULTS,
   HF_COLOR_GRADING_EFFECT_KEYS,
+  HF_COLOR_GRADING_EFFECT_PRESETS,
+  HF_COLOR_GRADING_GRADE_PRESETS,
+  HF_COLOR_GRADING_HUE_CURVE_KEYS,
+  HF_COLOR_GRADING_LUT_KEYS,
+  HF_COLOR_GRADING_PALETTES,
   HF_COLOR_GRADING_PRESETS,
+  HF_COLOR_GRADING_TOP_LEVEL_KEYS,
+  HF_COLOR_GRADING_WHEEL_KEYS,
+  getHfColorGradingCapabilities,
+  hasHfColorGradingAuthoredValues,
   isHfColorGradingActive,
   normalizeHfColorGrading,
   normalizeHfColorGradingWithVariables,
@@ -182,6 +194,8 @@ export {
   type HfColorGrading,
   type HfColorGradingAdjust,
   type HfColorGradingAdjustKey,
+  type HfColorGradingAnimatablePath,
+  type HfColorGradingActiveEffectKey,
   type HfColorGradingDetailKey,
   type HfColorGradingDetails,
   type HfColorGradingEffectKey,
@@ -191,7 +205,26 @@ export {
   type HfColorGradingPresetId,
   type HfColorGradingTarget,
   type HfColorGradingVariableMap,
+  type HfColorGradingCapabilities,
+  type HfColorGradingCurveKey,
+  type HfColorGradingCurves,
+  type HfColorGradingHueCurveKey,
+  type HfColorGradingHueCurves,
+  type HfColorGradingHueRange,
+  type HfColorGradingSecondary,
+  type HfColorGradingSecondaryCorrection,
+  type HfColorGradingSoftRange,
+  type HfColorGradingTonalWheel,
+  type HfColorGradingWheelKey,
+  type HfColorGradingWheels,
+  type HfColorCurvePoint,
+  type HfHueCurvePoint,
   type NormalizedHfColorGrading,
+  type NormalizedHfColorGradingCurves,
+  type NormalizedHfColorGradingHueCurves,
+  type NormalizedHfColorGradingSecondary,
+  type NormalizedHfColorGradingWheels,
+  type ResolvedHfColorGrading,
 } from "./colorGrading";
 export { parseCubeLut, CubeLutParseError, type ParseCubeLutOptions } from "./colorLuts";
 

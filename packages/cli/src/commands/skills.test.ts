@@ -5,6 +5,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
+async function commandExitCode(): Promise<number> {
+  const { consumeCommandResult } = await import("../utils/commandResult.js");
+  return consumeCommandResult().exitCode;
+}
+
+async function resetCommandResult(): Promise<void> {
+  const { consumeCommandResult } = await import("../utils/commandResult.js");
+  consumeCommandResult();
+}
+
 type SpawnCall = {
   command: string;
   args: ReadonlyArray<string>;
@@ -173,8 +183,6 @@ function skillFlagValues(args: ReadonlyArray<string>): string[] {
 }
 
 describe("hyperframes skills", () => {
-  let prevExitCode: typeof process.exitCode;
-
   beforeEach(async () => {
     state.execCalls = [];
     state.spawnCalls = [];
@@ -197,15 +205,13 @@ describe("hyperframes skills", () => {
     vi.mocked(presentSkills).mockImplementation((names: readonly string[]) => [...names]);
     vi.mocked(pruneOrphanedLockEntries).mockReset();
     vi.mocked(pruneOrphanedLockEntries).mockImplementation(() => []);
-    // Each test asserts on process.exitCode; isolate it from the runner's own.
-    prevExitCode = process.exitCode;
-    process.exitCode = 0;
+    await resetCommandResult();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     setPlatform(originalPlatform);
     vi.restoreAllMocks();
-    process.exitCode = prevExitCode;
+    await resetCommandResult();
   });
 
   it("sets clone-safe env on the spawned skills CLI child (GH #316 + LFS skip)", async () => {
@@ -290,13 +296,13 @@ describe("hyperframes skills", () => {
     setPlatform("linux");
     state.spawnExitCode = 1; // simulate `skills add` exiting non-zero
     await runSkillsUpdate();
-    expect(process.exitCode).toBe(1);
+    expect(await commandExitCode()).toBe(1);
   });
 
   it("skills update refreshes only the stale core + installed skills — never the full set", async () => {
     setPlatform("linux");
     await runSkillsUpdate();
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
     const args = state.spawnCalls[0]?.args ?? [];
     // straight from GitHub, globally, as a faithful clone
     expect(args).toContain("https://github.com/heygen-com/hyperframes");
@@ -350,7 +356,7 @@ describe("hyperframes skills", () => {
     await runSkillsUpdate();
 
     expect(state.spawnCalls.some((s) => s.args.includes("add"))).toBe(false);
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
   });
 
   // `skills add` never deletes, so update must separately prune skills the
@@ -375,7 +381,7 @@ describe("hyperframes skills", () => {
     expect(removeCall!.args).toContain("graphic-overlays");
     expect(removeCall!.args).toContain("--yes");
     expect(removeCall!.args).toContain("-g"); // attributed from the global lock → remove globally
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
   });
 
   // The scope the skill was attributed from drives the remove scope: a
@@ -443,7 +449,7 @@ describe("hyperframes skills", () => {
     await runSkillsUpdate();
 
     expect(pruneOrphanedLockEntries).toHaveBeenCalledWith(["hyperframes-captions"], "global");
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
   });
 
   // The idempotent-second-run contract at the command level: once nothing is
@@ -463,7 +469,7 @@ describe("hyperframes skills", () => {
     vi.mocked(pruneOrphanedLockEntries).mockReturnValueOnce(["hyperframes-captions"]);
 
     await runSkillsUpdate();
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
     expect(state.spawnCalls.some((s) => s.args.includes("remove"))).toBe(true);
 
     // Second run: nothing attributed as removed anymore (the lock entry was
@@ -474,7 +480,7 @@ describe("hyperframes skills", () => {
       .mockResolvedValueOnce({ scope: "global", skills: [] } as never);
 
     await runSkillsUpdate();
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
     expect(state.spawnCalls.some((s) => s.args.includes("remove"))).toBe(false);
     // Nothing to prune this time — pruneOrphanedLockEntries isn't even reached.
     expect(pruneOrphanedLockEntries).toHaveBeenCalledTimes(1);
@@ -542,7 +548,7 @@ describe("hyperframes skills", () => {
     // The install still ran and the update still succeeded — a cleanup no-op
     // doesn't fail the update.
     expect(state.spawnCalls[0]?.args).toContain("add");
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
   });
 
   // When git is missing the upstream `skills add` would clone-abort with a noisy
@@ -557,7 +563,7 @@ describe("hyperframes skills", () => {
     await skillsCmd.run?.({ args: {}, rawArgs: [], cmd: skillsCmd } as never);
 
     expect(state.spawnCalls).toHaveLength(0);
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
     // Diagnostic instrumentation: the skip records why, so rare boxes hitting
     // this (fresh Windows without git) are visible instead of silently no-op.
     expect(trackSkillsInstallSkipped).toHaveBeenCalledWith({ reason: "git_missing" });
@@ -585,7 +591,7 @@ describe("hyperframes skills", () => {
     await runSkillsUpdate();
 
     expect(state.spawnCalls).toHaveLength(0);
-    expect(process.exitCode).toBe(1);
+    expect(await commandExitCode()).toBe(1);
   });
 
   // The stale-24h-cache regression: the skills commands are excluded from the
@@ -599,7 +605,7 @@ describe("hyperframes skills", () => {
 
       await runSkillsUpdate();
 
-      expect(process.exitCode).toBe(0);
+      expect(await commandExitCode()).toBe(0);
       expect(invalidateSkillsCache).toHaveBeenCalled();
     });
 
@@ -610,7 +616,7 @@ describe("hyperframes skills", () => {
 
       await runSkillsUpdate();
 
-      expect(process.exitCode).toBe(1);
+      expect(await commandExitCode()).toBe(1);
       expect(invalidateSkillsCache).not.toHaveBeenCalled();
     });
 
@@ -653,8 +659,6 @@ describe("hyperframes skills", () => {
 // set it depends on) is guaranteed present and current before the agent reads
 // it. Positional names are the ONLY way update expands an install.
 describe("hyperframes skills update <names>", () => {
-  let prevExitCode: typeof process.exitCode;
-
   beforeEach(async () => {
     state.execCalls = [];
     state.spawnCalls = [];
@@ -671,21 +675,20 @@ describe("hyperframes skills update <names>", () => {
     vi.mocked(presentSkills).mockImplementation((names: readonly string[]) => [...names]);
     vi.mocked(pruneOrphanedLockEntries).mockReset();
     vi.mocked(pruneOrphanedLockEntries).mockImplementation(() => []);
-    prevExitCode = process.exitCode;
-    process.exitCode = 0;
+    await resetCommandResult();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     setPlatform(originalPlatform);
     vi.restoreAllMocks();
-    process.exitCode = prevExitCode;
+    await resetCommandResult();
   });
 
   it("installs the requested workflow plus the stale core set — nothing else", async () => {
     setPlatform("linux");
     await runSkillsUpdateWith(["pr-to-video"]);
 
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
     const args = state.spawnCalls[0]?.args ?? [];
     expect(args).toContain("add");
     // requested workflow (missing) + the stale core skills; embedded-captions
@@ -713,7 +716,7 @@ describe("hyperframes skills update <names>", () => {
     await runSkillsUpdateWith(["pr-to-video"]);
 
     expect(state.spawnCalls).toHaveLength(0);
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
   });
 
   it("fails loudly on a skill name the manifest doesn't ship", async () => {
@@ -721,7 +724,7 @@ describe("hyperframes skills update <names>", () => {
     await runSkillsUpdateWith(["graphic-overlays"]); // renamed upstream → unknown
 
     expect(state.spawnCalls).toHaveLength(0);
-    expect(process.exitCode).toBe(1);
+    expect(await commandExitCode()).toBe(1);
   });
 
   it("rejects flag-like skill names before any spawn", async () => {
@@ -729,7 +732,7 @@ describe("hyperframes skills update <names>", () => {
     await runSkillsUpdateWith(["--config=evil.js"]);
 
     expect(state.spawnCalls).toHaveLength(0);
-    expect(process.exitCode).toBe(1);
+    expect(await commandExitCode()).toBe(1);
   });
 
   it("offline with the skill already on disk: proceeds without installing", async () => {
@@ -740,7 +743,7 @@ describe("hyperframes skills update <names>", () => {
     await runSkillsUpdateWith(["pr-to-video"]);
 
     expect(state.spawnCalls).toHaveLength(0);
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
   });
 
   it("offline with the skill absent: blind-installs it plus the fallback core set", async () => {
@@ -759,7 +762,7 @@ describe("hyperframes skills update <names>", () => {
     // depends on, not silently shrink to just the named skill.
     const args = state.spawnCalls[0]?.args ?? [];
     expect(skillFlagValues(args).sort()).toEqual(["pr-to-video", ...FALLBACK_CORE_SKILLS].sort());
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
   });
 
   // The `check || update` CI contract: offline, a bare update can't verify
@@ -773,7 +776,7 @@ describe("hyperframes skills update <names>", () => {
     await runSkillsUpdate();
 
     expect(state.spawnCalls.some((s) => s.args.includes("add"))).toBe(false);
-    expect(process.exitCode).toBe(1);
+    expect(await commandExitCode()).toBe(1);
   });
 
   it("a malformed canonical manifest warns distinctly, then still degrades to presence mode", async () => {
@@ -792,7 +795,7 @@ describe("hyperframes skills update <names>", () => {
       .mock.calls.some((args) => String(args[0]).includes("malformed"));
     expect(warnedMalformed).toBe(true);
     // Still degrades rather than failing the whole command.
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
   });
 
   it("a genuine offline error degrades silently — no malformed-manifest warning", async () => {
@@ -816,7 +819,7 @@ describe("hyperframes skills update <names>", () => {
 
     await runSkillsUpdateWith(["pr-to-video"], { json: true });
 
-    expect(process.exitCode).toBe(0);
+    expect(await commandExitCode()).toBe(0);
     // The engine logs install progress lines too; the JSON result is the last
     // console.log of the run (the prune prints nothing when nothing was removed).
     const last = String(logSpy.mock.calls.at(-1)?.[0] ?? "");
@@ -830,7 +833,7 @@ describe("hyperframes skills update <names>", () => {
 
     await runSkillsUpdateWith(["graphic-overlays"], { json: true }); // unknown name
 
-    expect(process.exitCode).toBe(1);
+    expect(await commandExitCode()).toBe(1);
     const last = String(logSpy.mock.calls.at(-1)?.[0] ?? "");
     const parsed = JSON.parse(last) as { error?: string };
     expect(parsed.error).toMatch(/Unknown skill/);
@@ -842,7 +845,7 @@ describe("hyperframes skills update <names>", () => {
 
     await runSkillsUpdateWith(["pr-to-video"]);
 
-    expect(process.exitCode).toBe(1);
+    expect(await commandExitCode()).toBe(1);
   });
 
   it("exits non-zero when the skill is still missing after an install that exited 0", async () => {
@@ -854,6 +857,6 @@ describe("hyperframes skills update <names>", () => {
     await runSkillsUpdateWith(["pr-to-video"]);
 
     expect(state.spawnCalls[0]?.args).toContain("add");
-    expect(process.exitCode).toBe(1);
+    expect(await commandExitCode()).toBe(1);
   });
 });

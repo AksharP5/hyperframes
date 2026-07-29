@@ -72,9 +72,20 @@ declare global {
      * freshly-injected `__render_frame__` images. See `forceDispatchSeekEvent`.
      */
     __hfReseekGpu?: (time: number) => void;
+    /**
+     * Canonical root-timeline start for a media element. Snapshot capture uses
+     * this runtime-owned resolver so reference expressions, authored timing
+     * restoration, and arbitrary composition nesting cannot drift.
+     */
+    __hfResolveMediaStartSeconds?: (element: Element) => number;
     __HF_PICKER_API?: HyperframePickerApi;
     gsap?: {
       timeline: (params?: { paused?: boolean }) => RuntimeTimelineLike;
+      parseEase?: (
+        ease: string | ((progress: number) => number),
+        ...args: unknown[]
+      ) => ((progress: number) => number) | null;
+      registerPlugin?: (plugin: unknown) => void;
       ticker?: {
         tick: () => void;
       };

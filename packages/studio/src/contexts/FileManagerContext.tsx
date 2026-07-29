@@ -17,6 +17,7 @@ export function useFileManagerContextOptional(): FileManagerValue | null {
 
 export function FileManagerProvider({
   value: {
+    // fallow-ignore-next-line code-duplication
     editingFile,
     setEditingFile,
     projectDir,

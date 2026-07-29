@@ -28,6 +28,42 @@ describe("composition rules", () => {
         result.findings.find(({ code }) => code === "overlapping_clips_same_track"),
       ).toBeUndefined();
     });
+
+    // Regression: cli-feedback field cluster (crons 61-68, n=25+ across
+    // darwin/linux/win32 and versions 0.7.56-0.7.64). `bundleToSingleHtml`
+    // compiles `data-duration` into `data-end`, then re-validates the compiled
+    // HTML. Before this fix the linter fired `deprecated_data_end` on the
+    // compiler's own consistent output — a false-positive that reporters
+    // routed as "check --strict passes but StaticGuard still logs
+    // deprecated-attribute noise" (ts=1784548892, ts=1784541122).
+    it("does not flag deprecated_data_end when compiled data-end matches data-duration", async () => {
+      const result = await lintHyperframeHtml(`<!doctype html><html><body>
+        <div data-composition-id="main" data-width="1920" data-height="1080" data-start="0" data-duration="30">
+          <audio id="bgm" src="bgm.mp3" data-start="0" data-duration="18" data-end="18"></audio>
+          <audio id="narration" src="narr.mp3" data-start="5" data-duration="10" data-end="15"></audio>
+        </div>
+        <script>window.__timelines = { main: {} };</script>
+      </body></html>`);
+
+      const deprecatedEnd = result.findings.filter(({ code }) => code === "deprecated_data_end");
+      expect(deprecatedEnd).toEqual([]);
+    });
+
+    // Companion regression: a manually authored stale `data-end` still fires
+    // `deprecated_data_end`, with a message that names the disagreement so
+    // the author can spot the drift rather than reading the legacy phrasing.
+    it("still flags deprecated_data_end when data-end disagrees with data-duration", async () => {
+      const result = await lintHyperframeHtml(`<!doctype html><html><body>
+        <div data-composition-id="main" data-width="1920" data-height="1080" data-start="0" data-duration="30">
+          <audio id="bgm" src="bgm.mp3" data-start="0" data-duration="18" data-end="20"></audio>
+        </div>
+        <script>window.__timelines = { main: {} };</script>
+      </body></html>`);
+
+      const deprecatedEnd = result.findings.find(({ code }) => code === "deprecated_data_end");
+      expect(deprecatedEnd).toBeDefined();
+      expect(deprecatedEnd?.message).toMatch(/disagrees with data-duration/);
+    });
   });
 
   describe("subcomposition guidance", () => {

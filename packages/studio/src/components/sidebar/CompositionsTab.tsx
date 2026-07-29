@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { setPreviewMediaMuted } from "../../player/lib/timelineIframeHelpers";
+import { buildCompositionThumbnailUrl } from "../../player/components/CompositionThumbnail";
 import { TIMELINE_COMPOSITION_MIME } from "../../utils/timelineCompositionDrop";
 
 interface CompositionsTabProps {
@@ -130,6 +131,8 @@ function CompCard({
 }) {
   const [hovered, setHovered] = useState(false);
   const [stageSize, setStageSize] = useState(DEFAULT_PREVIEW_STAGE);
+  const [livePreviewLoaded, setLivePreviewLoaded] = useState(false);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -158,10 +161,21 @@ function CompCard({
       clearTimeout(hoverTimer.current);
       hoverTimer.current = null;
     }
+    if (syncTimer.current) {
+      clearTimeout(syncTimer.current);
+      syncTimer.current = null;
+    }
     setHovered(false);
+    setLivePreviewLoaded(false);
   };
   const name = comp.replace(/^compositions\//, "").replace(/\.html$/, "");
   const previewUrl = `/api/projects/${projectId}/preview/comp/${comp}`;
+  const thumbnailUrl = buildCompositionThumbnailUrl({
+    previewUrl,
+    seekTime: THUMBNAIL_SEEK_TIME_SECONDS,
+    duration: 0,
+    origin: window.location.origin,
+  });
   const previewScale = resolveCompositionPreviewScale({
     cardWidth: CARD_W,
     cardHeight: CARD_H,
@@ -172,7 +186,7 @@ function CompCard({
   const thumbnailOffsetY = (CARD_H - stageSize.height * previewScale) / 2;
 
   useEffect(() => {
-    requestIframePlaybackSync(hovered);
+    if (hovered) requestIframePlaybackSync(true);
   }, [hovered, requestIframePlaybackSync]);
 
   useEffect(() => {
@@ -216,36 +230,56 @@ function CompCard({
       }`}
     >
       <div className="w-20 h-[45px] rounded overflow-hidden bg-neutral-900 flex-shrink-0 relative">
-        <iframe
-          ref={iframeRef}
-          src={previewUrl}
-          sandbox="allow-scripts allow-same-origin"
-          loading="lazy"
-          className="absolute border-none pointer-events-none"
-          style={{
-            transformOrigin: "0 0",
-            width: stageSize.width,
-            height: stageSize.height,
-            left: thumbnailOffsetX,
-            top: thumbnailOffsetY,
-            transform: `scale(${previewScale})`,
-          }}
-          onLoad={(e) => {
-            try {
-              const iframe = e.currentTarget;
-              const root = iframe.contentDocument?.querySelector("[data-composition-id]");
-              const width = Number(root?.getAttribute("data-width")) || DEFAULT_PREVIEW_STAGE.width;
-              const height =
-                Number(root?.getAttribute("data-height")) || DEFAULT_PREVIEW_STAGE.height;
-              setStageSize({ width, height });
-              requestIframePlaybackSync(hovered);
-            } catch {
-              setStageSize(DEFAULT_PREVIEW_STAGE);
-            }
-          }}
-          title={`${name} preview`}
-          tabIndex={-1}
-        />
+        {thumbnailFailed ? (
+          <div className="absolute inset-0 flex items-center justify-center px-1 text-center text-[8px] leading-tight text-neutral-600">
+            Preview unavailable
+          </div>
+        ) : (
+          <img
+            src={thumbnailUrl}
+            alt=""
+            draggable={false}
+            loading="lazy"
+            decoding="async"
+            onError={() => setThumbnailFailed(true)}
+            className={`absolute inset-0 h-full w-full object-contain transition-opacity ${
+              livePreviewLoaded ? "opacity-0" : "opacity-100"
+            }`}
+          />
+        )}
+        {hovered && (
+          <iframe
+            ref={iframeRef}
+            src={previewUrl}
+            sandbox="allow-scripts allow-same-origin"
+            className="absolute border-none pointer-events-none"
+            style={{
+              transformOrigin: "0 0",
+              width: stageSize.width,
+              height: stageSize.height,
+              left: thumbnailOffsetX,
+              top: thumbnailOffsetY,
+              transform: `scale(${previewScale})`,
+            }}
+            onLoad={(e) => {
+              try {
+                const iframe = e.currentTarget;
+                const root = iframe.contentDocument?.querySelector("[data-composition-id]");
+                const width =
+                  Number(root?.getAttribute("data-width")) || DEFAULT_PREVIEW_STAGE.width;
+                const height =
+                  Number(root?.getAttribute("data-height")) || DEFAULT_PREVIEW_STAGE.height;
+                setStageSize({ width, height });
+                setLivePreviewLoaded(true);
+                requestIframePlaybackSync(true);
+              } catch {
+                setStageSize(DEFAULT_PREVIEW_STAGE);
+              }
+            }}
+            title={`${name} preview`}
+            tabIndex={-1}
+          />
+        )}
       </div>
       <div
         className="min-w-0 flex-1"
@@ -283,7 +317,10 @@ function CompCard({
             e.stopPropagation();
             onRender();
           }}
-          className={`flex-shrink-0 p-1 rounded transition-colors ${
+          // h-6 w-6 = the 24x24 WCAG 2.2 (2.5.8) minimum target; the 14px glyph
+          // is unchanged, only the box grows. The sibling "+" button is h-8 w-8,
+          // so the card row already has the room.
+          className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-colors ${
             isRendering
               ? "text-neutral-600 cursor-not-allowed"
               : "text-neutral-600 hover:text-studio-accent hover:bg-neutral-800"
@@ -331,7 +368,7 @@ export const CompositionsTab = memo(function CompositionsTab({
     <div className="flex-1 overflow-y-auto">
       {compositions.map((comp) => (
         <CompCard
-          key={comp}
+          key={`${projectId}:${comp}`}
           projectId={projectId}
           comp={comp}
           isActive={activeComposition === comp}

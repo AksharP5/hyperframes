@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CliRuntimeError } from "../../utils/commandResult.js";
 import {
   buildLambdaBatchRenderConfig,
   parseBatchFile,
@@ -115,19 +116,9 @@ describe("parseBatchFile", () => {
     expect(out[1]?.lineNumber).toBe(5);
   });
 
-  // Helper: stub `process.exit` to throw a sentinel, run the parser, and
-  // verify it called exit(1). Dedupes the 3 error-path tests so each one
-  // is a single readable assertion.
+  // Keep malformed input assertions focused on the typed command boundary.
   function expectExitOne(content: string): void {
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("EXIT_CALLED");
-    });
-    try {
-      expect(() => parseBatchFile(writeBatch(content))).toThrow(/EXIT_CALLED/);
-      expect(exitSpy).toHaveBeenCalledWith(1);
-    } finally {
-      exitSpy.mockRestore();
-    }
+    expect(() => parseBatchFile(writeBatch(content))).toThrow(CliRuntimeError);
   }
 
   it("exits with a clear message on malformed JSON, naming the offending line", () => {

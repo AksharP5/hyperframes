@@ -9,6 +9,7 @@ import type { RecordEditInput } from "./timelineEditingHelpers";
 
 interface UseRazorSplitOptions {
   projectId: string | null;
+  // fallow-ignore-next-line code-duplication
   activeCompPath: string | null;
   showToast: (message: string, tone?: "error" | "info") => void;
   writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;

@@ -14,7 +14,13 @@ import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { usePlayerStore } from "../player/store/playerStore";
 import { readAllAnimatedProperties, readGsapProperty } from "./gsapRuntimeBridge";
 import type { SetPatchProps } from "./gsapRuntimePatch";
-import { selectorFromSelection, computeElementPercentage, isInstantHold } from "./gsapShared";
+import {
+  selectorFromSelection,
+  computeElementPercentage,
+  isInstantHold,
+  writeTargetSelector,
+  tweenTargetsElement,
+} from "./gsapShared";
 import { resolveTweenStart, resolveTweenDuration } from "../utils/globalTimeCompiler";
 import { roundTo3 } from "../utils/rounding";
 import { commitWholePropertyOffset } from "./gsapWholePropertyOffsetCommit";
@@ -185,7 +191,9 @@ async function commitStaticSet(
     batch.push(entry);
     byGroup.set(group, batch);
   }
-  const staticWrites = animations.filter((a) => isInstantHold(a) && a.targetSelector === selector);
+  const staticWrites = animations.filter(
+    (a) => isInstantHold(a) && tweenTargetsElement(a.targetSelector, selector, selection.element),
+  );
   // Resolve every group's target BEFORE committing anything, and coalesce
   // groups that land on the SAME write into one commit: the snapshot is captured
   // once, so if two groups resolved to one legacy mixed write, a first
@@ -206,7 +214,7 @@ async function commitStaticSet(
   }
   // Fresh adds don't reshape existing sets, so their ids can't go stale.
   for (const batch of newSetBatches) {
-    await addGlobalStaticSet(selection, batch, selector, commit);
+    await addGlobalStaticSet(selection, batch, commit);
   }
 }
 
@@ -236,18 +244,22 @@ function findGroupOwningStaticWrite(
 async function addGlobalStaticSet(
   selection: DomEditSelection,
   batch: [string, number | string][],
-  selector: string,
   commit: Commit,
 ): Promise<void> {
   const numericProps: SetPatchProps = {};
   for (const [k, v] of batch) {
     if (typeof v === "number") numericProps[k as keyof SetPatchProps] = v;
   }
+  // A brand-new write, so it must address ONE element: the selection's own
+  // selector is the bare class an id-less element yields, which would hold every
+  // sibling. No one-element form means no write at all (see writeTargetSelector).
+  const target = writeTargetSelector(selection);
+  if (!target) return;
   await commit(
     selection,
     {
       type: "add",
-      targetSelector: selector,
+      targetSelector: target,
       method: "set",
       position: 0,
       properties: Object.fromEntries(batch),
@@ -259,7 +271,7 @@ async function addGlobalStaticSet(
       ...(Object.keys(numericProps).length > 0
         ? {
             instantPatch: {
-              selector,
+              selector: target,
               change: { kind: "global-set" as const, props: numericProps },
             },
           }
@@ -482,7 +494,11 @@ export function useAnimatedPropertyCommit(deps: CommitAnimatedPropertyDeps) {
         // contaminating a foreign-group tween. Mirror an existing keyframed tween's
         // time range so the new group animates over the same span. The 0% baseline is
         // an `_auto` endpoint so it tracks the nearest keyframe as you add more.
-        if (selector) {
+        // A fresh tween, so its target must address ONE element; with no
+        // one-element form the edit is dropped rather than written onto every
+        // class sibling (see writeTargetSelector).
+        const newTweenTarget = writeTargetSelector(selection);
+        if (selector && newTweenTarget) {
           const template = selectedGsapAnimations.find((a) => !!a.keyframes);
           const tStart = template ? (resolveTweenStart(template) ?? 0) : 0;
           const tDur = template ? resolveTweenDuration(template) || 1 : 1;
@@ -503,7 +519,7 @@ export function useAnimatedPropertyCommit(deps: CommitAnimatedPropertyDeps) {
             selection,
             {
               type: "add-with-keyframes",
-              targetSelector: selector,
+              targetSelector: newTweenTarget,
               position: roundTo3(tStart),
               duration: roundTo3(tDur),
               keyframes,

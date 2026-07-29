@@ -1,3 +1,5 @@
+// fallow-ignore-file code-duplication
+// Move/resize operation families remain parallel until SDK graduation.
 import { useCallback, type MutableRefObject, type RefObject } from "react";
 import type { Composition } from "@hyperframes/sdk";
 import type { TimelineElement } from "../player";
@@ -52,6 +54,7 @@ interface UseTimelineGroupEditingOptions {
   domEditSaveTimestampRef: MutableRefObject<number>;
   editQueueRef: MutableRefObject<Promise<unknown>>;
   forceReloadSdkSession?: () => void;
+  invalidateGsapCache?: () => void;
   isRecordingRef?: RefObject<boolean>;
   pendingTimelineEditPathRef: MutableRefObject<Set<string>>;
   previewIframeRef: RefObject<HTMLIFrameElement | null>;
@@ -108,6 +111,7 @@ export function useTimelineGroupEditing({
   domEditSaveTimestampRef,
   editQueueRef,
   forceReloadSdkSession,
+  invalidateGsapCache,
   isRecordingRef,
   pendingTimelineEditPathRef,
   previewIframeRef,
@@ -210,7 +214,12 @@ export function useTimelineGroupEditing({
           readProjectFile: (path) => readFileContent(projectIdRef.current ?? "", path),
           publishSession: publishSdkSession,
         },
-        { label: input.label, coalesceKey: input.coalesceKey, coalesceMs: input.coalesceMs },
+        {
+          label: input.label,
+          coalesceKey: input.coalesceKey,
+          coalesceMs: input.coalesceMs,
+          skipRefresh: true,
+        },
       );
       return cutoverCommittedOrThrow(result);
     },
@@ -280,47 +289,55 @@ export function useTimelineGroupEditing({
           coalesceKey,
           coalesceMs,
         });
-        if (handledBySdk) return;
-
-        await persistServerBatch(
-          projectId,
-          "Move timeline clips",
-          changes.map((change) => ({
-            element: change.element,
-            buildPatches: (original, target) =>
-              buildTimelineMoveTimingPatch(
-                original,
-                target,
-                change.start,
-                change.element.duration,
-                change.track,
-              ),
-          })),
-          coalesceKey,
-          coalesceMs,
-        );
+        if (!handledBySdk) {
+          await persistServerBatch(
+            projectId,
+            "Move timeline clips",
+            changes.map((change) => ({
+              element: change.element,
+              buildPatches: (original, target) =>
+                buildTimelineMoveTimingPatch(
+                  original,
+                  target,
+                  change.start,
+                  change.element.duration,
+                  change.track,
+                ),
+            })),
+            coalesceKey,
+            coalesceMs,
+          );
+        }
         // Track-only: no timing delta → no GSAP positions to shift and no
         // reload (see the trackOnly doc above). Mixed batches (any start
         // change) keep the full fallback below.
         if (trackOnly) return;
-        await finishGroupTimingGsapFallback({
-          projectId,
-          iframe: previewIframeRef.current,
-          reloadPreview,
-          label: "Move timeline clips",
-          errorLabel: "Failed to shift GSAP positions",
-          coalesceKey,
-          recordEdit,
-          activeCompPath,
-          changes,
-          resolveChangePath: (element) => targetPathFor(element, activeCompPath),
-          mutateChange: (change, changePath) => {
-            const delta = change.start - change.element.start;
-            const domId = change.element.domId;
-            if (delta === 0 || !domId) return null;
-            return shiftGsapPositions(projectId, changePath, domId, delta);
-          },
-        });
+        // The timing persist above already committed to disk, so the cached
+        // GSAP read is stale whether or not the position rewrite succeeded —
+        // invalidate on the error path too (matches the single-element path's
+        // `.finally`), or a failed rewrite leaves the editor reading old tweens.
+        try {
+          await finishGroupTimingGsapFallback({
+            projectId,
+            iframe: previewIframeRef.current,
+            reloadPreview,
+            label: "Move timeline clips",
+            errorLabel: "Failed to shift GSAP positions",
+            coalesceKey,
+            recordEdit,
+            activeCompPath,
+            changes,
+            resolveChangePath: (element) => targetPathFor(element, activeCompPath),
+            mutateChange: (change, changePath) => {
+              const delta = change.start - change.element.start;
+              const domId = change.element.domId;
+              if (delta === 0 || !domId) return null;
+              return shiftGsapPositions(projectId, changePath, domId, delta);
+            },
+          });
+        } finally {
+          invalidateGsapCache?.();
+        }
       }).catch((error) => {
         // Failed persist: revert the optimistic duration readout + live root
         // alongside the gesture owner's store rollback.
@@ -338,6 +355,7 @@ export function useTimelineGroupEditing({
       reloadPreview,
       trySdkBatchPersist,
       showToast,
+      invalidateGsapCache,
     ],
   );
 
@@ -382,50 +400,57 @@ export function useTimelineGroupEditing({
           coalesceKey,
           coalesceMs,
         });
-        if (handledBySdk) return;
-
-        await persistServerBatch(
-          projectId,
-          "Resize timeline clips",
-          changes.map((change) => ({
-            element: change.element,
-            buildPatches: (original, target) =>
-              buildTimelineResizeTimingPatch(original, target, change.element, {
-                start: change.start,
-                duration: change.duration,
-                playbackStart: change.playbackStart,
-              }),
-          })),
-          coalesceKey,
-          coalesceMs,
-        );
-        await finishGroupTimingGsapFallback({
-          projectId,
-          iframe: previewIframeRef.current,
-          reloadPreview,
-          label: "Resize timeline clips",
-          errorLabel: "Failed to scale GSAP positions",
-          coalesceKey,
-          recordEdit,
-          activeCompPath,
-          changes,
-          resolveChangePath: (element) => targetPathFor(element, activeCompPath),
-          mutateChange: (change, changePath) => {
-            const domId = change.element.domId;
-            const timingChanged =
-              change.start !== change.element.start || change.duration !== change.element.duration;
-            if (!timingChanged || !domId) return null;
-            return scaleGsapPositions(
-              projectId,
-              changePath,
-              domId,
-              change.element.start,
-              change.element.duration,
-              change.start,
-              change.duration,
-            );
-          },
-        });
+        if (!handledBySdk) {
+          await persistServerBatch(
+            projectId,
+            "Resize timeline clips",
+            changes.map((change) => ({
+              element: change.element,
+              buildPatches: (original, target) =>
+                buildTimelineResizeTimingPatch(original, target, change.element, {
+                  start: change.start,
+                  duration: change.duration,
+                  playbackStart: change.playbackStart,
+                }),
+            })),
+            coalesceKey,
+            coalesceMs,
+          );
+        }
+        // See the move path: the timing persist is already on disk, so the GSAP
+        // cache must be invalidated even when the position rewrite throws.
+        try {
+          await finishGroupTimingGsapFallback({
+            projectId,
+            iframe: previewIframeRef.current,
+            reloadPreview,
+            label: "Resize timeline clips",
+            errorLabel: "Failed to scale GSAP positions",
+            coalesceKey,
+            recordEdit,
+            activeCompPath,
+            changes,
+            resolveChangePath: (element) => targetPathFor(element, activeCompPath),
+            mutateChange: (change, changePath) => {
+              const domId = change.element.domId;
+              const timingChanged =
+                change.start !== change.element.start ||
+                change.duration !== change.element.duration;
+              if (!timingChanged || !domId) return null;
+              return scaleGsapPositions(
+                projectId,
+                changePath,
+                domId,
+                change.element.start,
+                change.element.duration,
+                change.start,
+                change.duration,
+              );
+            },
+          });
+        } finally {
+          invalidateGsapCache?.();
+        }
       }).catch((error) => {
         // Failed persist: revert the optimistic duration readout + live root
         // alongside the gesture owner's store rollback.
@@ -443,6 +468,7 @@ export function useTimelineGroupEditing({
       reloadPreview,
       trySdkBatchPersist,
       showToast,
+      invalidateGsapCache,
     ],
   );
 

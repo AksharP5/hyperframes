@@ -84,6 +84,7 @@ export function useGsapPropertyDebounce(
     const mutation = { type: "update-property", animationId, property, value };
     const label = `Edit GSAP ${property}`;
     try {
+      // fallow-ignore-next-line code-duplication
       const { sdkSession, sdkDeps, activeCompPath } = sdkRef.current ?? {};
       if (sdkSession && sdkDeps) {
         const targetPath = selection.sourceFile || activeCompPath || "index.html";

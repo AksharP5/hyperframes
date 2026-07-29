@@ -1,3 +1,8 @@
+---
+title: "Send to HyperFrames"
+description: "Author a Claude Design as a single-file HyperFrames composition for the \"Send to HyperFrames\" URL import."
+---
+
 # Claude Design → "Send to HyperFrames" (Single-File Import)
 
 > This guide is **fully self-contained**: everything needed to author a valid "Send to HyperFrames" composition is inline here. Do not rely on fetching any other document — produce the composition from this guide alone.
@@ -25,8 +30,8 @@ The single most important consequence: **there is no file tree on the other side
 
 1. **You (Claude Design)** — author a valid HyperFrames composition as a single self-contained HTML.
 2. **Send to HyperFrames** — one click. The importer fetches your HTML, validates it, and creates a hosted HeyGen project. **Import is free.**
-3. **Enhance in HyperFrames** — a motion-design agent adds what your export can't: sound effects, background music, and (later) HeyGen media. This is the paid step.
-4. **Render** — the cloud pipeline produces the MP4.
+3. **Enhance in HyperFrames** — a motion-design agent adds what your export can't: sound effects, background music, and (later) HeyGen media. **Enhance turns are free.**
+4. **Render** — the cloud pipeline produces the MP4. **Render is the paid step:** free accounts get 3 renders per month; paid plans are charged 20 credits per rendered minute.
 
 Your job is step 1: a composition that imports cleanly and is a strong on-brand starting point.
 
@@ -366,7 +371,7 @@ The cloud renderer seeks the timeline frame-by-frame. Non-deterministic or self-
 | `Date.now()`, `performance.now()` | hard-coded timing or `tl.time()` in `onUpdate` |
 | `setInterval`, `setTimeout` | timeline tweens + `onUpdate` |
 | `requestAnimationFrame` | GSAP tweens |
-| `repeat: -1` | `repeat: Math.ceil(duration / cycle) - 1` |
+| `repeat: -1` | `repeat: Math.max(0, Math.floor(duration / cycle) - 1)` |
 | `stagger: { from: "random" }` | `from: "start"`, `"center"`, or `"end"` |
 | async timeline construction | build synchronously at page load |
 | `video.play()` / `audio.play()` | the framework owns playback |

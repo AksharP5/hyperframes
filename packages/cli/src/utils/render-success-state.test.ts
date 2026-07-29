@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerRootExitCodeSanitizer } from "./commandResult.js";
 import {
   _resetRenderSuccessForTests,
   isRenderSucceeded,
@@ -37,6 +38,12 @@ describe("render-success-state flag", () => {
 
 describe("runPostRenderStep", () => {
   const originalExitCode = process.exitCode;
+
+  beforeEach(() => {
+    registerRootExitCodeSanitizer(() => {
+      process.exitCode = 0;
+    });
+  });
 
   afterEach(() => {
     process.exitCode = originalExitCode;
@@ -117,6 +124,12 @@ describe("runPostRenderStep", () => {
 
 describe("runPostRenderStepAsync", () => {
   const originalExitCode = process.exitCode;
+
+  beforeEach(() => {
+    registerRootExitCodeSanitizer(() => {
+      process.exitCode = 0;
+    });
+  });
 
   afterEach(() => {
     process.exitCode = originalExitCode;

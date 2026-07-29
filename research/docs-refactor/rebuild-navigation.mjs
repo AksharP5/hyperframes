@@ -101,6 +101,9 @@ config.navigation = {
                 "guides/prompting",
                 "guides/pipeline",
                 "guides/design-tools",
+                "guides/claude-design-hyperframes",
+                "guides/claude-design-send-to-hyperframes",
+                "guides/open-design-hyperframes",
                 "guides/figma",
                 "guides/antigravity",
                 "guides/copilot-cli",
@@ -130,6 +133,8 @@ config.navigation = {
                 "guides/transcribe-and-caption",
                 "guides/remove-background",
                 "guides/color-grading",
+                "guides/media-effects",
+                "guides/media-overlays",
               ],
             },
             {
@@ -159,7 +164,7 @@ config.navigation = {
             {
               group: "What's new",
               expanded: false,
-              pages: ["product-updates", "changelog"],
+              pages: ["product-updates", "weekly-updates", "changelog"],
             },
           ],
         },

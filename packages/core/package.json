@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/core",
-  "version": "0.7.61",
+  "version": "0.7.79",
   "description": "",
   "repository": {
     "type": "git",
@@ -52,6 +52,12 @@
       "import": "./src/editing/affordances.ts",
       "types": "./src/editing/affordances.ts"
     },
+    "./editing/draft-markers": {
+      "bun": "./src/editing/draftMarkers.ts",
+      "node": "./dist/editing/draftMarkers.js",
+      "import": "./src/editing/draftMarkers.ts",
+      "types": "./src/editing/draftMarkers.ts"
+    },
     "./variables": {
       "bun": "./src/variables.ts",
       "node": "./dist/variables.js",
@@ -94,6 +100,12 @@
       "import": "./src/colorLuts.ts",
       "types": "./src/colorLuts.ts"
     },
+    "./media-grade-analyzer": {
+      "bun": "./src/mediaGradeAnalyzer.ts",
+      "node": "./dist/mediaGradeAnalyzer.js",
+      "import": "./src/mediaGradeAnalyzer.ts",
+      "types": "./src/mediaGradeAnalyzer.ts"
+    },
     "./storyboard": {
       "bun": "./src/storyboard/index.ts",
       "node": "./dist/storyboard/index.js",
@@ -106,6 +118,12 @@
       "node": "./dist/runtime/clipTree.js",
       "import": "./src/runtime/clipTree.ts",
       "types": "./src/runtime/clipTree.ts"
+    },
+    "./runtime/custom-ease": {
+      "bun": "./src/runtime/customEase.ts",
+      "node": "./dist/runtime/customEase.js",
+      "import": "./src/runtime/customEase.ts",
+      "types": "./src/runtime/customEase.ts"
     },
     "./runtime/start-expression": {
       "bun": "./src/runtime/startExpression.ts",
@@ -245,6 +263,12 @@
       "import": "./src/parsers/springEase.ts",
       "types": "./src/parsers/springEase.ts"
     },
+    "./wiggle-ease": {
+      "bun": "./src/runtime/wiggleEase.ts",
+      "node": "./dist/runtime/wiggleEase.js",
+      "import": "./src/runtime/wiggleEase.ts",
+      "types": "./src/runtime/wiggleEase.ts"
+    },
     "./fonts/aliases": {
       "bun": "./src/fonts/aliases.ts",
       "node": "./dist/fonts/aliases.js",
@@ -290,17 +314,9 @@
         "import": "./dist/editing/affordances.js",
         "types": "./dist/editing/affordances.d.ts"
       },
-      "./figma": {
-        "import": "./dist/figma/index.js",
-        "types": "./dist/figma/index.d.ts"
-      },
-      "./generators": {
-        "import": "./dist/generators/hyperframes.js",
-        "types": "./dist/generators/hyperframes.d.ts"
-      },
-      "./lint": {
-        "import": "./dist/lint/index.js",
-        "types": "./dist/lint/index.d.ts"
+      "./editing/draft-markers": {
+        "import": "./dist/editing/draftMarkers.js",
+        "types": "./dist/editing/draftMarkers.d.ts"
       },
       "./variables": {
         "import": "./dist/variables.js",
@@ -309,6 +325,14 @@
       "./slideshow": {
         "import": "./dist/slideshow/index.js",
         "types": "./dist/slideshow/index.d.ts"
+      },
+      "./generators": {
+        "import": "./dist/generators/hyperframes.js",
+        "types": "./dist/generators/hyperframes.d.ts"
+      },
+      "./lint": {
+        "import": "./dist/lint/index.js",
+        "types": "./dist/lint/index.d.ts"
       },
       "./compiler": {
         "import": "./dist/compiler/index.js",
@@ -322,6 +346,10 @@
         "import": "./dist/colorLuts.js",
         "types": "./dist/colorLuts.d.ts"
       },
+      "./media-grade-analyzer": {
+        "import": "./dist/mediaGradeAnalyzer.js",
+        "types": "./dist/mediaGradeAnalyzer.d.ts"
+      },
       "./storyboard": {
         "import": "./dist/storyboard/index.js",
         "types": "./dist/storyboard/index.d.ts"
@@ -330,6 +358,10 @@
       "./runtime/clipTree": {
         "import": "./dist/runtime/clipTree.js",
         "types": "./dist/runtime/clipTree.d.ts"
+      },
+      "./runtime/custom-ease": {
+        "import": "./dist/runtime/customEase.js",
+        "types": "./dist/runtime/customEase.d.ts"
       },
       "./runtime/start-expression": {
         "import": "./dist/runtime/startExpression.js",
@@ -423,6 +455,10 @@
         "import": "./dist/parsers/springEase.js",
         "types": "./dist/parsers/springEase.d.ts"
       },
+      "./wiggle-ease": {
+        "import": "./dist/runtime/wiggleEase.js",
+        "types": "./dist/runtime/wiggleEase.d.ts"
+      },
       "./fonts/aliases": {
         "import": "./dist/fonts/aliases.js",
         "types": "./dist/fonts/aliases.d.ts"
@@ -430,6 +466,10 @@
       "./fonts/system-locator": {
         "import": "./dist/fonts/systemFontLocator.js",
         "types": "./dist/fonts/systemFontLocator.d.ts"
+      },
+      "./figma": {
+        "import": "./dist/figma/index.js",
+        "types": "./dist/figma/index.d.ts"
       },
       "./schemas/registry.json": "./schemas/registry.json",
       "./schemas/registry-item.json": "./schemas/registry-item.json"

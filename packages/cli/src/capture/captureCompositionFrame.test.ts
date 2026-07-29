@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AUDIT_SEEK_OPTIONS,
+  DENSE_GEOMETRY_SEEK_OPTIONS,
   captureRegionCrop,
   clampCropRegion,
   installPageFunctionGuard,
@@ -372,5 +374,17 @@ describe("installPageFunctionGuard", () => {
     ) => unknown;
     const marker = () => 42;
     expect(shim(marker)).toBe(marker);
+  });
+});
+
+describe("DENSE_GEOMETRY_SEEK_OPTIONS", () => {
+  it("is genuinely geometry-only — no post-seek settle waits at the 600-sample cap", () => {
+    // Dense pass must not inherit AUDIT's post-seek waits — geometry is valid synchronously after setTime, and waits multiply by sample count.
+    expect(DENSE_GEOMETRY_SEEK_OPTIONS.animationFrameSettle).toBe("none");
+    expect(DENSE_GEOMETRY_SEEK_OPTIONS.waitForFontsMs).toBe(0);
+    expect(DENSE_GEOMETRY_SEEK_OPTIONS.settleMs).toBe(0);
+    // AUDIT (the full-settle path used by the base grid) must still carry the waits.
+    expect(AUDIT_SEEK_OPTIONS.animationFrameSettle).toBe("double");
+    expect(AUDIT_SEEK_OPTIONS.settleMs).toBeGreaterThan(0);
   });
 });

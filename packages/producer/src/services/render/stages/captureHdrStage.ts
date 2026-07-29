@@ -25,9 +25,8 @@
  *     because `captureAlphaPng` hangs under `--enable-begin-frame-control`.
  *     Previously the stage mutated `cfg.forceScreenshot = true` directly;
  *     the value is now derived into a local `hdrCfg` so the caller-owned
- *     `cfg` survives the stage unchanged. The sequencer is expected to
- *     pass `forceScreenshot: true` for the layered branch as a contract
- *     check.
+ *     `cfg` survives the stage unchanged. The sequencer passes an immutable
+ *     `hdr_layered` plan whose construction guarantees screenshot mode.
  *
  * Resource setup (HDR video extraction, image decode, dim probing) lives
  * in `captureHdrResources.ts`; per-frame work lives in
@@ -44,8 +43,8 @@ import {
   type EngineConfig,
   type HdrTransfer,
   type StreamingEncoder,
-  calculateOptimalWorkers,
   closeCaptureSession,
+  cloneCaptureWarnings,
   createCaptureSession,
   getEncoderPreset,
   initTransparentBackground,
@@ -77,18 +76,13 @@ import { partitionTransitionFrames, shouldUseHybridLayeredPath } from "./capture
 import { runSequentialLayeredFrameLoop } from "./captureHdrSequentialLoop.js";
 import { runHybridLayeredFrameLoop } from "./captureHdrHybridLoop.js";
 import { wrapCaptureStageError } from "../captureStageError.js";
+import type { HdrLayeredCapturePlan } from "../capturePlan.js";
 
 export interface CaptureHdrStageInput {
   job: RenderJob;
   cfg: EngineConfig;
-  /**
-   * Capture-mode flag threaded from `compileStage`. The HDR layered
-   * branch requires `true` (see file header for the
-   * `captureAlphaPng` / `--enable-begin-frame-control` constraint);
-   * the stage throws if called with `false`. Stored locally as
-   * `hdrCfg.forceScreenshot` so the caller-owned `cfg` is not mutated.
-   */
-  forceScreenshot: boolean;
+  /** Immutable layered route selected by the sequencer. */
+  plan: HdrLayeredCapturePlan;
   log: ProducerLogger;
 
   projectDir: string;
@@ -120,13 +114,6 @@ export interface CaptureHdrStageInput {
   /** Mutated in place (counters incremented). */
   hdrDiagnostics: HdrDiagnostics;
 
-  /**
-   * Worker budget for the hybrid layered path. Only consulted when the
-   * gating predicate (`shouldUseHybridLayeredPath`) returns true. The
-   * sequential loop always runs on a single DOM session.
-   */
-  workerCount?: number;
-
   abortSignal: AbortSignal | undefined;
   assertNotAborted: () => void;
   onProgress?: ProgressCallback;
@@ -142,25 +129,13 @@ export interface CaptureHdrStageResult {
   warnings: CaptureWarning[];
 }
 
-function cloneCaptureWarnings(warnings: readonly CaptureWarning[]): CaptureWarning[] {
-  return warnings.map((warning) => ({
-    ...warning,
-    details: warning.details
-      ? {
-          ...warning.details,
-          sources: warning.details.sources ? [...warning.details.sources] : undefined,
-        }
-      : undefined,
-  }));
-}
-
 export async function runCaptureHdrStage(
   input: CaptureHdrStageInput,
 ): Promise<CaptureHdrStageResult> {
   const {
     job,
     cfg,
-    forceScreenshot,
+    plan,
     log,
     projectDir,
     compiledDir,
@@ -184,17 +159,11 @@ export async function runCaptureHdrStage(
     buildCaptureOptions,
     createRenderVideoFrameInjector,
     hdrDiagnostics,
-    workerCount,
     abortSignal,
     assertNotAborted,
     onProgress,
   } = input;
-
-  if (!forceScreenshot) {
-    throw new Error(
-      "captureHdrStage requires forceScreenshot=true; the layered composite path uses captureAlphaPng which hangs under --enable-begin-frame-control.",
-    );
-  }
+  const { workerCount } = plan;
 
   const stageStart = Date.now();
   let lastBrowserConsole: string[] = [];
@@ -378,16 +347,7 @@ export async function runCaptureHdrStage(
       };
 
       // ── Dispatch to sequential or hybrid frame loop ────────────────────
-      // Resolve the worker budget here rather than threading it through the
-      // renderOrchestrator call: keeps the renderOrchestrator diff zero
-      // (hf#732 PR 4 is intentionally a producer-stage-local change), at the
-      // cost of recomputing the same number the orchestrator already knows.
-      // The cost is negligible (one cpus() call) and the two values stay in
-      // lockstep because `calculateOptimalWorkers` is pure.
-      const effectiveWorkerCount =
-        workerCount !== undefined
-          ? Math.max(1, workerCount)
-          : calculateOptimalWorkers(totalFrames, job.config.workers, hdrCfg);
+      const effectiveWorkerCount = Math.max(1, workerCount);
       const transitionFrameCount = partitionTransitionFrames(transitionRanges, totalFrames).size;
       const useHybrid = shouldUseHybridLayeredPath({
         hasHdrContent,

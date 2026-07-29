@@ -465,10 +465,20 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
       }
       if (timing.diagnostics.some(({ code }) => code === "deprecated-end")) {
         const elementId = readAttr(tag.raw, "id") || undefined;
+        const conflicting = timing.diagnostics.some(({ code }) => code === "conflicting-end");
+        // Two shapes reach here after the false-positive fix (see
+        // compositionContract.ts `diagnoseDerivedEnd`): the truly-legacy shape
+        // (no data-duration, data-end alone) and the stale-companion shape
+        // (data-duration present but paired with a data-end that disagrees).
+        // A consistent data-duration + data-end pair — the shape the compiler
+        // emits — is silent and never reaches this branch.
+        const message = conflicting
+          ? `<${tag.name}${elementId ? ` id="${elementId}"` : ""}> has data-end that disagrees with data-duration. Remove the stale data-end; the compiler regenerates it from data-duration.`
+          : `<${tag.name}${elementId ? ` id="${elementId}"` : ""}> uses data-end without data-duration. Use data-duration in source HTML.`;
         findings.push({
           code: "deprecated_data_end",
           severity: "error",
-          message: `<${tag.name}${elementId ? ` id="${elementId}"` : ""}> uses data-end without data-duration. Use data-duration in source HTML.`,
+          message,
           elementId,
           fixHint:
             "Replace data-end with data-duration. The compiler generates data-end from data-duration automatically.",

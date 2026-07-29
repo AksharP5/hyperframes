@@ -1,18 +1,13 @@
+import { failCommand, requestCliExit } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
-import {
-  reportVariableIssues,
-  resolveVariablesArg,
-  validateVariablesAgainstProject,
-} from "../utils/variables.js";
-import {
-  parseGifLoopArg,
-  hasExplicitCompositionArg,
-  resolveBrowserTimeoutMsArg,
-  resolveCompositionEntryArg,
-  resolveDefaultFpsArg,
-} from "../utils/renderArgs.js";
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
+import { createRenderPlan, resolveBrowserGpuForCli, type RenderFormat } from "./render/plan.js";
+import { seedProjectAuthoringSkill } from "../utils/projectConfig.js";
+import { presentRenderPlan } from "./render/present.js";
+import { executeRenderPlan, renderLintContinuationHint } from "./render/execute.js";
+// Test-only seams retained at the command boundary for render behavior tests.
+export { resolveBrowserGpuForCli, renderLintContinuationHint };
 
 export const examples: Example[] = [
   ["Render to MP4", "hyperframes render --output output.mp4"],
@@ -53,12 +48,9 @@ export const examples: Example[] = [
     'hyperframes render --batch rows.json --output "renders/{name}.mp4"',
   ],
 ];
-import { cpus, freemem, tmpdir } from "node:os";
+import { freemem, tmpdir } from "node:os";
 import { resolve, dirname, join, basename } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
-import { resolveProject } from "../utils/project.js";
-import { lintProject, shouldBlockRender } from "../utils/lintProject.js";
-import { formatLintFindings } from "../utils/lintFormat.js";
 import { loadProducer } from "../utils/producer.js";
 import { c } from "../ui/colors.js";
 import { formatBytes, formatRenderSummaryDetail, errorBox } from "../ui/format.js";
@@ -68,19 +60,21 @@ import {
   trackRenderComplete,
   trackRenderError,
   trackRenderObservation,
-  trackRenderPreflightRejected,
 } from "../telemetry/events.js";
 import { maybePromptRenderFeedback } from "../telemetry/feedback.js";
-import { readConfigFresh, writeConfig, type HyperframesConfig } from "../telemetry/config.js";
+import {
+  readConfigFresh,
+  recordRecentRender,
+  writeConfig,
+  type HyperframesConfig,
+} from "../telemetry/config.js";
 import { shouldTrack } from "../telemetry/client.js";
 import { renderJobObservabilityTelemetryPayload } from "../telemetry/renderObservability.js";
-import { normalizeSkillSlug } from "../telemetry/skill.js";
 import { bytesToMb } from "../telemetry/system.js";
 import { VERSION } from "../version.js";
 import { isDevMode } from "../utils/env.js";
 import { buildDockerRunArgs, resolveDockerPlatform } from "../utils/dockerRunArgs.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
-import { formatRenderOutputTimestamp } from "@hyperframes/core";
 import { runEnvironmentChecks } from "../browser/preflight.js";
 import { detectH264EncoderMode } from "../browser/ffmpeg.js";
 import { chromeLaunchRemediation } from "../browser/linuxDeps.js";
@@ -92,75 +86,15 @@ import {
   runPostRenderStepAsync,
 } from "../utils/render-success-state.js";
 import type { ProducerLogger, RenderJob } from "@hyperframes/producer";
+import { EXTRACT_CACHE_DIR_DISABLED_ALIASES, type VideoFrameFormat } from "@hyperframes/engine";
 import {
-  EXTRACT_CACHE_DIR_DISABLED_ALIASES,
-  MAX_VP9_CPU_USED,
-  MIN_VP9_CPU_USED,
-  isVideoFrameFormat,
-  type VideoFrameFormat,
-} from "@hyperframes/engine";
-import {
-  normalizeResolutionFlag,
-  isAspectAgnosticResolutionAlias,
   checkOutputResolutionCompatibility,
   suggestMatchingPreset,
-  parseFps,
   fpsToNumber,
-  fpsToFfmpegArg,
   type CanvasResolution,
   type OutputResolutionIssueKind,
   type Fps,
-  type FpsParseResult,
 } from "@hyperframes/core";
-
-const VALID_QUALITY = new Set(["draft", "standard", "high"]);
-
-/**
- * Map a {@link FpsParseResult} failure reason to a human-friendly
- * error-box message. The empty / undefined / default-fallthrough case
- * shouldn't be reachable from the CLI flag (citty supplies a default of
- * "30") but the branch exists so this helper can be reused by other
- * fps-accepting CLI surfaces in the future.
- */
-function formatFpsParseError(
-  input: string,
-  reason: Exclude<FpsParseResult, { ok: true }>["reason"],
-): string {
-  switch (reason) {
-    case "empty":
-      return "Frame rate must not be empty.";
-    case "not-a-number":
-      return `Got "${input}". Frame rate must be an integer (e.g. 30) or a rational (e.g. 30000/1001 for NTSC).`;
-    case "non-positive":
-      return `Got "${input}". Frame rate must be greater than zero.`;
-    case "out-of-range":
-      return `Got "${input}". Frame rate must be in the range 1–240.`;
-    case "invalid-fraction":
-      return `Got "${input}". Rational frame rates must be two positive integers separated by '/' (e.g. 30000/1001).`;
-    case "ambiguous-decimal":
-      return `Got "${input}". Decimal frame rates are ambiguous — use the exact rational form instead (e.g. 30000/1001 for 29.97).`;
-  }
-}
-const RENDER_FORMATS = ["mp4", "webm", "mov", "png-sequence", "gif"] as const;
-type RenderFormat = (typeof RENDER_FORMATS)[number];
-const VALID_FORMAT = new Set<string>(RENDER_FORMATS);
-const RENDER_FORMAT_LABEL = "mp4, webm, mov, png-sequence, or gif";
-// `png-sequence` writes a directory of frames rather than a single muxed file,
-// so its "extension" is empty — the auto-output path becomes a directory name.
-const FORMAT_EXT: Record<RenderFormat, string> = {
-  mp4: ".mp4",
-  webm: ".webm",
-  mov: ".mov",
-  "png-sequence": "",
-  gif: ".gif",
-};
-
-const CPU_CORE_COUNT = cpus().length;
-
-function parseRenderFormat(input: string): RenderFormat | undefined {
-  if (!VALID_FORMAT.has(input)) return undefined;
-  return RENDER_FORMATS.find((format) => format === input);
-}
 
 export default defineCommand({
   meta: {
@@ -336,7 +270,7 @@ export default defineCommand({
     },
     json: {
       type: "boolean",
-      description: "With --batch, emit JSON progress events.",
+      description: "With --batch, emit exactly one final JSON result document.",
       default: false,
     },
     resolution: {
@@ -415,657 +349,18 @@ export default defineCommand({
         "Env: HYPERFRAMES_EXTRACT_CACHE_DIR.",
     },
   },
-  // `run` is the citty handler for `hyperframes render` — sequential flag
-  // validation + render dispatch. Inherited CRITICAL on main (CRAP 1290);
-  // this PR extracted --browser-timeout + --composition validators into
-  // `utils/renderArgs.ts`, reducing cyclomatic 75→65 and CRAP 1290→978.
-  // Full decomposition is tracked separately and out of scope for #1199.
-  // fallow-ignore-next-line complexity
+  // Keep the transport adapter thin: each phase has one ownership boundary.
   async run({ args }) {
-    // ── Resolve project ────────────────────────────────────────────────────
-    const hasExplicitComposition = hasExplicitCompositionArg(args.composition);
-    const project = resolveProject(args.dir, { requireIndex: !hasExplicitComposition });
-
-    // ── Resolve composition entry file ─────────────────────────────────────
-    // Needed early: fps default below must read the actual render target, not
-    // always index.html.
-    const entryFile = resolveCompositionEntryArg(args.composition, project.dir, statSync);
-    const renderTarget = entryFile ? resolve(project.dir, entryFile) : project.indexPath;
-
-    // ── Validate fps ───────────────────────────────────────────────────────
-    // Accept either integer (`30`) or ffmpeg-style rational (`30000/1001`).
-    // The whitelist-based validator was replaced with a sane numeric range so
-    // legitimate framerates (NTSC trio, PAL, 120/240 slow-mo) work without
-    // CLI gymnastics. The exact rational survives end-to-end into FFmpeg's
-    // `-r` / `-framerate` flags via `fpsToFfmpegArg`.
-    // Precedence: explicit --fps, else the composition's root data-fps, else 30.
-    // Honoring data-fps matches the runtime — render used to silently force 30
-    // even when the composition declared e.g. data-fps="24".
-    const fpsArg = resolveDefaultFpsArg(args.fps, project.dir, project.indexPath, entryFile);
-    const fpsParse = parseFps(fpsArg ?? "30");
-    if (!fpsParse.ok) {
-      errorBox("Invalid fps", formatFpsParseError(fpsArg ?? "30", fpsParse.reason));
-      process.exit(1);
-    }
-    let fps: Fps = fpsParse.value;
-
-    // ── Validate quality ───────────────────────────────────────────────────
-    const qualityRaw = args.quality ?? "standard";
-    if (!VALID_QUALITY.has(qualityRaw)) {
-      errorBox("Invalid quality", `Got "${qualityRaw}". Must be draft, standard, or high.`);
-      process.exit(1);
-    }
-    const quality = qualityRaw as "draft" | "standard" | "high";
-
-    // ── Authoring skill (telemetry attribution) ────────────────────────────
-    // Optional slug naming the workflow skill that drove this render (e.g.
-    // "product-launch-video"), tagged onto render telemetry for per-skill usage
-    // breakdowns. Slug-gated (shared with the `events` command) so a caller
-    // can't push high-cardinality or PII strings into the anonymous event
-    // stream; a missing/invalid value is omitted.
-    const authoringSkill = normalizeSkillSlug(args.skill);
-    if (typeof args.skill === "string" && args.skill.trim() !== "" && !authoringSkill) {
-      // Surface a typo (e.g. camelCase) instead of silently losing attribution.
-      // Warning only — never fails the render.
-      process.stderr.write(
-        `hyperframes: ignoring --skill="${args.skill}" — not a valid slug ` +
-          "(lowercase letters/digits/hyphens, max 64); this render will be unattributed.\n",
-      );
-    }
-
-    // ── Validate format ─────────────────────────────────────────────────
-    const formatRaw = args.format ?? "mp4";
-    const format = parseRenderFormat(formatRaw);
-    if (!format) {
-      errorBox("Invalid format", `Got "${formatRaw}". Must be ${RENDER_FORMAT_LABEL}.`);
-      process.exit(1);
-    }
-
-    let gifFpsCapped = false;
-    if (format === "gif" && fpsToNumber(fps) > 30) {
-      fps = { num: 30, den: 1 };
-      gifFpsCapped = true;
-    }
-
-    const gifLoopParse = parseGifLoopArg(args["gif-loop"]);
-    if (!gifLoopParse.ok) {
-      errorBox("Invalid gif-loop", gifLoopParse.message);
-      process.exit(1);
-    }
-    const gifLoop = gifLoopParse.value ?? (format === "gif" ? 0 : undefined);
-
-    const videoFrameFormatRaw = args["video-frame-format"] ?? "auto";
-    if (!isVideoFrameFormat(videoFrameFormatRaw)) {
-      errorBox(
-        "Invalid video-frame-format",
-        `Got "${videoFrameFormatRaw}". Must be auto, jpg, or png.`,
-      );
-      process.exit(1);
-    }
-    const videoFrameFormat = videoFrameFormatRaw;
-
-    // ── Validate resolution ────────────────────────────────────────────────
-    let outputResolution: CanvasResolution | undefined;
-    // Aspect-agnostic aliases (`--resolution 1080p` / `hd` / `4k` / `uhd`) name
-    // a resolution *tier* without pinning an orientation. Historically they
-    // all normalize to a `landscape` preset, which rejects portrait/square
-    // compositions at `resolveDeviceScaleFactor` time. Track the raw-input
-    // shape so the compile stage can re-map the preset to the composition's
-    // orientation (see `outputResolutionAspectAgnostic` on RenderConfig).
-    // Explicit orientation-bearing aliases (`1080p-portrait`, `4k-square`, …)
-    // and canonical presets (`landscape`, `portrait`, …) stay strict.
-    let outputResolutionAspectAgnostic = false;
-    if (args.resolution !== undefined) {
-      outputResolution = normalizeResolutionFlag(args.resolution);
-      if (!outputResolution) {
-        errorBox(
-          "Invalid resolution",
-          `Got "${args.resolution}". Must be one of: landscape, portrait, landscape-4k, portrait-4k, square, square-4k ` +
-            `(or aliases 1080p, 4k, uhd, 1080p-square, square-1080p, 4k-square).`,
-        );
-        process.exit(1);
-      }
-      outputResolutionAspectAgnostic = isAspectAgnosticResolutionAlias(args.resolution);
-      // Reject the --resolution + --hdr combination at the CLI layer so the
-      // user sees the friendly errorBox before any work directories or
-      // ffmpeg processes spin up. The orchestrator also enforces this via
-      // resolveDeviceScaleFactor — defense in depth.
-      if (args.hdr) {
-        errorBox(
-          "Conflicting flags",
-          "--resolution cannot be combined with --hdr. The HDR pipeline composites at composition dimensions and does not yet support supersampling.",
-          "Render in two passes: HDR at composition resolution, then upscale separately with ffmpeg.",
-        );
-        process.exit(1);
-      }
-    }
-
-    // ── Validate workers ──────────────────────────────────────────────────
-    let workers: number | undefined;
-    if (args.workers != null && args.workers !== "auto") {
-      const parsed = parseInt(args.workers, 10);
-      if (isNaN(parsed) || parsed < 1) {
-        errorBox("Invalid workers", `Got "${args.workers}". Must be a positive number or "auto".`);
-        process.exit(1);
-      }
-      workers = parsed;
-    }
-
-    // ── Validate timeout overrides ─────────────────────────────────────
-    let protocolTimeout: number | undefined;
-    if (args["protocol-timeout"] != null) {
-      const parsed = parseInt(args["protocol-timeout"], 10);
-      if (isNaN(parsed) || parsed < 1000) {
-        errorBox(
-          "Invalid protocol-timeout",
-          `Got "${args["protocol-timeout"]}". Must be a number >= 1000 (ms).`,
-        );
-        process.exit(1);
-      }
-      protocolTimeout = parsed;
-    }
-    let playerReadyTimeout: number | undefined;
-    if (args["player-ready-timeout"] != null) {
-      const parsed = parseInt(args["player-ready-timeout"], 10);
-      if (isNaN(parsed) || parsed < 1000) {
-        errorBox(
-          "Invalid player-ready-timeout",
-          `Got "${args["player-ready-timeout"]}". Must be a number >= 1000 (ms).`,
-        );
-        process.exit(1);
-      }
-      playerReadyTimeout = parsed;
-    }
-
-    // ── Wire opt-in: page-side compositing ───────────────────────────────
-    if (args["page-side-compositing"] === false) {
-      process.env.HF_PAGE_SIDE_COMPOSITING = "false";
-    }
-
-    // ── Override: low-memory safe profile (tri-state) ────────────────────
-    // Absent → auto-detect from total RAM inside resolveConfig. Explicit
-    // --low-memory-mode / --no-low-memory-mode forces it on/off via the env
-    // var the producer's resolveConfig reads.
-    if (args["low-memory-mode"] != null) {
-      process.env.PRODUCER_LOW_MEMORY_MODE = args["low-memory-mode"] ? "true" : "false";
-    }
-
-    // ── Override: experimental fast capture (drawElementImage) ───────────
-    if (args["experimental-fast-capture"] != null) {
-      process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE = args["experimental-fast-capture"]
-        ? "true"
-        : "false";
-    }
-
-    // ── Override: extracted-frame cache directory ────────────────────────
-    // Sugar for HYPERFRAMES_EXTRACT_CACHE_DIR. Set BEFORE resolveConfig() so
-    // the env resolver picks up the CLI-supplied value. Disabling aliases
-    // (off/none/false/0) pass through verbatim — the engine helper canonicalizes.
-    // Positive paths are resolved to absolute so CWD changes downstream can't
-    // stale them.
-    if (typeof args["frames-cache-dir"] === "string" && args["frames-cache-dir"].trim() !== "") {
-      const raw = args["frames-cache-dir"].trim();
-      const normalized = raw.toLowerCase();
-      const isDisableAlias = EXTRACT_CACHE_DIR_DISABLED_ALIASES.includes(normalized);
-      process.env.HYPERFRAMES_EXTRACT_CACHE_DIR = isDisableAlias ? raw : resolve(raw);
-    }
-
-    // ── Validate max-concurrent-renders ─────────────────────────────────
-    if (args["max-concurrent-renders"] != null) {
-      const parsed = parseInt(args["max-concurrent-renders"], 10);
-      if (isNaN(parsed) || parsed < 1 || parsed > 10) {
-        errorBox(
-          "Invalid max-concurrent-renders",
-          `Got "${args["max-concurrent-renders"]}". Must be a number between 1 and 10.`,
-        );
-        process.exit(1);
-      }
-      process.env.PRODUCER_MAX_CONCURRENT_RENDERS = String(parsed);
-    }
-
-    // ── Validate batch mode ───────────────────────────────────────────────
-    const batchPath =
-      typeof args.batch === "string" && args.batch.trim() !== "" ? args.batch.trim() : undefined;
-    if (batchPath && (args.variables != null || args["variables-file"] != null)) {
-      errorBox(
-        "Conflicting variables flags",
-        "Use either --batch or --variables/--variables-file, not both.",
-      );
-      process.exit(1);
-    }
-
-    if (!batchPath && args["batch-concurrency"] != null) {
-      errorBox("Invalid batch-concurrency", "--batch-concurrency requires --batch.");
-      process.exit(1);
-    }
-    if (!batchPath && args["batch-fail-fast"]) {
-      errorBox("Invalid batch-fail-fast", "--batch-fail-fast requires --batch.");
-      process.exit(1);
-    }
-
-    let batchConcurrency = 1;
-    if (args["batch-concurrency"] != null) {
-      const parsed = parseInt(args["batch-concurrency"], 10);
-      if (isNaN(parsed) || parsed < 1) {
-        errorBox(
-          "Invalid batch-concurrency",
-          `Got "${args["batch-concurrency"]}". Must be a positive integer.`,
-        );
-        process.exit(1);
-      }
-      batchConcurrency = parsed;
-    }
-
-    // ── Resolve output path ───────────────────────────────────────────────
-    const rendersDir = resolve("renders");
-    const ext = FORMAT_EXT[format] ?? ".mp4";
-    const now = new Date();
-    const timestamp = formatRenderOutputTimestamp(now);
-    const batchOutputTemplate = args.output
-      ? args.output
-      : join(rendersDir, `${project.name}_${timestamp}_{index}${ext}`);
-    const outputPath = args.output
-      ? resolve(args.output)
-      : join(rendersDir, `${project.name}_${timestamp}${ext}`);
-
-    // Ensure output directory exists
-    if (!batchPath) mkdirSync(dirname(outputPath), { recursive: true });
-
-    const useDocker = args.docker ?? false;
-    const useGpu = args.gpu ?? false;
-    const browserGpuArg = args["browser-gpu"];
-    const browserGpuMode = resolveBrowserGpuForCli(useDocker, browserGpuArg);
-    const quiet = args.quiet ?? false;
-    const debug = args.debug ?? false;
-    const bestEffort = args["best-effort"] ?? true;
-    const batchJson = args.json ?? false;
-    const effectiveQuiet = quiet || (batchPath != null && batchJson);
-    const strictAll = args["strict-all"] ?? false;
-    const strictErrors = (args.strict ?? false) || strictAll;
-    const crfRaw = args.crf;
-    const videoBitrate = args["video-bitrate"]?.trim();
-
-    if (crfRaw != null && videoBitrate) {
-      errorBox("Conflicting encoder settings", "Use either --crf or --video-bitrate, not both.");
-      process.exit(1);
-    }
-
-    if (useDocker && browserGpuArg === true) {
-      errorBox(
-        "Browser GPU is local-only",
-        "--browser-gpu uses the host Chrome GPU backend. Docker mode keeps browser rendering deterministic and does not expose a cross-platform Chrome GPU backend.",
-        "Run without --docker, or use --gpu for Docker GPU encoding where your Docker host supports GPU passthrough.",
-      );
-      process.exit(1);
-    }
-
-    let crf: number | undefined;
-    if (crfRaw != null) {
-      const parsed = Number(crfRaw);
-      if (!Number.isInteger(parsed) || parsed < 0) {
-        errorBox("Invalid crf", `Got "${crfRaw}". Must be a non-negative integer.`);
-        process.exit(1);
-      }
-      crf = parsed;
-    }
-
-    let vp9CpuUsed: number | undefined;
-    if (args["vp9-cpu-used"] != null) {
-      const raw = args["vp9-cpu-used"];
-      const parsed = Number(raw);
-      if (!Number.isInteger(parsed) || parsed < MIN_VP9_CPU_USED || parsed > MAX_VP9_CPU_USED) {
-        errorBox(
-          "Invalid vp9-cpu-used",
-          `Got "${raw}". Must be an integer between ${MIN_VP9_CPU_USED} and ${MAX_VP9_CPU_USED}.`,
-        );
-        process.exit(1);
-      }
-      vp9CpuUsed = parsed;
-    }
-
-    if (args["video-bitrate"] != null && !videoBitrate) {
-      errorBox(
-        "Invalid video-bitrate",
-        `Got "${args["video-bitrate"]}". Must be a non-empty bitrate such as "10M".`,
-      );
-      process.exit(1);
-    }
-
-    if (!quiet && gifFpsCapped) {
-      console.log(c.warn("  GIF output is capped at 30fps. Use --fps 15 for smaller files."));
-    }
-
-    // ── Validate browser-timeout (seconds) ───────────────────────────────
-    // This validator lives in `utils/renderArgs.ts` so the parse/reject
-    // branches are unit-testable without `process.exit`. See issue #1199
-    // for the original silent-timeout-0 footgun this guards.
-    const pageNavigationTimeoutMs = resolveBrowserTimeoutMsArg(args["browser-timeout"]);
-
-    // ── Preflight batch rows before browser/lint work ────────────────────
-    let batchModule: typeof import("./batchRender.js") | undefined;
-    let preparedBatch: import("./batchRender.js").PreparedBatchRender | undefined;
-    if (batchPath) {
-      batchModule = await import("./batchRender.js");
-      try {
-        preparedBatch = batchModule.prepareBatchRender({
-          batchPath,
-          outputTemplate: batchOutputTemplate,
-          indexPath: renderTarget,
-          strictVariables: args["strict-variables"] ?? false,
-          quiet: quiet || batchJson,
-          json: batchJson,
-        });
-      } catch (error: unknown) {
-        batchModule.exitBatchRenderInputError(error);
-      }
-    }
-
-    // ── Slideshow guard ───────────────────────────────────────────────────
-    // A slideshow deck is several top-level scene compositions with no master
-    // root. `render` captures only the FIRST composition, so a deck renders as a
-    // silently truncated MP4 (e.g. slide 1 of a 40s deck). Warn and point at the
-    // deck-native path. Best-effort — never block a render on this probe.
-    if (!quiet) {
-      try {
-        const { slideshowIslandRegex } = await import("@hyperframes/core/slideshow");
-        if (slideshowIslandRegex("i").test(readFileSync(renderTarget, "utf8"))) {
-          console.log(
-            c.warn("⚠") +
-              "  This composition carries a slideshow island — `render` captures only the first" +
-              " scene, so the MP4 will be truncated to slide 1. Use " +
-              c.accent("hyperframes present") +
-              " for the deck; a linear main-line MP4 export is not yet available.",
-          );
-          console.log("");
-        }
-      } catch {
-        /* best-effort — a missing/unreadable target surfaces later in the real flow */
-      }
-    }
-
-    // ── Print render plan ─────────────────────────────────────────────────
-    if (!quiet && !batchPath) {
-      const workerLabel =
-        workers != null ? `${workers} workers` : `auto workers (${CPU_CORE_COUNT} cores detected)`;
-      console.log("");
-      const nameLabel = entryFile ? project.name + "/" + entryFile : project.name;
-      console.log(
-        c.accent("\u25C6") + "  Rendering " + c.accent(nameLabel) + c.dim(" \u2192 " + outputPath),
-      );
-      console.log(
-        c.dim("   " + fpsToFfmpegArg(fps) + "fps \u00B7 " + quality + " \u00B7 " + workerLabel),
-      );
-      if (outputResolution) {
-        // Don't claim "supersampled" — when the composition is already at the
-        // target dimensions, the DPR resolves to 1 and no supersampling
-        // happens. We don't have the composition's dims at this point in the
-        // CLI, so describe the intent rather than the mechanism.
-        console.log(c.dim("   Output resolution: " + outputResolution));
-      }
-      if (useGpu || browserGpuMode !== "software") {
-        const gpuModes = [
-          useGpu ? "encoder GPU" : null,
-          browserGpuMode === "hardware"
-            ? "browser GPU (forced)"
-            : browserGpuMode === "auto"
-              ? "browser GPU (auto-detect)"
-              : null,
-        ].filter(Boolean);
-        console.log(c.dim("   GPU: " + gpuModes.join(" + ")));
-      }
-      console.log("");
-    }
-
-    // ── Ensure browser for local renders ────────────────────────────────
-    // Always resolve to our own pinned/managed Chrome, never a
-    // separately-installed puppeteer-cache binary or system Chrome — render
-    // behavior (drawElement support included, HF#2060) shouldn't depend on
-    // whatever arbitrary Chrome version happens to be on the machine.
-    let browserPath: string | undefined;
-    if (!useDocker) {
-      const { ensureBrowser } = await import("../browser/manager.js");
-      let browserSpinner:
-        | {
-            start: (message?: string) => void;
-            message: (message: string) => void;
-            stop: (message?: string) => void;
-          }
-        | undefined;
-      try {
-        if (effectiveQuiet) {
-          const info = await ensureBrowser({ preferManagedChrome: true });
-          browserPath = info.executablePath;
-        } else {
-          const clack = await import("@clack/prompts");
-          browserSpinner = clack.spinner();
-          browserSpinner.start("Checking browser...");
-          const info = await ensureBrowser({
-            preferManagedChrome: true,
-            onProgress: (downloaded, total) => {
-              if (total <= 0) return;
-              const pct = Math.floor((downloaded / total) * 100);
-              browserSpinner?.message(
-                `Downloading Chrome... ${c.progress(pct + "%")} ${c.dim("(" + formatBytes(downloaded) + " / " + formatBytes(total) + ")")}`,
-              );
-            },
-          });
-          browserPath = info.executablePath;
-          browserSpinner.stop(c.dim(`Browser: ${info.source}`));
-        }
-      } catch (err: unknown) {
-        browserSpinner?.stop(c.error("Browser not available"));
-        errorBox(
-          "Chrome not found",
-          normalizeErrorMessage(err),
-          "Run: npx hyperframes browser ensure",
-        );
-        process.exit(1);
-      }
-    }
-
-    // ── Pre-render lint ──────────────────────────────────────────────────
-    {
-      // lintProject's explicit-entry contract is an absolute source path;
-      // entryFile is project-relative for the producer.
-      const explicitEntry = entryFile ? renderTarget : undefined;
-      const lintResult = await lintProject(project.dir, explicitEntry);
-      if (!quiet && (lintResult.totalErrors > 0 || lintResult.totalWarnings > 0)) {
-        console.log("");
-        for (const line of formatLintFindings(lintResult, { errorsFirst: true })) console.log(line);
-        if (
-          shouldBlockRender(
-            strictErrors,
-            strictAll,
-            lintResult.totalErrors,
-            lintResult.totalWarnings,
-          )
-        ) {
-          const mode = strictAll ? "--strict-all" : "--strict";
-          console.log("");
-          console.log(c.error(`  Aborting render due to lint issues (${mode} mode).`));
-          console.log("");
-          process.exit(1);
-        }
-        console.log(c.dim(renderLintContinuationHint(strictErrors)));
-        console.log("");
-      }
-    }
-
-    // ── Pre-flight: output-resolution vs composition compatibility ────────
-    // Catch a preset whose orientation/aspect ratio (or alpha/HDR mode)
-    // conflicts with the composition BEFORE the browser and ffmpeg spin up —
-    // otherwise this surfaces cryptically deep inside the render compiler
-    // (resolveDeviceScaleFactor). Best-effort: a composition we can't read or
-    // whose dimensions aren't a known preset falls through to the pipeline's
-    // own defense-in-depth check rather than blocking a render we can't reason
-    // about. See render-reliability workstream P1-3.
-    if (outputResolution) {
-      let resolutionIssue: { message: string; kind: OutputResolutionIssueKind } | undefined;
-      try {
-        resolutionIssue = await checkRenderResolutionPreflight(
-          readFileSync(renderTarget, "utf8"),
-          outputResolution,
-          {
-            alphaRequested: format === "webm" || format === "mov" || format === "png-sequence",
-            hdrRequested: args.hdr ?? false,
-            aspectAgnostic: outputResolutionAspectAgnostic,
-          },
-        );
-      } catch {
-        // Unreadable file is non-fatal here — the render pipeline will surface
-        // the real problem with full context.
-      }
-      if (resolutionIssue) {
-        // Count the pre-flight save so dashboard 1783183 can distinguish
-        // "caught early by pre-flight" from a deep render failure or a user who
-        // gave up — i.e. measure whether the P1-3 fix is doing its job.
-        trackRenderPreflightRejected({ kind: resolutionIssue.kind });
-        errorBox("Output resolution incompatible", resolutionIssue.message);
-        process.exit(1);
-      }
-    }
-
-    // ── Validate HDR/SDR mutual exclusion ────────────────────────────────
-    if (args.hdr && args.sdr) {
-      console.error("Error: --hdr and --sdr are mutually exclusive.");
-      process.exit(1);
-    }
-
-    // ── Batch render ──────────────────────────────────────────────────────
-    if (batchPath && batchModule && preparedBatch) {
-      const batchQuiet = quiet || batchJson;
-      const hdrMode: RenderOptions["hdrMode"] = args.sdr
-        ? "force-sdr"
-        : args.hdr
-          ? "force-hdr"
-          : "auto";
-      const renderOptionsBase: RenderOptions = {
-        fps,
-        quality,
-        authoringSkill,
-        format,
-        workers,
-        gpu: useGpu,
-        browserGpuMode,
-        hdrMode,
-        crf,
-        vp9CpuUsed,
-        videoBitrate,
-        quiet: batchQuiet,
-        browserPath,
-        entryFile,
-        outputResolution,
-        outputResolutionAspectAgnostic,
-        outputResolutionRaw: args.resolution,
-        pageNavigationTimeoutMs,
-        protocolTimeout,
-        playerReadyTimeout,
-        debug,
-        bestEffort,
-        exitAfterComplete: false,
-        throwOnError: true,
-        skipFeedback: true,
-        // Sequential batch rows may trial; real concurrent workers
-        // (batchConcurrency > 1) can't safely share the trial's process-wide
-        // env var/flags — see enableDeParallelRouterTrial's own doc comment.
-        enableDeParallelRouterTrial: batchConcurrency <= 1,
-      };
-      const manifest = await batchModule.runBatchRender({
-        prepared: preparedBatch,
-        concurrency: batchConcurrency,
-        failFast: args["batch-fail-fast"] ?? false,
-        quiet: batchQuiet,
-        json: batchJson,
-        renderOne: (row) =>
-          useDocker
-            ? renderDocker(project.dir, row.outputPath, {
-                ...renderOptionsBase,
-                variables: row.variables,
-                pageSideCompositing: args["page-side-compositing"] !== false,
-              })
-            : renderLocal(project.dir, row.outputPath, {
-                ...renderOptionsBase,
-                variables: row.variables,
-              }),
-      });
-      if (manifest.failed > 0) process.exitCode = 1;
-      return;
-    }
-
-    // ── Resolve --variables / --variables-file ──────────────────────────
-    const variables = resolveVariablesArg(args.variables, args["variables-file"]);
-
-    // ── Validate --variables against data-composition-variables ─────────
-    const strictVariables = args["strict-variables"] ?? false;
-    if (variables && Object.keys(variables).length > 0) {
-      const issues = validateVariablesAgainstProject(renderTarget, variables);
-      reportVariableIssues(issues, { strict: strictVariables, quiet });
-    }
-
-    // ── Render ────────────────────────────────────────────────────────────
-    if (useDocker) {
-      await renderDocker(project.dir, outputPath, {
-        fps,
-        quality,
-        authoringSkill,
-        format,
-        gifLoop,
-        workers,
-        gpu: useGpu,
-        browserGpuMode,
-        hdrMode: args.sdr ? "force-sdr" : args.hdr ? "force-hdr" : "auto",
-        crf,
-        vp9CpuUsed,
-        videoBitrate,
-        videoFrameFormat,
-        quiet,
-        debug,
-        bestEffort,
-        variables,
-        entryFile,
-        outputResolution,
-        outputResolutionAspectAgnostic,
-        outputResolutionRaw: args.resolution,
-        pageSideCompositing: args["page-side-compositing"] !== false,
-        experimentalFastCapture: args["experimental-fast-capture"] === true,
-        pageNavigationTimeoutMs,
-        protocolTimeout,
-        playerReadyTimeout,
-        exitAfterComplete: true,
-      });
-    } else {
-      await renderLocal(project.dir, outputPath, {
-        fps,
-        quality,
-        authoringSkill,
-        format,
-        gifLoop,
-        workers,
-        gpu: useGpu,
-        browserGpuMode,
-        hdrMode: args.sdr ? "force-sdr" : args.hdr ? "force-hdr" : "auto",
-        crf,
-        vp9CpuUsed,
-        videoBitrate,
-        videoFrameFormat,
-        quiet,
-        browserPath,
-        debug,
-        bestEffort,
-        variables,
-        entryFile,
-        outputResolution,
-        outputResolutionAspectAgnostic,
-        outputResolutionRaw: args.resolution,
-        pageNavigationTimeoutMs,
-        protocolTimeout,
-        playerReadyTimeout,
-        exitAfterComplete: true,
-        // The single top-level CLI render is sequential by construction — the
-        // one place the trial's process-wide state is unconditionally safe.
-        enableDeParallelRouterTrial: true,
-      });
-    }
+    const plan = createRenderPlan(args);
+    // Teach the project its owning skill from an explicit --skill so every
+    // later flag-less render (re-render, `npm run render`, batch) inherits it.
+    seedProjectAuthoringSkill(plan.project.dir, args.skill);
+    await presentRenderPlan(plan);
+    await executeRenderPlan(plan, {
+      renderDocker,
+      renderLocal,
+      checkResolution: checkRenderResolutionPreflight,
+    });
   },
 });
 
@@ -1076,13 +371,7 @@ export interface SingleRenderResult {
   warnings?: Array<{ code: string; message: string }>;
 }
 
-export function renderLintContinuationHint(strictErrors: boolean): string {
-  return strictErrors
-    ? "  Continuing render despite lint warnings. Use --strict-all to block warnings."
-    : "  Continuing render despite lint issues. Use --strict to block errors.";
-}
-
-interface RenderOptions {
+export interface RenderOptions {
   fps: Fps;
   quality: "draft" | "standard" | "high";
   /** Authoring workflow skill that drove this render (telemetry attribution). */
@@ -1111,19 +400,9 @@ interface RenderOptions {
   exitAfterComplete?: boolean;
   /** Output resolution preset; see `resolveDeviceScaleFactor` for constraints. */
   outputResolution?: CanvasResolution;
-  /**
-   * True when `outputResolution` came from an aspect-agnostic alias
-   * (`--resolution 1080p` / `hd` / `4k` / `uhd`). The compile stage adapts
-   * the preset to the composition's orientation instead of rejecting
-   * portrait/square comps as an aspect-ratio mismatch.
-   */
+  /** Whether the resolution names a tier without fixing an orientation. */
   outputResolutionAspectAgnostic?: boolean;
-  /**
-   * Raw `--resolution` string as typed by the user. Preserved so Docker mode
-   * can forward the pre-normalized flag to the in-container CLI, which
-   * re-runs the aspect-agnostic detection on its own side — otherwise we'd
-   * lose the "1080p was ambiguous" signal at the process boundary.
-   */
+  /** Raw resolution flag retained for the in-container CLI. */
   outputResolutionRaw?: string;
   pageSideCompositing?: boolean;
   /** EXPERIMENTAL. drawElementImage frame capture (--experimental-fast-capture). */
@@ -1159,35 +438,6 @@ interface RenderOptions {
    * it unset for `--batch-concurrency N>=2`.
    */
   enableDeParallelRouterTrial?: boolean;
-}
-
-/**
- * Resolve the browser-GPU mode for a CLI render invocation.
- *
- * Priority (highest first):
- *   1. Docker mode → always "software" (docker has no portable GPU
- *      passthrough; the engine's render path uses SwiftShader).
- *   2. Explicit CLI flag — `--browser-gpu` → "hardware",
- *      `--no-browser-gpu` → "software".
- *   3. Env var `PRODUCER_BROWSER_GPU_MODE` accepts "hardware" / "software" /
- *      "auto".
- *   4. Default = "auto" — engine probes WebGL availability on first launch
- *      and falls back to software if the host lacks a usable GPU.
- *
- * Returning "auto" by default lets local renders Just Work whether or not the
- * host has a GPU, while preserving the explicit overrides for CI / power
- * users who want failure-on-misconfig.
- */
-export function resolveBrowserGpuForCli(
-  useDocker: boolean,
-  browserGpuArg: boolean | undefined,
-  envMode = process.env.PRODUCER_BROWSER_GPU_MODE,
-): "auto" | "hardware" | "software" {
-  if (useDocker) return "software";
-  if (browserGpuArg === true) return "hardware";
-  if (browserGpuArg === false) return "software";
-  if (envMode === "hardware" || envMode === "software" || envMode === "auto") return envMode;
-  return "auto";
 }
 
 /**
@@ -1234,14 +484,6 @@ async function readCompositionDimensions(
  * Extracted (and exported) so the CLI wiring around `process.exit` stays a
  * thin adapter and the branch logic is unit-testable. See render-reliability
  * workstream P1-3.
- *
- * `aspectAgnostic` reflects whether `outputResolution` was normalized from an
- * aspect-agnostic alias like `--resolution 1080p` / `hd` / `4k` / `uhd`.
- * When true, an aspect-ratio mismatch is *not* an error at the CLI layer:
- * the compile stage will re-map the preset to the composition's orientation
- * (a portrait 1080×1920 composition with `--resolution 1080p` renders at
- * 1080×1920, not 1920×1080). Alpha / HDR / downsampling / non-integer-scale
- * checks still block, because those failures are not orientation-fixable.
  */
 export async function checkRenderResolutionPreflight(
   compositionHtml: string,
@@ -1253,24 +495,6 @@ export async function checkRenderResolutionPreflight(
   // Couldn't determine the composition's actual dimensions — defer to the
   // pipeline's own defense-in-depth check rather than guess.
   if (!dims) return undefined;
-  // Aspect-agnostic aliases (`--resolution 1080p` / `hd` / `4k` / `uhd`)
-  // don't nail an orientation — the compile stage remaps them to the
-  // composition's orientation via `adaptAspectAgnosticResolution` +
-  // `suggestMatchingPreset`. Mirror that remap here BEFORE running the
-  // compatibility check so the early rejection reflects the *effective*
-  // preset the pipeline will actually use.
-  //
-  // Doing this pre-check (rather than post-hoc "downgrade aspect-mismatch")
-  // is what makes the following cases fail early with an aspect-aware
-  // message instead of throwing deep in the compile stage after Chrome +
-  // ffmpeg have already spun up (Rames Δ2 on PR #2529):
-  //
-  //   - Non-preset aspect (e.g. IG 4:5 1080×1350): no sibling preset
-  //     matches → `suggestMatchingPreset` returns `undefined` → we keep the
-  //     original preset and surface the aspect-mismatch normally.
-  //   - Orientation-flip + tier-too-small (portrait-4K comp 2160×3840 +
-  //     `--resolution 1080p`): remaps `landscape` → `portrait` (1080×1920),
-  //     re-check catches the downsample early with a clear message.
   const effective =
     modes.aspectAgnostic === true
       ? (suggestMatchingPreset(dims.width, dims.height, outputResolution) ?? outputResolution)
@@ -1338,9 +562,12 @@ function ensureDockerImage(version: string, platform: string, quiet: boolean): s
 
   const dockerfilePath = resolveDockerfilePath();
 
-  // Copy Dockerfile to a temp build context so docker build has a clean context
-  const tmpDir = join(tmpdir(), `hyperframes-docker-${Date.now()}`);
-  mkdirSync(tmpDir, { recursive: true });
+  // Copy Dockerfile to a temp build context so docker build has a clean context.
+  // mkdtempSync (not a `Date.now()`-derived name) so the path is unpredictable
+  // and created 0o700 by the kernel — a guessable temp dir in a world-writable
+  // tmpdir is pre-creatable by another local user, who could then swap in their
+  // own Dockerfile or symlink the path (CodeQL js/insecure-temporary-file).
+  const tmpDir = mkdtempSync(join(tmpdir(), "hyperframes-docker-"));
   writeFileSync(join(tmpDir, "Dockerfile"), readFileSync(dockerfilePath));
 
   // Platform is now derived from the host arch (see resolveDockerPlatform).
@@ -1400,7 +627,7 @@ function resolveDockerHostPlatform(options: RenderOptions): string {
       "Docker Desktop/colima on Apple Silicon doesn't expose --gpus host passthrough to linux/arm64 containers.",
       "Drop --gpu, or run a native (non-Docker) render on this host, or set HYPERFRAMES_DOCKER_PLATFORM=linux/amd64 if you need GPU encoding (slow under qemu but works).",
     );
-    process.exit(1);
+    failCommand();
   }
 
   if (!options.quiet && platform === "linux/arm64") {
@@ -1453,7 +680,7 @@ async function renderDocker(
         ? "Install Docker: https://docs.docker.com/get-docker/"
         : "Check Docker is running: docker info",
     );
-    process.exit(1);
+    failCommand();
   }
 
   const outputDir = dirname(outputPath);
@@ -1480,14 +707,6 @@ async function renderDocker(
       quiet: options.quiet,
       variables: options.variables,
       entryFile: options.entryFile,
-      // Forward the RAW `--resolution` flag (falling back to the canonical
-      // preset name when raw wasn't captured, e.g. programmatic callers).
-      // The in-container CLI re-runs `normalizeResolutionFlag` +
-      // `isAspectAgnosticResolutionAlias`, so aspect-agnostic aliases
-      // (`1080p`, `hd`, `4k`, `uhd`) retain their orientation-adaptive
-      // behavior inside Docker; passing the normalized `landscape` preset
-      // would silently lose that signal at the process boundary and
-      // reject portrait/square comps.
       outputResolution: options.outputResolutionRaw ?? options.outputResolution,
       pageSideCompositing: options.pageSideCompositing,
       debug: options.debug,
@@ -1583,7 +802,7 @@ export async function renderLocal(
     for (const check of failedChecks) {
       errorBox(check.title ?? `${check.name} check failed`, check.detail, check.hint);
     }
-    process.exit(1);
+    failCommand();
   }
   if (!options.quiet) {
     for (const outcome of preflight.outcomes) {
@@ -1751,7 +970,7 @@ function isUnrefableTimer(
 }
 
 function scheduleRenderProcessExit(): void {
-  const timer = setTimeout(() => process.exit(0), 100);
+  const timer = setTimeout(() => requestCliExit(0), 100);
   if (isUnrefableTimer(timer)) timer.unref();
 }
 
@@ -2132,6 +1351,9 @@ function handleRenderError(
     ...renderJobObservabilityTelemetryPayload(job),
     ...getMemorySnapshot(),
   });
+  // Failed renders join the recent-renders ring too — a bug report filed via
+  // `hyperframes feedback` is MOST likely to be about a failed render.
+  if (job?.id) recordRecentRender(job.id, false);
   if (options.throwOnError) {
     throw new Error(message);
   }
@@ -2142,7 +1364,7 @@ function handleRenderError(
   const remediation = chromeLaunchRemediation(message);
   if (remediation) {
     errorBox("Render failed — Chrome could not launch", message, remediation);
-    process.exit(1);
+    failCommand();
   }
   // macOS <13 dyld Symbol-not-found on the pinned chrome-headless-shell
   // build. Different remediation shape (older shell + env-var override)
@@ -2150,10 +1372,10 @@ function handleRenderError(
   const macosRemediation = macosOldChromeCrashRemediation(message);
   if (macosRemediation) {
     errorBox("Render failed — Chrome could not launch", message, macosRemediation);
-    process.exit(1);
+    failCommand();
   }
   errorBox("Render failed", message, hint);
-  process.exit(1);
+  failCommand();
 }
 
 /**
@@ -2169,6 +1391,9 @@ function trackRenderMetrics(
   options: RenderOptions,
   docker: boolean,
 ): void {
+  // Successful render → recent-renders ring, so a later `hyperframes
+  // feedback` can attach this render's telemetry id to the report.
+  recordRecentRender(job.id, true);
   const perf = job.perfSummary;
   const compositionDurationMs = perf
     ? Math.round(perf.compositionDurationSeconds * 1000)
@@ -2186,6 +1411,13 @@ function trackRenderMetrics(
     fps: fpsToNumber(options.fps),
     quality: options.quality,
     workers: options.workers ?? perf?.workers,
+    workersBoundBy: perf?.workerSizing?.boundBy,
+    workersCpuBased: perf?.workerSizing?.cpuBasedWorkers,
+    workersMemoryBased: perf?.workerSizing?.memoryBasedWorkers,
+    workersHeapBased: perf?.workerSizing?.heapBasedWorkers,
+    workersFrameBased: perf?.workerSizing?.frameBasedWorkers,
+    workersHeapLimitMb: perf?.workerSizing?.heapLimitMb,
+    workersExceedHeapAdvisory: perf?.workerSizing?.exceedsHeapAdvisory,
     docker,
     gpu: options.gpu,
     authoringSkill: options.authoringSkill,
@@ -2204,6 +1436,7 @@ function trackRenderMetrics(
     deParallelRouter: perf?.drawElement?.parallelRouter,
     dePreRouterWorkers: perf?.drawElement?.preRouterWorkers,
     deGateReason: perf?.drawElement?.gateReason,
+    gpuRenderer: perf?.drawElement?.gpuRenderer,
     deWorkerEncode: perf?.drawElement?.workerEncode,
     deVerifyArmed: perf?.drawElement?.verifyArmed,
     deVerifyChecked: perf?.drawElement?.verifyChecked,

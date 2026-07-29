@@ -1,3 +1,4 @@
+import { failCommand } from "../utils/commandResult.js";
 // fallow-ignore-file complexity
 import { defineCommand } from "citty";
 import { existsSync, mkdtempSync, readFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -90,6 +91,15 @@ export function resolveSnapshotVideoFrameTime(input: {
 
   const sourceEnd = sourceDuration > 0 ? sourceDuration : relativeTime;
   return Math.max(0, Math.min(relativeTime, sourceEnd - 1 / 30));
+}
+
+/** Prefer the runtime's canonical absolute media start. The authored value is
+ * only a compatibility fallback for pages built with an older runtime. */
+export function resolveSnapshotVideoClipStart(input: {
+  authoredStart: number;
+  runtimeResolvedStart: number | null;
+}): number {
+  return input.runtimeResolvedStart ?? input.authoredStart;
 }
 
 export function requireSnapshotFfmpeg(ffmpegPath: string | undefined): string {
@@ -398,10 +408,14 @@ async function captureSnapshots(
         if (cameraExpr) await page.evaluate(cameraExpr);
 
         if (injectVideoFramesBatch && syncVideoFrameVisibility) {
-          const candidates = await page.evaluate((t: number) => {
-            return Array.from(document.querySelectorAll("video[data-start]")).map((el) => {
+          const candidates = await page.evaluate(() => {
+            const runtimeWindow = window as Window & {
+              __hfResolveMediaStartSeconds?: (element: Element) => number;
+            };
+            return Array.from(document.querySelectorAll("video")).map((el) => {
               const v = el as HTMLVideoElement;
-              const start = parseFloat(v.dataset.start ?? "0") || 0;
+              const authoredStart = parseFloat(v.dataset.start ?? "0") || 0;
+              const runtimeResolvedStart = runtimeWindow.__hfResolveMediaStartSeconds?.(v);
               const rawRate = v.defaultPlaybackRate;
               const playbackRate =
                 Number.isFinite(rawRate) && rawRate > 0 ? Math.max(0.1, Math.min(5, rawRate)) : 1;
@@ -415,30 +429,43 @@ async function captureSnapshots(
                   : srcDur > 0
                     ? Math.max(0, (srcDur - mediaStart) / playbackRate)
                     : Number.POSITIVE_INFINITY;
-              let relTime = (t - start) * playbackRate + mediaStart;
-              if (v.loop && srcDur > mediaStart && relTime >= srcDur) {
-                relTime = mediaStart + ((relTime - mediaStart) % (srcDur - mediaStart));
-              }
               return {
                 id: v.id,
                 src: v.currentSrc || v.src,
-                start,
+                authoredStart,
+                runtimeResolvedStart:
+                  runtimeResolvedStart !== undefined && Number.isFinite(runtimeResolvedStart)
+                    ? runtimeResolvedStart
+                    : null,
                 duration,
                 srcDuration: srcDur,
-                relTime,
+                playbackRate,
+                mediaStart,
+                loop: v.loop,
               };
             });
-          }, time);
+          });
           const active = candidates.flatMap((candidate) => {
+            const start = resolveSnapshotVideoClipStart(candidate);
+            let relTime = (time - start) * candidate.playbackRate + candidate.mediaStart;
+            if (
+              candidate.loop &&
+              candidate.srcDuration > candidate.mediaStart &&
+              relTime >= candidate.srcDuration
+            ) {
+              relTime =
+                candidate.mediaStart +
+                ((relTime - candidate.mediaStart) % (candidate.srcDuration - candidate.mediaStart));
+            }
             if (!candidate.id || !candidate.src) return [];
             const frameTime = resolveSnapshotVideoFrameTime({
               globalTime: time,
-              clipStart: candidate.start,
+              clipStart: start,
               clipDuration: candidate.duration,
-              relativeTime: candidate.relTime,
+              relativeTime: relTime,
               sourceDuration: candidate.srcDuration,
             });
-            return frameTime === null ? [] : [{ ...candidate, relTime: frameTime }];
+            return frameTime === null ? [] : [{ ...candidate, start, relTime: frameTime }];
           });
 
           const updates: Array<{ videoId: string; dataUri: string }> = [];
@@ -666,7 +693,7 @@ export default defineCommand({
         console.log(
           `\n${c.error("✗")} Could not determine composition duration — no frames captured`,
         );
-        process.exit(1);
+        failCommand();
       }
 
       console.log(
@@ -789,7 +816,7 @@ export default defineCommand({
     } catch (err) {
       const msg = normalizeErrorMessage(err);
       console.error(`\n${c.error("✗")} Snapshot failed: ${msg}`);
-      process.exit(1);
+      failCommand();
     }
   },
 });

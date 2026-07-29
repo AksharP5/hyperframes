@@ -1,10 +1,9 @@
+import { scopedElementKey } from "../../hooks/gsapKeyframeCacheHelpers";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { resolveEditingSections } from "@hyperframes/core/editing";
 import { DesignPanelInputProvider } from "../../contexts/DesignPanelInputContext";
 import { slugifyDesignInput } from "../../utils/designInputTracking";
-import type { DomEditSelection } from "./domEditing";
 import { isTextEditableSelection } from "./domEditing";
-import type { PropertyPanelProps } from "./propertyPanelHelpers";
+import type { PropertyPanelFlatProps } from "./propertyPanelFlatProps";
 import { formatPxMetricValue } from "./propertyPanelHelpers";
 import { PropertyPanelFlatHeader } from "./PropertyPanelFlatHeader";
 import { PropertyPanelFlatFooter } from "./PropertyPanelFlatFooter";
@@ -19,12 +18,20 @@ import { createGsapLivePreview } from "./gsapLivePreview";
 import { formatTextFieldPreview } from "./propertyPanelSections";
 import { STUDIO_GSAP_PANEL_ENABLED } from "./manualEditingAvailability";
 import { useColorGradingController } from "./useColorGradingController";
+import { usePlayerStore } from "../../player";
 import {
   FlatColorGradingAccessory,
   FlatColorGradingSection,
 } from "./propertyPanelFlatColorGradingSection";
-
-type EditingSections = ReturnType<typeof resolveEditingSections>;
+import {
+  activeColorGradingEffectCount,
+  FlatEffectsAccessory,
+  FlatEffectsSection,
+} from "./propertyPanelFlatEffectsSection";
+import {
+  deriveMediaOverlayPlacement,
+  FlatOverlaysSection,
+} from "./propertyPanelFlatOverlaysSection";
 
 type FlatGroupDescriptor = {
   id: string;
@@ -34,11 +41,7 @@ type FlatGroupDescriptor = {
   content: ReactNode;
 };
 
-// Type-only fallback for the Motion effect-card callbacks. Used solely to
-// satisfy FlatMotionSection's required-callback shape when the effect list is
-// gated off (showEffects === false, so none of these are ever invoked). Keeps
-// the gated-off path free of `!` non-null assertions — the real, narrowed
-// handlers flow through only when the double-gate below passes.
+// Required callback shape for the gated-off Motion effect list.
 const EMPTY_GSAP_EFFECT_HANDLERS = {
   onAddAnimation: () => {},
   onUpdateProperty: () => {},
@@ -48,15 +51,7 @@ const EMPTY_GSAP_EFFECT_HANDLERS = {
   onRemoveProperty: () => {},
 };
 
-/**
- * The flat "Ledger" inspector shell (design_handoff_studio_inspector).
- *
- * Extracted from PropertyPanel so that file stays under the 600-LOC gate
- * (same one-directional-import precedent as FlatTextSection). Rendered only
- * when STUDIO_FLAT_INSPECTOR_ENABLED is on; owns the one-open group state.
- *
- * The Text/Style/Layout/Motion/Media/Grade groups share the one-open accordion.
- */
+/** The flat inspector shell with one shared open-group state. */
 // fallow-ignore-next-line complexity
 export function PropertyPanelFlat({
   element,
@@ -93,6 +88,7 @@ export function PropertyPanelFlat({
   onAskAgent,
   onToggleElementHidden,
   onImportAssets,
+  onAddMediaOverlay,
   onImportFonts,
   recordingState,
   recordingDuration,
@@ -113,10 +109,7 @@ export function PropertyPanelFlat({
   currentTime,
   animIdForProp,
   gsapRuntimeValues,
-  // Renamed: PropertyPanel.tsx still computes/passes these for its own legacy
-  // (non-flat) panel, but the flat path recomputes its own basis below via
-  // deriveElementTiming so it agrees with Motion's Timing row — ignore the
-  // parent's naive `elDuration ?? 1` fallback.
+  // The flat path derives timing consistently with its Motion section.
   elStart: _elStart,
   elDuration: _elDuration,
   onCommitAnimatedProperty,
@@ -139,100 +132,10 @@ export function PropertyPanelFlat({
   onUpdateArcSegment,
   onUnroll,
   onUpdateKeyframeEase,
+  onUpdateSegmentEase,
   onSetAllKeyframeEases,
-}: Pick<
-  PropertyPanelProps,
-  | "projectId"
-  | "projectDir"
-  | "assets"
-  | "previewIframeRef"
-  | "onClearSelection"
-  | "onUngroup"
-  | "onSetStyle"
-  | "onPreviewStyle"
-  | "onSetAttribute"
-  | "onSetAttributes"
-  | "onSetAttributeLive"
-  | "onApplyColorGradingScope"
-  | "onSetHtmlAttribute"
-  | "onRemoveBackground"
-  | "onSetText"
-  | "onSetTextFieldStyle"
-  | "onPreviewTextFieldStyle"
-  | "onAddTextField"
-  | "onRemoveTextField"
-  | "onAskAgent"
-  | "onToggleElementHidden"
-  | "onImportAssets"
-  | "onImportFonts"
-  | "fontAssets"
-  | "gsapAnimations"
-  | "gsapMultipleTimelines"
-  | "gsapUnsupportedTimelinePattern"
-  | "onUpdateGsapProperty"
-  | "onUpdateGsapMeta"
-  | "onDeleteGsapAnimation"
-  | "onAddGsapProperty"
-  | "onRemoveGsapProperty"
-  | "onUpdateGsapFromProperty"
-  | "onAddGsapFromProperty"
-  | "onRemoveGsapFromProperty"
-  | "onAddGsapAnimation"
-  | "onSetArcPath"
-  | "onUpdateArcSegment"
-  | "onUnroll"
-  | "onUpdateKeyframeEase"
-  | "onSetAllKeyframeEases"
-  | "recordingState"
-  | "recordingDuration"
-  | "onToggleRecording"
-> &
-  // Layout-group values (Plan 3a Task 5). All are derived locals or handlers in
-  // PropertyPanel; compose their exact shapes from FlatLayoutSection's own props
-  // via Pick so a signature change there propagates here instead of drifting.
-  Pick<
-    Parameters<typeof FlatLayoutSection>[0],
-    | "displayX"
-    | "displayY"
-    | "displayW"
-    | "displayH"
-    | "displayR"
-    | "manualOffsetEditingDisabled"
-    | "manualSizeEditingDisabled"
-    | "manualRotationEditingDisabled"
-    | "commitManualOffset"
-    | "commitManualSize"
-    | "commitManualRotation"
-    | "gsapAnimId"
-    | "navKeyframes"
-    | "animIdForProp"
-    | "gsapRuntimeValues"
-    | "elStart"
-    | "elDuration"
-    | "onCommitAnimatedProperty"
-    | "onCommitAnimatedProperties"
-    | "onSeekToTime"
-    | "onRemoveKeyframe"
-    | "onConvertToKeyframes"
-  > & {
-    element: DomEditSelection;
-    styles: Record<string, string>;
-    sections: EditingSections;
-    sourceLabel: string;
-    gsapBorderRadius: { tl: number; tr: number; br: number; bl: number } | null;
-    showEditableSections: boolean;
-    selectedElementHidden: boolean;
-    selectedElementId: string | null;
-    clipboardCopied: boolean;
-    onCopyElementInfo: () => void;
-    currentTime: number;
-  }) {
-  // Lazy initializer: pick whichever group actually renders for this element
-  // (Text if text-editable, else Style if style-editable, else none open) so a
-  // style-only element doesn't start with everything collapsed. Only runs on
-  // mount — PropertyPanel.tsx keys <PropertyPanelFlat> by element identity so
-  // switching the selection re-mounts this component and re-derives the
-  // default instead of preserving stale state across unrelated elements.
+}: PropertyPanelFlatProps) {
+  // PropertyPanel keys this component by selection, so the default is per element.
   const [openGroupId, setOpenGroupId] = useState<string>(() =>
     isTextEditableSelection(element)
       ? "text"
@@ -256,20 +159,36 @@ export function PropertyPanelFlat({
   // just toggled. Two ids, not one: the clicked (newly-opening/closing) group
   // AND whichever group was open immediately before the click and got
   // implicitly closed by it — both freshly-mounted headers need to animate.
+  // When the inline timeline ease button focuses a segment on this element,
+  // force the Motion group open so its AnimationCard (which only mounts while
+  // the group is expanded) can consume the focus and reveal the ease editor.
+  const focusedEaseSegment = usePlayerStore((s) => s.focusedEaseSegment);
+  // The element THIS panel renders, not the store's selectedElementId: that
+  // flips synchronously while the panel still renders its predecessor, so a
+  // stale panel would consume a request meant for its successor whenever the
+  // two share a class-selector animation id.
+  const renderedElementId = scopedElementKey(element);
+  // Adjusted during render (not an effect) so the card mounts on the same
+  // commit the request lands on. Keyed on request identity: a group the user
+  // closes afterwards stays closed.
+  const [consumedFocus, setConsumedFocus] = useState(focusedEaseSegment);
+  if (focusedEaseSegment !== consumedFocus) {
+    setConsumedFocus(focusedEaseSegment);
+    const focusesThisPanel =
+      focusedEaseSegment?.elementId === renderedElementId &&
+      gsapAnimations.some((a) => a.id === focusedEaseSegment.animationId);
+    if (focusesThisPanel) setOpenGroupId("motion");
+  }
+
   const [justToggledIds, setJustToggledIds] = useState<string[]>([]);
   const justToggledTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const panelBodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     return () => {
       if (justToggledTimeoutRef.current) clearTimeout(justToggledTimeoutRef.current);
     };
   }, []);
 
-  // Grade group state. Called unconditionally (React rules-of-hooks) even when
-  // sections.colorGrading is false — unlike the legacy ColorGradingSection,
-  // which is only mounted when the section is active, PropertyPanelFlat is not
-  // remounted per-section so the hook must run every render. Shares one state
-  // object between the group's header accessory (compare/status/reset) and its
-  // body (the FlatColorGradingSection controls).
   const colorGradingController = useColorGradingController({
     projectId,
     element,
@@ -281,9 +200,7 @@ export function PropertyPanelFlat({
   const isTextEditable = isTextEditableSelection(element);
   const elementKind = sections.media ? "media" : element.textFields.length > 0 ? "text" : "other";
   const toggleOpen = (groupId: string) => {
-    // Capture what was open BEFORE this click (this render's closure over
-    // openGroupId), so the group that's about to be implicitly closed can be
-    // tracked too — not just the one the user clicked.
+    const isOpening = openGroupId !== groupId;
     const previousOpenGroupId = openGroupId;
     setOpenGroupId((current) => (current === groupId ? "" : groupId));
     const implicitlyClosedId =
@@ -291,34 +208,20 @@ export function PropertyPanelFlat({
     setJustToggledIds(implicitlyClosedId ? [groupId, implicitlyClosedId] : [groupId]);
     if (justToggledTimeoutRef.current) clearTimeout(justToggledTimeoutRef.current);
     justToggledTimeoutRef.current = setTimeout(() => setJustToggledIds([]), 200);
+    if (isOpening) {
+      requestAnimationFrame(() =>
+        panelBodyRef.current
+          ?.querySelector<HTMLElement>('[data-flat-group-open="true"]')
+          ?.scrollIntoView?.({ block: "start" }),
+      );
+    }
   };
-  // Basis for the Layout keyframe gutter (X/Y/W/H/Angle + 3D Transform) —
-  // must agree with Motion's Timing row (FlatTimingRow), which infers the
-  // range from animations when there's no explicit data-duration. Computed
-  // here (not threaded from PropertyPanel) both to keep that file under its
-  // 600-LOC gate and because element/gsapAnimations are already in scope.
   const { start: elStart, duration: elDuration } = deriveElementTiming(element, gsapAnimations);
-  // Trivial percentage→time seek, derived here rather than threaded from
-  // PropertyPanel (keeps that file under its 600-LOC gate).
   const seekFromKfPct = (pct: number) => onSeekToTime?.(elStart + (pct / 100) * elDuration);
-  // Playhead position within the SAME corrected elStart/elDuration basis as
-  // seekFromKfPct above — recomputed here (not threaded as `currentPct` from
-  // PropertyPanel, which still derives it against its own naive basis for the
-  // legacy panel) so KeyframeNavigation's diamond active-state and prev/next
-  // arrow targeting agree with where a keyframe click actually seeks to
-  // (follow-up fix to 684ec4e87, which corrected the seek basis but left this
-  // one still naive).
+  // Use the same timing basis for seeking and active keyframe state.
   const currentPct = elDuration > 0 ? ((currentTime - elStart) / elDuration) * 100 : 0;
 
-  // Motion group double-gate — reproduces the legacy PropertyPanel gate exactly:
-  //  • Timing (sections.timing) shows via resolveEditingSections, same as today.
-  //  • The effect-card list shows only when STUDIO_GSAP_PANEL_ENABLED is on AND
-  //    all five edit handlers are present (identical to PropertyPanel's legacy
-  //    `<GsapAnimationSection>` guard).
-  // Computing the narrowed handler bundle inside the `&&`-guarded ternary lets
-  // TypeScript prove each handler non-undefined without a `!` assertion; the
-  // noop bundle only fills the type when the gate is off (never invoked, since
-  // FlatMotionSection guards every call behind showEffects).
+  // Match the legacy Motion gate while preserving TypeScript narrowing.
   const showMotionTiming = Boolean(sections.timing);
   const gsapEffectHandlers =
     STUDIO_GSAP_PANEL_ENABLED &&
@@ -341,15 +244,13 @@ export function PropertyPanelFlat({
           onUpdateArcSegment,
           onUnroll,
           onUpdateKeyframeEase,
+          onUpdateSegmentEase,
           onSetAllKeyframeEases,
         }
       : null;
   const showMotionEffects = gsapEffectHandlers !== null;
   const showMotionGroup = showMotionTiming || showMotionEffects;
 
-  // Ordered group descriptors — one per FlatGroup this panel renders, gated by
-  // the same conditions the inline JSX used. Split below into before-open/
-  // open/after-open regions for the one-open accordion.
   const groups: FlatGroupDescriptor[] = [];
   if (isTextEditable) {
     groups.push({
@@ -372,8 +273,6 @@ export function PropertyPanelFlat({
     });
   }
   if (showEditableSections) {
-    // Number.isFinite guard (not `|| 1`): opacity 0 is a real value — an
-    // invisible element must summarize as 0%, not 100%.
     const opacityValue = parseFloat(styles.opacity ?? "1");
     const opacityPct = Math.round((Number.isFinite(opacityValue) ? opacityValue : 1) * 100);
     groups.push({
@@ -398,8 +297,6 @@ export function PropertyPanelFlat({
     groups.push({
       id: "layout",
       title: "Layout",
-      // No scrub accessory: FlatRow/CommitField has no pointer-drag scrubbing
-      // (wheel/arrow keys only) — advertising "drag values to scrub" here lies.
       summary: `${formatPxMetricValue(displayX)},${formatPxMetricValue(displayY)} · ${Math.round(displayW)}×${Math.round(displayH)}`,
       content: (
         <FlatLayoutSection
@@ -470,15 +367,57 @@ export function PropertyPanelFlat({
           assets={assets}
           onImportAssets={onImportAssets}
           onCommitColorGrading={colorGradingController.commitColorGrading}
+          onPreviewColorGrading={colorGradingController.previewColorGrading}
           applyScope={colorGradingController.applyScope}
           applyBusy={colorGradingController.applyBusy}
           onSetApplyScope={colorGradingController.setApplyScope}
           onApplyToScope={() => void colorGradingController.applyToScope()}
           onApplyScopeAvailable={Boolean(onApplyColorGradingScope)}
           mediaMetadata={colorGradingController.mediaMetadata}
+          presetPreviews={colorGradingController.presetPreviews}
+          onRequestPresetPreviews={colorGradingController.requestPresetPreviews}
+          captureGradedFrame={colorGradingController.captureGradedFrame}
         />
       ),
     });
+    const activeEffects = activeColorGradingEffectCount(colorGradingController.grading);
+    const effectsProps = {
+      grading: colorGradingController.grading,
+      onCommitColorGrading: colorGradingController.commitColorGrading,
+    };
+    groups.push({
+      id: "effects",
+      title: "Effects",
+      accessory: <FlatEffectsAccessory {...effectsProps} />,
+      summary: activeEffects ? `${activeEffects} active` : "none",
+      content: (
+        <FlatEffectsSection
+          {...effectsProps}
+          previews={colorGradingController.effectPreviews}
+          presetPreviews={colorGradingController.presetPreviews}
+          onPreviewColorGrading={colorGradingController.previewColorGrading}
+          onRequestEffectPreviews={colorGradingController.requestEffectPreviews}
+          onRequestPresetPreviews={colorGradingController.requestPresetPreviews}
+        />
+      ),
+    });
+    if (onAddMediaOverlay) {
+      groups.push({
+        id: "overlays",
+        title: "Overlays",
+        summary: "add layer",
+        content: (
+          <FlatOverlaysSection
+            onAddOverlay={(blockName) =>
+              onAddMediaOverlay(
+                blockName,
+                deriveMediaOverlayPlacement(element, { start: elStart, duration: elDuration }),
+              )
+            }
+          />
+        ),
+      });
+    }
   }
   if (sections.media) {
     groups.push({
@@ -499,17 +438,21 @@ export function PropertyPanelFlat({
     });
   }
 
-  // Fixed-headers + scrollable-open-section layout (design_handoff
-  // scrollable-open-section, replaces the prior sticky-stacking mechanism):
-  // collapsed headers before/after the open group render in normal document
-  // flow and never move. Only the open group's own body content scrolls, in
-  // a dedicated region between the two fixed header stacks. When no group is
-  // open, every group is just a collapsed header — there's no scrollable
-  // middle region at all, since nothing is expanded.
   const openIndex = groups.findIndex((g) => g.id === openGroupId);
   const beforeOpen = openIndex === -1 ? groups : groups.slice(0, openIndex);
   const openGroup = openIndex === -1 ? null : groups[openIndex];
   const afterOpen = openIndex === -1 ? [] : groups.slice(openIndex + 1);
+  const renderClosedGroup = (group: FlatGroupDescriptor) => (
+    <DesignPanelInputProvider key={group.id} section={slugifyDesignInput(group.title)}>
+      <FlatGroupHeader
+        title={group.title}
+        isOpen={false}
+        onToggleOpen={() => toggleOpen(group.id)}
+        summary={group.summary}
+        animateEntrance={justToggledIds.includes(group.id)}
+      />
+    </DesignPanelInputProvider>
+  );
 
   return (
     <DesignPanelInputProvider ui="flat">
@@ -532,21 +475,15 @@ export function PropertyPanelFlat({
             showUngroup={Boolean(onUngroup && element.dataAttributes["hf-group"] != null)}
           />
         </DesignPanelInputProvider>
-        <div data-flat-panel-body="true" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {beforeOpen.map((g) => (
-            <DesignPanelInputProvider key={g.id} section={slugifyDesignInput(g.title)}>
-              <FlatGroupHeader
-                title={g.title}
-                isOpen={false}
-                onToggleOpen={() => toggleOpen(g.id)}
-                summary={g.summary}
-                animateEntrance={justToggledIds.includes(g.id)}
-              />
-            </DesignPanelInputProvider>
-          ))}
+        <div
+          ref={panelBodyRef}
+          data-flat-panel-body="true"
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+        >
+          {beforeOpen.map(renderClosedGroup)}
           {openGroup && (
             <DesignPanelInputProvider section={slugifyDesignInput(openGroup.title)}>
-              <div data-flat-group-open="true" className="flex min-h-0 flex-1 flex-col">
+              <div data-flat-group-open="true" className="flex min-h-[180px] flex-none flex-col">
                 <FlatGroupHeader
                   title={openGroup.title}
                   isOpen
@@ -562,17 +499,7 @@ export function PropertyPanelFlat({
               </div>
             </DesignPanelInputProvider>
           )}
-          {afterOpen.map((g) => (
-            <DesignPanelInputProvider key={g.id} section={slugifyDesignInput(g.title)}>
-              <FlatGroupHeader
-                title={g.title}
-                isOpen={false}
-                onToggleOpen={() => toggleOpen(g.id)}
-                summary={g.summary}
-                animateEntrance={justToggledIds.includes(g.id)}
-              />
-            </DesignPanelInputProvider>
-          ))}
+          {afterOpen.map(renderClosedGroup)}
         </div>
         <DesignPanelInputProvider section="footer">
           <PropertyPanelFlatFooter

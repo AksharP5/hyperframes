@@ -18,6 +18,14 @@ export const AUDIT_SEEK_OPTIONS = {
   settleMs: 120,
 } as const;
 
+// Geometry-only seek for the dense content_overlap grid: getBoundingClientRect is valid synchronously after setTime, so drop all post-seek waits (rAF/font/sleep) that would multiply across the dense grid.
+export const DENSE_GEOMETRY_SEEK_OPTIONS = {
+  ...AUDIT_SEEK_OPTIONS,
+  animationFrameSettle: "none",
+  waitForFontsMs: 0,
+  settleMs: 0,
+} as const;
+
 export interface SeekCompositionTimelineOptions {
   fallbackToBridgeAndTimelines?: boolean;
   waitForPreferredSeekTargetMs?: number;

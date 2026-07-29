@@ -1,4 +1,5 @@
 import { join, relative, resolve } from "node:path";
+import { setCommandExitCode } from "../utils/commandResult.js";
 import { existsSync } from "node:fs";
 import { defineCommand } from "citty";
 import * as clack from "@clack/prompts";
@@ -128,7 +129,7 @@ export default defineCommand({
           `  ${c.error(`${updateTarget ? "--update" : "--space"} requires authentication. Run 'hyperframes auth login' first.`)}`,
         );
         console.log();
-        process.exitCode = 1;
+        setCommandExitCode(1);
         return;
       }
     }
@@ -252,7 +253,7 @@ export default defineCommand({
       console.error();
       console.error(`  ${(err as Error).message}`);
       console.error();
-      process.exitCode = 1;
+      setCommandExitCode(1);
       return;
     }
   },

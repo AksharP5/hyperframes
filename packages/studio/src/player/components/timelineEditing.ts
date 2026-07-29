@@ -46,13 +46,11 @@ export interface TimelineMoveInput {
   track: number;
   duration: number;
   originClientX: number;
-  originClientY: number;
+  /** Vertical position as a track-row index, not pixels: rows vary in height. */
+  originRow: number;
   originScrollLeft?: number;
-  originScrollTop?: number;
   currentScrollLeft?: number;
-  currentScrollTop?: number;
   pixelsPerSecond: number;
-  trackHeight: number;
   maxStart: number;
   trackOrder: number[];
   layerOrder?: TimelineLayerId[];
@@ -108,7 +106,7 @@ export function resolveTimelineAutoScroll(
 export function resolveTimelineMove(
   input: TimelineMoveInput,
   clientX: number,
-  clientY: number,
+  currentRow: number,
 ): {
   start: number;
   track: number;
@@ -117,11 +115,12 @@ export function resolveTimelineMove(
   stackingReorder?: TimelineStackingReorderIntent | null;
 } {
   const scrollDeltaX = (input.currentScrollLeft ?? 0) - (input.originScrollLeft ?? 0);
-  const scrollDeltaY = (input.currentScrollTop ?? 0) - (input.originScrollTop ?? 0);
   const deltaTime =
     (clientX - input.originClientX + scrollDeltaX) / Math.max(input.pixelsPerSecond, 1);
-  const trackDeltaRaw =
-    (clientY - input.originClientY + scrollDeltaY) / Math.max(input.trackHeight, 1);
+  // Rows, so vertical scroll and per-row heights are the caller's problem: rows
+  // have varied in height since lanes expand, and a single trackHeight can't
+  // describe them.
+  const trackDeltaRaw = currentRow - input.originRow;
   const deltaTrack = Math.round(trackDeltaRaw);
   const nextStart = clamp(
     roundToCentiseconds(input.start + deltaTime),

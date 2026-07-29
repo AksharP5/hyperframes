@@ -12,6 +12,7 @@ import {
 import type { TimelineElement } from "../player/store/playerStore";
 import { usePlayerStore } from "../player/store/playerStore";
 import type { CommitMutationOptions } from "./gsapScriptCommitTypes";
+import { timelineKeyframeSelectionKey } from "../player/components/timelineKeyframeIdentity";
 
 afterEach(() => {
   usePlayerStore.getState().reset();
@@ -142,6 +143,32 @@ describe("applyTimelineStackingReorder", () => {
 });
 
 describe("patchIframeDomTiming", () => {
+  it("patches a top-level composition host in its parent source file", () => {
+    const iframe = makeIframeWith(`
+      <div data-composition-id="root">
+        <div
+          id="scene-host"
+          data-composition-id="scene"
+          data-composition-src="compositions/scene.html"
+          data-start="2"
+        ></div>
+      </div>
+    `);
+    const host = iframe.contentDocument?.getElementById("scene-host");
+    const target = el({
+      id: "scene-host",
+      tag: "div",
+      kind: "composition",
+      domId: "scene-host",
+      sourceFile: "index.html",
+      compositionSrc: "compositions/scene.html",
+    });
+
+    patchIframeDomTiming(iframe, target, [["data-start", "9"]], "index.html");
+
+    expect(host?.getAttribute("data-start")).toBe("9");
+  });
+
   it("resolves selectorIndex within the element's source file", () => {
     const iframe = makeIframeWith(`
       <div data-composition-id="root">
@@ -315,5 +342,84 @@ describe("deleteSelectedKeyframes", () => {
     expect(options[0]).not.toHaveProperty("softReload");
     expect(options[1]).not.toHaveProperty("softReload");
     expect(options[2]).not.toHaveProperty("skipReload");
+  });
+
+  it("deletes two expanded lanes through their own animation and tween percentages", () => {
+    usePlayerStore.setState({
+      selectedElementId: "card",
+      selectedKeyframes: new Set([
+        timelineKeyframeSelectionKey("card", {
+          percentage: 30,
+          tweenPercentage: 20,
+          propertyGroup: "position",
+          animationId: "card-position",
+        }),
+        timelineKeyframeSelectionKey("card", {
+          percentage: 70,
+          tweenPercentage: 80,
+          propertyGroup: "visual",
+          animationId: "card-visual",
+        }),
+      ]),
+    });
+    const handleGsapRemoveKeyframe =
+      vi.fn<(animId: string, pct: number, options?: Partial<CommitMutationOptions>) => void>();
+
+    deleteSelectedKeyframes({
+      selectedGsapAnimations: [
+        { id: "card-position", keyframes: {} },
+        { id: "card-visual", keyframes: {} },
+      ],
+      handleGsapRemoveKeyframe,
+    });
+
+    expect(handleGsapRemoveKeyframe).toHaveBeenCalledTimes(2);
+    expect(
+      handleGsapRemoveKeyframe.mock.calls.map(([animationId, percentage]) => [
+        animationId,
+        percentage,
+      ]),
+    ).toEqual([
+      ["card-position", 20],
+      ["card-visual", 80],
+    ]);
+    expect(handleGsapRemoveKeyframe.mock.calls[0]?.[2]).toEqual(
+      expect.objectContaining({ skipReload: true }),
+    );
+    expect(handleGsapRemoveKeyframe.mock.calls[1]?.[2]).toEqual(
+      expect.objectContaining({ softReload: true }),
+    );
+  });
+
+  it("drops keyframes that belong to other elements", () => {
+    // A stale selection from a previously active element must not delete
+    // anything on the element that is active now.
+    usePlayerStore.setState({
+      selectedElementId: "card",
+      selectedKeyframes: new Set([
+        timelineKeyframeSelectionKey("card", {
+          percentage: 30,
+          tweenPercentage: 20,
+          propertyGroup: "position",
+          animationId: "card-position",
+        }),
+        timelineKeyframeSelectionKey("other", {
+          percentage: 70,
+          tweenPercentage: 80,
+          propertyGroup: "position",
+          animationId: "card-position",
+        }),
+      ]),
+    });
+    const handleGsapRemoveKeyframe =
+      vi.fn<(animId: string, pct: number, options?: Partial<CommitMutationOptions>) => void>();
+
+    deleteSelectedKeyframes({
+      selectedGsapAnimations: [{ id: "card-position", keyframes: {} }],
+      handleGsapRemoveKeyframe,
+    });
+
+    expect(handleGsapRemoveKeyframe).toHaveBeenCalledTimes(1);
+    expect(handleGsapRemoveKeyframe.mock.calls[0]?.[1]).toBe(20);
   });
 });

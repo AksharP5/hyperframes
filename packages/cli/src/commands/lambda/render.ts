@@ -1,3 +1,4 @@
+import { setCommandExitCode } from "../../utils/commandResult.js";
 /**
  * `hyperframes lambda render <projectDir>` — start a distributed render
  * against the deployed stack. Wraps {@link renderToLambda}. Does NOT
@@ -218,7 +219,7 @@ async function waitForCompletion(
         for (const err of progress.errors) {
           console.log(`  ${c.dim(err.state)}: ${err.error} — ${err.cause}`);
         }
-        process.exitCode = 1;
+        setCommandExitCode(1);
       }
       return;
     }

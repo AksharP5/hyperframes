@@ -87,6 +87,12 @@ export const STUDIO_SDK_CUTOVER_ENABLED = resolveStudioBooleanEnvFlag(
   false,
 );
 
+/** Explicit per-operation-family canary selection; the master flag alone enables nothing. */
+export const STUDIO_SDK_CUTOVER_FAMILIES = resolveEnabledSdkFamilies(
+  env,
+  STUDIO_SDK_CUTOVER_ENABLED,
+);
+
 // Resolver-parity tripwire (telemetry-only, decoupled from cutover).
 // Runs the SDK resolver alongside any edit and emits sdk_resolver_shadow on
 // divergence. Default true; disable via VITE_STUDIO_SDK_RESOLVER_SHADOW_ENABLED=false.
@@ -109,3 +115,4 @@ export const STUDIO_FLAT_INSPECTOR_ENABLED = resolveStudioBooleanEnvFlag(
 );
 
 export const STUDIO_MANUAL_EDITING_DISABLED_TITLE = "Manual editing is temporarily disabled";
+import { resolveEnabledSdkFamilies } from "../../utils/sdkCutoverPolicy";

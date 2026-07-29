@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { normalizeErrorMessage } from "../utils/errorMessage.js";
 
 // ---------------------------------------------------------------------------
 // Config directory: ~/.hyperframes/
@@ -85,6 +86,39 @@ export interface HyperframesConfig {
    * `DE_PARALLEL_ROUTER_TRIAL_MAX_RENDERS` in `render.ts`.
    */
   deParallelRouterTrialRenderCount?: number;
+  /**
+   * Ring of the last few local renders (newest last). `hyperframes feedback`
+   * attaches these ids — which are the `render_job_id` /
+   * `observability_render_job_id` on this install's PostHog events — to the
+   * feedback it submits, so a wild bug report can be joined to the exact
+   * telemetry rows of the renders it describes.
+   */
+  recentRenders?: RecentRenderRecord[];
+}
+
+/** One entry in {@link HyperframesConfig.recentRenders}. */
+export interface RecentRenderRecord {
+  /** The render job id (`RenderJob.id` — the telemetry `render_job_id`). */
+  id: string;
+  /** ISO timestamp of when the render finished. */
+  at: string;
+  /** Whether the render completed successfully. */
+  ok: boolean;
+}
+
+/** Ring size for {@link HyperframesConfig.recentRenders}. */
+const MAX_RECENT_RENDERS = 5;
+
+/**
+ * Append a finished render to the recent-renders ring (newest last, capped).
+ * Fresh read-modify-write like the trial counters — narrows, but does not
+ * eliminate, lost updates against a concurrent CLI process.
+ */
+export function recordRecentRender(id: string, ok: boolean): void {
+  const config = readConfigFresh();
+  const ring = [...(config.recentRenders ?? []), { id, at: new Date().toISOString(), ok }];
+  config.recentRenders = ring.slice(-MAX_RECENT_RENDERS);
+  writeConfig(config);
 }
 
 const DEFAULT_CONFIG: HyperframesConfig = {
@@ -142,13 +176,33 @@ export function readConfig(): HyperframesConfig {
         typeof parsed.deParallelRouterTrialRenderCount === "number"
           ? parsed.deParallelRouterTrialRenderCount
           : undefined,
+      recentRenders: Array.isArray(parsed.recentRenders)
+        ? parsed.recentRenders
+            .filter(
+              (r): r is RecentRenderRecord =>
+                typeof r === "object" &&
+                r !== null &&
+                typeof (r as RecentRenderRecord).id === "string" &&
+                typeof (r as RecentRenderRecord).at === "string" &&
+                typeof (r as RecentRenderRecord).ok === "boolean",
+            )
+            .slice(-MAX_RECENT_RENDERS)
+        : undefined,
     };
 
     cachedConfig = config;
     return { ...config };
   } catch {
-    // Corrupted config — reset
-    const config = { ...DEFAULT_CONFIG, anonymousId: randomUUID() };
+    // A missing file is handled above. Any failure here means an existing
+    // preference could not be read safely (corrupt JSON, permissions, I/O).
+    // Preserve the historical recovery behavior for the rest of the config,
+    // but fail closed for the privacy control: recovery must never silently
+    // turn telemetry back on.
+    const config = {
+      ...DEFAULT_CONFIG,
+      telemetryEnabled: false,
+      anonymousId: randomUUID(),
+    };
     writeConfig(config);
     return config;
   }
@@ -184,16 +238,26 @@ export function readConfigFresh(): HyperframesConfig {
  * instead of re-implementing read-back verification.
  */
 export function writeConfig(config: HyperframesConfig): boolean {
+  return writeConfigWithResult(config).ok;
+}
+
+export type ConfigWriteResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Persist config and retain the failure reason for user-facing commands that
+ * must distinguish a durable preference write from a best-effort update.
+ */
+export function writeConfigWithResult(config: HyperframesConfig): ConfigWriteResult {
   try {
     mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
     const tmpFile = `${CONFIG_FILE}.${process.pid}.tmp`;
     writeFileSync(tmpFile, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
     renameSync(tmpFile, CONFIG_FILE);
     cachedConfig = { ...config };
-    return true;
-  } catch {
+    return { ok: true };
+  } catch (error) {
     // Non-fatal — telemetry should never break the CLI
-    return false;
+    return { ok: false, error: normalizeErrorMessage(error) };
   }
 }
 

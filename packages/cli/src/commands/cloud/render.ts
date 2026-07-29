@@ -1,3 +1,4 @@
+import { failCommand } from "../../utils/commandResult.js";
 /**
  * `hyperframes cloud render` — orchestrate a cloud-rendered HyperFrames
  * composition end-to-end:
@@ -317,7 +318,7 @@ export default defineCommand({
         "Render completed but returned no video_url",
         `render_id: ${renderId}. Try \`hyperframes cloud get ${renderId}\` to inspect raw fields.`,
       );
-      process.exit(1);
+      failCommand();
     }
 
     const outputPath = resolveOutputPath(args.output, renderId, detail.format);
@@ -359,7 +360,7 @@ function validateIdempotencyKey(key: string | undefined): void {
   if (key === undefined) return;
   if (!IDEMPOTENCY_KEY_RE.test(key)) {
     errorBox("Invalid --idempotency-key", `Got "${key}". Must be 1-255 chars from [A-Za-z0-9_:.-]`);
-    process.exit(1);
+    failCommand();
   }
 }
 
@@ -369,7 +370,7 @@ export function validateDryRunSource(source: ProjectInputSource, dryRun: boolean
     "Invalid --dry-run input",
     "--dry-run inspects a local project directory and cannot be combined with --asset-id or --url.",
   );
-  process.exit(1);
+  failCommand();
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +401,7 @@ function resolveProjectInput(opts: {
   const count = Number(explicit.dir) + Number(explicit.assetId) + Number(explicit.url);
   if (count > 1) {
     errorBox("Conflicting inputs", "Pass only one of: project dir, --asset-id, --url.");
-    process.exit(1);
+    failCommand();
   }
   if (explicit.assetId) return { kind: "asset_id", assetId: opts.assetId };
   if (explicit.url) return { kind: "url", url: opts.url };
@@ -450,7 +451,7 @@ export function resolveAspectRatioForSubmit(
       `Entry file "${entryRelative}" does not exist in ${dir}.`,
       "Pass --composition with a path that exists inside the project, or omit it to use index.html.",
     );
-    process.exit(1);
+    failCommand();
   }
 
   const detection = detectAspectRatioFromHtml(entryPath);
@@ -474,7 +475,7 @@ export function resolveAspectRatioForSubmit(
         `--aspect-ratio ${explicit} doesn't match the composition (${conflictDetail}).`,
         "The renderer matches the composition's authored aspect ratio — it can't reshape it. Drop --aspect-ratio (it's auto-detected) or re-author the composition at the target ratio.",
       );
-      process.exit(1);
+      failCommand();
     }
     return explicit;
   }
@@ -498,7 +499,7 @@ export function validateResolutionFormatCombo(
       `--resolution 4k cannot be combined with --format ${format}.`,
       "The alpha (webm/mov) capture path doesn't support 4k supersampling. Render 4k as mp4, or render alpha at composition resolution.",
     );
-    process.exit(1);
+    failCommand();
   }
 }
 
@@ -615,7 +616,7 @@ function prepareLocalArchive(
   } catch (err) {
     const msg = normalizeErrorMessage(err);
     errorBox("Zip failed", msg, "Check the project and .hyperframesignore for missing files.");
-    process.exit(1);
+    failCommand();
   }
 }
 
@@ -805,7 +806,7 @@ async function pollWithProgress(
         err.message,
         `The render may still complete. Resume with: hyperframes cloud get ${renderId}`,
       );
-      process.exit(1);
+      failCommand();
     }
     return reportApiError("API error during poll", err, {
       suggestion: `The render may still be running. Resume with: hyperframes cloud get ${renderId}`,
@@ -827,14 +828,14 @@ function formatTickLine(detail: HyperframesRenderDetail, elapsedMs: number): str
 function handleFailedRender(detail: HyperframesRenderDetail, asJson: boolean): never {
   if (asJson) {
     console.log(JSON.stringify(withMeta({ render: detail }), null, 2));
-    process.exit(1);
+    failCommand();
   }
   errorBox(
     "Render failed",
     detail.failure_message ?? "(no failure_message returned)",
     `Inspect: hyperframes cloud get ${detail.render_id}`,
   );
-  process.exit(1);
+  failCommand();
 }
 
 function resolveOutputPath(output: string | undefined, renderId: string, format: string): string {
@@ -870,6 +871,6 @@ async function streamVideo(
       message,
       "The presigned URL is short-lived; re-fetch with `hyperframes cloud get`.",
     );
-    process.exit(1);
+    failCommand();
   }
 }

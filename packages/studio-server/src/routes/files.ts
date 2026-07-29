@@ -55,6 +55,10 @@ import {
   unrollDynamicAnimations,
   setArcPathInScript,
   updateArcSegmentInScript,
+  updateMotionPathPointInScript,
+  addMotionPathPointInScript,
+  removeMotionPathPointInScript,
+  addMotionPathToScript,
   removeArcPathFromScript,
   addAnimationWithKeyframesToScript,
   splitAnimationsInScript,
@@ -62,6 +66,7 @@ import {
   shiftPositionsInScript,
   scalePositionsInScript,
   dedupePositionWritesInScript,
+  syncPositionHoldsBeforeKeyframes,
 } from "@hyperframes/parsers/gsap-writer-acorn";
 import {
   removeElementFromHtml,
@@ -79,26 +84,18 @@ import {
   CompositionInsertionError,
   insertCompositionIntoSource,
 } from "../helpers/compositionInsertion.js";
+import { resolveGsapWriter } from "./gsapMutationCapabilities.js";
 
 // ── Server cutover flag ─────────────────────────────────────────────────────
 
 /**
- * Mirror of the client STUDIO_SDK_CUTOVER_ENABLED flag for server-side writer
- * selection. When true, the acorn writer handles GSAP mutations; otherwise the
- * recast writer (gsapParser.ts) is used. Default false → recast.
- *
- * Enable with: STUDIO_SDK_CUTOVER_ENABLED=true (or =1)
- * Mirrors the client Vite env var name so one env switch flips both sides.
+ * Writer selection is deliberately independent from the Studio SDK cutover.
+ * Recast remains the default until the capability report has no parity blockers.
  */
-function isAcornGsapWriterEnabled(): boolean {
-  const val = process.env["STUDIO_SDK_CUTOVER_ENABLED"];
-  return val === "true" || val === "1";
-}
-
 /**
  * Lazy-load gsapParser for write ops (recast-backed) — the default server writer.
  * The read path uses the browser-safe acorn parser; this loader is only needed
- * for the recast write path (the default when STUDIO_SDK_CUTOVER_ENABLED is off).
+ * for the recast write path (the default until the migration gate graduates).
  */
 async function loadGsapParser() {
   return import("@hyperframes/parsers/gsap-parser-recast");
@@ -820,7 +817,7 @@ function bakeVisibilityOnDelete(document: Document, anim: GsapAnimation): void {
 
 // ── GSAP mutation types ─────────────────────────────────────────────────────
 
-type GsapMutationRequest =
+export type GsapMutationRequest =
   | {
       type: "update-property";
       animationId: string;
@@ -1000,6 +997,7 @@ type GsapMutationRequest =
         auto?: boolean;
       }>;
       ease?: string;
+      easeEach?: string;
     }
   | {
       type: "split-animations";
@@ -1055,6 +1053,18 @@ type GsapMutationRequest =
 
 type GsapMutationResult = string | { script: string; skippedSelectors: string[] };
 
+function resolveReplacementEaseEach(
+  scriptText: string,
+  request: { animationId: string; easeEach?: string },
+): string | undefined {
+  if (request.easeEach !== undefined) return request.easeEach;
+  const original = parseGsapScriptAcorn(scriptText).animations.find(
+    (animation) => animation.id === request.animationId,
+  );
+  if (!original?.arcPath?.enabled) return undefined;
+  return original?.keyframes?.easeEach ?? original?.ease;
+}
+
 // Mutations that can change a position tween's first keyframe (value/existence/timing)
 // and therefore require the pre-keyframe hold-`set`s to be re-synced afterwards.
 // `syncPositionHoldsBeforeKeyframes` rebuilds all `hf-hold` sets from scratch: it acts
@@ -1097,10 +1107,11 @@ async function executeGsapMutation(
   body: GsapMutationRequest,
   block: NonNullable<ReturnType<typeof extractGsapScriptBlock>>,
   respond: (data: unknown, status?: number) => Response,
+  writer: "recast" | "acorn",
 ): Promise<GsapMutationResult | Response> {
-  // When the server cutover flag is enabled, delegate to the acorn writer;
-  // otherwise use the recast writer (gsapParser.ts) as the default.
-  if (!isAcornGsapWriterEnabled()) {
+  // Keep writer selection explicit at the route boundary so a batch cannot
+  // switch implementations between operations.
+  if (writer === "recast") {
     return executeGsapMutationRecast(body, block, respond);
   }
   return executeGsapMutationAcorn(body, block, respond);
@@ -1192,17 +1203,27 @@ async function applyGsapMutations(
   const skippedSelectors = new Set<string>();
   const respond = (data: unknown, status?: number) =>
     status ? c.json(data, status) : c.json(data);
+  let writer: "recast" | "acorn";
+  try {
+    writer = resolveGsapWriter({
+      HYPERFRAMES_GSAP_WRITER: process.env["HYPERFRAMES_GSAP_WRITER"],
+    });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+  }
 
   for (const mutation of mutations) {
-    const result = await executeGsapMutation(mutation, block, respond);
+    const result = await executeGsapMutation(mutation, block, respond, writer);
     if (result instanceof Response) return result;
     let newScript = typeof result === "string" ? result : result.script;
     if (typeof result !== "string") {
       for (const selector of result.skippedSelectors) skippedSelectors.add(selector);
     }
     if (HOLD_SYNC_MUTATION_TYPES.has(mutation.type)) {
-      const parser = await loadGsapParser();
-      newScript = parser.syncPositionHoldsBeforeKeyframes(newScript);
+      newScript =
+        writer === "acorn"
+          ? syncPositionHoldsBeforeKeyframes(newScript)
+          : (await loadGsapParser()).syncPositionHoldsBeforeKeyframes(newScript);
     }
     block.scriptText = newScript;
   }
@@ -1298,6 +1319,14 @@ function executeGsapMutationAcorn(
     case "add": {
       if (body.fromProperties && body.method !== "fromTo") {
         return respond({ error: "fromProperties is only valid for method=fromTo" }, 400);
+      }
+      if (
+        Object.keys(body.properties).some((key) => {
+          const group = classifyPropertyGroup(key);
+          return group === "position" || group === "rotation";
+        })
+      ) {
+        stripStudioEditsFromTarget(block.document, body.targetSelector);
       }
       const result = addAnimationToScript(block.scriptText, {
         targetSelector: body.targetSelector,
@@ -1436,10 +1465,38 @@ function executeGsapMutationAcorn(
         ...(body.cp2 ? { cp2: body.cp2 } : {}),
       });
     }
+    case "update-motion-path-point": {
+      return updateMotionPathPointInScript(block.scriptText, body.animationId, body.pointIndex, {
+        x: body.x,
+        y: body.y,
+      });
+    }
+    case "add-motion-path-point": {
+      return addMotionPathPointInScript(block.scriptText, body.animationId, body.index, {
+        x: body.x,
+        y: body.y,
+      });
+    }
+    case "remove-motion-path-point": {
+      return removeMotionPathPointInScript(block.scriptText, body.animationId, body.index);
+    }
+    case "add-motion-path": {
+      return addMotionPathToScript(
+        block.scriptText,
+        body.targetSelector,
+        body.position,
+        body.duration,
+        { x: body.x, y: body.y },
+        body.ease,
+      ).script;
+    }
     case "remove-arc-path": {
       return removeArcPathFromScript(block.scriptText, body.animationId);
     }
     case "add-with-keyframes": {
+      if (keyframesWritePosition(body.keyframes) || keyframesWriteRotation(body.keyframes)) {
+        stripStudioEditsFromTarget(block.document, body.targetSelector);
+      }
       const result = addAnimationWithKeyframesToScript(
         block.scriptText,
         body.targetSelector,
@@ -1452,6 +1509,9 @@ function executeGsapMutationAcorn(
       return result.script;
     }
     case "replace-with-keyframes": {
+      if (keyframesWritePosition(body.keyframes) || keyframesWriteRotation(body.keyframes)) {
+        stripStudioEditsFromTarget(block.document, body.targetSelector);
+      }
       const script = removeAnimationFromScript(block.scriptText, body.animationId);
       const added = addAnimationWithKeyframesToScript(
         script,
@@ -1460,6 +1520,7 @@ function executeGsapMutationAcorn(
         body.duration,
         body.keyframes,
         body.ease,
+        resolveReplacementEaseEach(block.scriptText, body),
       );
       return added.script;
     }
@@ -1814,6 +1875,7 @@ async function executeGsapMutationRecast(
         body.duration,
         body.keyframes,
         body.ease,
+        body.easeEach,
       );
       return result.script;
     }
@@ -1829,6 +1891,7 @@ async function executeGsapMutationRecast(
         body.duration,
         body.keyframes,
         body.ease,
+        resolveReplacementEaseEach(block.scriptText, body),
       );
       return added.script;
     }
@@ -1927,6 +1990,7 @@ async function foldAtomicCutFile(
   file: AtomicCutFileRequest,
   absPath: string,
   before: string,
+  writer: "recast" | "acorn",
 ): Promise<FoldedAtomicCutFile | Response> {
   let after = before;
   let splitCount = 0;
@@ -1986,6 +2050,7 @@ async function foldAtomicCutFile(
       },
       block,
       respond,
+      writer,
     );
     if (result instanceof Response) return result;
     let script = typeof result === "string" ? result : result.script;
@@ -1993,8 +2058,10 @@ async function foldAtomicCutFile(
       for (const selector of result.skippedSelectors) skippedSelectors.add(selector);
     }
     if (script !== block.scriptText) {
-      const parser = await loadGsapParser();
-      script = parser.syncPositionHoldsBeforeKeyframes(script);
+      script =
+        writer === "acorn"
+          ? syncPositionHoldsBeforeKeyframes(script)
+          : (await loadGsapParser()).syncPositionHoldsBeforeKeyframes(script);
       after = block.replaceScript(script);
     }
   }
@@ -2377,6 +2444,14 @@ export function registerFileRoutes(api: Hono, adapter: StudioApiAdapter): void {
     const files = body.files as AtomicCutFileRequest[];
     const project = await adapter.resolveProject(c.req.param("id"));
     if (!project) return c.json({ error: "not found" }, 404);
+    let writer: "recast" | "acorn";
+    try {
+      writer = resolveGsapWriter({
+        HYPERFRAMES_GSAP_WRITER: process.env["HYPERFRAMES_GSAP_WRITER"],
+      });
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+    }
 
     return serializeAtomicCut(async () => {
       const seen = new Set<string>();
@@ -2407,7 +2482,7 @@ export function registerFileRoutes(api: Hono, adapter: StudioApiAdapter): void {
         }
         let folded: FoldedAtomicCutFile | Response;
         try {
-          folded = await foldAtomicCutFile(c, file, absPath, before);
+          folded = await foldAtomicCutFile(c, file, absPath, before, writer);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Cut transform failed";
           return c.json({ error: message }, 400);

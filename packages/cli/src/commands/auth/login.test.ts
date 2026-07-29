@@ -1,8 +1,9 @@
 import { promises as fs } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readStore, writeStore } from "../../auth/store.js";
+import { setupTempAuthEnv, type EnvFixture } from "../../auth/_test-utils.js";
+import { CliRuntimeError } from "../../utils/commandResult.js";
 
 // Mock only AuthClient — keep the real store/resolver so the test
 // exercises the actual on-disk rollback / persistence behavior.
@@ -42,38 +43,23 @@ const telemetry = vi.hoisted(() => ({
 }));
 vi.mock("../../telemetry/index.js", () => telemetry);
 
-const ENV_KEYS = ["HEYGEN_API_KEY", "HYPERFRAMES_API_KEY", "HEYGEN_CONFIG_DIR"] as const;
-
 describe("auth login --api-key rollback", () => {
   let dir: string;
-  const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
+  let envFixture: EnvFixture;
 
   beforeEach(async () => {
-    dir = await fs.mkdtemp(join(tmpdir(), "hf-login-"));
-    for (const k of ENV_KEYS) {
-      saved[k] = process.env[k];
-      delete process.env[k];
-    }
-    process.env["HEYGEN_CONFIG_DIR"] = dir;
+    envFixture = await setupTempAuthEnv("hf-login-");
+    dir = envFixture.dir;
     verifyState.reject = false;
     verifyState.user = { email: "alice@example.com" };
     for (const fn of Object.values(telemetry)) fn.mockClear();
-    // process.exit throws so we can assert the post-rollback state.
-    vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
-      throw new Error(`process.exit:${code ?? 0}`);
-    }) as never);
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    for (const k of ENV_KEYS) {
-      const v = saved[k];
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-    await fs.rm(dir, { recursive: true, force: true });
+    await envFixture.restore();
   });
 
   async function runLogin(apiKey: string): Promise<void> {
@@ -86,7 +72,7 @@ describe("auth login --api-key rollback", () => {
 
   it("removes the rejected key on a failed FIRST login (no prior credential)", async () => {
     verifyState.reject = true;
-    await expect(runLogin("hg_badkey123")).rejects.toThrow(/process\.exit:1/);
+    await expect(runLogin("hg_badkey123")).rejects.toThrow(CliRuntimeError);
 
     // The store must NOT retain the rejected key — otherwise the next
     // command would silently resolve a known-bad credential.
@@ -97,7 +83,7 @@ describe("auth login --api-key rollback", () => {
   it("restores the previous credential on a failed re-login", async () => {
     await writeStore({ api_key: "hg_previous_good" });
     verifyState.reject = true;
-    await expect(runLogin("hg_newbadkey99")).rejects.toThrow(/process\.exit:1/);
+    await expect(runLogin("hg_newbadkey99")).rejects.toThrow(CliRuntimeError);
 
     const { credentials } = await readStore();
     expect(credentials.api_key).toBe("hg_previous_good");
@@ -144,7 +130,7 @@ describe("auth login --api-key rollback", () => {
   it("rollback on a rejected key restores the previous user block too", async () => {
     await writeStore({ api_key: "hg_prev", user: { email: "prev@example.com" } });
     verifyState.reject = true;
-    await expect(runLogin("hg_badnewkey")).rejects.toThrow(/process\.exit:1/);
+    await expect(runLogin("hg_badnewkey")).rejects.toThrow(CliRuntimeError);
 
     const { credentials } = await readStore();
     expect(credentials.api_key).toBe("hg_prev");
@@ -163,7 +149,7 @@ describe("auth login --api-key rollback", () => {
       { mode: 0o600 },
     );
     verifyState.reject = true;
-    await expect(runLogin("hg_badnewkey")).rejects.toThrow(/process\.exit:1/);
+    await expect(runLogin("hg_badnewkey")).rejects.toThrow(CliRuntimeError);
 
     const onDisk = JSON.parse(await fs.readFile(join(dir, "credentials"), "utf8"));
     expect(onDisk.api_key).toBeUndefined();
@@ -193,7 +179,7 @@ describe("auth login --api-key rollback", () => {
 
   it("records a rejected key as failed and never identifies", async () => {
     verifyState.reject = true;
-    await expect(runLogin("hg_badkey123")).rejects.toThrow(/process\.exit:1/);
+    await expect(runLogin("hg_badkey123")).rejects.toThrow(CliRuntimeError);
     expect(telemetry.identifyUser).not.toHaveBeenCalled();
     expect(telemetry.trackAuthLoginFailed).toHaveBeenCalledWith("api_key", "rejected");
   });

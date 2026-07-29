@@ -1,3 +1,5 @@
+import { failCommand } from "../utils/commandResult.js";
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { defineCommand } from "citty";
 import * as clack from "@clack/prompts";
@@ -6,6 +8,7 @@ import type { Example } from "./_examples.js";
 import { trackRenderFeedback } from "../telemetry/events.js";
 import { shouldTrack, flush } from "../telemetry/client.js";
 import { getDoctorSummary } from "../telemetry/feedback.js";
+import { readConfig, type RecentRenderRecord } from "../telemetry/config.js";
 import { publishProjectArchive } from "../utils/publishProject.js";
 import { submitFeedback } from "../utils/submitFeedback.js";
 import { buildIssueUrl, HYPERFRAMES_REPO_URL } from "../utils/feedbackIssue.js";
@@ -25,6 +28,27 @@ export const examples: Example[] = [
 
 function normalizeComment(raw?: string): string | undefined {
   return raw || undefined;
+}
+
+/**
+ * Compact PostHog join keys appended to the environment string that rides
+ * along with the forwarded report (and therefore lands verbatim in the wild
+ * feedback channel): `fid` = this submission's PostHog `cli_render_feedback`
+ * `feedback_id`; `tid` = the install's telemetry distinct_id; `renders` =
+ * recent `render_job_id`s (newest last, `!` suffix = the render failed).
+ * Together they turn a wild report into an exact telemetry lookup instead of
+ * a hardware-fingerprint hunt.
+ */
+export function buildTelemetryJoinKeys(input: {
+  feedbackId: string;
+  anonymousId: string;
+  recentRenders?: RecentRenderRecord[];
+}): string {
+  const parts = [`fid=${input.feedbackId}`, `tid=${input.anonymousId}`];
+  if (input.recentRenders?.length) {
+    parts.push(`renders=${input.recentRenders.map((r) => `${r.id}${r.ok ? "" : "!"}`).join(",")}`);
+  }
+  return parts.join(" ");
 }
 
 function printIssueConsent(dir: string): void {
@@ -158,7 +182,7 @@ export default defineCommand({
     const rating = parseFeedbackRating(args.rating);
     if (rating === null) {
       console.error(c.error("Rating must be an integer between 0 and 10"));
-      process.exit(1);
+      failCommand();
     }
 
     if (!shouldTrack()) {
@@ -169,6 +193,18 @@ export default defineCommand({
     const comment = normalizeComment(args.comment);
     const doctorSummary = await getDoctorSummary();
 
+    // Join keys tying this report to the install's PostHog rows — see
+    // buildTelemetryJoinKeys. Appended to the env string so they surface in
+    // the forwarded report; mirrored as structured props on the PostHog event.
+    const feedbackId = randomUUID();
+    const config = readConfig();
+    const joinKeys = buildTelemetryJoinKeys({
+      feedbackId,
+      anonymousId: config.anonymousId,
+      recentRenders: config.recentRenders,
+    });
+    const envWithJoinKeys = doctorSummary ? `${doctorSummary} ${joinKeys}` : joinKeys;
+
     // Soft-warn (never blocks) when the comment for a non-clean report is
     // missing the mandated reproduction-packet markers. Prints before the
     // submission ack so the reporter sees the nudge while their run is fresh.
@@ -176,13 +212,19 @@ export default defineCommand({
 
     // The standalone command runs separately from `render`, so it has no real
     // elapsed time to report. Omit it rather than recording a fake duration.
-    trackRenderFeedback({ rating, comment, doctorSummary });
+    trackRenderFeedback({
+      rating,
+      comment,
+      doctorSummary,
+      feedbackId,
+      recentRenderIds: config.recentRenders?.map((r) => r.id),
+    });
 
     await flush();
     // Ack first so the user isn't kept waiting on the best-effort forward (which
     // is bounded to a few seconds and never surfaces an error either way).
     console.log(c.dim("Thanks for the feedback!"));
-    await submitFeedback({ rating, comment, cliVersion: VERSION, env: doctorSummary });
+    await submitFeedback({ rating, comment, cliVersion: VERSION, env: envWithJoinKeys });
 
     if (args["file-issue"] === true) {
       await fileGithubIssue({

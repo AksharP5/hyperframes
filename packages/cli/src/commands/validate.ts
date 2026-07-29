@@ -3,6 +3,7 @@
 // cannot import the Node helper. Line-level markers don't survive the clone
 // window drifting as the file is edited, hence the file-level suppression.
 // fallow-ignore-file code-duplication
+import { failCommand, setCommandExitCode } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -627,11 +628,12 @@ Examples:
     try {
       const result = await validateInBrowser(project, { timeout, contrast: useContrast });
       const exitCode = printValidationResult(result, asJson);
-      process.exit(exitCode);
+      setCommandExitCode(exitCode);
+      return;
     } catch (err: unknown) {
       const message = normalizeErrorMessage(err);
       emitFailureReport(message, asJson);
-      process.exit(1);
+      failCommand();
     }
   },
 });

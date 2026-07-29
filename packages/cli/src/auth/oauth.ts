@@ -1,3 +1,4 @@
+import { failCommand } from "../utils/commandResult.js";
 /**
  * OAuth 2.0 + PKCE driver for the HeyGen public OAuth flow.
  *
@@ -115,7 +116,7 @@ export function assertOAuthConfiguredOrExit(): void {
     if (isAuthError(err) && err.code === "OAUTH_NOT_CONFIGURED") {
       console.error(`Error: ${err.message}`);
       if (err.hint) console.error(err.hint);
-      process.exit(1);
+      failCommand();
     }
     throw err;
   }

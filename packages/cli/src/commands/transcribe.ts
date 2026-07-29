@@ -1,3 +1,4 @@
+import { failCommand, setCommandExitCode } from "../utils/commandResult.js";
 // fallow-ignore-file code-duplication
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
@@ -110,7 +111,7 @@ export default defineCommand({
       const message = `File not found: ${args.input}`;
       trackCommandFailure("transcribe", message);
       console.error(c.error(message));
-      process.exit(1);
+      failCommand();
     }
 
     // Default to the directory containing the input file so transcript.json
@@ -181,7 +182,7 @@ function failWith(message: string, json: boolean): never {
   } else {
     console.error(c.error(message));
   }
-  process.exit(1);
+  failCommand();
 }
 
 function parseExportFormat(
@@ -378,7 +379,7 @@ async function transcribeAudio(
       // Optional callers (pipelines) treat a missing prerequisite as a clean
       // skip; explicit runs still surface non-zero. Set the status and return
       // rather than guarding a process.exit() on the flag.
-      process.exitCode = opts.optional ? 0 : 1;
+      setCommandExitCode(opts.optional ? 0 : 1);
       return;
     }
 
@@ -388,6 +389,6 @@ async function transcribeAudio(
     } else {
       spin?.stop(c.error(`Transcription failed: ${message}`));
     }
-    process.exit(1);
+    failCommand();
   }
 }

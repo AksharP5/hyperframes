@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { Page } from "puppeteer-core";
 import {
   AUDIT_SEEK_OPTIONS,
+  DENSE_GEOMETRY_SEEK_OPTIONS,
   DEFAULT_ZOOM_PADDING_PX,
   DEFAULT_ZOOM_SCALE,
   captureRegionCrop,
@@ -41,7 +42,11 @@ import type {
   ContrastAuditEntry,
   ContrastCapture,
   GeometryCandidateRequest,
+  LayoutOptions,
   MotionSpecResolution,
+  OffPivotFrame,
+  OffPivotRotationSample,
+  RotationSample,
   RunAuditGrid,
 } from "./checkTypes.js";
 import type { ProjectDir } from "./project.js";
@@ -345,8 +350,15 @@ function createPageDriver(page: Page, setTime: (time: number) => void): CheckAud
       setTime(time);
       await seekCompositionTimeline(page, time, AUDIT_SEEK_OPTIONS);
     },
-    collectLayout: (time, tolerance) => collectLayout(page, time, tolerance),
+    seekGeometry: async (time) => {
+      setTime(time);
+      await seekCompositionTimeline(page, time, DENSE_GEOMETRY_SEEK_OPTIONS);
+    },
+    collectLayout: (time, tolerance, layout) => collectLayout(page, time, tolerance, layout),
+    collectOverlap: (time) => collectOverlap(page, time),
     collectLayoutGeometry: () => collectLayoutGeometry(page),
+    collectRotationSample: (time) => collectRotationSample(page, time),
+    collectOffPivotRotationSample: (time) => collectOffPivotRotationSample(page, time),
     collectGeometryCandidates: (time, request) => collectGeometryCandidates(page, time, request),
     collectMotionFrame: (time, selectors, scopes) =>
       collectMotionFrame(page, time, selectors, scopes),
@@ -446,15 +458,35 @@ async function collectLayout(
   page: Page,
   time: number,
   tolerance: number,
+  layout?: LayoutOptions,
 ): Promise<AnchoredLayoutIssue[]> {
   const raw = await page.evaluate(
-    (options: { time: number; tolerance: number }) => {
+    (options: { time: number; tolerance: number; proseCoverageFloor?: number }) => {
       const audit = Reflect.get(window, "__hyperframesLayoutAudit");
       if (typeof audit !== "function") return [];
       const result = Reflect.apply(audit, window, [options]);
       return Array.isArray(result) ? result : [];
     },
-    { time, tolerance },
+    {
+      time,
+      tolerance,
+      ...(typeof layout?.proseCoverageFloor === "number"
+        ? { proseCoverageFloor: layout.proseCoverageFloor }
+        : {}),
+    },
+  );
+  return anchorLayoutIssues(page, raw.flatMap(parseLayoutIssue));
+}
+
+async function collectOverlap(page: Page, time: number): Promise<AnchoredLayoutIssue[]> {
+  const raw = await page.evaluate(
+    (options: { time: number }) => {
+      const audit = Reflect.get(window, "__hyperframesOverlapAudit");
+      if (typeof audit !== "function") return [];
+      const result = Reflect.apply(audit, window, [options]);
+      return Array.isArray(result) ? result : [];
+    },
+    { time },
   );
   return anchorLayoutIssues(page, raw.flatMap(parseLayoutIssue));
 }
@@ -466,6 +498,82 @@ async function collectLayoutGeometry(page: Page): Promise<string> {
     const result = Reflect.apply(geometry, window, []);
     return typeof result === "string" ? result : "";
   });
+}
+
+/** Invoke a `window.__hyperframes*` sampler injected by layout-audit.browser.js
+ * and return its array result (or [] when absent / non-array). Shared by the
+ * per-frame sample collectors so the page.evaluate boilerplate lives once. */
+async function evaluateSampler(page: Page, globalName: string): Promise<unknown[]> {
+  return page.evaluate((name) => {
+    const sample = Reflect.get(window, name);
+    if (typeof sample !== "function") return [];
+    const result = Reflect.apply(sample, window, []);
+    return Array.isArray(result) ? result : [];
+  }, globalName);
+}
+
+async function collectRotationSample(page: Page, time: number): Promise<RotationSample[]> {
+  const raw = await evaluateSampler(page, "__hyperframesRotationSample");
+  return raw.flatMap((value) => parseRotationSample(value, time));
+}
+
+function parseRotationSample(value: unknown, time: number): RotationSample[] {
+  if (!isRecord(value)) return [];
+  const selector = stringValue(value, "selector");
+  const cx = numberValue(value, "cx");
+  const cy = numberValue(value, "cy");
+  const w = numberValue(value, "w");
+  const h = numberValue(value, "h");
+  const angle = numberValue(value, "angle");
+  if (!selector || cx === null || cy === null || w === null || h === null || angle === null) {
+    return [];
+  }
+  return [{ time, selector, cx, cy, w, h, angle }];
+}
+
+async function collectOffPivotRotationSample(page: Page, time: number): Promise<OffPivotFrame> {
+  const raw = await evaluateSampler(page, "__hyperframesOffPivotRotationSample");
+  return { time, samples: raw.flatMap(parseOffPivotRotationSample) };
+}
+
+/** Read every named key as a finite number; null if ANY is missing/non-finite.
+ * The mapped return type keeps each field a plain `number` (not `number |
+ * undefined`) so callers read `nums.ax` without re-narrowing. */
+function requiredNumbers<K extends string>(
+  value: Record<string, unknown>,
+  keys: readonly K[],
+): { [P in K]: number } | null {
+  const out = {} as { [P in K]: number };
+  for (const key of keys) {
+    const num = numberValue(value, key);
+    if (num === null) return null;
+    out[key] = num;
+  }
+  return out;
+}
+
+const OFF_PIVOT_REQUIRED_NUMBERS = ["ax", "ay", "bx", "by", "len", "angle", "hubCount"] as const;
+
+function parseOffPivotRotationSample(value: unknown): OffPivotRotationSample[] {
+  if (!isRecord(value)) return [];
+  const selector = stringValue(value, "selector");
+  const nums = requiredNumbers(value, OFF_PIVOT_REQUIRED_NUMBERS);
+  if (!selector || !nums) return [];
+  return [
+    {
+      selector,
+      ax: nums.ax,
+      ay: nums.ay,
+      bx: nums.bx,
+      by: nums.by,
+      len: nums.len,
+      angle: nums.angle,
+      hx: numberValue(value, "hx"),
+      hy: numberValue(value, "hy"),
+      hr: numberValue(value, "hr"),
+      hubCount: nums.hubCount,
+    },
+  ];
 }
 
 async function collectGeometryCandidates(
@@ -1051,6 +1159,8 @@ const LAYOUT_ISSUE_CODES: readonly LayoutIssueCode[] = [
   "escaped_container",
   "panel_out_of_canvas",
   "connector_detached",
+  "rotation_pivot_drift",
+  "off_pivot_rotation",
   "motion_appears_late",
   "motion_out_of_order",
   "motion_off_frame",

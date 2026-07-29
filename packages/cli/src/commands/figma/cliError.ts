@@ -1,3 +1,4 @@
+import { failCommand } from "../../utils/commandResult.js";
 /**
  * Shared CLI error boundary for `hyperframes figma` subcommands: typed
  * client errors (NO_TOKEN, BAD_TOKEN, …) and input errors (bad ref, bad
@@ -37,7 +38,7 @@ export async function withFigmaErrors(command: string, fn: () => Promise<void>):
       }
       const [title = "figma command failed", ...rest] = err.message.split("\n");
       errorBox(title, rest.length > 0 ? rest.join("\n") : undefined);
-      process.exit(1);
+      failCommand();
     }
     throw err;
   }

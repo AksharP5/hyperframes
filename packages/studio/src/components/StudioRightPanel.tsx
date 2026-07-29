@@ -5,7 +5,7 @@ import { CaptionPropertyPanel } from "../captions/components/CaptionPropertyPane
 import { BlockParamsPanel } from "./editor/BlockParamsPanel";
 import { RenderQueue } from "./renders/RenderQueue";
 import { SlideshowPanel } from "./panels/SlideshowPanel";
-import { VariablesPanel } from "./panels/VariablesPanel";
+import { VariablesPanel, type StudioEditPersistenceProps } from "./panels/VariablesPanel";
 import { PanelTabButton } from "./PanelTabButton";
 import { usePreviewVariablesStore } from "../hooks/previewVariablesStore";
 import type { RenderJob } from "./renders/useRenderQueue";
@@ -19,7 +19,6 @@ import type { EditHistoryKind } from "../utils/editHistory";
 import { useSlideshowPersist, type UseSlideshowPersistParams } from "../hooks/useSlideshowPersist";
 import { useSlideshowTabState } from "../hooks/useSlideshowTabState";
 import { DesignPanelPromoteProvider } from "./DesignPanelPromoteProvider";
-
 import { useStudioPlaybackContext, useStudioShellContext } from "../contexts/StudioContext";
 import { usePanelLayoutContext } from "../contexts/PanelLayoutContext";
 import { useFileManagerContext } from "../contexts/FileManagerContext";
@@ -31,11 +30,14 @@ import {
   EMPTY_COLOR_GRADING_SCOPE_RESULT,
   type ColorGradingScope,
 } from "./studioColorGradingScope";
-import type { BackgroundRemovalProgress } from "./editor/propertyPanelTypes";
+import type {
+  AddMediaOverlayHandler,
+  BackgroundRemovalProgress,
+} from "./editor/propertyPanelTypes";
 import { timelineKeysForSelections, type ToggleHiddenHandler } from "../utils/studioHelpers";
 import { useInspectorSplitResize } from "../hooks/useInspectorSplitResize";
 
-export interface StudioRightPanelProps {
+export interface StudioRightPanelProps extends StudioEditPersistenceProps {
   designPanelActive: boolean;
   activeBlockParams?: {
     blockName: string;
@@ -71,6 +73,7 @@ export interface StudioRightPanelProps {
     files: Record<string, { before: string; after: string }>;
   }) => Promise<void>;
   onToggleElementHidden?: ToggleHiddenHandler;
+  onAddMediaOverlay?: AddMediaOverlayHandler;
 }
 
 // fallow-ignore-next-line complexity
@@ -88,10 +91,11 @@ export function StudioRightPanel({
   domEditSaveTimestampRef,
   recordEdit,
   onToggleElementHidden,
+  onAddMediaOverlay,
 }: StudioRightPanelProps) {
   const {
     rightWidth,
-    setRightWidth,
+    adjustPanelWidth,
     rightPanelTab,
     setRightPanelTab,
     rightInspectorPanes,
@@ -151,6 +155,7 @@ export function StudioRightPanel({
     handleUpdateArcSegment,
     handleUnroll,
     handleUpdateKeyframeEase,
+    handleUpdateSegmentEase,
     handleSetAllKeyframeEases,
     handleGsapAddKeyframe,
     handleGsapRemoveKeyframe,
@@ -372,6 +377,7 @@ export function StudioRightPanel({
         onRemoveTextField={handleDomRemoveTextField}
         onAskAgent={handleAskAgent}
         onImportAssets={handleImportFiles}
+        onAddMediaOverlay={onAddMediaOverlay}
         fontAssets={fontAssets}
         onImportFonts={handleImportFonts}
         previewIframeRef={previewIframeRef}
@@ -400,6 +406,7 @@ export function StudioRightPanel({
         onUnroll={handleUnroll}
         onUpdateKeyframeEase={handleUpdateKeyframeEase}
         onSetAllKeyframeEases={handleSetAllKeyframeEases}
+        onUpdateSegmentEase={handleUpdateSegmentEase}
         recordingState={recordingState}
         recordingDuration={recordingDuration}
         onToggleRecording={onToggleRecording}
@@ -440,8 +447,7 @@ export function StudioRightPanel({
 
   return (
     <>
-      {/* Vertical resize divider: 3px visible seam, 8px pointer-capture zone via
-          the absolutely-positioned inner hit area. */}
+      {/* Vertical resize divider: 3px visible seam, 13px hit zone via the inner div. */}
       <div
         role="separator"
         aria-label="Resize inspector panel"
@@ -458,16 +464,18 @@ export function StudioRightPanel({
           e.preventDefault();
           // Panel is right-anchored: ArrowLeft grows it, ArrowRight shrinks it.
           const delta = e.key === "ArrowLeft" ? 16 : -16;
-          setRightWidth(Math.max(160, Math.min(600, rightWidth + delta)));
+          adjustPanelWidth("right", delta);
         }}
       >
-        {/* Expanded hit zone: 8px wide, centered on the 3px seam */}
-        <div className="absolute inset-y-0 -left-[2.5px] w-2" />
+        {/* Asymmetric hit zone: 8px into the preview's p-2 gutter (the only dead
+            space), the 3px seam, 2px into the card. Stops short of the 24px WCAG
+            2.5.8 target because the next pixel each way is live. */}
+        <div className="absolute inset-y-0 -left-[8px] w-[13px]" />
         {/* Visible hairline */}
         <div className="absolute top-1/2 left-0 h-[52px] w-[3px] -translate-y-1/2 bg-white/12 transition-colors group-hover:bg-white/18 group-active:bg-white/24" />
       </div>
       <div
-        className="flex min-w-0 flex-shrink-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900"
+        className="flex min-w-0 flex-shrink-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950"
         style={{ width: rightWidth }}
       >
         {captionEditMode ? (
