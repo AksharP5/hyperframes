@@ -126,10 +126,16 @@ h3 {
   letter-spacing: -0.01em;
 }
 
-/* Code font — IBM Plex Mono (loaded via Google Fonts above) */
-code, pre, pre code, kbd,
-[class*="code"],
-[class*="Code"] {
+/* Code font — IBM Plex Mono (loaded via Google Fonts above).
+ *
+ * Deliberately scoped to real code elements. The previous rule also matched
+ * [class*="code"] / [class*="Code"], which caught any element whose class
+ * merely contained that substring — including every Accordion, whose wrapper
+ * carries the Tailwind utility `dark:bg-codeblock`. That set the whole
+ * accordion (and, by inheritance, its title and prose) in monospace, so plain
+ * sentences rendered like terminal output. Syntax tokens inside `pre` inherit
+ * from `pre`, so they do not need a selector of their own. */
+code, pre, pre code, kbd, samp {
   font-family: 'IBM Plex Mono', 'SF Mono', 'Fira Code', monospace;
 }
 

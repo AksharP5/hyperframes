@@ -1,137 +1,52 @@
 ---
 title: "Choose a creation workflow"
 sidebarTitle: "Choose a workflow"
-description: "Find the situation that matches yours, copy the request, and let the agent confirm the direction before it builds."
+description: "Pick the situation that matches yours. Each path opens with a finished example, what to give the agent, and a request you can copy."
 ---
 
-You do not need to learn HyperFrames' internal workflow names. Open the situation that resembles yours, copy the request, and adjust it.
+You do not need to learn HyperFrames' internal workflow names. Pick the situation that resembles yours — each path tells you what to provide and gives you a request to copy.
 
 <Tip>
-  First HyperFrames project? Follow [Make your first video](/quickstart) instead — it walks the whole path once. This page is the faster route when you already know what HyperFrames is.
+  First HyperFrames project? Follow [Make your first video](/quickstart) instead. It walks the whole path once, end to end. This page is the faster route when you already know what HyperFrames is.
 </Tip>
 
-<AccordionGroup>
-  <Accordion title="A product, website, or launch brief" icon="rocket">
-    **Best for** launch videos, product tours, promos, and showcases that should use the product's real interface.
+## I am starting with…
 
-    **Give the agent** a public URL or launch brief, the audience, the main promise, and any claims or screens that must appear.
+<CardGroup cols={2}>
+  <Card title="A product, website, or launch brief" icon="rocket" href="/guides/product-launch-video">
+    Launch videos, product tours, promos, and showcases that use the real interface.
+  </Card>
+  <Card title="Notes, an article, or an idea" icon="lightbulb" href="/guides/faceless-explainer">
+    An explainer where every visual is invented from the subject, not captured from a site.
+  </Card>
+  <Card title="Existing talking-head footage" icon="video" href="/guides/captions-and-recuts">
+    Captions, or designed titles and lower thirds, over footage that stays untouched.
+  </Card>
+  <Card title="A pull request" icon="code-pull-request" href="/guides/pr-to-video">
+    A feature reveal, fix explanation, or changelog built from the diff.
+  </Card>
+  <Card title="A short motion-first idea" icon="wand-magic-sparkles" href="/guides/motion-graphics">
+    Motion is the message: a title, a statistic, a chart, a logo sting, an overlay.
+  </Card>
+  <Card title="A music track" icon="music" href="/guides/music-to-video">
+    Lyric videos, beat-synced slideshows, and promos where the music sets the pacing.
+  </Card>
+  <Card title="A presentation" icon="display" href="/guides/slideshow">
+    A navigable deck with reveals, speaker notes, branching, and presenter mode.
+  </Card>
+  <Card title="Something else entirely" icon="shapes" href="/guides/general-video">
+    Longer or unusual work — montages, title cards, loops, or co-designing the structure.
+  </Card>
+</CardGroup>
 
-    ```text
-    /hyperframes Make a 45-second launch video for https://example.com.
-    It is for small design teams. Show the real interface, focus on how quickly
-    a team can go from an idea to a shared result, and end with “Try it together.”
-    Keep the pacing confident rather than frantic.
-    ```
-
-    [Product and website workflow →](/guides/product-launch-video)
-  </Accordion>
-
-  <Accordion title="Notes, an article, or an idea" icon="lightbulb">
-    **Best for** explainers where every visual is invented from the subject rather than captured from a product site.
-
-    **Give the agent** the source text, who needs to understand it, the desired takeaway, and the maximum length.
-
-    ```text
-    /hyperframes Turn these notes into a 60-second visual explainer for a
-    non-technical audience. The viewer should understand the three stages and
-    why the second one prevents mistakes. Use diagrams and typography rather
-    than stock footage.
-    ```
-
-    [Explainer workflow →](/guides/faceless-explainer)
-  </Accordion>
-
-  <Accordion title="Existing talking-head footage" icon="video">
-    Choose by what must happen to the clip:
-
-    | Desired result | Best route |
-    | --- | --- |
-    | Plain or expressive subtitles; footage otherwise untouched | Embedded captions |
-    | Titles, quotes, lower thirds, data callouts, or side panels over untouched footage | Talking-head recut |
-    | Remove pauses, reorder speech, replace shots, or change the underlying edit | Custom video |
-
-    ```text
-    /hyperframes Add clean word-level captions to this interview clip. Keep the
-    footage and audio unchanged. Use high contrast and emphasize only the most
-    important phrase in each sentence.
-    ```
-
-    [Captions and designed recuts →](/guides/captions-and-recuts)
-  </Accordion>
-
-  <Accordion title="A pull request" icon="code-pull-request">
-    **Best for** a feature reveal, fix explanation, refactor summary, or team changelog built from a GitHub PR.
-
-    **Give the agent** the PR link, the audience, the tone, and whether to emphasise user impact or implementation.
-
-    ```text
-    /hyperframes Turn https://github.com/example/repo/pull/123 into a concise
-    feature reveal for product engineers. Lead with what changed for users,
-    then show the two most important code decisions. Keep it under 60 seconds.
-    ```
-
-    [PR-to-video workflow →](/guides/pr-to-video)
-  </Accordion>
-
-  <Accordion title="A short motion-first idea" icon="wand-magic-sparkles">
-    **Best for** motion-is-the-message pieces, usually under ten seconds, with no narration.
-
-    **Give the agent** the exact text or data, dimensions, duration, visual tone, and whether the background must be transparent.
-
-    ```text
-    /hyperframes Create a six-second vertical motion graphic announcing
-    “10 million renders.” Count up to the number, then reveal the label.
-    Use bold editorial type and export with a transparent background.
-    ```
-
-    [Motion graphics workflow →](/guides/motion-graphics)
-  </Accordion>
-
-  <Accordion title="A music track" icon="music">
-    **Best for** lyric videos, beat-synced slideshows, visualisers, and promos where the music sets the pacing.
-
-    **Give the agent** the audio file, any lyrics, the media to cut, and the intended format.
-
-    ```text
-    /hyperframes Make a 30-second vertical promo driven by this music track.
-    Cut the attached product stills on the major beats, reserve the chorus for
-    the strongest image, and end on the supplied logo.
-    ```
-
-    [Music-to-video workflow →](/guides/music-to-video)
-  </Accordion>
-
-  <Accordion title="A presentation" icon="display">
-    **Best for** discrete slides with fragment reveals, speaker notes, branching, presenter mode, or clickable navigation.
-
-    Ask for a **slideshow** explicitly, so the result stays a navigable deck instead of becoming a rendered linear video.
-
-    ```text
-    /hyperframes Build a ten-slide interactive product briefing from these
-    notes. Use progressive reveals, add speaker notes, and include a final
-    branch where the presenter can open either the roadmap or pricing detail.
-    ```
-
-    [Slideshow workflow →](/guides/slideshow)
-  </Accordion>
-
-  <Accordion title="Something custom" icon="shapes">
-    **Best for** longer or unusual work: multi-scene montages, title cards, static loops, mixed media, or projects where you want to co-create the structure with the agent.
-
-    ```text
-    /hyperframes Plan a 90-second brand reel from these three product films
-    and this logo. Co-design the structure with me before building: propose a
-    scene order and the feeling of each section, then wait for my approval.
-    ```
-
-    [Custom video workflow →](/guides/general-video)
-  </Accordion>
-</AccordionGroup>
+<Note>
+  Working with footage? Choose by what must happen to the clip. **Subtitles only, footage untouched** → embedded captions. **Titles, quotes, lower thirds, or side panels over untouched footage** → a designed recut. **Reordering speech, removing pauses, or changing the edit itself** → a [custom video](/guides/general-video). The [captions and recuts guide](/guides/captions-and-recuts) covers the first two.
+</Note>
 
 ## After you choose
 
-Install the guidance once with `npx hyperframes skills update`, then send your request starting with `/hyperframes`. The agent confirms the creative direction before it builds, so correct the message, length, and format at that point rather than after a finished video exists.
+Install the guidance once with `npx hyperframes skills update`, then start your request with `/hyperframes`. The agent confirms the creative direction before it builds, so correct the message, length, and format at that point — it is much cheaper than rebuilding a finished video around the wrong idea.
 
-When the first version opens, make direct visible edits in [Studio](/studio) and ask the agent for anything that affects the story, several scenes, or new media. Export from Studio's **Renders** panel. If something blocks you, start from the symptom in [Get unstuck](/help).
+When the first version opens, make direct visible edits in [Studio](/studio), and ask the agent for anything that affects the story, several scenes, or new media. Export from Studio's **Renders** panel. If something blocks you, start from the symptom in [Get unstuck](/help).
 
 Writing a stronger request is its own short guide: [Give your agent a useful brief](/guides/prompting).
