@@ -10,7 +10,7 @@
  * recursively extracting nested media from sub-sub-compositions.
  */
 
-import { readFileSync, existsSync, mkdirSync } from "fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync } from "fs";
 import { join, dirname, resolve, basename } from "path";
 import { parseHTML } from "linkedom";
 import {
@@ -1655,6 +1655,28 @@ export async function localizeRemoteFontFaces(
 }
 
 const LOCAL_FONTFACE_URL_RE = /url\(["']?(?!data:|https?:\/\/)([^"')]+)["']?\)/gi;
+// Base64 expands bytes by ~33%, then immutable HTML replacements retain more
+// string copies while compiling. Files up to and including 5 MiB remain inline;
+// the first byte above that stays file-backed. This conservative ceiling keeps
+// verified 19 MiB+ TTC collections out of the V8 heap while both local and
+// distributed file servers continue serving project assets at authored paths.
+const MAX_LOCAL_FONT_DATA_URI_BYTES = 5 * 1024 * 1024;
+
+type LocalFontRead = { kind: "file-backed" } | { kind: "inline"; buffer: Buffer };
+
+async function readLocalFont(absPath: string): Promise<LocalFontRead> {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of createReadStream(absPath)) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > MAX_LOCAL_FONT_DATA_URI_BYTES) {
+      return { kind: "file-backed" };
+    }
+    chunks.push(buffer);
+  }
+  return { kind: "inline", buffer: Buffer.concat(chunks, totalBytes) };
+}
 
 // fallow-ignore-next-line complexity
 async function embedLocalFontFaces(html: string, projectDir: string): Promise<string> {
@@ -1664,6 +1686,7 @@ async function embedLocalFontFaces(html: string, projectDir: string): Promise<st
   let result = html;
   const embeddedPaths = new Set<string>();
   const dataUriByAbsolutePath = new Map<string, string>();
+  const fileBackedAbsolutePaths = new Set<string>();
 
   let styleMatch: RegExpExecArray | null;
   while ((styleMatch = styleBlockRe.exec(html)) !== null) {
@@ -1679,16 +1702,27 @@ async function embedLocalFontFaces(html: string, projectDir: string): Promise<st
         if (!localPath || embeddedPaths.has(localPath)) continue;
         const absPath = localPath.startsWith("/") ? localPath : resolve(projectDir, localPath);
         if (!isPathInside(absPath, projectDir)) continue;
-        if (!existsSync(absPath)) continue;
         const ext = absPath.match(/\.(woff2?|ttf|otf|ttc)$/i)?.[1]?.toLowerCase() ?? "ttf";
         try {
+          if (fileBackedAbsolutePaths.has(absPath)) {
+            embeddedPaths.add(localPath);
+            continue;
+          }
           let dataUri = dataUriByAbsolutePath.get(absPath);
           if (!dataUri) {
-            const buffer = readFileSync(absPath);
-            dataUri = await toDataUri(buffer, ext);
+            const font = await readLocalFont(absPath);
+            if (font.kind === "file-backed") {
+              fileBackedAbsolutePaths.add(absPath);
+              defaultLogger.info(
+                `[Compiler] Kept large local font file-backed: ${localPath} (> ${(MAX_LOCAL_FONT_DATA_URI_BYTES / 1024 / 1024).toFixed(1)} MB)`,
+              );
+              embeddedPaths.add(localPath);
+              continue;
+            }
+            dataUri = await toDataUri(font.buffer, ext);
             dataUriByAbsolutePath.set(absPath, dataUri);
             defaultLogger.info(
-              `[Compiler] Embedded local font file: ${localPath} (${(buffer.length / 1024).toFixed(0)} KB → data URI)`,
+              `[Compiler] Embedded local font file: ${localPath} (${(font.buffer.length / 1024).toFixed(0)} KB → data URI)`,
             );
           }
           result = result.replaceAll(localPath, dataUri);
