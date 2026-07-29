@@ -106,7 +106,7 @@ config.navigation = {
               ],
             },
             {
-              group: "Concepts",
+          group: "Learn",
               root: "concepts/index",
               expanded: false,
               pages: [

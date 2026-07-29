@@ -148,6 +148,22 @@ a:not([class]):hover {
   opacity: 0.85;
 }
 
+/* ── Sidebar hierarchy ── */
+
+.sidebar-group li > button[aria-expanded='true'] + ul {
+  position: relative;
+}
+
+.sidebar-group li > button[aria-expanded='true'] + ul::before {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 16px;
+  width: 1px;
+  background: var(--hf-border-color);
+  content: '';
+}
+
 /* ── On-page navigation ── */
 
 #table-of-contents-content {

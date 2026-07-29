@@ -194,7 +194,7 @@ New navigation should be task-shaped:
 
 - Removed the redundant Guides, Studio, Catalog, and Developers parent groups beneath tabs with the same names.
 - Kept each tab overview as a normal first page and placed collapsible sections directly below it.
-- Restored the clearer **Concepts** label and made all multi-page sections collapsible.
+- Kept the task-oriented **Learn** label and made all multi-page sections collapsible.
 - Added a lightweight visual rail, active marker, and nested branch to Mintlify's generated **On this page** navigation.
 - Confirmed the result in a local Mintlify preview; validation and broken-link checks still pass.
 
