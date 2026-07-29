@@ -32,6 +32,8 @@ Elements that start hidden need their visible end state stated explicitly — a 
 - **Reveal the destination, not just the source.** If an element starts hidden and a `gsap.fromTo()` reveals it, ask for the destination vars — not just the `from` vars — to include `opacity: 1` (or `autoAlpha: 1`). Cold render workers restore the hidden authored state, so an element can stay invisible even when sequential preview looks correct. (`gsap_cold_seek_hidden_fromto_missing_reveal`, PR [#2503](https://github.com/heygen-com/hyperframes/pull/2503))
 - **Set the initial hidden state outside the timeline.** Don't rely on a `tl.set(...)` at position 0 inside the timeline itself to hide an element at the start — a zero-duration set exactly at frame 0 may not have applied yet when frame 0 renders. Ask for a bare `gsap.set(...)` outside the timeline, or author the hidden state directly in CSS/HTML. (`gsap_timeline_set_initial_hide`, PR [#2612](https://github.com/heygen-com/hyperframes/pull/2612))
 
+- **A `fromTo` shows its from-state *before* it starts.** `immediateRender` back-renders the `from` vars at every time earlier than the tween's own start, so an element you authored to "appear at 3s" is already on screen at frame 0 wearing its start pose. Sequential preview hides this — you scrub past frame 0 before the tween exists. Ask for `to()` plus `keyframes`, or a zero-duration `tl.set()` at the beat boundary, whenever an element must be absent before its cue. (Surfaced while validating this guide's kinetic-quote and map-route examples.)
+
 ### Seek-order safety
 
 These four all come from the same root cause: a cold render worker seeks non-linearly, so anything whose value depends on *when* or *in what order* it runs can render differently than the live preview did.
@@ -46,6 +48,7 @@ These four all come from the same root cause: a cold render worker seeks non-lin
 Two more ways an SVG "line draws itself" effect (animated `strokeDasharray` / `strokeDashoffset`) can render as a static, undrawn line.
 
 - **Don't declare a multi-value CSS `stroke-dasharray` on the same element GSAP is animating.** GSAP merges dash lists per component, so the CSS gap survives the animation and the draw-on hide only covers one gap's worth — the line stays visible for the whole scene. Put decorative dashing on a separate element if you need both effects. (`svg_drawon_css_dasharray_conflict`, PR [#2611](https://github.com/heygen-com/hyperframes/pull/2611))
+- **`stroke-linecap: round` paints a dot at zero dash length.** An un-drawn stroke isn't nothing — a round cap renders a visible dot at the path's start from frame 0, so a "line draws itself" effect begins with a stray mark sitting on screen. Gate the group's opacity until the draw begins, or use a butt cap. (Surfaced while validating this guide's examples.)
 - **Give the path a static `d` attribute before anything measures it.** `getTotalLength()` returns 0 in Chrome if the path's `d` isn't set yet — whether because `d` is only assigned inside a function that hasn't run, or never assigned as a static attribute at all — and a dash animation built on a 0-length path is silently dead. (`svg_measure_before_path_d`, PR [#2611](https://github.com/heygen-com/hyperframes/pull/2611))
 
 ## Layout waivers, and the one that bites
