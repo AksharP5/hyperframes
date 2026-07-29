@@ -19,7 +19,10 @@ export interface KeyframeDiamondContextMenuState {
 interface KeyframeDiamondContextMenuProps {
   state: KeyframeDiamondContextMenuState;
   onClose: () => void;
-  onDelete: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
+  /** Omitted where this node cannot be deleted on its own (see the arc-waypoint
+   *  floor in removeMotionPathPointInScript): an entry that silently no-ops is
+   *  worse than no entry. */
+  onDelete?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
   onDeleteAll: (element: TimelineElement) => void;
   /** Retime the keyframe to the current playhead, preserving its value + ease. */
   onMoveToPlayhead?: (element: TimelineElement, keyframe: TimelineKeyframeTarget) => void;
@@ -43,7 +46,9 @@ export const KeyframeDiamondContextMenu = memo(function KeyframeDiamondContextMe
   };
 
   const menuWidth = 200;
-  const menuHeight = onMoveToPlayhead ? 100 : 70;
+  // Measured off the rendered rows, so the flip-up test below stays right as
+  // optional entries drop out.
+  const menuHeight = 10 + (1 + (onMoveToPlayhead ? 1 : 0) + (onDelete ? 1 : 0)) * 30;
   const overflowY = state.y + menuHeight - window.innerHeight;
   const adjustedX = state.x + menuWidth > window.innerWidth ? state.x - menuWidth : state.x;
   const adjustedY = overflowY > 0 ? state.y - overflowY - 8 : state.y;
@@ -71,16 +76,18 @@ export const KeyframeDiamondContextMenu = memo(function KeyframeDiamondContextMe
       )}
 
       {/* Delete */}
-      <button
-        type="button"
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-neutral-800 cursor-pointer text-left"
-        onClick={() => {
-          onDelete(state.elementId, keyframe);
-          onClose();
-        }}
-      >
-        Delete Keyframe
-      </button>
+      {onDelete && (
+        <button
+          type="button"
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-neutral-800 cursor-pointer text-left"
+          onClick={() => {
+            onDelete(state.elementId, keyframe);
+            onClose();
+          }}
+        >
+          Delete Keyframe
+        </button>
+      )}
 
       <button
         type="button"
