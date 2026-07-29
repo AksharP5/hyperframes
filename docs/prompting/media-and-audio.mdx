@@ -43,7 +43,7 @@ SFX resolve from a small bundled library plus the catalog. Cue them to specific 
 
 ## Pace reveals to the narration
 
-Once a video has a voice, the voice is the clock. The single highest-leverage audio instruction after choosing the voice is telling the agent that on-screen elements land **on their spoken cues** — the stat appears as the narrator says it, not at some independent time the builder eyeballed. Without this, narration and visuals drift into two parallel tracks that happen to share a file:
+Once a video has a voice, the voice is the clock — the next instruction that matters is telling the agent that on-screen elements land **on their spoken cues** — the stat appears as the narrator says it, not at some independent time the builder eyeballed. Without this, narration and visuals drift into two parallel tracks that happen to share a file:
 
 > VO-paced reveals: each scene's elements land on their spoken cues; secondary elements keep resolving while the narrator is mid-thought; the scene is complete just as the narration moves on.
 
@@ -103,7 +103,7 @@ See the [Rendering guide](/guides/rendering#input-video-codecs) for the mechanic
 
 ## The supplied-assets rule
 
-The single most reliable media instruction is an explicit path. The agent will search when you describe an asset, but a path removes every ambiguity about *which* file — and for your own brand assets, it's the only way to guarantee the right one:
+For any asset you already have, an explicit path is the instruction that removes the most ambiguity. The agent will search when you describe an asset, but a path removes every ambiguity about *which* file — and for your own brand assets, it's the only way to guarantee the right one:
 
 - ❌ `use my logo`
 - ✅ `use assets/logo.svg`
@@ -129,7 +129,7 @@ This mirrors the negatives discipline in [Anatomy](/prompting/anatomy): close th
 </CardGroup>
 
 <Note>
-**Capstone thread** — the [Level 7 film](/prompting/capstone)'s Material region runs this chapter's entire pipeline on one clip: generated footage → HEVC auto-proxy → background removal mid-scene → word-synced captions from the clip's own transcription, with the clip's audio ducking the BGM (0:28–0:36 below, cut from the film).
+**Capstone thread** — the [Level 7 film](/prompting/capstone)'s Material region runs this chapter's entire pipeline on one clip: generated footage → HEVC auto-proxy → background removal mid-scene → word-synced captions from the clip's own transcription, with the clip's audio ducking the BGM (cut from the film, below).
 </Note>
 
 This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys the piece — prompt language you can lift for your own video:

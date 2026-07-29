@@ -80,7 +80,7 @@ Three [Text Effects](/catalog/components/morph-text) components do one focused j
 - ❌ `use caption-neon-glow and caption-matrix-decode together`
 - ✅ pick one; switch styles only across a clear section break
 
-**Don't reach for these on talking-head footage.** These are composition snippets, not the matting/occlusion pipeline — captions won't sit behind the speaker.
+**Don't reach for these on talking-head footage.** These are composition snippets, not the matting/occlusion pipeline — dropped onto an untouched MP4, a caption sits in front of the speaker, never behind. (The capstone thread below shows `caption-kinetic-slam` reading *behind* a subject, which is not a contradiction: that composition mattes the footage itself first, so the cutout is a separate layer the type can pass under. The limitation is about the snippet alone, not the technique.)
 - ❌ `/hyperframes add caption-highlight to my interview.mp4`
 - ✅ `/embedded-captions` (see [captions and talking heads](/prompting/captions-and-talking-heads))
 
@@ -93,7 +93,7 @@ Three [Text Effects](/catalog/components/morph-text) components do one focused j
 - ✅ describe the tone ("tutorial, monospace, typewriter") or name a real component
 
 <Note>
-**Capstone thread** — in the [Level 7 film](/prompting/capstone)'s Material region, word-synced keywords from the clip's own transcription slam in as display type behind the matted-out speaker — captions as scenography, on real word timings (0:28–0:36 below, cut from the film).
+**Capstone thread** — in the [Level 7 film](/prompting/capstone)'s Material region, word-synced keywords from the clip's own transcription slam in as display type behind the matted-out speaker — captions as scenography, on real word timings (cut from the film, below).
 </Note>
 
 This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys the piece — prompt language you can lift for your own video:

@@ -31,7 +31,7 @@ The guide is one arc, novice to advanced. Each level is what you can do once you
 Install the skills in your project (or globally for your agent):
 
 ```bash
-npx skills add heygen-com/hyperframes
+npx skills add heygen-com/hyperframes --full-depth
 ```
 
 The installer shows a picker. Select the **core skills** below — every project needs them. In Claude Code, restart the session after installing; the skills register as **slash commands**. Start at `/hyperframes`: it orients you to the whole surface and routes "make me a video" requests to the right workflow.
@@ -44,9 +44,10 @@ The installer shows a picker. Select the **core skills** below — every project
 | `/hyperframes-core`     | Composition contract — HTML structure, `data-*` attributes, clips, tracks  |
 | `/hyperframes-animation`| All animation — motion rules, scene blueprints, transitions, and the runtime adapters (GSAP, Lottie, Three.js, Anime.js, CSS, WAAPI, TypeGPU) |
 | `/hyperframes-creative` | Creative direction — design spec, palettes, typography, narration, beats   |
-| `/hyperframes-cli`      | Dev-loop CLI — `init`, `lint`, `inspect`, `preview`, `render`, `doctor`    |
+| `/hyperframes-cli`      | Dev-loop CLI — `init`, `lint`, `check`, `preview`, `render`, `doctor`    |
 | `/media-use`            | Media OS — TTS voiceover (`tts`), `transcribe`, `remove-background`, plus BGM / SFX / image resolution |
 | `/hyperframes-registry` | Block and component installation via `hyperframes add`                     |
+| `/hyperframes-keyframes`| Seek-safe keyframe authoring across runtimes, plus `hyperframes keyframes` diagnostics |
 | `/general-video`        | The general authoring workflow — fallback for any video that doesn't match a specific workflow below |
 
 **Optional workflows — add the ones that match your inputs** (`/hyperframes` routes to whichever you've installed)
@@ -62,9 +63,10 @@ The installer shows a picker. Select the **core skills** below — every project
 | `/music-to-video`        | A music track + your images → beat-synced video (lyric / slideshow / kinetic promo) |
 | `/slideshow`             | A deck outline or slides → navigable presentation with presenter mode (not a rendered MP4) |
 | `/remotion-to-hyperframes` | Port an existing Remotion (React) composition to HyperFrames HTML         |
+| `/figma`                 | A Figma file / frame / URL → imported assets, brand tokens, and reconstructed motion |
 
 <Tip>
-  To skip the picker and install everything (core + every workflow) in one shot, run `npx skills add heygen-com/hyperframes --all`. And start HyperFrames prompts with `/hyperframes` (or invoke the skill another way for non-Claude agents) — it loads the routing + composition context explicitly so the agent picks the right workflow and gets the rules right the first time.
+  To skip the picker and install everything (core + every workflow) in one shot, run `npx skills add heygen-com/hyperframes --all --full-depth`. And start HyperFrames prompts with `/hyperframes` (or invoke the skill another way for non-Claude agents) — it loads the routing + composition context explicitly so the agent picks the right workflow and gets the rules right the first time.
 </Tip>
 
 
@@ -104,6 +106,8 @@ Cold-start prompts work best when you specify **duration** ("10 seconds", "5 sce
 
 Warm-start prompts produce richer, more grounded videos because the agent is writing about *something specific* instead of inventing copy.
 
+The four prompts above illustrate shape, not results — every prompt in this guide that ships with an embedded render was run exactly as written, and the gallery of those lives in [Verified examples](/prompting/examples).
+
 ## Recommended workflow
 
 1. `npx hyperframes init my-video` — scaffold a project (skills install automatically)
@@ -111,7 +115,10 @@ Warm-start prompts produce richer, more grounded videos because the agent is wri
 3. Prompt with `/hyperframes` and one of the shapes above
 4. `npx hyperframes preview` — watch in the browser as the agent edits
 5. Iterate with small targeted prompts
-6. `npx hyperframes render --output final.mp4` when you're happy
+6. `npx hyperframes lint && npx hyperframes check` — the gate: structure, runtime errors, layout collisions, motion, and contrast. Both must pass before you render
+7. `npx hyperframes render --output final.mp4` when you're happy
+
+`check` is the step people skip and regret. It runs the composition in a headless browser and reports what a still frame can't tell you — an element overflowing its region, two text blocks colliding, a runtime error that only fires mid-timeline, contrast below WCAG AA. It is fast and it is not optional: a render that took ten minutes will happily contain a defect `check` would have named in seconds.
 
 
 
@@ -138,10 +145,12 @@ And at the far end of the [specification dial](/prompting/specification-dial), a
 
 <CardGroup cols={2}>
   <Card title="Prompt anatomy" href="/prompting/anatomy">The six-part skeleton every one-shot prompt shares</Card>
-  <Card title="Verified examples" href="/prompting/examples">18 copy-paste prompts, each one-shots a finished video</Card>
+  <Card title="Verified examples" href="/prompting/examples">Copy-paste prompts, each one-shots a finished video</Card>
   <Card title="The specification dial" href="/prompting/specification-dial">How much to specify, and what density buys</Card>
   <Card title="Vocabulary" href="/prompting/vocabulary">Words that map to specific framework settings</Card>
   <Card title="Premium motion" href="/prompting/motion">The seven-rule grammar that keeps video from feeling cheap</Card>
   <Card title="Recreating references" href="/prompting/recreating-references">Match something you saw, from text alone</Card>
   <Card title="Capstone" href="/prompting/capstone">The film above, dissected frame by frame</Card>
 </CardGroup>
+
+*Next: [Your first video](/prompting/product-launch) — one URL, one prompt, a finished launch video.*

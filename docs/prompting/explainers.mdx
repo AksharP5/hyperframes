@@ -69,7 +69,7 @@ What you can already steer from the prompt, before you've learned any technique.
 
 ## Common failure modes
 
-**"60 seconds" instead of "~60 seconds".** A supplied script's spoken duration is not knowable until the TTS renders; a hard target makes the agent mangle the words to hit the clock.
+**"60 seconds" instead of "~60 seconds".** Same rule as [ride 1](/prompting/product-launch#common-failure-modes), and it bites harder here because the script is the whole video — a supplied script's spoken duration isn't knowable until the TTS renders.
 - ❌ `a 60-second explainer from this text: ...`
 - ✅ `a ~60-second explainer from this text: ...`
 

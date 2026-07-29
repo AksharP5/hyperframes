@@ -25,7 +25,7 @@ Each Code Animations block answers a different "what is the viewer supposed to n
 | Code resolving out of a shader dissolve    | [`code-shader-dissolve`](/catalog/blocks/code-shader-dissolve) | 7s |
 | Code assembling from a particle swarm      | [`code-particle-assemble`](/catalog/blocks/code-particle-assemble) | 8s |
 
-The first four are the workhorses of a code *walkthrough* — they keep the code readable and the viewer oriented. The last three are entrance spectacle: they look great as an opener or a hero moment, but they trade legibility for motion, so don't ask them to carry an explanation.
+The first four are the workhorses of a code *walkthrough* — they keep the code readable and the viewer oriented. Everything below them trades legibility for motion: they look great as an opener or a hero moment, but they trade legibility for motion, so don't ask them to carry an explanation.
 
 <Tip>
   `code-morph` re-drives Shiki Magic Move as a paused GSAP timeline, and `code-diff` collapses removed lines and expands added lines. Both read "an edit happened" far more clearly than retyping the whole snippet with `code-typing` — reach for them when the story is *a change*, not *authoring from scratch*.
@@ -69,7 +69,7 @@ For "here's what changed," hand `code-diff` the before and after and let it colo
 *Rendered from the prompt above, unedited.*
 
 
-> /motion-graphics 5-second 1920x1080 video. Show a 12-line config file; a highlight band sweeps to line 7 (`timeout: 30_000`) while the surrounding lines dim. Hold with line 7 lit. Use the `code-highlight` registry block. No audio.
+> /motion-graphics 5-second 1920x1080 video. Show a 12-line config file; a highlight band sweeps to line 7 (`timeout: 30_000`) while the surrounding lines dim. Hold with line 7 lit and the cursor blinking. Use the `code-highlight` registry block. No audio.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-code-highlight.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *Rendered from the prompt above, unedited — the agent authors plausible surrounding config lines; paste all 12 if the exact file matters.*
@@ -137,7 +137,7 @@ When the code you're animating comes from a real PR, don't hand-write the beats 
 - [Motion that reads premium](/prompting/motion) — the hold-and-settle rules the code blocks still need from you.
 
 <Note>
-**Capstone thread** — the [Level 7 film](/prompting/capstone) opens with this chapter's technique: real HyperFrames markup typed character by character, and the typed line's baseline literally grows into the timeline wire the rest of the film travels (0:00–0:07 below, cut from the film).
+**Capstone thread** — the [Level 7 film](/prompting/capstone) opens with this chapter's technique: real HyperFrames markup typed character by character, and the typed line's baseline literally grows into the timeline wire the rest of the film travels (cut from the film, below).
 </Note>
 
 This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys the piece — prompt language you can lift for your own video:

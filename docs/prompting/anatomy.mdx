@@ -76,12 +76,28 @@ The fixes that come up most, as before/after pairs — each exists because of ho
 - ❌ `counts from $0 to $4.2M`
 - ✅ `counts up to $4.2M`
 
+## The framework's own vocabulary
+
+The skeleton above is how you ask. This is what the agent writes, and it's worth recognizing on sight — when you read a composition, review a diff, or get a lint error, these four are the load-bearing pieces:
+
+| In the file | What it means |
+| --- | --- |
+| `class="clip"` | Marks a timed section. The framework owns its visibility — never animate a clip's own opacity or `display` to hide it. |
+| `data-start` / `data-duration` / `data-track-index` | When the clip begins, how long it runs, and which track it sits on. Two clips on the same track index must not overlap in time. |
+| `window.__timelines["<id>"]` | Every composition registers exactly one paused GSAP timeline here, built synchronously at load. The renderer seeks that timeline frame by frame — which is why nothing may depend on wall-clock time or unseeded randomness. |
+| `<video muted>` + a separate `<audio>` | Video elements render muted and their sound rides a sibling audio element, so the mixer can duck and balance it independently. |
+
+You rarely write these by hand, but naming them in a prompt is legitimate and sometimes necessary — "put the captions on their own track index," "keep it one composition file, one timeline" — and it's the vocabulary every error message uses. The full contract lives in the `/hyperframes-core` skill; the [appendix](/prompting/rules-and-anti-patterns) carries the rules that most often bite.
+
 <Note>
-**Capstone thread** — the [Level 7 capstone](/prompting/capstone) prompt is this skeleton at maximum scale — route, spec, beats (its nine regions), copy quoted exactly, technique pinned per region, and a hard negative list. The chapters between here and there each teach one clause of it; the capstone is where they compose.
+**Capstone thread** — the [Level 7 film](/prompting/capstone) makes this table its scenery. In the Mount region the timeline wire splits into three track lanes and clip chips seat onto them, tagging themselves with the very attributes above — the framework's own vocabulary, staged as a set. And the whole prompt is this chapter's skeleton at maximum scale: route, spec, beats (its nine regions), copy quoted exactly, technique pinned per region, and a hard negative list.
 </Note>
 
 This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys the piece — prompt language you can lift for your own video:
 
-> **Message, stated once:** "Write HTML. Render video." — opening hook and closing lockup. Arc: Type → Mount → Measure → Everywhere → Material → Surface → Rhythm → Depth → Render. Audience: developers evaluating a programmable video tool. Mood: focused build-up that keeps accelerating, resolving confident and warm at the render.
+> **Mount (7–14s).** Traveling along the wire: it splits into three parallel track lanes; clip chips slide in along the direction of travel and seat onto the lanes on their spoken cues (audio track chip, video track chip, our protagonist chip among them). Small mono labels (`data-start`, `data-track-index`) tag themselves onto chips as the camera passes. The lanes merge back to one wire as the camera accelerates out.
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-mount.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*That clause, rendered — the region cut from the finished film.*
 
 *Next: [The specification dial](/prompting/specification-dial) — how much of the skeleton to fill in, and when density stops being optional.*

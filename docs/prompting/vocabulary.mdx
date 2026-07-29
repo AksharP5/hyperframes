@@ -5,7 +5,7 @@ description: "Natural-language adjectives the skills map to specific framework s
 
 [The dial](/prompting/specification-dial) told you *how much* to specify; this page is the word list for the cheap-precision setting — style tokens that cost you nothing to say and remove real ambiguity. The skills map natural-language adjectives to specific framework settings. Using the right word gets you the right result without specifying technical details.
 
-### Motion & easing
+## Motion & easing
 
 Describe how motion should *feel* and the agent picks the matching GSAP ease:
 
@@ -28,7 +28,7 @@ Each word, rendered — the same move, only the ease changes:
 </tbody></table>
 
 
-### Camera language
+## Camera language
 
 Compositions have no physical camera, but camera words translate directly into scene transforms (or real camera moves in Three.js scenes):
 
@@ -50,7 +50,7 @@ The same scene under each camera word:
 </tbody></table>
 
 
-### Depth language
+## Depth language
 
 | Say this               | Agent builds                                             |
 | ---------------------- | -------------------------------------------------------- |
@@ -59,7 +59,7 @@ The same scene under each camera word:
 | out-of-focus background | blurred, slower-moving back layer                        |
 | shallow depth of field | sharp subject, blurred everything-else                    |
 
-### Pacing language
+## Pacing language
 
 | Say this          | Agent builds                                        |
 | ----------------- | --------------------------------------------------- |
@@ -69,7 +69,9 @@ The same scene under each camera word:
 | breathing room    | a held moment before the next beat starts            |
 | ambient idle      | 1–2% breathing scale + slow drift during holds       |
 
-### Caption tones
+## Caption tones
+
+*The full chapter: [Caption styles](/prompting/captions-catalog).*
 
 Describe the *energy* of your captions and the agent picks matching typography, size, and animation:
 
@@ -95,7 +97,9 @@ Per-word styling also works:
 "Highlight numbers differently"
 ```
 
-### Transitions
+## Transitions
+
+*The full chapter: [Transitions](/prompting/transitions).*
 
 Every multi-scene composition benefits from transitions. Describe the energy level:
 
@@ -114,7 +118,9 @@ Or describe by mood:
 "Dramatic zoom for the reveal"
 ```
 
-### Audio-reactive animation
+## Audio-reactive animation
+
+*The full chapter: [Media and audio](/prompting/media-and-audio).*
 
 Map audio frequency bands to visual properties. The agent uses these defaults:
 
@@ -135,7 +141,7 @@ Map audio frequency bands to visual properties. The agent uses these defaults:
   Keep audio-reactive effects subtle for text (3–6% intensity). Go bigger for backgrounds (10–30%).
 </Tip>
 
-### Marker highlights
+## Marker highlights
 
 Hand-drawn emphasis effects for text:
 
@@ -159,7 +165,7 @@ The five modes on the same sentence:
 <tr><td style={{ padding: "6px", border: "none" }}><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-highlight.mp4" style={{ width: "100%", borderRadius: "0.4rem" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7 }}>highlight</div></td><td style={{ padding: "6px", border: "none" }}><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-circle.mp4" style={{ width: "100%", borderRadius: "0.4rem" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7 }}>circle</div></td><td style={{ padding: "6px", border: "none" }}><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-burst.mp4" style={{ width: "100%", borderRadius: "0.4rem" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7 }}>burst</div></td><td style={{ padding: "6px", border: "none" }}><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-scribble.mp4" style={{ width: "100%", borderRadius: "0.4rem" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7 }}>scribble</div></td><td style={{ padding: "6px", border: "none" }}><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-sketchout.mp4" style={{ width: "100%", borderRadius: "0.4rem" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7 }}>sketchout</div></td></tr>
 </tbody></table>
 
-### Text-to-speech voices
+## Text-to-speech voices
 
 TTS runs locally via Kokoro (no API key needed). Describe the content and the agent picks a voice, or request one directly:
 
@@ -175,7 +181,9 @@ TTS runs locally via Kokoro (no API key needed). Describe the content and the ag
 "Add TTS with British male voice at 1.1x speed"
 ```
 
-### Rendering quality
+## Rendering quality
+
+*The full chapter: [Rendering and output](/prompting/rendering-and-output).*
 
 | Quality    | Use for                  |
 | ---------- | ------------------------ |
@@ -188,16 +196,5 @@ TTS runs locally via Kokoro (no API key needed). Describe the content and the ag
 "Render at high quality"
 "Export as transparent WebM"
 ```
-
-<Note>
-**Capstone thread** — the [Level 7 film](/prompting/capstone)'s Mount region (0:07–0:14) is this page's thesis staged as scenery: the framework's own vocabulary — tracks, clips, `data-*` attributes — becomes the scene itself, because the builder and the viewer share the same words for it.
-</Note>
-
-This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys the piece — prompt language you can lift for your own video:
-
-> **Mount (7–14s).** Traveling along the wire: it splits into three parallel track lanes; clip chips slide in along the direction of travel and seat onto the lanes on their spoken cues (audio track chip, video track chip, our protagonist chip among them). Small mono labels (`data-start`, `data-track-index`) tag themselves onto chips as the camera passes. The lanes merge back to one wire as the camera accelerates out.
-
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-mount.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*That clause, rendered — the region cut from the finished film.*
 
 *Next: [High-fidelity looks](/prompting/visual-specs) — past single words, into full visual specs that carry an entire look.*

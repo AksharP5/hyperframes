@@ -17,6 +17,14 @@ description: "Talk to the agent like a video editor — small targeted edits bea
 
 The agent already has the composition open and the skills loaded — small targeted edits produce better results than long re-specifications.
 
+## The gates can't tell you it's good
+
+Before the loop: know what you are iterating *against*. `lint` and `check` are necessary and not sufficient — they verify structure, not quality. `lint` reads the HTML, `check` runs the composition in a headless browser and reports runtime errors, layout collisions, motion problems, and contrast failures. Every one of those is a fact about whether the composition is *well-formed*. None of them is an opinion about whether the video is *good*.
+
+So the failure mode to expect is: **passes every automated gate, fails human review.** Both earlier builds of this guide's [capstone](/prompting/capstone) did exactly that — one came back clean and read as sparse elements floating in empty frames, the next came back clean and read as a well-dressed slideshow. No linter has an opinion about either.
+
+Which is why the loop below always ends at the render, not at the gate. Watch the output, name what's wrong in specific terms, and change one thing.
+
 ## Editing is for nudging, not gambling
 
 Three moves keep iteration convergent instead of circular:

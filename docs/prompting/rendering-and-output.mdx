@@ -90,6 +90,8 @@ That routes to HyperFrames' AWS Lambda path, which fans the render across many p
 - ❌ `set up Lambda so I can preview edits faster` — cloud dispatch adds latency to a fast local loop
 - ✅ `render the final 3-minute 4K cut on Lambda` — the workload that actually justifies fanning out
 
+Lambda is not the only remote target. **HeyGen-hosted cloud rendering** ([guide](/deploy/cloud)) takes the infrastructure off your hands entirely — no AWS account to configure — and **Google Cloud Run** ([guide](/deploy/gcp-cloud-run)) is the option when your stack already lives on GCP. Name the one you want ("render this on Cloud Run"); the routing is explicit, never inferred.
+
 ## Preview before you commit the slow render
 
 The cheapest way to avoid a wasted `high`/4K/HDR render is to judge the frame first. The habit the workflow skills follow:
@@ -115,7 +117,7 @@ The cheapest way to avoid a wasted `high`/4K/HDR render is to judge the frame fi
 </CardGroup>
 
 <Note>
-**Capstone thread** — the [Level 7 film](/prompting/capstone) ends on this chapter's core promise: the protagonist chip snaps into a render slot and seeded confetti holds every piece for exactly two frames — deterministic, identical on every render (0:56–1:02 below, cut from the film). Its Everywhere region names the real cloud render targets: Lambda and Cloud Run.
+**Capstone thread** — the [Level 7 film](/prompting/capstone) ends on this chapter's core promise: the protagonist chip snaps into a render slot and seeded confetti holds every piece for exactly two frames — deterministic, identical on every render (cut from the film, below). Its Everywhere region names the real cloud render targets: Lambda and Cloud Run.
 </Note>
 
 This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys the piece — prompt language you can lift for your own video:
@@ -123,6 +125,6 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 > A **seeded confetti burst** fires — mulberry32, **seed 42, each piece holding position for exactly two frames before stepping** (stop-motion feel) — and the VO lands the honest punchline: identical on every render, because determinism is the whole point.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*That clause, rendered — the region cut from the finished film.*
+*That clause, rendered — the seeded confetti, identical on every render of this composition.*
 
 *Next: [Porting from Remotion](/prompting/remotion-migration) — bringing an existing Remotion project into everything you now know.*

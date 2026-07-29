@@ -16,13 +16,13 @@ There are two ways to get a chart, and the choice is about control:
 
 Feed data inline or as a file. Small series go straight in the prompt; a CSV gets referenced and parsed at build time (keep it deterministic — no [render-time fetches](/concepts/determinism)).
 
-> 12-second 1920x1080 video. Turn this into an animated bar chart with a staggered reveal and value labels counting up on each bar:
+> /motion-graphics 12-second 1920x1080 video. Turn this into an animated bar chart with a staggered reveal and value labels counting up on each bar:
 > ```
 > Python 41, TypeScript 33, Rust 19, Go 14, Java 9
 > ```
 > Use the `data-chart` registry block. No audio.
 
-> 10-second 1920x1080 video, dark slate background. Title "Top languages 2026" top-left. Five horizontal bars (Python, TypeScript, Rust, Go, Java) grow from zero with staggered starts, overtaking each other twice mid-animation; each bar has a right-edge value label counting up to its final %. End state holds 2s with the leader pulsing once. Hand-draw everything — no chart library. No audio.
+> /motion-graphics 10-second 1920x1080 video, dark slate background. Title "Top languages 2026" top-left. Five horizontal bars (Python, TypeScript, Rust, Go, Java) grow from zero with staggered starts, overtaking each other twice mid-animation; each bar has a right-edge value label counting up to its final %. End state holds 2s with the leader pulsing once. Hand-draw everything — no chart library. No audio.
 
 **State the block *or* opt out of it — don't leave it implicit.** "Animate this data" without a decision drifts between a generic block and an improvised layout.
 - ❌ `animate this CSV as a chart`
@@ -53,7 +53,7 @@ Each map block answers a different geographic question. Say what the map is *for
 
 The US map encodings combine — asking to "shade states *and* draw flows between two cities" gets you one composition: the agent merges the blocks at source onto a shared projection so arcs land exactly on the choropleth's states.
 
-> 12-second 1920x1080 video. A US choropleth shades states by adoption rate with staggered reveals and a gradient legend, then connection arcs draw between San Francisco, Austin, and New York. Use the `us-map` and `us-map-flow` registry blocks. No audio.
+> /motion-graphics 12-second 1920x1080 video. A US choropleth shades states by adoption rate with staggered reveals and a gradient legend, then connection arcs draw between San Francisco, Austin, and New York. Use the `us-map` and `us-map-flow` registry blocks. No audio.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-us-map-flows.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *Rendered from the prompt above, unedited.*
@@ -89,7 +89,7 @@ For a point-to-point journey — a route drawing across a map with a landing bea
 - [The specification dial](/prompting/specification-dial) — deciding when to name a block versus hand-draw.
 
 <Note>
-**Capstone thread** — the [Level 7 film](/prompting/capstone)'s Measure and Everywhere regions are this chapter end to end: `data-chart` bars rise from the timeline wire while the hero count lands, then the same wire becomes a great-circle arc over the `world-map` block's real cloud render regions (0:14–0:28 below, cut from the film).
+**Capstone thread** — the [Level 7 film](/prompting/capstone)'s Measure and Everywhere regions are this chapter end to end: `data-chart` bars rise from the timeline wire while the hero count lands, then the same wire becomes a great-circle arc over the `world-map` block's real cloud render regions (cut from the film, below).
 </Note>
 
 This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys the piece — prompt language you can lift for your own video:

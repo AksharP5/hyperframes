@@ -65,18 +65,9 @@ What you can already steer from the prompt, before you've learned any technique.
   </Accordion>
 </AccordionGroup>
 
-## Changelog videos
-
-The `/changelog-video` skill landed after the original guide, and it isn't a `/pr-to-video` variant — it's a second workflow. Where the "Changelog roundup" variant above reshapes a *single* PR into a changelog-style beat sequence, `/changelog-video` spans a stretch of *repo history*: it turns a repo's recent merges into a fully produced, voiced, captioned changelog video, one hero visualization per theme instead of a text digest.
-
-> /changelog-video Make a ~50-second 1080x1080 changelog video from the last two weeks of merges to heygen-com/hyperframes. Order themes marquee feature first, then product surface, then performance, then reliability. One hero visualization per theme — mock the actual UI or a faithful analog, never a bullet list. End on a link to the full digest.
-
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/changelog-video.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Rendered from the prompt above, unedited — themes drawn from `heygen-com/hyperframes`'s own last two weeks of merges.*
-
 ## Common failure modes
 
-**Forcing a theme over the preset.** The style is fixed for a reason — the navy code surface is tuned for diff legibility; a foreign theme fights it and produces a compromise (see [rules and anti-patterns](/prompting/rules-and-anti-patterns)).
+**Forcing a theme over the preset.** The general rule is on [ride 1](/prompting/product-launch#common-failure-modes); the specific reason here is that the navy code surface is tuned for diff legibility, so a foreign theme costs you the one thing the workflow is good at.
 - ❌ `/pr-to-video ... dark theme, neon accents`
 - ✅ let the preset carry the look; spend your specificity on the angle and the code beats
 
@@ -88,7 +79,7 @@ The `/changelog-video` skill landed after the original guide, and it isn't a `/p
 - ❌ `start with the diff, then explain what it does`
 - ✅ `lead with what users get, then show the key hunk`
 
-**Hard-timing a narrated cut.** With narration the spoken length sets the runtime; state a range, not a fixed number.
+**Hard-timing a narrated cut.** As in [ride 1](/prompting/product-launch#common-failure-modes) — the spoken length sets the runtime, so state a range.
 - ❌ `a 40-second narrated walkthrough`
 - ✅ `a ~40-second narrated walkthrough`
 

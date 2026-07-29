@@ -6,7 +6,7 @@ description: "Seven motion-grammar rules from frame-by-frame study of profession
 By now you can specify a frame precisely — exact copy, exact colors, exact layout, exact timing. This level makes it feel alive. Static frames can be perfect and the video still feels cheap if the motion is dead. Professional motion design follows a grammar you can put directly in prompts:
 
 1. **Nothing ever fully stops.** Every "hold" carries ambient idle motion — a 1-2% breathing scale, slow drift, a shimmer. Never write "holds motionless"; write "settles into a gentle ambient idle." A frozen final second is the single biggest cheap-motion tell.
-2. **The camera is an actor.** Give each scene one continuous camera move — a 4-8% push-in, a slow orbit, parallax between layered planes — easing gently but never settling on screen (compute the ease over a window slightly longer than the render).
+2. **The camera is an actor.** Give each scene one continuous camera move — a 4-8% push-in, a slow orbit, parallax between layered planes — easing gently and never *decaying* to a dead stop at the end of a scene (compute the ease over a window slightly longer than the render). A deliberate mid-film rest is a different thing, and it is sanctioned: see [avoiding the slideshow](#avoiding-the-slideshow).
 3. **Overlapping action.** No two elements share a start or end time. Entrances stagger at irregular offsets; the next element begins while the last is still settling.
 4. **Overshoot and follow-through.** Every pop scales past its target and settles back; letters can tumble in individually with rotation.
 5. **Depth planes.** One or two large, heavily-blurred foreground elements drifting near the lens sell depth instantly.
@@ -27,7 +27,7 @@ The difference is measurable, not just visible: in the final second the frozen b
 
 ## Avoiding the slideshow
 
-The seven rules govern motion *inside* a scene. Apply all seven, cut between scenes, and you can still end up with a slideshow: a sequence of well-animated cards that happen to play in order. It's the most common note on multi-scene work, and two failed review passes on the [Level 7 film](/prompting/capstone) are what taught us the diagnosis — neither fix was more animation.
+The seven rules govern motion *inside* a scene. Apply all seven, cut between scenes, and you can still end up with a slideshow: a sequence of well-animated cards that happen to play in order. It's the most common note on multi-scene work, and the rebuild passes on the [Level 7 film](/prompting/capstone) after its slideshow diagnosis are what taught us the two properties — neither fix was more animation.
 
 **What a slideshow actually is:** a run of scenes that are *independent* (nothing connects one to the next) and *uniform in energy* (nothing tells you which moment matters). So any fix has to supply two properties:
 
@@ -42,7 +42,13 @@ The capstone treats the whole film as a single wide space the camera travels acr
 
 For property 1, "no hard cuts" was not enough on its own — the first rebuild honored it and still played as slides, because each region faded up centered, sat, and faded out while the camera politely waited. What worked was naming the things that survive the boundary: **persistent elements** (a wire that becomes the chart baseline, then the map arc, then the waveform, then the 3D coil; a frame-ruler; a protagonist chip), **arrivals instead of cuts** (the next region is already at the edge of frame before the camera reaches it; the previous exits by parallax), and **a negative that names the tell** (agents default to the slideshow because it is safe — forbid it explicitly).
 
-For property 2, the second rebuild fixed continuity and broke emphasis: the camera never stopped, so every hero moment landed mid-sweep and got thrown away. The fix was a **dwell** — a genuine 1.5–2.5s full stop while the point lands. The subtlety that keeps this from contradicting rule 1: during a dwell the **camera** rests, the **film** does not. Counters keep ticking, labels keep stamping. Say that, or you trade a slideshow for a freeze-frame.
+For property 2, the second rebuild fixed continuity and broke emphasis: the camera never stopped, so every hero moment landed mid-sweep and got thrown away. The fix was a **dwell** — a genuine 1.5–2.5s full stop while the point lands. Two subtleties keep this consistent with the rules above. Against rule 1: during a dwell the **camera** rests, the **film** does not — counters keep ticking, labels keep stamping. Say that, or you trade a slideshow for a freeze-frame. Against rule 2: a dwell is a mid-film rest the piece resumes from, not the decayed settle that rule guards against — what rule 2 forbids is a camera that runs out of energy and dies on the last frame.
+
+<Note>
+**Capstone thread** — this is the method the [Level 7 film](/prompting/capstone) uses, and the reason it reads as a film instead of nine demos in a row.
+</Note>
+
+This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys both properties — prompt language you can lift for your own video:
 
 > ONE continuous camera journey with a dwell-and-sweep rhythm. The whole film is a single wide world (one large scene space) that the camera dollies across […] in one unbroken move with NO hard cuts anywhere except inside the two sanctioned seam moments named below. The rhythm: the camera SWEEPS between regions, then eases to a genuine REST at each region's hero moment — a full stop of roughly 1.5–2.5 seconds while the main point lands […] then accelerates away. The dwell is what gives the sweep meaning: without the rest, emphasis dies mid-motion. During a dwell the WORLD keeps resolving (counters tick, labels stamp, secondary motion continues) — the camera rests, the film never freezes.
 
@@ -57,12 +63,12 @@ Each of these supplies both properties by different means. They also compose —
 
 | Method | How it crosses the boundary | Where the emphasis comes from |
 | --- | --- | --- |
-| **Match cuts** | Cut freely, but on a shared shape, color, or motion vector, so the eye carries a form through the seam | Break the rhyme deliberately at the moment that matters |
-| **A hero prop** | Cut the environment, keep one object continuously on screen (the product, a chart, a character) | Push in on the prop and still everything else around it |
-| **Persistent chrome** | Scenes change *inside* a frame that never does — a HUD, a ruler, a browser shell, a border | Let the chrome fall away for one beat; its absence is the accent |
-| **Audio as the spine** | One unbroken sentence or musical phrase crosses the cut; the ear ties what the eye didn't | A rest in the audio — a held note, a beat of silence before the number lands |
+| **Match cuts** ([Transitions](/prompting/transitions)) | Cut freely, but on a shared shape, color, or motion vector, so the eye carries a form through the seam | Break the rhyme deliberately at the moment that matters |
+| **A hero prop** ([Storyboards](/prompting/storyboards)) | Cut the environment, keep one object continuously on screen (the product, a chart, a character) | Push in on the prop and still everything else around it |
+| **A persistent frame** | Scenes change *inside* a frame that never does — a HUD, a ruler, a browser shell, a border | Let the chrome fall away for one beat; its absence is the accent |
+| **Audio as the spine** ([Media and audio](/prompting/media-and-audio)) | One unbroken sentence or musical phrase crosses the cut; the ear ties what the eye didn't | A rest in the audio — a held note, a beat of silence before the number lands |
 | **Beat-locked cutting** | Cuts land on an analyzed grid, so the rhythm itself is the connective tissue ([Music](/prompting/music-and-slideshows)) | Hold through a downbeat, or drop a hit, so one card gets twice the space |
-| **Accumulation** | Nothing ever exits — each scene adds to one canvas and the frame reflows to the new material | Everything but the newest element quiets to a low idle |
+| **Accumulation** ([Storyboards](/prompting/storyboards)) | Nothing ever exits — each scene adds to one canvas and the frame reflows to the new material | Everything but the newest element quiets to a low idle |
 
 Whichever you choose, put the two properties in the prompt in your own words, and name the tell you are forbidding. The device is negotiable; the properties are not.
 

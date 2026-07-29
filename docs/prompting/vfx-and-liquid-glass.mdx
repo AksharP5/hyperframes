@@ -34,7 +34,7 @@ The liquid-glass blocks are frosted-glass Apple-style UI floating over an aurora
 
 The four `liquid-glass-*` panel blocks share the aurora-shader stage, so they compose cleanly into one scene; `ios26-liquid-glass` and `macos-tahoe-liquid-glass` are complete device environments and generally stand alone.
 
-> 8-second 1920x1080 video. Frosted glass notification cards drift in and stack over an aurora shader background, each reading a fake alert ("Build passed", "Deploy live", "0 incidents"). Use the `liquid-glass-notification` registry block. No audio.
+> /motion-graphics 8-second 1920x1080 video. Frosted glass notification cards drift in and stack over an aurora shader background, each reading a fake alert ("Build passed", "Deploy live", "0 incidents"). Use the `liquid-glass-notification` registry block. No audio.
 
 **"Liquid glass" means the block, not a filter you're describing.** These are complete WebGL stages; asking for "a glassy blur on my div" gets you a CSS `backdrop-filter`, not this look.
 - ❌ `add a liquid glass effect over my text`
@@ -73,7 +73,7 @@ The [Effects](/catalog/components/vignette) components are lightweight, pure-CSS
 
 These are the ambient layer of the [motion grammar](/prompting/motion): grain and a slow `parallax-zoom` keep a "held" beat alive instead of freezing. Never write "holds motionless" — a still final second is the biggest cheap-motion tell; let a grain overlay and a 2% push carry the hold.
 
-> 6-second 1920x1080 video. A product logo settles center-frame, then holds — but keep it alive with a film grain overlay and a slow 3% push-in, plus one shimmer sweep across the wordmark at 4s. Use the `grain-overlay`, `parallax-zoom`, and `shimmer-sweep` registry components. No audio.
+> /motion-graphics 6-second 1920x1080 video. A product logo settles center-frame, then holds — but keep it alive with a film grain overlay and a slow 3% push-in, plus one shimmer sweep across the wordmark at 4s. Use the `grain-overlay`, `parallax-zoom`, and `shimmer-sweep` registry components. No audio.
 
 **Reach for grain over a literal freeze.** The engine holds the final state exactly as written.
 - ❌ `logo appears and holds still to the end`
@@ -101,7 +101,7 @@ The Effects components above have none of this — they're plain CSS and animate
 - [HTML-in-Canvas guide](/guides/html-in-canvas) — how `drawElementImage` works and the flag details.
 
 <Note>
-**Capstone thread** — the [Level 7 film](/prompting/capstone)'s Surface region floats its inspector panels on the brand's glass tokens — translucent white over real backdrop blur, the mural visibly smearing through each panel (0:38–0:45 below, cut from the film).
+**Capstone thread** — the [Level 7 film](/prompting/capstone)'s Surface region floats its inspector panels on the brand's glass tokens — translucent white over real backdrop blur, the mural visibly smearing through each panel (cut from the film, below).
 </Note>
 
 This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys the piece — prompt language you can lift for your own video:

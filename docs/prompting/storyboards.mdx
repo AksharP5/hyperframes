@@ -35,7 +35,7 @@ A storyboard's direction block is the rules every frame obeys without restating 
 - ❌ `use the brand colors, plus a highlight color for the important bits`
 - ✅ `ground: deep navy; ink: warm white. Emphasis = invert, scale up, or go denser — never a third color.`
 
-**VO-paced reveals.** This is the throughline rule for *when* things appear, and it's worth stating close to verbatim because it's genuinely the rule the build follows: *every frame reveals to the VO — at t=0 only what the narrator is saying is on screen; each part arrives on its spoken cue, with reveals spreading across the back half.* Pair it with a hold behavior: say whether a held frame stays fully still or gets a subtle idle (never a slow drift or "breathing" — that reads as unfinished, not as a choice). If the piece is silent, keep the rule's shape but swap the trigger: reveals land on named timestamps instead of spoken clauses — the pacing still has to be deliberate, there's just no VO to key it to.
+**VO-paced reveals.** The rule itself is in [Media and audio](/prompting/media-and-audio#pace-reveals-to-the-narration); a storyboard is where you *apply* it per frame — at t=0 only what the narrator is saying is on screen, each part arriving on its spoken cue. Pair it with a hold behavior: say whether a held frame stays fully still or gets a subtle idle (never a slow drift or "breathing" — that reads as unfinished, not as a choice). If the piece is silent, keep the rule's shape but swap the trigger: reveals land on named timestamps instead of spoken clauses — the pacing still has to be deliberate, there's just no VO to key it to.
 
 **One breather.** Across the whole film, name exactly one frame as the breather — the deliberately calmer, more static beat, or the longest held read. Every other frame keeps developing continuously. Naming it prevents the build from either over-animating the one frame that's supposed to let the audience exhale, or under-animating the rest to match it.
 
@@ -100,7 +100,7 @@ Without stating the return explicitly, a rebuild is free to treat the early moti
 </CardGroup>
 
 <Note>
-**Capstone thread** — the [Level 7 film](/prompting/capstone) stretches this chapter's callback device across its whole runtime: the `<div class="clip">` chip typed in the opening rides the wire through every region and finally snaps into the render slot as the payoff (0:56–1:02 below, cut from the film).
+**Capstone thread** — the [Level 7 film](/prompting/capstone) stretches this chapter's callback device across its whole runtime: the `<div class="clip">` chip typed in the opening rides the wire through every region and finally snaps into the render slot as the payoff (cut from the film, below).
 </Note>
 
 This is the clause in the [full capstone prompt](/prompting/capstone#the-full-prompt-verbatim) that buys the piece — prompt language you can lift for your own video:
@@ -108,6 +108,6 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 > **The clip card** — the `<div class="clip">` typed in the opening travels the whole journey: it slides onto the wire as a clip chip after being typed, rides ahead of the camera between regions (handing itself off — visible leaving one region and arriving in the next), and is the thing that finally renders at the end. It is the protagonist.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*That clause, rendered — the region cut from the finished film.*
+*That clause paying off, rendered — the protagonist chip arriving at the render slot after a full minute on the wire.*
 
 *Next: [Editing existing videos](/prompting/editing-existing-videos) — the editor verbs that turn a first render, storyboard or not, into the twenty edits after it.*

@@ -56,6 +56,25 @@ The most common miss is describing the finished video with the values already fi
 
 The engine rationale: variables are runtime values a script applies to the live DOM, resolved from declared defaults, per-instance overrides, or the CLI in that precedence order. Declaring them up front means the reusable structure exists from the first render and the default is just one more value set. Baking `"Acme — Pro — $49"` into the markup produces a composition with no slots — reuse then means an edit pass over hardcoded text for every variant, which is exactly what variables exist to avoid.
 
+## Prove the template actually re-skins
+
+A template that never re-skins can pass every gate you have. `lint` and `check` verify structure, and `--strict-variables` catches an undeclared or mistyped key — but none of them can tell you whether the values you passed ever reached the DOM. The failure looks like success: the render completes, exits clean, and is **pixel-identical to the default**.
+
+So test it differentially — render twice and compare:
+
+```bash
+hyperframes render --output default.mp4
+hyperframes render --variables '{"ground":"#0d1420","ink":"#c8ff3d"}' --strict-variables --output reskin.mp4
+```
+
+Two identical files mean the override never landed. The usual cause is scope: `data-composition-variables` is declared **per composition file**, so variables declared inside a sub-composition pulled in with `data-composition-src` do not inherit a root-level `--variables` override — the sub-composition keeps its own defaults and a root override silently does nothing.
+
+This is not hypothetical. The first build of this guide's [capstone](/prompting/capstone) was authored as seven sub-composition files, each declaring its own palette variables. Every gate passed, the re-skin render succeeded, and it came out identical to the default. That is why the capstone prompt now carries a hard architecture constraint — one `index.html`, one variable scope — and why it names both renders it expects:
+
+> **Variables:** expose `ground` (default `#0a0a0a`) and `ink` (default `#3CE6AC`) as composition variables on the single root file, bound via CSS custom properties everywhere (including the duotoned mural), so one `--variables` call re-skins the entire journey. It will be rendered twice: the default brand palette, and a second full render with `{"ground":"#0d1420","ink":"#c8ff3d"}`.
+
+If you need sub-compositions *and* a template, forward the values explicitly at each mount point rather than assuming they inherit.
+
 ## What can't be a variable
 
 A few inputs are read once at compile time and no variable can move them: composition **dimensions** (`data-width` / `data-height`), the **root composition's total duration**, **frame rate**, and **output format / codec**. So this doesn't do what it reads like:
