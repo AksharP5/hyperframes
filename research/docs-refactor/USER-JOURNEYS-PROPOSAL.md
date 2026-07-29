@@ -1,6 +1,6 @@
 # HyperFrames documentation user journeys
 
-Status: **Approved; corrected after rendered-page review**
+Status: **Draft for leadership approval — do not restructure the public docs from this document yet**
 
 ## Decision requested
 
@@ -70,27 +70,35 @@ This must be the canonical explanation of HyperFrames. A teammate should be able
 
 ### First screen
 
-The first viewport should show immediate proof:
+The first viewport should contain:
 
-- a small set of realistic requests;
-- the selected request in plain language;
-- its finished HyperFrames video beside or directly below it;
-- normal video controls, including audio when the source has audio;
-- one useful next link: **Make your first video**.
+1. **One sentence**
 
-Do not add a paragraph that explains how to use the page. Do not add a button
-that only scrolls a few pixels. No installation command, schema term, package
-name, or rendering architecture should appear before the person sees the
-product.
+   > HyperFrames lets an AI agent create a real video project, then gives you a visual Studio to review, edit, and export it.
+
+2. **Immediate proof**
+
+   A short, muted, captioned 12–20 second montage made with HyperFrames:
+   - a plain-language request;
+   - the agent building scenes;
+   - the project opening in Studio;
+   - a person changing something visible;
+   - the finished video.
+
+3. **Two actions, not five equal choices**
+   - **See how it works** — continues down the page.
+   - **Try it** — opens the quickest supported hands-on path.
+
+No installation command, schema term, package name, or rendering architecture should appear before the person understands the product.
 
 ### Exact journey
 
 1. **Recognize the product**
    - See the one-sentence definition and a finished result immediately.
 2. **Understand the loop**
-   - One deliberately simple diagram:
+   - A simple diagram:
 
-     `Your request → AI agent → HyperFrames project → Video`
+     `Idea or source → AI agent → HyperFrames project → Studio review → Video or presentation`
 
 3. **See credible outcomes**
    - Three short examples, deliberately different:
@@ -107,9 +115,9 @@ product.
 
 ### Best formats
 
-- A playable “What is HyperFrames?” example made in HyperFrames.
-- A static, accessible four-step diagram.
-- A prompt/result gallery that changes the visible example without leaving the page.
+- A 45–60 second “What is HyperFrames?” video made in HyperFrames.
+- A static, accessible five-step diagram for people who do not watch video.
+- Three playable examples with one sentence explaining why each matters.
 - A “what do you want to do?” choice at the end, not at the top.
 
 ### Success test
@@ -122,9 +130,7 @@ If they describe HyperFrames only as “HTML-to-video,” “a rendering engine,
 
 ### Current gap
 
-The Introduction now begins with a compact prompt/result gallery and follows
-with the four-step product loop. It does not repeat the Guides overview or ask
-the visitor to choose between several large cards.
+The current Introduction has the right basic explanation, but it asks the person to choose between five equal cards before showing strong visual proof. It reads clearly, but it does not yet replace the five-minute product explanation.
 
 ---
 

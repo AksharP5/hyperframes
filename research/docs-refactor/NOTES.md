@@ -240,29 +240,6 @@ New navigation should be task-shaped:
 - Browser-reviewed Introduction, Quickstart, Workflows, Help, Studio, Catalog, and Developers in the local Mintlify preview.
 - `mint validate`, `mint broken-links`, and `git diff --check` pass.
 
-### 2026-07-29 — rendered-page correction pass
-
-- Reviewed the actual pages in Mintlify rather than judging MDX alone.
-- Removed the repeated page eyebrow while preserving sidebar group labels.
-- Replaced oversized routing cards on Guides, Workflows, Help, and Developers
-  with compact task links.
-- Removed obvious instructions, duplicate descriptions, repeated Catalog copy,
-  and the Quickstart completion summary.
-- Simplified the product loop to:
-  `Your request → AI agent → HyperFrames project → Video`.
-- Added a working prompt/result gallery to Introduction using four real
-  HyperFrames videos. The videos have controls and are not forced muted.
-- Added an interactive Studio explorer using current product screenshots.
-- Added an animated Catalog overview using real Catalog previews.
-- Kept autoplay loops muted because browsers block audible autoplay; controlled
-  videos retain audio.
-- Fixed the Catalog generator so repeated descriptions and generic usage copy
-  do not return when pages are regenerated.
-- Did not embed the complete Playground or a fake Studio. The Playground would
-  create a second nested navigation system, while a real Studio session needs a
-  project server and project state. The screenshot explorer gives an honest,
-  safe interaction without pretending to edit a real project.
-
 ## Maintenance issue
 
 - The repo instructions refer to `.agents/skills/hyperframes/SKILL.md`, but that repo-local path is absent in this checkout. The installed current router at `/Users/ularkimsanov/.agents/skills/hyperframes/SKILL.md` was used as the workflow source of truth for this pass.

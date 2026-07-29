@@ -261,8 +261,6 @@
           {
             "group": "Social Overlays",
             "pages": [
-              "catalog/blocks/editorial-flash-overlay",
-              "catalog/blocks/freeze-frame-dressing",
               "catalog/blocks/instagram-follow",
               "catalog/blocks/macos-notification",
               "catalog/blocks/reddit-post",
@@ -311,7 +309,6 @@
           {
             "group": "CSS Transitions",
             "pages": [
-              "catalog/blocks/organic-light-leak-overlay",
               "catalog/blocks/transitions-3d",
               "catalog/blocks/transitions-blur",
               "catalog/blocks/transitions-cover",
@@ -393,7 +390,6 @@
           {
             "group": "Blocks",
             "pages": [
-              "catalog/blocks/camcorder-hud",
               "catalog/blocks/flowchart",
               "catalog/blocks/flowchart-vertical",
               "catalog/blocks/logo-outro"
