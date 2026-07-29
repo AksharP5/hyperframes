@@ -32,12 +32,14 @@
 //         [--audio-meta audio_meta.json]. On disk: each built frame's src html,
 //         capture/{assets,assets/videos,screenshots}/<basename> for staging, compositions/captions.html.
 // Writes: <project>/index.html  +  stages assets/<basename>  +  (guard ① below)
-//         repairs a frame file in place when its root is missing data-width/height.
+//         repairs a frame file in place when its root is missing
+//         data-width/data-height/data-duration.
 //
 // Pre-assembly frame guards (run in the same pass that reads each frame, so common
 // `lint` failures surface HERE instead of after assembly + a wasted render):
-//   ① AUTO-REPAIR — a sub-comp root missing data-width/data-height: inject the canvas
-//      dims (the renderer needs them on the cloned root; else lint root_missing_dimensions).
+//   ① AUTO-REPAIR — a sub-comp root missing data-width/data-height/data-duration:
+//      inject the canvas dims and storyboard duration. The transition injector
+//      extends that static duration when it pads the outgoing frame tail.
 //   ② HARD FAIL  — a timed element (data-start+duration+track-index) that is not the root
 //      and lacks class="clip" (shows the whole frame), or two same-track clips that overlap.
 //   (Media inside a sub-comp is NOT a violation: the runtime seeks + decodes nested
@@ -162,7 +164,7 @@ function findRootTag(html) {
 }
 
 // Returns { errors: string[], repairedHtml: string|null, repairNote: string|null }.
-function guardFrame(html, label) {
+function guardFrame(html, label, durationSeconds) {
   const errors = [];
   // Scan a copy with comments + <script>/<style> bodies blanked, so a tag-like string
   // in a comment (e.g. "<!-- match the host <video> coords -->") or in GSAP code can't
@@ -219,19 +221,25 @@ function guardFrame(html, label) {
     }
   }
 
-  // ① auto-repair: ensure the root carries data-width / data-height.
+  // ① auto-repair: ensure the root carries data-width / data-height / data-duration.
   let repairedHtml = null;
   let repairNote = null;
   const root = findRootTag(html);
   if (root) {
     const needW = !attrPresent(root.attrs, "data-width");
     const needH = !attrPresent(root.attrs, "data-height");
-    if (needW || needH) {
+    const needDuration = !attrPresent(root.attrs, "data-duration");
+    if (needW || needH || needDuration) {
       const inject =
-        (needW ? ` data-width="${WIDTH}"` : "") + (needH ? ` data-height="${HEIGHT}"` : "");
+        (needW ? ` data-width="${WIDTH}"` : "") +
+        (needH ? ` data-height="${HEIGHT}"` : "") +
+        (needDuration ? ` data-duration="${durationSeconds}"` : "");
       const newTag = root.full.replace(/(\/?>)$/, `${inject}$1`);
       repairedHtml = html.slice(0, root.start) + newTag + html.slice(root.end);
-      repairNote = `${label}: injected${needW ? " data-width" : ""}${needH ? " data-height" : ""} (${WIDTH}×${HEIGHT}) on the root — was missing (would lint root_missing_dimensions)`;
+      repairNote =
+        `${label}: injected${needW ? " data-width" : ""}${needH ? " data-height" : ""}` +
+        `${needDuration ? " data-duration" : ""} on the root` +
+        `${needW || needH ? ` (${WIDTH}×${HEIGHT})` : ""}`;
     }
   }
 
@@ -281,8 +289,8 @@ for (const f of manifest.frames) {
       `${label}: ${f.src} is empty or has no HTML — the worker wrote a blank/partial file. Re-dispatch that worker before assembling.`,
     );
   }
-  // pre-assembly guards: ① repair missing root dims in place, ② collects fatal violations.
-  const guard = guardFrame(html, label);
+  // pre-assembly guards: ① repair missing root metadata in place, ② collects violations.
+  const guard = guardFrame(html, label, r3(f.durationSeconds));
   if (guard.repairedHtml) {
     writeFileSync(compAbs, guard.repairedHtml);
     html = guard.repairedHtml;
