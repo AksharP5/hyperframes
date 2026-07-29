@@ -2150,20 +2150,33 @@ export async function discoverAudioVolumeAutomationFromTimeline(
         }
 
         const keyframes: { time: number; volume: number }[] = [];
-        for (let t = sampleStart; t <= sampleEnd + 0.000001; t += step) {
-          const boundedTime = Math.min(sampleEnd, t);
-          seekTl(boundedTime);
+        let previousSample: { time: number; volume: number } | undefined;
+        for (let t = sampleStart; t <= sampleEnd + 0.000001; t = Math.min(sampleEnd, t + step)) {
+          seekTl(t);
           const rawVolume = Number(el.volume);
-          if (!Number.isFinite(rawVolume)) continue;
-          const volume = Math.max(0, Math.min(1, rawVolume));
-          const last = keyframes.at(-1);
-          if (!last || Math.abs(last.volume - volume) > 0.0001 || boundedTime === sampleEnd) {
-            keyframes.push({
-              time: Number(boundedTime.toFixed(6)),
-              volume: Number(volume.toFixed(6)),
-            });
+          if (!Number.isFinite(rawVolume)) {
+            if (t === sampleEnd) break;
+            continue;
           }
-          if (boundedTime === sampleEnd) break;
+          const volume = Math.max(0, Math.min(1, rawVolume));
+          const sample = {
+            time: Number(t.toFixed(6)),
+            volume: Number(volume.toFixed(6)),
+          };
+          const last = keyframes.at(-1);
+          if (!last || Math.abs(last.volume - volume) > 0.0001) {
+            // Retain the preceding real sample when compression omitted a flat
+            // run. Continuous ramps already have that sample as their last
+            // keyframe, so their interpolation remains unchanged.
+            if (last && previousSample && previousSample.time > last.time) {
+              keyframes.push(previousSample);
+            }
+            keyframes.push(sample);
+          } else if (t === sampleEnd && sample.time > last.time) {
+            keyframes.push(sample);
+          }
+          previousSample = sample;
+          if (t === sampleEnd) break;
         }
 
         const staticAttr = Number.parseFloat(el.dataset.volume ?? "");
