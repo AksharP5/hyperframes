@@ -26,6 +26,13 @@ docs/images/
 docs/images/*
 !docs/images/studio/
 !docs/images/studio/*.jpg
+# The introduction's explainer film. Not a generated preview: it is authored, it
+# is the page's whole argument, and at 332KB silent it costs less than one
+# catalog preview. Committed so the page cannot break when a CDN credential
+# expires. The version with its music bed lives on the CDN instead.
+!docs/images/showcase/
+!docs/images/showcase/*.mp4
+!docs/images/showcase/*.jpg
 
 videos/
 
