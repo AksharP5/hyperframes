@@ -173,6 +173,43 @@ h3 {
   max-width: none;
 }
 
+/* ── Hero media ──
+ *
+ * For the one visual on a page that is the argument, not an illustration.
+ * Reaches into the shell's horizontal padding so the frame reads as edge to
+ * edge rather than as a figure inside an article. Deliberately not 100vw: this
+ * column is not centred in the viewport (the sidebar is a flex sibling), so
+ * the usual `margin-left: calc(50% - 50vw)` trick would push it off-centre. */
+.hf-hero {
+  margin: 0 -1.25rem 0.75rem;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #000;
+  line-height: 0;
+}
+
+.hf-hero video,
+.hf-hero img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (min-width: 1280px) {
+  .hf-hero {
+    margin-left: -2.5rem;
+    margin-right: -2.5rem;
+    border-radius: 14px;
+  }
+}
+
+/* Caption for a hero: quiet, and it sits with the media rather than boxed. */
+.hf-hero-caption {
+  margin: 0 0 2rem;
+  font-size: 0.875rem;
+  color: var(--hf-text-muted, #8b8b8b);
+}
+
 /* Code font — IBM Plex Mono (loaded via Google Fonts above).
  *
  * Deliberately scoped to real code elements. The previous rule also matched
