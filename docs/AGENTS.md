@@ -19,7 +19,7 @@ These rules are persistent and apply to every documentation session:
 - Do not publish empty, duplicated, outdated, or aspirational content as fact.
 - A page should answer a real question or help complete a real task.
 - Keep ordinary top-level groups inside each tab, with no nested `root`, `directory`, `expanded`, or drilldown behavior.
-- Keep the quiet vertical rail beside every left-sidebar group. It is visual only; groups remain open and non-collapsible.
+- Match the deployed main docs' sidebar rhythm: 14px medium group headings, square links, no horizontal group dividers, and a segmented vertical rail whose active segment follows the current page. Groups remain open and non-collapsible.
 - Keep Mintlify's right-side **On this page** behavior and styling unchanged.
 - Keep Aspen's desktop header on one row: logo, tabs, search, actions, and theme toggle.
 - Record important findings, uncertainties, and decisions in `../research/docs-refactor/NOTES.md`.

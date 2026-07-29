@@ -57,6 +57,8 @@
   --hf-text-tertiary: #999999;
   --hf-heading: #0a0a0a;
   --hf-code-bg: #ffffff;
+  --hf-sidebar-rail: #eeeeee;
+  --hf-sidebar-text: #707070;
 
   --hf-accent-green: #1a7a0a;
   --hf-accent-green-light: rgba(26, 122, 10, 0.07);
@@ -85,6 +87,8 @@
   --hf-text-tertiary: #666666;
   --hf-heading: #f5f5f5;
   --hf-code-bg: #141414;
+  --hf-sidebar-rail: #2a2a2a;
+  --hf-sidebar-text: #a0a0a0;
 
   --hf-accent-green: #22c55e;
   --hf-accent-green-light: rgba(34, 197, 94, 0.1);
@@ -215,22 +219,63 @@ a:not([class]):hover {
 }
 
 /*
- * A quiet rail makes each ordinary sidebar group easier to scan without
- * changing Mintlify's navigation behavior or making the groups collapsible.
+ * Match the navigation rhythm and active-page rail used on the main docs.
+ * Each link owns one rail segment, so the current page can highlight only
+ * its segment. These rules are visual only; groups remain non-collapsible.
  */
-.sidebar-group-header + .sidebar-group {
-  position: relative;
-  padding-left: 1rem;
+#navigation-items .sidebar-group-header {
+  color: var(--hf-text);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
 }
 
-.sidebar-group-header + .sidebar-group::before {
-  position: absolute;
-  top: 0.3rem;
-  bottom: 0.3rem;
-  left: 0;
-  width: 1px;
-  background: var(--hf-border-color);
-  content: '';
+#navigation-items .sidebar-group {
+  padding-left: 0;
+}
+
+#navigation-items .sidebar-group::before {
+  content: none;
+}
+
+#navigation-items .sidebar-group > li {
+  margin-bottom: 0;
+}
+
+#navigation-items .sidebar-group > li + li {
+  margin-top: 0 !important;
+}
+
+#navigation-items .sidebar-group > li > a {
+  width: calc(100% - 1rem);
+  margin-left: 1rem;
+  padding: 0.375rem 0.75rem 0.375rem 1rem;
+  border-left: 1px solid var(--hf-sidebar-rail);
+  border-radius: 0;
+  background: transparent !important;
+  color: var(--hf-sidebar-text);
+}
+
+#navigation-items .sidebar-group > li > a:hover {
+  background: transparent !important;
+  color: var(--hf-heading);
+}
+
+#navigation-items .sidebar-group > li[data-active='true'] > a,
+#navigation-items .sidebar-group > li[data-active-nav-item='true'] > a,
+#navigation-items .sidebar-group > li > a[aria-current='page'] {
+  border-left-color: currentColor;
+  color: var(--hf-heading);
+}
+
+/* Aspen inserts horizontal separators; main uses the same space without a rule. */
+#navigation-items div:has(> .sidebar-group) + div {
+  height: 2rem;
+  padding: 0;
+}
+
+#navigation-items div:has(> .sidebar-group) + div > * {
+  display: none;
 }
 
 /* Catalog texture examples */

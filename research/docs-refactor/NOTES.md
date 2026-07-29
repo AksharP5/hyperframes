@@ -200,7 +200,7 @@ New navigation should be task-shaped:
 ### 2026-07-28 — final navigation visual correction
 
 - Kept the Aspen theme, four refactored tabs, and current page groupings.
-- Added a visual-only vertical rail to every ordinary sidebar group; groups remain open and non-collapsible.
+- Matched the deployed main docs' sidebar treatment: 14px medium group headings, square links, no horizontal dividers, and one border segment per page so the active segment tracks the current page. Groups remain open and non-collapsible.
 - Kept Mintlify's right-side **On this page** surface completely unchanged.
 - Fit the Aspen desktop header into one row, with the GitHub destination shown as a compact icon.
 

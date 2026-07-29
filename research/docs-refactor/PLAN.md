@@ -40,7 +40,7 @@ Global header:
 - Light/dark theme toggle remains available.
 - Primary **Playground** action to the official `hyperframes.dev` browser experience. Studio itself remains project-local through `npx hyperframes preview`.
 - Keep Aspen’s full-width top navigation. Use the small desktop-only layout override needed to fit the logo, tabs, search, actions, and theme toggle on one row.
-- Keep every left-sidebar group open and non-collapsible, with a quiet vertical guide rail.
+- Keep every left-sidebar group open and non-collapsible. Match the deployed main docs' spacing, group-heading scale, square link treatment, and segmented active-page rail.
 - Keep Mintlify’s default right-side **On this page** behavior and styling.
 
 Navigation behavior:
