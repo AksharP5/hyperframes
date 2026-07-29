@@ -270,20 +270,26 @@ function readUnsignedIntAfter(line: string, prefix: string): number | undefined 
   return digits > 0 ? value : undefined;
 }
 
-function summarizeInitObservability(lines: string[]): RenderInitObservability | undefined {
-  let initDurationMs: number | undefined;
-  let tweenCount: number | undefined;
+/** Max of two optional readings — multiple worker/session INIT records can appear; keep the worst. */
+function maxReading(current: number | undefined, next: number | undefined): number | undefined {
+  if (next === undefined) return current;
+  return current === undefined ? next : Math.max(current, next);
+}
+
+function summarizeInitObservability(
+  lines: string[],
+  fallback?: RenderInitObservability,
+): RenderInitObservability | undefined {
+  // Console parsing only sees THIS process's session buffer, so parallel
+  // workers' INIT lines never reach it — their init telemetry arrives
+  // structured via the per-worker perf summaries instead. Seed with that and
+  // let the console parse (same max semantics) refine it.
+  let initDurationMs: number | undefined = fallback?.initDurationMs;
+  let tweenCount: number | undefined = fallback?.tweenCount;
   for (const line of lines) {
     if (!line.includes("[FrameCapture:INIT]")) continue;
-    const duration = readUnsignedIntAfter(line, "initDurationMs=");
-    const tweens = readUnsignedIntAfter(line, "tweenCount=");
-    // Multiple worker/session INIT records can appear; keep the worst observed startup cost.
-    if (duration !== undefined) {
-      initDurationMs = initDurationMs === undefined ? duration : Math.max(initDurationMs, duration);
-    }
-    if (tweens !== undefined) {
-      tweenCount = tweenCount === undefined ? tweens : Math.max(tweenCount, tweens);
-    }
+    initDurationMs = maxReading(initDurationMs, readUnsignedIntAfter(line, "initDurationMs="));
+    tweenCount = maxReading(tweenCount, readUnsignedIntAfter(line, "tweenCount="));
   }
   if (initDurationMs === undefined && tweenCount === undefined) return undefined;
   return { initDurationMs, tweenCount };
@@ -402,6 +408,8 @@ export class RenderObservabilityRecorder {
   summary(input: {
     lastBrowserConsole: string[];
     capture: RenderCaptureObservability;
+    /** Structured init telemetry from per-worker perf summaries — the only success-path channel parallel workers have (their console buffers propagate on failure only). */
+    initFallback?: RenderInitObservability;
     extraction?: RenderExtractionObservability;
     compositionHash?: string;
   }): RenderObservabilitySummary {
@@ -416,7 +424,7 @@ export class RenderObservabilityRecorder {
       browserDiagnostics: summarizeBrowserDiagnostics(input.lastBrowserConsole),
       capture: { ...input.capture },
       extraction: input.extraction ? { ...input.extraction } : undefined,
-      init: summarizeInitObservability(input.lastBrowserConsole),
+      init: summarizeInitObservability(input.lastBrowserConsole, input.initFallback),
     };
   }
 

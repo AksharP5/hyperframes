@@ -1267,6 +1267,35 @@ export function countElementTags(html: string): number {
 }
 
 /**
+ * Max-merge init telemetry across per-worker capture perf summaries — the
+ * success-path channel for PARALLEL renders, whose worker console buffers
+ * (and so the `[FrameCapture:INIT]` line) only propagate on failure. Max
+ * matches summarizeInitObservability's own multi-session semantics: keep the
+ * worst observed startup cost, and tween count is per-composition so any
+ * worker's reading is the reading.
+ */
+export function mergeWorkerInitObservability(
+  perfs: ReadonlyArray<{ initDurationMs?: number; initTweenCount?: number }>,
+): { initDurationMs?: number; tweenCount?: number } | undefined {
+  let initDurationMs: number | undefined;
+  let tweenCount: number | undefined;
+  for (const perf of perfs) {
+    if (perf.initDurationMs !== undefined) {
+      initDurationMs =
+        initDurationMs === undefined
+          ? perf.initDurationMs
+          : Math.max(initDurationMs, perf.initDurationMs);
+    }
+    if (perf.initTweenCount !== undefined) {
+      tweenCount =
+        tweenCount === undefined ? perf.initTweenCount : Math.max(tweenCount, perf.initTweenCount);
+    }
+  }
+  if (initDurationMs === undefined && tweenCount === undefined) return undefined;
+  return { initDurationMs, tweenCount };
+}
+
+/**
  * DE priority inversion predicate: should an AUTO-resolved multi-worker render
  * drop to single-worker verified drawElement streaming?
  *
@@ -3600,6 +3629,7 @@ async function executeRenderPipeline(input: {
     const observabilitySummary = observability.summary({
       lastBrowserConsole,
       capture: captureObservability,
+      initFallback: mergeWorkerInitObservability(dedupPerfs),
       extraction: extractionObservability,
       compositionHash,
     });
@@ -3761,6 +3791,7 @@ async function executeRenderPipeline(input: {
     const observabilitySummary = observability.summary({
       lastBrowserConsole,
       capture: captureObservability,
+      initFallback: mergeWorkerInitObservability(dedupPerfs),
       extraction: extractionObservability,
       compositionHash,
     });

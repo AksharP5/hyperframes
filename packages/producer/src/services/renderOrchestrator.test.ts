@@ -36,6 +36,7 @@ import {
   shouldRetryViaPinnedFallback,
   countElementTags,
   envInt,
+  mergeWorkerInitObservability,
   shouldPreferParallelDrawElement,
   shouldPreferSingleWorkerDrawElement,
   shouldStreamParallelCapture,
@@ -1758,6 +1759,23 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
           minFrames: Math.min(900, 0),
         }),
       ).toBe(false);
+    });
+  });
+
+  describe("mergeWorkerInitObservability", () => {
+    it("max-merges across workers and ignores workers that reported nothing", () => {
+      expect(
+        mergeWorkerInitObservability([
+          { initDurationMs: 400, initTweenCount: 900 },
+          {},
+          { initDurationMs: 1250, initTweenCount: 880 },
+        ]),
+      ).toEqual({ initDurationMs: 1250, tweenCount: 900 });
+    });
+
+    it("returns undefined when no worker reported — summary.init must stay absent, not zeroed", () => {
+      expect(mergeWorkerInitObservability([])).toBeUndefined();
+      expect(mergeWorkerInitObservability([{}, {}])).toBeUndefined();
     });
   });
 

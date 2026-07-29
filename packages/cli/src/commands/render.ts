@@ -1109,7 +1109,6 @@ let deParallelRouterTrialFiredThisProcess = false;
  * resetting outside a test process where many independent test cases share
  * one imported module instance.
  */
-// fallow-ignore-next-line unused-export
 export function __resetDeParallelRouterTrialStateForTests(): void {
   deParallelRouterTrialManagedByUs = false;
   deParallelRouterTrialFiredThisProcess = false;
