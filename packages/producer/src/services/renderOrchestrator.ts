@@ -1270,15 +1270,54 @@ export function envInt(name: string, fallback: number): number {
  * literal closing marker (`</`, a void name at a word boundary, or `/>`), so
  * ordinary JS comparisons and divisions don't qualify — verified by test.
  *
- * These semantics are FROZEN while the short-band baseline is being read —
- * the fleet distribution recorded by the baseline release must be measured
- * by the same counter that later gates routing, or the baseline is invalid.
+ * FALLBACK ONLY as of the live-DOM fix below — a string scan of the SOURCE
+ * markup cannot see elements a composition's own script creates at runtime
+ * (`document.createElement`), which is an unbounded undercount no regex can
+ * close: `style-10-prod`'s per-transcript-word caption generator measures 2
+ * source tags against thousands of live nodes after init (review finding).
+ * `resolveCompositionElementCount` prefers the initialized probe session's
+ * live count and uses this only when no such session exists.
  */
 export function countElementTags(html: string): number {
   const matches = html.match(
     /<\/[a-zA-Z]|<(?:img|br|hr|input|source|track|area|base|col|embed|link|meta|param|wbr)\b|<[a-zA-Z][-a-zA-Z0-9]*\b[^>]*\/>/gi,
   );
   return matches === null ? 0 : matches.length;
+}
+
+/**
+ * Element count for the short-comp band's gate — prefers the LIVE DOM of the
+ * probe session that's already running for every render at this point in the
+ * pipeline (its Chrome is reused for capture on the common single-worker
+ * path, so this costs one extra CDP round-trip, not a browser launch) over
+ * the static `countElementTags` scan of `compiled.html`. The live count is
+ * the only one that sees runtime-generated DOM — a composition whose script
+ * builds its own elements after load (the caption-word-span pattern above)
+ * is otherwise measured as near-empty regardless of how the static scanner
+ * is tuned, admitting an arbitrarily large live DOM below the routing
+ * ceiling (review finding, R3).
+ *
+ * These semantics are FROZEN while the short-band baseline is being read —
+ * the fleet distribution recorded by the baseline release must be measured
+ * by the same resolver that later gates routing, or the baseline is invalid.
+ */
+export async function resolveCompositionElementCount(
+  probeSession: Pick<CaptureSession, "isInitialized" | "page"> | null,
+  html: string,
+): Promise<number> {
+  if (probeSession?.isInitialized) {
+    try {
+      const liveCount = await probeSession.page.evaluate(
+        () => document.querySelectorAll("*").length,
+      );
+      if (typeof liveCount === "number" && Number.isFinite(liveCount)) return liveCount;
+    } catch {
+      // Probe page evaluate can fail (navigation mid-flight, detached frame,
+      // page crash) — fall through to the static scan rather than block the
+      // render on a routing-gate measurement.
+    }
+  }
+  return countElementTags(html);
 }
 
 /**
@@ -2539,7 +2578,10 @@ async function executeRenderPipeline(input: {
     // 900 floor stands, unchanged.
     const deShortBandMinFrames = envInt("HF_DE_SHORT_MIN_FRAMES", 250);
     const deShortBandMaxElements = envInt("HF_DE_SHORT_MAX_ELEMENTS", 2500);
-    const compositionElementCount = countElementTags(compiled.html);
+    const compositionElementCount = await resolveCompositionElementCount(
+      probeSession,
+      compiled.html,
+    );
     // HF_DE_SHORT_MAX_ELEMENTS=0 is the documented kill switch (symmetric
     // with HF_DE_SHORT_MIN_FRAMES=0, which disables via the predicate's own
     // minFrames > 0 guard). Gated explicitly here too — without it, a fired

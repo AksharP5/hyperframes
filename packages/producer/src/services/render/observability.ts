@@ -71,7 +71,11 @@ export interface RenderCaptureObservability {
   /** Worker count the resolver would have used absent the inversion; undefined if it never fired. */
   dePreInversionWorkers?: number;
   /**
-   * Rough element count of the compiled composition (`countElementTags`).
+   * Element count for the short-comp band gate (`resolveCompositionElementCount`):
+   * the LIVE DOM size from the already-running probe session when one is
+   * initialized, falling back to a static scan of the compiled HTML
+   * (`countElementTags`) otherwise. Live is authoritative — a static scan
+   * cannot see elements a composition's own script creates at runtime.
    *
    * Emitted on every render, not just inverted ones — this is the variable the
    * short-comp inversion band is gated on, and the fleet distribution of it is

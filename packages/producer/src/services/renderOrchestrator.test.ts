@@ -37,6 +37,7 @@ import {
   countElementTags,
   envInt,
   mergeWorkerInitObservability,
+  resolveCompositionElementCount,
   resolveDeShortBand,
   shouldPreferParallelDrawElement,
   shouldPreferSingleWorkerDrawElement,
@@ -1893,6 +1894,46 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
 
     it("scales to a large document without a full parse", () => {
       expect(countElementTags("<p>x</p>".repeat(40000))).toBe(40000);
+    });
+  });
+
+  describe("resolveCompositionElementCount", () => {
+    // Review finding (R3): a static scan of SOURCE markup cannot see DOM a
+    // composition's own script creates at runtime (document.createElement) —
+    // an unbounded undercount no regex can close. style-10-prod's real
+    // per-transcript-word caption generator is exactly this shape: 2 source
+    // tags, thousands of live nodes after init. These pin the fix: prefer the
+    // live count from an initialized probe session, static scan only as
+    // fallback.
+    it("uses the live DOM count from an initialized probe session, ignoring the (much smaller) source scan", async () => {
+      const session = { isInitialized: true, page: { evaluate: async () => 40001 } };
+      expect(await resolveCompositionElementCount(session, "<div><span></span></div>")).toBe(40001);
+    });
+
+    it("falls back to the static scan when there is no probe session", async () => {
+      expect(await resolveCompositionElementCount(null, "<div><span></span></div>")).toBe(2);
+    });
+
+    it("falls back to the static scan when the probe session is not yet initialized", async () => {
+      const session = { isInitialized: false, page: { evaluate: async () => 999 } };
+      expect(await resolveCompositionElementCount(session, "<div></div>")).toBe(1);
+    });
+
+    it("falls back to the static scan when page.evaluate throws (detached frame, mid-navigation)", async () => {
+      const session = {
+        isInitialized: true,
+        page: {
+          evaluate: async () => {
+            throw new Error("Execution context was destroyed");
+          },
+        },
+      };
+      expect(await resolveCompositionElementCount(session, "<div><span></span></div>")).toBe(2);
+    });
+
+    it("falls back to the static scan when evaluate resolves a non-finite value", async () => {
+      const session = { isInitialized: true, page: { evaluate: async () => Number.NaN } };
+      expect(await resolveCompositionElementCount(session, "<div></div>")).toBe(1);
     });
   });
 
