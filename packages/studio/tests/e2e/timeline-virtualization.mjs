@@ -7,6 +7,13 @@
  * STUDIO_URL=http://127.0.0.1:5190/#project/timeline-virtualization \
  *   node packages/studio/tests/e2e/timeline-virtualization.mjs
  *
+ * TIMELINE_TIER selects the budget set and the emulation applied. "primary" is
+ * a developer machine and holds the strict budgets. "low-resource" and
+ * "high-dpr" add CPU throttling and a 2x scale factor respectively. "ci" is a
+ * shared runner: no emulation, but the constrained budgets, because a hosted
+ * runner is already slower and noisier than the machine the strict numbers were
+ * recorded on. Throttling it further would measure the throttle, not the build.
+ *
  * TIMELINE_ROW_VIRTUALIZATION selects which build is under test and defaults to
  * "off", the product default. The gate previously only ever ran against a server
  * with row virtualization enabled, so the configuration users actually get was
@@ -34,12 +41,12 @@ if (!STUDIO_URL) {
 }
 if (
   ![1_000, 50_000].includes(ELEMENT_COUNT) ||
-  !["primary", "low-resource", "high-dpr"].includes(TIER) ||
+  !["primary", "low-resource", "high-dpr", "ci"].includes(TIER) ||
   !["off", "on"].includes(ROW_VIRTUALIZATION)
 ) {
   console.error(
     "TIMELINE_ELEMENT_COUNT must be 1000 or 50000; " +
-      "TIMELINE_TIER must be primary, low-resource, or high-dpr; " +
+      "TIMELINE_TIER must be primary, low-resource, high-dpr, or ci; " +
       "TIMELINE_ROW_VIRTUALIZATION must be off or on",
   );
   process.exit(2);

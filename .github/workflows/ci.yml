@@ -36,6 +36,7 @@ jobs:
       skills: ${{ steps.filter.outputs.skills }}
       codex_plugin: ${{ steps.filter.outputs.codex_plugin }}
       gcp_beginframe: ${{ steps.filter.outputs.gcp_beginframe }}
+      studio: ${{ steps.filter.outputs.studio }}
     steps:
       # Force git-based change detection instead of the pull_request REST API.
       # The API path can fail the whole workflow on transient listFiles
@@ -76,6 +77,12 @@ jobs:
               - "skills/**"
               - "scripts/package-codex-plugin.mjs"
               - "package.json"
+              - ".github/workflows/ci.yml"
+            studio:
+              - "packages/studio/**"
+              - "packages/core/**"
+              - "packages/studio-server/**"
+              - "bun.lock"
               - ".github/workflows/ci.yml"
             gcp_beginframe:
               - "packages/gcp-cloud-run/Dockerfile"
@@ -495,6 +502,81 @@ jobs:
           node scripts/studio-runtime-smoke.mjs http://localhost:5199/#project=smoke-test
 
           kill $SERVER_PID 2>/dev/null || true
+
+  studio-timeline-viewport:
+    name: "Studio: timeline viewport gate"
+    needs: [changes]
+    if: needs.changes.outputs.studio == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      # Same reason as studio-load-smoke: vite.config.ts is loaded by Node and
+      # resolves the workspace packages through their "node" export condition.
+      - run: bun run --filter '@hyperframes/{parsers,lint,studio-server}' build
+      - run: bun run --cwd packages/core build
+      - run: bun run --cwd packages/core build:hyperframes-runtime
+      - name: Install the fixture as a Studio project
+        # Studio resolves projects from packages/studio/data/projects, which is
+        # gitignored. The fixture composition is tracked under tests/e2e, so
+        # copy it into place rather than committing a project directory.
+        run: |
+          mkdir -p packages/studio/data/projects
+          cp -R packages/studio/tests/e2e/fixtures/timeline-virtualization \
+            packages/studio/data/projects/timeline-virtualization
+      - name: Run both arms of the timeline viewport gate
+        run: |
+          set -euo pipefail
+
+          # Two servers, because row virtualization is read from import.meta.env
+          # at module load: one process cannot serve both builds.
+          bun run --cwd packages/studio dev -- --port 5313 --strictPort &
+          DEFAULT_PID=$!
+          VITE_STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED=1 \
+            bun run --cwd packages/studio dev -- --port 5314 --strictPort &
+          VIRTUALIZED_PID=$!
+          trap 'kill $DEFAULT_PID $VIRTUALIZED_PID 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5313/ >/dev/null 2>&1 \
+              && curl -sf http://localhost:5314/ >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          if ! curl -sf http://localhost:5313/ >/dev/null 2>&1 \
+            || ! curl -sf http://localhost:5314/ >/dev/null 2>&1; then
+            echo "FAIL: studio dev servers did not start"
+            exit 1
+          fi
+
+          # The default build first. It is the one users get, and the arm that
+          # caught the regression this gate exists for.
+          STUDIO_URL="http://localhost:5313/#project/timeline-virtualization" \
+            TIMELINE_ROW_VIRTUALIZATION=off \
+            TIMELINE_ELEMENT_COUNT=1000 \
+            TIMELINE_TIER=ci \
+            node packages/studio/tests/e2e/timeline-virtualization.mjs \
+            | tee /tmp/timeline-gate-default.json
+
+          STUDIO_URL="http://localhost:5314/#project/timeline-virtualization" \
+            TIMELINE_ROW_VIRTUALIZATION=on \
+            TIMELINE_ELEMENT_COUNT=50000 \
+            TIMELINE_TIER=ci \
+            node packages/studio/tests/e2e/timeline-virtualization.mjs \
+            | tee /tmp/timeline-gate-virtualized.json
+      - name: Upload gate evidence
+        # The gate's whole output is machine-readable evidence, and a red run is
+        # exactly when someone needs to read it. Keep it on failure too.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: timeline-viewport-gate-evidence
+          path: /tmp/timeline-gate-*.json
+          if-no-files-found: warn
 
   smoke-global-install:
     name: "Smoke: global install"
