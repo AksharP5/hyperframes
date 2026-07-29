@@ -35,214 +35,204 @@ Start with the symptom you can see. Keep the exact error and note whether the pr
 
 ## Studio problems
 
-<AccordionGroup>
-  <Accordion title="Studio does not open">
-    Run `npx hyperframes preview` from the project folder and keep that terminal running.
+### Studio does not open
 
-    If it still fails:
+Run `npx hyperframes preview` from the project folder and keep that terminal running.
 
-    1. read the terminal error;
-    2. run `npx hyperframes doctor`;
-    3. try another port with `npx hyperframes preview --port 4567`;
-    4. restart the preview process.
-  </Accordion>
+If it still fails:
 
-  <Accordion title="The preview is not updating">
-    Confirm that you are editing a file inside the open project. Save the file, wait for refresh, and inspect the preview terminal for errors.
+1. read the terminal error;
+2. run `npx hyperframes doctor`;
+3. try another port with `npx hyperframes preview --port 4567`;
+4. restart the preview process.
 
-    If needed, reload Studio or restart `npx hyperframes preview`.
-  </Accordion>
+### The preview is not updating
 
-  <Accordion title="I cannot select or edit an element">
-    Pause on a frame where the element is visible, then select it from Layers.
+Confirm that you are editing a file inside the open project. Save the file, wait for refresh, and inspect the preview terminal for errors.
 
-    The element may belong to a group or nested composition, sit outside the frame, or use source that Studio cannot edit safely. Open the nested composition, use the inspector, or copy context to your agent.
-  </Accordion>
+If needed, reload Studio or restart `npx hyperframes preview`.
 
-  <Accordion title="A move became animation">
-    Auto-keyframing was probably enabled. Undo the edit, turn off the auto-keyframe control, and apply the layout change again.
-  </Accordion>
+### I cannot select or edit an element
 
-  <Accordion title="A timeline edit landed at the wrong time">
-    Undo, zoom in, and place the playhead more precisely. Check whether snapping moved the boundary to a nearby clip or beat.
-  </Accordion>
-</AccordionGroup>
+Pause on a frame where the element is visible, then select it from Layers.
+
+The element may belong to a group or nested composition, sit outside the frame, or use source that Studio cannot edit safely. Open the nested composition, use the inspector, or copy context to your agent.
+
+### A move became animation
+
+Auto-keyframing was probably enabled. Undo the edit, turn off the auto-keyframe control, and apply the layout change again.
+
+### A timeline edit landed at the wrong time
+
+Undo, zoom in, and place the playhead more precisely. Check whether snapping moved the boundary to a nearby clip or beat.
 
 Continue to [Studio troubleshooting](/studio/troubleshooting) for selection, editing, timeline, and save recovery.
 
 ## Project and environment problems
 
-<AccordionGroup>
-  <Accordion title='"No composition found"'>
-    The project needs an `index.html` containing a valid composition root with `data-composition-id`, width, and height.
+### "No composition found"
 
-    Create a new project:
+The project needs an `index.html` containing a valid composition root with `data-composition-id`, width, and height.
 
-    ```bash
-    npx hyperframes init my-video
-    ```
+Create a new project:
 
-    Or compare the current source with [Compositions](/concepts/compositions).
-  </Accordion>
+```bash
+npx hyperframes init my-video
+```
 
-  <Accordion title='"FFmpeg not found"'>
-    FFmpeg is required for local video encoding.
+Or compare the current source with [Compositions](/concepts/compositions).
 
-    <CodeGroup>
-    ```bash macOS
-    brew install ffmpeg
-    ```
+### "FFmpeg not found"
 
-    ```bash Ubuntu or Debian
-    sudo apt install ffmpeg
-    ```
+FFmpeg is required for local video encoding.
 
-    ```powershell Windows
-    winget install ffmpeg
-    ```
-    </CodeGroup>
+<CodeGroup>
+```bash macOS
+brew install ffmpeg
+```
 
-    Verify with `ffmpeg -version`, then rerun `npx hyperframes doctor`.
-  </Accordion>
+```bash Ubuntu or Debian
+sudo apt install ffmpeg
+```
 
-  <Accordion title="Docker render will not start">
-    Run `docker info`.
+```powershell Windows
+winget install ffmpeg
+```
+</CodeGroup>
 
-    Confirm Docker is installed, its daemon is running, your user has permission, and the first image download can reach the registry.
-  </Accordion>
-</AccordionGroup>
+Verify with `ffmpeg -version`, then rerun `npx hyperframes doctor`.
+
+### Docker render will not start
+
+Run `docker info`.
+
+Confirm Docker is installed, its daemon is running, your user has permission, and the first image download can reach the registry.
 
 ## Media problems
 
-<AccordionGroup>
-  <Accordion title="Video is black in preview but renders">
-    The browser may not decode the source codec even though FFmpeg can.
+### Video is black in preview but renders
 
-    HyperFrames normally creates and uses a compatible preview proxy. If the frame remains black:
+The browser may not decode the source codec even though FFmpeg can.
 
-    1. confirm automatic proxying is not disabled;
-    2. run `npx hyperframes doctor`;
-    3. run `npx hyperframes lint --verbose` to identify affected files;
-    4. confirm the source file exists and can be read.
-  </Accordion>
+HyperFrames normally creates and uses a compatible preview proxy. If the frame remains black:
 
-  <Accordion title="Video, image, or audio is missing">
-    Prefer a local project asset. Confirm its path, filename capitalization, and whether it was moved or renamed.
+1. confirm automatic proxying is not disabled;
+2. run `npx hyperframes doctor`;
+3. run `npx hyperframes lint --verbose` to identify affected files;
+4. confirm the source file exists and can be read.
 
-    Remote media can fail because of permissions, expiring URLs, or cross-origin restrictions.
-  </Accordion>
+### Video, image, or audio is missing
 
-  <Accordion title="Preview stutters">
-    Common causes:
+Prefer a local project asset. Confirm its path, filename capitalization, and whether it was moved or renamed.
 
-    - very large source images;
-    - several large `backdrop-filter` blurs;
-    - expensive shadows or filters on animated elements;
-    - too many large overlapping layers.
+Remote media can fail because of permissions, expiring URLs, or cross-origin restrictions.
 
-    Check whether the slowdown occurs in one scene. Resize oversized media and simplify the expensive element before reducing the whole project’s quality.
-  </Accordion>
-</AccordionGroup>
+### Preview stutters
+
+Common causes:
+
+- very large source images;
+- several large `backdrop-filter` blurs;
+- expensive shadows or filters on animated elements;
+- too many large overlapping layers.
+
+Check whether the slowdown occurs in one scene. Resize oversized media and simplify the expensive element before reducing the whole project’s quality.
 
 ## Animation and composition mistakes
 
 These problems often appear in agent-written or manually edited source.
 
-<AccordionGroup>
-  <Accordion title="A video freezes while its box animates">
-    Do not animate `width`, `height`, `top`, or `left` directly on a `<video>` element.
+### A video freezes while its box animates
 
-    Put the video inside a wrapper and animate the wrapper:
+Do not animate `width`, `height`, `top`, or `left` directly on a `<video>` element.
 
-    ```html
-    <div id="video-wrapper">
-      <video src="./assets/video.mp4" style="width:100%;height:100%"></video>
-    </div>
-    ```
+Put the video inside a wrapper and animate the wrapper:
 
-    ```javascript
-    tl.to("#video-wrapper", { width: 500, height: 280, x: 1200 }, 2);
-    ```
-  </Accordion>
+```html
+<div id="video-wrapper">
+  <video src="./assets/video.mp4" style="width:100%;height:100%"></video>
+</div>
+```
 
-  <Accordion title="Media plays out of sync">
-    Do not call `play()`, `pause()`, or set `currentTime` from composition scripts.
+```javascript
+tl.to("#video-wrapper", { width: 500, height: 280, x: 1200 }, 2);
+```
 
-    HyperFrames owns media playback. Use timing and media attributes to describe when the file should play.
-  </Accordion>
+### Media plays out of sync
 
-  <Accordion title="The composition ends too early">
-    Check the resolved composition duration:
+Do not call `play()`, `pause()`, or set `currentTime` from composition scripts.
 
-    ```bash
-    npx hyperframes compositions
-    ```
+HyperFrames owns media playback. Use timing and media attributes to describe when the file should play.
 
-    A short animation timeline can make a project end before the underlying media. Extend the authored root duration or timeline using the correct pattern for that composition.
-  </Accordion>
+### The composition ends too early
 
-  <Accordion title="A timed element is always visible">
-    Timed visible elements need `class="clip"` as well as their timing attributes.
+Check the resolved composition duration:
 
-    ```html
-    <h1 class="clip" data-start="2" data-duration="5" data-track-index="0">
-      Hello
-    </h1>
-    ```
+```bash
+npx hyperframes compositions
+```
 
-    `npx hyperframes lint` normally catches this.
-  </Accordion>
+A short animation timeline can make a project end before the underlying media. Extend the authored root duration or timeline using the correct pattern for that composition.
 
-  <Accordion title="Animation is static">
-    Check that the animation is paused and registered using the exact composition ID.
+### A timed element is always visible
 
-    ```javascript
-    const timeline = gsap.timeline({ paused: true });
-    window.__timelines = window.__timelines || {};
-    window.__timelines["my-video"] = timeline;
-    ```
+Timed visible elements need `class="clip"` as well as their timing attributes.
 
-    `my-video` must match `data-composition-id="my-video"`.
-  </Accordion>
+```html
+<h1 class="clip" data-start="2" data-duration="5" data-track-index="0">
+  Hello
+</h1>
+```
 
-  <Accordion title="Changing root duration from a variable does nothing">
-    The root render length is determined before composition scripts run. Author or generate the intended root `data-duration` directly.
+`npx hyperframes lint` normally catches this.
 
-    Clip durations can still vary. See [Variables](/concepts/variables) for what may be changed safely.
-  </Accordion>
-</AccordionGroup>
+### Animation is static
+
+Check that the animation is paused and registered using the exact composition ID.
+
+```javascript
+const timeline = gsap.timeline({ paused: true });
+window.__timelines = window.__timelines || {};
+window.__timelines["my-video"] = timeline;
+```
+
+`my-video` must match `data-composition-id="my-video"`.
+
+### Changing root duration from a variable does nothing
+
+The root render length is determined before composition scripts run. Author or generate the intended root `data-duration` directly.
+
+Clip durations can still vary. See [Variables](/concepts/variables) for what may be changed safely.
 
 ## Render problems
 
-<AccordionGroup>
-  <Accordion title="The render looks different from preview">
-    Check fonts, remote media, browser-specific effects, and the actual exported file.
+### The render looks different from preview
 
-    Use Docker when you need a pinned rendering environment:
+Check fonts, remote media, browser-specific effects, and the actual exported file.
 
-    ```bash
-    npx hyperframes render --docker --output output.mp4
-    ```
-  </Accordion>
+Use Docker when you need a pinned rendering environment:
 
-  <Accordion title="The render is slow">
-    During iteration:
+```bash
+npx hyperframes render --docker --output output.mp4
+```
 
-    - use draft quality;
-    - render a shorter range or inspect snapshots;
-    - resize large source media;
-    - simplify expensive filters;
-    - avoid increasing resolution or frame rate before needed.
+### The render is slow
 
-    Run `npx hyperframes benchmark` when tuning worker settings.
-  </Accordion>
+During iteration:
 
-  <Accordion title="Expected HDR but received SDR">
-    HDR needs a supported output and correct source color metadata. MP4 is the normal HDR output path; WebM and MOV may fall back to SDR.
+- use draft quality;
+- render a shorter range or inspect snapshots;
+- resize large source media;
+- simplify expensive filters;
+- avoid increasing resolution or frame rate before needed.
 
-    Use `--hdr` only when the whole source and delivery workflow is intended for HDR. Read [HDR rendering](/guides/hdr) before delivery.
-  </Accordion>
-</AccordionGroup>
+Run `npx hyperframes benchmark` when tuning worker settings.
+
+### Expected HDR but received SDR
+
+HDR needs a supported output and correct source color metadata. MP4 is the normal HDR output path; WebM and MOV may fall back to SDR.
+
+Use `--hdr` only when the whole source and delivery workflow is intended for HDR. Read [HDR rendering](/guides/hdr) before delivery.
 
 ## Still stuck?
 

@@ -78,20 +78,20 @@ Add `+ N` or `- N` after the ID to offset from the end of the referenced clip:
   Overlapping clips must be on different tracks -- clips on the same track cannot overlap in time.
 </Note>
 
-<Accordion title="Relative timing rules and constraints">
-  **Same composition only** -- references resolve within the clip's parent [composition](/concepts/compositions). You cannot reference a clip in a sibling or parent composition.
+### Relative timing rules and constraints
 
-  **No circular references** -- A cannot start after B if B starts after A. The resolver detects cycles and throws an error.
+**Same composition only** -- references resolve within the clip's parent [composition](/concepts/compositions). You cannot reference a clip in a sibling or parent composition.
 
-  **Referenced clip must have a known duration** -- either an explicit `data-duration` or a duration inferred from source media. If the referenced clip has no known duration, the reference cannot resolve.
+**No circular references** -- A cannot start after B if B starts after A. The resolver detects cycles and throws an error.
 
-  **Parsing rules** -- if the value is a valid number, it is treated as absolute seconds. Otherwise it is parsed as one of:
-  - `<id>` -- start when that clip ends
-  - `<id> + <number>` -- start N seconds after that clip ends
-  - `<id> - <number>` -- start N seconds before that clip ends
+**Referenced clip must have a known duration** -- either an explicit `data-duration` or a duration inferred from source media. If the referenced clip has no known duration, the reference cannot resolve.
 
-  **Chain length** -- references can chain (`A` -> `B` -> `C`), but deeply nested chains make the timeline harder to reason about. Keep chains under 3-4 levels for readability.
-</Accordion>
+**Parsing rules** -- if the value is a valid number, it is treated as absolute seconds. Otherwise it is parsed as one of:
+- `<id>` -- start when that clip ends
+- `<id> + <number>` -- start N seconds after that clip ends
+- `<id> - <number>` -- start N seconds before that clip ends
+
+**Chain length** -- references can chain (`A` -> `B` -> `C`), but deeply nested chains make the timeline harder to reason about. Keep chains under 3-4 levels for readability.
 
 ## Next Steps
 

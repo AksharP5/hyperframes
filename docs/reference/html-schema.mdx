@@ -69,99 +69,97 @@ Common sizes:
 
 ## Clip Types
 
-<AccordionGroup>
-  <Accordion title="Video Clips">
-    Video clips embed `<video>` elements with timing and playback attributes.
+### Video Clips
 
-    ```html
-    <video
-      id="el-1"
-      data-start="0"
-      data-duration="15"
-      data-track-index="0"
-      data-media-start="0"
-      src="./assets/video.mp4"
-    ></video>
-    ```
+Video clips embed `<video>` elements with timing and playback attributes.
 
-    **Key behavior:**
-    - `data-duration` is **optional** — defaults to the remaining duration of the source file from `data-media-start`
-    - If source media runs out before `data-duration`, the clip shows the last frame (freeze frame)
-    - `data-media-start` trims the beginning of the source video — `data-media-start="5"` starts playback 5 seconds into the source file
-    - `data-volume` controls the audio volume of the video — set to `"0"` for silent video
-    - Do **not** add `class="clip"` to video elements — the framework manages their visibility directly
+```html
+<video
+  id="el-1"
+  data-start="0"
+  data-duration="15"
+  data-track-index="0"
+  data-media-start="0"
+  src="./assets/video.mp4"
+></video>
+```
 
-    <Warning>
-      Do not animate `width`, `height`, `top`, or `left` directly on `<video>` elements with GSAP. This can cause Chrome to stop rendering video frames. Wrap the video in a `<div>` and animate the wrapper instead. See [Troubleshooting](/guides/troubleshooting).
-    </Warning>
-  </Accordion>
+**Key behavior:**
+- `data-duration` is **optional** — defaults to the remaining duration of the source file from `data-media-start`
+- If source media runs out before `data-duration`, the clip shows the last frame (freeze frame)
+- `data-media-start` trims the beginning of the source video — `data-media-start="5"` starts playback 5 seconds into the source file
+- `data-volume` controls the audio volume of the video — set to `"0"` for silent video
+- Do **not** add `class="clip"` to video elements — the framework manages their visibility directly
 
-  <Accordion title="Image Clips">
-    Image clips display static images with controlled timing.
+<Warning>
+  Do not animate `width`, `height`, `top`, or `left` directly on `<video>` elements with GSAP. This can cause Chrome to stop rendering video frames. Wrap the video in a `<div>` and animate the wrapper instead. See [Troubleshooting](/guides/troubleshooting).
+</Warning>
 
-    ```html
-    <img
-      id="el-2"
-      class="clip"
-      data-start="5"
-      data-duration="4"
-      data-track-index="1"
-      src="./assets/overlay.png"
-    />
-    ```
+### Image Clips
 
-    **Key behavior:**
-    - `data-duration` is **required** for images (unlike video/audio, there is no source duration to default to)
-    - `class="clip"` is **required** — this enables the runtime to show/hide the image based on timing
-    - Supported formats: PNG, JPG, WebP, SVG, GIF. Animated GIFs are prepared as timeline-synced video for preview and render; `data-loop` can override GIF loop metadata.
-    - Position and size with CSS — the image renders at its natural size unless styled otherwise
-  </Accordion>
+Image clips display static images with controlled timing.
 
-  <Accordion title="Audio Clips">
-    Audio clips add sound to the composition without any visual element.
+```html
+<img
+  id="el-2"
+  class="clip"
+  data-start="5"
+  data-duration="4"
+  data-track-index="1"
+  src="./assets/overlay.png"
+/>
+```
 
-    ```html
-    <audio
-      id="el-4"
-      data-start="0"
-      data-duration="30"
-      data-track-index="2"
-      src="./assets/music.mp3"
-    ></audio>
-    ```
+**Key behavior:**
+- `data-duration` is **required** for images (unlike video/audio, there is no source duration to default to)
+- `class="clip"` is **required** — this enables the runtime to show/hide the image based on timing
+- Supported formats: PNG, JPG, WebP, SVG, GIF. Animated GIFs are prepared as timeline-synced video for preview and render; `data-loop` can override GIF loop metadata.
+- Position and size with CSS — the image renders at its natural size unless styled otherwise
 
-    **Key behavior:**
-    - `data-duration` is **optional** — defaults to the remaining duration of the source file from `data-media-start`
-    - Audio clips are invisible — do not add `class="clip"` (there is nothing to show/hide)
-    - `data-volume` controls volume — use `"0.5"` for background music at 50% volume
-    - `data-media-start` trims the beginning of the audio source, just like video
-    - Multiple audio clips can overlap on different tracks for layered sound design
-  </Accordion>
+### Audio Clips
 
-  <Accordion title="Composition Clips (Nested)">
-    Composition clips embed one composition inside another, enabling modular, reusable video building blocks.
+Audio clips add sound to the composition without any visual element.
 
-    ```html
-    <div
-      id="el-5"
-      data-composition-id="intro-anim"
-      data-composition-src="compositions/intro-anim.html"
-      data-start="0"
-      data-track-index="3"
-    ></div>
-    ```
+```html
+<audio
+  id="el-4"
+  data-start="0"
+  data-duration="30"
+  data-track-index="2"
+  src="./assets/music.mp3"
+></audio>
+```
 
-    **Key behavior:**
-    - Compositions do **not** use `data-duration` — duration is determined by the composition's GSAP timeline (`tl.duration()`)
-    - External compositions are loaded from `data-composition-src` and wrapped in `<template>` tags
-    - Each nested composition has its own `window.__timelines` entry, registered by its own `<script>` block
-    - The framework automatically nests sub-timelines — do not manually add them to the parent timeline
-    - Any composition can be nested inside any other — there is no special "root" type
-    - Per-instance values can be passed with `data-variable-values`; sub-composition scripts read them via `getVariables()`, and `data-var-*` bindings / `var(--id)` CSS resolve them automatically
+**Key behavior:**
+- `data-duration` is **optional** — defaults to the remaining duration of the source file from `data-media-start`
+- Audio clips are invisible — do not add `class="clip"` (there is nothing to show/hide)
+- `data-volume` controls volume — use `"0.5"` for background music at 50% volume
+- `data-media-start` trims the beginning of the audio source, just like video
+- Multiple audio clips can overlap on different tracks for layered sound design
 
-    For more on how compositions work, see [Compositions](/concepts/compositions).
-  </Accordion>
-</AccordionGroup>
+### Composition Clips (Nested)
+
+Composition clips embed one composition inside another, enabling modular, reusable video building blocks.
+
+```html
+<div
+  id="el-5"
+  data-composition-id="intro-anim"
+  data-composition-src="compositions/intro-anim.html"
+  data-start="0"
+  data-track-index="3"
+></div>
+```
+
+**Key behavior:**
+- Compositions do **not** use `data-duration` — duration is determined by the composition's GSAP timeline (`tl.duration()`)
+- External compositions are loaded from `data-composition-src` and wrapped in `<template>` tags
+- Each nested composition has its own `window.__timelines` entry, registered by its own `<script>` block
+- The framework automatically nests sub-timelines — do not manually add them to the parent timeline
+- Any composition can be nested inside any other — there is no special "root" type
+- Per-instance values can be passed with `data-variable-values`; sub-composition scripts read them via `getVariables()`, and `data-var-*` bindings / `var(--id)` CSS resolve them automatically
+
+For more on how compositions work, see [Compositions](/concepts/compositions).
 
 ## Media Treatments
 
