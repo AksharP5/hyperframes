@@ -206,6 +206,7 @@ New navigation should be task-shaped:
 - Corrected Aspen's stale 96px sticky-sidebar offset to the actual 56px header height and removed its early scroll-fade mask.
 - Restored the GitHub star count while keeping the repository name hidden, and normalized Aspen's darker surface borders to main's quieter border color.
 - Verified that the documentation font did not change: both main and the refactor use the same TT Norms Pro files and the same body and heading typography.
+- Explicitly forced Mintlify's live GitHub star span to remain visible and gave the floating agent input a distinct surface, stronger border, and restrained shadow.
 
 ## Maintenance issue
 

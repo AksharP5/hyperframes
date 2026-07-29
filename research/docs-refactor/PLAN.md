@@ -43,6 +43,7 @@ Global header:
 - Keep every left-sidebar group open and non-collapsible. Match the deployed main docs' spacing, group-heading scale, square link treatment, and segmented active-page rail.
 - Keep Mintlify’s default right-side **On this page** behavior and styling.
 - Align Aspen's sticky sidebar to the actual 56px header, remove its premature scroll fade, keep the GitHub star count, and use main's quieter structural border color.
+- Keep the floating agent input easy to notice without making it visually dominant.
 
 Navigation behavior:
 

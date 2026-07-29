@@ -60,6 +60,7 @@
   --hf-ui-border: #eeeeee;
   --hf-sidebar-rail: #eeeeee;
   --hf-sidebar-text: #707070;
+  --hf-floating-input-shadow: 0 8px 28px rgba(10, 10, 10, 0.08), 0 1px 4px rgba(10, 10, 10, 0.08);
   --mintlify-slot-header-height: 3.5rem;
 
   --hf-accent-green: #1a7a0a;
@@ -92,6 +93,7 @@
   --hf-ui-border: #2a2a2a;
   --hf-sidebar-rail: #2a2a2a;
   --hf-sidebar-text: #a0a0a0;
+  --hf-floating-input-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.4);
 
   --hf-accent-green: #22c55e;
   --hf-accent-green-light: rgba(34, 197, 94, 0.1);
@@ -225,6 +227,12 @@ a:not([class]):hover {
   #navbar a[title="heygen-com/hyperframes"] > span.truncate {
     display: none;
   }
+
+  #navbar a[title="heygen-com/hyperframes"] > span:not(.truncate) {
+    display: flex !important;
+    color: var(--hf-heading);
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 /* Preserve a useful search field on smaller desktop widths. */
@@ -238,6 +246,13 @@ a:not([class]):hover {
 #body-content [class*="border-gray-200"],
 #body-content [class*="border-gray-100"] {
   border-color: var(--hf-ui-border) !important;
+}
+
+/* Keep the floating agent input noticeable against the page background. */
+#body-content .chat-assistant-floating-input > div > div {
+  border-color: var(--hf-border-color-light) !important;
+  background-color: var(--hf-background-light) !important;
+  box-shadow: var(--hf-floating-input-shadow);
 }
 
 /*
