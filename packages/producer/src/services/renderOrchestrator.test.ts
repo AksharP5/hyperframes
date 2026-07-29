@@ -34,6 +34,8 @@ import {
   resolveParallelRouterRetryPlan,
   resetCaptureAttemptProgress,
   shouldRetryViaPinnedFallback,
+  countElementTags,
+  envInt,
   shouldPreferParallelDrawElement,
   shouldPreferSingleWorkerDrawElement,
   shouldStreamParallelCapture,
@@ -1691,6 +1693,108 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
 
   it("inverts an auto-resolved multi-worker render for an eligible long comp", () => {
     expect(shouldPreferSingleWorkerDrawElement(eligible)).toBe(true);
+  });
+
+  // ── Short-comp band ────────────────────────────────────────────────────
+  // The band lowers the effective floor from 900 to 250 for SMALL comps only.
+  // The predicate itself is unchanged — the call site picks the floor — so
+  // these pin the arithmetic the call site performs.
+  //
+  // Measured basis (400f, single-DE vs parallel-screenshot-W4, 2 reps, ratio
+  // = ss4/de1 so >1 means DE wins):
+  //   24 movers /     0 nodes -> 1.05   DE wins
+  //  320 movers /     0 nodes -> 1.24   DE wins
+  //  320 movers /  7000 nodes -> 1.09   DE wins
+  //   24 movers /  7000 nodes -> 0.96   DE LOSES
+  //   24 movers / 20000 nodes -> 0.71   DE loses badly
+  //   24 movers / 40000 nodes -> 0.55   DE loses very badly
+  // Motion helps DE, DOM size punishes it; the ceiling is calibrated at the
+  // lowest-motion case so every higher-motion comp is covered too.
+  describe("short-comp band floor arithmetic", () => {
+    const shortBandFloor = (elementCount: number, maxElements = 2500): number =>
+      elementCount <= maxElements ? Math.min(900, 250) : 900;
+
+    it("opens the 250-frame floor for a small comp", () => {
+      expect(shortBandFloor(800)).toBe(250);
+      expect(
+        shouldPreferSingleWorkerDrawElement({
+          ...eligible,
+          totalFrames: 400,
+          minFrames: shortBandFloor(800),
+        }),
+      ).toBe(true);
+    });
+
+    it("keeps the 900-frame floor for a large comp — the measured 1.8x regression case", () => {
+      expect(shortBandFloor(40000)).toBe(900);
+      expect(
+        shouldPreferSingleWorkerDrawElement({
+          ...eligible,
+          totalFrames: 400,
+          minFrames: shortBandFloor(40000),
+        }),
+      ).toBe(false);
+    });
+
+    it("never RAISES the floor: a large comp at 900+ frames still inverts as it did before", () => {
+      expect(
+        shouldPreferSingleWorkerDrawElement({
+          ...eligible,
+          totalFrames: 2380,
+          minFrames: shortBandFloor(40000),
+        }),
+      ).toBe(true);
+    });
+
+    it("leaves comps below the band floor alone", () => {
+      expect(
+        shouldPreferSingleWorkerDrawElement({
+          ...eligible,
+          totalFrames: 200,
+          minFrames: shortBandFloor(800),
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("countElementTags", () => {
+    it("counts closing tags", () => {
+      expect(countElementTags("<div><span>a</span></div>")).toBe(2);
+    });
+
+    it("undercounts void elements — biases the count DOWN, so the ceiling must stay conservative", () => {
+      expect(countElementTags("<img><br><hr>")).toBe(0);
+    });
+
+    it("is stable on empty and malformed input rather than throwing", () => {
+      expect(countElementTags("")).toBe(0);
+      expect(countElementTags("<<<>>>")).toBe(0);
+    });
+
+    it("scales to a large document without a full parse", () => {
+      expect(countElementTags("<p>x</p>".repeat(40000))).toBe(40000);
+    });
+  });
+
+  describe("envInt", () => {
+    afterEach(() => {
+      delete process.env.HF_TEST_ENV_INT;
+    });
+
+    it("falls back when unset, empty, or non-numeric — a typo must not disable a guard", () => {
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(2500);
+      process.env.HF_TEST_ENV_INT = "";
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(2500);
+      process.env.HF_TEST_ENV_INT = "lots";
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(2500);
+    });
+
+    it("reads an explicit value, including 0 as a real disable", () => {
+      process.env.HF_TEST_ENV_INT = "700";
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(700);
+      process.env.HF_TEST_ENV_INT = "0";
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(0);
+    });
   });
 
   it("honors explicitly requested workers", () => {

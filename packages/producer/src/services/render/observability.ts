@@ -70,6 +70,26 @@ export interface RenderCaptureObservability {
   deWorkerInversion?: "inverted" | "reverted";
   /** Worker count the resolver would have used absent the inversion; undefined if it never fired. */
   dePreInversionWorkers?: number;
+  /**
+   * Rough element count of the compiled composition (`countElementTags`).
+   *
+   * Emitted on every render, not just inverted ones — this is the variable the
+   * short-comp inversion band is gated on, and the fleet distribution of it is
+   * unknown. Without it there is no way to tell whether the 2500 ceiling opens
+   * the band for most short comps or almost none, and no way to re-derive the
+   * threshold from real content instead of synthetic sweeps.
+   */
+  compositionElementCount?: number;
+  /**
+   * Why the short-comp band did or did not apply to this render:
+   * "applied" (frames landed in 250-899 and the element count cleared the
+   * ceiling), "skipped_elements" (band was open by frame count but the comp
+   * was too large), or undefined when the frame count made the band
+   * irrelevant either way. Distinguishes "the new routing chose this" from
+   * "the pre-existing 900 floor chose this" — otherwise a fleet perf shift is
+   * unattributable.
+   */
+  deShortBand?: "applied" | "skipped_elements";
   /** DE parallel-router outcome: "routed" (fired, held) | "reverted" (fired, self-verify retry rolled back). */
   deParallelRouter?: "routed" | "reverted";
   /**
