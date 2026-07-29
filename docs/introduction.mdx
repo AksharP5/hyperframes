@@ -4,9 +4,7 @@ sidebarTitle: "What HyperFrames is"
 description: "Tell an AI agent what you want. It builds a real, editable video project — you refine it in Studio and export the film."
 ---
 
-Start from an idea, a website, a script, a recording, a pull request, or a song. The agent does the first build. You keep control of the result.
-
-<Frame caption="One prompt → ~30 seconds of finished video. Made with HyperFrames. Press play — it has sound.">
+<Frame caption="Made with HyperFrames, from a single request. Press play — it has sound.">
   <video
     className="aspect-video w-full object-cover bg-zinc-100 dark:bg-zinc-900"
     src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/hyperframes-launch-preview.mp4"
@@ -17,24 +15,19 @@ Start from an idea, a website, a script, a recording, a pull request, or a song.
   />
 </Frame>
 
-## From request to video
+Start from an idea, a website, a script, a recording, a pull request, or a song. The agent does the first build. You keep control of the result.
 
-```mermaid
-flowchart LR
-    A["Your request"] --> B["AI agent"]
-    B --> C["HyperFrames project"]
-    C --> D["Video"]
-```
+## From request to video
 
 <Steps>
   <Step title="Describe it">
-    Tell the agent what you want the viewer to understand, feel, or do — and attach a source if you have one.
+    Tell the agent what the viewer should understand, feel, or do — and attach a source if you have one.
   </Step>
   <Step title="Approve the direction">
-    The agent confirms the important creative choices before it spends time building.
+    The agent confirms the creative choices before it spends time building.
   </Step>
   <Step title="Refine it in Studio">
-    The first version opens in HyperFrames Studio — not a flattened export, but a real project whose scenes, timing, text, media, and animation stay editable. Change what you can point at, or ask the agent for a broader revision.
+    The first version opens as a real project, not a flattened export. Scenes, timing, text, media, and animation all stay editable — change what you can point at, or ask the agent for a broader revision.
   </Step>
   <Step title="Export">
     Render a standard video, a transparent overlay, a high-resolution file — or keep it as a navigable presentation.
@@ -43,54 +36,65 @@ flowchart LR
 
 ## What can it make?
 
-<CardGroup cols={2}>
+Every one of these is real HyperFrames output, running in your browser right now:
+
+<div className="grid grid-cols-2 md:grid-cols-4 gap-3 my-6">
+  <a href="/catalog/blocks/data-chart" className="block no-underline">
+    <video className="w-full aspect-video object-cover rounded-lg border border-zinc-200 dark:border-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/data-chart.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/data-chart.png" autoPlay muted loop playsInline />
+    <span className="block mt-2 text-sm text-zinc-500 dark:text-zinc-400">Animated data</span>
+  </a>
+  <a href="/catalog/components/caption-pill-karaoke" className="block no-underline">
+    <video className="w-full aspect-video object-cover rounded-lg border border-zinc-200 dark:border-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/components/caption-pill-karaoke.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/components/caption-pill-karaoke.png" autoPlay muted loop playsInline />
+    <span className="block mt-2 text-sm text-zinc-500 dark:text-zinc-400">Captions on footage</span>
+  </a>
+  <a href="/catalog/blocks/spain-map" className="block no-underline">
+    <video className="w-full aspect-video object-cover rounded-lg border border-zinc-200 dark:border-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/spain-map.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/spain-map.png" autoPlay muted loop playsInline />
+    <span className="block mt-2 text-sm text-zinc-500 dark:text-zinc-400">Maps and locations</span>
+  </a>
+  <a href="/catalog/blocks/logo-outro" className="block no-underline">
+    <video className="w-full aspect-video object-cover rounded-lg border border-zinc-200 dark:border-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/logo-outro.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/logo-outro.png" autoPlay muted loop playsInline />
+    <span className="block mt-2 text-sm text-zinc-500 dark:text-zinc-400">Logo and brand stings</span>
+  </a>
+</div>
+
+Those are individual pieces. A finished video combines them — and there is a path for each kind:
+
+<CardGroup cols={3}>
   <Card title="Product and website videos" icon="rocket" href="/guides/product-launch-video">
-    Launch videos, tours, promos, and showcases using the real product interface.
+    Launches, tours, and promos built from a real product interface.
   </Card>
   <Card title="Visual explainers" icon="lightbulb" href="/guides/faceless-explainer">
-    Turn notes, articles, and difficult ideas into clear visual stories.
+    Notes, articles, and hard ideas turned into a visual story.
   </Card>
-  <Card title="Captions and designed recuts" icon="closed-captioning" href="/guides/captions-and-recuts">
-    Add subtitles, titles, lower thirds, quotes, and information overlays to footage.
+  <Card title="Captions and recuts" icon="closed-captioning" href="/guides/captions-and-recuts">
+    Subtitles, titles, and overlays added to footage you already have.
   </Card>
   <Card title="Motion graphics" icon="wand-magic-sparkles" href="/guides/motion-graphics">
-    Create animated titles, statistics, charts, logo stings, and transparent overlays.
+    Titles, statistics, charts, logo stings, transparent overlays.
   </Card>
   <Card title="Music-driven videos" icon="music" href="/guides/music-to-video">
-    Cut footage, images, lyrics, and motion to the structure of a music track.
+    Footage and motion cut to the structure of a track.
   </Card>
   <Card title="Interactive presentations" icon="display" href="/workflows#a-presentation">
-    Build decks with reveals, notes, branches, presenter mode, and clickable navigation.
+    Decks with reveals, notes, branches, and presenter mode.
   </Card>
 </CardGroup>
 
-[Watch more finished work →](/examples)
+[Watch finished work →](/examples) · [Browse the catalog →](/catalog)
 
 ## Who does what
 
-The agent does the source-heavy work. Studio is where you stay in control — nothing is hidden behind a locked file.
+The agent does the source-heavy work — research, media, narration, building scenes. You direct it and control the visible result.
 
-| Reach for Studio when… | Ask the agent when… |
-| --- | --- |
-| You can point at the exact text or visual. | The story or message needs to change. |
-| A clip needs to move, trim, or split. | Several scenes need coordinated changes. |
-| Color, size, position, or timing needs a direct nudge. | New media, research, narration, or source work is required. |
-| You want to compare and export versions. | You know the outcome but not the implementation. |
+**Reach for Studio** when you can point at the thing: this text, this clip, this colour, this timing.
+**Ask the agent** when the change is bigger than a click: the story, several scenes at once, or new media.
 
-You never have to touch HTML, packages, or the rendering engine to make and review a video. Those live in [Developers](/developers) — for the people integrating or extending HyperFrames.
+You never have to touch HTML, packages, or the rendering engine to make and review a video. Those live in [Developers](/developers), for people integrating or extending HyperFrames.
 
 ## Your next step
 
-The shortest way to understand HyperFrames is to **make one thing** with it.
+<Card title="Make your first video" icon="play" href="/quickstart" horizontal arrow>
+  The shortest complete path — your own source material to a finished export, in about ten minutes.
+</Card>
 
-<CardGroup cols={3}>
-  <Card title="Make your first video" icon="play" href="/quickstart">
-    Go from your own source material to a finished export. ~10 minutes.
-  </Card>
-  <Card title="Try it in the browser" icon="browser" href="https://www.hyperframes.dev/">
-    Explore and remix in the Playground — nothing to install.
-  </Card>
-  <Card title="I already have a project" icon="palette" href="/studio">
-    Learn to review, edit, and export work an agent already built.
-  </Card>
-</CardGroup>
+Prefer to look around first? Open the [Playground](https://www.hyperframes.dev/) with nothing to install, or learn [Studio](/studio) if an agent already built you a project.
