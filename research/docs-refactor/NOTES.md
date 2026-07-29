@@ -209,6 +209,12 @@ New navigation should be task-shaped:
 - Explicitly forced Mintlify's live GitHub star span to remain visible and gave the floating agent input a distinct surface, stronger border, and restrained shadow.
 - Prevented the GitHub control from blinking during client-side navigation: Mintlify removes the live count for about 49ms while remounting, so the control now keeps a fixed width and shows the last verified count as a transient CSS fallback.
 
+### 2026-07-29 — journey-led documentation proposal
+
+- Leadership feedback requires the documentation strategy to begin with realistic end-to-end user journeys rather than the inherited page inventory.
+- Created `USER-JOURNEYS-PROPOSAL.md` as an approval document. It defines seven journeys, recommends five as P0, assigns one canonical starting link to each, and specifies the sequence, success state, visual formats, current gaps, and validation method.
+- Public docs should not be restructured again until the journeys are approved.
+
 ## Maintenance issue
 
 - The repo instructions refer to `.agents/skills/hyperframes/SKILL.md`, but that repo-local path is absent in this checkout. The installed current router at `/Users/ularkimsanov/.agents/skills/hyperframes/SKILL.md` was used as the workflow source of truth for this pass.

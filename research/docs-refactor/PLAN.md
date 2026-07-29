@@ -1,5 +1,18 @@
 # HyperFrames documentation refactor
 
+## Current approval gate
+
+Do not begin another public information-architecture or editorial pass until leadership approves the primary user journeys in `USER-JOURNEYS-PROPOSAL.md`.
+
+The approved journeys become the source of truth for:
+
+- canonical starting links;
+- page priority and order;
+- required videos and diagrams;
+- navigation;
+- consolidation and removal decisions;
+- analytics and usability tests.
+
 Status: implementation complete; post-release measurement remains
 Started: 2026-07-28
 Primary audience: people who want to make, edit, and share videos with HyperFrames
