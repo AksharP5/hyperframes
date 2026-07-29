@@ -16,6 +16,7 @@ import {
   deduplicateKeyframes,
   isStaticPositionHold,
   synthesizeFlatTweenKeyframes,
+  type MergeableKeyframe,
 } from "./gsapTweenSynth";
 
 export { resolveSelectorElementIds };
@@ -83,7 +84,7 @@ export async function populateKeyframeCacheFromAst(
   const { setKeyframeCache } = usePlayerStore.getState();
   clearKeyframeCacheForFile(sf);
   const { elements, domClipChildren } = usePlayerStore.getState();
-  const mergedByElement = new Map<string, GsapKeyframesData>();
+  const mergedByElement = new Map<string, GsapKeyframesData<MergeableKeyframe>>();
   const sourceByElement = new Map<string, GsapAnimation[]>();
   for (const anim of parsed.animations) {
     if (anim.hasUnresolvedKeyframes) continue;

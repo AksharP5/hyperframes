@@ -1,7 +1,7 @@
 import type {
   GsapAnimation,
   GsapKeyframesData,
-  GsapPercentageKeyframe,
+  SourcedGsapPercentageKeyframe,
 } from "@hyperframes/core/gsap-parser";
 import { PROPERTY_DEFAULTS } from "./gsapShared";
 
@@ -22,33 +22,60 @@ export function isStaticPositionHold(anim: GsapAnimation): boolean {
   return propKeys.length > 0 && propKeys.every((k) => k === "x" || k === "y");
 }
 
-export function deduplicateKeyframes<
-  T extends GsapPercentageKeyframe & { animationId?: string; easeAmbiguous?: boolean },
->(keyframes: T[]): T[] {
+export interface AnimationKeyframeTarget {
+  animationId: string;
+  tweenPercentage: number;
+}
+
+function accumulateCollidingAnimationTargets(
+  keyframe: AnimationKeyframeTarget & {
+    collidingAnimationTargets?: AnimationKeyframeTarget[];
+  },
+  incoming: AnimationKeyframeTarget,
+): void {
+  const primaryId = keyframe.animationId;
+  // One tween meeting itself is not a collision. Both identity fields are
+  // required by the parameter types rather than guarded at runtime: a keyframe
+  // that arrives without them cannot be attributed to a tween at all, and an
+  // early return here would silently record no collision and let the inline
+  // ease button edit an arbitrary one of the tweens that met at this
+  // percentage. The compiler now refuses the incomplete keyframe instead.
+  if (primaryId === incoming.animationId) return;
+  const collisionTargets = keyframe.collidingAnimationTargets;
+  if (collisionTargets?.some((target) => target.animationId === incoming.animationId)) return;
+  keyframe.collidingAnimationTargets = [
+    ...(collisionTargets === undefined || collisionTargets.length === 0
+      ? [{ animationId: primaryId, tweenPercentage: keyframe.tweenPercentage }]
+      : collisionTargets),
+    { animationId: incoming.animationId, tweenPercentage: incoming.tweenPercentage },
+  ];
+}
+
+/**
+ * What a keyframe looks like once it has been attributed to its source tween
+ * and is ready to be merged with the other tweens landing on the same row. The
+ * runtime scan produces unattributed keyframes and they never reach a merge, so
+ * they are deliberately not this type.
+ */
+export type MergeableKeyframe = SourcedGsapPercentageKeyframe & {
+  propertyGroup?: string;
+  collidingAnimationTargets?: AnimationKeyframeTarget[];
+};
+
+export function deduplicateKeyframes<T extends MergeableKeyframe>(keyframes: T[]): T[] {
   const byPct = new Map<number, T>();
   for (const kf of keyframes) {
     const existing = byPct.get(kf.percentage);
     if (existing) {
       existing.properties = { ...existing.properties, ...kf.properties };
-      // Two DIFFERENT source animations with a keyframe at the same clip %: a
-      // single inline ease button can only target one of them, and which one is
-      // arbitrary (each may also inherit a different easeEach/animation ease, so
-      // comparing raw keyframe eases isn't enough). Flag it so the collapsed row
-      // hides the button there and the user edits per-lane instead.
-      if (
-        existing.animationId !== undefined &&
-        kf.animationId !== undefined &&
-        existing.animationId !== kf.animationId
-      ) {
-        existing.easeAmbiguous = true;
-      }
-      // Whichever tween iterated last used to win `ease`, so the merged
-      // keyframe carried an arbitrary one of the colliding curves. Readers that
-      // do not check easeAmbiguous (drag readouts, lane hints) then showed a
-      // curve belonging to a different animation than the one an edit targets.
-      // Drop it instead: ambiguous means "no single ease", and the flag is the
-      // only honest answer.
-      if (existing.easeAmbiguous) delete existing.ease;
+      accumulateCollidingAnimationTargets(existing, kf);
+      // Whichever tween iterated last used to win `ease`, so the merged keyframe
+      // carried an arbitrary one of the colliding curves. Readers that show a
+      // single curve (drag readouts, lane hints, the inline ease button) then
+      // displayed one belonging to a different animation than the one an edit
+      // targets. A collision means "no single ease", and dropping it is the only
+      // honest answer; collidingAnimationTargets still names every tween there.
+      if ((existing.collidingAnimationTargets?.length ?? 0) > 1) delete existing.ease;
       else if (kf.ease) existing.ease = kf.ease;
     } else {
       byPct.set(kf.percentage, { ...kf, properties: { ...kf.properties } });

@@ -37,13 +37,6 @@ export function TimelineDiamondConnectors({
   keyframeTarget: (keyframe: TimelineDiamondKeyframe) => TimelineKeyframeTarget;
   onSelectSegment?: (target: TimelineKeyframeTarget) => void;
 }) {
-  // The ease button sits dead centre of its segment, which on a two-keyframe clip
-  // is the centre of the clip bar — the natural place to grab a clip and drag it.
-  // Swallowing pointerdown there made that grab a no-op. Instead the press falls
-  // through to the clip (so the drag starts normally) and the button keeps only
-  // the click, which we drop if the pointer actually travelled.
-  const pressXRef = useRef<number | null>(null);
-
   return (
     <>
       {markers.map((marker, i) => {
@@ -55,19 +48,6 @@ export function TimelineDiamondConnectors({
         if (x2 - x1 < 1) return null;
         const connectorLeft = x1 + previous.visualSize / 2;
         const connectorWidth = x2 - x1 - previous.visualSize / 2 - marker.visualSize / 2;
-        // The ease button targets one segment, so it needs the keyframe's own
-        // animationId/tweenPercentage. On a merged inline row the button is
-        // hidden where the segment is ambiguous (two source animations collide
-        // at this % with different eases; see easeAmbiguous) or the keyframe has
-        // no source animation id (runtime-scanned) so there is no tween to target.
-        const target = keyframeTarget(kf);
-        const ease = kf.ease ?? globalEase;
-        // connectorWidth is the clear span between the two diamonds' edges, so a
-        // 24x24 target centred in it overhangs a diamond as soon as the span is
-        // narrower than 24. The segment wrapper sits at z-index 3, above the
-        // diamonds, so that overhang would win the hit test and steal their
-        // clicks at fit zoom. Grow the target only where the room exists.
-        const roomForFullTarget = connectorWidth >= 24;
         return (
           <Fragment key={`line-${i}-${previous.keyframe.percentage}-${kf.percentage}`}>
             <div
@@ -84,75 +64,128 @@ export function TimelineDiamondConnectors({
                 borderRadius: 1,
               }}
             />
-            {onSelectSegment && !kf.easeAmbiguous && kf.animationId !== undefined && (
-              <div
-                className="group absolute"
-                data-keyframe-ease-segment=""
-                style={{
-                  left: x1,
-                  top: centerY,
-                  width: x2 - x1,
-                  height: 18,
-                  transform: "translateY(-50%)",
-                  // Own a stacking context above the diamond buttons. At fit
-                  // zoom the 16px ease control can overlap its neighbouring
-                  // diamond; without a z-index here the later diamond wins the
-                  // hit test even though the child button has z-index 3.
-                  zIndex: 3,
-                  // Only the centered control is interactive. The transparent
-                  // segment wrapper must not swallow connector/clip gestures.
-                  pointerEvents: "none",
-                }}
-              >
-                <button
-                  type="button"
-                  data-keyframe-ease-button=""
-                  aria-label={`Edit ${ease} easing`}
-                  title={`Edit ${ease} easing`}
-                  // A visible 24x24 badge would collide with the diamonds either
-                  // side, so the WCAG 2.2 (2.5.8) target is met with a centered
-                  // transparent ::before overlay; the box stays 16x16. Where the
-                  // segment is too narrow for that overlay the button keeps its
-                  // 16x16 hit area, which is WCAG's target-spacing exception:
-                  // the neighbouring diamonds are themselves the reason it
-                  // cannot grow, and stealing their clicks is the worse failure.
-                  className={`absolute flex items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 ${roomForFullTarget ? "before:absolute before:left-1/2 before:top-1/2 before:h-6 before:w-6 before:-translate-x-1/2 before:-translate-y-1/2 before:content-['']" : ""}`}
-                  style={{
-                    left: "50%",
-                    top: "50%",
-                    width: 16,
-                    height: 16,
-                    transform: "translate(-50%, -50%)",
-                    zIndex: 3,
-                    pointerEvents: "auto",
-                    padding: 0,
-                    border: "1px solid rgba(255, 255, 255, 0.14)",
-                    background: "#171717",
-                    cursor: "pointer",
-                  }}
-                  onPointerDown={(e) => {
-                    pressXRef.current = e.clientX;
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const pressX = pressXRef.current;
-                    pressXRef.current = null;
-                    if (
-                      pressX !== null &&
-                      Math.abs(e.clientX - pressX) >= KEYFRAME_DRAG_THRESHOLD_PX
-                    ) {
-                      return;
-                    }
-                    onSelectSegment(target);
-                  }}
-                >
-                  <MiniCurveSvg ease={ease} active size={12} />
-                </button>
-              </div>
+            {onSelectSegment && showsEaseControl(kf) && (
+              <SegmentEaseControl
+                left={x1}
+                width={x2 - x1}
+                centerY={centerY}
+                ease={kf.ease ?? globalEase}
+                target={keyframeTarget(kf)}
+                // connectorWidth is the clear span between the two diamonds'
+                // edges, so a 24x24 target centred in it overhangs a diamond as
+                // soon as the span is narrower than 24. The segment wrapper sits
+                // at z-index 3, above the diamonds, so that overhang would win
+                // the hit test and steal their clicks at fit zoom. Grow the
+                // target only where the room exists.
+                roomForFullTarget={connectorWidth >= 24}
+                onSelectSegment={onSelectSegment}
+              />
             )}
           </Fragment>
         );
       })}
     </>
+  );
+}
+
+/**
+ * The ease control targets one segment, so it needs the keyframe's own
+ * animationId/tweenPercentage. On a merged inline row it is hidden where two
+ * source animations collide at this percentage (one button cannot honestly
+ * stand for several curves) or the keyframe has no source animation id
+ * (runtime-scanned) so there is no tween to target.
+ */
+function showsEaseControl(kf: TimelineDiamondKeyframe): boolean {
+  return (kf.collidingAnimationTargets?.length ?? 0) <= 1 && kf.animationId !== undefined;
+}
+
+/**
+ * The ease button centred on one connector segment, plus the transparent
+ * wrapper that positions it. Split out of the connector map so that map stays a
+ * geometry loop and this keeps the press guard, hit-target sizing and click
+ * filtering together.
+ */
+function SegmentEaseControl({
+  left,
+  width,
+  centerY,
+  ease,
+  target,
+  roomForFullTarget,
+  onSelectSegment,
+}: {
+  left: number;
+  width: number;
+  centerY: number;
+  ease: string;
+  target: TimelineKeyframeTarget;
+  roomForFullTarget: boolean;
+  onSelectSegment: (target: TimelineKeyframeTarget) => void;
+}) {
+  // The ease button sits dead centre of its segment, which on a two-keyframe clip
+  // is the centre of the clip bar, the natural place to grab a clip and drag it.
+  // Swallowing pointerdown there made that grab a no-op. Instead the press falls
+  // through to the clip (so the drag starts normally) and the button keeps only
+  // the click, which we drop if the pointer actually travelled.
+  const pressXRef = useRef<number | null>(null);
+  return (
+    <div
+      className="group absolute"
+      data-keyframe-ease-segment=""
+      style={{
+        left,
+        top: centerY,
+        width,
+        height: 18,
+        transform: "translateY(-50%)",
+        // Own a stacking context above the diamond buttons. At fit zoom the 16px
+        // ease control can overlap its neighbouring diamond; without a z-index
+        // here the later diamond wins the hit test even though the child button
+        // has z-index 3.
+        zIndex: 3,
+        // Only the centered control is interactive. The transparent segment
+        // wrapper must not swallow connector/clip gestures.
+        pointerEvents: "none",
+      }}
+    >
+      <button
+        type="button"
+        data-keyframe-ease-button=""
+        aria-label={`Edit ${ease} easing`}
+        title={`Edit ${ease} easing`}
+        // A visible 24x24 badge would collide with the diamonds either side, so
+        // the WCAG 2.2 (2.5.8) target is met with a centered transparent
+        // ::before overlay; the box stays 16x16. Where the segment is too narrow
+        // for that overlay the button keeps its 16x16 hit area, which is WCAG's
+        // target-spacing exception: the neighbouring diamonds are themselves the
+        // reason it cannot grow, and stealing their clicks is the worse failure.
+        className={`absolute flex items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 ${roomForFullTarget ? "before:absolute before:left-1/2 before:top-1/2 before:h-6 before:w-6 before:-translate-x-1/2 before:-translate-y-1/2 before:content-['']" : ""}`}
+        style={{
+          left: "50%",
+          top: "50%",
+          width: 16,
+          height: 16,
+          transform: "translate(-50%, -50%)",
+          zIndex: 3,
+          pointerEvents: "auto",
+          padding: 0,
+          border: "1px solid rgba(255, 255, 255, 0.14)",
+          background: "#171717",
+          cursor: "pointer",
+        }}
+        onPointerDown={(e) => {
+          pressXRef.current = e.clientX;
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          const pressX = pressXRef.current;
+          pressXRef.current = null;
+          if (pressX !== null && Math.abs(e.clientX - pressX) >= KEYFRAME_DRAG_THRESHOLD_PX) return;
+          onSelectSegment(target);
+        }}
+      >
+        <MiniCurveSvg ease={ease} active size={12} />
+      </button>
+    </div>
   );
 }

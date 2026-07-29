@@ -4,6 +4,7 @@
  * keyframe-identity helper live here; the rendering lives there.
  */
 import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
+import type { AnimationKeyframeTarget } from "../../hooks/gsapTweenSynth";
 
 export interface TimelineDiamondKeyframe {
   percentage: number;
@@ -13,9 +14,8 @@ export interface TimelineDiamondKeyframe {
   animationId?: string;
   properties: Record<string, number | string>;
   ease?: string;
-  /** Set when 2+ source animations collide at this percentage (a single inline
-   *  ease button can't target one): the collapsed row hides the button here. */
-  easeAmbiguous?: boolean;
+  /** Source animation/keyframe targets that collide at this clip percentage. */
+  collidingAnimationTargets?: AnimationKeyframeTarget[];
 }
 
 interface KeyframeCacheEntry {
@@ -116,5 +116,6 @@ export function keyframeTarget(keyframe: TimelineDiamondKeyframe): TimelineKeyfr
     tweenPercentage: keyframe.tweenPercentage,
     propertyGroup: keyframe.propertyGroup,
     animationId: keyframe.animationId,
+    collidingAnimationTargets: keyframe.collidingAnimationTargets,
   };
 }
