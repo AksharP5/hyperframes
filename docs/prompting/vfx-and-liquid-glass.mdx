@@ -34,7 +34,16 @@ The liquid-glass blocks are frosted-glass Apple-style UI floating over an aurora
 
 The four `liquid-glass-*` panel blocks share the aurora-shader stage, so they compose cleanly into one scene; `ios26-liquid-glass` and `macos-tahoe-liquid-glass` are complete device environments and generally stand alone.
 
-> /motion-graphics 8-second 1920x1080 video. Frosted glass notification cards drift in and stack over an aurora shader background, each reading a fake alert ("Build passed", "Deploy live", "0 incidents"). Use the `liquid-glass-notification` registry block. No audio.
+> /motion-graphics 8-second 1920x1080 video. Frosted glass notification cards drift in and stack over an aurora shader background, each reading a fake alert ("Build passed", "Deploy live", "0 incidents"). Real translucency — the aurora must be visible through each card. Smoke the glass enough to keep white text above 3:1 against the brightest part of the aurora. No audio.
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/glass-notify.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Rendered from the prompt above, unedited — CSS `backdrop-filter` glass over a Three.js aurora.*
+
+<Warning>
+  **The `liquid-glass-notification` block needs a GPU and fails quietly without one.** It is marked `stability: experimental` and tagged `webgpu` because its frosted surface is painted through `drawElementImage` with refraction computed by a WebGPU renderer. Validating this chapter, `navigator.gpu.requestAdapter()` returned `null` in every headless and headful Chrome tried — with `--enable-unsafe-webgpu`, `--use-angle=metal`, and hardware GPU mode — and the block's init simply bails. The failure mode is not an error: you get **no cards at all**, just the text floating on the background.
+
+  So for a render you need to be able to reproduce, ask for the *effect* — "real translucency, the background visible through the card" — and let the agent build it with CSS `backdrop-filter`, which renders anywhere. That's what the video above is. Reach for the WebGPU block only when you have confirmed a working adapter in your render environment and you specifically want refraction, specular, and chromatic aberration, which CSS cannot do.
+</Warning>
 
 **"Liquid glass" means the block, not a filter you're describing.** These are complete WebGL stages; asking for "a glassy blur on my div" gets you a CSS `backdrop-filter`, not this look.
 - ❌ `add a liquid glass effect over my text`
