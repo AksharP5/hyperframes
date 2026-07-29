@@ -75,7 +75,7 @@ Mintlify compiles `.jsx` / `.tsx` from `docs/snippets/`. Use one when a native c
 
 ### Width and media
 
-The content column is widened in `custom.css`; running prose is held near 80 characters because longer lines measurably hurt reading. Tables, cards, code, and media already use the full width. Add `className="hf-wide"` when a visual should escape the prose measure entirely.
+The content column is widened in `custom.css` — a measured 888px at a 1600px viewport, 1048px at 1920px, where it used to be stuck at 664px. There is no paragraph measure cap: these pages are built from lists, tables, cards, and code, so a whole guide contains roughly three `<p>` elements and capping them changed nothing. Add `className="hf-wide"` when a visual should escape any inherited measure.
 
 ## Verification
 
