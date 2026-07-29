@@ -138,22 +138,35 @@ h3 {
  * ID selectors deliberately: they outrank the theme's utility classes without
  * needing !important, so the cascade stays debuggable. */
 @media (min-width: 1280px) {
-  #content-container {
-    max-width: 90rem;
+  /* The binding constraint. The left sidebar sits inside #body-content, so its
+   * max-w-8xl (1472px) cap was the real limit: 1432 inner − 287 sidebar = 1144,
+   * then −128 shell padding = 1016, then −352 for the contents rail and gap,
+   * which is exactly the 664px column we measured. */
+  #body-content {
+    max-width: 110rem;
   }
 
-  #content-area {
-    width: calc(100% - 19rem);
+  /* Let the shell use what #body-content now offers, and reclaim some of the
+   * generous left padding. Setting a width on #content-area itself does
+   * nothing — it is a flex item with grow, so it simply fills what is left. */
+  #content-container {
+    max-width: none;
+    padding-left: 2.5rem;
+  }
+
+  /* The contents rail only ever renders ~256px of text. */
+  #content-side-layout {
+    max-width: 16rem;
   }
 }
 
 /* Running prose stays inside a comfortable measure even though the column is
- * now wide — long lines are measurably harder to read. Tables, media, cards,
- * and code blocks are free to use the full width. */
+ * now wide — long lines are measurably harder to read. Direct children of
+ * .prose only, so text inside cards, tables, and callouts is untouched. */
 @media (min-width: 1280px) {
-  #content-area > div > p,
-  #content-area > div > ul,
-  #content-area > div > ol {
+  #content-area .prose > p,
+  #content-area .prose > ul,
+  #content-area .prose > ol {
     max-width: 80ch;
   }
 }
