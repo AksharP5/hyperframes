@@ -150,6 +150,21 @@ a:not([class]):hover {
 
 /* ── Sidebar hierarchy ── */
 
+.sidebar-group-header + .sidebar-group {
+  position: relative;
+  padding-left: 16px;
+}
+
+.sidebar-group-header + .sidebar-group::before {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 16px;
+  width: 1px;
+  background: var(--hf-border-color);
+  content: '';
+}
+
 .sidebar-group li > button[aria-expanded='true'] + ul {
   position: relative;
 }

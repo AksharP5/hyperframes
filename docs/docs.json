@@ -50,111 +50,102 @@
       {
         "tab": "Guides",
         "icon": "book-open",
-        "pages": [
-          "guides/index",
-              {
-                "group": "Start here",
-                "root": "introduction",
-                "expanded": true,
-                "pages": [
-                  "quickstart",
-                  "guides/choose-your-path",
-                  "guides/project-tour",
-                  "guides/authentication",
-                  "guides/mcp"
-                ]
-              },
-              {
-                "group": "Create with an agent",
-                "root": "guides/create-with-agent",
-                "expanded": false,
-                "pages": [
-                  "guides/skills",
-                  {
-                    "group": "Workflows",
-                    "expanded": false,
-                    "pages": [
-                      "guides/product-launch-video",
-                      "guides/faceless-explainer",
-                      "guides/pr-to-video",
-                      "guides/captions-and-recuts",
-                      "guides/motion-graphics",
-                      "guides/music-to-video",
-                      "guides/general-video"
-                    ]
-                  },
-                  "guides/prompting",
-                  "guides/pipeline",
-                  "guides/design-tools",
-                  "guides/claude-design-hyperframes",
-                  "guides/claude-design-send-to-hyperframes",
-                  "guides/open-design-hyperframes",
-                  "guides/figma",
-                  "guides/antigravity",
-                  "guides/copilot-cli"
-                ]
-              },
-              {
+        "groups": [
+          {
+            "group": "Start here",
+            "pages": [
+              "guides/index",
+              "introduction",
+              "quickstart",
+              "guides/choose-your-path",
+              "guides/project-tour",
+              "guides/authentication",
+              "guides/mcp"
+            ]
+          },
+          {
+            "group": "Create with an agent",
+            "pages": [
+              "guides/create-with-agent",
+              "guides/skills",
+              "guides/prompting",
+              "guides/pipeline",
+              "guides/design-tools",
+              "guides/claude-design-hyperframes",
+              "guides/claude-design-send-to-hyperframes",
+              "guides/open-design-hyperframes",
+              "guides/figma",
+              "guides/antigravity",
+              "guides/copilot-cli"
+            ]
+          },
+          {
+            "group": "Workflows",
+            "pages": [
+              "guides/product-launch-video",
+              "guides/faceless-explainer",
+              "guides/pr-to-video",
+              "guides/captions-and-recuts",
+              "guides/motion-graphics",
+              "guides/music-to-video",
+              "guides/general-video"
+            ]
+          },
+          {
             "group": "Learn",
-                "root": "concepts/index",
-                "expanded": false,
-                "pages": [
-                  "concepts/compositions",
-                  "concepts/variables",
-                  "concepts/data-attributes",
-                  "concepts/frame-adapters",
-                  "concepts/determinism",
-                  "guides/html-in-canvas",
-                  "guides/hyperframes-vs-remotion"
-                ]
-              },
-              {
-                "group": "Media",
-                "root": "guides/media",
-                "expanded": false,
-                "pages": [
-                  "guides/video-components",
-                  "guides/voice-and-audio",
-                  "guides/transcribe-and-caption",
-                  "guides/remove-background",
-                  "guides/color-grading",
-                  "guides/media-effects",
-                  "guides/media-overlays"
-                ]
-              },
-              {
-                "group": "Export and share",
-                "root": "guides/export-and-share",
-                "expanded": false,
-                "pages": [
-                  "guides/quality-checklist",
-                  "guides/publish-and-share",
-                  "guides/rendering",
-                  "guides/4k-rendering",
-                  "guides/hdr",
-                  "guides/performance"
-                ]
-              },
-              "examples",
-              {
-                "group": "Help",
-                "root": "guides/help",
-                "expanded": false,
-                "pages": [
-                  "guides/common-questions",
-                  "guides/troubleshooting",
-                  "guides/feedback"
-                ]
-              },
-              {
-                "group": "What's new",
-                "root": "product-updates",
-                "expanded": false,
-                "pages": [
-                  "weekly-updates",
-                  "changelog"
-                ]
-              }
+            "pages": [
+              "concepts/index",
+              "concepts/compositions",
+              "concepts/variables",
+              "concepts/data-attributes",
+              "concepts/frame-adapters",
+              "concepts/determinism",
+              "guides/html-in-canvas",
+              "guides/hyperframes-vs-remotion"
+            ]
+          },
+          {
+            "group": "Media",
+            "pages": [
+              "guides/media",
+              "guides/video-components",
+              "guides/voice-and-audio",
+              "guides/transcribe-and-caption",
+              "guides/remove-background",
+              "guides/color-grading",
+              "guides/media-effects",
+              "guides/media-overlays"
+            ]
+          },
+          {
+            "group": "Export and share",
+            "pages": [
+              "guides/export-and-share",
+              "guides/quality-checklist",
+              "guides/publish-and-share",
+              "guides/rendering",
+              "guides/4k-rendering",
+              "guides/hdr",
+              "guides/performance"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": ["examples"]
+          },
+          {
+            "group": "Help",
+            "pages": [
+              "guides/help",
+              "guides/common-questions",
+              "guides/troubleshooting",
+              "guides/feedback"
+            ]
+          },
+          {
+            "group": "What's new",
+            "pages": ["product-updates", "weekly-updates", "changelog"]
+          }
         ]
       },
       {
