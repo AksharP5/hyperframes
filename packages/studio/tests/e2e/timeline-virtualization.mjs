@@ -6,6 +6,13 @@
  *
  * STUDIO_URL=http://127.0.0.1:5190/#project/timeline-virtualization \
  *   node packages/studio/tests/e2e/timeline-virtualization.mjs
+ *
+ * TIMELINE_ROW_VIRTUALIZATION selects which build is under test and defaults to
+ * "off", the product default. The gate previously only ever ran against a server
+ * with row virtualization enabled, so the configuration users actually get was
+ * never measured. The script asserts the configuration it observes rather than
+ * trusting the caller: the server is configured by whoever started it, and a
+ * mismatch would otherwise pass silently against the wrong build.
  */
 import { existsSync, readdirSync } from "node:fs";
 import { homedir, platform, arch } from "node:os";
@@ -16,6 +23,7 @@ const STUDIO_URL = process.env.STUDIO_URL;
 const PROFILE = process.env.TIMELINE_PROFILE || "dense-short";
 const ELEMENT_COUNT = Number(process.env.TIMELINE_ELEMENT_COUNT || 50_000);
 const TIER = process.env.TIMELINE_TIER || "primary";
+const ROW_VIRTUALIZATION = process.env.TIMELINE_ROW_VIRTUALIZATION || "off";
 const EXPECTED_CHROME_MAJOR = process.env.TIMELINE_CHROME_MAJOR
   ? Number(process.env.TIMELINE_CHROME_MAJOR)
   : null;
@@ -26,11 +34,23 @@ if (!STUDIO_URL) {
 }
 if (
   ![1_000, 50_000].includes(ELEMENT_COUNT) ||
-  !["primary", "low-resource", "high-dpr"].includes(TIER)
+  !["primary", "low-resource", "high-dpr"].includes(TIER) ||
+  !["off", "on"].includes(ROW_VIRTUALIZATION)
 ) {
   console.error(
     "TIMELINE_ELEMENT_COUNT must be 1000 or 50000; " +
-      "TIMELINE_TIER must be primary, low-resource, or high-dpr",
+      "TIMELINE_TIER must be primary, low-resource, or high-dpr; " +
+      "TIMELINE_ROW_VIRTUALIZATION must be off or on",
+  );
+  process.exit(2);
+}
+if (ROW_VIRTUALIZATION === "off" && ELEMENT_COUNT === 50_000) {
+  // An unvirtualized build mounts a DOM node per clip. 50,000 of them does not
+  // reach a steady state in any useful time, so the run would time out rather
+  // than report a verdict. Refuse the combination instead of hanging on it.
+  console.error(
+    "TIMELINE_ROW_VIRTUALIZATION=off requires TIMELINE_ELEMENT_COUNT=1000; " +
+      "the unvirtualized build mounts every clip and cannot settle at 50000",
   );
   process.exit(2);
 }
@@ -263,6 +283,22 @@ try {
   const summary = await loadFixtureAndWait(page, ELEMENT_COUNT, PROFILE);
   const measuredMaxReliableScrollWidth = await measureMaximumReliableScrollWidth(page);
 
+  // Trust the DOM, not the caller. A virtualized build cannot mount every clip
+  // and an unvirtualized one cannot avoid it, so the mounted count says which
+  // build is really being measured.
+  const observedClipRoots = await page.evaluate(
+    () => window.__studioTest.readTimelinePerformanceDiagnostics().mountedClipRoots,
+  );
+  const observedRowVirtualization = observedClipRoots <= budgets.maxMountedClipRoots ? "on" : "off";
+  if (observedRowVirtualization !== ROW_VIRTUALIZATION) {
+    throw new Error(
+      `Requested TIMELINE_ROW_VIRTUALIZATION=${ROW_VIRTUALIZATION} but the server under test ` +
+        `behaves as ${observedRowVirtualization}: ${observedClipRoots} clip roots mounted for ` +
+        `${ELEMENT_COUNT} elements against a ${budgets.maxMountedClipRoots} budget. ` +
+        "Set VITE_STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED on the Studio dev server to match.",
+    );
+  }
+
   const runs = [];
   const interactionLimitMs =
     TIER === "primary" ? budgets.interactionP95Ms : budgets.constrainedInteractionP95Ms;
@@ -272,16 +308,24 @@ try {
     const run = await collectRun(page);
     if (index >= budgets.warmupRuns) runs.push(run);
   }
+  // Latency, long tasks and memory are product promises and hold for both
+  // builds. The DOM-size budgets describe what windowing achieves, so they only
+  // apply when windowing is on. They are skipped explicitly rather than relaxed,
+  // so a skipped budget never reads as a passed one.
+  const domBudgetsApply = ROW_VIRTUALIZATION === "on";
   for (const run of runs) {
-    run.passed =
+    run.responsivenessPassed =
       run.interactionP95Ms <= interactionLimitMs &&
       run.frameIntervalP95Ms <= frameIntervalLimitMs &&
-      run.longestTaskMs <= longTaskLimitMs &&
-      run.diagnostics.timelineRoots === 1 &&
-      run.diagnostics.mountedRows <= budgets.maxMountedRows &&
-      run.diagnostics.mountedClipRoots <= budgets.maxMountedClipRoots &&
-      run.diagnostics.maxMountedClipRootsInOneRow <= budgets.maxMountedClipRootsPerRow &&
-      run.diagnostics.mountedTimelineDescendants <= budgets.maxMountedTimelineDescendants;
+      run.longestTaskMs <= longTaskLimitMs;
+    run.timelineMounted = run.diagnostics.timelineRoots === 1;
+    run.domSizePassed = domBudgetsApply
+      ? run.diagnostics.mountedRows <= budgets.maxMountedRows &&
+        run.diagnostics.mountedClipRoots <= budgets.maxMountedClipRoots &&
+        run.diagnostics.maxMountedClipRootsInOneRow <= budgets.maxMountedClipRootsPerRow &&
+        run.diagnostics.mountedTimelineDescendants <= budgets.maxMountedTimelineDescendants
+      : null;
+    run.passed = run.responsivenessPassed && run.timelineMounted && run.domSizePassed !== false;
   }
 
   await page.evaluate(() => window.__studioTest.resetTimelinePerformanceFixture());
@@ -315,6 +359,14 @@ try {
       cpuThrottleRate: TIER === "low-resource" ? 4 : 1,
       tier: TIER,
       longTaskObserverProbe,
+      rowVirtualization: ROW_VIRTUALIZATION,
+      observedClipRootsAtLoad: observedClipRoots,
+      appliedBudgets: {
+        interactionP95Ms: interactionLimitMs,
+        frameIntervalP95Ms: frameIntervalLimitMs,
+        longTaskLimitMs,
+        domSizeBudgets: domBudgetsApply ? "applied" : "skipped (unvirtualized build)",
+      },
       fixture: summary,
       runProtocol: {
         warmups: budgets.warmupRuns,

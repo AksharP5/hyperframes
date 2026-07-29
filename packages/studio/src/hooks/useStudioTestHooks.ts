@@ -99,7 +99,12 @@ export function useStudioTestHooks({
     };
     window.__studioTest = api;
     return () => {
-      setTimelinePerformanceFixtureLease(false);
+      // The lease is deliberately NOT released here. Loading a fixture writes
+      // player state, which changes this effect's dependency identities and
+      // tears the effect down on the very next frame. Releasing on teardown
+      // therefore revoked the lease moments after it was taken, and live iframe
+      // discovery overwrote the fixture the loader had just installed. The
+      // lease belongs to the fixture, and a page reload clears it.
       // delete, not `= undefined`: an own key holding undefined keeps
       // `"__studioTest" in window` true, which defeats feature detection.
       delete window.__studioTest;

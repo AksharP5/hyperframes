@@ -536,7 +536,10 @@ export const Timeline = memo(function Timeline({
           blockedClipRef={blockedClipRef}
           suppressClickRef={suppressClickRef}
           scrollRef={scrollRef}
-          renderClipContent={viewport.isScrolling ? undefined : renderClipContent}
+          // Windowing drops content to mount a row cheaply; unvirtualized it is pure cost.
+          renderClipContent={
+            rowVirtualizationActive && viewport.isScrolling ? undefined : renderClipContent
+          }
           renderClipOverlay={renderClipOverlay}
           playheadRef={playheadRef}
           onDrillDown={onDrillDown}

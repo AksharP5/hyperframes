@@ -4,11 +4,6 @@ import { TIMELINE_VIEWPORT_BUDGETS } from "../lib/timelineViewportBudgets";
 import type { TimelineScrollViewportSnapshot } from "./useTimelineScrollViewport";
 import { RULER_H, TRACKS_TOP_PAD, type TimelineRowGeometry } from "./timelineLayout";
 
-/** Disabled until horizontal windowing and stable gesture lifetime land. */
-export const STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED =
-  import.meta.env.DEV === true &&
-  import.meta.env.VITE_STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED === "1";
-
 export interface TimelineVirtualRow {
   readonly index: number;
   readonly rowKey: number;

@@ -295,3 +295,118 @@ describe("Timeline row virtualization", { timeout: 30_000 }, () => {
     usePlayerStore.getState().reset();
   });
 });
+
+/**
+ * The flag-off build is the one users get today. It mounts every clip, so the
+ * scroll-time concessions windowing makes are pure cost there: this block pins
+ * the timeline to doing no per-frame work at all while a gesture runs.
+ */
+describe("Timeline without row virtualization", { timeout: 30_000 }, () => {
+  async function renderUnvirtualizedTimeline() {
+    vi.stubEnv("VITE_STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED", "0");
+    vi.resetModules();
+    const [{ Timeline }, { usePlayerStore }] = await Promise.all([
+      import("./Timeline"),
+      import("../store/playerStore"),
+    ]);
+    usePlayerStore.setState({
+      duration: 60,
+      timelineReady: true,
+      selectedElementId: "clip-0",
+      elements: Array.from({ length: 40 }, (_, track) => ({
+        id: `clip-${track}`,
+        label: `Clip ${track}`,
+        tag: "div",
+        start: 0,
+        duration: 10,
+        track,
+      })),
+    });
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () =>
+      root.render(
+        React.createElement(Timeline, {
+          renderClipContent: () => React.createElement("span", { "data-rich-content": true }),
+        }),
+      ),
+    );
+    await act(async () => {});
+    return {
+      host,
+      dispose: () => {
+        act(() => root.unmount());
+        usePlayerStore.getState().reset();
+        vi.stubEnv("VITE_STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED", "1");
+        vi.resetModules();
+      },
+    };
+  }
+
+  it("mounts every clip rather than a window", async () => {
+    const { host, dispose } = await renderUnvirtualizedTimeline();
+    try {
+      expect(host.querySelectorAll("[data-clip]").length).toBe(40);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("keeps clip content mounted across a scroll gesture", async () => {
+    const { host, dispose } = await renderUnvirtualizedTimeline();
+    try {
+      const scroller = host.querySelector<HTMLElement>("[data-timeline-scroll-viewport]");
+      expect(scroller).not.toBeNull();
+      const richBefore = host.querySelectorAll("[data-rich-content]").length;
+      expect(richBefore).toBe(40);
+
+      await act(async () => {
+        scroller?.dispatchEvent(new Event("scroll"));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+
+      expect(host.querySelectorAll("[data-rich-content]").length).toBe(richBefore);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("does not swap clip content back in after the gesture settles", async () => {
+    const { host, dispose } = await renderUnvirtualizedTimeline();
+    try {
+      const scroller = host.querySelector<HTMLElement>("[data-timeline-scroll-viewport]");
+      const clip = host.querySelector<HTMLElement>('[data-el-id="clip-0"]');
+      await act(async () => {
+        scroller?.dispatchEvent(new Event("scroll"));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      expect(host.querySelector('[data-el-id="clip-0"]')).toBe(clip);
+      expect(host.querySelectorAll("[data-rich-content]").length).toBe(40);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("leaves the scroll position alone, so no snapshot round trip happens", async () => {
+    const { host, dispose } = await renderUnvirtualizedTimeline();
+    try {
+      const scroller = host.querySelector<HTMLElement>("[data-timeline-scroll-viewport]");
+      if (!scroller) throw new Error("Expected a timeline scroll viewport");
+      scroller.scrollTop = 400;
+      await act(async () => {
+        scroller.dispatchEvent(new Event("scroll"));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+
+      expect(scroller.scrollTop).toBe(400);
+    } finally {
+      dispose();
+    }
+  });
+});

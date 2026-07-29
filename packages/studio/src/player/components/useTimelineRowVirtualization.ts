@@ -4,10 +4,8 @@ import { resolveTimelineFocusIdentity } from "./timelineFocusIdentity";
 import { getTimelineScrollTopForGeometryChange } from "./timelineViewportGeometry";
 import type { TimelineRowGeometry } from "./timelineLayout";
 import type { TimelineScrollViewportSnapshot } from "./useTimelineScrollViewport";
-import {
-  STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED,
-  useTimelineVirtualRows,
-} from "./useTimelineVirtualRows";
+import { STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED } from "./timelineRowVirtualizationFlag";
+import { useTimelineVirtualRows } from "./useTimelineVirtualRows";
 
 interface UseTimelineRowVirtualizationInput {
   scrollRef: RefObject<HTMLDivElement | null>;

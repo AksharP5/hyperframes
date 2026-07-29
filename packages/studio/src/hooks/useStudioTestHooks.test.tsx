@@ -129,7 +129,11 @@ describe("timeline performance fixture", () => {
     unsubscribe();
     act(() => root.unmount());
     expect(window.__studioTest).toBeUndefined();
-    expect(hasTimelinePerformanceFixtureLease()).toBe(false);
+    // The lease outlives the effect on purpose. Loading a fixture changes the
+    // player state this effect depends on, so the effect tears down right after
+    // the loader runs; releasing the lease there let live iframe discovery
+    // overwrite the fixture before anything could measure it.
+    expect(hasTimelinePerformanceFixtureLease()).toBe(true);
   });
 
   it("does not mutate state when the fixture request is invalid", () => {

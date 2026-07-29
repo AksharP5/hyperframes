@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useMountEffect } from "../../hooks/useMountEffect";
 import { shouldShowTimelineShortcutHint } from "./timelineLayout";
+import { STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED } from "./timelineRowVirtualizationFlag";
 
 export interface TimelineScrollViewportSnapshot {
   readonly scrollLeft: number;
@@ -66,6 +67,12 @@ export function useTimelineScrollViewport(
   const scrollingRef = useRef(false);
 
   const syncScrollViewport = useCallback((el: HTMLDivElement, isScrolling = false) => {
+    // Row virtualization is the only consumer of the per-frame scroll snapshot.
+    // With the flag off, publishing it re-rendered every mounted clip on every
+    // scroll frame and bought nothing, so the scroll path stops here and
+    // `isScrolling` stays false. Resize-driven and programmatic syncs arrive
+    // through the immediate path below and still publish.
+    if (isScrolling && !STUDIO_TIMELINE_ROW_VIRTUALIZATION_ENABLED) return;
     scrollingRef.current = isScrolling;
     const publish = () => {
       viewportRafRef.current = 0;
