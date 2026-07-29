@@ -173,6 +173,47 @@ h3 {
   max-width: none;
 }
 
+/* ── Next-step card thumbnail ──
+ *
+ * Sizing an <img> inside one of these cards with utility classes does not work.
+ * Mintlify wraps every image in its zoom component — span[data-rmiz] >
+ * span[data-rmiz-content] > picture.contents > img — so a width set on a
+ * surrounding div is absorbed by that wrapper, and the image renders full width
+ * with the card's text pushed out of view. Videos are not wrapped, which is why
+ * the same card works with a <video> and not an <img>.
+ *
+ * A custom class is used rather than utilities because Mintlify rewrites
+ * Tailwind classes into its own mint-* namespace and drops what it does not
+ * recognise; classes like this one pass through untouched. */
+.hf-peek {
+  width: 100%;
+  flex: 0 0 auto;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+
+@media (min-width: 640px) {
+  .hf-peek {
+    width: 16rem;
+  }
+}
+
+/* Collapse the zoom wrapper so the image can fill the box. */
+.hf-peek span,
+.hf-peek picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hf-peek img {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  object-fit: cover;
+  object-position: right center;
+}
+
 /* A breakout hero wrapper was tried here and reverted: at this column width it
  * rendered 968px wide and overwhelmed the page rather than supporting it. The
  * film stays inside a Frame at the column width. Motion was the part worth

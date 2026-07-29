@@ -75,19 +75,21 @@ Mintlify compiles `.jsx` / `.tsx` from `docs/snippets/`. Use one when a native c
 
 ### Raw HTML gotchas
 
-The theme's prose styles win against utility classes on media elements. `img`
-gets `width: 100%`, so a class like `sm:w-64` on the image itself is ignored and a
-side-by-side card collapses into a full-width picture with its text pushed out of
-view. Put the width on a wrapper element and let the image fill it:
+**Utility classes are rewritten, and unknown ones are dropped.** Mintlify moves
+Tailwind classes into its own `mint-*` namespace during the build. Write utilities
+for layout that the theme already uses (`flex`, `rounded-xl`, `border`) and do not
+rely on anything exotic surviving. Anything load-bearing belongs in `custom.css`
+under an `hf-` class — those pass through untouched.
 
-```html
-<div className="w-full sm:w-64 shrink-0 aspect-video overflow-hidden">
-  <img className="w-full h-full object-cover" src="..." alt="..." />
-</div>
-```
+**Every `<img>` is wrapped in the image-zoom component.** The real markup is
+`span[data-rmiz] > span[data-rmiz-content] > picture.contents > img`, so a width
+set on a surrounding `div` is absorbed and the image renders full width — which
+silently pushes a side-by-side card's text out of view. Use the `.hf-peek` class,
+which collapses that wrapper, or use a `<video>`: videos are not wrapped, which is
+why the same card layout works with one.
 
-The same styles add a 2em margin to media, which shows as a band inside any
-wrapper that has its own background. Zero it when the wrapper is the frame.
+Prose styles also add a 2em margin to media, which shows as a band inside any
+wrapper with its own background. Zero it when the wrapper is the frame.
 
 ### Width and media
 
