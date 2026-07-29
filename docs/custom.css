@@ -193,6 +193,9 @@ h3 {
   display: block;
   width: 100%;
   height: auto;
+  /* The theme's prose styles put a 2em margin on media, which showed up as a
+   * 64px black band above and below the film inside this wrapper. */
+  margin: 0;
 }
 
 @media (min-width: 1280px) {
