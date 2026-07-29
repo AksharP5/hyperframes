@@ -57,7 +57,7 @@
               "guides/index",
               "introduction",
               "quickstart",
-              "guides/choose-your-path",
+              "workflows",
               "guides/project-tour",
               "guides/authentication",
               "guides/mcp"
@@ -66,17 +66,10 @@
           {
             "group": "Create with an agent",
             "pages": [
-              "guides/create-with-agent",
-              "guides/skills",
               "guides/prompting",
               "guides/pipeline",
               "guides/design-tools",
-              "guides/claude-design-hyperframes",
-              "guides/claude-design-send-to-hyperframes",
-              "guides/open-design-hyperframes",
-              "guides/figma",
-              "guides/antigravity",
-              "guides/copilot-cli"
+              "guides/figma"
             ]
           },
           {
@@ -88,6 +81,7 @@
               "guides/captions-and-recuts",
               "guides/motion-graphics",
               "guides/music-to-video",
+              "guides/slideshow",
               "guides/general-video"
             ]
           },
@@ -138,7 +132,7 @@
           {
             "group": "Help",
             "pages": [
-              "guides/help",
+              "help",
               "guides/common-questions",
               "guides/troubleshooting",
               "guides/feedback"
@@ -422,6 +416,14 @@
             ]
           },
           {
+            "group": "Agent setup",
+            "pages": [
+              "guides/skills",
+              "guides/antigravity",
+              "guides/copilot-cli"
+            ]
+          },
+          {
             "group": "SDK",
             "pages": [
               "sdk/overview",
@@ -529,6 +531,18 @@
     {
       "source": "/guides/common-mistakes",
       "destination": "/guides/troubleshooting"
+    },
+    {
+      "source": "/guides/create-with-agent",
+      "destination": "/workflows"
+    },
+    {
+      "source": "/guides/choose-your-path",
+      "destination": "/workflows"
+    },
+    {
+      "source": "/guides/help",
+      "destination": "/help"
     },
     {
       "source": "/contributing/studio-manual-dom-editing",

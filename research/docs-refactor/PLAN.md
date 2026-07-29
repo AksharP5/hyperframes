@@ -2,7 +2,7 @@
 
 ## Current approval gate
 
-Do not begin another public information-architecture or editorial pass until leadership approves the primary user journeys in `USER-JOURNEYS-PROPOSAL.md`.
+Approved by the product owner on 2026-07-29. Public implementation is now in progress.
 
 The approved journeys become the source of truth for:
 
@@ -12,6 +12,8 @@ The approved journeys become the source of truth for:
 - navigation;
 - consolidation and removal decisions;
 - analytics and usability tests.
+
+The route-to-journey contract is maintained in `JOURNEY-IMPLEMENTATION-MAP.md`.
 
 Status: implementation complete; post-release measurement remains
 Started: 2026-07-28

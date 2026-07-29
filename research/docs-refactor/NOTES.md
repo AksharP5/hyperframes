@@ -215,6 +215,31 @@ New navigation should be task-shaped:
 - Created `USER-JOURNEYS-PROPOSAL.md` as an approval document. It defines seven journeys, recommends five as P0, assigns one canonical starting link to each, and specifies the sequence, success state, visual formats, current gaps, and validation method.
 - Public docs should not be restructured again until the journeys are approved.
 
+### 2026-07-29 — journey implementation approved
+
+- The product owner approved the proposed journey model.
+- Added `JOURNEY-IMPLEMENTATION-MAP.md` as the implementation contract.
+- Began consolidating the P0 entrances around `/introduction`, `/quickstart`, `/workflows`, `/studio`, and `/help`.
+- The established Aspen header, sidebar behavior, right-side table of contents, borders, typography, GitHub control, and agent input treatment remain unchanged.
+
+### 2026-07-29 — journey implementation pass
+
+- Rebuilt the five P0 entrances:
+  - `/introduction` now provides immediate proof, the product loop, human-control guidance, and focused next steps;
+  - `/quickstart` now starts from source material and ends at a played or exported result;
+  - `/workflows` is the canonical outcome-led creation chooser with useful requests;
+  - `/studio` now follows the real review → direct edit or agent revision → check → export journey;
+  - `/help` now starts from visible symptoms and produces a fix or useful diagnostic.
+- Removed the duplicate Choose your path, Create with an agent, and old Help pages. Added redirects for every old route.
+- Added the missing human-facing slideshow workflow, including the current live-deck output and honest MP4 limitation.
+- Standardized the seven existing creation workflow pages with direction approval, review guidance, common problems, and a return to Studio or the workflow chooser.
+- Reworked Catalog around the visual job and Developers around the smallest technical surface.
+- Removed large machine-facing Claude Design and Open Design authoring specifications from the human navigation while preserving their source URLs.
+- Added `VISUAL-PRODUCTION-BRIEFS.md` for the three P0 videos and eight Studio task loops.
+- Updated the visual current-state dashboard around the five approved journeys.
+- Browser-reviewed Introduction, Quickstart, Workflows, Help, Studio, Catalog, and Developers in the local Mintlify preview.
+- `mint validate`, `mint broken-links`, and `git diff --check` pass.
+
 ## Maintenance issue
 
 - The repo instructions refer to `.agents/skills/hyperframes/SKILL.md`, but that repo-local path is absent in this checkout. The installed current router at `/Users/ularkimsanov/.agents/skills/hyperframes/SKILL.md` was used as the workflow source of truth for this pass.

@@ -22,6 +22,17 @@ Say who the video is for:
 - contributors may need architecture and tradeoffs;
 - a social audience needs one clear change and visible proof.
 
+## Approve the angle
+
+Confirm:
+
+- the intended PR and target branch;
+- whether the audience cares about user impact, architecture, or both;
+- the release state: proposed, merged, released, or planned;
+- the before-and-after behavior;
+- breaking changes or migration work;
+- the maximum level of code detail.
+
 ## Check the facts
 
 Before export:
@@ -33,3 +44,22 @@ Before export:
 - confirm issue, version, and product names.
 
 Use [Studio Storyboard](/studio/storyboard) to review the explanation and [Source](/studio/source) when a code excerpt needs adjustment.
+
+## Common problems
+
+| Problem | Better direction |
+| --- | --- |
+| The video reads the PR description aloud | Build a story around the user or system change. |
+| Refactoring becomes a product claim | Separate internal work from visible behavior. |
+| Code appears too briefly to read | Show only the relevant lines and hold them longer. |
+| The PR is not released yet | Say that clearly instead of presenting it as shipped. |
+| The audience is mixed | Make separate user-facing and contributor-facing versions. |
+
+<CardGroup cols={2}>
+  <Card title="Review in Studio" icon="palette" href="/studio">
+    Check the facts, sequence, code excerpts, timing, and final release language.
+  </Card>
+  <Card title="Choose another workflow" icon="route" href="/workflows">
+    Return to the source-and-outcome chooser.
+  </Card>
+</CardGroup>

@@ -1,139 +1,150 @@
 ---
 title: "Make your first video"
-description: "Ask an AI agent to create a HyperFrames project, review it in Studio, and export the result."
+description: "Go from your own source material to a reviewable HyperFrames video in Studio, then export it."
 ---
 
-The simplest way to start is to tell an AI coding agent what you want to make. HyperFrames gives the agent the product knowledge and workflows it needs; Studio gives you a visual place to review and improve the result.
+The goal of this guide is not to finish installation. It is to reach a first video you can watch, improve, and export.
 
-## Before you start
+**You need:** an AI coding agent, Node.js, and a folder where the agent can create the project. Most first projects take a few minutes to set up, plus the time needed to plan and build the actual video.
 
-You need:
+```mermaid
+flowchart LR
+    A["Choose your source"] --> B["Send a useful request"]
+    B --> C["Approve the brief"]
+    C --> D["Review in Studio"]
+    D --> E["Export"]
+```
 
-- an AI coding agent such as Claude Code, Cursor, Codex, Gemini CLI, or GitHub Copilot CLI;
-- Node.js installed on your computer;
-- a folder where the agent can create the project.
+## 1. Choose what you are starting with
 
-You do **not** need to design the timeline or write a technical specification before you begin.
+Use the closest example. You can change its wording before sending it.
 
-## Create the first version
-
-<Steps>
-  <Step title="Install the HyperFrames skills">
-    Run this in your project folder:
-
-    ```bash
-    npx hyperframes skills update
-    ```
-
-    This installs the core guidance. The `/hyperframes` router adds a specialized workflow later when your request needs one.
-  </Step>
-  <Step title="Describe what you want">
-    Start your request with `/hyperframes`, then explain the result in normal language.
-
+<AccordionGroup>
+  <Accordion title="A product or website" icon="globe">
     ```text
     /hyperframes Make a 30-second launch video for https://example.com.
-    It should feel calm and premium, use the product's real interface,
-    and end with “Start creating today.”
+    It is for small design teams. Show the real product interface, focus on
+    how quickly a team can share a result, and end with “Try it together.”
+    Keep the pacing calm and premium.
     ```
-
-    A useful request usually includes:
-
-    - the subject or source;
-    - who the video is for;
-    - the rough length and format, if they matter;
-    - the feeling you want;
-    - anything that must appear or must not appear.
-
-    If something important is missing, the agent will ask. You do not need to know which HyperFrames workflow to choose.
-  </Step>
-  <Step title="Approve the direction">
-    For a new project, the agent confirms the important creative choices before building. Read this like a short creative brief:
-
-    - Is the main message right?
-    - Does the proposed style fit?
-    - Is the length realistic?
-    - Are the required words, visuals, and call to action included?
-
-    Fix the direction here if needed. It is faster than rebuilding a finished video around the wrong idea.
-  </Step>
-  <Step title="Review the result in Studio">
-    The agent starts HyperFrames Studio and gives you a local project link. You can then:
-
-    - play the full video;
-    - inspect the storyboard;
-    - move and trim clips on the timeline;
-    - select text and visual elements on the canvas;
-    - adjust design and animation;
-    - ask the agent for broader changes.
-
-    See the [Studio tour](/studio/tour) when you want to understand the workspace.
-  </Step>
-  <Step title="Ask for changes">
-    Give feedback using the result you can see:
-
+  </Accordion>
+  <Accordion title="Notes, a script, or an idea" icon="lightbulb">
     ```text
-    Make the opening faster and reveal the product by three seconds.
-    Keep the current colors. Replace the final line with “Try it free.”
+    /hyperframes Turn these notes into a 45-second visual explainer for a
+    non-technical audience. The viewer should understand the three stages
+    and why the second one matters. Use diagrams and typography rather than
+    stock footage.
     ```
+  </Accordion>
+  <Accordion title="Existing footage" icon="video">
+    ```text
+    /hyperframes Add clean word-level captions to this interview clip.
+    Keep the footage and audio unchanged. Use high contrast and emphasize
+    only the most important phrase in each sentence.
+    ```
+  </Accordion>
+  <Accordion title="A pull request" icon="code-pull-request">
+    ```text
+    /hyperframes Turn https://github.com/example/repo/pull/123 into a
+    45-second feature reveal. Lead with the user impact, then explain the
+    two most important implementation decisions.
+    ```
+  </Accordion>
+  <Accordion title="A song or audio track" icon="music">
+    ```text
+    /hyperframes Make a 30-second vertical promo driven by this music track.
+    Cut the attached images on the major beats and reserve the chorus for
+    the strongest product moment.
+    ```
+  </Accordion>
+</AccordionGroup>
 
-    Use Studio for direct visual adjustments. Use the agent when a change affects the story, several scenes, source files, or new media.
-  </Step>
-  <Step title="Export">
-    Open the **Renders** panel in Studio, choose the format and resolution, and start the export.
+If none resembles your job, use the [workflow chooser](/workflows).
 
-    MP4 is the normal choice for a finished video. WebM or MOV may be more useful for transparent overlays or another editing workflow.
-  </Step>
-</Steps>
+## 2. Install the HyperFrames guidance
 
-## Pick a request that matches your material
+Open the project folder in your agent and run:
+
+```bash
+npx hyperframes skills update
+```
+
+This installs the core HyperFrames guidance. The `/hyperframes` router adds a specialized creation workflow when the request needs one.
+
+<Note>
+  Start a fresh agent session if `/hyperframes` is not recognized after installation.
+</Note>
+
+## 3. Send the request
+
+Paste the request you chose, attach or link the real source material, and add anything that must be accurate.
+
+A useful first request answers:
+
+- What should exist when the work is finished?
+- Who will watch it?
+- What source should the agent use?
+- What format, duration, or tone matters?
+- What must appear, and what must not?
+
+Do not write a technical animation specification unless a particular motion is essential. The agent should solve the communication problem first.
+
+## 4. Approve the creative direction
+
+Before building a fresh project, the agent confirms the important choices. Read the response like a short creative brief:
+
+- Is the main message correct?
+- Does the audience match?
+- Is the proposed format and length useful?
+- Does the visual direction fit?
+- Are exact claims, words, screens, and exclusions captured?
+
+Correct misunderstandings here. Changing the direction before the build is faster than rebuilding a finished video around the wrong idea.
+
+## 5. Review the first version in Studio
+
+The agent starts Studio and gives you a local project link. Watch the complete video once before editing individual moments.
+
+<Frame caption="Studio opens the real project so you can review the sequence, select visible elements, change timing, and export versions.">
+  <img src="/images/studio/overview.jpg" alt="HyperFrames Studio showing the video canvas, editing panels, and timeline" />
+</Frame>
+
+Check:
+
+1. Can a new viewer understand the opening?
+2. Is the main promise or idea accurate?
+3. Does every scene earn its time?
+4. Can text be read before it leaves?
+5. Does the ending give the viewer somewhere to land?
+
+Use Studio for a direct, visible change. Ask the agent when the change affects the story, multiple scenes, source files, or new media.
+
+```text
+Make the opening faster and reveal the product by three seconds.
+Keep the current colors. Replace the final line with “Try it free.”
+```
+
+[Take the Studio tour →](/studio/tour)
+
+## 6. Export the result
+
+Open **Renders**, choose the format and resolution, and start the export.
+
+- Choose **MP4** for a normal finished video.
+- Choose **WebM** or **MOV** when another workflow needs transparency or a specific codec.
+- Watch the exported file once, including the final frame and audio ending.
+
+[See every export option →](/studio/export)
+
+## You are done when…
+
+You have a video that plays in Studio or an exported file you can watch. Installation alone is not the finish line.
 
 <CardGroup cols={2}>
-  <Card title="A product or website" icon="globe" href="/guides/create-with-agent">
-    Share the URL and explain what the video should help the audience understand or do.
+  <Card title="Choose another workflow" icon="route" href="/workflows">
+    Make a product video, explainer, recut, PR video, motion graphic, music video, or presentation.
   </Card>
-  <Card title="Notes or an idea" icon="lightbulb" href="/guides/create-with-agent">
-    Ask for an explainer when there is no website or existing footage to show.
-  </Card>
-  <Card title="Existing footage" icon="video" href="/guides/create-with-agent">
-    Ask for captions or designed overlays, and say whether the underlying footage should remain untouched.
-  </Card>
-  <Card title="A song or audio track" icon="music" href="/guides/create-with-agent">
-    Say that the music should drive the pacing and attach the media you want cut to the beat.
-  </Card>
-</CardGroup>
-
-## If you prefer to start manually
-
-<Accordion title="Create and open a blank project">
-  Create a project:
-
-  ```bash
-  npx hyperframes init my-video
-  cd my-video
-  ```
-
-  Open it in Studio:
-
-  ```bash
-  npx hyperframes preview
-  ```
-
-  HyperFrames projects use HTML files, but you can make many changes visually in Studio or hand the folder to an agent at any point.
-</Accordion>
-
-## If something goes wrong
-
-- If the agent does not recognize `/hyperframes`, restart the agent session after installing the skills.
-- If Studio does not open, run `npx hyperframes preview` inside the project folder.
-- If a render fails, open [Troubleshooting](/guides/troubleshooting) and copy the error into your agent.
-
-## Next
-
-<CardGroup cols={2}>
-  <Card title="Choose your path" icon="route" href="/guides/choose-your-path">
-    See which workflow fits your source material and intended result.
-  </Card>
-  <Card title="Tour Studio" icon="palette" href="/studio/tour">
-    Learn what the storyboard, canvas, inspector, timeline, and render queue are for.
+  <Card title="Get unstuck" icon="life-ring" href="/help">
+    Start with the visible symptom when Studio, media, animation, or export is not behaving.
   </Card>
 </CardGroup>

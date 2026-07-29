@@ -1,56 +1,93 @@
 ---
-title: "HyperFrames Studio"
-description: "Review, edit, animate, and export a HyperFrames project in the browser."
+title: "Review and edit a project in Studio"
+sidebarTitle: "Studio overview"
+description: "Understand an existing HyperFrames project, make the right kind of change, and export a version."
 ---
 
-HyperFrames Studio is the visual workspace that opens when you preview a project.
+HyperFrames Studio is the visual workspace for a project that an agent or teammate has already created.
 
-Use it to understand what an agent built, make direct changes, and export the finished result. The edits stay with the project, so the visual editor, source files, and final render are working on the same composition.
+Use it to review the story, play the built result, make direct visual changes, ask the agent for broader revisions, and export finished versions. You do not need to understand the project's HTML architecture to start.
 
-## Open Studio
+<Frame caption="The Studio workspace: project navigation, canvas, Inspector, playback, and timeline remain connected to the same project files.">
+  <img src="/images/studio/overview.jpg" alt="HyperFrames Studio showing the canvas, Inspector, playback controls, and timeline" />
+</Frame>
 
-From a HyperFrames project folder, run:
+## Open the project
+
+From the HyperFrames project folder, run:
 
 ```bash
 npx hyperframes preview
 ```
 
-Your browser opens the project in Studio. Keep the terminal process running while you work.
+Keep the terminal process running and open the local URL it prints.
 
-## What you can do
+## First, understand the two views
 
 <CardGroup cols={2}>
-  <Card title="Review the storyboard" icon="table-cells-large" href="/studio/storyboard">
-    Check each planned frame, its direction, status, voiceover, and agent feedback.
+  <Card title="Storyboard: review the plan" icon="table-cells-large" href="/studio/storyboard">
+    Check the sequence, direction, status, narration, and agent feedback before focusing on individual pixels.
   </Card>
-  <Card title="Edit on the canvas" icon="arrow-pointer" href="/studio/canvas">
-    Select, move, resize, rotate, crop, and style visible elements.
-  </Card>
-  <Card title="Change timing" icon="timeline" href="/studio/timeline">
-    Move, trim, split, align, and organize clips.
-  </Card>
-  <Card title="Edit animation" icon="wand-magic-sparkles" href="/studio/animation">
-    Work with keyframes, easing, motion paths, and recorded movement.
-  </Card>
-  <Card title="Add media and Catalog items" icon="photo-film" href="/studio/assets-and-blocks">
-    Import media, reuse project assets, and add Catalog items.
-  </Card>
-  <Card title="Export versions" icon="download" href="/studio/export">
-    Render MP4, WebM, or MOV files and manage the render queue.
+  <Card title="Preview: review the built result" icon="play" href="/studio/tour">
+    Play the video and work with the canvas, Inspector, timeline, Code, Assets, Catalog, Variables, and Renders.
   </Card>
 </CardGroup>
 
-## Two ways to look at a project
+They are two views of the same project. Switching views does not create a separate version.
 
-Use **Storyboard** when you are reviewing the idea and the planned sequence.
+## The safest review order
 
-Use **Preview** when you are editing the built video: canvas, Inspector, timeline, Code, Comps, Assets, Catalog, Variables, and Renders.
+<Steps>
+  <Step title="Review the storyboard">
+    Confirm that the sequence and intended message still make sense.
+  </Step>
+  <Step title="Watch the complete result once">
+    Resist fixing the first imperfect detail immediately. Notice where the story becomes unclear, slow, unreadable, or visually repetitive.
+  </Step>
+  <Step title="Choose one visible task">
+    Use the pages below for the specific change instead of learning every Studio control.
+  </Step>
+  <Step title="Run a quick check">
+    Resolve visible warnings or copy the generated message to your agent when the fix requires source work.
+  </Step>
+  <Step title="Export a named version">
+    Keep useful iterations rather than overwriting the only file you can compare.
+  </Step>
+</Steps>
 
-Switching views does not create a different project. It changes what you are focusing on.
+## What do you want to change?
 
-## Studio and your agent work together
+<CardGroup cols={2}>
+  <Card title="Text, layout, or design" icon="pen-ruler" href="/studio/canvas">
+    Select, move, resize, rotate, crop, and style something you can see.
+  </Card>
+  <Card title="Timing or clip order" icon="timeline" href="/studio/timeline">
+    Move, trim, split, align, and organize clips.
+  </Card>
+  <Card title="Animation" icon="wand-magic-sparkles" href="/studio/animation">
+    Adjust keyframes, easing, motion paths, or recorded movement.
+  </Card>
+  <Card title="Media or a reusable visual" icon="photo-film" href="/studio/assets-and-blocks">
+    Import a file, reuse a project asset, or add something from the Catalog.
+  </Card>
+  <Card title="Captions or variables" icon="closed-captioning" href="/studio/captions">
+    Correct transcript timing and text, or update reusable project values.
+  </Card>
+  <Card title="Export a version" icon="download" href="/studio/export">
+    Choose a format and resolution, render, and review the output.
+  </Card>
+</CardGroup>
 
-Studio is best for direct, visible changes. The agent is best for changes that require broader reasoning or source work.
+## Studio or agent?
+
+```mermaid
+flowchart TD
+    A["Can you point at the exact thing to change?"] -->|Yes| B["Start in Studio"]
+    A -->|No| C["Describe the desired outcome to the agent"]
+    B --> D{"Does the change affect several scenes or source files?"}
+    D -->|No| E["Make the direct edit"]
+    D -->|Yes| C
+```
 
 | Change | Good place to start |
 | --- | --- |
@@ -58,13 +95,18 @@ Studio is best for direct, visible changes. The agent is best for changes that r
 | Trim a clip or split it at the playhead | Studio |
 | Make the opening explain the product sooner | Agent |
 | Add a completely new scene with new media | Agent |
-| Fix a lint issue you do not understand | Copy it to the agent from Studio |
-| Export a vertical and landscape version | Studio or agent, depending on whether the layout must change |
+| Fix a warning you do not understand | Copy it to the agent from Studio |
+| Export another resolution of the same layout | Studio |
+| Redesign the layout for another aspect ratio | Agent, then review in Studio |
 
-<Tip>
-  If you can point at the thing you want to change, try Studio. If you need to describe a new outcome, ask the agent.
-</Tip>
+## Finish safely
 
-## Start with a five-minute tour
+Before sharing:
 
-Open [Tour the workspace](/studio/tour), then keep the relevant task page nearby while you edit.
+1. Play the entire project from the beginning.
+2. Check the final frame and audio ending.
+3. Run the available lint or project check.
+4. Export a version with a useful name.
+5. Watch the exported file once.
+
+If something blocks the task, [start from the visible symptom](/help).

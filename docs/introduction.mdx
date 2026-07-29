@@ -1,84 +1,113 @@
 ---
-title: "Welcome to HyperFrames"
-description: "Make videos with an AI agent, refine them in Studio, and export the finished result."
+title: "What is HyperFrames?"
+sidebarTitle: "What HyperFrames is"
+description: "See how an AI agent, a real project, and HyperFrames Studio work together to create a finished video."
 ---
 
-HyperFrames is a way to create videos with an AI agent and still keep full control over the result.
+HyperFrames lets an AI agent create a real video project, then gives you a visual Studio to review, edit, and export it.
 
-Tell your agent what you want to make. It can plan the story, gather media, build the scenes, add motion, and open the project in **HyperFrames Studio**. In Studio, you can watch the video, rearrange timing, edit text and design, adjust animation, and export the finished file.
+You can begin with an idea, website, script, pull request, recording, or music track. The agent handles the first build. You stay in control of the direction and the visible result.
 
-You do not need to understand the rendering engine or write HTML to get started.
+<Frame caption="A finished HyperFrames product video. This is the kind of result the agent and Studio produce together.">
+  <video
+    className="aspect-video w-full object-cover bg-zinc-100 dark:bg-zinc-900"
+    src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/hyperframes-launch-preview.mp4"
+    poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/hyperframes-launch-poster.jpg"
+    controls
+    muted
+    playsInline
+    preload="metadata"
+  />
+</Frame>
 
 <CardGroup cols={2}>
-  <Card title="Try the browser Playground" icon="browser" href="https://www.hyperframes.dev/">
-    Explore and remix HyperFrames work without beginning in a local project.
+  <Card title="See how it works" icon="arrow-down" href="#from-request-to-finished-result">
+    Understand the complete loop without learning the technical architecture.
   </Card>
-  <Card title="Make something with an agent" icon="sparkles" href="/quickstart">
-    Describe the outcome you want. Your agent chooses the right workflow and builds a first version.
-  </Card>
-  <Card title="Learn HyperFrames Studio" icon="palette" href="/studio">
-    See how to review, edit, animate, and export a project in the visual editor.
-  </Card>
-  <Card title="Browse reusable visuals" icon="grid-2" href="/catalog">
-    Find transitions, captions, charts, overlays, code animations, and complete scenes.
-  </Card>
-  <Card title="Build with the framework" icon="code" href="/developers">
-    Use the CLI, SDK, packages, schemas, and deployment tools.
+  <Card title="Make your first video" icon="sparkles" href="/quickstart">
+    Go from your own source material to a reviewable result in Studio.
   </Card>
 </CardGroup>
 
-## What can you make?
+## From request to finished result
 
-HyperFrames is useful for more than one kind of video.
-
-<CardGroup cols={2}>
-  <Card title="Product and website videos" icon="rocket">
-    Turn a product, website, or launch brief into a polished promo, tour, or social video.
-  </Card>
-  <Card title="Explainers" icon="lightbulb">
-    Turn notes, an article, or a difficult idea into a visual story with narration and motion.
-  </Card>
-  <Card title="Captions and video overlays" icon="closed-captioning">
-    Add subtitles, kinetic titles, lower thirds, quotes, and information cards to existing footage.
-  </Card>
-  <Card title="Motion graphics" icon="wand-magic-sparkles">
-    Create title sequences, animated statistics, charts, logo stings, and transparent overlays.
-  </Card>
-  <Card title="Music-driven videos" icon="music">
-    Cut images, footage, lyrics, and motion to the beat of a music track.
-  </Card>
-  <Card title="Interactive slideshows" icon="display">
-    Build presentations with reveals, speaker notes, branches, and clickable hotspots.
-  </Card>
-</CardGroup>
-
-## How the pieces fit together
+```mermaid
+flowchart LR
+    A["Your idea or source"] --> B["AI agent"]
+    B --> C["HyperFrames project"]
+    C --> D["Studio review and edits"]
+    D --> E["Finished video or presentation"]
+```
 
 <Steps>
-  <Step title="You describe the result">
-    Give an agent a product link, a script, a piece of footage, a pull request, a song, or a plain-language idea.
+  <Step title="Describe the result">
+    Tell the agent what you want the viewer to understand, feel, or do. Attach a website, text, footage, code change, music, or other source when you have one.
   </Step>
-  <Step title="The agent builds a project">
-    The agent chooses the matching HyperFrames workflow, confirms the important creative choices, and creates the scenes and media.
+  <Step title="Approve the direction">
+    The agent confirms the important creative choices before spending time on the build.
   </Step>
-  <Step title="You review it in Studio">
-    Play the result, leave direction, edit visible elements, change timing, adjust animation, and check the final frame.
+  <Step title="Review a real project">
+    The first version opens in HyperFrames Studio. It is not a flattened mystery file: the scenes, timing, media, text, and animation remain editable.
   </Step>
-  <Step title="You export or share it">
-    Render a standard video, a transparent overlay, a high-resolution file, or a shareable published project.
+  <Step title="Improve what you can see">
+    Make direct changes in Studio or ask the agent for a broader revision.
+  </Step>
+  <Step title="Export the result">
+    Render a normal video, a transparent overlay, a high-resolution file, or keep the work as a navigable presentation.
   </Step>
 </Steps>
 
-<Note>
-  HyperFrames projects are stored as normal files rather than a locked proprietary project format. That matters to agents and developers, but you can use the visual Studio without working directly with those files.
-</Note>
+## What can it make?
 
-## Choose the shortest path
+<CardGroup cols={2}>
+  <Card title="Product and website videos" icon="rocket" href="/guides/product-launch-video">
+    Launch videos, tours, promos, and showcases using the real product interface.
+  </Card>
+  <Card title="Visual explainers" icon="lightbulb" href="/guides/faceless-explainer">
+    Turn notes, articles, and difficult ideas into clear visual stories.
+  </Card>
+  <Card title="Captions and designed recuts" icon="closed-captioning" href="/guides/captions-and-recuts">
+    Add subtitles, titles, lower thirds, quotes, and information overlays to footage.
+  </Card>
+  <Card title="Motion graphics" icon="wand-magic-sparkles" href="/guides/motion-graphics">
+    Create animated titles, statistics, charts, logo stings, and transparent overlays.
+  </Card>
+  <Card title="Music-driven videos" icon="music" href="/guides/music-to-video">
+    Cut footage, images, lyrics, and motion to the structure of a music track.
+  </Card>
+  <Card title="Interactive presentations" icon="display" href="/workflows#a-presentation">
+    Build decks with reveals, notes, branches, presenter mode, and clickable navigation.
+  </Card>
+</CardGroup>
 
-- If you have an idea or source material, start with [Make your first video](/quickstart).
-- If you want to explore first, open the [browser Playground](https://www.hyperframes.dev/).
-- If an agent already created a project for you, open [Studio](/studio).
-- If you want a ready-made visual, browse the [Catalog](/catalog).
-- If you are integrating HyperFrames into another product, go to [Developers](/developers).
+[Watch more finished work →](/examples)
 
-Not sure which one fits? [Choose your path](/guides/choose-your-path) gives you a simple decision guide.
+## What the person controls
+
+HyperFrames is built so an agent can do the source-heavy work without hiding the result from you.
+
+| Use Studio when… | Ask the agent when… |
+| --- | --- |
+| You can point at the exact text or visual. | The story or message needs to change. |
+| A clip needs to move, trim, or split. | Several scenes need coordinated changes. |
+| Color, size, position, or timing needs a direct adjustment. | New media, research, narration, or source work is required. |
+| You want to compare and export versions. | You know the outcome but not the implementation. |
+
+You do not need to understand HTML, packages, schemas, or the rendering engine to create and review a video. Those details remain available in [Developers](/developers) when somebody is integrating or extending the framework.
+
+## Choose your next step
+
+<CardGroup cols={2}>
+  <Card title="Try it in the browser" icon="browser" href="https://www.hyperframes.dev/">
+    Explore the Playground without beginning in a local project.
+  </Card>
+  <Card title="Make your first video" icon="play" href="/quickstart">
+    Follow the shortest complete path from source material to export.
+  </Card>
+  <Card title="Choose a workflow" icon="route" href="/workflows">
+    Find the correct path for a product, idea, recording, PR, motion graphic, song, or presentation.
+  </Card>
+  <Card title="Open an existing project" icon="palette" href="/studio">
+    Learn how to review, edit, and export work that an agent or teammate already created.
+  </Card>
+</CardGroup>

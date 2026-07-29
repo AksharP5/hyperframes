@@ -1,0 +1,150 @@
+---
+title: "Get unstuck"
+sidebarTitle: "Get unstuck"
+description: "Start with what you can see, try the smallest useful fix, and return to your HyperFrames task."
+---
+
+Choose the symptom that looks most like yours. You should not need to read the entire documentation site or understand the rendering architecture to solve a normal problem.
+
+<CardGroup cols={2}>
+  <Card title="Studio will not open" icon="window" href="#studio-will-not-open">
+    The browser never opens, the page is unreachable, or the project does not load.
+  </Card>
+  <Card title="Preview is wrong or stale" icon="rotate" href="#preview-is-wrong-or-stale">
+    A saved change is missing, playback looks old, or the preview is blank.
+  </Card>
+  <Card title="I cannot select or edit something" icon="arrow-pointer" href="#i-cannot-select-or-edit-something">
+    Selection, canvas controls, timing, or an Inspector field is unavailable.
+  </Card>
+  <Card title="Media is missing or black" icon="photo-film" href="#media-is-missing-or-black">
+    An image, video, font, or audio file is absent or does not render correctly.
+  </Card>
+  <Card title="Animation is wrong" icon="wand-magic-sparkles" href="#animation-is-wrong">
+    Motion jumps, drifts, starts at the wrong time, or differs after seeking.
+  </Card>
+  <Card title="Render failed or differs from preview" icon="film" href="#render-failed-or-differs-from-preview">
+    Export stops, produces the wrong result, or disagrees with Studio.
+  </Card>
+  <Card title="I have an error message" icon="triangle-exclamation" href="#copy-a-useful-diagnostic">
+    Preserve the exact message and collect enough context for an agent or issue.
+  </Card>
+  <Card title="I need a person" icon="life-ring" href="#ask-for-help">
+    Search known issues or report a reproducible problem.
+  </Card>
+</CardGroup>
+
+## Studio will not open
+
+1. Open a terminal in the HyperFrames project folder.
+2. Run `npx hyperframes preview`.
+3. Keep that process running while Studio is open.
+4. Use the local URL printed in the terminal.
+
+If the command says it cannot find a project, confirm that the folder contains the HyperFrames project rather than its parent folder.
+
+## Preview is wrong or stale
+
+Try these in order:
+
+1. Save the changed file.
+2. Reload Studio once.
+3. Check the terminal for a build or runtime error.
+4. Run the project checks below.
+
+```bash
+npx hyperframes lint
+npx hyperframes check
+```
+
+`lint` checks the composition structure. `check` opens the project in a browser gate and catches runtime, layout, motion, and contrast problems.
+
+## I cannot select or edit something
+
+- Open **Layers** and select the element there when clicking the canvas is difficult.
+- Confirm that you are in **Preview**, not Storyboard.
+- Scrub to a time where the element is visible.
+- Check whether the visual lives inside a nested composition.
+- Ask the agent when the change affects source structure rather than one visible element.
+
+[Open Studio troubleshooting →](/studio/troubleshooting)
+
+## Media is missing or black
+
+Check:
+
+- the file still exists inside the project;
+- the path and filename capitalization match;
+- the source is local and available during rendering;
+- the browser can decode the media format;
+- the media is visible at the current time;
+- the terminal does not report a download, decode, or CORS error.
+
+Do not rely on a temporary signed URL or a render-time network request. Ask the agent to copy required media into the project.
+
+## Animation is wrong
+
+First decide whether the problem happens:
+
+- during normal playback;
+- only after scrubbing;
+- only in the final render.
+
+That distinction helps separate a timeline mistake from non-deterministic animation. HyperFrames animation must be seekable: the same frame should look the same every time it is requested.
+
+Run `npx hyperframes check`, then share the smallest affected scene and the exact timestamp with your agent.
+
+## Render failed or differs from preview
+
+1. Preserve the complete render error.
+2. Run `npx hyperframes check`.
+3. Confirm that fonts and media are local and load before capture.
+4. Check the affected timestamp in Studio.
+5. Try the normal MP4 preset before changing codecs or advanced flags.
+
+Use the [complete troubleshooting guide](/guides/troubleshooting) for codec, browser, FFmpeg, GPU, HDR, and deployment-specific failures.
+
+## Copy a useful diagnostic
+
+Send this block to your agent and fill in the visible facts:
+
+```text
+What I was trying to do:
+
+What I clicked or ran:
+
+What I expected:
+
+What happened instead:
+
+Exact error:
+
+Where it happens: Studio / lint / check / render
+
+Does it happen every time?
+
+HyperFrames version:
+
+Operating system:
+
+Affected file or timestamp:
+```
+
+Add a screenshot or short recording when the failure is visual. Do not paste access tokens, credentials, private media, or other secrets into a public issue.
+
+## Ask for help
+
+<CardGroup cols={2}>
+  <Card title="Common questions" icon="circle-question" href="/guides/common-questions">
+    Read short answers to the questions most likely to come up during first use.
+  </Card>
+  <Card title="Complete troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Diagnose less common project, media, animation, rendering, and environment failures.
+  </Card>
+  <Card title="Share product feedback" icon="comment" href="/guides/feedback">
+    Explain a confusing or broken experience with useful context.
+  </Card>
+  <Card title="Search GitHub issues" icon="github" href="https://github.com/heygen-com/hyperframes/issues">
+    Find known problems or open a reproducible issue.
+  </Card>
+</CardGroup>
+

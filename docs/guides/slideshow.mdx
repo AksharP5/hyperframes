@@ -1,0 +1,96 @@
+---
+title: "Create an interactive presentation"
+sidebarTitle: "Create an interactive presentation"
+description: "Ask an agent to build a navigable HyperFrames deck with reveals, notes, branches, hotspots, and presenter mode."
+---
+
+A HyperFrames slideshow is a running presentation, not a video pretending to be a deck.
+
+It can contain discrete slides, progressive reveals, speaker notes, optional branches, clickable hotspots, presenter controls, and an audience view.
+
+<Warning>
+  Choose this workflow only when the final result should remain interactive. A HyperFrames slideshow is presented with `hyperframes present`; rendering it as one linear MP4 is not currently a supported slideshow output.
+</Warning>
+
+## Use it when
+
+- a presenter needs to control the pace;
+- points should reveal one at a time;
+- the audience may choose a branch or detail path;
+- speaker notes and a separate audience view matter;
+- an existing interactive page should become a navigable deck.
+
+Use a normal video workflow when the result should play from beginning to end without a presenter.
+
+## Give the agent
+
+- the source notes, document, page, or existing deck;
+- the audience and purpose;
+- the rough number of slides;
+- the main narrative;
+- required brand or visual references;
+- whether you need fragments, branches, hotspots, media, or speaker notes;
+- the environment where it will be presented.
+
+```text
+/hyperframes Build a ten-slide interactive product briefing from these
+notes. It is for a sales team introducing the product to design leaders.
+Use progressive reveals, include speaker notes, and add a final branch
+where the presenter can open either the roadmap or pricing detail.
+```
+
+## What the agent should confirm
+
+Before building, agree on:
+
+1. **Deliverable:** an interactive slideshow rather than a rendered video.
+2. **Audience and decision:** what should change after the presentation?
+3. **Main line:** the sequence every audience sees.
+4. **Branches:** optional detail that should not interrupt the main story.
+5. **Interaction:** reveals, hotspots, media, and presenter control.
+6. **Handoff:** how and where the deck will be presented.
+
+## Review the first version
+
+Check the deck as a presenter, not as a passive video:
+
+- Does each slide make one clear point?
+- Do reveals help the explanation, or merely delay content?
+- Can the main line stand without opening a branch?
+- Are hotspots obvious enough to use but quiet enough not to distract?
+- Do speaker notes help the presenter rather than repeat the slide?
+- Does embedded media stop when you leave its slide?
+- Can the audience view be shared without exposing presenter notes?
+
+Use [Studio's Slideshow panel](/studio/slideshows) to review and adjust slide metadata.
+
+## Present the deck
+
+Run:
+
+```bash
+npx hyperframes present <project-directory>
+```
+
+Open the local URL, then click **Present** or press **P**. HyperFrames opens a separate audience view while the original tab becomes the presenter view with the current slide, next-slide preview, notes, and timer.
+
+For a call:
+
+- In Google Meet, share the audience **tab**.
+- In Zoom, move the audience tab into its own window and share that window.
+- Keep presenter notes on your own screen.
+
+## Supported output
+
+The primary output is the live, navigable deck. You can also create per-slide snapshots.
+
+If the final deliverable must be a linear MP4 today, ask the agent to make a normal HyperFrames video from the same source rather than sending the slideshow to the video renderer.
+
+## If something goes wrong
+
+- If navigation does nothing, confirm the slideshow project is being served with `hyperframes present`.
+- If a branch cannot be opened, ask the agent to check the hotspot target and slide sequence.
+- If a reveal lands at the wrong moment, identify the slide and reveal number.
+- If the audience view does not play media, interact with the audience tab once so the browser can allow playback.
+
+[Start from a visible symptom →](/help)

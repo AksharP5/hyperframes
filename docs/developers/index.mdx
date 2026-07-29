@@ -7,33 +7,55 @@ This section is for people integrating HyperFrames, automating it, extending the
 
 If you only want to create or edit a video, begin with [Guides](/guides) or [Studio](/studio).
 
+## Choose the smallest surface
+
+```mermaid
+flowchart TD
+    A["What does your system need to do?"] --> B["Run commands or CI jobs"]
+    A --> C["Inspect or edit compositions in an app"]
+    A --> D["Embed playback"]
+    A --> E["Operate custom render infrastructure"]
+    A --> F["Generate or validate raw composition source"]
+    B --> G["CLI"]
+    C --> H["SDK"]
+    D --> I["Player"]
+    E --> J["Focused packages and deployment guides"]
+    F --> K["HTML schema and animation reference"]
+```
+
 <CardGroup cols={2}>
   <Card title="CLI" icon="terminal" href="/developers/cli">
-    Choose the command for creating, checking, rendering, publishing, and automating projects.
+    Create, check, render, publish, and automate projects from a terminal or CI job.
   </Card>
-  <Card title="SDK" icon="code" href="/sdk/overview">
-    Query and edit compositions, persist changes, and build custom editing surfaces.
+  <Card title="SDK quickstart" icon="code" href="/sdk/quickstart">
+    Open a composition, query or edit it, persist changes, and build custom editing surfaces.
+  </Card>
+  <Card title="Player" icon="circle-play" href="/packages/player">
+    Embed a seekable HyperFrames composition and control playback from an application.
   </Card>
   <Card title="Packages" icon="boxes-stacked" href="/packages/core">
-    Use the framework as focused packages for parsing, playback, rendering, Studio, and infrastructure.
-  </Card>
-  <Card title="HTML schema" icon="brackets-curly" href="/reference/html-schema">
-    Reference the composition elements, timing attributes, tracks, variables, and media contract.
+    Add focused parsing, playback, rendering, Studio, or infrastructure capabilities.
   </Card>
   <Card title="Deployment" icon="cloud" href="/deploy/cloud">
     Render with managed cloud infrastructure, AWS Lambda, or Google Cloud Run.
   </Card>
-  <Card title="Contributing" icon="code-pull-request" href="/contributing">
-    Work on the framework, Catalog, tests, and releases.
+  <Card title="HTML schema" icon="brackets-curly" href="/reference/html-schema">
+    Reference composition elements, timing attributes, tracks, variables, and the media contract.
   </Card>
 </CardGroup>
 
-## Start with the smallest surface
+## A good first technical result
 
-- Use the **CLI** for normal project and render automation.
-- Use the **SDK** when your application needs to inspect or edit compositions.
-- Use the **Player** when you need embedded playback.
-- Install individual **packages** when you are building infrastructure or a custom product surface.
-- Read the raw **schema** when generating or validating composition source.
+Choose one result rather than installing the whole repository:
 
-Most applications do not need to depend on every package.
+- render one known project from a script or CI job;
+- open one composition with the SDK and change one value;
+- embed one project with the Player and seek to a timestamp;
+- deploy one minimal render path;
+- validate one generated composition against the schema.
+
+Continue to package or reference pages only when that working path requires more control. Most integrations should not depend on every HyperFrames package.
+
+## Working on HyperFrames itself?
+
+Use [Contributing](/contributing) for repository setup, tests, Catalog contributions, and releases. Product integrations should begin with one of the surfaces above instead.
