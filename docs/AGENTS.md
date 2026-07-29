@@ -22,7 +22,7 @@ These rules are persistent and apply to every documentation session:
 - Match the deployed main docs' sidebar rhythm: 14px medium group headings, square links, no horizontal group dividers, and a segmented vertical rail whose active segment follows the current page. Groups remain open and non-collapsible.
 - Keep the Aspen sidebar aligned to the 56px header and disable its early scroll-fade mask.
 - Keep Mintlify's right-side **On this page** behavior and styling unchanged.
-- Keep Aspen's desktop header on one row: logo, tabs, search, compact GitHub link with its star count, Playground action, and theme toggle.
+- Keep Aspen's desktop header on one row: logo, tabs, search, compact GitHub link with its star count, Playground action, and theme toggle. Preserve the fixed-width star-count fallback so client-side navigation does not make the control blink or collapse.
 - Keep the bottom-center agent input visually distinct from the page with its own surface, stronger border, and restrained shadow.
 - Record important findings, uncertainties, and decisions in `../research/docs-refactor/NOTES.md`.
 - Update progress and changed decisions in `../research/docs-refactor/PLAN.md`.

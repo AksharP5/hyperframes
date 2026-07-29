@@ -207,6 +207,7 @@ New navigation should be task-shaped:
 - Restored the GitHub star count while keeping the repository name hidden, and normalized Aspen's darker surface borders to main's quieter border color.
 - Verified that the documentation font did not change: both main and the refactor use the same TT Norms Pro files and the same body and heading typography.
 - Explicitly forced Mintlify's live GitHub star span to remain visible and gave the floating agent input a distinct surface, stronger border, and restrained shadow.
+- Prevented the GitHub control from blinking during client-side navigation: Mintlify removes the live count for about 49ms while remounting, so the control now keeps a fixed width and shows the last verified count as a transient CSS fallback.
 
 ## Maintenance issue
 
