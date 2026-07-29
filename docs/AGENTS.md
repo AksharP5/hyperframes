@@ -20,8 +20,9 @@ These rules are persistent and apply to every documentation session:
 - A page should answer a real question or help complete a real task.
 - Keep ordinary top-level groups inside each tab, with no nested `root`, `directory`, `expanded`, or drilldown behavior.
 - Match the deployed main docs' sidebar rhythm: 14px medium group headings, square links, no horizontal group dividers, and a segmented vertical rail whose active segment follows the current page. Groups remain open and non-collapsible.
+- Keep the Aspen sidebar aligned to the 56px header and disable its early scroll-fade mask.
 - Keep Mintlify's right-side **On this page** behavior and styling unchanged.
-- Keep Aspen's desktop header on one row: logo, tabs, search, actions, and theme toggle.
+- Keep Aspen's desktop header on one row: logo, tabs, search, compact GitHub link with its star count, Playground action, and theme toggle.
 - Record important findings, uncertainties, and decisions in `../research/docs-refactor/NOTES.md`.
 - Update progress and changed decisions in `../research/docs-refactor/PLAN.md`.
 

@@ -203,6 +203,9 @@ New navigation should be task-shaped:
 - Matched the deployed main docs' sidebar treatment: 14px medium group headings, square links, no horizontal dividers, and one border segment per page so the active segment tracks the current page. Groups remain open and non-collapsible.
 - Kept Mintlify's right-side **On this page** surface completely unchanged.
 - Fit the Aspen desktop header into one row, with the GitHub destination shown as a compact icon.
+- Corrected Aspen's stale 96px sticky-sidebar offset to the actual 56px header height and removed its early scroll-fade mask.
+- Restored the GitHub star count while keeping the repository name hidden, and normalized Aspen's darker surface borders to main's quieter border color.
+- Verified that the documentation font did not change: both main and the refactor use the same TT Norms Pro files and the same body and heading typography.
 
 ## Maintenance issue
 

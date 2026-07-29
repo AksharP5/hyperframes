@@ -42,6 +42,7 @@ Global header:
 - Keep Aspen’s full-width top navigation. Use the small desktop-only layout override needed to fit the logo, tabs, search, actions, and theme toggle on one row.
 - Keep every left-sidebar group open and non-collapsible. Match the deployed main docs' spacing, group-heading scale, square link treatment, and segmented active-page rail.
 - Keep Mintlify’s default right-side **On this page** behavior and styling.
+- Align Aspen's sticky sidebar to the actual 56px header, remove its premature scroll fade, keep the GitHub star count, and use main's quieter structural border color.
 
 Navigation behavior:
 
