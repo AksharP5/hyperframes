@@ -19,24 +19,28 @@ Created by [Stronkter](https://x.com/Stronkter).
 
 ## Add it to a project
 
-Ask your agent:
+<Tabs>
+
+<Tab title="Ask your agent">
 
 ```text
 Add the Apple Money Count block from the HyperFrames Catalog to this project.
 Replace the demo content with mine and match the existing design and timing.
 ```
 
-Or install it from the project folder:
+</Tab>
 
-<CodeGroup>
+<Tab title="Terminal">
 
-```bash Terminal
+```bash
 npx hyperframes add apple-money-count
 ```
 
-</CodeGroup>
+</Tab>
 
-<Accordion title="Technical details">
+</Tabs>
+
+## Details
 
 | Property | Value |
 | --- | --- |
@@ -51,18 +55,12 @@ npx hyperframes add apple-money-count
 | `apple-money-count.html` | `compositions/apple-money-count.html` | hyperframes:composition |
 | `assets/sfx-production.wav` | `assets/sfx-production.wav` | hyperframes:asset |
 
-</Accordion>
-
 ## Use it
 
 Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
 
-<Accordion title="HTML for agents and developers">
-
-The installed block can be added to a host composition with:
+**Wiring it by hand.** The installed block can be added to a host composition with:
 
 ```html
 <div data-composition-id="apple-money-count" data-composition-src="compositions/apple-money-count.html" data-start="0" data-duration="5" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
-
-</Accordion>

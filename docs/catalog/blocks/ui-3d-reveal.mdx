@@ -11,24 +11,28 @@ Perspective 3D reveal animation for UI elements
 
 ## Add it to a project
 
-Ask your agent:
+<Tabs>
+
+<Tab title="Ask your agent">
 
 ```text
 Add the 3D UI Reveal block from the HyperFrames Catalog to this project.
 Replace the demo content with mine and match the existing design and timing.
 ```
 
-Or install it from the project folder:
+</Tab>
 
-<CodeGroup>
+<Tab title="Terminal">
 
-```bash Terminal
+```bash
 npx hyperframes add ui-3d-reveal
 ```
 
-</CodeGroup>
+</Tab>
 
-<Accordion title="Technical details">
+</Tabs>
+
+## Details
 
 | Property | Value |
 | --- | --- |
@@ -42,18 +46,12 @@ npx hyperframes add ui-3d-reveal
 | --- | --- | --- |
 | `ui-3d-reveal.html` | `compositions/ui-3d-reveal.html` | hyperframes:composition |
 
-</Accordion>
-
 ## Use it
 
 Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
 
-<Accordion title="HTML for agents and developers">
-
-The installed block can be added to a host composition with:
+**Wiring it by hand.** The installed block can be added to a host composition with:
 
 ```html
 <div data-composition-id="ui-3d-reveal" data-composition-src="compositions/ui-3d-reveal.html" data-start="0" data-duration="13" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
-
-</Accordion>

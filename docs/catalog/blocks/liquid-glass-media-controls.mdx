@@ -15,24 +15,28 @@ Frosted glass media control panels spreading over an aurora shader background
 
 ## Add it to a project
 
-Ask your agent:
+<Tabs>
+
+<Tab title="Ask your agent">
 
 ```text
 Add the Liquid Glass Media Controls block from the HyperFrames Catalog to this project.
 Replace the demo content with mine and match the existing design and timing.
 ```
 
-Or install it from the project folder:
+</Tab>
 
-<CodeGroup>
+<Tab title="Terminal">
 
-```bash Terminal
+```bash
 npx hyperframes add liquid-glass-media-controls
 ```
 
-</CodeGroup>
+</Tab>
 
-<Accordion title="Technical details">
+</Tabs>
+
+## Details
 
 | Property | Value |
 | --- | --- |
@@ -47,18 +51,12 @@ npx hyperframes add liquid-glass-media-controls
 | `liquid-glass-media-controls.html` | `compositions/liquid-glass-media-controls.html` | hyperframes:composition |
 | `lib/liquid-glass.iife.js` | `compositions/lib/liquid-glass.iife.js` | registry:asset |
 
-</Accordion>
-
 ## Use it
 
 Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
 
-<Accordion title="HTML for agents and developers">
-
-The installed block can be added to a host composition with:
+**Wiring it by hand.** The installed block can be added to a host composition with:
 
 ```html
 <div data-composition-id="liquid-glass-media-controls" data-composition-src="compositions/liquid-glass-media-controls.html" data-start="0" data-duration="8" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
-
-</Accordion>

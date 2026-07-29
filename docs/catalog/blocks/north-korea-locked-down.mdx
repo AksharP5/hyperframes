@@ -19,24 +19,28 @@ use 📷HyperFrames by HeyGen and Image Gen  if you need it for assets or like p
 
 ## Add it to a project
 
-Ask your agent:
+<Tabs>
+
+<Tab title="Ask your agent">
 
 ```text
 Add the North Korea Locked Down block from the HyperFrames Catalog to this project.
 Replace the demo content with mine and match the existing design and timing.
 ```
 
-Or install it from the project folder:
+</Tab>
 
-<CodeGroup>
+<Tab title="Terminal">
 
-```bash Terminal
+```bash
 npx hyperframes add north-korea-locked-down
 ```
 
-</CodeGroup>
+</Tab>
 
-<Accordion title="Technical details">
+</Tabs>
+
+## Details
 
 | Property | Value |
 | --- | --- |
@@ -51,18 +55,12 @@ npx hyperframes add north-korea-locked-down
 | `north-korea-locked-down.html` | `compositions/north-korea-locked-down.html` | hyperframes:composition |
 | `assets/korea-map.png` | `assets/korea-map.png` | hyperframes:asset |
 
-</Accordion>
-
 ## Use it
 
 Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
 
-<Accordion title="HTML for agents and developers">
-
-The installed block can be added to a host composition with:
+**Wiring it by hand.** The installed block can be added to a host composition with:
 
 ```html
 <div data-composition-id="north-korea-locked-down" data-composition-src="compositions/north-korea-locked-down.html" data-start="0" data-duration="7" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
-
-</Accordion>

@@ -362,31 +362,38 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
     );
   }
 
-  // Human-first install path, with the terminal command kept as an alternative.
+  // Two genuinely parallel ways to do one thing, so they belong in tabs rather
+  // than stacked with the second framed as an afterthought. The agent request
+  // leads because it is the shorter path for most readers.
   lines.push(
     "## Add it to a project",
     "",
-    "Ask your agent:",
+    "<Tabs>",
+    "",
+    '<Tab title="Ask your agent">',
     "",
     "```text",
     `Add the ${manifest.title} ${kind} from the HyperFrames Catalog to this project.`,
     "Replace the demo content with mine and match the existing design and timing.",
     "```",
     "",
-    "Or install it from the project folder:",
+    "</Tab>",
     "",
-    "<CodeGroup>",
+    '<Tab title="Terminal">',
     "",
-    "```bash Terminal",
+    "```bash",
     installCmd,
     "```",
     "",
-    "</CodeGroup>",
+    "</Tab>",
+    "",
+    "</Tabs>",
     "",
   );
 
-  // Keep registry metadata available without making it the main reading path.
-  lines.push('<Accordion title="Technical details">', "");
+  // Registry metadata, visible. It is short — three rows and a file list — so
+  // hiding it behind a click bought nothing and cost Cmd+F and printing.
+  lines.push("## Details", "");
   if (kind === "block" && manifest.dimensions && manifest.duration) {
     lines.push(
       `| Property | Value |`,
@@ -408,8 +415,6 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
     }
     lines.push("");
   }
-  lines.push("</Accordion>", "");
-
   if (textureGroups.length > 0) {
     lines.push(...generateTextureAgentUsage(manifest, textureGroups));
     lines.push(...generateTextureAnimationExample(manifest, textureGroups));
@@ -431,15 +436,11 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
       "",
       "Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.",
       "",
-      '<Accordion title="HTML for agents and developers">',
-      "",
-      "The installed block can be added to a host composition with:",
+      "**Wiring it by hand.** The installed block can be added to a host composition with:",
       "",
       "```html",
       `<div data-composition-id="${manifest.name}" data-composition-src="${primaryTarget}" data-start="0" data-duration="${manifest.duration}" data-track-index="1" data-width="${w}" data-height="${h}"></div>`,
       "```",
-      "",
-      "</Accordion>",
       "",
     );
   } else {
@@ -456,11 +457,7 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
         "",
         "Ask your agent to apply the component to the intended element and preserve the project’s existing timing.",
         "",
-        '<Accordion title="Instructions for agents and developers">',
-        "",
-        `Open \`${primaryTarget}\` and paste its contents into your composition. The comment header in that file contains any item-specific instructions.`,
-        "",
-        "</Accordion>",
+        `**Wiring it by hand.** Open \`${primaryTarget}\` and paste its contents into your composition. The comment header in that file contains any item-specific instructions.`,
         "",
       );
     }
@@ -582,16 +579,23 @@ function main(): void {
     .map(([group, pages]) => ({ group, pages }));
 
   if (catalogGroups.length > 0) {
-    // Replace or insert the Catalog tab
+    // Update the existing Catalog tab in place. Rebuilding the object dropped
+    // everything except the groups — the tab lost its `icon` — and removing it
+    // before re-inserting moved it, because the anchor tab it looked for
+    // ("Documentation") no longer exists and the fallback index put Catalog
+    // ahead of Studio. Only `groups` is generated; every other property and the
+    // tab's position belong to whoever curates docs.json.
     const existingIdx = tabs.findIndex((t) => t.tab === "Catalog");
-    const catalogTab = { tab: "Catalog", groups: catalogGroups };
-    // Remove existing Catalog tab if present, then insert at position 1
-    // (after Documentation, before Packages).
     if (existingIdx >= 0) {
-      tabs.splice(existingIdx, 1);
+      tabs[existingIdx] = { ...tabs[existingIdx], groups: catalogGroups };
+    } else {
+      const anchorIdx = tabs.findIndex((t) => t.tab === "Guides" || t.tab === "Documentation");
+      tabs.splice(anchorIdx >= 0 ? anchorIdx + 1 : 1, 0, {
+        tab: "Catalog",
+        icon: "grid-2",
+        groups: catalogGroups,
+      });
     }
-    const docsIdx = tabs.findIndex((t) => t.tab === "Documentation");
-    tabs.splice(docsIdx >= 0 ? docsIdx + 1 : 1, 0, catalogTab);
     writeFileSync(docsJsonPath, JSON.stringify(docsJson, null, 2) + "\n", "utf-8");
     const totalPages = catalogGroups.reduce((n, g) => n + g.pages.length, 0);
     console.log(`  ✓ docs.json updated with ${catalogGroups.length} groups, ${totalPages} pages`);
