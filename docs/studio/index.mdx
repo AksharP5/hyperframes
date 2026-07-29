@@ -35,6 +35,10 @@ Keep the terminal process running and open the local URL it prints.
 
 They are two views of the same project. Switching views does not create a separate version.
 
+<Frame caption="Storyboard: the plan and running order, before you focus on individual pixels.">
+  <img src="/images/studio/storyboard.jpg" alt="HyperFrames Studio Storyboard view showing scenes in sequence with direction and status" />
+</Frame>
+
 ## The safest review order
 
 <Steps>
@@ -80,14 +84,7 @@ They are two views of the same project. Switching views does not create a separa
 
 ## Studio or agent?
 
-```mermaid
-flowchart TD
-    A["Can you point at the exact thing to change?"] -->|Yes| B["Start in Studio"]
-    A -->|No| C["Describe the desired outcome to the agent"]
-    B --> D{"Does the change affect several scenes or source files?"}
-    D -->|No| E["Make the direct edit"]
-    D -->|Yes| C
-```
+If you can point at the exact thing, start in Studio. If the change spans several scenes or needs new source material, describe the outcome to the agent instead.
 
 | Change | Good place to start |
 | --- | --- |
