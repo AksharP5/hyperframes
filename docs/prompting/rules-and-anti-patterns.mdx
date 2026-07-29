@@ -48,6 +48,30 @@ Two more ways an SVG "line draws itself" effect (animated `strokeDasharray` / `s
 - **Don't declare a multi-value CSS `stroke-dasharray` on the same element GSAP is animating.** GSAP merges dash lists per component, so the CSS gap survives the animation and the draw-on hide only covers one gap's worth — the line stays visible for the whole scene. Put decorative dashing on a separate element if you need both effects. (`svg_drawon_css_dasharray_conflict`, PR [#2611](https://github.com/heygen-com/hyperframes/pull/2611))
 - **Give the path a static `d` attribute before anything measures it.** `getTotalLength()` returns 0 in Chrome if the path's `d` isn't set yet — whether because `d` is only assigned inside a function that hasn't run, or never assigned as a static attribute at all — and a dash animation built on a 0-length path is silently dead. (`svg_measure_before_path_d`, PR [#2611](https://github.com/heygen-com/hyperframes/pull/2611))
 
+## Layout waivers, and the one that bites
+
+`hyperframes check` flags a text block covered by another element as `text_occluded`, and
+two attributes waive it: `data-layout-allow-overlap` for intentional layering, and
+`data-layout-allow-occlusion` for something deliberately painted over type. Both are
+legitimate — a caption designed to sit behind a matted subject needs one.
+
+Two things about them are worth knowing before you reach for either:
+
+- **`data-layout-allow-occlusion` also silences the WCAG contrast gate for that whole
+  subtree.** Validating this guide's confetti example, moving the attribute onto a cluster
+  root took contrast coverage from 73 checks to 13 — and a deliberately near-invisible
+  numeral inside it then passed. Scope the attribute to the narrowest node that needs it,
+  and check the contrast count afterwards; if it dropped, you have waived more than you
+  meant to.
+- **The occlusion audit is stricter than it looks on atomic labels.** A single glyph — a
+  digit, a `$`, a `.` — flags at *any* coverage, so one confetti particle grazing one
+  character is a hard error. `pointer-events: none` does not exempt an element, and a CSS
+  `mask-image` lets the audit probe through masked-away cells and attribute the occlusion
+  to whatever paints behind them.
+
+The cheaper fix is usually compositional: layer a particle burst *behind* the type rather
+than over it. The type's ink cuts through, the reading stays clean, and no waiver is needed.
+
 ## Anti-patterns
 
 Each one causes friction or wrong output for a specific engine reason — with the fix.
