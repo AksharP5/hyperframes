@@ -4,11 +4,13 @@ sidebarTitle: "What HyperFrames is"
 description: "Tell an AI agent what you want. It builds a real, editable video project — you refine it in Studio and export the film."
 ---
 
-<Frame caption="One request — “make a 30-second launch video for our new pricing page” — from prompt to exported film. Made with HyperFrames.">
+import { ShowcaseWall } from "/snippets/showcase-wall.jsx"
+
+<Frame caption="A website goes in; HyperFrames plans it, builds it, and renders the film. Made with HyperFrames — press play for sound.">
   <video
     className="aspect-video w-full object-cover bg-zinc-100 dark:bg-zinc-900"
-    src="/images/showcase/what-is-hyperframes.mp4"
-    poster="/images/showcase/what-is-hyperframes-poster.jpg"
+    src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/hero-website-launch.mp4"
+    poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/hero-website-launch.jpg"
     autoPlay
     muted
     loop
@@ -39,28 +41,11 @@ Start from an idea, a website, a script, a recording, a pull request, or a song.
 
 ## What can it make?
 
-Every one of these is real HyperFrames output, running in your browser right now:
+Every one of these is a finished film made with HyperFrames. Each tile plays silently where it sits — click one to watch it properly, with sound.
 
-<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 my-6">
-  <a href="/catalog/blocks/data-chart" className="block no-underline">
-    <video className="w-full aspect-video object-cover rounded-lg border border-zinc-200 dark:border-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/data-chart.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/data-chart.png" autoPlay muted loop playsInline />
-    <span className="block mt-2 text-sm text-zinc-500 dark:text-zinc-400">Animated data</span>
-  </a>
-  <a href="/catalog/components/caption-highlight" className="block no-underline">
-    <video className="w-full aspect-video object-cover rounded-lg border border-zinc-200 dark:border-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/components/caption-highlight.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/components/caption-highlight.png" autoPlay muted loop playsInline />
-    <span className="block mt-2 text-sm text-zinc-500 dark:text-zinc-400">Kinetic captions</span>
-  </a>
-  <a href="/catalog/blocks/spain-map" className="block no-underline">
-    <video className="w-full aspect-video object-cover rounded-lg border border-zinc-200 dark:border-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/spain-map.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/spain-map.png" autoPlay muted loop playsInline />
-    <span className="block mt-2 text-sm text-zinc-500 dark:text-zinc-400">Maps and locations</span>
-  </a>
-  <a href="/catalog/blocks/logo-outro" className="block no-underline">
-    <video className="w-full aspect-video object-cover rounded-lg border border-zinc-200 dark:border-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/logo-outro.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/logo-outro.png" autoPlay muted loop playsInline />
-    <span className="block mt-2 text-sm text-zinc-500 dark:text-zinc-400">Logo and brand stings</span>
-  </a>
-</div>
+<ShowcaseWall />
 
-Those are individual pieces. A finished video combines them — and there is a path for each kind:
+There is a path for each kind of video:
 
 <CardGroup cols={2}>
   <Card title="Product and website videos" icon="rocket" href="/guides/product-launch-video">
