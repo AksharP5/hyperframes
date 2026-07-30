@@ -34,7 +34,7 @@ Once a movement has something to say, this is how to make it read well. These ru
 
 1. **Nothing ever fully stops.** Every "hold" carries ambient idle motion — a 1-2% breathing scale, slow drift, a shimmer. Never write "holds motionless"; write "settles into a gentle ambient idle." A frozen final second is the single biggest cheap-motion tell.
 2. **The camera is an actor.** Give each scene one continuous camera move — a 4-8% push-in, a slow orbit, parallax between layered planes — easing gently and never *decaying* to a dead stop at the end of a scene (compute the ease over a window slightly longer than the render). A deliberate mid-film rest is a different thing, and it is sanctioned: see [avoiding the slideshow](#avoiding-the-slideshow).
-3. **Overlapping action.** No two elements share a start or end time. Entrances stagger at irregular offsets; the next element begins while the last is still settling. The mechanism is a ratio: **each offset should be clearly shorter than the animation it offsets** — a small offset-to-duration ratio reads fluid, a large one reads deliberate, and an offset longer than the animation stops being a stagger and becomes a queue. Delay the *supporting* elements, never the focal one; a focal element that waits reads as lag.
+3. **Overlapping action.** No two elements share a start or end time. Entrances stagger at irregular offsets; the next element begins while the last is still settling. The mechanism is a ratio: **each offset should be clearly shorter than the animation it offsets** — a small offset-to-duration ratio reads fluid, a large one reads deliberate, and an offset longer than the animation stops being a stagger and becomes a queue. Delay the *supporting* elements, never the focal one; a focal element that waits reads as lag. And stagger what is **happening**, not what is merely **present**: things that arrive in sequence should animate in sequence, but a set of things that already existed before the shot started should appear together — staggering those just makes the scene take longer to assemble.
 4. **Compound properties only when they tell one story.** Every animation changes at least one property — position, scale, opacity, rotation. Combining them works when they say the same thing (a confirmation sliding up *and* fading in both read as "arriving") and confuses when they don't (a sheet that rises *and* rotates is two unrelated claims about one object). Pick the properties that serve the movement's job and drop the rest. Direction follows from the same logic: entrances ease **out** (fast in, gentle settle — the object arrives), exits ease **in** (gentle start, decisive departure), on-screen moves ease **in-out**, and impacts — a stamp, a slam — ease **in**, because an impact is an acceleration.
 5. **Overshoot and follow-through.** Overshoot is a claim about mass: a thing with weight passes its target and settles back, and the parts it drags — a shadow, a trailing panel, the housing it lands in — resolve a beat *after* it does, not with it. That one-frame lag is what sells the weight; perfectly synchronized "follow-through" is just a bigger single object. Apply it to **transforms only**. A number is not a physical object, so a counter must never fly past its value and fall back — that renders a figure that was never true, and on a real metric it's a lie with a frame count.
 6. **Depth planes.** Move each plane at a rate that matches its distance — far background at a fraction of the camera's rate, content at full rate, foreground at several times. The cue that does the most work isn't blur, it's **occlusion**: one large, heavily-blurred foreground element that actually crosses in front of your content proves there is space between them in a way no amount of blur on an element that never overlaps can. Prefer one such element over two — a second stops reading as the room and starts reading as decoration.
@@ -53,40 +53,44 @@ Each subject is chosen so the rule is *unavoidable* given the content: a live fe
 
 ❌ **Without**
 
-> 6-second 1920x1080 stat card: an `ARR · LIVE` eyebrow with a status dot above `$4.200M` at display scale, a mint accent rule beneath. Everything lands by 2s, then holds motionless to the end — the status dot stops, the figure freezes.
+> 6-second 1920x1080 live telemetry panel: an `ARR · LIVE` eyebrow with a status dot, `PROD · US-EAST-1` opposite, `$4.200M` at display scale with a delta chip, a sparkline of the reading history beneath, and a footer row reading `LAST SYNC` and `READINGS`. The panel rises in and lands by 1.9s, then holds motionless to the end — the dot stops, the figure freezes, the sparkline stops extending, the footer stops updating.
 
 ✅ **With**
 
-> 6-second 1920x1080 stat card: an `ARR · LIVE` eyebrow with a status dot above `$4.200M` at display scale, a mint accent rule beneath. Everything lands by 2s, then stays alive because the data is — the status dot keeps a steady 1s heartbeat, and the last digits keep ticking as fresh readings arrive, the accent rule extending toward each new one. Nothing else moves.
+> 6-second 1920x1080 live telemetry panel: an `ARR · LIVE` eyebrow with a status dot, `PROD · US-EAST-1` opposite, `$4.200M` at display scale with a delta chip, a sparkline of the reading history beneath, and a footer row reading `LAST SYNC` and `READINGS`. The panel rises in and lands by 1.9s, then stays alive because the feed is — a new reading arrives every 300ms and each one moves exactly what it should: the last digits change, the sparkline extends one segment with its leading dot, `LAST SYNC` restamps, `READINGS` increments. The status dot keeps a 1s heartbeat because the connection is up. Nothing else moves. Fix the sparkline's y-scale up front so an arriving reading never rescales the axis.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule1-nothing-stops.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Left `WITHOUT`, right `WITH` — after 2s the left is bit-identical frame to frame while the right's 120 frames are all distinct. Note what is moving and why: the dot beats because the feed is connected, the digits tick because a reading arrived, the rule extends because it is the number. Three movements, three reasons. The frozen half reads as a dead connection rather than a style choice, which is the argument for the rule.*
+*Left `WITHOUT`, right `WITH` — from 2.0s the left's 120 remaining frames share a single hash; all 180 of the right's are distinct. Every movement on the right answers "because": the dot beats because the connection is up, the digits change because a reading arrived, the sparkline extends because that reading is now history. That's the test — not "is there enough motion" but "can each thing that moves say why".*
+
+*The clearest artifact is the footer. The frozen half reads `LAST SYNC 09:41:21.75 · READINGS 22` while the live one reads `09:41:23.95 · 30`. A still frame of the left half looks like a perfectly good stat card; the moment it sits next to a running one you can read exactly how long the feed has been dead. That is what a frozen hold communicates to a viewer, whether or not you meant it.*
 
 ### Rule 2 — The camera is an actor
 
 ❌ **Without**
 
-> …three feature cards in an asymmetric cluster, entering over the first 2s. Locked-off frame — no camera move.
+> …an isometric deploy pipeline, `SOURCE → BUILD → TEST → DEPLOY → EDGE`, laid out left to right across a world 3.5 frame-widths wide, each stage a slab with a labelled card reading its status. A packet of work travels the wire stage to stage, lighting the wire behind it and igniting each stage as it arrives. Locked-off frame — no camera move.
 
 ✅ **With**
 
-> …three feature cards in an asymmetric cluster, entering over the first 2s. One continuous camera across the whole 6s: a 25% push-in with a 118px lateral drift, `ease: none` so it never settles for a single frame, and the background grid parallaxing at a fifth of that rate.
+> …an isometric deploy pipeline, `SOURCE → BUILD → TEST → DEPLOY → EDGE`, laid out left to right across a world 3.5 frame-widths wide, each stage a slab with a labelled card reading its status. A packet of work travels the wire stage to stage, lighting the wire behind it and igniting each stage as it arrives. One continuous camera follows the work for the whole 6s — 2.5 frame-widths of travel on `ease: none`, so it never settles for a single frame — with the background grid parallaxing at a fifth of that rate.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule2-camera-actor.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Left `WITHOUT`, right `WITH` — measured: 25.05% push and 118px drift on the right, exactly 0.00 on the left.*
+*Left `WITHOUT`, right `WITH` — the camera is not decoration here, it's the only way to see the subject. In the locked frame `SOURCE` is fully visible, `BUILD` is cut off at 47.6%, and `TEST`, `DEPLOY` and `EDGE` are 0% visible for the entire six seconds. Deleting those three stages and their wires from the composition entirely and re-rendering produced a left half identical on all 180 frames, max channel delta 0 — three fifths of the pipeline contribute literally nothing. The left half also goes completely static at 2.7s, once the work has left the visible region: a locked frame doesn't just crop the story, it strands you watching the part that already finished.*
 
 ### Rule 3 — Overlapping action
 
 ❌ **Without**
 
-> …five chips enter, then exit; the sequence plays twice. All five start at the same moment, 0.5s each.
+> …`Rolling out to every region` over a dotted world map with twelve edge regions marked and a live `n / 12` tally. A progressive rollout takes each region live: the region's core ignites, its dot field turns mint, and the tally counts. All twelve ignite at the same moment, 0.5s each.
 
 ✅ **With**
 
-> …five chips enter, then exit; the sequence plays twice. They arrive as one wave — 0.5s each, staggered 0.09s apart so all five are in flight at once, and none finishes before the next begins.
+> …`Rolling out to every region` over a dotted world map with twelve edge regions marked and a live `n / 12` tally. A progressive rollout spreads outward from `us-east-1`, reaching each region in order of its distance from the origin, 0.09s apart: a link draws from the nearest already-live region and lands exactly as that region's core ignites, its dot field turns mint, a ping carries onward and an ACK dash returns up the link. Each region's 0.5s ignite is still running when the next three begin.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule3-overlapping-action.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Left `WITHOUT`, right `WITH` — on the right all five are simultaneously in motion for a 0.167s window; chip 1 comes to rest at 0.867s, after chip 5 has already started.*
+*Left `WITHOUT`, right `WITH` — twelve distinct ignition frames on the right, 0.088s apart, against a single frame on the left. At peak, all twelve regions are animating at once.*
+
+*Stagger here isn't a styling preference, it's the difference between a true statement and a false one. A rollout propagates; twelve regions cannot go live on the same frame, and the simultaneous version says something about the system that isn't true. Watch the tally: the left jumps `0 → 12` in one frame and the map gives you no way to tell where the rollout started, because there is no order to read. Note also what is **not** staggered — the twelve region markers all appear on the same frame in both halves, because the regions already existed. Stagger what is happening, not what is merely present.*
 
 ### Rule 4 — Compound properties only when they tell one story
 
@@ -131,27 +135,27 @@ Each subject is chosen so the rule is *unavoidable* given the content: a live fe
 
 ❌ **Without**
 
-> …three statements, 2 seconds each, filling the full runtime, dissolving between them. A rail under each half tracks the time consumed.
+> …a three-beat product showreel, each beat a titled panel with its own live evidence: `SEEK ANY FRAME` over a scrubbing timeline reading out frame 147, `RENDER ON LAMBDA` over six worker lanes filling their own frame ranges, `SHIP THE MP4` over a player with an encode bar. 2 seconds per beat, dissolving between them, filling the full 6s runtime. A rail under each half tracks time consumed and time spare.
 
 ✅ **With**
 
-> …three statements at showreel pace — 1.1 seconds each, cutting hard on the beat, all three delivered by 3.3s, then hold the last on a live idle. A rail under each half tracks the time consumed.
+> …a three-beat product showreel, each beat a titled panel with its own live evidence: `SEEK ANY FRAME` over a scrubbing timeline reading out frame 147, `RENDER ON LAMBDA` over six worker lanes filling their own frame ranges, `SHIP THE MP4` over a player with an encode bar. Showreel pace — 1.1 seconds per beat, cutting hard rather than dissolving, all three delivered by 3.3s, then hold the last beat on a live idle. A rail under each half tracks time consumed and time spare.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule7-pacing.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Left `WITHOUT`, right `WITH` — left spends all 6.00s and is still on statement 3 at the end; right finishes at 3.30s and holds the remainder alive — 78 consecutive frames, no two alike.*
+*Left `WITHOUT`, right `WITH` — same three ideas, same evidence, same 6 seconds. At 3.6s the left is still working through beat 2 with `SPARE 0.00`; the right has already delivered all three and banked `+0.33s`. The left is not badly animated, it is correctly animated at the wrong tempo — which is why this failure survives review so often. Pace is a genre decision you make before you touch an ease.*
 
 ### Rule 8 — Handmade imperfection stays reproducible
 
 ❌ **Without**
 
-> …paper cutouts on visible wires swaying through a ±12° arc with smooth continuous tweens.
+> …a hanging paper mobile: five cut-paper shapes on fine visible wires from a wooden dowel, each with real paper grain, irregular hand-cut edges and its own layered drop shadow. They sway through a ±12° arc with smooth continuous tweens. A readout shows the current frame and how many distinct states the six seconds contain.
 
 ✅ **With**
 
-> …paper cutouts on visible wires swaying through a ±12° arc, seeded with mulberry32 and stepped on a two-frame hold quantized on the integer frame index, so every render is identical. Stop-motion cadence, not a smooth tween.
+> …a hanging paper mobile: five cut-paper shapes on fine visible wires from a wooden dowel, each with real paper grain, irregular hand-cut edges and its own layered drop shadow. They sway through the same ±12° arc, but driven by a mulberry32 PRNG seeded once at composition start and stepped on a two-frame hold quantized to the integer frame index — so the cadence is stop-motion, not a tween, and every render is byte-identical. A readout shows the current frame and how many distinct states the six seconds contain.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule8-seeded-handmade.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Left `WITHOUT`, right `WITH` — on lossless frames the right half is identical in pairs — 90 states across 180 frames, zero irregular holds — while the left has 180 distinct frames. Two renders of the whole thing were byte-identical.*
+*Left `WITHOUT`, right `WITH` — the right holds each pose for exactly two frames: 90 states across 180 frames, no irregular holds, while the left has 180 distinct ones. Rendered twice, the whole thing came back byte-identical both times. This is the rule that is easy to get wrong in the wrong direction — reaching for `Math.random()` to buy the same irregularity produces a composition that renders differently every time and can never be re-rendered or resumed.*
 
 ## The grammar, measured
 
