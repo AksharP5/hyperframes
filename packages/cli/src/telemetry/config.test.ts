@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // In-memory fake filesystem so these tests exercise the REAL config.ts
 // module (parsing, caching, readConfigFresh's cache-bypass) without ever
@@ -27,6 +29,10 @@ vi.mock("node:fs", () => ({
     if (content === undefined) throw new Error(`ENOENT: ${from}`);
     fsState.files.set(to, content);
     fsState.files.delete(from);
+  }),
+  // Legacy install-state cleanup after the migration to CONFIG_DIR.
+  rmSync: vi.fn((path: string) => {
+    fsState.files.delete(path);
   }),
 }));
 
@@ -130,12 +136,17 @@ describe("config.ts — readConfig / readConfigFresh / writeConfig (real module,
   });
 });
 
-describe("install-state rollover (breaker survives a config wipe)", () => {
+describe("install-state rollover (breaker survives a config re-mint)", () => {
   let readConfig: typeof import("./config.js").readConfig;
   let readConfigFresh: typeof import("./config.js").readConfigFresh;
   let writeConfig: typeof import("./config.js").writeConfig;
   let CONFIG_PATH: typeof import("./config.js").CONFIG_PATH;
   let STATE_PATH: typeof import("./config.js").STATE_PATH;
+
+  // Derived here rather than exported from config.ts: the pre-move path is
+  // frozen history, so pinning the literal is the point — an export would
+  // just let a rename pass silently, and it has no non-test consumer.
+  const LEGACY_STATE_PATH = join(homedir(), ".local", "state", "hyperframes", "install-state.json");
 
   beforeEach(async () => {
     fsState.files.clear();
@@ -244,5 +255,40 @@ describe("install-state rollover (breaker survives a config wipe)", () => {
     const { predecessorFound: _dropped, ...legacy } = base;
     fsState.files.set(CONFIG_PATH, JSON.stringify(legacy));
     expect(readConfigFresh().predecessorFound).toBeUndefined();
+  });
+
+  // The move: state used to live in ~/.local/state/hyperframes/ so it would
+  // survive `rm -rf ~/.hyperframes`. Review rejected persisting state outside
+  // the config dir to defeat the user's reset, so it now shares CONFIG_DIR.
+  it("keeps install-state inside the config dir, so deleting that dir is a full reset", () => {
+    readConfig();
+    expect(STATE_PATH.startsWith(CONFIG_PATH.replace(/config\.json$/, ""))).toBe(true);
+    expect(STATE_PATH).not.toContain(".local");
+  });
+
+  it("adopts a pre-move state file so an upgrading install keeps its tripped breaker", () => {
+    fsState.files.set(
+      LEGACY_STATE_PATH,
+      JSON.stringify({ markerAt: "2026-07-28T00:00:00.000Z", deParallelRouterTrialFired: true }),
+    );
+    // Config absent => mintConfig consults install state; without the
+    // migration this install silently re-enrols in the failed trial.
+    const config = readConfig();
+    expect(config.deParallelRouterTrialFired).toBe(true);
+    expect(config.predecessorFound).toBe(true);
+    expect(fsState.files.has(STATE_PATH), "state migrated into CONFIG_DIR").toBe(true);
+    expect(fsState.files.has(LEGACY_STATE_PATH), "legacy copy removed").toBe(false);
+  });
+
+  it("lets the current location win over a stale legacy file, and deletes the legacy copy", () => {
+    // A user who cleared the breaker must not have it resurrected by a
+    // leftover file from the old scheme.
+    fsState.files.set(
+      LEGACY_STATE_PATH,
+      JSON.stringify({ markerAt: "2026-07-28T00:00:00.000Z", deParallelRouterTrialFired: true }),
+    );
+    fsState.files.set(STATE_PATH, JSON.stringify({ markerAt: "2026-07-30T00:00:00.000Z" }));
+    expect(readConfig().deParallelRouterTrialFired).toBeUndefined();
+    expect(fsState.files.has(LEGACY_STATE_PATH)).toBe(false);
   });
 });
