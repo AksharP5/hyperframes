@@ -73,6 +73,7 @@ export interface RenderObservabilityTelemetryPayload {
   captureDeWorkerInversion?: string;
   captureDePreInversionWorkers?: number;
   captureCompositionElementCount?: number;
+  captureCompositionElementCountSource?: string;
   captureDeShortBand?: string;
   captureDeParallelRouter?: string;
   captureDeGpuRenderer?: string;
@@ -133,6 +134,7 @@ function renderObservabilityEventProperties(props: RenderObservabilityTelemetryP
     de_worker_inversion: props.captureDeWorkerInversion,
     de_pre_inversion_workers: props.captureDePreInversionWorkers,
     composition_element_count: props.captureCompositionElementCount,
+    composition_element_count_source: props.captureCompositionElementCountSource,
     de_short_band: props.captureDeShortBand,
     de_parallel_router: props.captureDeParallelRouter,
     gpu_renderer: props.captureDeGpuRenderer,
@@ -209,6 +211,7 @@ export function trackRenderComplete(
     deWorkerInversion?: string;
     dePreInversionWorkers?: number;
     compositionElementCount?: number;
+    compositionElementCountSource?: string;
     deShortBand?: string;
     deParallelRouter?: string;
     dePreRouterWorkers?: number;
@@ -310,6 +313,7 @@ export function trackRenderComplete(
       de_worker_inversion: props.deWorkerInversion,
       de_pre_inversion_workers: props.dePreInversionWorkers,
       composition_element_count: props.compositionElementCount,
+      composition_element_count_source: props.compositionElementCountSource,
       de_short_band: props.deShortBand,
       de_parallel_router: props.deParallelRouter,
       de_pre_router_workers: props.dePreRouterWorkers,

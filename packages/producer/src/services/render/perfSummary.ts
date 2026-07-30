@@ -82,8 +82,10 @@ export interface DrawElementPerfInput {
   preInversionWorkers?: number;
   /** Rough compiled-composition element count — gate variable for the short-comp inversion band. */
   compositionElementCount?: number;
+  /** Provenance of the element count: "live" (probe DOM, trusted to gate) | "static" (source scan, not). */
+  compositionElementCountSource?: "live" | "static";
   /** Short-comp band decision when the band was DECISIVE: "applied" (inverts once HF_DE_SHORT_BAND_ROUTE is on; counterfactual in the baseline release) | "skipped_elements" (element ceiling was the only blocker); unset when the band could not have affected this render. */
-  shortBand?: "applied" | "skipped_elements";
+  shortBand?: "applied" | "skipped_elements" | "unmeasured";
   parallelRouter?: "routed" | "reverted";
   /** Auto-resolved worker count before the router pinned it to 3 (set only when the router fired). */
   preRouterWorkers?: number;
@@ -126,6 +128,7 @@ function aggregateDrawElement(
     workerInversion: de.workerInversion ?? "none",
     preInversionWorkers: de.preInversionWorkers,
     compositionElementCount: de.compositionElementCount,
+    compositionElementCountSource: de.compositionElementCountSource,
     shortBand: de.shortBand,
     parallelRouter: de.parallelRouter ?? "none",
     preRouterWorkers: de.preRouterWorkers,

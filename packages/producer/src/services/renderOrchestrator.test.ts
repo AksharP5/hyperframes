@@ -44,6 +44,7 @@ import {
   shouldStreamParallelCapture,
   shouldUseStreamingEncode,
 } from "./renderOrchestrator.js";
+import { probeRequiresBrowser } from "./render/stages/probeStage.js";
 import { ensureFrameWritten } from "./render/stages/captureHdrFrameShared.js";
 import { resolveCompositeTransfer, shouldUseLayeredComposite } from "./hdrCompositor.js";
 import {
@@ -1765,9 +1766,12 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
   });
 
   describe("resolveDeShortBand", () => {
-    it("reports applied only when decisive and the element ceiling cleared", () => {
+    const live = { elementCountSource: "live" as const };
+
+    it("reports applied only when decisive, live-measured, and under the ceiling", () => {
       expect(
         resolveDeShortBand({
+          ...live,
           invertAtBaseFloor: false,
           invertAtBandFloor: true,
           bandEnabled: true,
@@ -1776,9 +1780,10 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
       ).toBe("applied");
     });
 
-    it("reports skipped_elements when decisive but the comp is oversized", () => {
+    it("reports skipped_elements when live-measured and over the ceiling", () => {
       expect(
         resolveDeShortBand({
+          ...live,
           invertAtBaseFloor: false,
           invertAtBandFloor: true,
           bandEnabled: true,
@@ -1790,6 +1795,7 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     it("is undefined when the base floor already inverts — the band changed nothing", () => {
       expect(
         resolveDeShortBand({
+          ...live,
           invertAtBaseFloor: true,
           invertAtBandFloor: true,
           bandEnabled: true,
@@ -1801,6 +1807,7 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     it("is undefined when neither floor inverts — the render was ineligible for some other reason", () => {
       expect(
         resolveDeShortBand({
+          ...live,
           invertAtBaseFloor: false,
           invertAtBandFloor: false,
           bandEnabled: true,
@@ -1816,12 +1823,112 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     it("HF_DE_SHORT_MAX_ELEMENTS=0 (bandEnabled=false) reports undefined even when the render would otherwise be decisive", () => {
       expect(
         resolveDeShortBand({
+          ...live,
           invertAtBaseFloor: false,
           invertAtBandFloor: true, // an otherwise-eligible in-band render
           bandEnabled: false, // the kill switch
           bandOpen: false, // deShortBandOpen also false when the switch is off
         }),
       ).toBeUndefined();
+    });
+
+    // Review finding (R4): the probe supplying the live count is conditional,
+    // so a static count is an UNBOUNDED undercount on runtime-generated DOM.
+    // It must never produce "applied" (would route a 40k-node comp) and must
+    // never produce "skipped_elements" either (would contaminate the DiD
+    // control cohort with a number that isn't a real oversize observation).
+    it("fails closed to unmeasured when the count came from the static scan, never applied", () => {
+      expect(
+        resolveDeShortBand({
+          elementCountSource: "static",
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: true, // static scan said "small" — must NOT be believed
+        }),
+      ).toBe("unmeasured");
+    });
+
+    it("reports unmeasured (not skipped_elements) for a static count over the ceiling — it is not a real observation either", () => {
+      expect(
+        resolveDeShortBand({
+          elementCountSource: "static",
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: false,
+        }),
+      ).toBe("unmeasured");
+    });
+
+    it("stays undefined for a static count when the band was not decisive anyway", () => {
+      expect(
+        resolveDeShortBand({
+          elementCountSource: "static",
+          invertAtBaseFloor: true,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: true,
+        }),
+      ).toBeUndefined();
+    });
+  });
+
+  // Review finding (R4), end-to-end: the review asked for a regression with a
+  // known duration, no media / unresolved compositions, and >2500
+  // script-created nodes, asserting it cannot enter `applied` without a live
+  // count. This walks the real decision chain rather than a full render —
+  // the probe gate, the count resolver, and the band attribution are each the
+  // production function, wired in the same order the pipeline wires them.
+  describe("no-probe dynamic-DOM composition cannot enter the applied cohort (R4 regression)", () => {
+    // A caption-style comp: known duration, no media, builds 4000 spans in
+    // its own init script. Mirrors packages/producer/tests/style-10-prod.
+    const DYNAMIC_DOM_HTML = [
+      '<div id="root"><div id="captions"></div></div>',
+      "<script>",
+      '  const c = document.getElementById("captions");',
+      "  for (let i = 0; i < 4000; i++) {",
+      '    const el = document.createElement("span");',
+      "    el.textContent = String(i);",
+      "    c.appendChild(el);",
+      "  }",
+      "</script>",
+    ].join("\n");
+
+    it("gets no browser probe — none of the probe conditions fire for this shape", () => {
+      expect(
+        probeRequiresBrowser({
+          durationSeconds: 13.3, // known
+          unresolvedCompositionCount: 0, // resolved
+          hasAutoStart: false, // no media
+          hasScriptedAudio: false,
+          hasVariableMedia: false,
+          // createElement("span") is not createElement("video"|"audio")
+          hasInsertedMedia: false,
+        }),
+      ).toBe(false);
+    });
+
+    it("therefore measures statically, and the static count wildly understates the live DOM", async () => {
+      const resolved = await resolveCompositionElementCount(null, DYNAMIC_DOM_HTML);
+      expect(resolved.source).toBe("static");
+      // Source markup has a handful of tags; the live DOM would have 4000+.
+      expect(resolved.count).toBeLessThan(2500);
+    });
+
+    it("and therefore reports unmeasured — never applied — so it cannot route or join either cohort", async () => {
+      const { count, source } = await resolveCompositionElementCount(null, DYNAMIC_DOM_HTML);
+      const bandOpen = source === "live" && count <= 2500;
+      const band = resolveDeShortBand({
+        // A 400-frame render that would otherwise be perfectly eligible.
+        invertAtBaseFloor: false,
+        invertAtBandFloor: true,
+        bandEnabled: true,
+        bandOpen,
+        elementCountSource: source,
+      });
+      expect(band).toBe("unmeasured");
+      expect(band).not.toBe("applied");
     });
   });
 
@@ -1902,24 +2009,36 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     // composition's own script creates at runtime (document.createElement) —
     // an unbounded undercount no regex can close. style-10-prod's real
     // per-transcript-word caption generator is exactly this shape: 2 source
-    // tags, thousands of live nodes after init. These pin the fix: prefer the
-    // live count from an initialized probe session, static scan only as
-    // fallback.
+    // tags, thousands of live nodes after init.
+    //
+    // Review finding (R4): the probe that provides the live count is
+    // CONDITIONAL, so the fallback cases below are not merely "less precise"
+    // — they are UNSAFE to gate on, and every one of them must report
+    // provenance "static" so the caller can fail closed.
     it("uses the live DOM count from an initialized probe session, ignoring the (much smaller) source scan", async () => {
       const session = { isInitialized: true, page: { evaluate: async () => 40001 } };
-      expect(await resolveCompositionElementCount(session, "<div><span></span></div>")).toBe(40001);
+      expect(await resolveCompositionElementCount(session, "<div><span></span></div>")).toEqual({
+        count: 40001,
+        source: "live",
+      });
     });
 
-    it("falls back to the static scan when there is no probe session", async () => {
-      expect(await resolveCompositionElementCount(null, "<div><span></span></div>")).toBe(2);
+    it("reports static provenance when there is no probe session", async () => {
+      expect(await resolveCompositionElementCount(null, "<div><span></span></div>")).toEqual({
+        count: 2,
+        source: "static",
+      });
     });
 
-    it("falls back to the static scan when the probe session is not yet initialized", async () => {
+    it("reports static provenance when the probe session is not yet initialized", async () => {
       const session = { isInitialized: false, page: { evaluate: async () => 999 } };
-      expect(await resolveCompositionElementCount(session, "<div></div>")).toBe(1);
+      expect(await resolveCompositionElementCount(session, "<div></div>")).toEqual({
+        count: 1,
+        source: "static",
+      });
     });
 
-    it("falls back to the static scan when page.evaluate throws (detached frame, mid-navigation)", async () => {
+    it("reports static provenance when page.evaluate throws (detached frame, mid-navigation)", async () => {
       const session = {
         isInitialized: true,
         page: {
@@ -1928,12 +2047,18 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
           },
         },
       };
-      expect(await resolveCompositionElementCount(session, "<div><span></span></div>")).toBe(2);
+      expect(await resolveCompositionElementCount(session, "<div><span></span></div>")).toEqual({
+        count: 2,
+        source: "static",
+      });
     });
 
-    it("falls back to the static scan when evaluate resolves a non-finite value", async () => {
+    it("reports static provenance when evaluate resolves a non-finite value", async () => {
       const session = { isInitialized: true, page: { evaluate: async () => Number.NaN } };
-      expect(await resolveCompositionElementCount(session, "<div></div>")).toBe(1);
+      expect(await resolveCompositionElementCount(session, "<div></div>")).toEqual({
+        count: 1,
+        source: "static",
+      });
     });
   });
 

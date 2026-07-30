@@ -494,8 +494,10 @@ export interface RenderPerfSummary {
     preInversionWorkers?: number;
     /** Rough compiled-composition element count — the variable the short-comp inversion band is gated on. Always set. */
     compositionElementCount?: number;
-    /** Short-comp band attribution: "applied" | "skipped_elements"; unset when the frame count made the band irrelevant. */
-    shortBand?: "applied" | "skipped_elements";
+    /** Rough compiled-composition element-count provenance: "live" (probe DOM) | "static" (source scan, not trusted to open the band). */
+    compositionElementCountSource?: "live" | "static";
+    /** Short-comp band attribution: "applied" | "skipped_elements" | "unmeasured"; unset when the frame count made the band irrelevant. */
+    shortBand?: "applied" | "skipped_elements" | "unmeasured";
     /** DE parallel-router outcome: "routed" (fired, held), "reverted" (fired, self-verify retry rolled back), "none". Mutually exclusive with workerInversion. */
     parallelRouter?: string;
     /** Worker count the auto-resolution chose BEFORE the router pinned it to 3 — the single-worker-inversion counterfactual. Only set when the router fired. */
@@ -1286,16 +1288,22 @@ export function countElementTags(html: string): number {
 }
 
 /**
- * Element count for the short-comp band's gate — prefers the LIVE DOM of the
- * probe session that's already running for every render at this point in the
- * pipeline (its Chrome is reused for capture on the common single-worker
- * path, so this costs one extra CDP round-trip, not a browser launch) over
- * the static `countElementTags` scan of `compiled.html`. The live count is
- * the only one that sees runtime-generated DOM — a composition whose script
- * builds its own elements after load (the caption-word-span pattern above)
- * is otherwise measured as near-empty regardless of how the static scanner
- * is tuned, admitting an arbitrarily large live DOM below the routing
- * ceiling (review finding, R3).
+ * Element count for the short-comp band's gate, WITH PROVENANCE.
+ *
+ * `live` — measured from the initialized probe session's real DOM. This is
+ * the only trustworthy source: it sees elements a composition's own script
+ * created after load, which no scan of the source markup can (the
+ * caption-word-span pattern above builds thousands of nodes from two source
+ * tags).
+ *
+ * `static` — the `countElementTags` fallback. Emitted for diagnostics, but
+ * NOT trusted to open the band: the probe is conditional (see
+ * `probeStage.ts`'s `needsBrowser` — only unknown duration, unresolved
+ * compositions, or specific media cases launch one), so a known-duration,
+ * media-free composition that builds 40k nodes in script gets no probe, and
+ * a static count that says "2". Treating that as measured would admit
+ * exactly the regression case the ceiling exists to exclude (review finding,
+ * R4). The caller fails closed on anything but `live`.
  *
  * These semantics are FROZEN while the short-band baseline is being read —
  * the fleet distribution recorded by the baseline release must be measured
@@ -1304,20 +1312,22 @@ export function countElementTags(html: string): number {
 export async function resolveCompositionElementCount(
   probeSession: Pick<CaptureSession, "isInitialized" | "page"> | null,
   html: string,
-): Promise<number> {
+): Promise<{ count: number; source: "live" | "static" }> {
   if (probeSession?.isInitialized) {
     try {
       const liveCount = await probeSession.page.evaluate(
         () => document.querySelectorAll("*").length,
       );
-      if (typeof liveCount === "number" && Number.isFinite(liveCount)) return liveCount;
+      if (typeof liveCount === "number" && Number.isFinite(liveCount)) {
+        return { count: liveCount, source: "live" };
+      }
     } catch {
       // Probe page evaluate can fail (navigation mid-flight, detached frame,
       // page crash) — fall through to the static scan rather than block the
       // render on a routing-gate measurement.
     }
   }
-  return countElementTags(html);
+  return { count: countElementTags(html), source: "static" };
 }
 
 /**
@@ -1355,26 +1365,43 @@ export function mergeWorkerInitObservability(
  * the gating fixes below are independently testable rather than living inline
  * where only a full render pipeline run could exercise them.
  *
- * "applied" / "skipped_elements" are emitted ONLY when the band is DECISIVE —
- * every other inversion-eligibility condition already passed (both floor
- * evaluations agree on everything except which floor they used) and the band
- * floor alone flipped the answer. `bandEnabled` gates that decisiveness
- * itself: `HF_DE_SHORT_MAX_ELEMENTS=0` is a documented kill switch (symmetric
- * with `HF_DE_SHORT_MIN_FRAMES=0`, which already disables via the predicate's
- * own `minFrames > 0` guard), and without this gate a fired kill switch left
+ * A value is emitted ONLY when the band is DECISIVE — every other
+ * inversion-eligibility condition already passed (both floor evaluations
+ * agree on everything except which floor they used) and the band floor alone
+ * flipped the answer. `bandEnabled` gates that decisiveness itself:
+ * `HF_DE_SHORT_MAX_ELEMENTS=0` is a documented kill switch (symmetric with
+ * `HF_DE_SHORT_MIN_FRAMES=0`, which already disables via the predicate's own
+ * `minFrames > 0` guard), and without this gate a fired kill switch left
  * every in-band render decisive against a real floor comparison — reporting
  * "skipped_elements" (comp too large) instead of undefined (band disabled)
  * and corrupting the DiD control cohort with kill-switched renders (review
  * finding).
+ *
+ * Three decisive outcomes, and the distinction between the last two is the
+ * point:
+ *   "applied"          — measured LIVE and under the ceiling. Only this
+ *                        routes (once HF_DE_SHORT_BAND_ROUTE is on) and only
+ *                        this joins the treatment cohort.
+ *   "skipped_elements" — measured live, over the ceiling. A real oversize
+ *                        observation; the DiD control group.
+ *   "unmeasured"       — no live DOM count available (no probe session ran;
+ *                        see `resolveCompositionElementCount`). FAILS CLOSED:
+ *                        never routes, and kept out of BOTH cohorts so a
+ *                        static undercount cannot masquerade as a small comp
+ *                        (review finding, R4). Emitted rather than dropped
+ *                        because its fleet rate sizes the population a
+ *                        future conditional-probe-launch would unlock.
  */
 export function resolveDeShortBand(args: {
   invertAtBaseFloor: boolean;
   invertAtBandFloor: boolean;
   bandEnabled: boolean;
   bandOpen: boolean;
-}): "applied" | "skipped_elements" | undefined {
+  elementCountSource: "live" | "static";
+}): "applied" | "skipped_elements" | "unmeasured" | undefined {
   const decisive = args.bandEnabled && args.invertAtBandFloor && !args.invertAtBaseFloor;
   if (!decisive) return undefined;
+  if (args.elementCountSource !== "live") return "unmeasured";
   return args.bandOpen ? "applied" : "skipped_elements";
 }
 
@@ -2578,10 +2605,13 @@ async function executeRenderPipeline(input: {
     // 900 floor stands, unchanged.
     const deShortBandMinFrames = envInt("HF_DE_SHORT_MIN_FRAMES", 250);
     const deShortBandMaxElements = envInt("HF_DE_SHORT_MAX_ELEMENTS", 2500);
-    const compositionElementCount = await resolveCompositionElementCount(
-      probeSession,
-      compiled.html,
-    );
+    // `source` is load-bearing, not diagnostic: the probe is CONDITIONAL
+    // (probeStage's `needsBrowser` — unknown duration, unresolved
+    // compositions, or specific media cases), so a known-duration media-free
+    // comp that builds its DOM in script has no live count available and the
+    // static scan reads it as tiny. Only a `live` count may open the band.
+    const { count: compositionElementCount, source: compositionElementCountSource } =
+      await resolveCompositionElementCount(probeSession, compiled.html);
     // HF_DE_SHORT_MAX_ELEMENTS=0 is the documented kill switch (symmetric
     // with HF_DE_SHORT_MIN_FRAMES=0, which disables via the predicate's own
     // minFrames > 0 guard). Gated explicitly here too — without it, a fired
@@ -2593,6 +2623,7 @@ async function executeRenderPipeline(input: {
     const deShortBandOpen =
       deShortBandEnabled &&
       deShortBandMinFrames > 0 &&
+      compositionElementCountSource === "live" &&
       compositionElementCount <= deShortBandMaxElements;
     // Baseline-first sequencing: this release EVALUATES the band on every
     // render and emits the decision, but only routes on it when
@@ -2643,6 +2674,7 @@ async function executeRenderPipeline(input: {
       invertAtBandFloor,
       bandEnabled: deShortBandEnabled,
       bandOpen: deShortBandOpen,
+      elementCountSource: compositionElementCountSource,
     });
     const deInversionEligible =
       deShortBandRoute && deShortBand === "applied" ? invertAtBandFloor : invertAtBaseFloor;
@@ -2906,6 +2938,7 @@ async function executeRenderPipeline(input: {
       // render so the fleet element-count distribution is readable, and so a
       // perf shift can be split into "the new band did it" vs "unchanged".
       compositionElementCount,
+      compositionElementCountSource,
       deShortBand,
       // Same rationale as the counters above: carried on live capture
       // observability, not only the success-path perfSummary, so a crash /
@@ -3755,6 +3788,7 @@ async function executeRenderPipeline(input: {
         workerInversion: deWorkerInversion,
         preInversionWorkers: deWorkerInversion ? preRoutingWorkerCount : undefined,
         compositionElementCount,
+        compositionElementCountSource,
         shortBand: deShortBand,
         parallelRouter: deParallelRouter,
         preRouterWorkers: deParallelRouter ? preRoutingWorkerCount : undefined,

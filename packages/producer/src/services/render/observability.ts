@@ -85,6 +85,15 @@ export interface RenderCaptureObservability {
    */
   compositionElementCount?: number;
   /**
+   * Provenance of `compositionElementCount`: "live" (measured from the probe
+   * session's real DOM — sees runtime-generated elements) or "static" (source
+   * markup scan, which does not). The probe is CONDITIONAL, so this is not a
+   * detail: only a `live` count may open the short band, and the fleet rate of
+   * "static" sizes the population a future conditional-probe-launch would
+   * unlock for the band.
+   */
+  compositionElementCountSource?: "live" | "static";
+  /**
    * Short-comp band decision, emitted only when the band is DECISIVE — every
    * other inversion-eligibility condition passed and only the floor (250 vs
    * 900) differed. "applied": the element count cleared the ceiling too, so
@@ -97,7 +106,7 @@ export interface RenderCaptureObservability {
    * renders form the concurrent control for the difference-in-differences
    * read — that is the entire point of the field.
    */
-  deShortBand?: "applied" | "skipped_elements";
+  deShortBand?: "applied" | "skipped_elements" | "unmeasured";
   /** DE parallel-router outcome: "routed" (fired, held) | "reverted" (fired, self-verify retry rolled back). */
   deParallelRouter?: "routed" | "reverted";
   /**

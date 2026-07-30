@@ -1433,6 +1433,7 @@ function trackRenderMetrics(
     deWorkerInversion: perf?.drawElement?.workerInversion,
     dePreInversionWorkers: perf?.drawElement?.preInversionWorkers,
     compositionElementCount: perf?.drawElement?.compositionElementCount,
+    compositionElementCountSource: perf?.drawElement?.compositionElementCountSource,
     deShortBand: perf?.drawElement?.shortBand,
     deParallelRouter: perf?.drawElement?.parallelRouter,
     dePreRouterWorkers: perf?.drawElement?.preRouterWorkers,
