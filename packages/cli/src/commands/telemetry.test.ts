@@ -27,6 +27,7 @@ async function loadTelemetryCommand(options?: {
   vi.resetModules();
   vi.doMock("../telemetry/config.js", () => ({
     CONFIG_PATH: "/test/.hyperframes/config.json",
+    STATE_PATH: "/test/.local/state/hyperframes/install-state.json",
     readConfig: () => {
       throw new Error("telemetry commands must bypass stale cached config");
     },

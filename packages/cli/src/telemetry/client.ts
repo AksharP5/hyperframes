@@ -73,6 +73,12 @@ export function trackEvent(
       // New-agent discovery signals — populated only when agent_runtime is null.
       agent_hint: sys.agent_hint ?? undefined,
       term_program: sys.term_program ?? undefined,
+      // Did this install's mint find a previous install's state marker?
+      // The fleet-wide rate of `true` IS the recoverable-churn fraction —
+      // the share of "new" ids that are really a config wipe on a machine
+      // we already knew. Absent (not false) when the config predates the
+      // marker. Resolved after the shouldTrack guard.
+      install_predecessor_found: readConfig().predecessorFound,
       agent_env_hints: sys.agent_env_hints ?? undefined,
     },
     distinctId,
