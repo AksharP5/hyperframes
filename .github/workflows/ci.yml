@@ -574,6 +574,12 @@ jobs:
             | tee /tmp/timeline-gate-virtualized.json \
             || VIRTUALIZED_STATUS=$?
 
+          {
+            echo "### Timeline viewport gate"
+            echo "- Default arm exit: ${DEFAULT_STATUS}"
+            echo "- Virtualized arm exit: ${VIRTUALIZED_STATUS}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           if (( DEFAULT_STATUS != 0 || VIRTUALIZED_STATUS != 0 )); then
             echo "FAIL: default=${DEFAULT_STATUS}, virtualized=${VIRTUALIZED_STATUS}"
             exit 1
