@@ -192,3 +192,36 @@ describe("telemetry", () => {
     expect(canaryEventProperties()["$feature/canary-on-everywhere"]).toBe("false");
   });
 });
+
+describe("telemetry opt-out is canary opt-out", () => {
+  // The studio opt-out lever, per telemetry/config.ts.
+  const OPT_OUT_KEY = "hyperframes-studio:telemetryDisabled";
+
+  it("does not enrol an opted-out browser profile", () => {
+    localStorage.setItem(OPT_OUT_KEY, "1");
+    // on-everywhere is at 100% — it would be on for everyone otherwise.
+    expect(resolveCanary("on-everywhere")).toEqual({
+      enabled: false,
+      reason: "telemetry_opt_out",
+    });
+  });
+
+  it("never buckets an opted-out profile — no cohort is assigned at all", () => {
+    localStorage.setItem(OPT_OUT_KEY, "1");
+    expect(resolveCanary("on-everywhere").bucket).toBeUndefined();
+  });
+
+  it("still honours an explicit URL override", () => {
+    localStorage.setItem(OPT_OUT_KEY, "1");
+    setSearch("?hf_canary_off_everywhere=on");
+    expect(resolveCanary("off-everywhere")).toEqual({ enabled: true, reason: "forced_on" });
+  });
+
+  it("reports every canary as false when opted out", () => {
+    localStorage.setItem(OPT_OUT_KEY, "1");
+    expect(canaryEventProperties()).toEqual({
+      "$feature/canary-on-everywhere": "false",
+      "$feature/canary-off-everywhere": "false",
+    });
+  });
+});

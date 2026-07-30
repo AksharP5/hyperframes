@@ -39,7 +39,13 @@ export type CanaryReason =
   | "in_cohort"
   | "out_of_cohort"
   | "no_unit_id"
-  | "excluded";
+  | "excluded"
+  // Telemetry is off, so the install is not enrolled. Distinct from
+  // "excluded" because the caller decides this BEFORE evaluate is reached —
+  // and because "why is my canary off" has a very different answer in the two
+  // cases. Never appears in telemetry by construction: an install that
+  // resolves this way sends nothing.
+  | "telemetry_opt_out";
 
 export interface CanaryDecision {
   enabled: boolean;

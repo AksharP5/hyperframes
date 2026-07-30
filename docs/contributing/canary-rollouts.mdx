@@ -220,6 +220,20 @@ rm -rf ~/.hyperframes    # clears telemetry id, canary cohorts, and breaker stat
 `hyperframes telemetry status` prints both paths if you want to inspect or
 delete them individually. Nothing canary-related is stored anywhere else.
 
+**Opting out of telemetry opts you out of canaries.** A canary is a *measured*
+rollout — we enrol a slice precisely so it can be compared against everyone
+else. An install that sends nothing can't be compared, so enrolling it buys no
+signal and only changes that user's code path, on an experimental feature,
+without their knowledge. Every opt-out route counts: the persisted preference
+(`hyperframes telemetry disable`), the runtime env vars
+(`HYPERFRAMES_NO_TELEMETRY`, `DO_NOT_TRACK`), dev/telemetry-disabled builds,
+and Studio's `hyperframes-studio:telemetryDisabled`. The decision resolves to
+`telemetry_opt_out` *before* bucketing, so no cohort is assigned at all.
+
+An explicit `HF_CANARY_<FEATURE>` (or `?hf_canary_<feature>=` in Studio)
+override still wins — that is a deliberate local choice, and it stays the way
+to exercise a canary with telemetry off.
+
 **It fails closed.** No install id, an unregistered name, or a CI machine all
 resolve to *not enrolled*. A canary exists to bound blast radius, so "we
 don't know who this is" must never mean "enrol everyone". CI is excluded

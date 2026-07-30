@@ -28,7 +28,27 @@ import {
 } from "@hyperframes/core/canary";
 import { CANARIES, canaryEnvVar, findCanary } from "@hyperframes/core/canary-registry";
 import { readConfig } from "./config.js";
+import { telemetryRuntimeOverride } from "./policy.js";
 import { getSystemMeta } from "./system.js";
+
+/**
+ * Opting out of telemetry opts you out of canaries.
+ *
+ * A canary is a measured rollout: we enrol a slice precisely so we can compare
+ * it against everyone else. An install that sends nothing can't be compared,
+ * so enrolling it buys no signal — it only changes that user's code path, on
+ * an experimental feature, without their knowledge and with no way for us to
+ * see the result. That is the wrong side of an opt-out.
+ *
+ * Deliberately mirrors `shouldTrack()` rather than importing it: client.ts
+ * already imports this module for `canaryEventProperties`, so depending on it
+ * here would be a cycle. Both read the same two inputs (`policy.ts`'s runtime
+ * override, then the persisted preference), so they cannot disagree.
+ */
+function telemetryActive(): boolean {
+  if (telemetryRuntimeOverride() !== null) return false;
+  return readConfig().telemetryEnabled;
+}
 
 /**
  * Decisions are memoized per process: a `--batch` run asks the same question
@@ -43,6 +63,40 @@ export function __resetCanaryCacheForTests(): void {
   decisions.clear();
 }
 
+/** The uncached decision. Split out so `resolveCanary` is purely the memo. */
+function decideCanary(name: string): CanaryDecision {
+  const definition = findCanary(name);
+  if (!definition) return { enabled: false, reason: "out_of_cohort" };
+
+  const override = parseCanaryOverride(process.env[canaryEnvVar(definition.name)]);
+
+  // Resolved ahead of evaluate so an opted-out install is never bucketed at
+  // all. An explicit HF_CANARY_* override still wins: that is a deliberate
+  // local choice (support session, bisect, developer testing), not silent
+  // enrolment, and it stays the way to exercise a canary with telemetry off.
+  if (override === undefined && !telemetryActive()) {
+    return { enabled: false, reason: "telemetry_opt_out" };
+  }
+
+  const config = readConfig();
+  return evaluateCanary({
+    feature: definition.name,
+    // The bucket seed, NOT the anonymousId: the seed is inherited across
+    // config.json re-mints via the install-state file, so cohorts hold when
+    // the telemetry id re-rolls. Both files live in ~/.hyperframes, so
+    // deleting that directory clears the cohort too — intentional. Fallback
+    // covers only a failed backfill write on a legacy config.
+    unitId: config.bucketSeed ?? config.anonymousId,
+    percentage: definition.percentage,
+    override,
+    // CI installs regenerate their config per run, so their ids are
+    // ephemeral — they would hop cohorts between runs, adding noise to the
+    // rollout signal while saying nothing about real users. An explicit
+    // override still gets through, which is how you test a canary in CI.
+    exclude: getSystemMeta().is_ci,
+  });
+}
+
 /**
  * Full decision for a registered canary, including the reason — use this when
  * you want to record WHY, not just whether.
@@ -54,27 +108,7 @@ export function resolveCanary(name: string): CanaryDecision {
   const cached = decisions.get(name);
   if (cached) return cached;
 
-  const definition = findCanary(name);
-  const config = readConfig();
-  const decision: CanaryDecision = definition
-    ? evaluateCanary({
-        feature: definition.name,
-        // The bucket seed, NOT the anonymousId: the seed is inherited across
-        // config.json re-mints via the install-state file, so cohorts hold
-        // when the telemetry id re-rolls. Both files live in ~/.hyperframes,
-        // so deleting that directory clears the cohort too — intentional.
-        // Fallback covers only a failed backfill write on a legacy config.
-        unitId: config.bucketSeed ?? config.anonymousId,
-        percentage: definition.percentage,
-        override: parseCanaryOverride(process.env[canaryEnvVar(definition.name)]),
-        // CI installs regenerate their config per run, so their ids are
-        // ephemeral — they would hop cohorts between runs, adding noise to the
-        // rollout signal while saying nothing about real users. An explicit
-        // override still gets through, which is how you test a canary in CI.
-        exclude: getSystemMeta().is_ci,
-      })
-    : { enabled: false, reason: "out_of_cohort" };
-
+  const decision = decideCanary(name);
   decisions.set(name, decision);
   return decision;
 }

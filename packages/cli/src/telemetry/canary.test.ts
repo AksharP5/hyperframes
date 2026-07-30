@@ -1,16 +1,31 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const configState: { anonymousId: string; bucketSeed: string | undefined } = {
+const configState: {
+  anonymousId: string;
+  bucketSeed: string | undefined;
+  telemetryEnabled: boolean;
+} = {
   anonymousId: "db0c1f4a-b95e-4c35-90c6-1a15bd76f717",
   bucketSeed: undefined,
+  telemetryEnabled: true,
 };
 const systemState = { is_ci: false };
+// null = no runtime opt-out in force; a string names the source (env var,
+// dev build, ...) exactly as policy.ts reports it.
+const policyState: { runtimeOverride: string | null } = { runtimeOverride: null };
 
 vi.mock("./config.js", () => ({
-  readConfig: () => ({ anonymousId: configState.anonymousId, bucketSeed: configState.bucketSeed }),
+  readConfig: () => ({
+    anonymousId: configState.anonymousId,
+    bucketSeed: configState.bucketSeed,
+    telemetryEnabled: configState.telemetryEnabled,
+  }),
 }));
 vi.mock("./system.js", () => ({
   getSystemMeta: () => ({ is_ci: systemState.is_ci }),
+}));
+vi.mock("./policy.js", () => ({
+  telemetryRuntimeOverride: () => policyState.runtimeOverride,
 }));
 
 // The registry is data; pin a known shape so these tests don't move when a
@@ -64,9 +79,51 @@ beforeEach(() => {
   __resetCanaryCacheForTests();
   configState.anonymousId = "db0c1f4a-b95e-4c35-90c6-1a15bd76f717";
   configState.bucketSeed = undefined;
+  configState.telemetryEnabled = true;
   systemState.is_ci = false;
+  policyState.runtimeOverride = null;
   delete process.env.HF_CANARY_TEST_ALPHA;
   delete process.env.HF_CANARY_TEST_BETA;
+});
+
+describe("telemetry opt-out is canary opt-out", () => {
+  it("does not enrol when the persisted preference is off", () => {
+    configState.telemetryEnabled = false;
+    // test-alpha is at 100% — it would be on for everyone otherwise.
+    expect(resolveCanary("test-alpha")).toEqual({
+      enabled: false,
+      reason: "telemetry_opt_out",
+    });
+  });
+
+  it.each(["HYPERFRAMES_NO_TELEMETRY", "DO_NOT_TRACK", "dev_mode"])(
+    "does not enrol under the %s runtime override, even with the preference on",
+    (source) => {
+      configState.telemetryEnabled = true;
+      policyState.runtimeOverride = source;
+      expect(resolveCanary("test-alpha").reason).toBe("telemetry_opt_out");
+    },
+  );
+
+  it("never buckets an opted-out install — no cohort is assigned at all", () => {
+    configState.telemetryEnabled = false;
+    // A bucket number would mean we hashed them into a slice anyway.
+    expect(resolveCanary("test-alpha").bucket).toBeUndefined();
+  });
+
+  it("still honours an explicit override — the documented way to test with telemetry off", () => {
+    configState.telemetryEnabled = false;
+    process.env.HF_CANARY_TEST_BETA = "on";
+    expect(resolveCanary("test-beta")).toEqual({ enabled: true, reason: "forced_on" });
+  });
+
+  it("reports every canary as false to PostHog shape when opted out", () => {
+    configState.telemetryEnabled = false;
+    expect(canaryEventProperties()).toEqual({
+      "$feature/canary-test-alpha": "false",
+      "$feature/canary-test-beta": "false",
+    });
+  });
 });
 
 describe("bucketing unit", () => {

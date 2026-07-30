@@ -41,6 +41,7 @@ import {
 } from "@hyperframes/core/canary";
 import { CANARIES, findCanary } from "@hyperframes/core/canary-registry";
 import { resolveStudioDistinctId } from "./distinctId";
+import { isOptedOut } from "./config";
 import { safeSessionStorage } from "../utils/safeStorage";
 
 /** `my-feature` → `hf_canary_my_feature`, the query param and storage key. */
@@ -151,15 +152,23 @@ export function resolveCanary(name: string): CanaryDecision {
   if (cached) return cached;
 
   const definition = findCanary(name);
-  const decision: CanaryDecision = definition
-    ? evaluateCanary({
-        feature: definition.name,
-        unitId: resolveBucketUnit(),
-        percentage: definition.percentage,
-        override: readOverride(definition.name),
-        exclude: isAutomatedBrowser(),
-      })
-    : { enabled: false, reason: "out_of_cohort" };
+  const override = definition ? readOverride(definition.name) : undefined;
+  // Opting out of telemetry opts you out of canaries — same rule as the CLI
+  // (see packages/cli/src/telemetry/canary.ts). An install that sends nothing
+  // can't be compared against anyone, so enrolling it changes that user's
+  // code path for no signal. An explicit override still wins: that is a
+  // deliberate local choice, not silent enrolment.
+  const decision: CanaryDecision = !definition
+    ? { enabled: false, reason: "out_of_cohort" }
+    : override === undefined && isOptedOut()
+      ? { enabled: false, reason: "telemetry_opt_out" }
+      : evaluateCanary({
+          feature: definition.name,
+          unitId: resolveBucketUnit(),
+          percentage: definition.percentage,
+          override,
+          exclude: isAutomatedBrowser(),
+        });
 
   decisions.set(name, decision);
   return decision;
