@@ -1297,7 +1297,18 @@ export function countElementTags(html: string): number {
   // no probe session, for which this scan is the only element signal (review
   // finding). Removing the bodies also drops their own closing tags, which
   // costs 1-2 counts against a threshold in the thousands.
-  const markup = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+  // Looped to a fixed point rather than a single pass: one pass can REFORM
+  // the pattern it just removed (`<scr<script>ipt>` leaves `<script>`), which
+  // CodeQL flags as incomplete multi-character sanitization. The impact here
+  // is nil — the stripped string is counted and discarded, never rendered —
+  // but the incompleteness is real, and a stray reformed tag would perturb
+  // the count this gate reads. Converges: every iteration strictly shortens
+  // the string or changes nothing and exits.
+  let markup = html;
+  for (let previous = ""; markup !== previous; ) {
+    previous = markup;
+    markup = markup.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+  }
   const matches = markup.match(
     /<\/[a-zA-Z]|<(?:img|br|hr|input|source|track|area|base|col|embed|link|meta|param|wbr)\b|<[a-zA-Z][-a-zA-Z0-9]*\b[^>]*\/>/gi,
   );

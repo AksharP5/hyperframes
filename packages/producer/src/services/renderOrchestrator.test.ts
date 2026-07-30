@@ -2020,6 +2020,20 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
       expect(countElementTags('<div></div><style>a::after{content:"</div>"}</style>')).toBe(1);
     });
 
+    // CodeQL "incomplete multi-character sanitization": a single-pass replace
+    // can reform the very pattern it removed. Impact is nil here (the stripped
+    // string is counted, never rendered) but a reformed tag would perturb the
+    // count, so the strip runs to a fixed point.
+    it("strips script tags that reform after one pass", () => {
+      // Inner <script> removed by pass 1 leaves "<script>alert(1)</script>",
+      // which pass 2 removes. A single pass would leave a stray tag behind.
+      expect(countElementTags("<div></div><scr<script></script>ipt>alert(1)</script>")).toBe(1);
+    });
+
+    it("terminates on input with no closing tag rather than looping", () => {
+      expect(countElementTags("<div></div><script>unterminated")).toBe(1);
+    });
+
     it("strips multiple and attributed script blocks, not just the first", () => {
       expect(
         countElementTags(
