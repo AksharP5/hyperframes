@@ -60,9 +60,10 @@ export function resolveCanary(name: string): CanaryDecision {
     ? evaluateCanary({
         feature: definition.name,
         // The bucket seed, NOT the anonymousId: the seed is inherited across
-        // config wipes via the install-state file, so the machine keeps its
-        // cohorts when the telemetry id re-rolls. Fallback covers only a
-        // failed backfill write on a legacy config.
+        // config.json re-mints via the install-state file, so cohorts hold
+        // when the telemetry id re-rolls. Both files live in ~/.hyperframes,
+        // so deleting that directory clears the cohort too — intentional.
+        // Fallback covers only a failed backfill write on a legacy config.
         unitId: config.bucketSeed ?? config.anonymousId,
         percentage: definition.percentage,
         override: parseCanaryOverride(process.env[canaryEnvVar(definition.name)]),

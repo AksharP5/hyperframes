@@ -167,24 +167,30 @@ experiment, and it survives uninstall), and account identity covers only
 accepted limit — but its worst consequence is mitigated, and its size is now
 directly measurable rather than inferred:
 
-- **Cohorts survive the wipe.** Canaries bucket on a dedicated `bucketSeed` —
-  not the telemetry id — and the seed is inherited across config wipes via a
-  machine-local state file (write-once: the first install's seed is the
-  lineage's seed forever). A wipe re-rolls the telemetry id, never the canary
-  assignment. The seed is never emitted, so it does not link the old id to
-  the new one.
-- **A re-rolled install cannot re-enter a path that already failed on that
+- **Cohorts survive a config re-mint.** Canaries bucket on a dedicated
+  `bucketSeed` — not the telemetry id — held in `install-state.json` beside
+  `config.json` and write-once (the first install's seed wins forever). This
+  matters because `config.json` is rewritten on every command and every
+  render, and any parse/permission/IO failure makes the CLI mint a fresh
+  identity. The seed is never emitted, so it does not link the old id to the
+  new one.
+- **Deleting `~/.hyperframes` clears the cohort too, deliberately.** The seed
+  does not live outside the config directory, so the user's reset is a real
+  reset. A seed that outlived it would be a persistent identifier defeating
+  the only lever they have — see [the removal path](#removing-your-canary-state).
+- **A re-minted install cannot re-enter a path that already failed on that
   machine.** The circuit breaker's tripped state is mirrored to the same
   state file.
 - **`install_predecessor_found`** on every event says whether this install's
-  mint found a previous install's state marker. Its true-share splits check
-  2's drift into the recoverable part (config wiped, machine persisted) and
-  the part no local mechanism can link (fresh machine, container, new user).
+  mint found a previous install's state marker — i.e. `config.json` was lost
+  while `install-state.json` survived. Its true-share is the re-mint rate
+  directly; drift from a deliberate reset, a fresh machine, a container, or a
+  new user is not linkable by any local mechanism and is not counted.
 
 With the seed carryover, check 2's residual drift comes from the
-unrecoverable buckets only — fresh machines, containers, and genuinely new
-users — and canary window lengths get picked from that residual, not the raw
-turnover.
+unrecoverable buckets only — deliberate resets, fresh machines, containers,
+and genuinely new users — and canary window lengths get picked from that
+residual, not the raw turnover.
 
 ## Behaviour worth knowing
 
@@ -197,10 +203,22 @@ not the seed alone — two canaries at 10% select two different 10%s. If
 they shared a slice, one unlucky cohort would receive every experiment at
 once and no two rollouts could be read apart.
 
-**Cohorts are keyed to the machine, not the config.** The bucketing unit is a
-dedicated seed inherited across config wipes (see the calibration section) —
-distinct from the telemetry id, never emitted, and shared with a CLI-launched
-Studio so both surfaces agree.
+**Cohorts are keyed to the install directory, not to `config.json`.** The
+bucketing unit is a dedicated seed in `install-state.json`, inherited across
+`config.json` re-mints (see the calibration section) — distinct from the
+telemetry id, never emitted, and shared with a CLI-launched Studio so both
+surfaces agree. It does not outlive `~/.hyperframes`.
+
+## Removing your canary state
+
+Both `config.json` and `install-state.json` live in `~/.hyperframes`, so:
+
+```bash
+rm -rf ~/.hyperframes    # clears telemetry id, canary cohorts, and breaker state
+```
+
+`hyperframes telemetry status` prints both paths if you want to inspect or
+delete them individually. Nothing canary-related is stored anywhere else.
 
 **It fails closed.** No install id, an unregistered name, or a CI machine all
 resolve to *not enrolled*. A canary exists to bound blast radius, so "we

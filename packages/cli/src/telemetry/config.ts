@@ -29,8 +29,8 @@ const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 // that churn: no shared schema to migrate on upgrade, and one write at first
 // mint instead of one per command.
 //
-// It carries exactly two facts, and no identity — no anonymousId, no
-// counters, nothing linking the old install to the new one:
+// It carries exactly three facts, and no telemetry identity — no anonymousId,
+// no counters, nothing emitted that links the old install to the new one:
 //
 //   1. `markerAt` — "a hyperframes install existed on this machine". Now that
 //      it shares CONFIG_DIR, `predecessorFound` measures the churn we care
@@ -39,6 +39,10 @@ const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 //   2. `deParallelRouterTrialFired` — the DE parallel-router circuit
 //      breaker's tripped state, so a config re-mint does not re-enrol an
 //      install into an experimental path that already FAILED on this machine.
+//   3. `bucketSeed` — the canary bucketing unit, so a re-mint does not
+//      reshuffle cohorts mid-rollout. Never transmitted; only the resulting
+//      true/false assignments are. Sharing CONFIG_DIR is what keeps it from
+//      being a persistent identifier that outlives the user's reset.
 //
 // Removal path: delete ~/.hyperframes (or just this file). `hyperframes
 // telemetry status` prints its exact location.
@@ -57,9 +61,10 @@ interface InstallState {
   /** Rolled-over circuit-breaker state — see HyperframesConfig's field. */
   deParallelRouterTrialFired?: boolean;
   /**
-   * The machine's canary bucketing seed — see HyperframesConfig's field.
-   * Write-once: the first install's seed is the lineage's seed forever, so a
-   * config wipe re-mints the telemetry id but NOT the canary cohorts.
+   * The canary bucketing seed — see HyperframesConfig's field. Write-once
+   * within this config dir: the first install's seed wins forever, so a
+   * config.json re-mint re-rolls the telemetry id but NOT the canary cohorts.
+   * Deleting ~/.hyperframes takes the seed with it, by design.
    */
   bucketSeed?: string;
 }
@@ -152,7 +157,7 @@ function sameInstallState(a: InstallState, b: InstallState): boolean {
   );
 }
 
-/** Latching: once tripped (by any install in this machine's lineage), stays tripped. */
+/** Latching: once tripped (by any install in this config dir), stays tripped. */
 function latchedFired(state: InstallState | null, config: HyperframesConfig): true | undefined {
   return (
     state?.deParallelRouterTrialFired === true ||
@@ -169,7 +174,7 @@ function nextInstallState(
   const next: InstallState = {
     markerAt: state?.markerAt ?? new Date().toISOString(),
     deParallelRouterTrialFired: latchedFired(state, config),
-    // Write-once: an existing lineage seed always wins, so cohorts stay
+    // Write-once: an existing seed always wins, so cohorts stay
     // anchored to the FIRST install in this config dir, not the latest one.
     bucketSeed: state?.bucketSeed ?? config.bucketSeed,
   };
@@ -289,7 +294,8 @@ export interface HyperframesConfig {
   /**
    * Whether a previous install's state marker existed on this machine when
    * this config was minted. Attached to telemetry so the fraction of fresh
-   * installs that are RECOVERABLE churn (config wiped, machine persisted) is
+   * installs that are RECOVERABLE churn (config.json re-minted, install-state
+   * survived) is
    * measurable directly. `undefined` on configs minted before this field
    * existed — a different fact from `false` (minted fresh, no predecessor).
    */
@@ -297,12 +303,20 @@ export interface HyperframesConfig {
   /**
    * The unit canary percentages bucket on — deliberately NOT the anonymousId.
    * A fresh random UUID, mirrored write-once into the install-state file and
-   * inherited at mint, so a config wipe re-rolls the telemetry id but keeps
-   * the machine's canary cohorts: no cumulative-exposure drift from wipes,
-   * and before/after comparisons survive a reinstall. It is never emitted in
-   * telemetry (only the resulting true/false assignments are), so it does not
-   * link the old id to the new one server-side. Backfilled once for configs
-   * predating the field.
+   * inherited at mint, so a config.json RE-MINT re-rolls the telemetry id but
+   * keeps this install's canary cohorts: no cumulative-exposure drift from
+   * corruption, and before/after comparisons survive one.
+   *
+   * A re-mint is the churn that actually happens — config.json is rewritten on
+   * every command and every render, and readConfig recovers from any
+   * parse/permission/IO failure by minting fresh. Deleting ~/.hyperframes
+   * deliberately does NOT survive: install-state lives in that same directory
+   * precisely so the user's reset is a real reset. A seed that outlived it
+   * would be a persistent identifier defeating the only lever they have.
+   *
+   * Never emitted in telemetry (only the resulting true/false assignments
+   * are), so it does not link the old id to the new one server-side.
+   * Backfilled once for configs predating the field.
    */
   bucketSeed?: string;
   /**
@@ -422,7 +436,7 @@ export function readConfig(): HyperframesConfig {
     };
 
     // One-time backfill for configs predating the bucket seed: prefer the
-    // lineage seed if a previous install already recorded one, else mint.
+    // recorded seed if a previous install already wrote one, else mint.
     // Persisted immediately — an unpersisted seed would re-roll every process.
     if (config.bucketSeed === undefined) {
       config.bucketSeed = readInstallState()?.bucketSeed ?? randomUUID();

@@ -36,6 +36,11 @@ vi.mock("node:fs", () => ({
   }),
 }));
 
+// Derived here rather than exported from config.ts: the pre-move path is
+// frozen history, so pinning the literal is the point — an export would just
+// let a rename pass silently, and it has no non-test consumer.
+const LEGACY_STATE_PATH = join(homedir(), ".local", "state", "hyperframes", "install-state.json");
+
 describe("config.ts — readConfig / readConfigFresh / writeConfig (real module, faked fs)", () => {
   let readConfig: typeof import("./config.js").readConfig;
   let readConfigFresh: typeof import("./config.js").readConfigFresh;
@@ -142,11 +147,6 @@ describe("install-state rollover (breaker survives a config re-mint)", () => {
   let writeConfig: typeof import("./config.js").writeConfig;
   let CONFIG_PATH: typeof import("./config.js").CONFIG_PATH;
   let STATE_PATH: typeof import("./config.js").STATE_PATH;
-
-  // Derived here rather than exported from config.ts: the pre-move path is
-  // frozen history, so pinning the literal is the point — an export would
-  // just let a rename pass silently, and it has no non-test consumer.
-  const LEGACY_STATE_PATH = join(homedir(), ".local", "state", "hyperframes", "install-state.json");
 
   beforeEach(async () => {
     fsState.files.clear();
@@ -322,12 +322,34 @@ describe("bucket-seed carryover (cohorts survive a config wipe)", () => {
     expect(state.bucketSeed).toBe(config.bucketSeed);
   });
 
-  it("the seed survives a config wipe — the machine keeps its cohorts, only the id re-rolls", () => {
+  it("the seed survives a config.json re-mint — cohorts hold, only the id re-rolls", () => {
     const first = readConfig();
     fsState.files.delete(CONFIG_PATH);
     const second = readConfigFresh();
     expect(second.bucketSeed).toBe(first.bucketSeed);
     expect(second.anonymousId).not.toBe(first.anonymousId);
+  });
+
+  // The counterpart, and the reason install-state shares CONFIG_DIR: a seed
+  // that outlived `rm -rf ~/.hyperframes` would be a persistent identifier
+  // defeating the only reset the user has.
+  it("the seed does NOT survive deleting the config dir — that reset is real", () => {
+    const first = readConfig();
+    fsState.files.delete(CONFIG_PATH);
+    fsState.files.delete(STATE_PATH);
+    const reborn = readConfigFresh();
+    expect(reborn.bucketSeed).toBeTruthy();
+    expect(reborn.bucketSeed).not.toBe(first.bucketSeed);
+    expect(reborn.predecessorFound).toBe(false);
+  });
+
+  it("adopts a pre-move seed so the migration does not reshuffle a live cohort", () => {
+    fsState.files.set(
+      LEGACY_STATE_PATH,
+      JSON.stringify({ markerAt: "2026-07-28T00:00:00.000Z", bucketSeed: "seed-from-old-path" }),
+    );
+    expect(readConfig().bucketSeed).toBe("seed-from-old-path");
+    expect(fsState.files.has(LEGACY_STATE_PATH), "legacy copy removed").toBe(false);
   });
 
   it("the seed survives config corruption via the same mint path", () => {
