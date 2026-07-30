@@ -22,7 +22,7 @@ export const ShowcaseWall = () => {
       id: "grading",
       title: "Colour grading and media effects",
       note: "Real footage graded with LUTs, curves, and scopes — inside Studio.",
-      length: "56s",
+      length: "48s",
     },
     {
       id: "variables",
