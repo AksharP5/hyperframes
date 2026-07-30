@@ -19,12 +19,27 @@ export function isRemoteOrInlineUrl(url: string): boolean {
  * substitutes before render. The static linter runs before that substitution,
  * so it cannot resolve such a value to a file on disk and must not report it as
  * a missing asset. Check the RAW url, before any `cleanAssetUrl()` step: that
- * splits on `?`/`#`, which also chops inside a `${...}` expression. (The older
- * `__UPPER__` placeholder shape predates this and keeps its own inline check at
- * each call site.)
+ * splits on `?`/`#`, which also chops inside a `${...}` expression. (The `__UPPER__`
+ * placeholder shape is combined with this in `isUnresolvedAssetPlaceholder` below, the
+ * shared predicate asset-src sites skip on.)
  */
 export function hasUnresolvedTemplatingToken(url: string): boolean {
   return /<<[^<>]+>>|\{\{[^{}]+\}\}|\$\{[^{}]+\}/.test(url);
+}
+
+/**
+ * True when an asset src is a build-time placeholder rather than a resolvable path:
+ * the `__UPPER__` shape (e.g. `__DURATION__`) or an unresolved templating token
+ * (`<<...>>`, `{{...}}`, `${...}`). Pass the RAW src, before any `cleanAssetUrl()` step —
+ * cleanAssetUrl splits on `?`/`#`, which would chop inside a `${...}` expression and defeat
+ * the token match. Remote/inline URL handling is deliberately NOT folded in: call sites
+ * differ (e.g. audio uses a narrower http/data/blob check), so each keeps its own.
+ *
+ * This is the single skip predicate every asset-src lint / codec / compile site should
+ * route through, so the placeholder rules can't drift apart across call sites.
+ */
+export function isUnresolvedAssetPlaceholder(rawSrc: string): boolean {
+  return /^__[A-Z_]+__$/.test(rawSrc.trim()) || hasUnresolvedTemplatingToken(rawSrc);
 }
 
 export function cleanAssetUrl(url: string): string {
