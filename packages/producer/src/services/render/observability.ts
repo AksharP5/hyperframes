@@ -182,6 +182,15 @@ export interface RenderExtractionObservability {
 export interface RenderInitObservability {
   initDurationMs?: number;
   tweenCount?: number;
+  /**
+   * Live DOM element count at end of capture-session init. Observational:
+   * measured after routing has already been decided, so it cannot gate — it
+   * exists because the routing gate's own count is only available on the
+   * ~17% of renders that get a probe session, leaving the fleet
+   * element-count distribution (and any large-runtime-DOM tail) unreadable
+   * for the rest.
+   */
+  elementCount?: number;
 }
 
 export interface RenderObservabilitySummary {
@@ -299,13 +308,17 @@ function summarizeInitObservability(
   // let the console parse (same max semantics) refine it.
   let initDurationMs: number | undefined = fallback?.initDurationMs;
   let tweenCount: number | undefined = fallback?.tweenCount;
+  let elementCount: number | undefined = fallback?.elementCount;
   for (const line of lines) {
     if (!line.includes("[FrameCapture:INIT]")) continue;
     initDurationMs = maxReading(initDurationMs, readUnsignedIntAfter(line, "initDurationMs="));
     tweenCount = maxReading(tweenCount, readUnsignedIntAfter(line, "tweenCount="));
+    elementCount = maxReading(elementCount, readUnsignedIntAfter(line, "elementCount="));
   }
-  if (initDurationMs === undefined && tweenCount === undefined) return undefined;
-  return { initDurationMs, tweenCount };
+  if (initDurationMs === undefined && tweenCount === undefined && elementCount === undefined) {
+    return undefined;
+  }
+  return { initDurationMs, tweenCount, elementCount };
 }
 
 // fallow-ignore-next-line complexity

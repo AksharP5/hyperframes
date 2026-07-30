@@ -416,18 +416,33 @@ describe("init observability fallback (parallel workers)", () => {
     const summary = makeRecorder().summary({
       lastBrowserConsole: ["[FrameCapture:NAV] page.goto start"],
       capture: { forceScreenshot: false, captureMode: "screenshot" },
-      initFallback: { initDurationMs: 850, tweenCount: 1200 },
+      initFallback: { initDurationMs: 850, tweenCount: 1200, elementCount: 3400 },
     });
-    expect(summary.init).toEqual({ initDurationMs: 850, tweenCount: 1200 });
+    expect(summary.init).toEqual({ initDurationMs: 850, tweenCount: 1200, elementCount: 3400 });
   });
 
   it("max-merges console INIT lines over the fallback, matching multi-session semantics", () => {
     const summary = makeRecorder().summary({
-      lastBrowserConsole: ["[FrameCapture:INIT] complete initDurationMs=1234 tweenCount=42"],
+      lastBrowserConsole: [
+        "[FrameCapture:INIT] complete initDurationMs=1234 tweenCount=42 elementCount=5000",
+      ],
       capture: { forceScreenshot: false, captureMode: "screenshot" },
-      initFallback: { initDurationMs: 850, tweenCount: 1200 },
+      initFallback: { initDurationMs: 850, tweenCount: 1200, elementCount: 3400 },
     });
-    expect(summary.init).toEqual({ initDurationMs: 1234, tweenCount: 1200 });
+    expect(summary.init).toEqual({ initDurationMs: 1234, tweenCount: 1200, elementCount: 5000 });
+  });
+
+  // The single-session path has no structured fallback — it parses the console
+  // line only. This is the path that covers renders the routing gate cannot
+  // measure, so the element count must survive it.
+  it("parses elementCount from the console INIT line with no fallback at all", () => {
+    const summary = makeRecorder().summary({
+      lastBrowserConsole: [
+        "[FrameCapture:INIT] complete initDurationMs=90 tweenCount=7 elementCount=1420",
+      ],
+      capture: { forceScreenshot: false, captureMode: "screenshot" },
+    });
+    expect(summary.init).toEqual({ initDurationMs: 90, tweenCount: 7, elementCount: 1420 });
   });
 
   it("stays undefined when neither source has anything", () => {

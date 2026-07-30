@@ -253,6 +253,14 @@ export interface CapturePerfSummary {
   initDurationMs?: number;
   /** GSAP tween count at init — the motion-axis signal for capture routing analysis. */
   initTweenCount?: number;
+  /**
+   * Live DOM element count at end of init. Observational counterpart to the
+   * short-comp routing gate's own count: the gate can only measure the ~17%
+   * of renders that get a probe session, so without this the fleet
+   * element-count distribution — and any large-runtime-DOM tail — stays
+   * invisible for the rest.
+   */
+  initElementCount?: number;
   /** Correctness warnings observed before or during capture. */
   warnings?: CaptureWarning[];
   /**

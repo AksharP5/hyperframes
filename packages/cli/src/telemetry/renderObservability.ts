@@ -66,6 +66,7 @@ export function renderObservabilityTelemetryPayload(
     observabilityExtractCacheMisses: extraction?.cacheMisses,
     observabilityInitDurationMs: init?.initDurationMs,
     observabilityInitTweenCount: init?.tweenCount,
+    observabilityInitElementCount: init?.elementCount,
   };
 }
 

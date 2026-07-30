@@ -1345,10 +1345,15 @@ export async function resolveCompositionElementCount(
  * initializes before the timeline is fully wired, not an expected disagreement.
  */
 export function mergeWorkerInitObservability(
-  perfs: ReadonlyArray<{ initDurationMs?: number; initTweenCount?: number }>,
-): { initDurationMs?: number; tweenCount?: number } | undefined {
+  perfs: ReadonlyArray<{
+    initDurationMs?: number;
+    initTweenCount?: number;
+    initElementCount?: number;
+  }>,
+): { initDurationMs?: number; tweenCount?: number; elementCount?: number } | undefined {
   let initDurationMs: number | undefined;
   let tweenCount: number | undefined;
+  let elementCount: number | undefined;
   for (const perf of perfs) {
     if (perf.initDurationMs !== undefined) {
       initDurationMs =
@@ -1360,9 +1365,20 @@ export function mergeWorkerInitObservability(
       tweenCount =
         tweenCount === undefined ? perf.initTweenCount : Math.max(tweenCount, perf.initTweenCount);
     }
+    // Max across workers: every worker loads the same composition, so they
+    // should agree — max is defensive against a worker sampled before its
+    // init script finished populating the DOM.
+    if (perf.initElementCount !== undefined) {
+      elementCount =
+        elementCount === undefined
+          ? perf.initElementCount
+          : Math.max(elementCount, perf.initElementCount);
+    }
   }
-  if (initDurationMs === undefined && tweenCount === undefined) return undefined;
-  return { initDurationMs, tweenCount };
+  if (initDurationMs === undefined && tweenCount === undefined && elementCount === undefined) {
+    return undefined;
+  }
+  return { initDurationMs, tweenCount, elementCount };
 }
 
 /**

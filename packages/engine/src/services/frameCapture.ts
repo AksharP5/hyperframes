@@ -119,6 +119,8 @@ export interface CaptureSession {
   initTelemetry?: {
     initDurationMs: number;
     tweenCount: number;
+    /** Live DOM element count at end of init — observational; see collectSessionInitTelemetry. */
+    elementCount: number;
   };
   capturePerf: {
     frames: number;
@@ -406,8 +408,24 @@ function appendBrowserDiagnostic(session: CaptureSession, text: string): void {
 async function collectSessionInitTelemetry(
   page: Page,
   initStart: number,
-): Promise<{ initDurationMs: number; tweenCount: number }> {
+): Promise<{ initDurationMs: number; tweenCount: number; elementCount: number }> {
   const initDurationMs = Date.now() - initStart;
+  // Live DOM size, measured once the init sequence has completed so
+  // script-generated elements are present. This is the SAME quantity the
+  // short-comp routing gate wants, but measured here it is observational
+  // only — capture has already started, so it is far too late to route on.
+  // Its job is coverage: the routing gate can only read a live count on the
+  // ~17% of renders that get a probe session, which leaves the fleet
+  // element-count distribution unknowable for the rest (and hides exactly
+  // the dangerous shape — small source markup, huge runtime DOM). Every
+  // render reaches this path, so the distribution becomes readable even
+  // where the gate stays blind.
+  let elementCount = 0;
+  try {
+    elementCount = await page.evaluate(() => document.querySelectorAll("*").length);
+  } catch {
+    elementCount = 0;
+  }
   let tweenCount = 0;
   try {
     tweenCount = await page.evaluate(() => {
@@ -431,7 +449,7 @@ async function collectSessionInitTelemetry(
   } catch {
     tweenCount = 0;
   }
-  return { initDurationMs, tweenCount };
+  return { initDurationMs, tweenCount, elementCount };
 }
 
 async function recordSessionInitTelemetry(
@@ -442,7 +460,7 @@ async function recordSessionInitTelemetry(
   session.initTelemetry = telemetry;
   appendBrowserDiagnostic(
     session,
-    `[FrameCapture:INIT] complete initDurationMs=${telemetry.initDurationMs} tweenCount=${telemetry.tweenCount}`,
+    `[FrameCapture:INIT] complete initDurationMs=${telemetry.initDurationMs} tweenCount=${telemetry.tweenCount} elementCount=${telemetry.elementCount}`,
   );
 }
 
@@ -3788,6 +3806,7 @@ export function getCapturePerfSummary(session: CaptureSession): CapturePerfSumma
     subTimelineWaitOutcome: session.subTimelineWaitOutcome,
     initDurationMs: session.initTelemetry?.initDurationMs,
     initTweenCount: session.initTelemetry?.tweenCount,
+    initElementCount: session.initTelemetry?.elementCount,
     warnings: cloneCaptureWarnings(session.warnings),
     staticDedupReused: session.staticDedupCount ?? 0,
     staticDedupEnabled: session.staticDedupEnabled ?? false,

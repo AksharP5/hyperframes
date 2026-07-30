@@ -1936,16 +1936,24 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     it("max-merges across workers and ignores workers that reported nothing", () => {
       expect(
         mergeWorkerInitObservability([
-          { initDurationMs: 400, initTweenCount: 900 },
+          { initDurationMs: 400, initTweenCount: 900, initElementCount: 1200 },
           {},
-          { initDurationMs: 1250, initTweenCount: 880 },
+          { initDurationMs: 1250, initTweenCount: 880, initElementCount: 1190 },
         ]),
-      ).toEqual({ initDurationMs: 1250, tweenCount: 900 });
+      ).toEqual({ initDurationMs: 1250, tweenCount: 900, elementCount: 1200 });
     });
 
     it("returns undefined when no worker reported — summary.init must stay absent, not zeroed", () => {
       expect(mergeWorkerInitObservability([])).toBeUndefined();
       expect(mergeWorkerInitObservability([{}, {}])).toBeUndefined();
+    });
+
+    it("surfaces an element count even when a worker reported nothing else", () => {
+      expect(mergeWorkerInitObservability([{ initElementCount: 4000 }])).toEqual({
+        initDurationMs: undefined,
+        tweenCount: undefined,
+        elementCount: 4000,
+      });
     });
   });
 
