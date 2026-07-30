@@ -69,23 +69,85 @@ interface InstallState {
   bucketSeed?: string;
 }
 
-/** Parse one state file; any parse/shape failure reads as absent. */
-function parseInstallState(file: string): InstallState | null {
+/**
+ * Why there is no usable state: the file isn't there, or it is but couldn't be
+ * read/parsed. Distinguished because they mean opposite things for churn
+ * measurement — "absent" is a genuinely new machine, "corrupt" is a machine we
+ * already knew whose record we lost. Collapsing them into one `null` reported
+ * every corruption as a fresh install and biased `predecessorFound` low.
+ */
+type InstallStateMiss = "absent" | "corrupt";
+
+/**
+ * Parse one state file.
+ *
+ * A malformed `markerAt` no longer discards the record. `markerAt` is
+ * regenerable — it is only a timestamp — while `bucketSeed` is not: losing it
+ * silently re-rolls the install's canary cohort. So a partial corruption that
+ * leaves a usable seed keeps the seed and restamps the marker.
+ */
+function salvageInstallState(parsed: Partial<InstallState>): InstallState | InstallStateMiss {
+  const markerAt = typeof parsed.markerAt === "string" ? parsed.markerAt : undefined;
+  const bucketSeed = parseNonEmptyString(parsed.bucketSeed);
+  // Nothing salvageable in the record at all — treat as corrupt rather than
+  // inventing a marker, so the miss is still counted as "we knew this machine"
+  // instead of masquerading as a fresh install.
+  if (markerAt === undefined && bucketSeed === undefined) return "corrupt";
+  return {
+    markerAt: markerAt ?? new Date().toISOString(),
+    deParallelRouterTrialFired: parsed.deParallelRouterTrialFired === true ? true : undefined,
+    bucketSeed,
+  };
+}
+
+function parseInstallState(file: string): InstallState | InstallStateMiss {
+  if (!existsSync(file)) return "absent";
   try {
-    if (!existsSync(file)) return null;
-    const parsed = JSON.parse(readFileSync(file, "utf-8")) as Partial<InstallState>;
-    if (typeof parsed.markerAt !== "string") return null;
-    return {
-      markerAt: parsed.markerAt,
-      deParallelRouterTrialFired: parsed.deParallelRouterTrialFired === true ? true : undefined,
-      bucketSeed:
-        typeof parsed.bucketSeed === "string" && parsed.bucketSeed.length > 0
-          ? parsed.bucketSeed
-          : undefined,
-    };
+    return salvageInstallState(JSON.parse(readFileSync(file, "utf-8")) as Partial<InstallState>);
   } catch {
-    return null;
+    return "corrupt";
   }
+}
+
+// Once per process: the backfill runs on every readConfig until it lands, and
+// a read-only home directory would otherwise print on every single command.
+let seedBackfillWarned = false;
+
+/**
+ * The seed backfill could not be persisted, so this install will mint a
+ * different seed next invocation and silently churn its canary cohort. Rare
+ * (unwritable ~/.hyperframes) but invisible without this, and it makes the
+ * "backfilled once" contract in the field's docstring false.
+ */
+function warnSeedBackfillFailed(error: string | undefined): void {
+  if (seedBackfillWarned) return;
+  seedBackfillWarned = true;
+  console.warn(
+    `[hyperframes] Could not persist telemetry config${error ? `: ${error}` : ""}. ` +
+      "Canary cohort assignment will not be stable across runs.",
+  );
+}
+
+/**
+ * One-time backfill for configs predating the bucket seed: prefer the seed a
+ * previous install recorded, else mint. Mutates `config` in place.
+ *
+ * Persisting is the whole point — an unpersisted seed re-rolls next process,
+ * silently churning this install's cohort on every invocation. `~/.hyperframes`
+ * being unwritable (root-owned after a sudo mishap, read-only mount, disk full)
+ * is exactly when that happens, so it says so once rather than failing
+ * invisibly.
+ */
+function backfillBucketSeed(config: HyperframesConfig): void {
+  const recorded = readInstallState();
+  config.bucketSeed = (isInstallState(recorded) ? recorded.bucketSeed : undefined) ?? randomUUID();
+  const write = writeConfigWithResult(config);
+  if (!write.ok) warnSeedBackfillFailed(write.error);
+}
+
+/** Narrow the parse result to a usable record. */
+function isInstallState(value: InstallState | InstallStateMiss): value is InstallState {
+  return typeof value !== "string";
 }
 
 /**
@@ -97,14 +159,17 @@ function parseInstallState(file: string): InstallState | null {
  * cleared), and failing to delete the legacy copy is not an error — it is
  * re-read harmlessly next time.
  */
-function readInstallState(): InstallState | null {
+function readInstallState(): InstallState | InstallStateMiss {
   const current = parseInstallState(STATE_FILE);
-  if (current !== null) {
+  if (isInstallState(current)) {
     removeLegacyStateFile();
     return current;
   }
   const legacy = parseInstallState(LEGACY_STATE_FILE);
-  if (legacy === null) return null;
+  if (!isInstallState(legacy)) {
+    // Corruption at EITHER location still means this machine had an install.
+    return current === "corrupt" || legacy === "corrupt" ? "corrupt" : "absent";
+  }
   try {
     writeInstallState(legacy);
     removeLegacyStateFile();
@@ -186,7 +251,8 @@ function syncInstallState(config: HyperframesConfig): void {
   const wantFired = config.deParallelRouterTrialFired === true;
   if (stateMarkerSynced && (stateFiredSynced || !wantFired)) return;
   try {
-    const state = readInstallState();
+    const read = readInstallState();
+    const state = isInstallState(read) ? read : null;
     const next = nextInstallState(state, config);
     if (next !== null) writeInstallState(next);
     stateMarkerSynced = true;
@@ -202,15 +268,20 @@ function syncInstallState(config: HyperframesConfig): void {
  * machine left behind.
  */
 function mintConfig(): HyperframesConfig {
-  const state = readInstallState();
+  const read = readInstallState();
+  const state = isInstallState(read) ? read : null;
   return {
     ...DEFAULT_CONFIG,
     anonymousId: randomUUID(),
-    predecessorFound: state !== null,
+    // A corrupt record still means this machine had an install — reporting it
+    // as `false` would count a partial disk write as a brand-new machine and
+    // understate recoverable churn, which is the one thing this field exists
+    // to measure. `undefined` on configs minted before the field existed.
+    predecessorFound: state !== null || read === "corrupt",
+    stateFileCorrupt: read === "corrupt" ? true : undefined,
     // The rollover itself: a breaker tripped by a previous install on this
     // machine stays tripped for the new one, and the canary bucketing seed is
-    // inherited so the machine keeps its cohorts — a wipe re-rolls the
-    // telemetry id, never the canary assignment.
+    // inherited so cohorts hold across a config.json re-mint.
     deParallelRouterTrialFired: state?.deParallelRouterTrialFired === true ? true : undefined,
     bucketSeed: state?.bucketSeed ?? randomUUID(),
   };
@@ -300,6 +371,13 @@ export interface HyperframesConfig {
    * existed — a different fact from `false` (minted fresh, no predecessor).
    */
   predecessorFound?: boolean;
+  /**
+   * The install-state file existed but could not be read. Separates "we lost
+   * this machine's record" from "genuinely new machine" in the churn split —
+   * without it a partial disk write is indistinguishable from a fresh install.
+   * Absent (not false) in the normal case, so it costs nothing on the wire.
+   */
+  stateFileCorrupt?: boolean;
   /**
    * The unit canary percentages bucket on — deliberately NOT the anonymousId.
    * A fresh random UUID, mirrored write-once into the install-state file and
@@ -431,6 +509,7 @@ export function readConfig(): HyperframesConfig {
           : undefined,
       predecessorFound:
         typeof parsed.predecessorFound === "boolean" ? parsed.predecessorFound : undefined,
+      stateFileCorrupt: parsed.stateFileCorrupt === true ? true : undefined,
       bucketSeed: parseNonEmptyString(parsed.bucketSeed),
       recentRenders: parseRecentRenders(parsed.recentRenders),
     };
@@ -439,8 +518,7 @@ export function readConfig(): HyperframesConfig {
     // recorded seed if a previous install already wrote one, else mint.
     // Persisted immediately — an unpersisted seed would re-roll every process.
     if (config.bucketSeed === undefined) {
-      config.bucketSeed = readInstallState()?.bucketSeed ?? randomUUID();
-      writeConfig(config);
+      backfillBucketSeed(config);
       // Cache even if the write failed, so the seed is at least stable for
       // the life of this process (a re-roll per readConfigFresh would flip
       // cohorts mid-session).

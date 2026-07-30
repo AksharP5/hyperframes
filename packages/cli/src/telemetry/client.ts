@@ -80,6 +80,10 @@ export function trackEvent(
       // we already knew. Absent (not false) when the config predates the
       // marker. Resolved after the shouldTrack guard.
       install_predecessor_found: readConfig().predecessorFound,
+      // Splits the `true` share above: a machine we knew but whose record we
+      // could not read. Without it a partial disk write is indistinguishable
+      // from a genuinely fresh install. Absent in the normal case.
+      install_state_file_corrupt: readConfig().stateFileCorrupt,
       // Canary assignments as `$feature/canary-<name>` — PostHog's native flag
       // property shape, so breakdowns and experiment analysis work on a canary
       // with nothing configured server-side. On EVERY event, not just renders:

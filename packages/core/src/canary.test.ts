@@ -222,10 +222,30 @@ describe("parseCanaryOverride", () => {
 });
 
 describe("registry", () => {
-  it("has unique, kebab-case names", () => {
+  // Also load-bearing for the hash, not just for tidiness: fnv1a32 walks
+  // charCodeAt, i.e. UTF-16 code units, while reference FNV-1a is byte
+  // oriented. The two agree only for ASCII. Names are hashed as
+  // `feature:unit`, so a non-ASCII name (an accented owner tag, an emoji, a
+  // full-width dash from autocorrect) would silently disagree with every
+  // other FNV-1a implementation — including any external tool that recomputes
+  // cohorts. This regex is what makes that unreachable; loosening it means
+  // fixing the hash first.
+  it("has unique, ASCII kebab-case names — the hash depends on this", () => {
     const names = CANARIES.map((c) => c.name);
     expect(new Set(names).size).toBe(names.length);
-    for (const n of names) expect(n).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    for (const n of names) {
+      expect(n).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+      // eslint-disable-next-line no-control-regex -- explicit ASCII range check
+      expect(n).toMatch(/^[\x00-\x7F]*$/);
+    }
+  });
+
+  // The registry is data, so a ramp is a one-line edit with no code review
+  // surface. This canary's own description says "ramp only alongside the
+  // per-install circuit breaker" — without an assertion, bumping it to 5
+  // before that wiring lands would go green.
+  it("keeps de-parallel-router at 0% until the circuit breaker is wired", () => {
+    expect(findCanary("de-parallel-router")?.percentage).toBe(0);
   });
 
   it("has in-range percentages and a parseable sunset date", () => {

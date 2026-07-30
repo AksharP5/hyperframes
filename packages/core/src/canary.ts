@@ -81,6 +81,14 @@ export interface CanaryInput {
  * run in the browser-side studio bundle and the embeddable player too, and a
  * six-line hash beats shipping a polyfill or maintaining two code paths.
  * Distribution is uniform enough for bucketing (pinned by a test).
+ *
+ * ASCII-only by contract. `charCodeAt` yields UTF-16 code units — two
+ * surrogate halves for an astral character — whereas reference FNV-1a is
+ * byte-oriented, so the two agree only on ASCII. Both inputs are constrained
+ * to satisfy that: canary names by the registry's kebab-case assertion in
+ * `canary.test.ts`, unit ids by being UUIDs. Widening either means switching
+ * to a UTF-8 encoding here first, which is not free in the browser bundle
+ * (`TextEncoder` is fine; `Buffer` is not).
  */
 function fnv1a32(input: string): number {
   let hash = 0x811c9dc5;

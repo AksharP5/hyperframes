@@ -18,7 +18,7 @@ import {
 import { VERSION as version } from "../version.js";
 import {
   buildStudioHeadScripts,
-  resolveCliBucketSeed,
+  isLoopbackHost,
   resolveCliTelemetryDistinctId,
 } from "./telemetryIdentity.js";
 import { emitStudioRenderComplete, emitStudioRenderError } from "./studioRenderTelemetry.js";
@@ -655,11 +655,23 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
   // clients that can't rely on the injected global. Returns the CLI's anonymous
   // distinct id (no PII) so the browser session can join the CLI's PostHog
   // person, or `{ distinctId: null }` when CLI telemetry is disabled.
+  //
+  // Deliberately does NOT serve `bucketSeed`. Studio gets its canary answers
+  // from the injected `window.__HF_CLI_CANARY_DECISIONS` (booleans, not the
+  // value cohorts derive from), so nothing needs the seed over HTTP — and an
+  // unauthenticated local endpoint is a strictly worse place for it than an
+  // inline script scoped to Studio's own document.
+  //
+  // Host-guarded against DNS rebinding: a remote page can point a hostname it
+  // controls at 127.0.0.1 and read this response as same-origin. Pinning the
+  // Host header to a loopback name means such a request (which carries the
+  // attacker's hostname) is refused. Same-origin Studio traffic always
+  // presents the bound loopback host.
   app.get("/api/telemetry-identity", (c) => {
-    return c.json({
-      distinctId: resolveCliTelemetryDistinctId(),
-      bucketSeed: resolveCliBucketSeed(),
-    });
+    if (!isLoopbackHost(c.req.header("host"))) {
+      return c.json({ error: "forbidden" }, 403);
+    }
+    return c.json({ distinctId: resolveCliTelemetryDistinctId() });
   });
 
   app.get("/api/events", (c) => {

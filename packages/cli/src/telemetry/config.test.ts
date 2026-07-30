@@ -228,11 +228,15 @@ describe("install-state rollover (breaker survives a config re-mint)", () => {
     expect(stateFile()["markerAt"]).toBe(minted);
   });
 
-  it("a corrupted state file reads as absent rather than breaking the mint", () => {
+  it("a corrupted state file never breaks the mint, and is not counted as fresh", () => {
     fsState.files.set(STATE_PATH, "{not valid json");
     const config = readConfig();
-    expect(config.predecessorFound).toBe(false);
     expect(config.anonymousId).toBeTruthy();
+    // Previously asserted `false` here. That was the bug: a machine whose
+    // record we lost is not a new machine, and reporting it as one understated
+    // recoverable churn — the only thing predecessorFound measures.
+    expect(config.predecessorFound).toBe(true);
+    expect(config.stateFileCorrupt).toBe(true);
     // And the corrupt file was replaced with a valid marker by the mint's write.
     expect(stateFile()["markerAt"]).toEqual(expect.any(String));
   });
@@ -386,5 +390,78 @@ describe("bucket-seed carryover (cohorts survive a config wipe)", () => {
     const { bucketSeed: _dropped, ...legacy } = base;
     fsState.files.set(CONFIG_PATH, JSON.stringify(legacy));
     expect(readConfigFresh().bucketSeed).toBe(lineageSeed);
+  });
+});
+
+describe("install-state corruption is distinguishable from absence", () => {
+  let readConfig: typeof import("./config.js").readConfig;
+  let readConfigFresh: typeof import("./config.js").readConfigFresh;
+  let CONFIG_PATH: typeof import("./config.js").CONFIG_PATH;
+  let STATE_PATH: typeof import("./config.js").STATE_PATH;
+
+  beforeEach(async () => {
+    fsState.files.clear();
+    vi.resetModules();
+    ({ readConfig, readConfigFresh, CONFIG_PATH, STATE_PATH } = await import("./config.js"));
+  });
+
+  it("reports predecessorFound for an unreadable state file, not a fresh install", () => {
+    fsState.files.set(STATE_PATH, "{not valid json");
+    const config = readConfig();
+    // The machine DID have an install; counting it as fresh understates
+    // recoverable churn, which is the only thing this field measures.
+    expect(config.predecessorFound).toBe(true);
+    expect(config.stateFileCorrupt).toBe(true);
+  });
+
+  it("leaves stateFileCorrupt absent on a genuinely fresh install", () => {
+    const config = readConfig();
+    expect(config.predecessorFound).toBe(false);
+    expect(config.stateFileCorrupt).toBeUndefined();
+  });
+
+  it("salvages a bucketSeed when only markerAt is mangled", () => {
+    // markerAt is regenerable; the seed is not — losing it re-rolls the cohort.
+    fsState.files.set(STATE_PATH, JSON.stringify({ markerAt: 12345, bucketSeed: "keep-me" }));
+    fsState.files.delete(CONFIG_PATH);
+    const config = readConfigFresh();
+    expect(config.bucketSeed).toBe("keep-me");
+    expect(config.predecessorFound).toBe(true);
+  });
+
+  it("treats a parseable file with nothing salvageable as corrupt", () => {
+    fsState.files.set(STATE_PATH, JSON.stringify({ unrelated: true }));
+    expect(readConfig().stateFileCorrupt).toBe(true);
+  });
+});
+
+describe("seed backfill write failure is surfaced", () => {
+  let readConfig: typeof import("./config.js").readConfig;
+  let CONFIG_PATH: typeof import("./config.js").CONFIG_PATH;
+
+  beforeEach(async () => {
+    fsState.files.clear();
+    vi.resetModules();
+    ({ readConfig, CONFIG_PATH } = await import("./config.js"));
+  });
+
+  it("warns once when the backfilled seed cannot be persisted", async () => {
+    // A config predating bucketSeed, on an unwritable home directory.
+    const seeded = { telemetryEnabled: true, anonymousId: "id", telemetryNoticeShown: true };
+    fsState.files.set(CONFIG_PATH, JSON.stringify(seeded));
+    const fs = await import("node:fs");
+    vi.mocked(fs.writeFileSync).mockImplementation(() => {
+      throw new Error("EACCES: permission denied");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    readConfig();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("not be stable across runs");
+
+    warn.mockRestore();
+    vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
+      fsState.files.set(String(path), String(content));
+    });
   });
 });

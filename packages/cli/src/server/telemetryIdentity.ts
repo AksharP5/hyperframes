@@ -43,7 +43,7 @@ export function resolveCliTelemetryDistinctId(): string | null {
  * and editor would split one user across cohorts. Same telemetry gate as the
  * distinct id: seeding is part of the identity stitch, not a separate channel.
  */
-export function resolveCliBucketSeed(): string | null {
+function resolveCliBucketSeed(): string | null {
   try {
     if (!telemetryShouldTrack()) return null;
     const seed = readConfig().bucketSeed;
@@ -51,6 +51,30 @@ export function resolveCliBucketSeed(): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Is this request's `Host` a loopback name the studio server could have been
+ * reached on directly?
+ *
+ * Guards the identity endpoint against DNS rebinding: an attacker-controlled
+ * page can resolve its own hostname to 127.0.0.1 and read the response as
+ * same-origin, but the request still carries THAT hostname in `Host`. Genuine
+ * same-origin Studio traffic always presents the bound loopback host.
+ *
+ * A bare `[::1]`/`localhost`/dotted-quad check rather than a full parse: the
+ * port is irrelevant (any port on loopback is us), and anything exotic enough
+ * to miss here should be refused rather than guessed at.
+ */
+export function isLoopbackHost(host: string | undefined): boolean {
+  if (!host) return false;
+  // Strip the port. IPv6 literals are bracketed (`[::1]:1234`), so take the
+  // bracketed part when present and only split on ":" otherwise.
+  const bracketed = /^\[([^\]]+)\]/.exec(host);
+  const hostname = (bracketed ? bracketed[1] : host.split(":")[0])?.toLowerCase() ?? "";
+  if (hostname === "localhost" || hostname === "::1" || hostname === "0:0:0:0:0:0:0:1") return true;
+  // 127.0.0.0/8 — the whole loopback block, not just 127.0.0.1.
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
 }
 
 // JSON.stringify does not escape "<" or "/". Escaping both means no

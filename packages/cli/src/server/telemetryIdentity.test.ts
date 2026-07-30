@@ -20,8 +20,12 @@ vi.mock("../telemetry/canary.js", () => ({
   canaryDecisionsForStudio: () => canaryDecisions(),
 }));
 
-const { resolveCliTelemetryDistinctId, buildCliIdentityScript, buildStudioHeadScripts } =
-  await import("./telemetryIdentity.js");
+const {
+  resolveCliTelemetryDistinctId,
+  buildCliIdentityScript,
+  buildStudioHeadScripts,
+  isLoopbackHost,
+} = await import("./telemetryIdentity.js");
 
 describe("resolveCliTelemetryDistinctId", () => {
   beforeEach(() => {
@@ -165,5 +169,36 @@ describe("buildStudioHeadScripts", () => {
   it("returns just the env script when there is no identity and no canary", () => {
     shouldTrack.mockReturnValue(false);
     expect(buildStudioHeadScripts(ENV_SCRIPT)).toBe(ENV_SCRIPT);
+  });
+});
+
+describe("isLoopbackHost (DNS-rebinding guard on the identity endpoint)", () => {
+  it.each([
+    "localhost",
+    "localhost:5173",
+    "127.0.0.1",
+    "127.0.0.1:5173",
+    "127.1.2.3",
+    "[::1]",
+    "[::1]:5173",
+    "LOCALHOST:5173",
+  ])("accepts the loopback host %s", (host) => {
+    expect(isLoopbackHost(host)).toBe(true);
+  });
+
+  it.each([
+    undefined,
+    "",
+    // The rebinding case: an attacker hostname resolving to 127.0.0.1 still
+    // arrives with ITS name in Host, which is what makes this catchable.
+    "evil.example.com",
+    "evil.example.com:5173",
+    "127.0.0.1.evil.com",
+    "notlocalhost",
+    "localhost.evil.com",
+    "192.168.1.10",
+    "0.0.0.0",
+  ])("rejects %s", (host) => {
+    expect(isLoopbackHost(host)).toBe(false);
   });
 });
