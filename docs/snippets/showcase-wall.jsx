@@ -17,9 +17,12 @@ export const ShowcaseWall = () => {
   // so constants defined above this line arrive undefined at render time.
   const CDN = "https://static.heygen.ai/hyperframes-oss/docs/images/showcase";
 
+  // grading is served from its 4K60 master; the other five are the best
+  // rendered file that exists for each on disk. Versioned filenames because
+  // the CDN objects are immutable for a year and will not re-fetch in place.
   const FILMS = [
     {
-      id: "grading",
+      id: "grading", tile: "tile-grading-v2", full: "full-grading-4k-v2",
       title: "Colour grading and media effects",
       note: "Real footage graded with LUTs, curves, and scopes — inside Studio.",
       length: "48s",
@@ -74,8 +77,8 @@ export const ShowcaseWall = () => {
       <div style={{ margin: "1.5rem 0" }}>
         <video
           key={open.id}
-          src={`${CDN}/full-${open.id}.mp4`}
-          poster={`${CDN}/tile-${open.id}.jpg`}
+          src={`${CDN}/${open.full || `full-${open.id}`}.mp4`}
+          poster={`${CDN}/${open.tile || `tile-${open.id}`}.jpg`}
           controls
           autoPlay
           playsInline
@@ -150,8 +153,8 @@ export const ShowcaseWall = () => {
           }}
         >
           <video
-            src={reduced ? undefined : `${CDN}/tile-${film.id}.mp4`}
-            poster={`${CDN}/tile-${film.id}.jpg`}
+            src={reduced ? undefined : `${CDN}/${film.tile || `tile-${film.id}`}.mp4`}
+            poster={`${CDN}/${film.tile || `tile-${film.id}`}.jpg`}
             autoPlay={!reduced}
             muted
             loop={!reduced}
