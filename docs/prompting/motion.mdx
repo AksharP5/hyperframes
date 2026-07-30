@@ -3,31 +3,41 @@ title: Motion that reads premium
 description: "Seven motion-grammar rules from frame-by-frame study of professional work — nothing stops, the camera acts, action overlaps, imperfection stays reproducible."
 ---
 
-By now you can specify a frame precisely — exact copy, exact colors, exact layout, exact timing. This level makes it feel alive. Static frames can be perfect and the video still feels cheap if the motion is dead. Professional motion design follows a grammar you can put directly in prompts:
+By now you can specify a frame precisely — exact copy, exact colors, exact layout, exact timing. This level makes it feel alive. Static frames can be perfect and the video still feels cheap if the motion is dead. Before the grammar, one filter. Every animation should be doing a job for the viewer, and there are only four:
+
+| The job | What it looks like |
+| --- | --- |
+| **Direct attention** | Motion pulls the eye to the thing that matters this second — a count landing, a line igniting |
+| **Carry continuity** | Motion ties one moment to the next so the piece reads as one space, not a sequence of slides |
+| **Show change** | Motion *is* the information — a value rising, a diff resolving, a route drawing |
+| **Express character** | Motion carries the brand's temperament — snappy and confident, or calm and editorial |
+
+If a movement is doing none of those, it's decoration, and decoration is what makes a video read as cheap no matter how smooth the easing is. (Product-UI motion frameworks name a fifth job, *feedback* — confirming a user's action. Video has no user input, so it doesn't apply here.) Ask for motion that serves a job, then use the grammar below to make it read well:
 
 1. **Nothing ever fully stops.** Every "hold" carries ambient idle motion — a 1-2% breathing scale, slow drift, a shimmer. Never write "holds motionless"; write "settles into a gentle ambient idle." A frozen final second is the single biggest cheap-motion tell.
 2. **The camera is an actor.** Give each scene one continuous camera move — a 4-8% push-in, a slow orbit, parallax between layered planes — easing gently and never *decaying* to a dead stop at the end of a scene (compute the ease over a window slightly longer than the render). A deliberate mid-film rest is a different thing, and it is sanctioned: see [avoiding the slideshow](#avoiding-the-slideshow).
-3. **Overlapping action.** No two elements share a start or end time. Entrances stagger at irregular offsets; the next element begins while the last is still settling.
-4. **Overshoot and follow-through.** Every pop scales past its target and settles back; letters can tumble in individually with rotation.
-5. **Depth planes.** One or two large, heavily-blurred foreground elements drifting near the lens sell depth instantly.
-6. **Match pacing to genre.** Showreel-style cuts run 1.5-4 seconds per idea; a stretched 8-second version of a 2-second idea feels slow no matter how it's animated.
-7. **Handmade imperfection stays reproducible.** A stop-motion or hand-animated feel wants irregular timing, not machine-smooth eases — but true unseeded randomness breaks the render: HyperFrames must produce the identical frame every time it seeks to the same point, and `Math.random()` can't promise that. Seed a PRNG once at composition start instead, and step discrete elements between held positions (a "two-frame hold": land, hold two frames, jump to the next offset) rather than tweening continuously between them. The irregularity is real — it just comes from a seed, not from chance.
+3. **Overlapping action.** No two elements share a start or end time. Entrances stagger at irregular offsets; the next element begins while the last is still settling. The mechanism is a ratio: **each offset should be clearly shorter than the animation it offsets** — a small offset-to-duration ratio reads fluid, a large one reads deliberate, and an offset longer than the animation stops being a stagger and becomes a queue. Delay the *supporting* elements, never the focal one; a focal element that waits reads as lag.
+4. **Compound properties only when they tell one story.** Every animation changes at least one property — position, scale, opacity, rotation. Combining them works when they say the same thing (a confirmation sliding up *and* fading in both read as "arriving") and confuses when they don't (a sheet that rises *and* rotates is two unrelated claims about one object). Pick the properties that serve the movement's job and drop the rest. Direction follows from the same logic: entrances ease **out** (fast in, gentle settle — the object arrives), exits ease **in** (gentle start, decisive departure), on-screen moves ease **in-out**, and impacts — a stamp, a slam — ease **in**, because an impact is an acceleration.
+5. **Overshoot and follow-through.** Every pop scales past its target and settles back; letters can tumble in individually with rotation.
+6. **Depth planes.** One or two large, heavily-blurred foreground elements drifting near the lens sell depth instantly.
+7. **Match pacing to genre.** Showreel-style cuts run 1.5-4 seconds per idea; a stretched 8-second version of a 2-second idea feels slow no matter how it's animated.
+8. **Handmade imperfection stays reproducible.** A stop-motion or hand-animated feel wants irregular timing, not machine-smooth eases — but true unseeded randomness breaks the render: HyperFrames must produce the identical frame every time it seeks to the same point, and `Math.random()` can't promise that. Seed a PRNG once at composition start instead, and step discrete elements between held positions (a "two-frame hold": land, hold two frames, jump to the next offset) rather than tweening continuously between them. The irregularity is real — it just comes from a seed, not from chance.
 
 ## The grammar, measured
 
-The same composition built twice — identical content, identical layout; the only variable is the motion treatment. The first build commits the anti-patterns above: simultaneous identical entrances, no camera, a frozen final 2.4 seconds. The second applies the seven rules.
+The same composition built twice — identical content, identical layout; the only variable is the motion treatment. The first build commits the anti-patterns above: simultaneous identical entrances, no camera, a frozen final 2.4 seconds. The second applies the eight rules.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-before.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *Every anti-pattern: tiles enter together, nothing overlaps, the last seconds are a freeze-frame.*
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-after.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*The seven rules: staggered overshoot entrances, a continuous 5% push, ambient idle, a blurred foreground plane, sparkline draw-ins as secondary motion.*
+*The eight rules: staggered overshoot entrances, a continuous 5% push, ambient idle, a blurred foreground plane, sparkline draw-ins as secondary motion.*
 
 The difference is measurable, not just visible: in the final second the frozen build has bit-identical consecutive frames, while the motion-grammar build changes every single frame — corroborated by the encoder (211KB vs 2.5MB for the same content). A frozen final second is the cheap-motion tell you can test for.
 
 ## Avoiding the slideshow
 
-The seven rules govern motion *inside* a scene. Apply all seven, cut between scenes, and you can still end up with a slideshow: a sequence of well-animated cards that happen to play in order. It's the most common note on multi-scene work, and the rebuild passes on the [Level 7 film](/prompting/capstone) after its slideshow diagnosis are what taught us the two properties — neither fix was more animation.
+The eight rules govern motion *inside* a scene. Apply all eight, cut between scenes, and you can still end up with a slideshow: a sequence of well-animated cards that happen to play in order. It's the most common note on multi-scene work, and the rebuild passes on the [Level 7 film](/prompting/capstone) after its slideshow diagnosis are what taught us the two properties — neither fix was more animation.
 
 **What a slideshow actually is:** a run of scenes that are *independent* (nothing connects one to the next) and *uniform in energy* (nothing tells you which moment matters). So any fix has to supply two properties:
 
@@ -74,7 +84,7 @@ Whichever you choose, put the two properties in the prompt in your own words, an
 
 ## Handmade, still deterministic
 
-Rule 1's ambient idle is *continuous* — a slow, smooth breathing scale. Rule 7 is a different tool for a different job: when the brief wants something that reads as physically hand-animated (paper cutouts, stop-motion, a wobbly hand-drawn line), continuous easing is the wrong texture — it reads as digital no matter how organic the curve. What you want is irregular, but reproducible:
+Rule 1's ambient idle is *continuous* — a slow, smooth breathing scale. Rule 8 is a different tool for a different job: when the brief wants something that reads as physically hand-animated (paper cutouts, stop-motion, a wobbly hand-drawn line), continuous easing is the wrong texture — it reads as digital no matter how organic the curve. What you want is irregular, but reproducible:
 
 > A paper-cutout garden scene: flowers, leaves, and a bee drifting on visible wires, like stop-motion. Seed a random offset per element at the start (same seed every render) so each leaf sways to a slightly different rhythm, but hold each position for exactly two frames before stepping to the next — discrete jumps, not a smooth tween. It should read as intentionally handmade, not glitchy.
 
