@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -12,30 +12,44 @@ const CONFIG_DIR = join(homedir(), ".hyperframes");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 // ---------------------------------------------------------------------------
-// Install-state file: ~/.local/state/hyperframes/install-state.json
+// Install-state file: ~/.hyperframes/install-state.json
 //
-// A second, deliberately separate location from CONFIG_DIR, so it survives
-// the most common identity reset — deleting or reinstalling ~/.hyperframes.
-// It exists to carry exactly two facts across that reset, and nothing else:
+// A separate FILE, but deliberately the same DIRECTORY as config.json, so
+// `rm -rf ~/.hyperframes` really is a full reset. It previously lived in
+// ~/.local/state/hyperframes/ specifically to survive that delete; review
+// rejected that ("if someone is deleting their hyperframes config it should
+// wipe all hyperframes state — I'm not sure we should try and persist state
+// elsewhere to get around this"), and the measurement agreed: the churn this
+// actually defends against is not users running `rm -rf`.
 //
-//   1. `markerAt` — "a hyperframes install existed on this machine". Written
-//      unconditionally, so the fraction of fresh installs that find it is a
-//      direct measurement of recoverable id churn (config wiped, machine
-//      persisted) vs unrecoverable (fresh machine/container/new user).
+// The threat it does defend against is config.json itself. That file is hot
+// and wide — ~20 fields rewritten on every command and every render — and
+// readConfig recovers from ANY parse/permission/IO failure by minting a fresh
+// identity. Splitting these two facts into their own file decouples them from
+// that churn: no shared schema to migrate on upgrade, and one write at first
+// mint instead of one per command.
+//
+// It carries exactly two facts, and no identity — no anonymousId, no
+// counters, nothing linking the old install to the new one:
+//
+//   1. `markerAt` — "a hyperframes install existed on this machine". Now that
+//      it shares CONFIG_DIR, `predecessorFound` measures the churn we care
+//      about (config.json lost, install-state survived => corruption/re-mint)
+//      rather than deliberate directory deletion, which takes both.
 //   2. `deParallelRouterTrialFired` — the DE parallel-router circuit
-//      breaker's tripped state. Without this, a config wipe re-enrols the
-//      install into an experimental path that already FAILED on this exact
-//      machine; the breaker's whole point is that a real failure turns the
-//      trial off for good.
+//      breaker's tripped state, so a config re-mint does not re-enrol an
+//      install into an experimental path that already FAILED on this machine.
 //
-// It intentionally holds NO identity: no anonymousId, no counters, nothing
-// that could link the old install to the new one. A user who wipes their
-// config gets a fresh id unconditionally — this file only stops the wipe
-// from also discarding a safety fact about the machine.
+// Removal path: delete ~/.hyperframes (or just this file). `hyperframes
+// telemetry status` prints its exact location.
 // ---------------------------------------------------------------------------
 
-const STATE_DIR = join(homedir(), ".local", "state", "hyperframes");
-const STATE_FILE = join(STATE_DIR, "install-state.json");
+const STATE_FILE = join(CONFIG_DIR, "install-state.json");
+
+// Pre-move location. Read once, migrated, then deleted — an install that
+// wrote state under the old scheme keeps its tripped breaker instead of
+// silently re-enrolling, and no file is left behind outside CONFIG_DIR.
+const LEGACY_STATE_FILE = join(homedir(), ".local", "state", "hyperframes", "install-state.json");
 
 interface InstallState {
   /** ISO timestamp of when the marker was first written. */
@@ -44,11 +58,11 @@ interface InstallState {
   deParallelRouterTrialFired?: boolean;
 }
 
-/** Read the install-state file; any parse/shape failure reads as absent. */
-function readInstallState(): InstallState | null {
+/** Parse one state file; any parse/shape failure reads as absent. */
+function parseInstallState(file: string): InstallState | null {
   try {
-    if (!existsSync(STATE_FILE)) return null;
-    const parsed = JSON.parse(readFileSync(STATE_FILE, "utf-8")) as Partial<InstallState>;
+    if (!existsSync(file)) return null;
+    const parsed = JSON.parse(readFileSync(file, "utf-8")) as Partial<InstallState>;
     if (typeof parsed.markerAt !== "string") return null;
     return {
       markerAt: parsed.markerAt,
@@ -56,6 +70,40 @@ function readInstallState(): InstallState | null {
     };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Read the install-state file, adopting the pre-move copy if this machine
+ * still has one.
+ *
+ * Migration is one-way and best-effort: the current location always wins (a
+ * stale legacy file must never resurrect a breaker the user has since
+ * cleared), and failing to delete the legacy copy is not an error — it is
+ * re-read harmlessly next time.
+ */
+function readInstallState(): InstallState | null {
+  const current = parseInstallState(STATE_FILE);
+  if (current !== null) {
+    removeLegacyStateFile();
+    return current;
+  }
+  const legacy = parseInstallState(LEGACY_STATE_FILE);
+  if (legacy === null) return null;
+  try {
+    writeInstallState(legacy);
+    removeLegacyStateFile();
+  } catch {
+    // Keep the legacy copy; the value is still returned below either way.
+  }
+  return legacy;
+}
+
+function removeLegacyStateFile(): void {
+  try {
+    if (existsSync(LEGACY_STATE_FILE)) rmSync(LEGACY_STATE_FILE, { force: true });
+  } catch {
+    // Best-effort cleanup — never break the CLI over a leftover file.
   }
 }
 
@@ -76,7 +124,7 @@ export function __resetInstallStateSyncForTests(): void {
  * since a corrupted state file silently reads as absent.
  */
 function writeInstallState(next: InstallState): void {
-  mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
+  mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
   const tmpFile = `${STATE_FILE}.${process.pid}.tmp`;
   writeFileSync(tmpFile, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
   renameSync(tmpFile, STATE_FILE);
