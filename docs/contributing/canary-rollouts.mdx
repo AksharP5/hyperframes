@@ -206,8 +206,22 @@ once and no two rollouts could be read apart.
 **Cohorts are keyed to the install directory, not to `config.json`.** The
 bucketing unit is a dedicated seed in `install-state.json`, inherited across
 `config.json` re-mints (see the calibration section) — distinct from the
-telemetry id, never emitted, and shared with a CLI-launched Studio so both
-surfaces agree. It does not outlive `~/.hyperframes`.
+telemetry id and never emitted. It does not outlive `~/.hyperframes`.
+
+**A CLI-launched Studio adopts the CLI's decisions rather than re-deriving
+them.** The CLI publishes `window.__HF_CLI_CANARY_DECISIONS` — a plain
+`{ name: boolean }` map — and Studio takes it as authoritative over its own
+seed, URL override and the registry percentage. Re-deriving cannot agree in
+the cases that matter: telemetry off (the CLI resolves `telemetry_opt_out`,
+but Studio's opt-out is a separate localStorage flag it cannot see), an
+`HF_CANARY_*` override (env vars never cross into the browser), or no seed
+injected (Studio falls back to a different unit, so a different bucket). One
+render spanning both surfaces must not run half-enrolled.
+
+The decisions map is published even when telemetry is off — that is the case
+it exists for. It is safe to expose where the seed is not: booleans about
+features, not the value cohorts are derived from. Studio still evaluates
+locally when opened standalone, or for any canary the CLI did not publish.
 
 ## Removing your canary state
 

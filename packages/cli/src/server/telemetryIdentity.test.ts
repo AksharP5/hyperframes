@@ -6,12 +6,18 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const shouldTrack = vi.fn();
 const readConfig = vi.fn();
+// Pinned rather than using the real registry, so these string assertions
+// don't move every time a canary is added, ramped, or retired.
+const canaryDecisions = vi.fn<() => Record<string, boolean>>();
 
 vi.mock("../telemetry/client.js", () => ({
   shouldTrack: (...args: unknown[]) => shouldTrack(...args),
 }));
 vi.mock("../telemetry/config.js", () => ({
   readConfig: (...args: unknown[]) => readConfig(...args),
+}));
+vi.mock("../telemetry/canary.js", () => ({
+  canaryDecisionsForStudio: () => canaryDecisions(),
 }));
 
 const { resolveCliTelemetryDistinctId, buildCliIdentityScript, buildStudioHeadScripts } =
@@ -21,6 +27,8 @@ describe("resolveCliTelemetryDistinctId", () => {
   beforeEach(() => {
     shouldTrack.mockReset();
     readConfig.mockReset();
+    canaryDecisions.mockReset();
+    canaryDecisions.mockReturnValue({});
   });
 
   it("returns the CLI anonymousId when telemetry is enabled", () => {
@@ -56,6 +64,8 @@ describe("buildCliIdentityScript", () => {
   beforeEach(() => {
     shouldTrack.mockReset();
     readConfig.mockReset();
+    canaryDecisions.mockReset();
+    canaryDecisions.mockReturnValue({});
   });
 
   it("emits a script that sets window.__HF_CLI_DISTINCT_ID when telemetry is on", () => {
@@ -74,9 +84,54 @@ describe("buildCliIdentityScript", () => {
     );
   });
 
-  it("emits an empty string when telemetry is disabled (nothing to seed)", () => {
+  it("emits an empty string when telemetry is off and there are no canaries", () => {
     shouldTrack.mockReturnValue(false);
     expect(buildCliIdentityScript()).toBe("");
+  });
+
+  // The cross-surface fix: with telemetry off the CLI resolves every canary
+  // to telemetry_opt_out, and Studio cannot see that from its own separate
+  // localStorage flag. Publishing the DECISIONS (not the identity) is what
+  // stops Studio evaluating independently and enrolling anyway.
+  it("still publishes canary decisions when telemetry is off, but no identity", () => {
+    shouldTrack.mockReturnValue(false);
+    canaryDecisions.mockReturnValue({ "de-parallel-router": false });
+    const script = buildCliIdentityScript();
+    expect(script).toBe(
+      '<script>window.__HF_CLI_CANARY_DECISIONS={"de-parallel-router":false};</script>',
+    );
+    expect(script).not.toContain("__HF_CLI_DISTINCT_ID");
+    expect(script).not.toContain("__HF_CLI_BUCKET_SEED");
+  });
+
+  it("publishes decisions alongside the identity when telemetry is on", () => {
+    shouldTrack.mockReturnValue(true);
+    readConfig.mockReturnValue({ anonymousId: "machine-uuid", bucketSeed: "seed-uuid" });
+    canaryDecisions.mockReturnValue({ "de-parallel-router": true });
+    expect(buildCliIdentityScript()).toBe(
+      '<script>window.__HF_CLI_DISTINCT_ID="machine-uuid";' +
+        'window.__HF_CLI_BUCKET_SEED="seed-uuid";' +
+        'window.__HF_CLI_CANARY_DECISIONS={"de-parallel-router":true};</script>',
+    );
+  });
+
+  it("escapes a canary name that tries to close the script tag", () => {
+    shouldTrack.mockReturnValue(false);
+    canaryDecisions.mockReturnValue({ "</script><script>alert(1)": true });
+    const script = buildCliIdentityScript();
+    expect(script).not.toContain("</script><script>alert(1)");
+    expect(script).toContain("__HF_CLI_CANARY_DECISIONS");
+  });
+
+  it("survives a throwing canary resolver — telemetry must never break preview", () => {
+    shouldTrack.mockReturnValue(true);
+    readConfig.mockReturnValue({ anonymousId: "machine-uuid" });
+    canaryDecisions.mockImplementation(() => {
+      throw new Error("registry blew up");
+    });
+    expect(buildCliIdentityScript()).toBe(
+      '<script>window.__HF_CLI_DISTINCT_ID="machine-uuid";</script>',
+    );
   });
 
   it("JSON-encodes the id so it can't break out of the script literal", () => {
@@ -93,6 +148,8 @@ describe("buildStudioHeadScripts", () => {
   beforeEach(() => {
     shouldTrack.mockReset();
     readConfig.mockReset();
+    canaryDecisions.mockReset();
+    canaryDecisions.mockReturnValue({});
   });
 
   const ENV_SCRIPT = "<script>window.__HF_STUDIO_ENV__={};</script>";
@@ -105,7 +162,7 @@ describe("buildStudioHeadScripts", () => {
     expect(head.indexOf("__HF_CLI_DISTINCT_ID")).toBeLessThan(head.indexOf("__HF_STUDIO_ENV__"));
   });
 
-  it("returns just the env script when identity is suppressed (telemetry off)", () => {
+  it("returns just the env script when there is no identity and no canary", () => {
     shouldTrack.mockReturnValue(false);
     expect(buildStudioHeadScripts(ENV_SCRIPT)).toBe(ENV_SCRIPT);
   });

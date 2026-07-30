@@ -225,3 +225,53 @@ describe("telemetry opt-out is canary opt-out", () => {
     });
   });
 });
+
+describe("CLI-launched Studio adopts the CLI's decisions", () => {
+  const OPT_OUT_KEY = "hyperframes-studio:telemetryDisabled";
+
+  afterEach(() => {
+    delete window.__HF_CLI_CANARY_DECISIONS;
+  });
+
+  // The divergence this exists for: CLI telemetry off resolves every canary
+  // to telemetry_opt_out, but Studio's opt-out is a SEPARATE localStorage
+  // flag it cannot see — left to itself it would evaluate and could enrol.
+  it("stays off when the CLI opted out, even though Studio's own flag is unset", () => {
+    expect(localStorage.getItem(OPT_OUT_KEY)).toBeNull();
+    window.__HF_CLI_CANARY_DECISIONS = { "on-everywhere": false };
+    expect(resolveCanary("on-everywhere").enabled).toBe(false);
+  });
+
+  // HF_CANARY_* never crosses into the browser, so before this the CLI was
+  // forced on and Studio silently guessed from the percentage.
+  it("turns on when the CLI forced it on, with no URL param present", () => {
+    window.__HF_CLI_CANARY_DECISIONS = { "off-everywhere": true };
+    expect(resolveCanary("off-everywhere").enabled).toBe(true);
+  });
+
+  it("beats a contradicting URL override — one render must not run half-enrolled", () => {
+    window.__HF_CLI_CANARY_DECISIONS = { "on-everywhere": false };
+    setSearch("?hf_canary_on_everywhere=on");
+    expect(resolveCanary("on-everywhere").enabled).toBe(false);
+  });
+
+  it("beats the seed-derived bucket", () => {
+    window.__HF_CLI_BUCKET_SEED = "5f1c9d2e-0000-4000-8000-aaaaaaaaaaaa";
+    window.__HF_CLI_CANARY_DECISIONS = { "on-everywhere": false };
+    expect(resolveCanary("on-everywhere").enabled).toBe(false);
+  });
+
+  it("falls back to local evaluation for a canary the CLI did not publish", () => {
+    window.__HF_CLI_CANARY_DECISIONS = { "off-everywhere": true };
+    expect(resolveCanary("on-everywhere").enabled).toBe(true);
+  });
+
+  it("ignores a non-boolean value rather than trusting it", () => {
+    window.__HF_CLI_CANARY_DECISIONS = { "on-everywhere": "false" } as unknown as Record<
+      string,
+      boolean
+    >;
+    // Falls through to local evaluation: on-everywhere is at 100%.
+    expect(resolveCanary("on-everywhere").enabled).toBe(true);
+  });
+});

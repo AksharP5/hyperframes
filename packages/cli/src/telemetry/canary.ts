@@ -119,6 +119,32 @@ export function isCanaryEnabled(name: string): boolean {
 }
 
 /**
+ * Every registered canary's resolved on/off for this process, for handing to
+ * a CLI-launched Studio.
+ *
+ * Studio adopts these wholesale instead of re-deriving, because re-deriving
+ * cannot agree in three cases:
+ *
+ *   - **Telemetry off.** The CLI resolves `telemetry_opt_out`; Studio's own
+ *     opt-out is a separate localStorage flag on a different machine-level
+ *     switch, so it would evaluate normally and could enrol.
+ *   - **`HF_CANARY_*` override.** Env vars do not cross into the browser at
+ *     all — Studio only reads its URL param / sessionStorage — so a support
+ *     session forcing a canary on got the CLI forced and Studio guessing.
+ *   - **No seed injected.** Whenever the seed is withheld Studio falls back
+ *     to a different unit id, i.e. a different bucket.
+ *
+ * Shipping the decision rather than the inputs makes divergence structurally
+ * impossible: one evaluation, two surfaces. It is also strictly less to
+ * expose — booleans about features, not the seed the buckets derive from.
+ */
+export function canaryDecisionsForStudio(): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const canary of CANARIES) out[canary.name] = resolveCanary(canary.name).enabled;
+  return out;
+}
+
+/**
  * Canary assignments as PostHog flag properties — `$feature/canary-<name>`
  * set to `"true"` / `"false"` for every registered canary. Spread onto every
  * event so any metric can be broken down by cohort using PostHog's native

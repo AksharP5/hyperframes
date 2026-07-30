@@ -53,6 +53,34 @@ export function canaryParamName(name: string): string {
 declare global {
   interface Window {
     __HF_CLI_BUCKET_SEED?: string;
+    /** Resolved on/off per canary from the launching CLI. Authoritative. */
+    __HF_CLI_CANARY_DECISIONS?: Record<string, boolean>;
+  }
+}
+
+/**
+ * The launching CLI's decision for this canary, if it published one.
+ *
+ * When present this WINS over everything Studio could work out locally —
+ * seed, URL override, registry percentage. Studio re-deriving cannot agree
+ * with the CLI in the cases that matter most:
+ *
+ *   - telemetry off: the CLI resolves `telemetry_opt_out`, but Studio's
+ *     opt-out is a separate localStorage flag it cannot see from here;
+ *   - `HF_CANARY_*` override: env vars never cross into the browser;
+ *   - no seed injected: Studio falls back to a different unit, i.e. a
+ *     different bucket.
+ *
+ * In all three the CLI has already decided, and one render spanning both
+ * surfaces must not run half-enrolled.
+ */
+function cliDecision(name: string): boolean | undefined {
+  try {
+    if (typeof window === "undefined") return undefined;
+    const decision = window.__HF_CLI_CANARY_DECISIONS?.[name];
+    return typeof decision === "boolean" ? decision : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -142,6 +170,39 @@ export function __resetStudioCanaryCacheForTests(): void {
   decisions.clear();
 }
 
+/** The uncached decision. Split out so `resolveCanary` is purely the memo. */
+function decideStudioCanary(name: string): CanaryDecision {
+  const definition = findCanary(name);
+  if (!definition) return { enabled: false, reason: "out_of_cohort" };
+
+  // The launching CLI's decision, when there is one, is the whole answer:
+  // it already applied telemetry opt-out, HF_CANARY_* overrides and the
+  // percentage against the shared seed. Re-deriving here is what let the two
+  // surfaces disagree on the same render.
+  const fromCli = cliDecision(definition.name);
+  if (fromCli !== undefined) {
+    return { enabled: fromCli, reason: fromCli ? "forced_on" : "forced_off" };
+  }
+
+  const override = readOverride(definition.name);
+  // Standalone Studio. Opting out of telemetry opts you out of canaries —
+  // same rule as the CLI (see packages/cli/src/telemetry/canary.ts). A
+  // profile that sends nothing can't be compared against anyone, so
+  // enrolling it changes that user's code path for no signal. An explicit
+  // override still wins: a deliberate local choice, not silent enrolment.
+  if (override === undefined && isOptedOut()) {
+    return { enabled: false, reason: "telemetry_opt_out" };
+  }
+
+  return evaluateCanary({
+    feature: definition.name,
+    unitId: resolveBucketUnit(),
+    percentage: definition.percentage,
+    override,
+    exclude: isAutomatedBrowser(),
+  });
+}
+
 /**
  * Full decision including the reason. An unregistered name resolves to off
  * rather than throwing — a typo in a rollout control must never break the
@@ -151,24 +212,7 @@ export function resolveCanary(name: string): CanaryDecision {
   const cached = decisions.get(name);
   if (cached) return cached;
 
-  const definition = findCanary(name);
-  const override = definition ? readOverride(definition.name) : undefined;
-  // Opting out of telemetry opts you out of canaries — same rule as the CLI
-  // (see packages/cli/src/telemetry/canary.ts). An install that sends nothing
-  // can't be compared against anyone, so enrolling it changes that user's
-  // code path for no signal. An explicit override still wins: that is a
-  // deliberate local choice, not silent enrolment.
-  const decision: CanaryDecision = !definition
-    ? { enabled: false, reason: "out_of_cohort" }
-    : override === undefined && isOptedOut()
-      ? { enabled: false, reason: "telemetry_opt_out" }
-      : evaluateCanary({
-          feature: definition.name,
-          unitId: resolveBucketUnit(),
-          percentage: definition.percentage,
-          override,
-          exclude: isAutomatedBrowser(),
-        });
+  const decision = decideStudioCanary(name);
 
   decisions.set(name, decision);
   return decision;

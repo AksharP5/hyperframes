@@ -18,6 +18,7 @@
 
 import { readConfig } from "../telemetry/config.js";
 import { shouldTrack as telemetryShouldTrack } from "../telemetry/client.js";
+import { canaryDecisionsForStudio } from "../telemetry/canary.js";
 
 /**
  * The CLI's anonymous distinct id to hand to Studio, or null when CLI telemetry
@@ -34,13 +35,6 @@ export function resolveCliTelemetryDistinctId(): string | null {
   }
 }
 
-/**
- * `<script>` tag to inject into the served index.html `<head>`, publishing the
- * CLI distinct id as `window.__HF_CLI_DISTINCT_ID` before the studio bundle
- * runs. Preferred over a URL param so the id never leaks into `$current_url` /
- * `url_hash` telemetry or browser history. Empty string when there's nothing to
- * seed (telemetry off / no id).
- */
 /**
  * The CLI's canary bucket seed to hand to Studio, or null. Injected alongside
  * the distinct id so a CLI-launched Studio buckets canaries on the SAME unit
@@ -67,13 +61,65 @@ function encodeInlineScriptValue(value: string): string {
   return JSON.stringify(value).replace(/</g, "\\u003c").replace(/\//g, "\\/");
 }
 
+/**
+ * Same escaping, for a structured value. Separate from the string form
+ * because that one stringifies its argument — passing an object through it
+ * would double-encode into a quoted JSON blob.
+ *
+ * The keys here are registry canary names, so they are developer-authored and
+ * ASCII by convention rather than user input; the escaping is belt-and-braces
+ * for the same reason it is on the ids.
+ */
+function encodeInlineScriptJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/\//g, "\\/");
+}
+
+/**
+ * The CLI's resolved canary decisions for a launched Studio, or null when
+ * there are none to publish. Fail-silent, like everything else here.
+ */
+function resolveCliCanaryDecisions(): Record<string, boolean> | null {
+  try {
+    const decisions = canaryDecisionsForStudio();
+    return Object.keys(decisions).length > 0 ? decisions : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `<script>` tag to inject into the served index.html `<head>`, publishing the
+ * CLI distinct id as `window.__HF_CLI_DISTINCT_ID` (plus the bucket seed and
+ * resolved canary decisions) before the studio bundle runs. Preferred over a
+ * URL param so the id never leaks into `$current_url` / `url_hash` telemetry
+ * or browser history. Empty string only when there is nothing at all to
+ * publish.
+ */
 export function buildCliIdentityScript(): string {
+  const parts: string[] = [];
+
   const cliId = resolveCliTelemetryDistinctId();
-  if (!cliId) return "";
-  const parts = [`window.__HF_CLI_DISTINCT_ID=${encodeInlineScriptValue(cliId)};`];
-  const seed = resolveCliBucketSeed();
-  if (seed) parts.push(`window.__HF_CLI_BUCKET_SEED=${encodeInlineScriptValue(seed)};`);
-  return `<script>${parts.join("")}</script>`;
+  if (cliId) {
+    parts.push(`window.__HF_CLI_DISTINCT_ID=${encodeInlineScriptValue(cliId)};`);
+    const seed = resolveCliBucketSeed();
+    if (seed) parts.push(`window.__HF_CLI_BUCKET_SEED=${encodeInlineScriptValue(seed)};`);
+  }
+
+  // Emitted even when telemetry is OFF and the identity block above is empty —
+  // that is the case it exists for. With telemetry off the CLI resolves every
+  // canary to `telemetry_opt_out`, but Studio's opt-out is a separate
+  // localStorage flag it cannot see, so left to itself Studio would evaluate
+  // normally and could enrol on a render the CLI had already excluded. Same
+  // for an `HF_CANARY_*` override, which never crosses into the browser.
+  //
+  // Safe to publish unconditionally: these are booleans about features, not
+  // identity, and strictly less than the seed they replace as Studio's input.
+  const decisions = resolveCliCanaryDecisions();
+  if (decisions !== null) {
+    parts.push(`window.__HF_CLI_CANARY_DECISIONS=${encodeInlineScriptJson(decisions)};`);
+  }
+
+  return parts.length === 0 ? "" : `<script>${parts.join("")}</script>`;
 }
 
 /**
