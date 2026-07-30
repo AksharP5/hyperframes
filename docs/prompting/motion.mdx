@@ -3,7 +3,21 @@ title: Motion that reads premium
 description: "Seven motion-grammar rules from frame-by-frame study of professional work — nothing stops, the camera acts, action overlaps, imperfection stays reproducible."
 ---
 
-By now you can specify a frame precisely — exact copy, exact colors, exact layout, exact timing. This level makes it feel alive. Static frames can be perfect and the video still feels cheap if the motion is dead. Before the grammar, one filter. Every animation should be doing a job for the viewer, and there are only four:
+By now you can specify a frame precisely — exact copy, exact colors, exact layout, exact timing. This level makes it move. But "make it move" is the wrong instruction, and it is worth understanding why before you write a single motion clause.
+
+## Motion is a claim, not a coat of paint
+
+**Every movement says something about the thing that moves.** A number that breathes says *this figure is live, it is still counting*. A card that flies in from the right says *it came from somewhere, there is more offscreen*. Overshoot says *this has mass and it arrived eagerly*. A slow, heavy entrance says *this matters*. A jitter says *this is unstable*. You do not get to opt out of this: motion is read as meaning whether or not you intended meaning, so the only question is whether what it says is true.
+
+That reframes the useful question. Not *"does this feel too static?"* but **"what is this movement saying, and do I mean it?"** A stat card that breathes because the number is live is telling the truth. The same card breathing because the frame looked empty is telling the viewer a live-data story about a static figure — and viewers feel the mismatch even when they can't name it.
+
+The strongest motion goes further and works as a metaphor for the content itself. A deployment pipeline should *flow*. A build should *assemble*. A countdown should *tick*, discretely, the way time does. A route should *draw* in the direction of travel. When the movement and the meaning are the same gesture, you stop needing to explain the graphic.
+
+**The failure this prevents is the common one: adding amplitude when a piece feels dead.** More motion is not more meaning. Four decorative movements are worse than one motivated movement — they compete for the eye, none of them says anything, and the result reads as busy rather than alive. If a shot feels lifeless, the fix is usually to find the one thing that genuinely *is* changing and let that carry the frame, not to set everything else wobbling.
+
+A practical test: name what each movement means, in words, in a sentence that ends. *"The counter breathes because it's still receiving data."* *"The cards stagger because they arrive over the wire, not all at once."* If you can't finish the sentence, cut the movement.
+
+Four jobs cover almost everything a movement can honestly be doing:
 
 | The job | What it looks like |
 | --- | --- |
@@ -12,7 +26,11 @@ By now you can specify a frame precisely — exact copy, exact colors, exact lay
 | **Show change** | Motion *is* the information — a value rising, a diff resolving, a route drawing |
 | **Express character** | Motion carries the brand's temperament — snappy and confident, or calm and editorial |
 
-If a movement is doing none of those, it's decoration, and decoration is what makes a video read as cheap no matter how smooth the easing is. (Product-UI motion frameworks name a fifth job, *feedback* — confirming a user's action. Video has no user input, so it doesn't apply here.) Ask for motion that serves a job, then use the grammar below to make it read well:
+If a movement is doing none of those, it's decoration, and decoration is what makes a video read as cheap no matter how smooth the easing is. (Product-UI motion frameworks name a fifth job, *feedback* — confirming a user's action. Video has no user input, so it doesn't apply here.)
+
+## The grammar
+
+Once a movement has something to say, this is how to make it read well. These rules govern *execution*; none of them is a reason to add a movement that has no job:
 
 1. **Nothing ever fully stops.** Every "hold" carries ambient idle motion — a 1-2% breathing scale, slow drift, a shimmer. Never write "holds motionless"; write "settles into a gentle ambient idle." A frozen final second is the single biggest cheap-motion tell.
 2. **The camera is an actor.** Give each scene one continuous camera move — a 4-8% push-in, a slow orbit, parallax between layered planes — easing gently and never *decaying* to a dead stop at the end of a scene (compute the ease over a window slightly longer than the render). A deliberate mid-film rest is a different thing, and it is sanctioned: see [avoiding the slideshow](#avoiding-the-slideshow).
