@@ -36,8 +36,8 @@ Once a movement has something to say, this is how to make it read well. These ru
 2. **The camera is an actor.** Give each scene one continuous camera move — a 4-8% push-in, a slow orbit, parallax between layered planes — easing gently and never *decaying* to a dead stop at the end of a scene (compute the ease over a window slightly longer than the render). A deliberate mid-film rest is a different thing, and it is sanctioned: see [avoiding the slideshow](#avoiding-the-slideshow).
 3. **Overlapping action.** No two elements share a start or end time. Entrances stagger at irregular offsets; the next element begins while the last is still settling. The mechanism is a ratio: **each offset should be clearly shorter than the animation it offsets** — a small offset-to-duration ratio reads fluid, a large one reads deliberate, and an offset longer than the animation stops being a stagger and becomes a queue. Delay the *supporting* elements, never the focal one; a focal element that waits reads as lag.
 4. **Compound properties only when they tell one story.** Every animation changes at least one property — position, scale, opacity, rotation. Combining them works when they say the same thing (a confirmation sliding up *and* fading in both read as "arriving") and confuses when they don't (a sheet that rises *and* rotates is two unrelated claims about one object). Pick the properties that serve the movement's job and drop the rest. Direction follows from the same logic: entrances ease **out** (fast in, gentle settle — the object arrives), exits ease **in** (gentle start, decisive departure), on-screen moves ease **in-out**, and impacts — a stamp, a slam — ease **in**, because an impact is an acceleration.
-5. **Overshoot and follow-through.** Every pop scales past its target and settles back; letters can tumble in individually with rotation.
-6. **Depth planes.** One or two large, heavily-blurred foreground elements drifting near the lens sell depth instantly.
+5. **Overshoot and follow-through.** Overshoot is a claim about mass: a thing with weight passes its target and settles back, and the parts it drags — a shadow, a trailing panel, the housing it lands in — resolve a beat *after* it does, not with it. That one-frame lag is what sells the weight; perfectly synchronized "follow-through" is just a bigger single object. Apply it to **transforms only**. A number is not a physical object, so a counter must never fly past its value and fall back — that renders a figure that was never true, and on a real metric it's a lie with a frame count.
+6. **Depth planes.** Move each plane at a rate that matches its distance — far background at a fraction of the camera's rate, content at full rate, foreground at several times. The cue that does the most work isn't blur, it's **occlusion**: one large, heavily-blurred foreground element that actually crosses in front of your content proves there is space between them in a way no amount of blur on an element that never overlaps can. Prefer one such element over two — a second stops reading as the room and starts reading as decoration.
 7. **Match pacing to genre.** Showreel-style cuts run 1.5-4 seconds per idea; a stretched 8-second version of a 2-second idea feels slow no matter how it's animated.
 8. **Handmade imperfection stays reproducible.** A stop-motion or hand-animated feel wants irregular timing, not machine-smooth eases — but true unseeded randomness breaks the render: HyperFrames must produce the identical frame every time it seeks to the same point, and `Math.random()` can't promise that. Seed a PRNG once at composition start instead, and step discrete elements between held positions (a "two-frame hold": land, hold two frames, jump to the next offset) rather than tweening continuously between them. The irregularity is real — it just comes from a seed, not from chance.
 
@@ -47,7 +47,7 @@ Once a movement has something to say, this is how to make it read well. These ru
 
 One A/B per rule, and the prompt that produces each half. Both halves come from the same base composition — same content, palette, layout and timing — so the two prompts below are the *only* difference between them. That's the point: you can see what the words buy.
 
-The applied side is deliberately over-cranked. Real work wants subtler values than these; a teaching demo wants the rule to be unmissable.
+Each subject is chosen so the rule is *unavoidable* given the content: a live feed that freezes reads as a broken connection, a pipeline wider than the frame forces the camera to move, a split-flap board cannot stop dead because it has mass. The values are pushed far enough to be legible in a six-second loop, but every movement in the applied half can finish the sentence "this moves because…". If you find yourself copying a number here without being able to finish that sentence, you're copying the exaggeration and not the rule.
 
 ### Rule 1 — Nothing ever fully stops
 
@@ -92,40 +92,40 @@ The applied side is deliberately over-cranked. Real work wants subtler values th
 
 ❌ **Without**
 
-> …a confirmation sheet rises 470px over 1.2s while rotating 25°; it exits and repeats once.
+> …an itemized coffee-shop receipt; a payment-confirmation sheet rises 470px over 1.2s to cover its lower half while simultaneously rotating in from 18°, scaling up from 0.8, and un-blurring from 14px. The receipt dims behind it. The sequence plays twice.
 
 ✅ **With**
 
-> …a confirmation sheet rises 470px over 1.2s while fading up from 0; it exits and repeats once. Both properties say the same thing — arriving — and nothing else changes.
+> …an itemized coffee-shop receipt; a payment-confirmation sheet rises 470px over 1.2s to cover its lower half while fading up from 0. Rotation, scale and blur are never touched. The receipt dims behind it. The sequence plays twice.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule4-compound-properties.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Left `WITHOUT`, right `WITH` — identical 470px travel and 1.200s rise on both sides, to within 0.119px. The rotation peaks while the sheet is still clearing the frame edge, so what you see once it is fully in shot is about 8°.*
+*Left `WITHOUT`, right `WITH` — identical travel (470px), identical window (0.25s → 1.45s), identical ease. The only difference is how many properties ride along. Both halves are pixel-identical at rest, so everything you see mid-flight is the cost of the extra three. On the left, "Payment confirmed" is an unreadable tilted smear for most of its arrival; on the right it is legible the whole way up. Two properties agreeing on one claim — this is arriving — beat four properties each making a different one.*
 
 ### Rule 5 — Overshoot and follow-through
 
 ❌ **Without**
 
-> …`SHIPPED`, a counter and a stat chip animate to their final size and stop. Linear ease, no overshoot. The sequence plays twice.
+> …a bolted airport departure board, `HF 402 · SAN FRANCISCO`, its split-flap gate cells riffling to **42**. The flap plates drop 34px and rotate from −16° straight to their final position and stop. Linear throughout, no overshoot, and the cast shadow moves locked to its plate. The sequence plays twice.
 
 ✅ **With**
 
-> …`SHIPPED`, a counter and a stat chip arrive with hard overshoot and follow-through: the chip scales past its target to 1.6× and the title to 1.25× on `back.out(5)`, each rocking back once before rest. Transforms only — the counter never overshoots its value. The sequence plays twice.
+> …a bolted airport departure board, `HF 402 · SAN FRANCISCO`, its split-flap gate cells riffling to **42**. The flap plates drop 34px and rotate from −16° on `back.out(5)`, swinging past their rest position and settling back; the housing recoils ~7px when they land, and each plate's cast shadow reaches its own peak one frame later than the plate that casts it. Transforms only — the gate number never overshoots **42**. The sequence plays twice.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule5-overshoot.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Left `WITHOUT`, right `WITH` — chip peaks at exactly 1.600× and rocks to 0.691× before resting at 1.0; every element on the left has peak == final. The counter tops out at its true value on both sides.*
+*Left `WITHOUT`, right `WITH` — the right's plates swing 1.51× past their travel before settling; every transform on the left has peak == final. The shadow's lag is measured at 0.033s, exactly one frame at 30fps. Note the one thing that does **not** overshoot on either side: the number itself tops out at 42 and stays there. Overshoot is a claim about mass, and a value has none — a counter that flies to 47 and falls back is reporting a number that was never true.*
 
 ### Rule 6 — Depth planes
 
 ❌ **Without**
 
-> …a headline and a chip over a grid, with two large accent shapes. Everything on one flat plane, no blur, every layer moving at the same rate.
+> …a render-farm corridor: CSS-3D floor and ceiling converging on a single vanishing point, a bank of server racks with blinking status LEDs, a distant rack row near the horizon, and one rack column close to the lens. `CLUSTER 04 · WEST / Every frame, in parallel.` on a camera-locked HUD panel. The camera trucks forward for the full 6s. Every plane drifts at the same rate and nothing is blurred.
 
 ✅ **With**
 
-> …a headline and a chip over a grid, in three depth planes: the grid drifting at a fifth speed, the content at normal, and two enormous 140px-blurred accent shapes sweeping past the lens at six times the content's speed.
+> …a render-farm corridor: CSS-3D floor and ceiling converging on a single vanishing point, a bank of server racks with blinking status LEDs, a distant rack row near the horizon, and one rack column close to the lens. `CLUSTER 04 · WEST / Every frame, in parallel.` on a camera-locked HUD panel. The camera trucks forward for the full 6s and each plane drifts at its own distance: the horizon row at a fifth of the room's rate, the room and its racks at full rate, and the near column sweeping past at six times — `blur(22px)`, close enough to cross in front of the headline. Haze the far plane slightly.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule6-depth-planes.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Left `WITHOUT`, right `WITH` — measured travel ratios on the right are 0.20× / 1.00× / 6.00×; on the left all four layers move identically.*
+*Left `WITHOUT`, right `WITH` — measured travel ratios on the right are exactly 0.20× / 1.00× / 6.00×; on the left all five planes displace an identical 240px with `filter: none`. The strongest cue isn't the blur, it's the occlusion: the near column crosses in front of the headline for about a third of the shot, which is only possible if it's in the room. One foreground element does this — a second would just be clutter with a blur on it.*
 
 ### Rule 7 — Match pacing to genre
 
