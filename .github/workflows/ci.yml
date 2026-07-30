@@ -592,7 +592,7 @@ jobs:
         with:
           name: timeline-viewport-gate-evidence
           path: /tmp/timeline-gate-*.json
-          if-no-files-found: warn
+          if-no-files-found: error
 
   smoke-global-install:
     name: "Smoke: global install"
