@@ -13,6 +13,20 @@ export function isRemoteOrInlineUrl(url: string): boolean {
   return /^(https?:|data:|blob:|\/\/|#)/i.test(url);
 }
 
+/**
+ * True when a URL still contains an unresolved templating placeholder —
+ * `<<token>>`, `{{ token }}`, or `${token}` — that a build or templating step
+ * substitutes before render. The static linter runs before that substitution,
+ * so it cannot resolve such a value to a file on disk and must not report it as
+ * a missing asset. Check the RAW url, before any `cleanAssetUrl()` step: that
+ * splits on `?`/`#`, which also chops inside a `${...}` expression. (The older
+ * `__UPPER__` placeholder shape predates this and keeps its own inline check at
+ * each call site.)
+ */
+export function hasUnresolvedTemplatingToken(url: string): boolean {
+  return /<<[^<>]+>>|\{\{[^{}]+\}\}|\$\{[^{}]+\}/.test(url);
+}
+
 export function cleanAssetUrl(url: string): string {
   return url.trim().split(/[?#]/, 1)[0] ?? "";
 }

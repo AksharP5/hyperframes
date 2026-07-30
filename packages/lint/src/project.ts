@@ -6,6 +6,7 @@ import { checkSubCompositionUsability } from "@hyperframes/parsers/sub-compositi
 import { parseHTML } from "linkedom";
 import {
   cleanAssetUrl,
+  hasUnresolvedTemplatingToken,
   isRemoteOrInlineUrl,
   isWithinProjectRoot,
   maskNonScannableRanges,
@@ -283,6 +284,7 @@ function lintAudioSrcNotFound(
       const src = match[1]!;
       if (/^(https?:|data:|blob:)/i.test(src)) continue;
       if (/^__[A-Z_]+__$/.test(src)) continue;
+      if (hasUnresolvedTemplatingToken(src)) continue;
       const rootRelative = compSrcPath ? rewriteAssetPath(compSrcPath, src) : src;
       if (!resolveLocalAssetCandidates(projectDir, rootRelative).some(existsSync)) {
         missingSrcs.push(src);
@@ -324,6 +326,8 @@ function lintMissingLocalAsset(
     while ((match = re.exec(scannable)) !== null) {
       const tagName = (match[1] ?? "").toLowerCase();
       const rawSrc = match[2] ?? "";
+      // Check the RAW value: cleanAssetUrl() splits on ?/# and would chop inside a ${...} token.
+      if (hasUnresolvedTemplatingToken(rawSrc)) continue;
       const src = cleanAssetUrl(rawSrc);
       if (!src) continue;
       if (isRemoteOrInlineUrl(src)) continue;
@@ -375,6 +379,8 @@ function lintTextureMaskAssetNotFound(
       const pattern = new RegExp(MASK_IMAGE_URL_RE.source, MASK_IMAGE_URL_RE.flags);
       while ((match = pattern.exec(cssSource.content)) !== null) {
         const rawUrl = match[1] ?? match[2] ?? match[3] ?? "";
+        // Check the RAW value: cleanAssetUrl() splits on ?/# and would chop inside a ${...} token.
+        if (hasUnresolvedTemplatingToken(rawUrl)) continue;
         const url = cleanAssetUrl(rawUrl);
         if (!url || isRemoteOrInlineUrl(url)) continue;
         if (/^__[A-Z_]+__$/.test(url)) continue;
@@ -526,6 +532,7 @@ function lintMissingOrEmptySubComposition(
       const srcPath = (match[1] ?? "").trim();
       if (!srcPath) continue;
       if (/^__[A-Z_]+__$/.test(srcPath)) continue; // template placeholder
+      if (hasUnresolvedTemplatingToken(srcPath)) continue; // late-bound templating token
 
       // data-composition-src is always written root-relative (even from a
       // nested sub-composition) — matches the resolution the renderer uses
