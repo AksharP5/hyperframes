@@ -11,48 +11,51 @@
  * namespace — so anything load-bearing here is an inline style.
  */
 
-const CDN = "https://static.heygen.ai/hyperframes-oss/docs/images/showcase";
-
-const FILMS = [
-  {
-    id: "grading",
-    title: "Colour grading and media effects",
-    note: "Real footage graded with LUTs, curves, and scopes — inside Studio.",
-    length: "56s",
-  },
-  {
-    id: "variables",
-    title: "One shoot, many cuts",
-    note: "The same footage rendered as several vertical videos from one project.",
-    length: "44s",
-  },
-  {
-    id: "music",
-    title: "Cut to the music",
-    note: "A track analysed for beats and sections, then everything snapped to that grid.",
-    length: "90s",
-  },
-  {
-    id: "prvideo",
-    title: "A pull request, explained",
-    note: "A code change turned into a review anyone on the team can watch.",
-    length: "32s",
-  },
-  {
-    id: "timeline",
-    title: "Editing on a timeline",
-    note: "Trimming, splitting, and retiming a project by hand.",
-    length: "34s",
-  },
-  {
-    id: "hypecard",
-    title: "A year in review",
-    note: "Personal data turned into a shareable card, generated per person.",
-    length: "27s",
-  },
-];
-
 export const ShowcaseWall = () => {
+  // Declared inside the component deliberately: Mintlify compiles only the
+  // exported component out of a snippet file and drops module-level consts,
+  // so constants defined above this line arrive undefined at render time.
+  const CDN = "https://static.heygen.ai/hyperframes-oss/docs/images/showcase";
+
+  const FILMS = [
+    {
+      id: "grading",
+      title: "Colour grading and media effects",
+      note: "Real footage graded with LUTs, curves, and scopes — inside Studio.",
+      length: "56s",
+    },
+    {
+      id: "variables",
+      title: "One shoot, many cuts",
+      note: "The same footage rendered as several vertical videos from one project.",
+      length: "44s",
+    },
+    {
+      id: "music",
+      title: "Cut to the music",
+      note: "A track analysed for beats and sections, then everything snapped to that grid.",
+      length: "90s",
+    },
+    {
+      id: "prvideo",
+      title: "A pull request, explained",
+      note: "A code change turned into a review anyone on the team can watch.",
+      length: "32s",
+    },
+    {
+      id: "timeline",
+      title: "Editing on a timeline",
+      note: "Trimming, splitting, and retiming a project by hand.",
+      length: "34s",
+    },
+    {
+      id: "hypecard",
+      title: "A year in review",
+      note: "Personal data turned into a shareable card, generated per person.",
+      length: "27s",
+    },
+  ];
+
   const [openId, setOpenId] = useState(null);
   const [reduced, setReduced] = useState(false);
 

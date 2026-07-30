@@ -70,6 +70,11 @@ Mintlify compiles `.jsx` / `.tsx` from `docs/snippets/`. Use one when a native c
 - `useState`, `useEffect`, `useRef`, `useCallback`, `useMemo`, `useContext`, `useReducer` are pre-injected; do not import React.
 - **No third-party packages and no CDN scripts.** Browser built-ins only (`fetch`, `IntersectionObserver`, Canvas, `<video>`). This rules out importing `@hyperframes/player` as a package — embed a hosted composition in an `iframe` instead.
 - A snippet cannot import another snippet. Keep each self-contained.
+- **Declare everything inside the component.** Only the exported component survives
+  compilation; module-level `const`s above it are dropped, so a constant defined
+  outside arrives `undefined` at render. The component then throws inside React,
+  the error boundary swallows it, and the page renders nothing at that position —
+  with no console error to point at it. If a snippet renders blank, check this first.
 - Client-side only: guard anything touching `window` and give every component a sensible first paint.
 - Respect `prefers-reduced-motion`, give interactive elements a visible focus state, and never make a component the only route to information.
 
