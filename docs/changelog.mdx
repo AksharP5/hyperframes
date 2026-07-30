@@ -9,6 +9,33 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.7.86"
+  description="Released - 2026-07-30"
+  tags={["Release", "Studio", "Engine", "Contributing"]}
+>
+Hardens media probing against malformed frame rates, option-like file paths, and
+out-of-order PNG color metadata, while keeping Studio timeline latency telemetry
+non-negative. Contributor documentation now points to the correct Studio
+development port.
+
+## Fixes
+
+- **Studio:** Prevent negative timeline latency telemetry ([b813b1734](https://github.com/heygen-com/hyperframes/commit/b813b17345531874a00b3c755f60ee6f42849fee), [#2905](https://github.com/heygen-com/hyperframes/pull/2905))
+- **Engine:** Harden ffprobe parsing and command arguments ([f75ca076b](https://github.com/heygen-com/hyperframes/commit/f75ca076b790d38e518af892b67a9ea42cca3dd5), [#2740](https://github.com/heygen-com/hyperframes/pull/2740))
+
+## Docs & Examples
+
+- **Studio:** Document monorepo dev server port ([a52dd9c30](https://github.com/heygen-com/hyperframes/commit/a52dd9c3087c63a5c2c7f38d480961794d8c5eae), [#2902](https://github.com/heygen-com/hyperframes/pull/2902))
+- **Contributing:** Fix studio dev server port in setup guide ([ffe5e12cf](https://github.com/heygen-com/hyperframes/commit/ffe5e12cf8f404b86e019d28ca25dc75de903d57), [#2901](https://github.com/heygen-com/hyperframes/pull/2901))
+
+## Internal
+
+- **Pr To Video:** Pin the code-vocabulary section of the frame packet ([7b3d3db8a](https://github.com/heygen-com/hyperframes/commit/7b3d3db8adbfb7e04663d7373b9fd62c71321e6c), [#2900](https://github.com/heygen-com/hyperframes/pull/2900))
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.7.85...v0.7.86).
+</Update>
+
+<Update
   label="HyperFrames v0.7.85"
   description="Released - 2026-07-30"
   tags={["Release", "Prompting", "Studio", "Docs"]}
