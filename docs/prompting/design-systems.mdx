@@ -53,7 +53,7 @@ For a series — a launch set, a weekly clip, a per-region cut — consistency c
 
 > All four videos share `frame.md` for palette and type. Only the headline and the stat change per video.
 
-Because the runtime exposes every declared brand token as a CSS custom property, the parts that stay constant come from the one spec (or one set of imported Figma tokens), and the parts that vary become [variables](/prompting/variables-and-templating). Change one brand value in the spec and every video re-skins on the next render — you don't touch four files. This is where design systems and templating meet: the brand is shared, the content is parameterized.
+The parts that stay constant come from the one authoring spec (or one set of imported Figma tokens), and the parts that vary become [variables](/prompting/variables-and-templating). When `frame.md` changes, rerun the workflow steps that generate or assemble the affected compositions so the authored HTML picks up the new brand value. For existing compositions that must re-skin at render time, declare the shared brand tokens as composition variables and bind them through CSS custom properties. This is where design systems and templating meet: the brand is shared, the content is parameterized.
 
 ## Supplying brand assets by path
 
@@ -97,7 +97,7 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 
 > **Design system: the provided `frame.md` is the single source of brand truth — read it first and obey it exactly.** It is the real HyperFrames brand (by HeyGen), dark-first: flat near-black ground […] **mint `#3CE6AC` used sparingly as the single accent — mint means go / primary / active**. The mint→cyan gradient (`#3CE6AC → #00E3FF`) appears in exactly one place in the whole film: the final CTA lockup.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *That clause paying off, rendered — the closing lockup, where the brand file's display face and its one sanctioned gradient finally appear together.*
 
 *Next: [Variables and templating](/prompting/variables-and-templating) — turn the brand tokens that repeat across a series into named slots you fill per render.*

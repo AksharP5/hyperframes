@@ -217,14 +217,13 @@ For GSAP animation, register one paused timeline per composition:
   const tl = gsap.timeline({ paused: true });
 
   tl.from("#title", { opacity: 0, y: 40, duration: 0.6 });
-  tl.set({}, {}, 5); // keeps the timeline at least 5 seconds long
 
   window.__timelines["main"] = tl;
 </script>
 ```
 
 <Warning>
-  If a video cuts off early, check that the GSAP timeline is at least as long as the intended edit. The final `tl.set({}, {}, 5)` pattern is the fix.
+  Render duration comes from `data-duration` on the composition and clips, not from GSAP timeline length. If a video cuts off early, check those timing attributes. Do not pad the timeline with an empty `tl.set()` sentinel.
 </Warning>
 
 ## Render Presets
@@ -285,7 +284,7 @@ For editor-facing changes, keep `npx hyperframes preview` running, then have the
 | Need to share editable project | `npx hyperframes publish` |
 
 <CardGroup cols={2}>
-  <Card title="Prompt Guide" icon="wand-magic-sparkles" href="/guides/prompting">
+  <Card title="Prompt Guide" icon="wand-magic-sparkles" href="/prompting/overview">
     How to direct AI agents to build better videos
   </Card>
   <Card title="Timeline Editing" icon="timeline" href="/guides/timeline-editing">

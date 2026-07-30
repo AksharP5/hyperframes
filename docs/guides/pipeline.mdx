@@ -141,7 +141,7 @@ npx hyperframes transcribe narration.wav
 | `narration.txt`  | The exact spoken text with pronunciation substitutions applied (`API` → `A P I`, `$2T` → `two trillion`). Distinct from `SCRIPT.md` so you can regenerate the audio later with a different voice without redoing the substitutions. |
 | `transcript.json`| `[{ text, start, end }]` for every word. Every later step reads this for timing. |
 
-Hyperframes ships multiple TTS adapters (Kokoro, ElevenLabs, HeyGen); see [`/media-use`](/guides/prompting) for the skill that picks one. After generating audio, update `STORYBOARD.md` with the real beat boundaries from `transcript.json`.
+Hyperframes ships multiple TTS adapters (Kokoro, ElevenLabs, HeyGen); see [`/media-use`](/guides/skills#domain-skills-loaded-on-demand) for the skill that picks one. After generating audio, update `STORYBOARD.md` with the real beat boundaries from `transcript.json`.
 
 **Gate:** `narration.wav`, `narration.txt`, and `transcript.json` exist. `STORYBOARD.md` beat timings reference real timestamps, not estimates.
 
@@ -153,7 +153,7 @@ This is where the storyboard becomes runnable HTML. Each composition is a self-c
 
 For multi-beat videos, spawn a focused sub-agent per beat. Each one gets fresh context, the storyboard section for its beat, the asset paths it needs, and the relevant technique references. That produces noticeably better output than building every beat in one long-running context.
 
-After each composition is built, run a self-review for layout, asset placement, and animation quality. The [`/hyperframes-core`](/guides/prompting) skill encodes the composition rules — required `class="clip"` attributes, `data-*` attribute semantics — and [`/hyperframes-animation`](/guides/prompting) covers GSAP timeline registration and adapter registries.
+After each composition is built, run a self-review for layout, asset placement, and animation quality. The [`/hyperframes-core`](/guides/skills#domain-skills-loaded-on-demand) skill encodes the composition rules — required `class="clip"` attributes, `data-*` attribute semantics — and [`/hyperframes-animation`](/guides/skills#domain-skills-loaded-on-demand) covers GSAP timeline registration and adapter registries.
 
 **Gate:** Every composition is self-reviewed. No overlapping elements, no misplaced assets, no static images sitting unanimated.
 
@@ -209,7 +209,7 @@ For a 5-second one-shot animation, a single hand-authored composition is fine; t
   <Card title="Website to Video" icon="globe" href="/guides/website-to-video">
     The full website-to-video guide built on this pipeline.
   </Card>
-  <Card title="Prompting" icon="comment" href="/guides/prompting">
+  <Card title="Prompting" icon="comment" href="/prompting/overview">
     How to invoke the pipeline through your AI agent.
   </Card>
   <Card title="Launch Videos" icon="rocket" href="/launch-videos">

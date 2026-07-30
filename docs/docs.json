@@ -493,7 +493,8 @@
   "redirects": [
     {
       "source": "/guides/prompting",
-      "destination": "/prompting/overview"
+      "destination": "/prompting/overview",
+      "permanent": true
     }
   ]
 }

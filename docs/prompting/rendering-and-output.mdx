@@ -41,7 +41,7 @@ Transparency also only *means something* on a design that has empty space to see
 - ❌ `render my full-screen product promo as a transparent WebM`
 - ✅ `render the promo as MP4; export just the lower-third overlay as transparent WebM` — transparency belongs to the layer meant to sit *over* other footage, not the finished full-frame film
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/overlay-spotify-preview.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/overlay-spotify-preview.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *A transparent VP9 WebM overlay previewed over a checkerboard. To verify alpha from the CLI: VP9 stores it out-of-band, so look for ALPHA_MODE=1 in ffprobe (a pix_fmt-only check false-negatives) or extract it with ffmpeg alphaextract.*
 
 
@@ -124,7 +124,7 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 
 > A **seeded confetti burst** fires — mulberry32, **seed 42, each piece holding position for exactly two frames before stepping** (stop-motion feel) — and the VO lands the honest punchline: identical on every render, because determinism is the whole point.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *That clause, rendered — the seeded confetti, identical on every render of this composition.*
 
 *Next: [Porting from Remotion](/prompting/remotion-migration) — bringing an existing Remotion project into everything you now know.*

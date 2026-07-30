@@ -9,9 +9,9 @@ The trigger phrase is simple — call out the slots:
 
 > Build a 6-second title card. Make the **name**, the **logo**, and the **accent color** variables; everything else stays fixed.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-variables-default.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-variables-default.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *Default variable values.*
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-variables-variant.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-variables-variant.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *The same composition re-rendered with `--variables` overrides — different name, logo, and accent, zero re-prompting.*
 
 
@@ -67,13 +67,13 @@ hyperframes render --output default.mp4
 hyperframes render --variables '{"ground":"#0d1420","ink":"#c8ff3d"}' --strict-variables --output reskin.mp4
 ```
 
-Two identical files mean the override never landed. The usual cause is scope: `data-composition-variables` is declared **per composition file**, so variables declared inside a sub-composition pulled in with `data-composition-src` do not inherit a root-level `--variables` override — the sub-composition keeps its own defaults and a root override silently does nothing.
+Two identical files mean the override never reached the property you expected. Check that the variable ID is declared, the render command uses that exact ID, and the visible property is actually bound to its CSS custom property or variable value.
 
-This is not hypothetical. The first build of this guide's [capstone](/prompting/capstone) was authored as seven sub-composition files, each declaring its own palette variables. Every gate passed, the re-skin render succeeded, and it came out identical to the default. That is why the capstone prompt now carries a hard architecture constraint — one `index.html`, one variable scope — and why it names both renders it expects:
+Render-time `--variables` overrides are global by variable ID. The compiler applies a matching override to CSS custom properties declared by the root and by sub-compositions pulled in with `data-composition-src`, while `data-variable-values` remains the per-instance way to give two mounts different values. Scoped JavaScript inside a sub-composition reads its per-instance variable table, so forward values at the mount point when that script calls `getVariables()` instead of reading CSS.
 
 > **Variables:** expose `ground` (default `#0a0a0a`) and `ink` (default `#3CE6AC`) as composition variables on the single root file, bound via CSS custom properties everywhere (including the duotoned mural), so one `--variables` call re-skins the entire journey. It will be rendered twice: the default brand palette, and a second full render with `{"ground":"#0d1420","ink":"#c8ff3d"}`.
 
-If you need sub-compositions *and* a template, forward the values explicitly at each mount point rather than assuming they inherit.
+The [capstone](/prompting/capstone) keeps these variables on one root file for simplicity, not because templates require one file. Sub-compositions work as long as shared CSS-bound IDs are declared consistently; use mount-point values for instance-specific or JavaScript-read inputs.
 
 ## What can't be a variable
 

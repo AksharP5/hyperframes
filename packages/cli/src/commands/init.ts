@@ -960,7 +960,7 @@ export default defineCommand({
       console.log(
         `     ${c.dim('"Using /hyperframes, create a 15-second intro about [your topic]"')}`,
       );
-      console.log(`     ${c.dim("More patterns: hyperframes.heygen.com/guides/prompting")}`);
+      console.log(`     ${c.dim("More patterns: hyperframes.heygen.com/prompting/overview")}`);
       console.log();
       console.log(`  ${c.accent("4.")} Preview in the browser:`);
       console.log(`     ${c.accent(`cd ${name}`)} && ${c.accent("npm run dev")}`);

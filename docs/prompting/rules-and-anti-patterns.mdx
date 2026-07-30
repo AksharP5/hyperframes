@@ -3,7 +3,7 @@ title: Rules and anti-patterns
 description: "The technical rules that keep renders correct, and the prompt patterns that cause friction."
 ---
 
-Almost every rule below is taught in context somewhere earlier in this guide; a few of the narrower lint rules appear only here, because they surface as an error message before they ever matter to a prompt. This page is the lookup table: skim it when you're debugging a render or hand-editing a composition, and follow a rule's link back to the chapter that explains *why* it exists. The lint-rule rows extend the same eight rules with more specific cases the linter now catches automatically.
+Almost every rule below is taught in context somewhere earlier in this guide; a few of the narrower lint rules appear only here, because they surface as an error message before they ever matter to a prompt. This page is the lookup table: skim it when you're debugging a render or hand-editing a composition, and follow a rule's link back to the chapter that explains *why* it exists. The lint-rule rows extend the same seven rules with more specific cases the linter now catches automatically.
 
 ## Rules to know
 
@@ -23,7 +23,7 @@ The skills enforce these automatically, but if you hand-edit compositions or deb
 
 ## Lint rules to know
 
-The linter added eight more rules that catch subtler seek-order and SVG-drawing mistakes — cases where a render can look right in the live preview and still render wrong on a cold, non-linear render worker. Phrase prompts to avoid these up front rather than debugging them after a render.
+The linter added eight more rules that catch subtler seek-order and SVG-drawing mistakes — cases where a render can look right in the live preview and still render wrong on a cold, non-linear render worker. Two further hazards below carry no rule code: they surface in the render, not the linter. Phrase prompts to avoid these up front rather than debugging them after a render.
 
 ### Cold-seek visibility
 

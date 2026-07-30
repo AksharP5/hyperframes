@@ -39,10 +39,10 @@ Bound moves by the composition's length — a 4-second clip moved to 0:08 in a 1
 - ❌ `tighten up the opening`
 - ✅ `intro clip duration = 3s; leave its animation and position alone` — one attribute, and the freeze clause stops a rebuild from drifting on axes you'd already settled
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/editing-before.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/editing-before.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *Before — the untouched composition.*
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/editing-after.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/editing-after.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *After — four verbatim edits from this page (move, right-trim, retime, restyle-with-freeze); each touched exactly the attribute the verb map promises, gates green after every edit.*
 
 
@@ -56,7 +56,7 @@ Name the exact cut point. The agent turns one clip into two adjacent clips; you 
 
 ## Retime a scene
 
-Retiming is a duration change, but with one catch worth knowing: a scene driven by a GSAP timeline needs the timeline to be at least as long as the new duration, or the render cuts off early.
+Retiming starts with the scene's `data-duration`. If the motion should keep its original speed, the timeline can finish early and hold its final state while the scene continues. If the motion itself should slow down or spread across the longer scene, ask the agent to retime the affected tweens as well.
 
 > Make scene 2 run 4 seconds instead of 2.5 — keep the animation, just give it more room.
 
@@ -64,7 +64,7 @@ Retiming is a duration change, but with one catch worth knowing: a scene driven 
 - ✅ `scene 2 duration = 4s, same motion, add the extra time as a hold at the end`
 
 <Warning>
-  If a retimed scene cuts off before its new end, the fix is extending the GSAP timeline length (the `tl.set({}, {}, <seconds>)` sentinel pattern). The agent handles this; it's the single most common reason a lengthened clip renders short. See the [Video editor cheatsheet](/guides/video-editor-cheatsheet#timing-cheatsheet).
+  Render duration comes from `data-duration`, not GSAP timeline length. Do not pad a timeline with an empty `tl.set({}, {}, <seconds>)` sentinel. If a scene still ends early, check the scene and composition timing attributes in the [Video editor cheatsheet](/guides/video-editor-cheatsheet#timing-cheatsheet).
 </Warning>
 
 ## Make it snappier (retiming *feel*, not just duration)

@@ -96,7 +96,7 @@ None of this changes how you phrase the ask: name the footage by path like any o
 
 > Build a short picture-in-picture piece from `source-hevc.mp4` — inset it bottom-right over a full-bleed background scene, with a soft rounded border.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/proxy-footage.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/proxy-footage.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *Rendered from the prompt above, unedited — the source clip is a plain H.265/HEVC file; render decoded it directly via FFmpeg, while preview would have used the automatic H.264 proxy.*
 
 See the [Rendering guide](/guides/rendering#input-video-codecs) for the mechanics — proxy generation, caching, and which codecs it covers.
@@ -136,7 +136,7 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 
 > […] a real talking-head clip (generate a short clip of a person speaking one neutral line via the media pipeline's avatar video generation […] **transcode it to HEVC `hvc1`** so the automatic proxy subsystem carries preview) sits as a clip on the wire. The order of operations IS the story: as the camera arrives and BEFORE the person speaks, the framework mattes the footage — **the background peels away via background removal** […] THEN they speak, and the main **keywords of their own line — derived from the clip's transcription — land word-synced** […] The clip's own audio ducks the BGM briefly; the VO resumes as the camera pulls away.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-material.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-material.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
 *That clause, rendered — the region cut from the finished film.*
 
 *Next: [Design systems and brand](/prompting/design-systems) — pointing the agent at a source of brand truth instead of describing a vibe.*
