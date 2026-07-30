@@ -9,6 +9,109 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.7.85"
+  description="Released - 2026-07-30"
+  tags={["Release", "Studio", "Lint", "Skills", "Product Launch Video", "Docs"]}
+>
+Adds privacy-aware Studio timeline performance telemetry ahead of virtualization, without
+collecting project content. Generated-video workflows also get safer template-aware asset linting,
+durationless transition-root support, and more reliable product-launch capture and audio handling,
+alongside a rebuilt novice-to-capstone Prompt Guide.
+
+## Features
+
+- **Studio:** Track timeline performance ([10b517dab](https://github.com/heygen-com/hyperframes/commit/10b517dab9515988cb82100c3975b53a47da1f35), [#2898](https://github.com/heygen-com/hyperframes/pull/2898))
+
+## Fixes
+
+- **Docs:** Correct mediabunny GitHub link in CREDITS.md ([1481fe1ed](https://github.com/heygen-com/hyperframes/commit/1481fe1ed936ee2aac7220061f258155c274bfb8), [#2897](https://github.com/heygen-com/hyperframes/pull/2897))
+- **Skills:** Extend transition roots without explicit duration ([14ced9051](https://github.com/heygen-com/hyperframes/commit/14ced9051795b32db75a479ac2580eef3c5df85c), [#2873](https://github.com/heygen-com/hyperframes/pull/2873))
+- **Lint:** Don't flag unresolved templating-token asset srcs as missing ([6c185f252](https://github.com/heygen-com/hyperframes/commit/6c185f252f38a5a1f1dc9e23f17ef98f63ea18c7), [#2893](https://github.com/heygen-com/hyperframes/pull/2893))
+- **Capture,audio,docs:** Defects found running product-launch-video end to end ([e0dc255e8](https://github.com/heygen-com/hyperframes/commit/e0dc255e8a4108833ac727d54f4b039cca397042), [#2892](https://github.com/heygen-com/hyperframes/pull/2892))
+
+## Docs & Examples
+
+- Address remaining prompt guide feedback ([fdf3ad8fd](https://github.com/heygen-com/hyperframes/commit/fdf3ad8fddd262cad70ea32934126d35a1a7c8cb))
+- Address prompt guide review findings ([73ebc7c62](https://github.com/heygen-com/hyperframes/commit/73ebc7c62145e084c8b2565d2c5c0c76ef5385de))
+- **Prompting:** Rebuild rule 2 as cross-fade vs camera move ([8fb1482e7](https://github.com/heygen-com/hyperframes/commit/8fb1482e7ff59a7007e5f6e40d38a7a02ede3adb))
+- **Prompting:** Rebuild rule 1-3 demos around motivated subjects ([cdac57c07](https://github.com/heygen-com/hyperframes/commit/cdac57c0757cee22db67e9595b29809cfabd056c))
+- **Prompting:** Rebuild rule 4-6 demos around motivated subjects ([dd4fd9cef](https://github.com/heygen-com/hyperframes/commit/dd4fd9cefaa1f5816a8a2ff404e2152af542b25d))
+- **Prompting:** Rebuild rule 1 demo around a motivated idle ([a17755d2e](https://github.com/heygen-com/hyperframes/commit/a17755d2ef0805279573d478d8426e36c0798da8))
+- **Prompting:** Lead the motion chapter with meaning, not amplitude ([6f29f1454](https://github.com/heygen-com/hyperframes/commit/6f29f1454e4d84a94c36574188d92cc8dc3b953c))
+- **Prompting:** Rule demos gain before/after prompts and exaggerated applied sides ([cebf66e6e](https://github.com/heygen-com/hyperframes/commit/cebf66e6e8ca6251c8e83c88d1009a00024ffc63))
+- **Prompting:** Fix MDX parse error from an orphaned Warning close tag ([75dac808a](https://github.com/heygen-com/hyperframes/commit/75dac808a9e032f8d8a06b6f75f363a2de61986d))
+- **Prompting:** Add per-rule A/B demos and the worker-boundary determinism caveat ([d4bd2917b](https://github.com/heygen-com/hyperframes/commit/d4bd2917b5e279e43be8ac7cb811fc863aebc49b))
+- **Prompting:** Add the motion-purpose filter, offset ratio, and property coherence ([1f4d00e15](https://github.com/heygen-com/hyperframes/commit/1f4d00e15e627aa2e6b130fe4f78401980cd37c7))
+- **Prompting:** Frame.md is the design spec, drop design.md references ([4260f12b0](https://github.com/heygen-com/hyperframes/commit/4260f12b01a7bbcd9b5841e5f29cbba02fe0604f))
+- **Prompting:** Rebuild beat-synced slideshow — generated brutalist plates, no stock ([5a0518222](https://github.com/heygen-com/hyperframes/commit/5a05182226f8259bd93bbbac7f0804475864abb7))
+- **Prompting:** Refresh example gallery with motion grammar and named spectacle beats ([770e79dc6](https://github.com/heygen-com/hyperframes/commit/770e79dc69ad92e7c292684186814067cf26f35a))
+- **Prompting:** Add fromTo back-render and round-linecap dot traps to the appendix ([fda3d9a65](https://github.com/heygen-com/hyperframes/commit/fda3d9a65af9ef02c21bf4c632857ff0f801f925))
+- **Prompting:** Document layout waivers and the contrast-gate side effect ([4d89bd426](https://github.com/heygen-com/hyperframes/commit/4d89bd426150e054cf42e3c05d6bc75585bcffbb))
+- **Prompting:** Six more validated renders, tighten the prompts their builds exposed ([8468771dc](https://github.com/heygen-com/hyperframes/commit/8468771dc60e1ccbe825d61107cb0df17e97aa5e))
+- **Prompting:** Validated chart example, add duration-with-no-tail rewrite ([87843f291](https://github.com/heygen-com/hyperframes/commit/87843f29103e5d5d6279860c03e4850f4ae064c9))
+- **Prompting:** Warn on webgpu-only glass block, strengthen chart prompt, embed validated renders ([a3e880669](https://github.com/heygen-com/hyperframes/commit/a3e88066926a68aea94695e82cd97a9f23390595))
+- **Prompting:** Validated showreel + handmade prompts, fix spec defects they exposed ([d888be198](https://github.com/heygen-com/hyperframes/commit/d888be198d97c36a66d59ced7889c3100b34a680))
+- **Prompting:** Audit fixes — validation gate, framework vocabulary, thread consistency ([44f9db425](https://github.com/heygen-com/hyperframes/commit/44f9db42596ae97e7c1be3788f5eae87c4f2ba64))
+- **Prompting:** Frame slideshow fix as two properties, camera as one method of many ([90a281b7f](https://github.com/heygen-com/hyperframes/commit/90a281b7f8d4366ec6744f6a5ec88b053413340e))
+- **Prompting:** Add "Avoiding the slideshow" — continuity contract + dwell-and-sweep ([4f6fb8fc1](https://github.com/heygen-com/hyperframes/commit/4f6fb8fc16c566bd8f473820a559a16c15b1fbeb))
+- **Prompting:** Revert capstone prompt to the pre-audit film ([17e79740e](https://github.com/heygen-com/hyperframes/commit/17e79740e06d11fc68987c906d50f30019804a54))
+- **Prompting:** Coil carries the wire stroke, anchors to the diving wire, world turns ([8ce65d03c](https://github.com/heygen-com/hyperframes/commit/8ce65d03ce151fc3b55e9adc5718505ab27edefc))
+- **Prompting:** Sync capstone prompt — chip rides the coil, peel needs room, pulses repeat ([4d5953c12](https://github.com/heygen-com/hyperframes/commit/4d5953c12c9681955d7760d9a1b07afdfe5d64aa))
+- **Prompting:** Fill gaps — vo-paced reveals, density contract, mount thread, sfx ([01e993c35](https://github.com/heygen-com/hyperframes/commit/01e993c353fa53bb95f7f235cc8ada397778e6d5))
+- **Prompting:** Capstone threads quote the verbatim prompt clause that buys each region ([8f2e0541d](https://github.com/heygen-com/hyperframes/commit/8f2e0541da81e971c33f41a40804f6235a238d40))
+- **Prompting:** Thread capstone regions through the guide as each chapter's worked example ([bd8437f7e](https://github.com/heygen-com/hyperframes/commit/bd8437f7e47164781ae4d22b89230b9e396b19c2))
+- **Prompting:** Capstone honesty note + depth technique row cover 3D occlusion clauses ([79525f954](https://github.com/heygen-com/hyperframes/commit/79525f954b19e2244b5785bceb8246d6db154a55))
+- **Prompting:** Capstone depth region — chip occlusion + coil taper in printed prompt ([871b8f2ec](https://github.com/heygen-com/hyperframes/commit/871b8f2ec3716376012f0663f563edc4932c8a60))
+- **Prompting:** Sync prompt to fixes — screen-fixed mural, ring-only iris, stable map pulses ([74346e18c](https://github.com/heygen-com/hyperframes/commit/74346e18c85fdc87ee9a44ea10df9f878c917a84))
+- **Prompting:** Lower-third renders behind the subject — match film behavior ([ef62ebd37](https://github.com/heygen-com/hyperframes/commit/ef62ebd37a4a3cb29ac1281530f7cc96e68d089d))
+- **Prompting:** Close prompt gaps — chip path-binding and mural iris-reveal clauses ([6df264700](https://github.com/heygen-com/hyperframes/commit/6df2647004df251837fd67874953127d62329902))
+- **Prompting:** Capstone v4 — dwell-and-sweep rhythm, real brand frame.md, text-behind-subject ([b13457be9](https://github.com/heygen-com/hyperframes/commit/b13457be9312ea492bfa594563c53528e22185e7))
+- **Prompting:** Capstone v3 — The Timeline, one continuous camera journey ([a90e343e8](https://github.com/heygen-com/hyperframes/commit/a90e343e8e4f7c15424cb2b33030a2522509218d))
+- **Prompting:** Capstone v2 — OSS Wrapped all-techniques film, two-render templating demo ([87b2ec632](https://github.com/heygen-com/hyperframes/commit/87b2ec63290a8d5d8dbe83fbfde581dc50fac1b8))
+- **Prompting:** Rebuild capstone film with density contract — chrome, roles, scale ([e6bea18b9](https://github.com/heygen-com/hyperframes/commit/e6bea18b959bb4bf65c77f56741cd7a9eac78667))
+- **Prompting:** Fix stale six-rules references to match the seven-rule grammar ([48e359bd1](https://github.com/heygen-com/hyperframes/commit/48e359bd1b736be9ffba5a276d861c1d5d55826a))
+- **Prompting:** Final QA pass for the guide arc ([6a6adb9f2](https://github.com/heygen-com/hyperframes/commit/6a6adb9f2dfc26af23416679be68d91453409617))
+- **Prompting:** Fix capstone exit bridge to the literal template ([e0164105f](https://github.com/heygen-com/hyperframes/commit/e0164105f1fb5f0477d00a6d5d93f31e0ade1694))
+- **Prompting:** Capstone chapter + overview rewritten as the arc's map ([6a2d506f7](https://github.com/heygen-com/hyperframes/commit/6a2d506f75eca0d8dc28edc04fb8413985b1b033))
+- **Prompting:** Remove non-sequitur anatomy link from rule 1 ([b14545a23](https://github.com/heygen-com/hyperframes/commit/b14545a23e335bfc01fe7a144869c58be84e271b))
+- **Prompting:** Appendix cheat sheet + post-guide lint rules as prompt guidance ([00c6fd238](https://github.com/heygen-com/hyperframes/commit/00c6fd238e09c171e14a41ea85d47dc9f7ab7c67))
+- **Prompting:** Embed validated storyboard-mini render ([de96c0594](https://github.com/heygen-com/hyperframes/commit/de96c0594c1d10fe1d335cf5e9825f3764d6320c))
+- **Prompting:** Add storyboards chapter — prompting the plan, not the scenes ([630ad482c](https://github.com/heygen-com/hyperframes/commit/630ad482c627c850dcc4dade7b4aef5a189f3bb5))
+- **Prompting:** Level 6 — scale chapters + variables CSS-shadow correction ([fe09437c6](https://github.com/heygen-com/hyperframes/commit/fe09437c6a3da751ba4dd832bbbcc01845268fe7))
+- **Prompting:** Embed validated proxy-footage render ([9eaf62ebf](https://github.com/heygen-com/hyperframes/commit/9eaf62ebfa9d5d800280e874a7b2073dce32243e))
+- **Prompting:** Level 5 — voice, sound, and automatic media proxies ([c76354351](https://github.com/heygen-com/hyperframes/commit/c76354351d04304b4b8522661c43b53b15e7728e))
+- **Prompting:** Level 4 — capability chapters framed as additive ([cd8c98e92](https://github.com/heygen-com/hyperframes/commit/cd8c98e92dee3597a9084858f0f350a8a2230186))
+- **Prompting:** Level 3 — life chapters with bridges ([2ab72e5d1](https://github.com/heygen-com/hyperframes/commit/2ab72e5d14c59d9d24190ab25806204df7bf047f))
+- **Prompting:** Level 2 — control chapters with bridges + structure mandate note ([c8a64a29b](https://github.com/heygen-com/hyperframes/commit/c8a64a29bdfdaa8bcb8c27a6bdff8b4420b036b8))
+- **Prompting:** Fix Level 1 exit bridges to the plan's literal template ([68ab77611](https://github.com/heygen-com/hyperframes/commit/68ab776113da402c7cbf1a13dd5a49e58ed51f38))
+- **Prompting:** Embed validated changelog-video render ([8de8545f2](https://github.com/heygen-com/hyperframes/commit/8de8545f20711585888925cc35f7b40df0e5b8c6))
+- **Prompting:** Level 1 — reframe workflow pages as first-win rides + changelog-video ([04b0b75a2](https://github.com/heygen-com/hyperframes/commit/04b0b75a21c6923e1b60a206f0610284ca2138a8))
+- **Prompting:** Regroup Prompt Guide nav into novice-to-advanced levels ([a47889824](https://github.com/heygen-com/hyperframes/commit/a47889824ca086a78a65e38f82840bc9d080ee57))
+- **Prompting:** Implementation plan for the guide arc restructure ([54051c2c0](https://github.com/heygen-com/hyperframes/commit/54051c2c0e822d4fecdcbba974b7f11d5d119557))
+- **Prompting:** Approved design for novice-to-capstone guide arc ([c222b1742](https://github.com/heygen-com/hyperframes/commit/c222b1742c6146e192f8232d197ead8d222ca920))
+- **Prompting:** Add rule 7 — seeded + two-frame-hold motion for handmade-but-deterministic feel ([ba37b53ef](https://github.com/heygen-com/hyperframes/commit/ba37b53efbdbdf936db13579b54370cdd090e5b7))
+- **Prompting:** Add Porting from Remotion page — the one workflow with zero prompting coverage ([ead4341c7](https://github.com/heygen-com/hyperframes/commit/ead4341c7c7d57a78c944d7e3fbac1ed545d9cfd))
+- **Prompting:** Complete plan — variant validation, vocab clips, worked specs, measured motion ([2f958d119](https://github.com/heygen-com/hyperframes/commit/2f958d1197651d8e32d05ffaf6fe8fc171a55ac1))
+- **Prompting:** Polish pass — verify facts against sources, fix staleness ([99ff79bc6](https://github.com/heygen-com/hyperframes/commit/99ff79bc60d689d2a56cac9e9ec8f1690b983e49))
+- **Prompting:** Serve guide renders from static.heygen.ai ([702a6bbdd](https://github.com/heygen-com/hyperframes/commit/702a6bbdd007a4decba81c0f16cad094fd466a25))
+- **Prompting:** Validate prompts and embed renders across the guide ([0aebbc2a4](https://github.com/heygen-com/hyperframes/commit/0aebbc2a4aa8806d3a675cd65fd03c8934742d12))
+- **Prompting:** Strip title-duplicate headings from guide pages ([a5ed39d34](https://github.com/heygen-com/hyperframes/commit/a5ed39d3498ab90bea536f66c28828311ac897f3))
+- **Prompting:** Add by-video-type and by-feature prompt guide pages ([816f580f2](https://github.com/heygen-com/hyperframes/commit/816f580f2d6e3d2a753f521ba97f0080a29ec531))
+- **Prompting:** Expand prompt guide into top-level multi-page section ([383dd3568](https://github.com/heygen-com/hyperframes/commit/383dd35685c2355675c6285a357a4b8d1a4b708d))
+- **Skills:** Text corrections from prompt-guide validation ([e7a6cb0da](https://github.com/heygen-com/hyperframes/commit/e7a6cb0da622e2086afb27fe1ecb6144af2734c4))
+
+## Catalog
+
+- **Prompting:** Fix misquoted caption-color phrase in captions-catalog bridge ([16224fd2f](https://github.com/heygen-com/hyperframes/commit/16224fd2fbd1b591e88e4029352d682dcf8b734d))
+
+## Internal
+
+- Format prompt-guide-expansion plan (fixes Format CI) ([b71ce85c2](https://github.com/heygen-com/hyperframes/commit/b71ce85c2cd830d16af28299adf2df6938ab306a))
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.7.84...v0.7.85).
+</Update>
+
+<Update
   label="HyperFrames v0.7.84"
   description="Released - 2026-07-30"
   tags={["Release", "Producer", "Engine"]}
