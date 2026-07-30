@@ -184,6 +184,37 @@ function hasRuntimeInsertedMedia(html: string): boolean {
   );
 }
 
+/**
+ * Does this render need a browser probe at all?
+ *
+ * Extracted as a pure predicate because whether a probe runs decides whether
+ * a LIVE DOM element count is available downstream, and the short-comp
+ * inversion band fails closed without one (see
+ * `resolveCompositionElementCount` / `resolveDeShortBand`). Notably NONE of
+ * these conditions fire for a known-duration, media-free composition that
+ * builds thousands of `div`/`span` nodes in its own init script —
+ * `hasRuntimeInsertedMedia` matches only `createElement("video"|"audio")` —
+ * so that shape is measured statically and must never reach the band's
+ * `applied` cohort (review finding, R4).
+ */
+export function probeRequiresBrowser(args: {
+  durationSeconds: number;
+  unresolvedCompositionCount: number;
+  hasAutoStart: boolean;
+  hasScriptedAudio: boolean;
+  hasVariableMedia: boolean;
+  hasInsertedMedia: boolean;
+}): boolean {
+  return (
+    args.durationSeconds <= 0 ||
+    args.unresolvedCompositionCount > 0 ||
+    args.hasAutoStart ||
+    args.hasScriptedAudio ||
+    args.hasVariableMedia ||
+    args.hasInsertedMedia
+  );
+}
+
 export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageResult> {
   const {
     projectDir,
@@ -217,13 +248,14 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
   );
   const hasVariableMedia = hasVariableBoundMedia(compiled.html, job.config.variables);
   const hasInsertedMedia = hasRuntimeInsertedMedia(compiled.html);
-  const needsBrowser =
-    composition.duration <= 0 ||
-    compiled.unresolvedCompositions.length > 0 ||
-    hasAutoStart ||
-    hasScriptedAudio ||
-    hasVariableMedia ||
-    hasInsertedMedia;
+  const needsBrowser = probeRequiresBrowser({
+    durationSeconds: composition.duration,
+    unresolvedCompositionCount: compiled.unresolvedCompositions.length,
+    hasAutoStart,
+    hasScriptedAudio,
+    hasVariableMedia,
+    hasInsertedMedia,
+  });
 
   if (needsBrowser) {
     const reasons = [];

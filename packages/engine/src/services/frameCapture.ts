@@ -3786,6 +3786,8 @@ export function getCapturePerfSummary(session: CaptureSession): CapturePerfSumma
     p95TotalMs: percentileOf(session.capturePerf.frameMs, 0.95),
     p99TotalMs: percentileOf(session.capturePerf.frameMs, 0.99),
     subTimelineWaitOutcome: session.subTimelineWaitOutcome,
+    initDurationMs: session.initTelemetry?.initDurationMs,
+    initTweenCount: session.initTelemetry?.tweenCount,
     warnings: cloneCaptureWarnings(session.warnings),
     staticDedupReused: session.staticDedupCount ?? 0,
     staticDedupEnabled: session.staticDedupEnabled ?? false,

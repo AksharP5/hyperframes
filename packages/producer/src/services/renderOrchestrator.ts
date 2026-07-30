@@ -497,6 +497,12 @@ export interface RenderPerfSummary {
     workerInversion?: string;
     /** Worker count the auto-resolution chose BEFORE the inversion pinned it to 1 — the parallel counterfactual for speedup math. Only set when the inversion fired. */
     preInversionWorkers?: number;
+    /** Rough compiled-composition element count — the variable the short-comp inversion band is gated on. Always set. */
+    compositionElementCount?: number;
+    /** Rough compiled-composition element-count provenance: "live" (probe DOM) | "static" (source scan, not trusted to open the band). */
+    compositionElementCountSource?: "live" | "static";
+    /** Short-comp band attribution: "applied" | "skipped_elements" | "unmeasured"; unset when the frame count made the band irrelevant. */
+    shortBand?: "applied" | "skipped_elements" | "unmeasured";
     /** DE parallel-router outcome: "routed" (fired, held), "reverted" (fired, self-verify retry rolled back), "none". Mutually exclusive with workerInversion. */
     parallelRouter?: string;
     /** Worker count the auto-resolution chose BEFORE the router pinned it to 3 — the single-worker-inversion counterfactual. Only set when the router fired. */
@@ -1225,6 +1231,183 @@ export function shouldUseStreamingEncode(
   // condition.
   if (forceParallelStream || process.env.HF_DE_PARALLEL_STREAM === "true") return true;
   return workerCount === 1;
+}
+
+/**
+ * Integer tuning knob from the environment. Matches the convention the
+ * surrounding DE thresholds already use: unset OR set-but-empty falls back to
+ * the default (a blank var is not a kill switch), and so does anything
+ * non-numeric — a typo must never silently disable a routing guard.
+ */
+export function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * Rough element count for compiled composition HTML.
+ *
+ * Deliberately a string scan and not a `parseHTML` + `querySelectorAll` (the
+ * `countAuthoredTimedClips` approach): this runs on EVERY render before the
+ * routing decision, and a full linkedom parse of the exact documents that
+ * matter here — the 20k-40k node ones — is the most expensive case. Precision
+ * is not needed. It feeds a threshold whose measured crossover is ~3.9k and
+ * whose default sits at 2500, so tag counting is comfortably inside the
+ * margin — PROVIDED the count is not unboundedly low for some real content
+ * shape. Three sources are counted, each catching a case the others miss:
+ *
+ *   1. Closing tags (`</div>`) — the base count for ordinary HTML.
+ *   2. Named HTML void elements (`<img>`, `<br>`, …), bare or self-closed —
+ *      voids matter because they skew EXPENSIVE to paint (images), and
+ *      counting only closers would read an image gallery as a tiny comp and
+ *      open the band on exactly the content most likely to lose it.
+ *   3. Any self-closing tag (`<circle/>`, `<path d="…"/>`) — SVG's own
+ *      elements are neither closing-tag-shaped nor in the void list, so
+ *      without this a self-closing-SVG-heavy composition (`<circle/>` x 40k)
+ *      counted as ZERO — an unbounded undercount, not a rounding error, and
+ *      exactly the shape of comp the 1.8x regression case is made of
+ *      (review finding: the ceiling cannot compensate for an error with no
+ *      bound).
+ *
+ * Opening (non-self-closing, non-void) tags are deliberately NOT counted:
+ * compiled comps embed inline scripts, and `a < b` or `x <breadth` would
+ * false-positive on a bare `<letter` scan. All three counted forms require a
+ * literal closing marker (`</`, a void name at a word boundary, or `/>`), so
+ * ordinary JS comparisons and divisions don't qualify — verified by test.
+ *
+ * FALLBACK ONLY as of the live-DOM fix below — a string scan of the SOURCE
+ * markup cannot see elements a composition's own script creates at runtime
+ * (`document.createElement`), which is an unbounded undercount no regex can
+ * close: `style-10-prod`'s per-transcript-word caption generator measures 2
+ * source tags against thousands of live nodes after init (review finding).
+ * `resolveCompositionElementCount` prefers the initialized probe session's
+ * live count and uses this only when no such session exists.
+ */
+export function countElementTags(html: string): number {
+  const matches = html.match(
+    /<\/[a-zA-Z]|<(?:img|br|hr|input|source|track|area|base|col|embed|link|meta|param|wbr)\b|<[a-zA-Z][-a-zA-Z0-9]*\b[^>]*\/>/gi,
+  );
+  return matches === null ? 0 : matches.length;
+}
+
+/**
+ * Element count for the short-comp band's gate, WITH PROVENANCE.
+ *
+ * `live` — measured from the initialized probe session's real DOM. This is
+ * the only trustworthy source: it sees elements a composition's own script
+ * created after load, which no scan of the source markup can (the
+ * caption-word-span pattern above builds thousands of nodes from two source
+ * tags).
+ *
+ * `static` — the `countElementTags` fallback. Emitted for diagnostics, but
+ * NOT trusted to open the band: the probe is conditional (see
+ * `probeStage.ts`'s `needsBrowser` — only unknown duration, unresolved
+ * compositions, or specific media cases launch one), so a known-duration,
+ * media-free composition that builds 40k nodes in script gets no probe, and
+ * a static count that says "2". Treating that as measured would admit
+ * exactly the regression case the ceiling exists to exclude (review finding,
+ * R4). The caller fails closed on anything but `live`.
+ *
+ * These semantics are FROZEN while the short-band baseline is being read —
+ * the fleet distribution recorded by the baseline release must be measured
+ * by the same resolver that later gates routing, or the baseline is invalid.
+ */
+export async function resolveCompositionElementCount(
+  probeSession: Pick<CaptureSession, "isInitialized" | "page"> | null,
+  html: string,
+): Promise<{ count: number; source: "live" | "static" }> {
+  if (probeSession?.isInitialized) {
+    try {
+      const liveCount = await probeSession.page.evaluate(
+        () => document.querySelectorAll("*").length,
+      );
+      if (typeof liveCount === "number" && Number.isFinite(liveCount)) {
+        return { count: liveCount, source: "live" };
+      }
+    } catch {
+      // Probe page evaluate can fail (navigation mid-flight, detached frame,
+      // page crash) — fall through to the static scan rather than block the
+      // render on a routing-gate measurement.
+    }
+  }
+  return { count: countElementTags(html), source: "static" };
+}
+
+/**
+ * Max-merge init telemetry across per-worker capture perf summaries — the
+ * success-path channel for PARALLEL renders, whose worker console buffers
+ * (and so the `[FrameCapture:INIT]` line) only propagate on failure. Max
+ * matches summarizeInitObservability's own multi-session semantics: keep the
+ * worst observed startup cost for duration. Tween count is per-composition,
+ * so workers should agree — max is a defensive read against a worker that
+ * initializes before the timeline is fully wired, not an expected disagreement.
+ */
+export function mergeWorkerInitObservability(
+  perfs: ReadonlyArray<{ initDurationMs?: number; initTweenCount?: number }>,
+): { initDurationMs?: number; tweenCount?: number } | undefined {
+  let initDurationMs: number | undefined;
+  let tweenCount: number | undefined;
+  for (const perf of perfs) {
+    if (perf.initDurationMs !== undefined) {
+      initDurationMs =
+        initDurationMs === undefined
+          ? perf.initDurationMs
+          : Math.max(initDurationMs, perf.initDurationMs);
+    }
+    if (perf.initTweenCount !== undefined) {
+      tweenCount =
+        tweenCount === undefined ? perf.initTweenCount : Math.max(tweenCount, perf.initTweenCount);
+    }
+  }
+  if (initDurationMs === undefined && tweenCount === undefined) return undefined;
+  return { initDurationMs, tweenCount };
+}
+
+/**
+ * The short-comp band's attribution decision, extracted as a pure function so
+ * the gating fixes below are independently testable rather than living inline
+ * where only a full render pipeline run could exercise them.
+ *
+ * A value is emitted ONLY when the band is DECISIVE — every other
+ * inversion-eligibility condition already passed (both floor evaluations
+ * agree on everything except which floor they used) and the band floor alone
+ * flipped the answer. `bandEnabled` gates that decisiveness itself:
+ * `HF_DE_SHORT_MAX_ELEMENTS=0` is a documented kill switch (symmetric with
+ * `HF_DE_SHORT_MIN_FRAMES=0`, which already disables via the predicate's own
+ * `minFrames > 0` guard), and without this gate a fired kill switch left
+ * every in-band render decisive against a real floor comparison — reporting
+ * "skipped_elements" (comp too large) instead of undefined (band disabled)
+ * and corrupting the DiD control cohort with kill-switched renders (review
+ * finding).
+ *
+ * Three decisive outcomes, and the distinction between the last two is the
+ * point:
+ *   "applied"          — measured LIVE and under the ceiling. Only this
+ *                        routes (once HF_DE_SHORT_BAND_ROUTE is on) and only
+ *                        this joins the treatment cohort.
+ *   "skipped_elements" — measured live, over the ceiling. A real oversize
+ *                        observation; the DiD control group.
+ *   "unmeasured"       — no live DOM count available (no probe session ran;
+ *                        see `resolveCompositionElementCount`). FAILS CLOSED:
+ *                        never routes, and kept out of BOTH cohorts so a
+ *                        static undercount cannot masquerade as a small comp
+ *                        (review finding, R4). Emitted rather than dropped
+ *                        because its fleet rate sizes the population a
+ *                        future conditional-probe-launch would unlock.
+ */
+export function resolveDeShortBand(args: {
+  invertAtBaseFloor: boolean;
+  invertAtBandFloor: boolean;
+  bandEnabled: boolean;
+  bandOpen: boolean;
+  elementCountSource: "live" | "static";
+}): "applied" | "skipped_elements" | "unmeasured" | undefined {
+  const decisive = args.bandEnabled && args.invertAtBandFloor && !args.invertAtBaseFloor;
+  if (!decisive) return undefined;
+  if (args.elementCountSource !== "live") return "unmeasured";
+  return args.bandOpen ? "applied" : "skipped_elements";
 }
 
 /**
@@ -2408,10 +2591,58 @@ async function executeRenderPipeline(input: {
         ? 900
         : Number(deSingleMinFramesRaw);
     const deSingleMinFrames = Number.isFinite(deSingleMinFramesNum) ? deSingleMinFramesNum : 900;
+    // Short-comp band: 31% of fleet renders (24h, 0.7.78+) are DE-eligible
+    // comps clamped to parallel screenshot purely because they sit under this
+    // floor. A controlled sweep (fixed synthetic content, {250,400,600,900}f,
+    // single-DE vs parallel-screenshot-W4, 3 reps, capture modes verified per
+    // run) showed single-DE winning 1.16-1.24x at EVERY size — but only for
+    // content in constant motion. A follow-up 2x2 (movers x static DOM nodes)
+    // found the two variables pull in opposite directions: motion favours DE,
+    // DOM size punishes it, and DE's wall-clock scales ~0.50ms/node against
+    // parallel screenshot's ~0.22ms (drawElement repaints the whole tree per
+    // frame; fan-out amortizes it). At 24 movers / 400f the measured curve is
+    // +5% for DE at 0 nodes, -4% at 7k, -41% at 20k, -80% at 40k — crossover
+    // near ~3.9k. Since motion only ever helps DE, a node ceiling calibrated
+    // at the LOWEST-motion case is safe for every motion level, so the short
+    // band opens only below `deShortBandMaxElements`. Above it the original
+    // 900 floor stands, unchanged.
+    const deShortBandMinFrames = envInt("HF_DE_SHORT_MIN_FRAMES", 250);
+    const deShortBandMaxElements = envInt("HF_DE_SHORT_MAX_ELEMENTS", 2500);
+    // `source` is load-bearing, not diagnostic: the probe is CONDITIONAL
+    // (probeStage's `needsBrowser` — unknown duration, unresolved
+    // compositions, or specific media cases), so a known-duration media-free
+    // comp that builds its DOM in script has no live count available and the
+    // static scan reads it as tiny. Only a `live` count may open the band.
+    const { count: compositionElementCount, source: compositionElementCountSource } =
+      await resolveCompositionElementCount(probeSession, compiled.html);
+    // HF_DE_SHORT_MAX_ELEMENTS=0 is the documented kill switch (symmetric
+    // with HF_DE_SHORT_MIN_FRAMES=0, which disables via the predicate's own
+    // minFrames > 0 guard). Gated explicitly here too — without it, a fired
+    // max-elements kill switch left every in-band render decisive against a
+    // real floor comparison, so it reported "skipped_elements" (comp too
+    // large) instead of undefined (band disabled), corrupting the DiD
+    // control cohort with kill-switched renders (review finding).
+    const deShortBandEnabled = deShortBandMaxElements > 0;
+    const deShortBandOpen =
+      deShortBandEnabled &&
+      deShortBandMinFrames > 0 &&
+      compositionElementCountSource === "live" &&
+      compositionElementCount <= deShortBandMaxElements;
+    // Baseline-first sequencing: this release EVALUATES the band on every
+    // render and emits the decision, but only routes on it when
+    // HF_DE_SHORT_BAND_ROUTE=true (flipped by default in a follow-up release).
+    // The point is a difference-in-differences read: the cohort selector
+    // (`de_short_band`) is computed identically before and after the flip —
+    // "applied" is counterfactual in the baseline release and factual after —
+    // and the skipped/oversize renders in the same frame band form a
+    // concurrent control that absorbs secular drift (content mix, version-
+    // correlated populations, hardware). A plain before/after cannot
+    // attribute a fleet perf shift to this change; this can.
+    const deShortBandRoute = process.env.HF_DE_SHORT_BAND_ROUTE === "true";
     // "Would ANY multi-worker resolution be inverted?" — if workers resolve
     // to 1 naturally the outcome is identical either way.
     const WOULD_RESOLVE_MULTI_WORKER = 2;
-    const deInversionEligible = shouldPreferSingleWorkerDrawElement({
+    const deInversionArgs = {
       workerCount: WOULD_RESOLVE_MULTI_WORKER,
       requestedWorkers: job.config.workers,
       useDrawElement: cfg.useDrawElement,
@@ -2431,7 +2662,32 @@ async function executeRenderPipeline(input: {
         process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true" ||
         // Verified parallel DE streaming (opt-in) wants its parallelism kept.
         process.env.HF_DE_PARALLEL_STREAM === "true",
+    };
+    const invertAtBaseFloor = shouldPreferSingleWorkerDrawElement(deInversionArgs);
+    // Same render, same eligibility, band floor instead of 900. Math.min so a
+    // user override of HF_DE_SINGLE_MIN_FRAMES below the band floor keeps
+    // winning; HF_DE_SHORT_MIN_FRAMES=0 disables via the predicate's own
+    // minFrames > 0 check.
+    const invertAtBandFloor = shouldPreferSingleWorkerDrawElement({
+      ...deInversionArgs,
+      minFrames: Math.min(deSingleMinFrames, deShortBandMinFrames),
     });
+    const deShortBand = resolveDeShortBand({
+      invertAtBaseFloor,
+      invertAtBandFloor,
+      bandEnabled: deShortBandEnabled,
+      bandOpen: deShortBandOpen,
+      elementCountSource: compositionElementCountSource,
+    });
+    const deInversionEligible =
+      deShortBandRoute && deShortBand === "applied" ? invertAtBandFloor : invertAtBaseFloor;
+    // The floor that actually decided this render — for the human-facing log
+    // below, so it never claims e.g. "400 frames >= 900" for a band-routed
+    // inversion (review finding).
+    const deInversionEffectiveMinFrames =
+      deShortBandRoute && deShortBand === "applied"
+        ? Math.min(deSingleMinFrames, deShortBandMinFrames)
+        : deSingleMinFrames;
     // DE parallel-router eligibility — see shouldPreferParallelDrawElement.
     // Default-off (HF_DE_PARALLEL_ROUTER); HF_DE_PARALLEL_MIN_FRAMES default
     // 700, re-calibrated 2026-07-27 from the original safe-high 2000. A
@@ -2665,7 +2921,7 @@ async function executeRenderPipeline(input: {
       log.info(
         "[Render] Fast capture: single-worker drawElement streaming preferred over " +
           `${workerCount}-worker screenshot capture (${totalFrames} frames >= ` +
-          `${deSingleMinFrames}; verified path, measured faster at every worker count). ` +
+          `${deInversionEffectiveMinFrames}; verified path, measured faster at every worker count). ` +
           "Set HF_DE_SINGLE_MIN_FRAMES=0 or --workers N to override.",
       );
       workerCount = 1;
@@ -2681,6 +2937,12 @@ async function executeRenderPipeline(input: {
       // any resource-pressure failure unique to this cohort.
       dePreInversionWorkers: deWorkerInversion ? preRoutingWorkerCount : undefined,
       dePreRouterWorkers: deParallelRouter ? preRoutingWorkerCount : undefined,
+      // Short-comp band attribution — see the field docs. Emitted on every
+      // render so the fleet element-count distribution is readable, and so a
+      // perf shift can be split into "the new band did it" vs "unchanged".
+      compositionElementCount,
+      compositionElementCountSource,
+      deShortBand,
       // Same rationale as the counters above: carried on live capture
       // observability, not only the success-path perfSummary, so a crash /
       // OOM / timeout still reports which GPU backend it happened on. That
@@ -3497,6 +3759,7 @@ async function executeRenderPipeline(input: {
     const observabilitySummary = observability.summary({
       lastBrowserConsole,
       capture: captureObservability,
+      initFallback: mergeWorkerInitObservability(dedupPerfs),
       extraction: extractionObservability,
       compositionHash,
     });
@@ -3525,6 +3788,9 @@ async function executeRenderPipeline(input: {
         clampReason: deClampReason,
         workerInversion: deWorkerInversion,
         preInversionWorkers: deWorkerInversion ? preRoutingWorkerCount : undefined,
+        compositionElementCount,
+        compositionElementCountSource,
+        shortBand: deShortBand,
         parallelRouter: deParallelRouter,
         preRouterWorkers: deParallelRouter ? preRoutingWorkerCount : undefined,
         selfVerifyFallback: deSelfVerifyFallback,
@@ -3656,6 +3922,7 @@ async function executeRenderPipeline(input: {
     const observabilitySummary = observability.summary({
       lastBrowserConsole,
       capture: captureObservability,
+      initFallback: mergeWorkerInitObservability(dedupPerfs),
       extraction: extractionObservability,
       compositionHash,
     });

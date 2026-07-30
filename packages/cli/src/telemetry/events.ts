@@ -72,6 +72,9 @@ export interface RenderObservabilityTelemetryPayload {
   // the more authoritative perfSummary value wins when both are present.
   captureDeWorkerInversion?: string;
   captureDePreInversionWorkers?: number;
+  captureCompositionElementCount?: number;
+  captureCompositionElementCountSource?: string;
+  captureDeShortBand?: string;
   captureDeParallelRouter?: string;
   captureDeGpuRenderer?: string;
   captureDePreRouterWorkers?: number;
@@ -130,6 +133,9 @@ function renderObservabilityEventProperties(props: RenderObservabilityTelemetryP
     capture_memory_exhaustion_detected: props.captureMemoryExhaustionDetected,
     de_worker_inversion: props.captureDeWorkerInversion,
     de_pre_inversion_workers: props.captureDePreInversionWorkers,
+    composition_element_count: props.captureCompositionElementCount,
+    composition_element_count_source: props.captureCompositionElementCountSource,
+    de_short_band: props.captureDeShortBand,
     de_parallel_router: props.captureDeParallelRouter,
     gpu_renderer: props.captureDeGpuRenderer,
     de_pre_router_workers: props.captureDePreRouterWorkers,
@@ -204,6 +210,9 @@ export function trackRenderComplete(
     deClampReason?: string;
     deWorkerInversion?: string;
     dePreInversionWorkers?: number;
+    compositionElementCount?: number;
+    compositionElementCountSource?: string;
+    deShortBand?: string;
     deParallelRouter?: string;
     dePreRouterWorkers?: number;
     deGateReason?: string;
@@ -303,6 +312,9 @@ export function trackRenderComplete(
       de_clamp_reason: props.deClampReason,
       de_worker_inversion: props.deWorkerInversion,
       de_pre_inversion_workers: props.dePreInversionWorkers,
+      composition_element_count: props.compositionElementCount,
+      composition_element_count_source: props.compositionElementCountSource,
+      de_short_band: props.deShortBand,
       de_parallel_router: props.deParallelRouter,
       de_pre_router_workers: props.dePreRouterWorkers,
       de_gate_reason: props.deGateReason,

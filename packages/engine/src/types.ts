@@ -241,6 +241,18 @@ export interface CapturePerfSummary {
   p99TotalMs: number;
   /** Sub-composition timeline wait outcome (absent pre-init). */
   subTimelineWaitOutcome?: SubTimelineWaitOutcome;
+  /**
+   * Session init telemetry, mirrored from the `[FrameCapture:INIT]` console
+   * line so PARALLEL workers report it too: worker sessions' console buffers
+   * only propagate to the orchestrator on failure, which left the
+   * multi-worker path — the short-comp band's entire population — with 0%
+   * coverage of the motion axis (`observability_init_tween_count`) in fleet
+   * telemetry. Riding the perf summary reuses the one channel that already
+   * flows back per worker on success.
+   */
+  initDurationMs?: number;
+  /** GSAP tween count at init — the motion-axis signal for capture routing analysis. */
+  initTweenCount?: number;
   /** Correctness warnings observed before or during capture. */
   warnings?: CaptureWarning[];
   /**

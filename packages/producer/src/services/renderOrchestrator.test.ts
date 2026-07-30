@@ -34,11 +34,17 @@ import {
   resolveParallelRouterRetryPlan,
   resetCaptureAttemptProgress,
   shouldRetryViaPinnedFallback,
+  countElementTags,
+  envInt,
+  mergeWorkerInitObservability,
+  resolveCompositionElementCount,
+  resolveDeShortBand,
   shouldPreferParallelDrawElement,
   shouldPreferSingleWorkerDrawElement,
   shouldStreamParallelCapture,
   shouldUseStreamingEncode,
 } from "./renderOrchestrator.js";
+import { probeRequiresBrowser } from "./render/stages/probeStage.js";
 import { ensureFrameWritten } from "./render/stages/captureHdrFrameShared.js";
 import { resolveCompositeTransfer, shouldUseLayeredComposite } from "./hdrCompositor.js";
 import {
@@ -1691,6 +1697,390 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
 
   it("inverts an auto-resolved multi-worker render for an eligible long comp", () => {
     expect(shouldPreferSingleWorkerDrawElement(eligible)).toBe(true);
+  });
+
+  // ── Short-comp band ──────────────────────────────────────────────────────────────────────
+  // The call site evaluates the predicate TWICE — once at the 900 floor, once
+  // at the 250 band floor — and the band is DECISIVE only when the calls
+  // disagree. These pin that arithmetic, including the property the design
+  // depends on: the band can only ADD inversions, never remove one.
+  //
+  // Measured basis (400f, single-DE vs parallel-screenshot-W4, ratio = ss4/de1
+  // so >1 means DE wins):
+  //   24 movers /     0 nodes -> 1.05   |   24 movers /  7000 nodes -> 0.96
+  //  320 movers /     0 nodes -> 1.24   |   24 movers / 20000 nodes -> 0.71
+  //  320 movers /  7000 nodes -> 1.09   |   24 movers / 40000 nodes -> 0.55
+  // Motion helps DE, DOM size punishes it; the element ceiling is calibrated
+  // at the lowest-motion case so every higher-motion comp is covered too.
+  describe("short-comp band decisiveness (two-floor evaluation)", () => {
+    const BAND_FLOOR = Math.min(900, 250);
+    const atBase = (totalFrames: number, over?: Partial<typeof eligible>) =>
+      shouldPreferSingleWorkerDrawElement({ ...eligible, ...over, totalFrames, minFrames: 900 });
+    const atBand = (totalFrames: number, over?: Partial<typeof eligible>) =>
+      shouldPreferSingleWorkerDrawElement({
+        ...eligible,
+        ...over,
+        totalFrames,
+        minFrames: BAND_FLOOR,
+      });
+
+    it("is decisive exactly in the 250-899 window for an otherwise-eligible render", () => {
+      expect(atBand(400) && !atBase(400)).toBe(true);
+      expect(atBand(250) && !atBase(250)).toBe(true);
+      expect(atBand(899) && !atBase(899)).toBe(true);
+    });
+
+    it("is NOT decisive below the band floor — nothing fires either way", () => {
+      expect(atBand(200)).toBe(false);
+      expect(atBase(200)).toBe(false);
+    });
+
+    it("is NOT decisive at 900+ — the pre-existing floor already inverts, unchanged", () => {
+      expect(atBase(2380)).toBe(true);
+      expect(atBand(2380) && !atBase(2380)).toBe(false);
+    });
+
+    it("is NOT decisive when the render is ineligible for any other reason — the attribution cohort must exclude renders the band cannot affect", () => {
+      for (const over of [
+        { requestedWorkers: 3 as const },
+        { useDrawElement: false },
+        { deCompileGate: "css_effect:filter" },
+        { forceScreenshot: true },
+        { outputFormat: "webm" as const },
+        { singleWorkerStreamingOk: false },
+        { probeDeGated: true },
+      ]) {
+        expect(atBand(400, over)).toBe(false);
+      }
+    });
+
+    it("HF_DE_SHORT_MIN_FRAMES=0 disables via the predicate's own minFrames guard", () => {
+      expect(
+        shouldPreferSingleWorkerDrawElement({
+          ...eligible,
+          totalFrames: 400,
+          minFrames: Math.min(900, 0),
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("resolveDeShortBand", () => {
+    const live = { elementCountSource: "live" as const };
+
+    it("reports applied only when decisive, live-measured, and under the ceiling", () => {
+      expect(
+        resolveDeShortBand({
+          ...live,
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: true,
+        }),
+      ).toBe("applied");
+    });
+
+    it("reports skipped_elements when live-measured and over the ceiling", () => {
+      expect(
+        resolveDeShortBand({
+          ...live,
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: false,
+        }),
+      ).toBe("skipped_elements");
+    });
+
+    it("is undefined when the base floor already inverts — the band changed nothing", () => {
+      expect(
+        resolveDeShortBand({
+          ...live,
+          invertAtBaseFloor: true,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: true,
+        }),
+      ).toBeUndefined();
+    });
+
+    it("is undefined when neither floor inverts — the render was ineligible for some other reason", () => {
+      expect(
+        resolveDeShortBand({
+          ...live,
+          invertAtBaseFloor: false,
+          invertAtBandFloor: false,
+          bandEnabled: true,
+          bandOpen: true,
+        }),
+      ).toBeUndefined();
+    });
+
+    // Review finding (R1 + R2, both reviewers): HF_DE_SHORT_MAX_ELEMENTS=0
+    // must read as "band disabled" (undefined), never "comp too large"
+    // (skipped_elements) — the latter would poison the DiD control cohort by
+    // mislabeling a kill-switch event as a real oversize measurement.
+    it("HF_DE_SHORT_MAX_ELEMENTS=0 (bandEnabled=false) reports undefined even when the render would otherwise be decisive", () => {
+      expect(
+        resolveDeShortBand({
+          ...live,
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true, // an otherwise-eligible in-band render
+          bandEnabled: false, // the kill switch
+          bandOpen: false, // deShortBandOpen also false when the switch is off
+        }),
+      ).toBeUndefined();
+    });
+
+    // Review finding (R4): the probe supplying the live count is conditional,
+    // so a static count is an UNBOUNDED undercount on runtime-generated DOM.
+    // It must never produce "applied" (would route a 40k-node comp) and must
+    // never produce "skipped_elements" either (would contaminate the DiD
+    // control cohort with a number that isn't a real oversize observation).
+    it("fails closed to unmeasured when the count came from the static scan, never applied", () => {
+      expect(
+        resolveDeShortBand({
+          elementCountSource: "static",
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: true, // static scan said "small" — must NOT be believed
+        }),
+      ).toBe("unmeasured");
+    });
+
+    it("reports unmeasured (not skipped_elements) for a static count over the ceiling — it is not a real observation either", () => {
+      expect(
+        resolveDeShortBand({
+          elementCountSource: "static",
+          invertAtBaseFloor: false,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: false,
+        }),
+      ).toBe("unmeasured");
+    });
+
+    it("stays undefined for a static count when the band was not decisive anyway", () => {
+      expect(
+        resolveDeShortBand({
+          elementCountSource: "static",
+          invertAtBaseFloor: true,
+          invertAtBandFloor: true,
+          bandEnabled: true,
+          bandOpen: true,
+        }),
+      ).toBeUndefined();
+    });
+  });
+
+  // Review finding (R4), end-to-end: the review asked for a regression with a
+  // known duration, no media / unresolved compositions, and >2500
+  // script-created nodes, asserting it cannot enter `applied` without a live
+  // count. This walks the real decision chain rather than a full render —
+  // the probe gate, the count resolver, and the band attribution are each the
+  // production function, wired in the same order the pipeline wires them.
+  describe("no-probe dynamic-DOM composition cannot enter the applied cohort (R4 regression)", () => {
+    // A caption-style comp: known duration, no media, builds 4000 spans in
+    // its own init script. Mirrors packages/producer/tests/style-10-prod.
+    const DYNAMIC_DOM_HTML = [
+      '<div id="root"><div id="captions"></div></div>',
+      "<script>",
+      '  const c = document.getElementById("captions");',
+      "  for (let i = 0; i < 4000; i++) {",
+      '    const el = document.createElement("span");',
+      "    el.textContent = String(i);",
+      "    c.appendChild(el);",
+      "  }",
+      "</script>",
+    ].join("\n");
+
+    it("gets no browser probe — none of the probe conditions fire for this shape", () => {
+      expect(
+        probeRequiresBrowser({
+          durationSeconds: 13.3, // known
+          unresolvedCompositionCount: 0, // resolved
+          hasAutoStart: false, // no media
+          hasScriptedAudio: false,
+          hasVariableMedia: false,
+          // createElement("span") is not createElement("video"|"audio")
+          hasInsertedMedia: false,
+        }),
+      ).toBe(false);
+    });
+
+    it("therefore measures statically, and the static count wildly understates the live DOM", async () => {
+      const resolved = await resolveCompositionElementCount(null, DYNAMIC_DOM_HTML);
+      expect(resolved.source).toBe("static");
+      // Source markup has a handful of tags; the live DOM would have 4000+.
+      expect(resolved.count).toBeLessThan(2500);
+    });
+
+    it("and therefore reports unmeasured — never applied — so it cannot route or join either cohort", async () => {
+      const { count, source } = await resolveCompositionElementCount(null, DYNAMIC_DOM_HTML);
+      const bandOpen = source === "live" && count <= 2500;
+      const band = resolveDeShortBand({
+        // A 400-frame render that would otherwise be perfectly eligible.
+        invertAtBaseFloor: false,
+        invertAtBandFloor: true,
+        bandEnabled: true,
+        bandOpen,
+        elementCountSource: source,
+      });
+      expect(band).toBe("unmeasured");
+      expect(band).not.toBe("applied");
+    });
+  });
+
+  describe("mergeWorkerInitObservability", () => {
+    it("max-merges across workers and ignores workers that reported nothing", () => {
+      expect(
+        mergeWorkerInitObservability([
+          { initDurationMs: 400, initTweenCount: 900 },
+          {},
+          { initDurationMs: 1250, initTweenCount: 880 },
+        ]),
+      ).toEqual({ initDurationMs: 1250, tweenCount: 900 });
+    });
+
+    it("returns undefined when no worker reported — summary.init must stay absent, not zeroed", () => {
+      expect(mergeWorkerInitObservability([])).toBeUndefined();
+      expect(mergeWorkerInitObservability([{}, {}])).toBeUndefined();
+    });
+  });
+
+  describe("countElementTags", () => {
+    it("counts closing tags", () => {
+      expect(countElementTags("<div><span>a</span></div>")).toBe(2);
+    });
+
+    it("counts void elements — an image gallery must not read as a tiny comp", () => {
+      expect(countElementTags("<img><br><hr>")).toBe(3);
+      expect(countElementTags('<img src="a.png"><IMG SRC="b.png">')).toBe(2);
+    });
+
+    // Review-flagged blocker (v1): SVG elements are neither closing-tag-shaped
+    // nor in the HTML void list, so a self-closing-SVG-heavy comp read as
+    // element count 0 — an UNBOUNDED undercount, the same failure class as
+    // the original <img> counterexample, and the exact shape of comp the
+    // measured 1.8x regression case is made of. The ceiling cannot bound an
+    // error that has no bound of its own.
+    it("counts self-closing SVG elements — the 40k-node regression case must not read as empty", () => {
+      expect(countElementTags("<circle/>".repeat(40000))).toBe(40000);
+      expect(countElementTags('<path d="M0 0 L1 1" stroke="red" />')).toBe(1);
+      expect(countElementTags("<feGaussianBlur stdDeviation='2'/>")).toBe(1);
+    });
+
+    it("does not double-count a self-closed void element (still just 1)", () => {
+      expect(countElementTags('<img src="a.png"/>')).toBe(1);
+      expect(countElementTags('<img src="a.png" />')).toBe(1);
+    });
+
+    it("does not false-positive on minified JS division-after-comparison (the self-closing alt's real risk)", () => {
+      // Unspaced "<b/c>" is the adversarial case: "<" IS immediately
+      // followed by a letter, so the generic self-closing alt gets as far as
+      // starting a match — but it still requires the literal two-char "/>"
+      // sequence, and here a "c" sits between the "/" and the ">", so
+      // backtracking never finds one and it correctly fails to match.
+      expect(countElementTags("if(a<b/c>d){}")).toBe(0);
+    });
+
+    it("does not false-positive on inline-script comparisons or void-prefixed words", () => {
+      // Only the </script> closer counts: "<breadth" and "<imgWidth" hit the
+      // br/img alternatives but fail the \b word boundary (next char is a
+      // word char), and bare "a < b" comparisons match nothing.
+      expect(countElementTags("<script>if (a < b && x <breadth && y <imgWidth) {}</script>")).toBe(
+        1,
+      );
+    });
+
+    it("is stable on empty and malformed input rather than throwing", () => {
+      expect(countElementTags("")).toBe(0);
+      expect(countElementTags("<<<>>>")).toBe(0);
+    });
+
+    it("scales to a large document without a full parse", () => {
+      expect(countElementTags("<p>x</p>".repeat(40000))).toBe(40000);
+    });
+  });
+
+  describe("resolveCompositionElementCount", () => {
+    // Review finding (R3): a static scan of SOURCE markup cannot see DOM a
+    // composition's own script creates at runtime (document.createElement) —
+    // an unbounded undercount no regex can close. style-10-prod's real
+    // per-transcript-word caption generator is exactly this shape: 2 source
+    // tags, thousands of live nodes after init.
+    //
+    // Review finding (R4): the probe that provides the live count is
+    // CONDITIONAL, so the fallback cases below are not merely "less precise"
+    // — they are UNSAFE to gate on, and every one of them must report
+    // provenance "static" so the caller can fail closed.
+    it("uses the live DOM count from an initialized probe session, ignoring the (much smaller) source scan", async () => {
+      const session = { isInitialized: true, page: { evaluate: async () => 40001 } };
+      expect(await resolveCompositionElementCount(session, "<div><span></span></div>")).toEqual({
+        count: 40001,
+        source: "live",
+      });
+    });
+
+    it("reports static provenance when there is no probe session", async () => {
+      expect(await resolveCompositionElementCount(null, "<div><span></span></div>")).toEqual({
+        count: 2,
+        source: "static",
+      });
+    });
+
+    it("reports static provenance when the probe session is not yet initialized", async () => {
+      const session = { isInitialized: false, page: { evaluate: async () => 999 } };
+      expect(await resolveCompositionElementCount(session, "<div></div>")).toEqual({
+        count: 1,
+        source: "static",
+      });
+    });
+
+    it("reports static provenance when page.evaluate throws (detached frame, mid-navigation)", async () => {
+      const session = {
+        isInitialized: true,
+        page: {
+          evaluate: async () => {
+            throw new Error("Execution context was destroyed");
+          },
+        },
+      };
+      expect(await resolveCompositionElementCount(session, "<div><span></span></div>")).toEqual({
+        count: 2,
+        source: "static",
+      });
+    });
+
+    it("reports static provenance when evaluate resolves a non-finite value", async () => {
+      const session = { isInitialized: true, page: { evaluate: async () => Number.NaN } };
+      expect(await resolveCompositionElementCount(session, "<div></div>")).toEqual({
+        count: 1,
+        source: "static",
+      });
+    });
+  });
+
+  describe("envInt", () => {
+    afterEach(() => {
+      delete process.env.HF_TEST_ENV_INT;
+    });
+
+    it("falls back when unset, empty, or non-numeric — a typo must not disable a guard", () => {
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(2500);
+      process.env.HF_TEST_ENV_INT = "";
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(2500);
+      process.env.HF_TEST_ENV_INT = "lots";
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(2500);
+    });
+
+    it("reads an explicit value, including 0 as a real disable", () => {
+      process.env.HF_TEST_ENV_INT = "700";
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(700);
+      process.env.HF_TEST_ENV_INT = "0";
+      expect(envInt("HF_TEST_ENV_INT", 2500)).toBe(0);
+    });
   });
 
   it("honors explicitly requested workers", () => {

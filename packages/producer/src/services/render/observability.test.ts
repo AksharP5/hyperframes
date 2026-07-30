@@ -407,3 +407,34 @@ describe("RenderObservabilityRecorder", () => {
     );
   });
 });
+
+describe("init observability fallback (parallel workers)", () => {
+  const makeRecorder = () =>
+    new RenderObservabilityRecorder({ renderJobId: "render-par", pipelineStartMs: Date.now() });
+
+  it("uses the structured fallback when the console has no INIT line — the parallel success path", () => {
+    const summary = makeRecorder().summary({
+      lastBrowserConsole: ["[FrameCapture:NAV] page.goto start"],
+      capture: { forceScreenshot: false, captureMode: "screenshot" },
+      initFallback: { initDurationMs: 850, tweenCount: 1200 },
+    });
+    expect(summary.init).toEqual({ initDurationMs: 850, tweenCount: 1200 });
+  });
+
+  it("max-merges console INIT lines over the fallback, matching multi-session semantics", () => {
+    const summary = makeRecorder().summary({
+      lastBrowserConsole: ["[FrameCapture:INIT] complete initDurationMs=1234 tweenCount=42"],
+      capture: { forceScreenshot: false, captureMode: "screenshot" },
+      initFallback: { initDurationMs: 850, tweenCount: 1200 },
+    });
+    expect(summary.init).toEqual({ initDurationMs: 1234, tweenCount: 1200 });
+  });
+
+  it("stays undefined when neither source has anything", () => {
+    const summary = makeRecorder().summary({
+      lastBrowserConsole: [],
+      capture: { forceScreenshot: false, captureMode: "screenshot" },
+    });
+    expect(summary.init).toBeUndefined();
+  });
+});

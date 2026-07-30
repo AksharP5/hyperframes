@@ -70,6 +70,43 @@ export interface RenderCaptureObservability {
   deWorkerInversion?: "inverted" | "reverted";
   /** Worker count the resolver would have used absent the inversion; undefined if it never fired. */
   dePreInversionWorkers?: number;
+  /**
+   * Element count for the short-comp band gate (`resolveCompositionElementCount`):
+   * the LIVE DOM size from the already-running probe session when one is
+   * initialized, falling back to a static scan of the compiled HTML
+   * (`countElementTags`) otherwise. Live is authoritative — a static scan
+   * cannot see elements a composition's own script creates at runtime.
+   *
+   * Emitted on every render, not just inverted ones — this is the variable the
+   * short-comp inversion band is gated on, and the fleet distribution of it is
+   * unknown. Without it there is no way to tell whether the 2500 ceiling opens
+   * the band for most short comps or almost none, and no way to re-derive the
+   * threshold from real content instead of synthetic sweeps.
+   */
+  compositionElementCount?: number;
+  /**
+   * Provenance of `compositionElementCount`: "live" (measured from the probe
+   * session's real DOM — sees runtime-generated elements) or "static" (source
+   * markup scan, which does not). The probe is CONDITIONAL, so this is not a
+   * detail: only a `live` count may open the short band, and the fleet rate of
+   * "static" sizes the population a future conditional-probe-launch would
+   * unlock for the band.
+   */
+  compositionElementCountSource?: "live" | "static";
+  /**
+   * Short-comp band decision, emitted only when the band is DECISIVE — every
+   * other inversion-eligibility condition passed and only the floor (250 vs
+   * 900) differed. "applied": the element count cleared the ceiling too, so
+   * with routing enabled (HF_DE_SHORT_BAND_ROUTE) this render inverts; in the
+   * baseline release the same value is the COUNTERFACTUAL "would have
+   * inverted". "skipped_elements": the element ceiling was the only blocker.
+   * Unset: the band could not have affected this render (ineligible for some
+   * other reason, or already inverting at 900+). The selector is computed
+   * identically before and after the routing flip, and the skipped/oversize
+   * renders form the concurrent control for the difference-in-differences
+   * read — that is the entire point of the field.
+   */
+  deShortBand?: "applied" | "skipped_elements" | "unmeasured";
   /** DE parallel-router outcome: "routed" (fired, held) | "reverted" (fired, self-verify retry rolled back). */
   deParallelRouter?: "routed" | "reverted";
   /**
@@ -246,20 +283,26 @@ function readUnsignedIntAfter(line: string, prefix: string): number | undefined 
   return digits > 0 ? value : undefined;
 }
 
-function summarizeInitObservability(lines: string[]): RenderInitObservability | undefined {
-  let initDurationMs: number | undefined;
-  let tweenCount: number | undefined;
+/** Max of two optional readings — multiple worker/session INIT records can appear; keep the worst. */
+function maxReading(current: number | undefined, next: number | undefined): number | undefined {
+  if (next === undefined) return current;
+  return current === undefined ? next : Math.max(current, next);
+}
+
+function summarizeInitObservability(
+  lines: string[],
+  fallback?: RenderInitObservability,
+): RenderInitObservability | undefined {
+  // Console parsing only sees THIS process's session buffer, so parallel
+  // workers' INIT lines never reach it — their init telemetry arrives
+  // structured via the per-worker perf summaries instead. Seed with that and
+  // let the console parse (same max semantics) refine it.
+  let initDurationMs: number | undefined = fallback?.initDurationMs;
+  let tweenCount: number | undefined = fallback?.tweenCount;
   for (const line of lines) {
     if (!line.includes("[FrameCapture:INIT]")) continue;
-    const duration = readUnsignedIntAfter(line, "initDurationMs=");
-    const tweens = readUnsignedIntAfter(line, "tweenCount=");
-    // Multiple worker/session INIT records can appear; keep the worst observed startup cost.
-    if (duration !== undefined) {
-      initDurationMs = initDurationMs === undefined ? duration : Math.max(initDurationMs, duration);
-    }
-    if (tweens !== undefined) {
-      tweenCount = tweenCount === undefined ? tweens : Math.max(tweenCount, tweens);
-    }
+    initDurationMs = maxReading(initDurationMs, readUnsignedIntAfter(line, "initDurationMs="));
+    tweenCount = maxReading(tweenCount, readUnsignedIntAfter(line, "tweenCount="));
   }
   if (initDurationMs === undefined && tweenCount === undefined) return undefined;
   return { initDurationMs, tweenCount };
@@ -378,6 +421,8 @@ export class RenderObservabilityRecorder {
   summary(input: {
     lastBrowserConsole: string[];
     capture: RenderCaptureObservability;
+    /** Structured init telemetry from per-worker perf summaries — the only success-path channel parallel workers have (their console buffers propagate on failure only). */
+    initFallback?: RenderInitObservability;
     extraction?: RenderExtractionObservability;
     compositionHash?: string;
   }): RenderObservabilitySummary {
@@ -392,7 +437,7 @@ export class RenderObservabilityRecorder {
       browserDiagnostics: summarizeBrowserDiagnostics(input.lastBrowserConsole),
       capture: { ...input.capture },
       extraction: input.extraction ? { ...input.extraction } : undefined,
-      init: summarizeInitObservability(input.lastBrowserConsole),
+      init: summarizeInitObservability(input.lastBrowserConsole, input.initFallback),
     };
   }
 
