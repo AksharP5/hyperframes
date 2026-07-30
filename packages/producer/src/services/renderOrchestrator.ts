@@ -1243,7 +1243,10 @@ export function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === "") return fallback;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  // Integer-only, per the name: a fractional threshold would compare
+  // sensibly against integer counts but silently means something the knob
+  // never promised, so treat it as a typo and fall back (review nit).
+  return Number.isInteger(parsed) ? parsed : fallback;
 }
 
 /**
@@ -1286,7 +1289,27 @@ export function envInt(name: string, fallback: number): number {
  * live count and uses this only when no such session exists.
  */
 export function countElementTags(html: string): number {
-  const matches = html.match(
+  // Strip inline <script>/<style> bodies BEFORE matching. Every alternation
+  // below can fire on ordinary JS text — `const html = "</div>"` or a
+  // template literal building `</span>` inflates the count once per
+  // occurrence — and compiled comps embed large inline scripts. That bias is
+  // systematic, not noise, and it lands entirely on the ~83% of renders with
+  // no probe session, for which this scan is the only element signal (review
+  // finding). Removing the bodies also drops their own closing tags, which
+  // costs 1-2 counts against a threshold in the thousands.
+  // Looped to a fixed point rather than a single pass: one pass can REFORM
+  // the pattern it just removed (`<scr<script>ipt>` leaves `<script>`), which
+  // CodeQL flags as incomplete multi-character sanitization. The impact here
+  // is nil — the stripped string is counted and discarded, never rendered —
+  // but the incompleteness is real, and a stray reformed tag would perturb
+  // the count this gate reads. Converges: every iteration strictly shortens
+  // the string or changes nothing and exits.
+  let markup = html;
+  for (let previous = ""; markup !== previous; ) {
+    previous = markup;
+    markup = markup.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
+  }
+  const matches = markup.match(
     /<\/[a-zA-Z]|<(?:img|br|hr|input|source|track|area|base|col|embed|link|meta|param|wbr)\b|<[a-zA-Z][-a-zA-Z0-9]*\b[^>]*\/>/gi,
   );
   return matches === null ? 0 : matches.length;
@@ -1321,7 +1344,9 @@ export async function resolveCompositionElementCount(
   if (probeSession?.isInitialized) {
     try {
       const liveCount = await probeSession.page.evaluate(
-        () => document.querySelectorAll("*").length,
+        // Live HTMLCollection length — avoids materializing a static NodeList
+        // on the large-DOM comps this gate exists to catch (review nit).
+        () => document.getElementsByTagName("*").length,
       );
       if (typeof liveCount === "number" && Number.isFinite(liveCount)) {
         return { count: liveCount, source: "live" };
@@ -1345,10 +1370,15 @@ export async function resolveCompositionElementCount(
  * initializes before the timeline is fully wired, not an expected disagreement.
  */
 export function mergeWorkerInitObservability(
-  perfs: ReadonlyArray<{ initDurationMs?: number; initTweenCount?: number }>,
-): { initDurationMs?: number; tweenCount?: number } | undefined {
+  perfs: ReadonlyArray<{
+    initDurationMs?: number;
+    initTweenCount?: number;
+    initElementCount?: number;
+  }>,
+): { initDurationMs?: number; tweenCount?: number; elementCount?: number } | undefined {
   let initDurationMs: number | undefined;
   let tweenCount: number | undefined;
+  let elementCount: number | undefined;
   for (const perf of perfs) {
     if (perf.initDurationMs !== undefined) {
       initDurationMs =
@@ -1360,9 +1390,20 @@ export function mergeWorkerInitObservability(
       tweenCount =
         tweenCount === undefined ? perf.initTweenCount : Math.max(tweenCount, perf.initTweenCount);
     }
+    // Max across workers: every worker loads the same composition, so they
+    // should agree — max is defensive against a worker sampled before its
+    // init script finished populating the DOM.
+    if (perf.initElementCount !== undefined) {
+      elementCount =
+        elementCount === undefined
+          ? perf.initElementCount
+          : Math.max(elementCount, perf.initElementCount);
+    }
   }
-  if (initDurationMs === undefined && tweenCount === undefined) return undefined;
-  return { initDurationMs, tweenCount };
+  if (initDurationMs === undefined && tweenCount === undefined && elementCount === undefined) {
+    return undefined;
+  }
+  return { initDurationMs, tweenCount, elementCount };
 }
 
 /**
@@ -2672,6 +2713,11 @@ async function executeRenderPipeline(input: {
       ...deInversionArgs,
       minFrames: Math.min(deSingleMinFrames, deShortBandMinFrames),
     });
+    // Attribution runs even when routing is OFF — that is the whole point of
+    // the baseline release: "applied" is the counterfactual "would have
+    // inverted", and emitting it now is what establishes the DiD cohort
+    // before the flip. Do not short-circuit this block behind
+    // `deShortBandRoute` (review nit).
     const deShortBand = resolveDeShortBand({
       invertAtBaseFloor,
       invertAtBandFloor,

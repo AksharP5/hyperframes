@@ -1936,16 +1936,24 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     it("max-merges across workers and ignores workers that reported nothing", () => {
       expect(
         mergeWorkerInitObservability([
-          { initDurationMs: 400, initTweenCount: 900 },
+          { initDurationMs: 400, initTweenCount: 900, initElementCount: 1200 },
           {},
-          { initDurationMs: 1250, initTweenCount: 880 },
+          { initDurationMs: 1250, initTweenCount: 880, initElementCount: 1190 },
         ]),
-      ).toEqual({ initDurationMs: 1250, tweenCount: 900 });
+      ).toEqual({ initDurationMs: 1250, tweenCount: 900, elementCount: 1200 });
     });
 
     it("returns undefined when no worker reported — summary.init must stay absent, not zeroed", () => {
       expect(mergeWorkerInitObservability([])).toBeUndefined();
       expect(mergeWorkerInitObservability([{}, {}])).toBeUndefined();
+    });
+
+    it("surfaces an element count even when a worker reported nothing else", () => {
+      expect(mergeWorkerInitObservability([{ initElementCount: 4000 }])).toEqual({
+        initDurationMs: undefined,
+        tweenCount: undefined,
+        elementCount: 4000,
+      });
     });
   });
 
@@ -1986,12 +1994,52 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     });
 
     it("does not false-positive on inline-script comparisons or void-prefixed words", () => {
-      // Only the </script> closer counts: "<breadth" and "<imgWidth" hit the
-      // br/img alternatives but fail the \b word boundary (next char is a
-      // word char), and bare "a < b" comparisons match nothing.
+      // Script bodies are stripped wholesale (with their own closing tag), so
+      // nothing inside can match — including "<breadth" / "<imgWidth", which
+      // would anyway fail the \b word boundary.
       expect(countElementTags("<script>if (a < b && x <breadth && y <imgWidth) {}</script>")).toBe(
+        0,
+      );
+    });
+
+    // Review finding: the `</[a-zA-Z]` alternation matches ANY "</" + letter,
+    // including inside JS strings and template literals. Compiled comps embed
+    // large inline scripts, so this bias is systematic — and it lands entirely
+    // on the ~83% of renders with no probe, for which this scan is the only
+    // element signal.
+    it("does not count closing tags written inside inline script strings", () => {
+      expect(countElementTags('<div></div><script>const h = "</div></div></div>";</script>')).toBe(
         1,
       );
+      expect(
+        countElementTags("<p></p><script>const t = words.map(w => `</span>`).join('');</script>"),
+      ).toBe(1);
+    });
+
+    it("strips <style> bodies too — CSS content strings can carry the same shapes", () => {
+      expect(countElementTags('<div></div><style>a::after{content:"</div>"}</style>')).toBe(1);
+    });
+
+    // CodeQL "incomplete multi-character sanitization": a single-pass replace
+    // can reform the very pattern it removed. Impact is nil here (the stripped
+    // string is counted, never rendered) but a reformed tag would perturb the
+    // count, so the strip runs to a fixed point.
+    it("strips script tags that reform after one pass", () => {
+      // Inner <script> removed by pass 1 leaves "<script>alert(1)</script>",
+      // which pass 2 removes. A single pass would leave a stray tag behind.
+      expect(countElementTags("<div></div><scr<script></script>ipt>alert(1)</script>")).toBe(1);
+    });
+
+    it("terminates on input with no closing tag rather than looping", () => {
+      expect(countElementTags("<div></div><script>unterminated")).toBe(1);
+    });
+
+    it("strips multiple and attributed script blocks, not just the first", () => {
+      expect(
+        countElementTags(
+          '<div></div><script type="module">"</span>"</script><script>"</span>"</script>',
+        ),
+      ).toBe(1);
     });
 
     it("is stable on empty and malformed input rather than throwing", () => {

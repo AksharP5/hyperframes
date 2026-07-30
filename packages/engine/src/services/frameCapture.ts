@@ -119,6 +119,8 @@ export interface CaptureSession {
   initTelemetry?: {
     initDurationMs: number;
     tweenCount: number;
+    /** Live DOM element count at end of init; undefined when the measurement itself failed. Observational — see collectSessionInitTelemetry. */
+    elementCount?: number;
   };
   capturePerf: {
     frames: number;
@@ -406,8 +408,40 @@ function appendBrowserDiagnostic(session: CaptureSession, text: string): void {
 async function collectSessionInitTelemetry(
   page: Page,
   initStart: number,
-): Promise<{ initDurationMs: number; tweenCount: number }> {
+): Promise<{ initDurationMs: number; tweenCount: number; elementCount?: number }> {
   const initDurationMs = Date.now() - initStart;
+  // Live DOM size, measured once the init sequence has completed so
+  // script-generated elements are present. This is the SAME quantity the
+  // short-comp routing gate wants, but measured here it is observational
+  // only — capture has already started, so it is far too late to route on.
+  // Its job is coverage: the routing gate can only read a live count on the
+  // ~17% of renders that get a probe session, which leaves the fleet
+  // element-count distribution unknowable for the rest (and hides exactly
+  // the dangerous shape — small source markup, huge runtime DOM).
+  //
+  // Coverage caveat, since the "every render reaches this" claim is easy to
+  // over-read: every render that SURVIVES TO END OF INIT reaches it. Renders
+  // that die in browser launch, navigation, or OOM before init completes
+  // never emit — and on the huge-DOM tail this field exists to characterize,
+  // those are disproportionately the ones that fail early. The distribution
+  // is therefore survivor-biased toward smaller comps; treat the tail as a
+  // lower bound (review finding).
+  // Deliberately `undefined` (not 0) when the measurement fails, breaking
+  // from the tweenCount fallback pattern directly above. A page.evaluate
+  // crash during init is most likely on exactly the huge-DOM compositions
+  // this field exists to observe, and a 0 there is indistinguishable from a
+  // legitimately empty comp — the fleet p50/p99 would silently absorb both
+  // (review finding). Mirrors the live/static provenance split the routing
+  // resolver already uses: "not measured" must not read as "measured small".
+  // getElementsByTagName over querySelectorAll: a live HTMLCollection's
+  // length avoids materializing a 40k-node static NodeList on the tail this
+  // is here to characterize.
+  let elementCount: number | undefined;
+  try {
+    elementCount = await page.evaluate(() => document.getElementsByTagName("*").length);
+  } catch {
+    elementCount = undefined;
+  }
   let tweenCount = 0;
   try {
     tweenCount = await page.evaluate(() => {
@@ -431,7 +465,7 @@ async function collectSessionInitTelemetry(
   } catch {
     tweenCount = 0;
   }
-  return { initDurationMs, tweenCount };
+  return { initDurationMs, tweenCount, elementCount };
 }
 
 async function recordSessionInitTelemetry(
@@ -442,7 +476,10 @@ async function recordSessionInitTelemetry(
   session.initTelemetry = telemetry;
   appendBrowserDiagnostic(
     session,
-    `[FrameCapture:INIT] complete initDurationMs=${telemetry.initDurationMs} tweenCount=${telemetry.tweenCount}`,
+    `[FrameCapture:INIT] complete initDurationMs=${telemetry.initDurationMs} tweenCount=${telemetry.tweenCount}` +
+      // Omitted rather than zeroed when unmeasured, so the parser reports
+      // absent instead of inventing an empty DOM.
+      (telemetry.elementCount === undefined ? "" : ` elementCount=${telemetry.elementCount}`),
   );
 }
 
@@ -3788,6 +3825,7 @@ export function getCapturePerfSummary(session: CaptureSession): CapturePerfSumma
     subTimelineWaitOutcome: session.subTimelineWaitOutcome,
     initDurationMs: session.initTelemetry?.initDurationMs,
     initTweenCount: session.initTelemetry?.tweenCount,
+    initElementCount: session.initTelemetry?.elementCount,
     warnings: cloneCaptureWarnings(session.warnings),
     staticDedupReused: session.staticDedupCount ?? 0,
     staticDedupEnabled: session.staticDedupEnabled ?? false,

@@ -98,6 +98,7 @@ export interface RenderObservabilityTelemetryPayload {
   observabilityExtractCacheMisses?: number;
   observabilityInitDurationMs?: number;
   observabilityInitTweenCount?: number;
+  observabilityInitElementCount?: number;
 }
 
 function renderObservabilityEventProperties(props: RenderObservabilityTelemetryPayload) {
@@ -157,6 +158,7 @@ function renderObservabilityEventProperties(props: RenderObservabilityTelemetryP
     observability_extract_cache_misses: props.observabilityExtractCacheMisses,
     observability_init_duration_ms: props.observabilityInitDurationMs,
     observability_init_tween_count: props.observabilityInitTweenCount,
+    observability_init_element_count: props.observabilityInitElementCount,
   };
 }
 
