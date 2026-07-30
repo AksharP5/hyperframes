@@ -53,14 +53,14 @@ The applied side is deliberately over-cranked. Real work wants subtler values th
 
 ❌ **Without**
 
-> …the card lands by 2s, then holds motionless to the end.
+> 6-second 1920x1080 stat card: an `ARR · LIVE` eyebrow with a status dot above `$4.200M` at display scale, a mint accent rule beneath. Everything lands by 2s, then holds motionless to the end — the status dot stops, the figure freezes.
 
 ✅ **With**
 
-> …the card lands by 2s, then nothing ever fully stops: the cluster breathes between 0.95× and 1.05× on a 1.6s cycle, a wide glow sweeps behind it end to end and wraps off-frame so it never pauses, the eyebrow pulses, and the accent rule's sheen crosses its full length three times.
+> 6-second 1920x1080 stat card: an `ARR · LIVE` eyebrow with a status dot above `$4.200M` at display scale, a mint accent rule beneath. Everything lands by 2s, then stays alive because the data is — the status dot keeps a steady 1s heartbeat, and the last digits keep ticking as fresh readings arrive, the accent rule extending toward each new one. Nothing else moves.
 
 <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule1-nothing-stops.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
-*Left `WITHOUT`, right `WITH` — the left is bit-identical frame to frame after it lands; on the right, worst-case adjacent-frame PSNR is 28 dB — every frame differs.*
+*Left `WITHOUT`, right `WITH` — after 2s the left is bit-identical frame to frame while the right's 120 frames are all distinct. Note what is moving and why: the dot beats because the feed is connected, the digits tick because a reading arrived, the rule extends because it is the number. Three movements, three reasons. The frozen half reads as a dead connection rather than a style choice, which is the argument for the rule.*
 
 ### Rule 2 — The camera is an actor
 
