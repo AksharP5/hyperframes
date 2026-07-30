@@ -5,6 +5,8 @@ description: "For multi-scene work, don't prompt the scenes one by one — promp
 
 [Variables and templating](/prompting/variables-and-templating) was about reusing one composition across many renders. This page is the other axis of scale: one film with many scenes. Past a handful of beats, describing each scene from a blank page — "then frame 2 shows X, then frame 3 shows Y" — is the slow way and the way that drifts, because nothing ties the frames to each other. The fast way is to prompt the **plan** once — the throughline, the job each frame does, the rule that paces reveals — and let the build put frames against it.
 
+This narrative vocabulary is a writing discipline, not additional `STORYBOARD.md` schema: the workflow translates the plan into the smaller machine-readable shape the build consumes.
+
 ## Prompt the plan, not the scenes
 
 A storyboard is a short, structured document that sits above the individual frames: one arc, one direction block that every frame inherits, and a light per-frame spec (not a full description) for each key moment. The workflow reads the plan and builds each frame's HTML sub-composition against it — so a plan that's precise about the *shape* of the film produces frames that already agree with each other on pacing, palette, and payoff, without you re-stating any of that per frame.
