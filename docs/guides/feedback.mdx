@@ -199,7 +199,7 @@ Studio stores the equivalent state in `localStorage` under the `hyperframes-stud
 
 ### CLI — disable telemetry entirely
 
-Disabling telemetry suppresses the CLI feedback prompt and all other CLI usage tracking:
+Disabling telemetry suppresses the CLI feedback prompt, all other CLI usage tracking, and enrolment in any [canary rollout](/contributing/canary-rollouts) — an install that reports nothing is never picked for a staged rollout:
 
 ```bash
 # Via CLI command (persisted to ~/.hyperframes/config.json)

@@ -8,6 +8,18 @@ exercised on real traffic) or on for everyone (and therefore a fleet-wide
 bet). A canary is the rung in between — the same change, enabled for a stable
 slice of installs, ramped as the signal holds.
 
+<Note>
+  **Canaries are part of telemetry, not a separate system.** A canary is a
+  *measured* rollout: a slice is enrolled specifically so it can be compared
+  against everyone else, and the comparison is what makes ramping safe. An
+  install that reports nothing cannot be compared, so **opting out of telemetry
+  opts you out of canaries** — via `hyperframes telemetry disable`,
+  `HYPERFRAMES_NO_TELEMETRY=1`, `DO_NOT_TRACK=1`, a dev build, or Studio's
+  `hyperframes-studio:telemetryDisabled`. See the
+  [`telemetry` command](/packages/cli#telemetry) for what is collected and how
+  to turn it off; everything on this page sits behind that switch.
+</Note>
+
 ## Add one
 
 **1. Register it at 0%.** In `packages/core/src/canaryRegistry.ts`:
