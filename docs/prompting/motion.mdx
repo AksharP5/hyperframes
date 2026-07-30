@@ -23,6 +23,51 @@ If a movement is doing none of those, it's decoration, and decoration is what ma
 7. **Match pacing to genre.** Showreel-style cuts run 1.5-4 seconds per idea; a stretched 8-second version of a 2-second idea feels slow no matter how it's animated.
 8. **Handmade imperfection stays reproducible.** A stop-motion or hand-animated feel wants irregular timing, not machine-smooth eases — but true unseeded randomness breaks the render: HyperFrames must produce the identical frame every time it seeks to the same point, and `Math.random()` can't promise that. Seed a PRNG once at composition start instead, and step discrete elements between held positions (a "two-frame hold": land, hold two frames, jump to the next offset) rather than tweening continuously between them. The irregularity is real — it just comes from a seed, not from chance.
 
+
+## Each rule, shown
+
+One A/B per rule. Both halves of every clip run the same content, palette, layout and timing — the only thing that differs is the rule itself, so what you see is the rule and nothing else.
+
+**Rule 1 — Nothing ever fully stops**
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule1-nothing-stops.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Left `WITHOUT`, right `WITH` — the left half is genuinely frozen after it lands; the right carries a breathing scale, a background drift, and a creeping sheen.*
+
+**Rule 2 — The camera is an actor**
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule2-camera-actor.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Left `WITHOUT`, right `WITH` — identical cards; the left frame is locked, the right travels 31px of continuous, never-settling push and drift with the grid parallaxing behind it.*
+
+**Rule 3 — Overlapping action**
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule3-overlapping-action.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Left `WITHOUT`, right `WITH` — two takes. First the simultaneous block, then the queue — offsets longer than the animations. The right runs the same wave both times: offset 0.12s against a 0.48s duration, so four chips are in motion at once instead of one.*
+
+**Rule 4 — Compound properties only when they tell one story**
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule4-compound-properties.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Left `WITHOUT`, right `WITH` — the same sheet travels the same 470px in the same 1.12s on both sides. The left also rotates 12°; the right fades instead — one property that agrees with the rise.*
+
+**Rule 5 — Overshoot and follow-through**
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule5-overshoot.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Left `WITHOUT`, right `WITH` — the left arrives at its exact target and stops. The right passes it and settles back, the chip further than the title. Neither numeral ever overshoots its value.*
+
+**Rule 6 — Depth planes**
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule6-depth-planes.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Left `WITHOUT`, right `WITH` — the left moves every layer at one rate with no blur. The right runs three rates — background, content, and a heavily-blurred foreground drifting ten times faster than the grid.*
+
+**Rule 7 — Match pacing to genre**
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule7-pacing.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Left `WITHOUT`, right `WITH` — the same three ideas. The left spends 2.0s each and consumes all six seconds; the right spends 1.3s each, finishes at 3.9s, and holds the rest on a live idle.*
+
+**Rule 8 — Handmade imperfection stays reproducible**
+
+<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/motion-rule8-seeded-handmade.mp4" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+*Left `WITHOUT`, right `WITH` — the same seeded sway sampled two ways. The left tweens smoothly; the right holds every position for exactly two frames — note the frame counter advancing in evens.*
+
 ## The grammar, measured
 
 The same composition built twice — identical content, identical layout; the only variable is the motion treatment. The first build commits the anti-patterns above: simultaneous identical entrances, no camera, a frozen final 2.4 seconds. The second applies the eight rules.

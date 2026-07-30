@@ -34,6 +34,10 @@ Elements that start hidden need their visible end state stated explicitly — a 
 
 - **A `fromTo` shows its from-state *before* it starts.** `immediateRender` back-renders the `from` vars at every time earlier than the tween's own start, so an element you authored to "appear at 3s" is already on screen at frame 0 wearing its start pose. Sequential preview hides this — you scrub past frame 0 before the tween exists. Ask for `to()` plus `keyframes`, or a zero-duration `tl.set()` at the beat boundary, whenever an element must be absent before its cue. (Surfaced while validating this guide's kinetic-quote and map-route examples.)
 
+<Note>
+  **One caveat on "identical every time": parallel workers are not bit-identical to each other.** Building this chapter's rule-1 demo — whose left half is deliberately frozen — a default multi-worker render produced four distinct frame hashes across those frozen frames instead of one, with the changes landing exactly on the 30-frame worker-chunk boundaries. The deltas were a handful of ±1-level pixels (109–113 dB), i.e. per-Chrome-process rasterization variance, not animation. Determinism in the sense that matters is intact: the same worker seeking the same time renders the same frame, and your composition is not the variable. But if you need a *bit-exact* result — hashing frames, proving a hold, diffing two renders — pass `--workers 1`. Encoding adds its own noise on top, so compare lossless frames rather than the encoded MP4 when you need certainty.
+</Note>
+
 ### Seek-order safety
 
 These four all come from the same root cause: a cold render worker seeks non-linearly, so anything whose value depends on *when* or *in what order* it runs can render differently than the live preview did.
