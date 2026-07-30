@@ -1994,12 +1994,38 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     });
 
     it("does not false-positive on inline-script comparisons or void-prefixed words", () => {
-      // Only the </script> closer counts: "<breadth" and "<imgWidth" hit the
-      // br/img alternatives but fail the \b word boundary (next char is a
-      // word char), and bare "a < b" comparisons match nothing.
+      // Script bodies are stripped wholesale (with their own closing tag), so
+      // nothing inside can match — including "<breadth" / "<imgWidth", which
+      // would anyway fail the \b word boundary.
       expect(countElementTags("<script>if (a < b && x <breadth && y <imgWidth) {}</script>")).toBe(
+        0,
+      );
+    });
+
+    // Review finding: the `</[a-zA-Z]` alternation matches ANY "</" + letter,
+    // including inside JS strings and template literals. Compiled comps embed
+    // large inline scripts, so this bias is systematic — and it lands entirely
+    // on the ~83% of renders with no probe, for which this scan is the only
+    // element signal.
+    it("does not count closing tags written inside inline script strings", () => {
+      expect(countElementTags('<div></div><script>const h = "</div></div></div>";</script>')).toBe(
         1,
       );
+      expect(
+        countElementTags("<p></p><script>const t = words.map(w => `</span>`).join('');</script>"),
+      ).toBe(1);
+    });
+
+    it("strips <style> bodies too — CSS content strings can carry the same shapes", () => {
+      expect(countElementTags('<div></div><style>a::after{content:"</div>"}</style>')).toBe(1);
+    });
+
+    it("strips multiple and attributed script blocks, not just the first", () => {
+      expect(
+        countElementTags(
+          '<div></div><script type="module">"</span>"</script><script>"</span>"</script>',
+        ),
+      ).toBe(1);
     });
 
     it("is stable on empty and malformed input rather than throwing", () => {

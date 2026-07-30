@@ -183,12 +183,18 @@ export interface RenderInitObservability {
   initDurationMs?: number;
   tweenCount?: number;
   /**
-   * Live DOM element count at end of capture-session init. Observational:
-   * measured after routing has already been decided, so it cannot gate — it
-   * exists because the routing gate's own count is only available on the
-   * ~17% of renders that get a probe session, leaving the fleet
-   * element-count distribution (and any large-runtime-DOM tail) unreadable
-   * for the rest.
+   * Live DOM element count at end of capture-session init; undefined when
+   * the measurement failed (never 0). Observational: measured after routing
+   * has already been decided, so it cannot gate — it exists because the
+   * routing gate's own count is only available on the ~17% of renders that
+   * get a probe session, leaving the fleet element-count distribution (and
+   * any large-runtime-DOM tail) unreadable for the rest.
+   *
+   * Not interchangeable with `RenderCaptureObservability.compositionElementCount`:
+   * that one is measured pre-routing from the probe session (or a static
+   * scan) and is what the band gates on. This one is measured post-routing
+   * from the capture session and covers renders the gate cannot see. Query
+   * the former for router behaviour, this for distribution/tail analysis.
    */
   elementCount?: number;
 }

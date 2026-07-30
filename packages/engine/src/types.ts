@@ -254,11 +254,23 @@ export interface CapturePerfSummary {
   /** GSAP tween count at init — the motion-axis signal for capture routing analysis. */
   initTweenCount?: number;
   /**
-   * Live DOM element count at end of init. Observational counterpart to the
-   * short-comp routing gate's own count: the gate can only measure the ~17%
-   * of renders that get a probe session, so without this the fleet
-   * element-count distribution — and any large-runtime-DOM tail — stays
-   * invisible for the rest.
+   * Live DOM element count at end of init; undefined when the measurement
+   * failed (never 0 — see collectSessionInitTelemetry).
+   *
+   * WHICH FIELD TO QUERY — two element counts exist and they answer
+   * different questions:
+   *   • `composition_element_count` (+ `_source`) is the ROUTING-RELEVANT
+   *     one. Measured from the PROBE session before the routing decision,
+   *     falling back to a static source scan. That is what the short-comp
+   *     band actually gates on.
+   *   • `observability_init_element_count` (this field) is the
+   *     OBSERVATIONAL counterpart. Measured from the capture session's own
+   *     DOM at end of init, on every surviving render — including the ~83%
+   *     with no probe, where the routing signal is a blind static scan.
+   * They agree for most comps and diverge for one that mutates its DOM
+   * between probe launch and capture init. Use this for distribution and
+   * tail questions; use `composition_element_count` for anything about what
+   * the router did (review finding).
    */
   initElementCount?: number;
   /** Correctness warnings observed before or during capture. */
