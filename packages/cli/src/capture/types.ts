@@ -26,7 +26,13 @@ export interface CapturePhaseProgress {
   status: "started" | "completed" | "degraded";
   /** Null before the post-navigation budget begins. */
   remainingMs: number | null;
-  reason?: "budget-exhausted" | "disabled" | "request-timeout" | "provider-error";
+  reason?:
+    | "budget-exhausted"
+    | "disabled"
+    | "request-timeout"
+    | "provider-error"
+    | "internal-error"
+    | "blocked";
 }
 
 export interface CaptureOptions {

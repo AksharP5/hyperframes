@@ -23,6 +23,16 @@ describe("detectBlockedPage", () => {
         hasChallengeElement: false,
       },
     },
+    {
+      label: "classic Cloudflare interstitial",
+      evidence: {
+        httpStatus: 503,
+        title: "Attention Required! | Cloudflare",
+        textLength: 120,
+        bodyChildCount: 3,
+        hasChallengeElement: false,
+      },
+    },
   ])("rejects a minimal protection page: $label", ({ evidence }) => {
     expect(detectBlockedPage(evidence)).toMatch(/capture blocked/i);
   });

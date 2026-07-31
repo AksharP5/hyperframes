@@ -16,7 +16,7 @@ export function detectBlockedPage(evidence: PageLoadEvidence): string | undefine
   const hasBlockedStatus =
     evidence.httpStatus === 401 || evidence.httpStatus === 403 || evidence.httpStatus === 429;
   const hasBlockedTitle =
-    /^(?:(?:error\s*)?(?:401|403|429)(?:\s*(?:[-:—]\s*)?(?:forbidden|unauthorized|access denied|too many requests))?|forbidden|access denied|attention required|just a moment(?:\.{3})?)(?:\s*[|—-]\s*(?:cloudflare|sucuri website firewall))?$/i.test(
+    /^(?:(?:error\s*)?(?:401|403|429)(?:\s*(?:[-:—]\s*)?(?:forbidden|unauthorized|access denied|too many requests))?|forbidden|access denied|attention required!?|just a moment(?:\.{3})?)(?:\s*[|—-]\s*(?:cloudflare|sucuri website firewall))?$/i.test(
       evidence.title.trim(),
     );
 

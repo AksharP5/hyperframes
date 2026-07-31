@@ -267,7 +267,10 @@ export async function captureWebsite(
       httpStatus: navigationResponse?.status() ?? null,
       ...pageContentCheck,
     });
-    if (blockedReason) throw new Error(blockedReason);
+    if (blockedReason) {
+      phase("navigation", "degraded", "blocked");
+      throw new Error(blockedReason);
+    }
 
     phase("navigation", "completed");
     phase("core-extraction", "started");

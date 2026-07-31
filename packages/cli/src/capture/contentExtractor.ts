@@ -21,6 +21,8 @@ export interface VisionCaptionOutcome {
   timedOutRequests: number;
   failedRequests: number;
   budgetExhausted: boolean;
+  /** Failure outside provider request handling (filesystem, module, or programming error). */
+  internalError?: boolean;
 }
 
 interface VisionCaptionOptions {
@@ -36,10 +38,13 @@ export function resolveVisionPhaseCompletion(
   | { status: "completed" }
   | {
       status: "degraded";
-      reason: "budget-exhausted" | "request-timeout" | "provider-error";
+      reason: "budget-exhausted" | "request-timeout" | "provider-error" | "internal-error";
     } {
   if (outcome.budgetExhausted || remainingMs <= 0) {
     return { status: "degraded", reason: "budget-exhausted" };
+  }
+  if (outcome.internalError) {
+    return { status: "degraded", reason: "internal-error" };
   }
   if (outcome.timedOutRequests > 0) {
     return { status: "degraded", reason: "request-timeout" };
@@ -245,12 +250,15 @@ export async function captionImagesWithGemini(
   let timedOutCount = 0;
   let failedRequestCount = 0;
   let budgetExhausted = false;
+  let internalError = false;
   const reportOutcome = (): void => {
-    options.onOutcome?.({
+    const outcome: VisionCaptionOutcome = {
       timedOutRequests: timedOutCount,
       failedRequests: failedRequestCount,
       budgetExhausted,
-    });
+    };
+    if (internalError) outcome.internalError = true;
+    options.onOutcome?.(outcome);
   };
   if (options.skipVision) {
     reportOutcome();
@@ -546,8 +554,8 @@ export async function captionImagesWithGemini(
       );
     }
   } catch {
-    failedRequestCount = Math.max(1, failedRequestCount);
-    warnings.push(`${providerName} captioning failed; captions omitted.`);
+    internalError = true;
+    warnings.push(`${providerName} captioning failed internally; captions omitted.`);
   }
 
   reportOutcome();

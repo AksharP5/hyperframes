@@ -309,6 +309,35 @@ describe("captionImagesWithGemini — OpenRouter provider", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("classifies non-provider pipeline failures without leaking the local path", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-caption-no-assets-"));
+    dirs.push(dir);
+    vi.stubEnv("OPENROUTER_API_KEY", "or-unused-key");
+
+    const warnings: string[] = [];
+    let outcome: VisionCaptionOutcome | undefined;
+    const captions = await captionImagesWithGemini(dir, () => {}, warnings, {
+      onOutcome: (value) => {
+        outcome = value;
+      },
+    });
+
+    expect(captions).toEqual({});
+    expect(warnings).toEqual(["OpenRouter captioning failed internally; captions omitted."]);
+    expect(warnings.join(" ")).not.toContain(dir);
+    expect(outcome).toEqual({
+      timedOutRequests: 0,
+      failedRequests: 0,
+      budgetExhausted: false,
+      internalError: true,
+    });
+    if (!outcome) throw new Error("Expected vision caption outcome");
+    expect(resolveVisionPhaseCompletion(outcome, 10_000)).toEqual({
+      status: "degraded",
+      reason: "internal-error",
+    });
+  });
+
   it("skips captioning entirely when no provider key is present", async () => {
     const dir = makeProjectWithImages();
     dirs.push(dir);
