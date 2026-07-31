@@ -30,6 +30,7 @@ import {
   trackChildProcess,
   type AudioMetadata,
 } from "@hyperframes/engine";
+import { redactTelemetryString } from "@hyperframes/core";
 
 /**
  * Tolerance used to decide whether an audio file is already short enough to
@@ -361,6 +362,7 @@ async function defaultProbeVideoFrameInfo(
       "stream=nb_frames,r_frame_rate",
       "-of",
       "json",
+      "--",
       videoPath,
     ],
     signal,
@@ -381,6 +383,7 @@ async function defaultProbeVideoFrameInfo(
       "stream=nb_read_packets,r_frame_rate",
       "-of",
       "json",
+      "--",
       videoPath,
     ],
     signal,
@@ -434,7 +437,13 @@ async function defaultRunFfmpeg(
 // ── ffprobe JSON runner (shared between fast/slow video probe paths) ─────
 
 async function runFfprobeJson<T>(args: string[], signal?: AbortSignal): Promise<T> {
-  const proc = spawn(getFfprobeBinary(), args);
+  // Callers bake the input path into `args` (terminated with "--"), so this
+  // helper cannot add the terminator itself — assert they did rather than
+  // let a dash-prefixed path silently reach ffprobe as an option.
+  if (!args.includes("--")) {
+    throw new Error('[audioPadTrim] ffprobe args must terminate options with "--".');
+  }
+  const proc = spawn(getFfprobeBinary(), args, { stdio: ["ignore", "pipe", "pipe"] });
   trackChildProcess(proc);
   let stdout = "";
   proc.stdout.on("data", (data: Buffer) => {
@@ -452,7 +461,9 @@ async function runFfprobeJson<T>(args: string[], signal?: AbortSignal): Promise<
     throw outcome.error ?? new Error(outcome.stderr);
   }
   if (outcome.reason !== "exit" || outcome.exitCode !== 0) {
-    throw new Error(`ffprobe ${outcome.reason}: ${outcome.stderr}`);
+    // Redacted: raw ffprobe stderr echoes the input path, and this message
+    // reaches logs and telemetry.
+    throw new Error(`ffprobe ${outcome.reason}: ${redactTelemetryString(outcome.stderr, 2000)}`);
   }
   try {
     return JSON.parse(stdout) as T;
