@@ -3,7 +3,12 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Page } from "puppeteer-core";
-import { captureFullPagePlate, MAX_PLATE_HEIGHT_PX, pngHeight } from "./screenshotCapture.js";
+import {
+  captureFullPagePlate,
+  captureScrollScreenshots,
+  MAX_PLATE_HEIGHT_PX,
+  pngHeight,
+} from "./screenshotCapture.js";
 
 // A real 1920x800 PNG header, so the produced-height guard sees something valid.
 function pngBuffer(height: number, width = 1920): Buffer {
@@ -101,6 +106,21 @@ describe("captureFullPagePlate — the scroll shot's plate", () => {
     // A page left with every sticky element forced static would corrupt the extraction
     // passes that run after this one.
     expect(String(evaluate.mock.calls.at(-1)?.[0])).toContain("removeAttribute");
+  });
+});
+
+describe("captureScrollScreenshots — capture budget", () => {
+  it("does not begin page work when the post-navigation budget is exhausted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-scroll-budget-"));
+    const evaluate = vi.fn(async () => 1080);
+    const screenshot = vi.fn(async () => pngBuffer(1080));
+    const page = { evaluate, screenshot } as unknown as Page;
+
+    const files = await captureScrollScreenshots(page, dir, { remainingMs: () => 0 });
+
+    expect(files).toEqual([]);
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(screenshot).not.toHaveBeenCalled();
   });
 });
 

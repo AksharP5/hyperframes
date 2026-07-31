@@ -3,6 +3,14 @@ import { defineCommand } from "citty";
 import { resolve } from "node:path";
 import type { Example } from "./_examples.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
+import { diag } from "../ui/diagnostics.js";
+import type { CapturePhaseProgress } from "../capture/types.js";
+
+const CAPTURE_PHASE_PREFIX = "HYPERFRAMES_CAPTURE_PHASE ";
+
+function emitCapturePhase(event: CapturePhaseProgress): void {
+  diag.notice(`${CAPTURE_PHASE_PREFIX}${JSON.stringify(event)}`);
+}
 
 export const examples: Example[] = [
   ["Capture a website into ./capture/", "hyperframes capture https://stripe.com"],
@@ -37,6 +45,11 @@ export default defineCommand({
     "skip-assets": {
       type: "boolean",
       description: "Skip downloading assets (images, SVGs)",
+      default: false,
+    },
+    "skip-vision": {
+      type: "boolean",
+      description: "Skip optional AI image captioning",
       default: false,
     },
     "max-screenshots": {
@@ -139,11 +152,13 @@ export default defineCommand({
           url,
           outputDir,
           skipAssets: args["skip-assets"] as boolean,
+          skipVision: args["skip-vision"] as boolean,
           maxScreenshots: args["max-screenshots"]
             ? parseInt(args["max-screenshots"] as string)
             : undefined,
           timeout: args.timeout ? parseInt(args.timeout as string) : undefined,
           json: isJson,
+          onPhase: emitCapturePhase,
         },
         isJson
           ? undefined
@@ -179,6 +194,7 @@ export default defineCommand({
               fontsDetailed: result.tokens.fonts,
               animations: result.animationCatalog?.summary,
               warnings: result.warnings,
+              lastPhase: result.lastPhase,
             },
             null,
             2,

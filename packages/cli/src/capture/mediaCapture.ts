@@ -216,6 +216,15 @@ export async function renderLottiePreviews(
 
 const MAX_VIDEO_BYTES = 75 * 1024 * 1024; // 75 MB — hero/demo clips, not full films
 const DOWNLOADABLE_VIDEO_EXTS = new Set([".mp4", ".webm", ".mov", ".m4v"]);
+const VIDEO_DOWNLOAD_TIMEOUT_MS = 120_000;
+
+export function remainingVideoDownloadTimeoutMs(
+  budgetStartedAt: number,
+  budgetMs: number,
+  now = Date.now(),
+): number {
+  return Math.max(0, Math.min(VIDEO_DOWNLOAD_TIMEOUT_MS, budgetMs - (now - budgetStartedAt)));
+}
 
 /**
  * Download a <video> body to assets/videos/<file>, returning the
@@ -234,6 +243,7 @@ async function downloadVideoBody(
   srcUrl: string,
   filename: string,
   videosDir: string,
+  timeoutMs: number,
 ): Promise<string | null> {
   if (isPrivateUrl(srcUrl)) return null; // cheap pre-check; safeFetch re-checks every hop
   let ext = "";
@@ -247,7 +257,7 @@ async function downloadVideoBody(
     // safeFetch resolves redirects manually and re-runs isPrivateUrl on each
     // Location hop, so a public URL cannot 30x to an internal/metadata host.
     const res = await safeFetch(srcUrl, {
-      signal: AbortSignal.timeout(120000), // up to ~75 MB on a slow link; aborts cleanly → still-frame fallback
+      signal: AbortSignal.timeout(timeoutMs), // bounded by both per-request and aggregate capture budgets
       headers: { "User-Agent": "HyperFrames/1.0" },
     });
     if (!res || !res.ok || !res.body) return null;
@@ -462,6 +472,7 @@ export async function captureVideoManifest(
 
   const dlStart = Date.now();
   for (let vi = 0; vi < merged.length && vi < 20; vi++) {
+    if (remainingVideoDownloadTimeoutMs(dlStart, downloadBudgetMs) <= 0) break;
     const v = merged[vi]!;
     let preview: string | undefined;
 
@@ -505,9 +516,10 @@ export async function captureVideoManifest(
     // direct file. Cumulative budget caps total download time so a throttled
     // host or many large clips can't stall capture — over budget, keep the
     // preview (if any) and stop fetching bodies.
+    const downloadTimeoutMs = remainingVideoDownloadTimeoutMs(dlStart, downloadBudgetMs);
     const savedPath =
-      Date.now() - dlStart < downloadBudgetMs
-        ? await downloadVideoBody(v.src, v.filename, videoManifestDir)
+      downloadTimeoutMs > 0
+        ? await downloadVideoBody(v.src, v.filename, videoManifestDir, downloadTimeoutMs)
         : null;
 
     // A network-only video with neither a preview nor a downloaded body carries
