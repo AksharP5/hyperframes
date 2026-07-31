@@ -1,7 +1,7 @@
 // fallow-ignore-file code-duplication complexity
 import { spawn } from "child_process";
 import { readFileSync } from "fs";
-import { crc32 } from "node:zlib";
+import * as zlib from "node:zlib";
 import { basename, extname } from "path";
 import { redactTelemetryString } from "@hyperframes/core";
 import { FFPROBE_PATH_ENV, getFfprobeBinary } from "./ffmpegBinaries.js";
@@ -170,11 +170,34 @@ interface StillImageMetadata {
 
 // node:zlib's crc32 is native and takes a running seed, so the chunk type and
 // the chunk data can be CRC'd in sequence without concatenating them into a
-// throwaway buffer. The hand-rolled bit-at-a-time loop this replaces cost
-// ~210 ms on a 12 MiB PNG; this is ~1.3 ms. Available on this repo's
-// "node": ">=22".
+// throwaway buffer: ~210 ms -> ~1.3 ms on a 12 MiB PNG.
+//
+// It landed in Node 22.2.0, and this repo declares `"node": ">=22"` with a
+// major-only runtime gate, so 22.0 and 22.1 are still supported. A NAMED
+// import of a missing export throws at module evaluation — i.e. `ffprobe.ts`
+// would fail to load at all on those, long before any PNG is parsed — so the
+// namespace import plus this capability check is deliberate. Raising the
+// floor to 22.2.0 instead would be a user-facing support change, which does
+// not belong in a PNG bug fix.
+const nativeCrc32 = typeof zlib.crc32 === "function" ? zlib.crc32 : undefined;
+
+/** Bit-at-a-time fallback for Node 22.0/22.1. Correct, just slower. */
+function crc32Fallback(data: Buffer, seed: number): number {
+  let crc = seed ^ 0xffffffff;
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data[i] ?? 0;
+    for (let bit = 0; bit < 8; bit++) {
+      const mask = -(crc & 1);
+      crc = (crc >>> 1) ^ (0xedb88320 & mask);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 function chunkCrc32(chunkType: string, chunkData: Buffer): number {
-  return crc32(chunkData, crc32(Buffer.from(chunkType, "ascii")));
+  const typeBytes = Buffer.from(chunkType, "ascii");
+  if (nativeCrc32) return nativeCrc32(chunkData, nativeCrc32(typeBytes));
+  return crc32Fallback(chunkData, crc32Fallback(typeBytes, 0));
 }
 
 export function extractPngMetadataFromBuffer(buf: Buffer): StillImageMetadata | null {

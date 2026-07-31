@@ -709,3 +709,44 @@ describe("PNG chunk walk — integrity of the fallback itself", () => {
     ).toBeNull();
   });
 });
+
+describe("crc32 works on every runtime the package declares", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("node:zlib");
+  });
+
+  /** Load ffprobe.ts as it would evaluate on Node 22.0/22.1. */
+  async function loadWithoutNativeCrc32() {
+    const actual = await vi.importActual<typeof import("node:zlib")>("node:zlib");
+    vi.resetModules();
+    // zlib.crc32 landed in 22.2.0, but engine and cli both declare
+    // `"node": ">=22"` behind a major-only gate. A NAMED import of a missing
+    // export throws at module evaluation, so ffprobe.ts would fail to load
+    // entirely on those runtimes — before any PNG is touched.
+    vi.doMock("node:zlib", () => ({ ...actual, crc32: undefined }));
+    return import("./ffprobe.js");
+  }
+
+  it("parses an HDR PNG identically with the native crc32 unavailable", async () => {
+    const png = buildPngWithChunks([
+      pngChunk("IHDR", [0, 0, 0x0f, 0, 0, 0, 0x08, 0x70, 16, 2, 0, 0, 0]),
+      pngChunk("cICP", [9, 16, 0, 1]),
+      pngChunk("IEND", []),
+    ]);
+    const withNative = extractPngMetadataFromBuffer(png);
+    expect(withNative?.colorSpace?.colorTransfer).toBe("smpte2084");
+
+    const fresh = await loadWithoutNativeCrc32();
+    expect(fresh.extractPngMetadataFromBuffer(png)).toEqual(withNative);
+  });
+
+  it("rejects a corrupt chunk on the fallback path too", async () => {
+    const bad = pngChunk("IHDR", [0, 0, 0x0f, 0, 0, 0, 0x08, 0x70, 16, 2, 0, 0, 0]);
+    bad[bad.length - 1] ^= 0xff;
+    const png = buildPngWithChunks([bad, pngChunk("IEND", [])]);
+
+    const fresh = await loadWithoutNativeCrc32();
+    expect(fresh.extractPngMetadataFromBuffer(png)).toBeNull();
+  });
+});
