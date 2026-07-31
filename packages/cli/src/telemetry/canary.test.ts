@@ -45,6 +45,17 @@ vi.mock("@hyperframes/core/canary-registry", async () => {
         sunsetAfter: "2099-01-01",
       },
       {
+        // A PARTIAL percentage. `exclude` and the unit-id check only apply
+        // below 100 — at 100 the guard is about to be deleted, so everyone
+        // must already be on it — so exclusion behaviour cannot be expressed
+        // against test-alpha.
+        name: "test-gamma",
+        percentage: 50,
+        description: "partial rollout",
+        owner: "t",
+        sunsetAfter: "2099-01-01",
+      },
+      {
         name: "test-beta",
         percentage: 0,
         description: "always off",
@@ -57,6 +68,13 @@ vi.mock("@hyperframes/core/canary-registry", async () => {
         {
           name: "test-alpha",
           percentage: 100,
+          description: "",
+          owner: "t",
+          sunsetAfter: "2099-01-01",
+        },
+        {
+          name: "test-gamma",
+          percentage: 50,
           description: "",
           owner: "t",
           sunsetAfter: "2099-01-01",
@@ -84,6 +102,7 @@ beforeEach(() => {
   policyState.runtimeOverride = null;
   delete process.env.HF_CANARY_TEST_ALPHA;
   delete process.env.HF_CANARY_TEST_BETA;
+  delete process.env.HF_CANARY_TEST_GAMMA;
 });
 
 describe("telemetry opt-out is canary opt-out", () => {
@@ -121,6 +140,7 @@ describe("telemetry opt-out is canary opt-out", () => {
     configState.telemetryEnabled = false;
     expect(canaryEventProperties()).toEqual({
       "$feature/canary-test-alpha": "false",
+      "$feature/canary-test-gamma": "false",
       "$feature/canary-test-beta": "false",
     });
   });
@@ -130,16 +150,18 @@ describe("bucketing unit", () => {
   it("buckets on the bucketSeed when present — the unit that survives config wipes", async () => {
     const { evaluateCanary } = await import("@hyperframes/core/canary");
     configState.bucketSeed = "5f1c9d2e-0000-4000-8000-aaaaaaaaaaaa";
-    const viaBinding = resolveCanary("test-alpha").bucket;
+    const viaBinding = resolveCanary("test-gamma").bucket;
+    // 50, not 100: at 100 evaluateCanary short-circuits before bucketing and
+    // reports no bucket at all, which would make this comparison vacuous.
     const bySeed = evaluateCanary({
-      feature: "test-alpha",
+      feature: "test-gamma",
       unitId: configState.bucketSeed,
-      percentage: 100,
+      percentage: 50,
     }).bucket;
     const byId = evaluateCanary({
-      feature: "test-alpha",
+      feature: "test-gamma",
       unitId: configState.anonymousId,
-      percentage: 100,
+      percentage: 50,
     }).bucket;
     expect(viaBinding).toBe(bySeed);
     // Only meaningful if the two units actually bucket differently.
@@ -148,13 +170,15 @@ describe("bucketing unit", () => {
 
   it("falls back to the anonymousId when no seed exists (failed legacy backfill)", async () => {
     const { evaluateCanary } = await import("@hyperframes/core/canary");
-    const viaBinding = resolveCanary("test-alpha").bucket;
+    const viaBinding = resolveCanary("test-gamma").bucket;
     const byId = evaluateCanary({
-      feature: "test-alpha",
+      feature: "test-gamma",
       unitId: configState.anonymousId,
-      percentage: 100,
+      percentage: 50,
     }).bucket;
     expect(viaBinding).toBe(byId);
+    // Both undefined would satisfy toBe — assert a bucket was actually computed.
+    expect(viaBinding).toEqual(expect.any(Number));
   });
 });
 
@@ -178,16 +202,16 @@ describe("CLI canary binding", () => {
 
   it("excludes CI from percentage enrolment, but an override still reaches it", () => {
     systemState.is_ci = true;
-    expect(resolveCanary("test-alpha")).toMatchObject({ enabled: false, reason: "excluded" });
+    expect(resolveCanary("test-gamma")).toMatchObject({ enabled: false, reason: "excluded" });
 
     __resetCanaryCacheForTests();
-    process.env.HF_CANARY_TEST_ALPHA = "on";
-    expect(resolveCanary("test-alpha")).toMatchObject({ enabled: true, reason: "forced_on" });
+    process.env.HF_CANARY_TEST_GAMMA = "on";
+    expect(resolveCanary("test-gamma")).toMatchObject({ enabled: true, reason: "forced_on" });
   });
 
   it("fails closed when the install has no anonymousId", () => {
     configState.anonymousId = "";
-    expect(resolveCanary("test-alpha")).toMatchObject({ enabled: false, reason: "no_unit_id" });
+    expect(resolveCanary("test-gamma")).toMatchObject({ enabled: false, reason: "no_unit_id" });
   });
 
   it("memoizes so a decision cannot change mid-process", () => {
@@ -202,6 +226,7 @@ describe("CLI canary binding", () => {
   it("emits PostHog flag-shaped properties for every registered canary", () => {
     expect(canaryEventProperties()).toEqual({
       "$feature/canary-test-alpha": "true",
+      "$feature/canary-test-gamma": expect.stringMatching(/^(true|false)$/),
       "$feature/canary-test-beta": "false",
     });
 

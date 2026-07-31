@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 // CLI → Studio telemetry identity seeding (Layer 1). Verifies the server only
 // hands the browser a distinct id when CLI telemetry is enabled, and passes
@@ -26,6 +26,7 @@ const {
   buildStudioHeadScripts,
   isLoopbackHost,
   buildStudioHeadScriptsForHost,
+  identityAllowed,
 } = await import("./telemetryIdentity.js");
 
 describe("resolveCliTelemetryDistinctId", () => {
@@ -249,5 +250,51 @@ describe("buildStudioHeadScriptsForHost — Host split", () => {
   it("always keeps the env script, whatever the Host", () => {
     expect(buildStudioHeadScriptsForHost(ENV, "evil.example.com")).toContain("__HF_STUDIO_ENV__");
     expect(buildStudioHeadScriptsForHost(ENV, "localhost")).toContain("__HF_STUDIO_ENV__");
+  });
+});
+
+describe("identityAllowed — loopback-bound vs explicitly LAN-bound", () => {
+  const original = process.env["HYPERFRAMES_PREVIEW_HOST"];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env["HYPERFRAMES_PREVIEW_HOST"];
+    else process.env["HYPERFRAMES_PREVIEW_HOST"] = original;
+  });
+
+  describe("loopback-bound (the default)", () => {
+    beforeEach(() => {
+      delete process.env["HYPERFRAMES_PREVIEW_HOST"];
+    });
+
+    it.each(["localhost:5173", "127.0.0.1", "[::1]:3000"])("allows %s", (host) => {
+      expect(identityAllowed(host)).toBe(true);
+    });
+
+    // A rebinding page cannot forge Host, so it arrives carrying its own name.
+    it.each(["evil.example.com", "127.0.0.1.evil.com", "192.168.1.10:3000", undefined])(
+      "refuses %s",
+      (host) => {
+        expect(identityAllowed(host)).toBe(false);
+      },
+    );
+  });
+
+  describe("explicitly LAN-bound", () => {
+    beforeEach(() => {
+      process.env["HYPERFRAMES_PREVIEW_HOST"] = "0.0.0.0";
+    });
+
+    // The mode this regressed: browsing your own LAN-exposed Studio lost the
+    // CLI stitch entirely, so the same human became two PostHog persons.
+    it.each(["0.0.0.0:3000", "192.168.1.10:3000", "my-dev-box.local:3000"])(
+      "allows %s once the operator opted into LAN exposure",
+      (host) => {
+        expect(identityAllowed(host)).toBe(true);
+      },
+    );
+
+    it("still allows loopback in that mode", () => {
+      expect(identityAllowed("localhost:3000")).toBe(true);
+    });
   });
 });

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
+import { telemetryRuntimeOverride } from "./policy.js";
 
 // ---------------------------------------------------------------------------
 // Config directory: ~/.hyperframes/
@@ -124,6 +125,12 @@ let seedBackfillWarned = false;
 function warnSeedBackfillFailed(error: string | undefined): void {
   if (seedBackfillWarned) return;
   seedBackfillWarned = true;
+  // Suppressed when the user has opted out of telemetry: the only consequence
+  // of the failed write is unstable CANARY cohorts, and an opted-out install
+  // is not enrolled in any. Printing anyway put an unsilenceable line into
+  // CI render logs on every invocation for a user who wants no telemetry at
+  // all. `hyperframes doctor` still surfaces it on demand.
+  if (telemetryRuntimeOverride() !== null) return;
   console.warn(
     `[hyperframes] Could not persist telemetry config${error ? `: ${error}` : ""}. ` +
       "Canary cohort assignment will not be stable across runs.",
@@ -147,9 +154,12 @@ function backfillBucketSeed(config: HyperframesConfig): void {
   if (!write.ok) warnSeedBackfillFailed(write.error);
 }
 
-// The latch is monotonic — once tripped it never untrips — so one read per
-// process is enough, and readConfig is hot (every command, every render).
-let latchFromStateFile: boolean | undefined;
+// ONLY the positive is cached. The latch is monotonic across processes in one
+// direction: once some process trips it, it stays tripped. A cached `false`
+// is not monotonic — another process can trip the breaker while this one is
+// alive, and a long-lived process (the preview/studio server) would then hold
+// a stale negative for hours. So `true` short-circuits and `false` re-reads.
+let latchedFiredSeen = false;
 
 /**
  * Is the breaker latched according to install-state?
@@ -163,11 +173,22 @@ let latchFromStateFile: boolean | undefined;
  * to prefer the safety fact.
  */
 function installStateLatchedFired(): boolean {
-  if (latchFromStateFile === undefined) {
-    const state = readInstallState();
-    latchFromStateFile = isInstallState(state) && state.deParallelRouterTrialFired === true;
-  }
-  return latchFromStateFile;
+  if (latchedFiredSeen) return true;
+  const state = readInstallState();
+  latchedFiredSeen = isInstallState(state) && state.deParallelRouterTrialFired === true;
+  return latchedFiredSeen;
+}
+
+// Same shape as the latch memo, and same reason for existing: readConfig is
+// hot. A seed never changes once recorded, so the positive is cacheable.
+let seedFromStateFile: string | undefined;
+
+/** The seed install-state has recorded for this machine, if any. */
+function installStateSeed(): string | undefined {
+  if (seedFromStateFile !== undefined) return seedFromStateFile;
+  const state = readInstallState();
+  if (isInstallState(state) && state.bucketSeed !== undefined) seedFromStateFile = state.bucketSeed;
+  return seedFromStateFile;
 }
 
 /** Narrow the parse result to a usable record. */
@@ -192,6 +213,12 @@ function readInstallState(): InstallState | InstallStateMiss {
   }
   const legacy = parseInstallState(LEGACY_STATE_FILE);
   if (!isInstallState(legacy)) {
+    // Unreadable legacy copy: nothing to migrate, so drop it here too. It
+    // used to survive, and since it lives OUTSIDE ~/.hyperframes it then
+    // reported predecessorFound/stateFileCorrupt forever on a machine the
+    // user had already reset with `rm -rf ~/.hyperframes` — poisoning the one
+    // metric this file exists to produce.
+    if (legacy === "corrupt") removeLegacyStateFile();
     // Corruption at EITHER location still means this machine had an install.
     return current === "corrupt" || legacy === "corrupt" ? "corrupt" : "absent";
   }
@@ -281,7 +308,8 @@ function applyInstallState(config: HyperframesConfig, wantFired: boolean): void 
   if (next !== null) writeInstallState(next);
   stateMarkerSynced = true;
   stateFiredSynced = wantFired || state?.deParallelRouterTrialFired === true;
-  if (wantFired) latchFromStateFile = true;
+  if (wantFired) latchedFiredSeen = true;
+  if (next?.bucketSeed !== undefined) seedFromStateFile = next.bucketSeed;
 }
 
 function syncInstallState(config: HyperframesConfig): boolean {
@@ -294,6 +322,23 @@ function syncInstallState(config: HyperframesConfig): boolean {
     // Leave the memo unset so a later write retries.
     return false;
   }
+}
+
+/**
+ * Mint a fresh config, persist it, and cache it EVEN IF the write failed.
+ *
+ * Without the unconditional cache the next readConfig in the same process
+ * re-minted, re-rolling bucketSeed along with the id — and across processes an
+ * unwritable ~/.hyperframes (read-only mount, root-owned after a sudo run,
+ * full disk) meant a fresh cohort on every single command, which is exactly
+ * the unbounded cumulative exposure the seed exists to prevent.
+ */
+function mintAndCacheConfig(): HyperframesConfig {
+  const config = mintConfig();
+  const write = writeConfigWithResult(config);
+  if (!write.ok) warnSeedBackfillFailed(write.error);
+  cachedConfig = { ...config };
+  return { ...config };
 }
 
 /**
@@ -501,55 +546,83 @@ function parseRecentRenders(value: unknown): RecentRenderRecord[] | undefined {
  * Read the config file, creating it with defaults if it doesn't exist.
  * Returns a mutable copy — call `writeConfig()` to persist changes.
  */
+/**
+ * Materialize a parsed config object, applying defaults and the explicit
+ * type guards. Split out of readConfig purely for size — that function is
+ * otherwise one long object literal plus four control-flow branches.
+ */
+/** Fields that are pure passthrough — no default, no validation. */
+function passthroughFields(parsed: Partial<HyperframesConfig>): Partial<HyperframesConfig> {
+  return {
+    lastUpdateCheck: parsed.lastUpdateCheck,
+    latestVersion: parsed.latestVersion,
+    lastStalePinNoticeAt: parsed.lastStalePinNoticeAt,
+    pendingUpdate: parsed.pendingUpdate,
+    completedUpdate: parsed.completedUpdate,
+    lastSkillsCheck: parsed.lastSkillsCheck,
+    skillsUpdateAvailable: parsed.skillsUpdateAvailable,
+    skillsOutdatedCount: parsed.skillsOutdatedCount,
+    skillsMissingCount: parsed.skillsMissingCount,
+    skillsRemovedCount: parsed.skillsRemovedCount,
+  };
+}
+
+/**
+ * Fields that need an explicit type guard or a cross-store merge, split from
+ * the plain defaults so neither block is complex on its own.
+ */
+function guardedFields(parsed: Partial<HyperframesConfig>): Partial<HyperframesConfig> {
+  return {
+    // Explicit `=== true`/typeof-number checks rather than a truthy/nullish
+    // read — a hand-edited or corrupted config could plausibly carry a
+    // non-boolean/non-number JSON value (e.g. the STRING "false", which is
+    // truthy in JS) for these two fields specifically, since they're read
+    // with a bare truthy check at the call site (review finding).
+    // `|| installStateLatchedFired()` — a latch recorded in install-state
+    // wins over an untripped config.json, never the reverse.
+    deParallelRouterTrialFired:
+      parsed.deParallelRouterTrialFired === true || installStateLatchedFired() ? true : undefined,
+    deParallelRouterTrialRenderCount:
+      typeof parsed.deParallelRouterTrialRenderCount === "number"
+        ? parsed.deParallelRouterTrialRenderCount
+        : undefined,
+    predecessorFound:
+      typeof parsed.predecessorFound === "boolean" ? parsed.predecessorFound : undefined,
+    stateFileCorrupt: parsed.stateFileCorrupt === true ? true : undefined,
+    // Install-state wins, exactly as it does for the latch. Without this the
+    // two stores could hold different seeds indefinitely: nextInstallState
+    // is write-once (state's seed always survives), but the read took
+    // config.json's blindly — so restoring or syncing only config.json left
+    // the install bucketing on A while install-state kept B, and the next
+    // re-mint silently flipped every cohort at once.
+    bucketSeed: installStateSeed() ?? parseNonEmptyString(parsed.bucketSeed),
+  };
+}
+
+function materializeConfig(parsed: Partial<HyperframesConfig>): HyperframesConfig {
+  return {
+    ...passthroughFields(parsed),
+    telemetryEnabled: parsed.telemetryEnabled ?? DEFAULT_CONFIG.telemetryEnabled,
+    anonymousId: parsed.anonymousId || randomUUID(),
+    telemetryNoticeShown: parsed.telemetryNoticeShown ?? DEFAULT_CONFIG.telemetryNoticeShown,
+    commandCount: parsed.commandCount ?? DEFAULT_CONFIG.commandCount,
+    renderSuccessCount: parsed.renderSuccessCount ?? DEFAULT_CONFIG.renderSuccessCount,
+    lastFeedbackPromptAt: parsed.lastFeedbackPromptAt ?? DEFAULT_CONFIG.lastFeedbackPromptAt,
+    ...guardedFields(parsed),
+    recentRenders: parseRecentRenders(parsed.recentRenders),
+  };
+}
+
 export function readConfig(): HyperframesConfig {
   if (cachedConfig) return { ...cachedConfig };
 
-  if (!existsSync(CONFIG_FILE)) {
-    const config = mintConfig();
-    writeConfig(config);
-    return config;
-  }
+  if (!existsSync(CONFIG_FILE)) return mintAndCacheConfig();
 
   try {
     const raw = readFileSync(CONFIG_FILE, "utf-8");
     const parsed = JSON.parse(raw) as Partial<HyperframesConfig>;
 
-    const config: HyperframesConfig = {
-      telemetryEnabled: parsed.telemetryEnabled ?? DEFAULT_CONFIG.telemetryEnabled,
-      anonymousId: parsed.anonymousId || randomUUID(),
-      telemetryNoticeShown: parsed.telemetryNoticeShown ?? DEFAULT_CONFIG.telemetryNoticeShown,
-      commandCount: parsed.commandCount ?? DEFAULT_CONFIG.commandCount,
-      renderSuccessCount: parsed.renderSuccessCount ?? DEFAULT_CONFIG.renderSuccessCount,
-      lastFeedbackPromptAt: parsed.lastFeedbackPromptAt ?? DEFAULT_CONFIG.lastFeedbackPromptAt,
-      lastUpdateCheck: parsed.lastUpdateCheck,
-      latestVersion: parsed.latestVersion,
-      lastStalePinNoticeAt: parsed.lastStalePinNoticeAt,
-      pendingUpdate: parsed.pendingUpdate,
-      completedUpdate: parsed.completedUpdate,
-      lastSkillsCheck: parsed.lastSkillsCheck,
-      skillsUpdateAvailable: parsed.skillsUpdateAvailable,
-      skillsOutdatedCount: parsed.skillsOutdatedCount,
-      skillsMissingCount: parsed.skillsMissingCount,
-      skillsRemovedCount: parsed.skillsRemovedCount,
-      // Explicit `=== true`/typeof-number checks rather than a truthy/nullish
-      // read — a hand-edited or corrupted config could plausibly carry a
-      // non-boolean/non-number JSON value (e.g. the STRING "false", which is
-      // truthy in JS) for these two fields specifically, since they're read
-      // with a bare truthy check at the call site (review finding).
-      // `|| installStateLatchedFired()` — a latch recorded in install-state
-      // wins over an untripped config.json, never the reverse.
-      deParallelRouterTrialFired:
-        parsed.deParallelRouterTrialFired === true || installStateLatchedFired() ? true : undefined,
-      deParallelRouterTrialRenderCount:
-        typeof parsed.deParallelRouterTrialRenderCount === "number"
-          ? parsed.deParallelRouterTrialRenderCount
-          : undefined,
-      predecessorFound:
-        typeof parsed.predecessorFound === "boolean" ? parsed.predecessorFound : undefined,
-      stateFileCorrupt: parsed.stateFileCorrupt === true ? true : undefined,
-      bucketSeed: parseNonEmptyString(parsed.bucketSeed),
-      recentRenders: parseRecentRenders(parsed.recentRenders),
-    };
+    const config = materializeConfig(parsed);
 
     // One-time backfill for configs predating the bucket seed: prefer the
     // recorded seed if a previous install already wrote one, else mint.

@@ -18,7 +18,7 @@ import {
 import { VERSION as version } from "../version.js";
 import {
   buildStudioHeadScriptsForHost,
-  isLoopbackHost,
+  identityAllowed,
   resolveCliTelemetryDistinctId,
 } from "./telemetryIdentity.js";
 import { emitStudioRenderComplete, emitStudioRenderError } from "./studioRenderTelemetry.js";
@@ -668,7 +668,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
   // attacker's hostname) is refused. Same-origin Studio traffic always
   // presents the bound loopback host.
   app.get("/api/telemetry-identity", (c) => {
-    if (!isLoopbackHost(c.req.header("host"))) {
+    if (!identityAllowed(c.req.header("host"))) {
       return c.json({ error: "forbidden" }, 403);
     }
     return c.json({ distinctId: resolveCliTelemetryDistinctId() });

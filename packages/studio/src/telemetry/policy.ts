@@ -82,6 +82,17 @@ function isViteDevMode(): boolean {
  * (canary decisions do; the transports intentionally do not).
  */
 export function browserTelemetryAllowed(): boolean {
+  try {
+    return allowed();
+  } catch {
+    // Fail CLOSED. A storage read that throws must not enrol anyone, and must
+    // not propagate: callers include a post-commit catch block where a throw
+    // reports a committed edit as failed.
+    return false;
+  }
+}
+
+function allowed(): boolean {
   return (
     isApiKeyConfigured() &&
     !isBuildTimeOptOut() &&

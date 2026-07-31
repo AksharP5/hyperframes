@@ -58,9 +58,18 @@ function telemetryActive(): boolean {
  */
 const decisions = new Map<string, CanaryDecision>();
 
+// The memo is scoped to a telemetry posture, not to the process. Within one
+// render nothing may change (a render that starts enrolled must finish
+// enrolled), but `hyperframes preview` is a long-lived server that re-serves
+// decisions on every page load — and it used to keep serving pre-opt-out
+// decisions for hours after `hyperframes telemetry disable`, which is exactly
+// what the docs promise cannot happen.
+let decisionsTelemetryPosture: boolean | undefined;
+
 /** Test-only: drop memoized decisions so cases don't leak into each other. */
 export function __resetCanaryCacheForTests(): void {
   decisions.clear();
+  decisionsTelemetryPosture = undefined;
 }
 
 /** The uncached decision. Split out so `resolveCanary` is purely the memo. */
@@ -105,6 +114,11 @@ function decideCanary(name: string): CanaryDecision {
  * rollout control, and a typo in one must never take down a render.
  */
 export function resolveCanary(name: string): CanaryDecision {
+  const posture = telemetryActive();
+  if (decisionsTelemetryPosture !== posture) {
+    decisions.clear();
+    decisionsTelemetryPosture = posture;
+  }
   const cached = decisions.get(name);
   if (cached) return cached;
 

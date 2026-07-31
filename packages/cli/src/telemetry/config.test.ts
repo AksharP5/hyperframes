@@ -36,6 +36,14 @@ vi.mock("node:fs", () => ({
   }),
 }));
 
+// The backfill warning is suppressed under a telemetry runtime override (a
+// dev build counts as one, which vitest is), so the posture is controlled
+// explicitly rather than inherited from the test environment.
+const policyState = { runtimeOverride: null as string | null };
+vi.mock("./policy.js", () => ({
+  telemetryRuntimeOverride: () => policyState.runtimeOverride,
+}));
+
 // Derived here rather than exported from config.ts: the pre-move path is
 // frozen history, so pinning the literal is the point — an export would just
 // let a rename pass silently, and it has no non-test consumer.
@@ -446,6 +454,7 @@ describe("seed backfill write failure is surfaced", () => {
   });
 
   it("warns once when the backfilled seed cannot be persisted", async () => {
+    policyState.runtimeOverride = null;
     // A config predating bucketSeed, on an unwritable home directory.
     const seeded = { telemetryEnabled: true, anonymousId: "id", telemetryNoticeShown: true };
     fsState.files.set(CONFIG_PATH, JSON.stringify(seeded));
@@ -548,6 +557,122 @@ describe("the breaker latch is authoritative from install-state", () => {
     // but the caller can now see the safety fact reached only one store.
     expect(writeConfigWithResult(config)).toEqual({ ok: true, mirrored: false });
 
+    vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
+      fsState.files.set(String(path), String(content));
+    });
+  });
+});
+
+describe("install-state authority — negative latch and seed", () => {
+  let readConfig: typeof import("./config.js").readConfig;
+  let readConfigFresh: typeof import("./config.js").readConfigFresh;
+  let CONFIG_PATH: typeof import("./config.js").CONFIG_PATH;
+  let STATE_PATH: typeof import("./config.js").STATE_PATH;
+
+  beforeEach(async () => {
+    fsState.files.clear();
+    vi.resetModules();
+    ({ readConfig, readConfigFresh, CONFIG_PATH, STATE_PATH } = await import("./config.js"));
+  });
+
+  // Only `true` is monotonic across processes. Caching `false` froze a stale
+  // negative in a long-lived process (the preview server), so a breaker
+  // tripped by another process was never picked up.
+  it("re-reads a negative latch: false -> external trip -> stale config -> fresh read is true", () => {
+    fsState.files.set(STATE_PATH, JSON.stringify({ markerAt: "2026-07-28T00:00:00.000Z" }));
+    fsState.files.set(
+      CONFIG_PATH,
+      JSON.stringify({ telemetryEnabled: true, anonymousId: "id", bucketSeed: "seed" }),
+    );
+    expect(readConfig().deParallelRouterTrialFired).toBeUndefined();
+
+    // Another process trips the breaker and mirrors it...
+    fsState.files.set(
+      STATE_PATH,
+      JSON.stringify({ markerAt: "2026-07-28T00:00:00.000Z", deParallelRouterTrialFired: true }),
+    );
+    // ...and a stale writer rewrites config.json without the flag.
+    fsState.files.set(
+      CONFIG_PATH,
+      JSON.stringify({ telemetryEnabled: true, anonymousId: "id", bucketSeed: "seed" }),
+    );
+
+    expect(readConfigFresh().deParallelRouterTrialFired).toBe(true);
+  });
+
+  // The latch got read-side authority; the seed did not, so the two stores
+  // could hold different seeds indefinitely and a re-mint flipped every cohort.
+  it("prefers the install-state seed over a restored config.json seed", () => {
+    fsState.files.set(
+      STATE_PATH,
+      JSON.stringify({ markerAt: "2026-07-28T00:00:00.000Z", bucketSeed: "seed-B" }),
+    );
+    fsState.files.set(
+      CONFIG_PATH,
+      JSON.stringify({ telemetryEnabled: true, anonymousId: "id", bucketSeed: "seed-A" }),
+    );
+    expect(readConfig().bucketSeed).toBe("seed-B");
+  });
+
+  // A corrupt file OUTSIDE ~/.hyperframes survived the documented reset and
+  // reported a predecessor forever.
+  it("deletes an unreadable pre-move state file instead of reporting it forever", () => {
+    fsState.files.set(LEGACY_STATE_PATH, "{truncated");
+    const config = readConfig();
+    expect(config.stateFileCorrupt).toBe(true);
+    expect(fsState.files.has(LEGACY_STATE_PATH), "legacy copy removed").toBe(false);
+  });
+});
+
+describe("an unwritable config dir must not re-roll the seed", () => {
+  let readConfig: typeof import("./config.js").readConfig;
+  let readConfigFresh: typeof import("./config.js").readConfigFresh;
+
+  beforeEach(async () => {
+    fsState.files.clear();
+    policyState.runtimeOverride = null;
+    vi.resetModules();
+    ({ readConfig, readConfigFresh } = await import("./config.js"));
+  });
+
+  // No config.json AND an unwritable dir: cachedConfig was never set, so the
+  // next read re-minted and the seed re-rolled — on every command, forever.
+  it("keeps one seed for the process when the initial write fails", async () => {
+    const fs = await import("node:fs");
+    vi.mocked(fs.writeFileSync).mockImplementation(() => {
+      throw new Error("EACCES: permission denied");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const first = readConfig();
+    const second = readConfig();
+    expect(first.bucketSeed).toBeTruthy();
+    expect(second.bucketSeed).toBe(first.bucketSeed);
+    expect(second.anonymousId).toBe(first.anonymousId);
+    // And the user is told, rather than churning silently.
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    warn.mockRestore();
+    vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
+      fsState.files.set(String(path), String(content));
+    });
+  });
+
+  it("stays silent for an install that opted out of telemetry", async () => {
+    policyState.runtimeOverride = "HYPERFRAMES_NO_TELEMETRY";
+    const fs = await import("node:fs");
+    vi.mocked(fs.writeFileSync).mockImplementation(() => {
+      throw new Error("EACCES: permission denied");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    readConfigFresh();
+    // The only consequence is unstable canary cohorts, and an opted-out
+    // install is never enrolled in one — so this line was pure noise in CI
+    // logs, on every invocation, unsilenceable.
+    expect(warn).not.toHaveBeenCalled();
+
+    warn.mockRestore();
     vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
       fsState.files.set(String(path), String(content));
     });

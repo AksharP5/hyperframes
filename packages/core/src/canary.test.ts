@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { randomUUID } from "node:crypto";
 import { canaryBucket, evaluateCanary, parseCanaryOverride, type CanaryInput } from "./canary.js";
 import { CANARIES, canaryEnvVar, findCanary, overdueCanaries } from "./canaryRegistry.js";
 import { CANARY_FEATURE_PREFIX, canaryFeatureKey, canaryFeatureProperties } from "./canary.js";
@@ -27,9 +26,36 @@ function rawFnv(input: string): number {
   return hash >>> 0;
 }
 
-/** A realistic population: install ids are v4 UUIDs (`randomUUID()`). */
-function uuids(n: number): string[] {
-  return Array.from({ length: n }, () => randomUUID());
+/**
+ * A realistic population: v4-shaped UUIDs, but from a SEEDED PRNG.
+ *
+ * These ids feed statistical assertions (share within 1pp, chi-square
+ * uniformity) whose thresholds are tight enough to fail by chance on a
+ * genuinely random draw: measured at ~4 failures per 1500 runs for the share
+ * bound (the pct=50 case has a binomial SD of 0.354pp, so 1pp is only 2.8
+ * sigma) and 1 per 1000 for chi-square by its own construction. That made the
+ * whole @hyperframes/core suite flaky for unrelated PRs. Seeded means the
+ * population is fixed, so a failure is a real change in the hash — which is
+ * the only thing these tests are for.
+ */
+function uuids(n: number, seed = 0x9e3779b9): string[] {
+  let state = seed >>> 0;
+  const nextByte = (): number => {
+    // xorshift32 — deterministic, and uniform enough to stand in for a real
+    // id population. Not used for anything security-relevant.
+    state ^= state << 13;
+    state >>>= 0;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    state >>>= 0;
+    return state & 0xff;
+  };
+  const hex = (count: number): string =>
+    Array.from({ length: count }, () => nextByte().toString(16).padStart(2, "0")).join("");
+  return Array.from(
+    { length: n },
+    () => `${hex(4)}-${hex(2)}-4${hex(2).slice(1)}-a${hex(2).slice(1)}-${hex(6)}`,
+  );
 }
 
 describe("fnv1a32 (via canaryBucket)", () => {
@@ -87,9 +113,9 @@ describe("evaluateCanary", () => {
     }
   });
 
-  it("fails closed without a unit id — unknown must never mean everyone", () => {
+  it("fails closed without a unit id — unknown must never mean a PARTIAL cohort", () => {
     for (const id of [undefined, "", "   "]) {
-      expect(evaluateCanary(base({ unitId: id, percentage: 100 }))).toEqual({
+      expect(evaluateCanary(base({ unitId: id, percentage: 50 }))).toEqual({
         enabled: false,
         reason: "no_unit_id",
       });
@@ -97,10 +123,30 @@ describe("evaluateCanary", () => {
   });
 
   it("excludes flagged units (CI) from percentage enrolment but not from an override", () => {
-    expect(evaluateCanary(base({ percentage: 100, exclude: true })).reason).toBe("excluded");
-    expect(evaluateCanary(base({ percentage: 100, exclude: true, override: true })).enabled).toBe(
+    expect(evaluateCanary(base({ percentage: 50, exclude: true })).reason).toBe("excluded");
+    expect(evaluateCanary(base({ percentage: 50, exclude: true, override: true })).enabled).toBe(
       true,
     );
+  });
+
+  // 100 is the one percentage where "we don't know who this is" and "this is
+  // CI" stop mattering: the registry's step 4 says to delete the entry and the
+  // guard at 100-and-holding, so any population still resolving false here
+  // would take the new path for the FIRST time at deletion — unstaged, and
+  // invisible on the dashboard that said it was safe.
+  it.each([
+    ["no unit id", { unitId: undefined }],
+    ["blank unit id", { unitId: "   " }],
+    ["excluded (CI)", { exclude: true }],
+  ])("at 100%% enrols %s, so deleting the guard changes nothing", (_label, extra) => {
+    expect(evaluateCanary(base({ percentage: 100, ...extra }))).toEqual({
+      enabled: true,
+      reason: "in_cohort",
+    });
+  });
+
+  it("an explicit off still wins at 100%", () => {
+    expect(evaluateCanary(base({ percentage: 100, override: false })).enabled).toBe(false);
   });
 
   it("clamps out-of-range and fractional percentages", () => {
@@ -264,10 +310,29 @@ describe("registry", () => {
     expect(findCanary("nope")).toBeUndefined();
   });
 
-  it("no canary is past its sunset date", () => {
-    // Fails the suite when a rollout has been left half-finished. Either take
-    // it to 100 and delete the entry, or move the date deliberately.
-    expect(overdueCanaries()).toEqual([]);
+  // Deliberately NOT `overdueCanaries()` with the ambient date. That assertion
+  // reads wall-clock time, so it turns the entire @hyperframes/core suite red
+  // on a calendar date for every unrelated PR — a broken build nobody caused
+  // and whose fix is unrelated to the change under test. The registry's own
+  // freshness is enforced by the pinned dates below plus the sunset REPORT,
+  // which is advisory rather than a gate.
+  it("every canary carries a parseable sunset date in the future at authoring time", () => {
+    const authored = new Date("2026-07-31T00:00:00Z");
+    for (const c of CANARIES) {
+      const sunset = Date.parse(`${c.sunsetAfter}T00:00:00Z`);
+      expect(Number.isFinite(sunset), `${c.name} has an unparseable sunsetAfter`).toBe(true);
+      expect(sunset, `${c.name} was authored already-expired`).toBeGreaterThan(authored.getTime());
+    }
+  });
+
+  it("reports a canary as overdue only AFTER the whole sunset day has passed", () => {
+    const [first] = CANARIES;
+    if (!first) return;
+    const day = first.sunsetAfter;
+    expect(overdueCanaries(new Date(`${day}T00:00:00Z`))).not.toContain(first.name);
+    expect(overdueCanaries(new Date(`${day}T23:59:59Z`))).not.toContain(first.name);
+    const dayAfter = new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000);
+    expect(overdueCanaries(dayAfter)).toContain(first.name);
   });
 });
 

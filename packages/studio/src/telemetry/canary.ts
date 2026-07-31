@@ -213,14 +213,25 @@ function decideStudioCanary(name: string): CanaryDecision {
   const override = readOverride(definition.name);
   if (override === undefined) {
     if (!browserTelemetryAllowed()) return { enabled: false, reason: "telemetry_opt_out" };
+    // Studio's exclusion is its own to apply: the CLI cannot see
+    // navigator.webdriver, so adopting its cohort decision verbatim enrolled
+    // Playwright/Puppeteer sessions driving a local `hyperframes preview` —
+    // each minting a fresh localStorage id, precisely the ephemeral-id noise
+    // the exclusion exists to keep out of the rollout signal.
+    if (isAutomatedBrowser()) return { enabled: false, reason: "excluded" };
     if (fromCli !== undefined) return cohortOutcome(fromCli.enabled);
   }
+
+  // An explicit override decides on evaluateCanary's first line without ever
+  // reading unitId, so resolving the unit here would mint and PERSIST an
+  // anonymous id purely as an unused argument — for a profile that may have
+  // opted out. One click on a support link created a durable tracking id.
+  if (override !== undefined) return forcedOutcome(override);
 
   return evaluateCanary({
     feature: definition.name,
     unitId: resolveBucketUnit(),
     percentage: definition.percentage,
-    override,
     exclude: isAutomatedBrowser(),
   });
 }

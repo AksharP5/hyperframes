@@ -106,7 +106,10 @@ export function canaryEnvVar(name: string): string {
  */
 export function overdueCanaries(now: Date = new Date()): string[] {
   return CANARIES.filter((c) => {
-    const sunset = Date.parse(`${c.sunsetAfter}T00:00:00Z`);
-    return Number.isFinite(sunset) && now.getTime() > sunset;
+    // End of the sunset day, not its start. The field is documented as the
+    // date AFTER which a canary is overdue, but comparing against midnight UTC
+    // made it overdue ON that date — and earlier still for anyone west of UTC.
+    const sunsetEnd = Date.parse(`${c.sunsetAfter}T23:59:59.999Z`);
+    return Number.isFinite(sunsetEnd) && now.getTime() > sunsetEnd;
   }).map((c) => c.name);
 }

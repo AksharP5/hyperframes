@@ -24,14 +24,14 @@ interface QueuedEvent {
 
 let eventQueue: QueuedEvent[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
-let telemetryEnabled: boolean | null = null;
 
 export function shouldTrack(): boolean {
-  if (telemetryEnabled !== null) return telemetryEnabled;
-  // Delegated to telemetry/policy.ts so this transport, the older `studio:*`
-  // transport, and canary enrolment cannot drift apart again.
-  telemetryEnabled = browserTelemetryAllowed();
-  return telemetryEnabled;
+  // NOT memoized. policy.ts is explicit that the transports re-ask, and
+  // policy.test.ts asserts a mid-session opt-out takes effect at once — but
+  // this cached on first call, so a user who opted out in DevTools after one
+  // event kept sending `studio_*` and render events for the rest of the tab
+  // while `studio:*` correctly stopped. The check is two property reads.
+  return browserTelemetryAllowed();
 }
 
 export function trackEvent(event: string, properties: EventProperties = {}): void {

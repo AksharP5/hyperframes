@@ -119,13 +119,17 @@ export function evaluateCanary(input: CanaryInput): CanaryDecision {
   const pct = Math.max(0, Math.min(100, Math.trunc(input.percentage)));
   if (pct <= 0) return { enabled: false, reason: "out_of_cohort" };
 
+  // Ahead of `exclude` and the unit-id check: at 100 the registry's step 4
+  // says to delete the entry and the guard, so anything still resolving false
+  // here would take the new path for the FIRST time at deletion, unstaged.
+  // CI and seedless installs are exactly the populations a dashboard cannot
+  // see, so "100% and holding" looked green while they were never exercised.
+  if (pct >= 100) return { enabled: true, reason: "in_cohort" };
+
   if (input.exclude) return { enabled: false, reason: "excluded" };
 
   const unitId = input.unitId?.trim();
   if (!unitId) return { enabled: false, reason: "no_unit_id" };
-
-  if (pct >= 100)
-    return { enabled: true, reason: "in_cohort", bucket: canaryBucket(input.feature, unitId) };
 
   const bucket = canaryBucket(input.feature, unitId);
   return bucket < pct

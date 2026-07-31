@@ -57,14 +57,17 @@ function resolveCliBucketSeed(): string | null {
  * Is this request's `Host` a loopback name the studio server could have been
  * reached on directly?
  *
- * Guards the identity endpoint against DNS rebinding: an attacker-controlled
- * page can resolve its own hostname to 127.0.0.1 and read the response as
- * same-origin, but the request still carries THAT hostname in `Host`. Genuine
- * same-origin Studio traffic always presents the bound loopback host.
- *
  * A bare `[::1]`/`localhost`/dotted-quad check rather than a full parse: the
  * port is irrelevant (any port on loopback is us), and anything exotic enough
  * to miss here should be refused rather than guessed at.
+ *
+ * Scope, stated precisely: this is a **DNS-rebinding mitigation for browsers**,
+ * not access control. A browser sets `Host` from the URL it was given, so a
+ * page that rebinds its own hostname to 127.0.0.1 arrives carrying that
+ * hostname and is refused. A non-browser client sets `Host` to whatever it
+ * likes, so this stops nothing there — but on a loopback-bound server such a
+ * client is already local, and on a LAN-bound one it can read the project
+ * files through the unauthenticated studio API anyway. See `identityAllowed`.
  */
 export function isLoopbackHost(host: string | undefined): boolean {
   if (!host) return false;
@@ -175,6 +178,28 @@ export function buildStudioHeadScripts(
  * injection branch when `packages/studio/dist` happens to be built, which is
  * true locally and false in the CI test lane.
  */
+/**
+ * May this request receive the CLI's identity (distinct id + bucket seed)?
+ *
+ * Two regimes, because the server binds loopback by DEFAULT and exposes the
+ * LAN only when an operator sets `HYPERFRAMES_PREVIEW_HOST` (portUtils.ts,
+ * F-001):
+ *
+ *  - **Loopback-bound (default).** Anything reaching us came via loopback, so
+ *    the only interesting attacker is a rebinding browser page — which the
+ *    Host check catches, because a browser cannot forge `Host`.
+ *  - **Explicitly LAN-bound.** The operator opted into exposing this server,
+ *    and the Host header is trivially forgeable by any non-browser client, so
+ *    the check buys nothing. Withholding identity there only broke the
+ *    CLI-to-Studio stitch for the supported mode: the user browses
+ *    `http://0.0.0.0:3000` or the machine's LAN IP, `isLoopbackHost` says no,
+ *    and Studio mints a second anonymous person for the same human.
+ */
+export function identityAllowed(host: string | undefined): boolean {
+  const lanBound = (process.env["HYPERFRAMES_PREVIEW_HOST"] ?? "").trim() !== "";
+  return lanBound || isLoopbackHost(host);
+}
+
 export function buildStudioHeadScriptsForHost(envScript: string, host: string | undefined): string {
-  return buildStudioHeadScripts(envScript, { includeIdentity: isLoopbackHost(host) });
+  return buildStudioHeadScripts(envScript, { includeIdentity: identityAllowed(host) });
 }
