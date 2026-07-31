@@ -553,13 +553,24 @@ export async function extractAudioMetadata(
     // 2. It must honour the caller's AbortSignal. Only the first probe
     //    received it, so aborting during this one was ignored and the call
     //    resolved with full metadata long after cancellation.
-    // 3. It must not apply to HE-AAC. ffprobe reports codec_name "aac" for
-    //    HE-AAC v1/v2 as well — the marker is in the profile — and with SBR
-    //    each packet carries 2048 output samples against the doubled output
-    //    sample_rate, so assuming 1024 halves the duration. A 10:00 podcast
-    //    became 5:00, truncating the audio at exactly half.
-    const isHeAac = /he-?aac|aac\s*(?:se?|v[12])\b/i.test(audioStream.profile ?? "");
-    if (audioCodec === "aac" && !isHeAac && sampleRate > 0) {
+    // 3. It must apply ONLY to profiles whose 1024-sample framing is
+    //    established. ffprobe reports codec_name "aac" for every AAC
+    //    variant — the framing lives in the profile:
+    //
+    //      LC            1024 samples/frame   <- the only one this maths fits
+    //      HE-AAC v1/v2  2048 output samples against a doubled sample_rate
+    //      LD            512
+    //      ELD           480
+    //      Main/SSR/LTP  1024 nominally, but not verified here
+    //      xHE-AAC (USAC) variable
+    //
+    //    An ALLOWLIST, not a HE-AAC denylist. The denylist form let LD/ELD
+    //    through (halving to a third of the true duration), and let an
+    //    unknown or missing profile through too — so an unrecognised HE
+    //    spelling preserved the exact truncation this is meant to close.
+    //    A skipped refinement is harmless: format.duration is already correct.
+    const isAacLc = /^\s*LC\s*$/i.test(audioStream.profile ?? "");
+    if (audioCodec === "aac" && isAacLc && sampleRate > 0) {
       try {
         const packetStdout = await runFfprobe(
           filePath,
