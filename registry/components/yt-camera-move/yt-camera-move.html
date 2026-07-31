@@ -50,12 +50,14 @@
         overflow: hidden;
         background: linear-gradient(135deg, #35c8d9 0%, #2a7fff 55%, #7d5cff 100%);
       }
+      /* Grid is the only cue that reveals the camera move on a flat gradient
+         plate; at 0.14/2px the zoom and slide were nearly imperceptible. */
       #yt-cm-stage .yt-cm-grid {
         position: absolute;
         inset: -60px;
         background:
-          repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.14) 0 2px, transparent 2px 120px),
-          repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.14) 0 2px, transparent 2px 120px);
+          repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.3) 0 3px, transparent 3px 120px),
+          repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0 3px, transparent 3px 120px);
       }
       #yt-cm-stage .yt-cm-label {
         position: absolute;

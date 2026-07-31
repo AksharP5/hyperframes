@@ -16,7 +16,9 @@
         overflow: hidden;
       }
       #hw-st-root {
-        --hw-accent: #6d6dff;
+        /* Warm marker accent, consistent with the rest of the hw family.
+           Override per use via CONFIG.color. */
+        --hw-accent: #ffb020;
 
         position: relative;
         width: 1920px;
@@ -75,7 +77,7 @@
            coverage at the midpoint (the host hard-cuts beneath, ~0.9-1.4s
            local), then everything clears. Place spanning the host's cut. */
         var CONFIG = {
-          color: null, // css color; null = --hw-accent purple
+          color: null, // css color; null = --hw-accent (warm marker)
           bands: 7, // horizontal scribble bands
           strokeScale: 1.0,
           seed: 17,

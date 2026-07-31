@@ -44,9 +44,12 @@
         stroke-width: var(--hw-co-w, 6);
       }
       .hw-callout .hw-co-scribble {
-        stroke: var(--hw-co-accent, var(--hw-accent, #6d6dff));
-        stroke-width: 4;
-        opacity: 0.7;
+        /* Warm marker accent to match hw-frame / hw-title / hw-underline; the
+           previous blue read as a default UI colour. Lighter weight and alpha
+           so the hatch sits behind the labelled subject instead of over it. */
+        stroke: var(--hw-co-accent, var(--hw-accent, #ffb020));
+        stroke-width: 3;
+        opacity: 0.42;
       }
       .hw-callout .hw-co-connector {
         stroke: var(--hw-co-ink, var(--hw-ink, #f4f2ec));
@@ -220,8 +223,10 @@
           if (opts.scribble === false) {
             scr.style.display = "none";
           } else {
+            /* Denser rows so the zigzag reads as a scribbled hatch. At 6 rows
+               the near-horizontal runs dominate and it renders as stacked bars. */
             var d = "",
-              rows = 6;
+              rows = 11;
             for (var i = 0; i < rows; i++) {
               var t = (i + 0.5) / rows;
               var yy = cy - ry + t * ry * 2;

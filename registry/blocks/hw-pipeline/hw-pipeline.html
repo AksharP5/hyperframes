@@ -25,7 +25,9 @@
         --hw-font-print: "Caveat", cursive;
         --hw-font-script: "Caveat", cursive;
         --hw-ink: #f4f2ec;
-        --hw-accent: #6d6dff;
+        /* Warm marker accent, matching hw-frame / hw-title / hw-underline. The
+           previous #6d6dff read as a default UI blue against the family's ink. */
+        --hw-accent: #ffb020;
 
         position: relative;
         width: 1920px;
@@ -220,29 +222,51 @@
             var c = document.createElementNS(NS, "path");
             c.setAttribute("class", "hw-pl-conn");
             c.setAttribute("id", "hw-pl-conn-" + i);
+            var sx = cx + 10,
+              tx = ex - 10;
+            var qx = cx + CONFIG.gap / 2 + window.hwHash(i * 9 + 2, CONFIG.seed) * 16,
+              qy = cy - 46 - window.hwHash(i * 9 + 3, CONFIG.seed) * 12;
+            /* Barbs follow the curve's incoming tangent. A quadratic's tangent
+               at its end is (end - control); barbs fixed to horizontal left the
+               head detached from a curve that arrives descending. Symmetric
+               length and angle, so it reads as one arrowhead. */
+            var ang = Math.atan2(ey - qy, tx - qx) + Math.PI;
+            var BARB = 26,
+              SPREAD = 0.42;
+            var b1x = tx + BARB * Math.cos(ang - SPREAD),
+              b1y = ey + BARB * Math.sin(ang - SPREAD);
+            var b2x = tx + BARB * Math.cos(ang + SPREAD),
+              b2y = ey + BARB * Math.sin(ang + SPREAD);
             c.setAttribute(
               "d",
               "M " +
-                (cx + 10) +
+                sx +
                 " " +
                 cy +
                 " Q " +
-                (cx + CONFIG.gap / 2 + window.hwHash(i * 9 + 2, CONFIG.seed) * 16) +
+                qx +
                 " " +
-                (cy - 46 - window.hwHash(i * 9 + 3, CONFIG.seed) * 12) +
+                qy +
                 " " +
-                (ex - 10) +
+                tx +
                 " " +
                 ey +
                 " M " +
-                (ex - 10) +
+                tx +
                 " " +
                 ey +
-                " l -30 -14 M " +
-                (ex - 10) +
+                " L " +
+                b1x +
+                " " +
+                b1y +
+                " M " +
+                tx +
                 " " +
                 ey +
-                " l -26 18",
+                " L " +
+                b2x +
+                " " +
+                b2y,
             );
             svg.appendChild(c);
             conns.push(c);
