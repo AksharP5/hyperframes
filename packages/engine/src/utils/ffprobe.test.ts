@@ -797,3 +797,81 @@ describe("pix_fmt alpha detection", () => {
   it.each(ALPHA)("detects alpha in %s", (fmt) => expect(pixelFormatHasAlpha(fmt)).toBe(true));
   it.each(OPAQUE)("reports %s as opaque", (fmt) => expect(pixelFormatHasAlpha(fmt)).toBe(false));
 });
+
+describe("AAC duration refinement must never fail or distort the call", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("child_process");
+  });
+
+  const aacStream = (profile?: string) =>
+    JSON.stringify({
+      streams: [
+        { codec_type: "audio", codec_name: "aac", sample_rate: "44100", channels: 2, profile },
+      ],
+      format: { duration: "600", bit_rate: "128000" },
+    });
+
+  async function probe(outcomes: SpawnOutcome[], file: string) {
+    const { spawn, calls } = createSpawnSpy(outcomes);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { extractAudioMetadata } = await import("./ffprobe.js");
+    return { meta: await extractAudioMetadata(file), calls };
+  }
+
+  // Regression: the refinement had no try/catch, so its failure rejected a
+  // call whose duration was already correct. htmlCompiler catches that as
+  // "no audio stream", returns 0, and the render ships silent.
+  it("keeps the container duration when the packet probe fails", async () => {
+    const { meta } = await probe(
+      [
+        { kind: "exit", code: 0, stdout: aacStream("LC") },
+        { kind: "exit", code: 1, stdout: "", stderr: "ffprobe exploded" },
+      ],
+      "/tmp/aac-packet-probe-fails.m4a",
+    );
+    expect(meta.durationSeconds).toBe(600);
+  });
+
+  it("keeps the container duration when the packet probe returns junk", async () => {
+    const { meta } = await probe(
+      [
+        { kind: "exit", code: 0, stdout: aacStream("LC") },
+        { kind: "exit", code: 0, stdout: "not json at all" },
+      ],
+      "/tmp/aac-packet-probe-junk.m4a",
+    );
+    expect(meta.durationSeconds).toBe(600);
+  });
+
+  // Regression: codec_name is "aac" for HE-AAC too, but its packets carry
+  // 2048 output samples — assuming 1024 halved a 10:00 podcast to 5:00.
+  it.each(["HE-AAC", "HE-AACv2", "he-aac"])(
+    "does not apply the LC packet maths to profile %s",
+    async (profile) => {
+      const { meta, calls } = await probe(
+        [{ kind: "exit", code: 0, stdout: aacStream(profile) }],
+        `/tmp/heaac-${profile}.m4a`,
+      );
+      expect(meta.durationSeconds).toBe(600);
+      // The second probe is not even attempted.
+      expect(calls).toHaveLength(1);
+    },
+  );
+
+  it("still refines a plain AAC-LC stream", async () => {
+    const { meta } = await probe(
+      [
+        { kind: "exit", code: 0, stdout: aacStream("LC") },
+        {
+          kind: "exit",
+          code: 0,
+          stdout: JSON.stringify({ streams: [{ nb_read_packets: "861" }], format: {} }),
+        },
+      ],
+      "/tmp/aac-lc-refined.m4a",
+    );
+    expect(meta.durationSeconds).toBeCloseTo((861 * 1024) / 44100, 5);
+  });
+});
