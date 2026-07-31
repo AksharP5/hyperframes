@@ -1,4 +1,5 @@
 import { setCommandExitCode, requestCliExit } from "../utils/commandResult.js";
+// fallow-ignore-file code-duplication
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
@@ -68,6 +69,7 @@ import {
   startBackgroundPreview,
   stopBackgroundPreview,
 } from "./previewLifecycle.js";
+import { resolveLocalBrowserGpuMode, type BrowserGpuMode } from "../browser/gpuPolicy.js";
 
 interface BrowserLaunchOptions {
   noOpen?: boolean;
@@ -80,6 +82,7 @@ interface BrowserLaunchOptions {
 interface StudioLaunchOptions extends BrowserLaunchOptions {
   projectName?: string;
   autoProxy?: boolean;
+  browserGpuMode?: BrowserGpuMode;
 }
 
 interface EmbeddedStudioOptions extends StudioLaunchOptions {
@@ -190,6 +193,12 @@ export default defineCommand({
       description:
         "Launch the opened browser with --disable-gpu (requires --browser-path). For hosts where hardware acceleration crashes the graphics driver (e.g. NVIDIA Xid resets); with the system default browser use --no-open instead.",
     },
+    "browser-gpu": {
+      type: "boolean",
+      description:
+        "Use hardware GPU for Studio thumbnails and frame capture; pass --no-browser-gpu for deterministic SwiftShader (default: auto-detect)",
+      default: undefined,
+    },
     proxy: {
       type: "boolean",
       description:
@@ -198,6 +207,9 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    const browserGpuMode = resolveLocalBrowserGpuMode(args["browser-gpu"] as boolean | undefined);
+    if (args["browser-gpu"] === true) process.env.PRODUCER_BROWSER_GPU_MODE = "hardware";
+    if (args["browser-gpu"] === false) process.env.PRODUCER_BROWSER_GPU_MODE = "software";
     const startPort = parseInt(args.port ?? "3002", 10);
     const preferredContextPort = hasExplicitPreviewPort(process.argv) ? startPort : undefined;
 
@@ -380,6 +392,7 @@ export default defineCommand({
       try {
         background = await startBackgroundPreview(dir, startPort, {
           forceNew: Boolean(args["force-new"]),
+          browserGpuMode,
         });
       } catch (error) {
         clack.log.error(errorMessage(error));
@@ -417,6 +430,7 @@ export default defineCommand({
       userDataDir,
       remoteDebuggingPort,
       browserNoGpu,
+      browserGpuMode,
     });
   },
 });
@@ -1046,6 +1060,7 @@ async function runEmbeddedMode(
     projectDir: dir,
     projectName: pName,
     autoProxy: options?.autoProxy,
+    browserGpuMode: options?.browserGpuMode,
   });
   const serverBuildSignature = await loadPreviewServerBuildSignature();
 
@@ -1057,6 +1072,8 @@ async function runEmbeddedMode(
       dir,
       !!options?.forceNew,
       serverBuildSignature,
+      undefined,
+      options?.browserGpuMode,
     );
   } catch (err: unknown) {
     s.stop(c.error("Failed to start studio"));
