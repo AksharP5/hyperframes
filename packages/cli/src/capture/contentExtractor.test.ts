@@ -4,17 +4,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captionImagesWithGemini } from "./contentExtractor.js";
 
+const { generateContentMock } = vi.hoisted(() => ({
+  generateContentMock: vi.fn(),
+}));
+
+vi.mock("@google/genai", () => ({
+  GoogleGenAI: class {
+    models = { generateContent: generateContentMock };
+  },
+}));
+
 // These tests exercise the OpenRouter provider path only — it makes a plain
 // `fetch` call we can stub, with no native (`sharp`) or `@google/genai`
 // dependency. OpenRouter wins over Gemini when OPENROUTER_API_KEY is set, so we
 // don't need to clear the Gemini keys for the OpenRouter cases.
 
-function makeProjectWithImage(): string {
+function makeProjectWithImages(files = ["hero.png"]): string {
   const dir = mkdtempSync(join(tmpdir(), "hf-caption-"));
   mkdirSync(join(dir, "assets"), { recursive: true });
   // Contents are irrelevant to the OpenRouter path (it just base64-encodes the
   // bytes); only the .png extension matters for the image filter.
-  writeFileSync(join(dir, "assets", "hero.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  for (const file of files) {
+    writeFileSync(join(dir, "assets", file), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  }
   return dir;
 }
 
@@ -28,7 +40,7 @@ describe("captionImagesWithGemini — OpenRouter provider", () => {
   });
 
   it("captions via OpenRouter when OPENROUTER_API_KEY is set", async () => {
-    const dir = makeProjectWithImage();
+    const dir = makeProjectWithImages();
     dirs.push(dir);
     vi.stubEnv("OPENROUTER_API_KEY", "or-test-key");
     vi.stubEnv("HYPERFRAMES_OPENROUTER_MODEL", "google/gemini-3.1-flash-lite");
@@ -63,7 +75,7 @@ describe("captionImagesWithGemini — OpenRouter provider", () => {
   });
 
   it("degrades gracefully (no throw, no captions) when OpenRouter returns a non-OK status", async () => {
-    const dir = makeProjectWithImage();
+    const dir = makeProjectWithImages();
     dirs.push(dir);
     vi.stubEnv("OPENROUTER_API_KEY", "or-bad-key");
 
@@ -83,8 +95,97 @@ describe("captionImagesWithGemini — OpenRouter provider", () => {
     expect(captions).toEqual({});
   });
 
+  it("terminates captioning when the vision provider never responds", async () => {
+    const dir = makeProjectWithImages();
+    dirs.push(dir);
+    vi.stubEnv("OPENROUTER_API_KEY", "or-hanging-key");
+    vi.stubEnv("HYPERFRAMES_VISION_TIMEOUT_MS", "20");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        });
+      }),
+    );
+
+    const warnings: string[] = [];
+    const result = await Promise.race([
+      captionImagesWithGemini(dir, () => {}, warnings),
+      new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 250)),
+    ]);
+
+    expect(result).toEqual({});
+  });
+
+  it("keeps a successful sibling caption when another request times out", async () => {
+    const dir = makeProjectWithImages(["hang.png", "success.png"]);
+    dirs.push(dir);
+    vi.stubEnv("OPENROUTER_API_KEY", "or-mixed-key");
+    vi.stubEnv("HYPERFRAMES_VISION_TIMEOUT_MS", "20");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: RequestInit) => {
+        const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
+        const imageUrl = body.messages?.[0]?.content?.[1]?.image_url?.url;
+        if (typeof imageUrl === "string" && imageUrl.includes("iVBORw==")) {
+          // Both fixtures contain the same bytes, so use call order: the first
+          // request hangs while the second succeeds independently.
+          const fetchMock = vi.mocked(fetch);
+          if (fetchMock.mock.calls.length === 1) return new Promise<Response>(() => {});
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ choices: [{ message: { content: "Successful image." } }] }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+        );
+      }),
+    );
+
+    const warnings: string[] = [];
+    const captions = await captionImagesWithGemini(dir, () => {}, warnings);
+
+    expect(captions).toEqual({ "success.png": "Successful image." });
+  });
+
+  it("does not call a configured provider when vision is skipped", async () => {
+    const dir = makeProjectWithImages();
+    dirs.push(dir);
+    vi.stubEnv("OPENROUTER_API_KEY", "or-unused-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captions = await captionImagesWithGemini(dir, () => {}, [], { skipVision: true });
+
+    expect(captions).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not start a vision batch after the capture budget is exhausted", async () => {
+    const dir = makeProjectWithImages();
+    dirs.push(dir);
+    vi.stubEnv("OPENROUTER_API_KEY", "or-budget-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captions = await captionImagesWithGemini(dir, () => {}, [], {
+      remainingMs: () => 0,
+    });
+
+    expect(captions).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("skips captioning entirely when no provider key is present", async () => {
-    const dir = makeProjectWithImage();
+    const dir = makeProjectWithImages();
     dirs.push(dir);
     vi.stubEnv("OPENROUTER_API_KEY", "");
     vi.stubEnv("GEMINI_API_KEY", "");
@@ -98,5 +199,32 @@ describe("captionImagesWithGemini — OpenRouter provider", () => {
 
     expect(captions).toEqual({});
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("captionImagesWithGemini — Gemini provider", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    generateContentMock.mockReset();
+    vi.unstubAllEnvs();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    dirs.length = 0;
+  });
+
+  it("terminates captioning when Gemini never settles even if the SDK ignores abort", async () => {
+    const dir = makeProjectWithImages();
+    dirs.push(dir);
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "gemini-hanging-key");
+    vi.stubEnv("HYPERFRAMES_VISION_TIMEOUT_MS", "20");
+    generateContentMock.mockImplementation(() => new Promise(() => {}));
+
+    const result = await Promise.race([
+      captionImagesWithGemini(dir, () => {}, []),
+      new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 250)),
+    ]);
+
+    expect(result).toEqual({});
   });
 });
