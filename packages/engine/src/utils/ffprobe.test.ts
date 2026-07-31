@@ -618,8 +618,18 @@ describe("parseFrameRate", () => {
     expect(parseFrameRate(input)).toBe(0);
   });
 
-  // Fell through to a bare parseFloat that stops at trailing garbage.
-  it.each(["30/1/2", "60fps"])("returns 0 for malformed input %s", (input) => {
+  // Fell through to a bare parseFloat that stops at trailing garbage. The
+  // rational operands had the same defect after the plain path was fixed.
+  it.each(["30/1/2", "60fps", "60fps/1", "60/1fps", "30garbage/1garbage", "/", "/1", "30/"])(
+    "returns 0 for malformed input %s",
+    (input) => {
+      expect(parseFrameRate(input)).toBe(0);
+    },
+  );
+
+  // raw * 100 overflows for a finite-but-huge rate, so the rounded value was
+  // Infinity even though the pre-round guard passed.
+  it.each(["1e307", "1e307/1", "1e308/0.5"])("returns 0 when rounding overflows: %s", (input) => {
     expect(parseFrameRate(input)).toBe(0);
   });
 

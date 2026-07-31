@@ -356,21 +356,32 @@ export function parseFrameRate(frameRateStr: string | undefined): number {
   const parts = frameRateStr.split("/");
   if (parts.length > 2) return 0;
 
+  // Number(), never parseFloat — on BOTH the rational operands and the plain
+  // form. parseFloat stops at trailing garbage, so "60fps" parsed as 60 and,
+  // once the plain path was fixed but the operands were not, "60fps/1" and
+  // "30garbage/1garbage" still slipped through the rational branch.
+  const strict = (part: string | undefined): number =>
+    part === undefined || part.trim() === "" ? NaN : Number(part.trim());
+
   const raw =
     parts.length === 2
       ? (() => {
-          const num = parseFloat(parts[0] ?? "");
-          const den = parseFloat(parts[1] ?? "");
+          const num = strict(parts[0]);
+          const den = strict(parts[1]);
           if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) return NaN;
           return num / den;
         })()
-      : // Not parseFloat: it stops at trailing garbage, so "60fps" parsed as
-        // 60. Number() rejects the whole string.
-        Number(frameRateStr.trim());
+      : strict(frameRateStr);
 
   if (!Number.isFinite(raw) || raw <= 0) return 0;
 
+  // Checked AFTER rounding as well as before. `raw * 100` overflows for a
+  // finite-but-huge rate ("1e307", "1e307/1"), so `rounded` became Infinity
+  // and sailed past the positivity check — reaching exactly the `-r Infinity`
+  // failure the finite guard above exists to prevent.
   const rounded = Math.round(raw * 100) / 100;
+  if (!Number.isFinite(rounded)) return 0;
+
   // A real but very slow rate must not collapse to 0 and inherit the
   // caller's 30fps default.
   return rounded > 0 ? rounded : 0.01;
