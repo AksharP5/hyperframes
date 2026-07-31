@@ -15,8 +15,8 @@ function emitCapturePhase(event: CapturePhaseProgress): void {
 function parseCaptureBudget(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    console.error("--capture-budget must be a positive finite number of milliseconds.");
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.error("--capture-budget must be a positive integer in milliseconds.");
     failCommand();
   }
   return parsed;
@@ -73,7 +73,7 @@ export default defineCommand({
     "capture-budget": {
       type: "string",
       description:
-        "Post-navigation capture budget in ms (default: 120000); separate from page-load --timeout",
+        "Cooperative post-navigation budget in ms (default: 120000), separate from page-load --timeout; not a hard wall-clock timeout and cannot interrupt already-started native/core work",
     },
     json: {
       type: "boolean",

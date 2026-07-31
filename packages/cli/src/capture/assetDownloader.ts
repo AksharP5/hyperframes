@@ -264,8 +264,10 @@ export async function downloadAndRewriteFonts(
 
   if (fontUrls.size === 0) return css;
 
-  // Limit font downloads to avoid bloat. Google Fonts serves 20+ unicode-range
-  // subsets per weight — we only need a few per family for video production.
+  // Limit font download attempts to bound worst-case egress and latency. Google Fonts serves
+  // 20+ unicode-range subsets per weight, so successes alone cannot be the bound: six transient
+  // failures can intentionally suppress later URLs in that family. Latin-priority sorting below
+  // makes the limited attempts useful while keeping this failure tradeoff explicit.
   const MAX_FONTS_PER_FAMILY = 6;
   const MAX_TOTAL_FONTS = 30;
   const familyCounts = new Map<string, number>();

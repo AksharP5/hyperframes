@@ -57,7 +57,11 @@ describe("capture command — vision control", () => {
       ? Reflect.get(captureCommand.args, "capture-budget")
       : undefined;
     expect(captureBudgetArg).toMatchObject({ type: "string" });
-    expect(captureBudgetArg?.description.toLowerCase()).toContain("post-navigation");
+    const description = captureBudgetArg?.description.toLowerCase();
+    expect(description).toContain("post-navigation");
+    expect(description).toContain("cooperative");
+    expect(description).toContain("not a hard wall-clock timeout");
+    expect(description).toContain("already-started native/core work");
     expect(captureBudgetArg?.description).toContain("--timeout");
   });
 
@@ -81,28 +85,34 @@ describe("capture command — vision control", () => {
     );
   });
 
-  it("plumbs a positive --capture-budget into the post-navigation budget", async () => {
-    vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
+  it.each([
+    ["1", 1],
+    ["45000", 45_000],
+  ])(
+    "plumbs positive integer --capture-budget %s into the post-navigation budget",
+    async (captureBudget, expectedBudget) => {
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await captureCommand.run!({
-      args: {
-        url: "https://example.com",
-        output: "/tmp/hf-capture-budget-test",
-        "skip-assets": false,
-        "skip-vision": false,
-        "capture-budget": "45000",
-        json: true,
-      },
-    } as never);
+      await captureCommand.run!({
+        args: {
+          url: "https://example.com",
+          output: "/tmp/hf-capture-budget-test",
+          "skip-assets": false,
+          "skip-vision": false,
+          "capture-budget": captureBudget,
+          json: true,
+        },
+      } as never);
 
-    expect(captureWebsiteMock).toHaveBeenCalledWith(
-      expect.objectContaining({ postNavigationBudgetMs: 45_000 }),
-      undefined,
-    );
-  });
+      expect(captureWebsiteMock).toHaveBeenCalledWith(
+        expect.objectContaining({ postNavigationBudgetMs: expectedBudget }),
+        undefined,
+      );
+    },
+  );
 
-  it.each(["0", "-1", "Infinity", "not-a-number"])(
+  it.each(["0", "-1", "0.5", "Infinity", "not-a-number"])(
     "rejects invalid --capture-budget %s before capture starts",
     async (captureBudget) => {
       vi.spyOn(console, "log").mockImplementation(() => {});
