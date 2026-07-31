@@ -70,6 +70,26 @@ describe("detectBlockedPage", () => {
         hasChallengeElement: true,
       },
     },
+    {
+      label: "a minimal photography page named Forbidden Fruit Photography",
+      evidence: {
+        httpStatus: 200,
+        title: "Forbidden Fruit Photography",
+        textLength: 40,
+        bodyChildCount: 4,
+        hasChallengeElement: false,
+      },
+    },
+    {
+      label: "a minimal photo essay named Attention Required",
+      evidence: {
+        httpStatus: 200,
+        title: "Attention Required: A Photo Essay",
+        textLength: 60,
+        bodyChildCount: 5,
+        hasChallengeElement: false,
+      },
+    },
   ])("allows $label", ({ evidence }) => {
     expect(detectBlockedPage(evidence)).toBeUndefined();
   });
