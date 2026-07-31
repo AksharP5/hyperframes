@@ -684,6 +684,7 @@ export async function captureWebsite(
       phase("vision", "started");
       let visionOutcome: VisionCaptionOutcome = {
         timedOutRequests: 0,
+        failedRequests: 0,
         budgetExhausted: false,
       };
       geminiCaptions = await captionImagesWithGemini(outputDir, progress, warnings, {

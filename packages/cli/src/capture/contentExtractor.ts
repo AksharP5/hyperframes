@@ -19,6 +19,7 @@ const DEFAULT_VISION_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface VisionCaptionOutcome {
   timedOutRequests: number;
+  failedRequests: number;
   budgetExhausted: boolean;
 }
 
@@ -33,12 +34,18 @@ export function resolveVisionPhaseCompletion(
   remainingMs: number,
 ):
   | { status: "completed" }
-  | { status: "degraded"; reason: "budget-exhausted" | "request-timeout" } {
+  | {
+      status: "degraded";
+      reason: "budget-exhausted" | "request-timeout" | "provider-error";
+    } {
   if (outcome.budgetExhausted || remainingMs <= 0) {
     return { status: "degraded", reason: "budget-exhausted" };
   }
   if (outcome.timedOutRequests > 0) {
     return { status: "degraded", reason: "request-timeout" };
+  }
+  if (outcome.failedRequests > 0) {
+    return { status: "degraded", reason: "provider-error" };
   }
   return { status: "completed" };
 }
@@ -236,9 +243,14 @@ export async function captionImagesWithGemini(
 ): Promise<Record<string, string>> {
   const geminiCaptions: Record<string, string> = {};
   let timedOutCount = 0;
+  let failedRequestCount = 0;
   let budgetExhausted = false;
   const reportOutcome = (): void => {
-    options.onOutcome?.({ timedOutRequests: timedOutCount, budgetExhausted });
+    options.onOutcome?.({
+      timedOutRequests: timedOutCount,
+      failedRequests: failedRequestCount,
+      budgetExhausted,
+    });
   };
   if (options.skipVision) {
     reportOutcome();
@@ -279,42 +291,40 @@ export async function captionImagesWithGemini(
     let captionOne: CaptionOne;
     if (openRouterKey) {
       captionOne = async ({ mimeType, base64, prompt, maxTokens, timeoutMs }) => {
-        const res = await runBoundedVisionRequest(
-          (signal) =>
-            fetch("https://openrouter.ai/api/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${openRouterKey}`,
-                "Content-Type": "application/json",
-              },
-              signal,
-              body: JSON.stringify({
-                model,
-                messages: [
-                  {
-                    role: "user",
-                    content: [
-                      { type: "text", text: prompt },
-                      {
-                        type: "image_url",
-                        image_url: { url: `data:${mimeType};base64,${base64}` },
-                      },
-                    ],
-                  },
-                ],
-                max_tokens: maxTokens,
-              }),
+        return runBoundedVisionRequest(async (signal) => {
+          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${openRouterKey}`,
+              "Content-Type": "application/json",
+            },
+            signal,
+            body: JSON.stringify({
+              model,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: prompt },
+                    {
+                      type: "image_url",
+                      image_url: { url: `data:${mimeType};base64,${base64}` },
+                    },
+                  ],
+                },
+              ],
+              max_tokens: maxTokens,
             }),
-          timeoutMs,
-        );
-        if (!res.ok) {
-          const detail = await res.text().catch(() => "");
-          throw new Error(`OpenRouter ${res.status} ${res.statusText}: ${detail.slice(0, 200)}`);
-        }
-        const data = (await res.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
-        };
-        return data.choices?.[0]?.message?.content?.trim() || "";
+          });
+          if (!res.ok) {
+            await res.text();
+            throw new Error(`OpenRouter request failed with HTTP ${res.status}`);
+          }
+          const data = (await res.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+          };
+          return data.choices?.[0]?.message?.content?.trim() || "";
+        }, timeoutMs);
       };
     } else {
       // Unreachable when geminiKey is unset (guarded above); re-narrow for TS.
@@ -350,13 +360,14 @@ export async function captionImagesWithGemini(
 
     // Caption in parallel batches. Gemini free tier is ~5 RPM (slow but $0),
     // paid/OpenRouter ~2000 RPM. We batch 20 with a 2s inter-batch pause and rely
-    // on Promise.allSettled so a rate-limited image degrades to "" rather than
-    // failing the batch.
+    // on Promise.allSettled so one rate-limited image does not fail its siblings;
+    // rejected requests are aggregated into a sanitized warning below.
     const BATCH_SIZE = 20;
     const collectCaptionResults = (
       results: PromiseSettledResult<{ file: string; caption: string }>[],
-    ): number => {
+    ): { timeouts: number; failures: number } => {
       let timeouts = 0;
+      let failures = 0;
       for (const result of results) {
         if (result.status === "fulfilled" && result.value.caption) {
           geminiCaptions[result.value.file] = result.value.caption;
@@ -365,9 +376,11 @@ export async function captionImagesWithGemini(
           result.reason instanceof VisionRequestTimeoutError
         ) {
           timeouts++;
+        } else if (result.status === "rejected") {
+          failures++;
         }
       }
-      return timeouts;
+      return { timeouts, failures };
     };
     for (let i = 0; i < imageFiles.length; i += BATCH_SIZE) {
       const remainingMs = options.remainingMs?.() ?? Number.POSITIVE_INFINITY;
@@ -397,7 +410,9 @@ export async function captionImagesWithGemini(
           return { file, caption };
         }),
       );
-      timedOutCount += collectCaptionResults(results);
+      const counts = collectCaptionResults(results);
+      timedOutCount += counts.timeouts;
+      failedRequestCount += counts.failures;
       // Pace requests between batches (paid tier: 2000+ RPM, free tier: rate-limited)
       if (i + BATCH_SIZE < imageFiles.length) {
         await new Promise((r) => setTimeout(r, 2000)); // 2s pause between batches — paid tier handles 2000 RPM, free tier retries via Promise.allSettled
@@ -501,7 +516,9 @@ export async function captionImagesWithGemini(
             return { file: relPath, caption };
           }),
         );
-        timedOutCount += collectCaptionResults(results);
+        const counts = collectCaptionResults(results);
+        timedOutCount += counts.timeouts;
+        failedRequestCount += counts.failures;
         if (i + SVG_BATCH < svgFiles.length) {
           await new Promise((r) => setTimeout(r, 2000));
         }
@@ -523,8 +540,14 @@ export async function captionImagesWithGemini(
         `${providerName} vision timed out for ${timedOutCount} asset(s); captions omitted.`,
       );
     }
-  } catch (err) {
-    warnings.push(`${providerName} captioning failed: ${err}`);
+    if (failedRequestCount > 0) {
+      warnings.push(
+        `${providerName} vision failed for ${failedRequestCount} asset(s); captions omitted.`,
+      );
+    }
+  } catch {
+    failedRequestCount = Math.max(1, failedRequestCount);
+    warnings.push(`${providerName} captioning failed; captions omitted.`);
   }
 
   reportOutcome();

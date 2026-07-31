@@ -86,17 +86,35 @@ describe("captionImagesWithGemini — OpenRouter provider", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
-        async () => new Response("invalid api key", { status: 401, statusText: "Unauthorized" }),
+        async () =>
+          new Response("provider detail containing or-bad-key", {
+            status: 401,
+            statusText: "Unauthorized",
+          }),
       ),
     );
 
     const warnings: string[] = [];
-    // captionOne throws on !res.ok, but the throw is per-image inside
-    // Promise.allSettled, so it's filtered out as a rejected result rather than
-    // bubbling up — same silent degradation as the existing Gemini path.
-    const captions = await captionImagesWithGemini(dir, () => {}, warnings);
+    let outcome: VisionCaptionOutcome | undefined;
+    const captions = await captionImagesWithGemini(dir, () => {}, warnings, {
+      onOutcome: (value) => {
+        outcome = value;
+      },
+    });
 
     expect(captions).toEqual({});
+    expect(warnings).toEqual(["OpenRouter vision failed for 1 asset(s); captions omitted."]);
+    expect(warnings.join(" ")).not.toContain("or-bad-key");
+    expect(outcome).toEqual({
+      timedOutRequests: 0,
+      failedRequests: 1,
+      budgetExhausted: false,
+    });
+    if (!outcome) throw new Error("Expected vision caption outcome");
+    expect(resolveVisionPhaseCompletion(outcome, 10_000)).toEqual({
+      status: "degraded",
+      reason: "provider-error",
+    });
   });
 
   it("terminates captioning when the vision provider never responds", async () => {
@@ -123,6 +141,94 @@ describe("captionImagesWithGemini — OpenRouter provider", () => {
     ]);
 
     expect(result).toEqual({});
+  });
+
+  it.each([
+    { label: "success JSON", status: 200, partialBody: '{"choices":[' },
+    { label: "failure text", status: 500, partialBody: "upstream failed: " },
+  ])(
+    "terminates captioning when OpenRouter $label body never ends",
+    async ({ status, partialBody }) => {
+      const dir = makeProjectWithImages();
+      dirs.push(dir);
+      vi.stubEnv("OPENROUTER_API_KEY", "or-stalled-body-key");
+      vi.stubEnv("HYPERFRAMES_VISION_TIMEOUT_MS", "20");
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(partialBody));
+            },
+          });
+          return new Response(body, {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+        }),
+      );
+
+      const warnings: string[] = [];
+      let outcome: VisionCaptionOutcome | undefined;
+      const result = await Promise.race([
+        captionImagesWithGemini(dir, () => {}, warnings, {
+          onOutcome: (value) => {
+            outcome = value;
+          },
+        }),
+        new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 250)),
+      ]);
+
+      expect(result).toEqual({});
+      expect(warnings).toEqual(["OpenRouter vision timed out for 1 asset(s); captions omitted."]);
+      expect(outcome).toEqual({
+        timedOutRequests: 1,
+        failedRequests: 0,
+        budgetExhausted: false,
+      });
+    },
+  );
+
+  it("keeps successful captions while reporting a failed sibling request", async () => {
+    const dir = makeProjectWithImages(["failed.png", "success.png"]);
+    dirs.push(dir);
+    vi.stubEnv("OPENROUTER_API_KEY", "or-mixed-failure-key");
+
+    let requestCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        requestCount++;
+        if (requestCount === 1) {
+          return new Response("upstream exploded with or-mixed-failure-key", {
+            status: 500,
+            statusText: "Internal Server Error",
+          });
+        }
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: "Successful image." } }] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const warnings: string[] = [];
+    let outcome: VisionCaptionOutcome | undefined;
+    const captions = await captionImagesWithGemini(dir, () => {}, warnings, {
+      onOutcome: (value) => {
+        outcome = value;
+      },
+    });
+
+    expect(captions).toEqual({ "success.png": "Successful image." });
+    expect(warnings).toEqual(["OpenRouter vision failed for 1 asset(s); captions omitted."]);
+    expect(warnings.join(" ")).not.toContain("or-mixed-failure-key");
+    expect(outcome).toEqual({
+      timedOutRequests: 0,
+      failedRequests: 1,
+      budgetExhausted: false,
+    });
   });
 
   it("keeps a successful sibling caption when another request times out", async () => {
@@ -163,7 +269,11 @@ describe("captionImagesWithGemini — OpenRouter provider", () => {
     });
 
     expect(captions).toEqual({ "success.png": "Successful image." });
-    expect(outcome).toEqual({ timedOutRequests: 1, budgetExhausted: false });
+    expect(outcome).toEqual({
+      timedOutRequests: 1,
+      failedRequests: 0,
+      budgetExhausted: false,
+    });
     if (!outcome) throw new Error("Expected vision caption outcome");
     expect(resolveVisionPhaseCompletion(outcome, 10_000)).toEqual({
       status: "degraded",
@@ -241,5 +351,37 @@ describe("captionImagesWithGemini — Gemini provider", () => {
     ]);
 
     expect(result).toEqual({});
+  });
+
+  it("reports a rejected Gemini request without leaking its error detail", async () => {
+    const dir = makeProjectWithImages();
+    dirs.push(dir);
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("GEMINI_API_KEY", "gemini-secret-key");
+    generateContentMock.mockRejectedValue(
+      new Error("provider echoed gemini-secret-key in its response"),
+    );
+
+    const warnings: string[] = [];
+    let outcome: VisionCaptionOutcome | undefined;
+    const captions = await captionImagesWithGemini(dir, () => {}, warnings, {
+      onOutcome: (value) => {
+        outcome = value;
+      },
+    });
+
+    expect(captions).toEqual({});
+    expect(warnings).toEqual(["Gemini vision failed for 1 asset(s); captions omitted."]);
+    expect(warnings.join(" ")).not.toContain("gemini-secret-key");
+    expect(outcome).toEqual({
+      timedOutRequests: 0,
+      failedRequests: 1,
+      budgetExhausted: false,
+    });
+    if (!outcome) throw new Error("Expected vision caption outcome");
+    expect(resolveVisionPhaseCompletion(outcome, 10_000)).toEqual({
+      status: "degraded",
+      reason: "provider-error",
+    });
   });
 });
