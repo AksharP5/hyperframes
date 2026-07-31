@@ -59,6 +59,7 @@ export function pngHeight(buf: Uint8Array): number | null {
 export async function captureFullPagePlate(
   page: Page,
   screenshotsDir: string,
+  budget: { remainingMs?: () => number } = {},
 ): Promise<string | null> {
   // Record the inline value before overwriting so the page is handed back unchanged — the
   // caller keeps using it (asset extraction, DOM reads) after this returns.
@@ -81,6 +82,7 @@ export async function captureFullPagePlate(
       `Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)`,
     )) as number;
     if (docHeight > MAX_PLATE_HEIGHT_PX) return null;
+    if ((budget.remainingMs?.() ?? 1) <= 0) return null;
 
     const buffer = await page.screenshot({ type: "png", fullPage: true });
     // Confirm what Chrome produced instead of trusting the measurement: the capture itself can
@@ -107,12 +109,19 @@ export async function captureFullPagePlate(
   }
 }
 
-export async function captureScrollScreenshots(page: Page, outputDir: string): Promise<string[]> {
+// fallow-ignore-next-line complexity
+export async function captureScrollScreenshots(
+  page: Page,
+  outputDir: string,
+  budget: { remainingMs?: () => number } = {},
+): Promise<string[]> {
   const screenshotsDir = join(outputDir, "screenshots");
   mkdirSync(screenshotsDir, { recursive: true });
 
   const MAX_SCREENSHOTS = 20;
   const filePaths: string[] = [];
+
+  if ((budget.remainingMs?.() ?? 1) <= 0) return filePaths;
 
   try {
     // Dismiss marketing banners, cookie consents, and popups before scrolling.
@@ -220,6 +229,7 @@ export async function captureScrollScreenshots(page: Page, outputDir: string): P
     }
 
     for (let i = 0; i < finalPositions.length; i++) {
+      if ((budget.remainingMs?.() ?? 1) <= 0) break;
       await page.evaluate(`window.scrollTo(0, ${finalPositions[i]})`);
       await new Promise((r) => setTimeout(r, 400));
 
@@ -228,6 +238,7 @@ export async function captureScrollScreenshots(page: Page, outputDir: string): P
       );
       const filename = `scroll-${String(Math.min(pct, 100)).padStart(3, "0")}.png`;
       const filePath = join(screenshotsDir, filename);
+      if ((budget.remainingMs?.() ?? 1) <= 0) break;
       const buffer = await page.screenshot({ type: "png" });
       writeFileSync(filePath, buffer);
       filePaths.push(`screenshots/${filename}`);
@@ -242,8 +253,10 @@ export async function captureScrollScreenshots(page: Page, outputDir: string): P
     // dropped because 1/8 agents read it and the contact sheet covered the same ground — that
     // was about it as a *comprehension* artifact. The scroll shot is a different consumer: it
     // needs one continuous plate, which no set of viewport tiles can substitute for.)
-    const plate = await captureFullPagePlate(page, screenshotsDir);
-    if (plate) filePaths.push(plate);
+    if ((budget.remainingMs?.() ?? 1) > 0) {
+      const plate = await captureFullPagePlate(page, screenshotsDir, budget);
+      if (plate) filePaths.push(plate);
+    }
   } catch {
     /* scroll screenshots are non-critical */
   }

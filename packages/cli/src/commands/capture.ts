@@ -3,6 +3,24 @@ import { defineCommand } from "citty";
 import { resolve } from "node:path";
 import type { Example } from "./_examples.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
+import { diag } from "../ui/diagnostics.js";
+import type { CapturePhaseProgress } from "../capture/types.js";
+
+const CAPTURE_PHASE_PREFIX = "HYPERFRAMES_CAPTURE_PHASE ";
+
+function emitCapturePhase(event: CapturePhaseProgress): void {
+  diag.notice(`${CAPTURE_PHASE_PREFIX}${JSON.stringify(event)}`);
+}
+
+function parseCaptureBudget(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.error("--capture-budget must be a positive integer in milliseconds.");
+    failCommand();
+  }
+  return parsed;
+}
 
 export const examples: Example[] = [
   ["Capture a website into ./capture/", "hyperframes capture https://stripe.com"],
@@ -39,6 +57,11 @@ export default defineCommand({
       description: "Skip downloading assets (images, SVGs)",
       default: false,
     },
+    "skip-vision": {
+      type: "boolean",
+      description: "Skip optional AI image captioning",
+      default: false,
+    },
     "max-screenshots": {
       type: "string",
       description: "Maximum screenshots to capture (default: 24)",
@@ -46,6 +69,11 @@ export default defineCommand({
     timeout: {
       type: "string",
       description: "Page load timeout in ms (default: 120000)",
+    },
+    "capture-budget": {
+      type: "string",
+      description:
+        "Cooperative post-navigation budget in ms (default: 120000), separate from page-load --timeout; not a hard wall-clock timeout and cannot interrupt already-started native/core work",
     },
     json: {
       type: "boolean",
@@ -99,6 +127,8 @@ export default defineCommand({
       failCommand();
     }
 
+    const captureBudgetMs = parseCaptureBudget(args["capture-budget"] as string | undefined);
+
     const isDefaultOutput = !args.output;
     let outputName = (args.output as string | undefined) ?? "capture";
     let outputDir = resolve(outputName);
@@ -139,11 +169,14 @@ export default defineCommand({
           url,
           outputDir,
           skipAssets: args["skip-assets"] as boolean,
+          skipVision: args["skip-vision"] as boolean,
           maxScreenshots: args["max-screenshots"]
             ? parseInt(args["max-screenshots"] as string)
             : undefined,
           timeout: args.timeout ? parseInt(args.timeout as string) : undefined,
+          postNavigationBudgetMs: captureBudgetMs,
           json: isJson,
+          onPhase: emitCapturePhase,
         },
         isJson
           ? undefined
@@ -179,6 +212,7 @@ export default defineCommand({
               fontsDetailed: result.tokens.fonts,
               animations: result.animationCatalog?.summary,
               warnings: result.warnings,
+              lastPhase: result.lastPhase,
             },
             null,
             2,

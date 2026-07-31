@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isPrivateUrl, safeFetch, toStandaloneSvg } from "./assetDownloader.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  downloadAndRewriteFonts,
+  isPrivateUrl,
+  safeFetch,
+  toStandaloneSvg,
+} from "./assetDownloader.js";
 
 describe("isPrivateUrl — SSRF denylist (security: F-003)", () => {
   it("blocks loopback, private, and metadata IPv4", () => {
@@ -125,5 +133,54 @@ describe("toStandaloneSvg — scraped inline SVGs must survive as .svg files", (
 
   it("returns non-SVG input unchanged rather than corrupting it", () => {
     expect(toStandaloneSvg("<div>not an svg</div>")).toBe("<div>not an svg</div>");
+  });
+});
+
+describe("downloadAndRewriteFonts — attempt caps", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  async function expectFailedFontAttempts(css: string, expectedAttempts: number): Promise<void> {
+    const dir = mkdtempSync(join(tmpdir(), "hf-font-attempts-"));
+    const fetchMock = vi.fn(async () => new Response("failed", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await downloadAndRewriteFonts(css, dir);
+      expect(fetchMock).toHaveBeenCalledTimes(expectedAttempts);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("counts failed requests toward the global 30-font cap", async () => {
+    const css = Array.from(
+      { length: 35 },
+      (_, i) =>
+        `@font-face { font-family: Family${i}; src: url(https://fonts${i}.example/font-${i}.woff2); }`,
+    ).join("\n");
+    await expectFailedFontAttempts(css, 30);
+  });
+
+  it("counts failed requests toward the six-attempt per-family cap", async () => {
+    const css = Array.from(
+      { length: 10 },
+      (_, i) =>
+        `@font-face { font-family: Shared; src: url(https://fonts.example/font-${i}.woff2); }`,
+    ).join("\n");
+    await expectFailedFontAttempts(css, 6);
+  });
+
+  it("does not start a font request after the capture budget is exhausted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-font-budget-"));
+    const css = "@font-face { font-family: Budget; src: url(https://fonts.example/budget.woff2); }";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await downloadAndRewriteFonts(css, dir, { remainingMs: () => 0 });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
