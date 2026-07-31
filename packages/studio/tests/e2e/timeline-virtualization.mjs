@@ -13,13 +13,13 @@
  * shared runner: no emulation, but the constrained budgets, because a hosted
  * runner is already slower and noisier than the machine the strict numbers were
  * recorded on. Throttling it further would measure the throttle, not the build.
+ * CI also requires production React and reports the observed runtime so Vite's
+ * development-only checks can never contaminate the shipped-code measurement.
  *
  * TIMELINE_ROW_VIRTUALIZATION selects which build is under test and defaults to
- * "off", the product default. The gate previously only ever ran against a server
- * with row virtualization enabled, so the configuration users actually get was
- * never measured. The script asserts the configuration it observes rather than
- * trusting the caller: the server is configured by whoever started it, and a
- * mismatch would otherwise pass silently against the wrong build.
+ * "on", the product default. The script asserts the configuration it observes
+ * rather than trusting the caller: the server is configured by whoever started
+ * it, and a mismatch would otherwise pass silently against the wrong build.
  */
 import { existsSync, readdirSync } from "node:fs";
 import { homedir, platform, arch } from "node:os";
@@ -30,7 +30,7 @@ const STUDIO_URL = process.env.STUDIO_URL;
 const PROFILE = process.env.TIMELINE_PROFILE || "dense-short";
 const ELEMENT_COUNT = Number(process.env.TIMELINE_ELEMENT_COUNT || 50_000);
 const TIER = process.env.TIMELINE_TIER || "primary";
-const ROW_VIRTUALIZATION = process.env.TIMELINE_ROW_VIRTUALIZATION || "off";
+const ROW_VIRTUALIZATION = process.env.TIMELINE_ROW_VIRTUALIZATION || "on";
 const EXPECTED_CHROME_MAJOR = process.env.TIMELINE_CHROME_MAJOR
   ? Number(process.env.TIMELINE_CHROME_MAJOR)
   : null;
@@ -110,6 +110,7 @@ async function collectRun(page, injectedLongTaskMs = 0) {
     return {
       interactionP95Ms: percentileInPage(interactions, 0.95),
       frameIntervalP95Ms: percentileInPage(frameIntervals, 0.95),
+      scrollSampleCount: interactions.length,
       longestTaskMs: Math.max(0, ...longTasks),
       scrollWidth: scroller.scrollWidth,
       scrollHeight: scroller.scrollHeight,
@@ -166,7 +167,10 @@ async function collectRun(page, injectedLongTaskMs = 0) {
       const interactions = [];
       const frameIntervals = [];
       const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
-      for (const ratio of [0, 0.25, 0.5, 0.75, 1, 0.5, 0]) {
+      const ratios = [0, 0.25, 0.5, 0.75, 1, 0.5, 0];
+      const sampleCount = window.__studioTest.timelineViewportBudgets.scrollSamplesPerRun;
+      for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+        const ratio = ratios[sampleIndex % ratios.length];
         const started = performance.now();
         timelineScroller.scrollLeft = Math.round(
           (timelineScroller.scrollWidth - timelineScroller.clientWidth) * ratio,
@@ -184,7 +188,7 @@ async function collectRun(page, injectedLongTaskMs = 0) {
   }, injectedLongTaskMs);
 }
 
-async function assertLongTaskCapture(browser, longTaskLimitMs) {
+async function assertLongTaskCapture(browser, longTaskLimitMs, scrollSamplesPerRun) {
   const page = await browser.newPage();
   const injectedDurationMs = longTaskLimitMs + 25;
   try {
@@ -195,9 +199,12 @@ async function assertLongTaskCapture(browser, longTaskLimitMs) {
         </div>
       </div>
     `);
-    await page.evaluate(() => {
-      window.__studioTest = { readTimelinePerformanceDiagnostics: () => ({}) };
-    });
+    await page.evaluate((sampleCount) => {
+      window.__studioTest = {
+        timelineViewportBudgets: { scrollSamplesPerRun: sampleCount },
+        readTimelinePerformanceDiagnostics: () => ({}),
+      };
+    }, scrollSamplesPerRun);
     const probe = await collectRun(page, injectedDurationMs);
     if (probe.longestTaskMs <= longTaskLimitMs) {
       throw new Error(
@@ -279,6 +286,14 @@ try {
   );
   await waitForStudioTestHookSettle(page);
 
+  const runtimeMode = await page.evaluate(() => window.__studioTest.runtimeMode);
+  if (TIER === "ci" && runtimeMode !== "production") {
+    throw new Error(
+      `Timeline CI must measure the production React runtime, received ${runtimeMode}. ` +
+        "Start the Studio development server with NODE_ENV=production.",
+    );
+  }
+
   await loadFixtureAndWait(page, 1_000, PROFILE);
   await client.send("HeapProfiler.collectGarbage");
   const baselineHeapBytes = await collectHeapBytes(client);
@@ -286,7 +301,11 @@ try {
   const budgets = await page.evaluate(() => window.__studioTest.timelineViewportBudgets);
   const longTaskLimitMs =
     TIER === "primary" ? budgets.longTaskLimitMs : budgets.constrainedLongTaskLimitMs;
-  const longTaskObserverProbe = await assertLongTaskCapture(browser, longTaskLimitMs);
+  const longTaskObserverProbe = await assertLongTaskCapture(
+    browser,
+    longTaskLimitMs,
+    budgets.scrollSamplesPerRun,
+  );
   const summary = await loadFixtureAndWait(page, ELEMENT_COUNT, PROFILE);
   const measuredMaxReliableScrollWidth = await measureMaximumReliableScrollWidth(page);
 
@@ -365,6 +384,7 @@ try {
       deviceScaleFactor: TIER === "high-dpr" ? 2 : 1,
       cpuThrottleRate: TIER === "low-resource" ? 4 : 1,
       tier: TIER,
+      runtimeMode,
       longTaskObserverProbe,
       rowVirtualization: ROW_VIRTUALIZATION,
       observedClipRootsAtLoad: observedClipRoots,
@@ -376,6 +396,7 @@ try {
       },
       fixture: summary,
       runProtocol: {
+        scrollSamplesPerRun: budgets.scrollSamplesPerRun,
         warmups: budgets.warmupRuns,
         measured: budgets.measuredRuns,
         requiredPassing: budgets.requiredPassingRuns,
