@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { captionImagesWithGemini } from "./contentExtractor.js";
+import {
+  captionImagesWithGemini,
+  resolveVisionPhaseCompletion,
+  type VisionCaptionOutcome,
+} from "./contentExtractor.js";
 
 const { generateContentMock } = vi.hoisted(() => ({
   generateContentMock: vi.fn(),
@@ -151,9 +155,20 @@ describe("captionImagesWithGemini — OpenRouter provider", () => {
     );
 
     const warnings: string[] = [];
-    const captions = await captionImagesWithGemini(dir, () => {}, warnings);
+    let outcome: VisionCaptionOutcome | undefined;
+    const captions = await captionImagesWithGemini(dir, () => {}, warnings, {
+      onOutcome: (value) => {
+        outcome = value;
+      },
+    });
 
     expect(captions).toEqual({ "success.png": "Successful image." });
+    expect(outcome).toEqual({ timedOutRequests: 1, budgetExhausted: false });
+    if (!outcome) throw new Error("Expected vision caption outcome");
+    expect(resolveVisionPhaseCompletion(outcome, 10_000)).toEqual({
+      status: "degraded",
+      reason: "request-timeout",
+    });
   });
 
   it("does not call a configured provider when vision is skipped", async () => {

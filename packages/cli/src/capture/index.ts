@@ -37,7 +37,9 @@ import {
   extractVisibleText,
   captionImagesWithGemini,
   generateAssetDescriptions,
+  resolveVisionPhaseCompletion,
 } from "./contentExtractor.js";
+import type { VisionCaptionOutcome } from "./contentExtractor.js";
 import { loadEnvFile, generateProjectScaffold } from "./scaffolding.js";
 import type { CaptureOptions, CapturePhase, CapturePhaseProgress, CaptureResult } from "./types.js";
 
@@ -343,10 +345,11 @@ export async function captureWebsite(
     if (discoveredLotties.length > 0 && remainingMs() > 0) {
       const lottieDir = join(outputDir, "assets", "lottie");
       mkdirSync(lottieDir, { recursive: true });
-      const savedCount = await saveLottieAnimations(discoveredLotties, lottieDir);
+      const lottieBudget = { remainingMs };
+      const savedCount = await saveLottieAnimations(discoveredLotties, lottieDir, lottieBudget);
       // Generate manifest + preview thumbnails so the agent can SEE what each animation is
       if (savedCount > 0 && remainingMs() > 0) {
-        await renderLottiePreviews(chromeBrowser, lottieDir, outputDir);
+        await renderLottiePreviews(chromeBrowser, lottieDir, outputDir, lottieBudget);
         progress("lottie", `${savedCount} Lottie animation(s) saved`);
       }
     }
@@ -494,6 +497,7 @@ export async function captureWebsite(
           networkVideoUrls: discoveredVideoUrls, // Layer 1 (live Set, read after sampling)
           sampleMs: Math.min(12000, videoBudgetMs), // Layer 2: poll DOM within the shared budget
           downloadBudgetMs: videoBudgetMs,
+          remainingMs,
         });
       }
     } catch {
@@ -670,13 +674,21 @@ export async function captureWebsite(
       phase("vision", "degraded", "budget-exhausted");
     } else {
       phase("vision", "started");
+      let visionOutcome: VisionCaptionOutcome = {
+        timedOutRequests: 0,
+        budgetExhausted: false,
+      };
       geminiCaptions = await captionImagesWithGemini(outputDir, progress, warnings, {
         remainingMs,
+        onOutcome: (outcome) => {
+          visionOutcome = outcome;
+        },
       });
+      const completion = resolveVisionPhaseCompletion(visionOutcome, remainingMs());
       phase(
         "vision",
-        remainingMs() > 0 ? "completed" : "degraded",
-        remainingMs() > 0 ? undefined : "budget-exhausted",
+        completion.status,
+        completion.status === "degraded" ? completion.reason : undefined,
       );
     }
 

@@ -122,6 +122,61 @@ describe("captureScrollScreenshots — capture budget", () => {
     expect(evaluate).not.toHaveBeenCalled();
     expect(screenshot).not.toHaveBeenCalled();
   });
+
+  it("re-checks the budget after settling and before each viewport screenshot", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const dir = mkdtempSync(join(tmpdir(), "hf-scroll-expiring-budget-"));
+    const evaluate = vi.fn(async (expression: unknown) => {
+      const source = String(expression);
+      if (source.includes("Math.max(document.body.scrollHeight")) return 1080;
+      if (source === "window.innerHeight") return 1080;
+      return undefined;
+    });
+    const screenshot = vi.fn(async () => pngBuffer(1080));
+    const page = { evaluate, screenshot } as unknown as Page;
+
+    try {
+      const capture = captureScrollScreenshots(page, dir, {
+        remainingMs: () => Math.max(0, 600 - Date.now()),
+      });
+      await vi.runAllTimersAsync();
+      const files = await capture;
+
+      expect(files).toEqual([]);
+      expect(screenshot).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("captureFullPagePlate — capture budget", () => {
+  it("re-checks the budget immediately before the full-page screenshot", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const dir = mkdtempSync(join(tmpdir(), "hf-plate-expiring-budget-"));
+    const screenshot = vi.fn(async () => pngBuffer(8000));
+    const evaluate = vi.fn(async (expression: unknown) => {
+      if (String(expression).includes("scrollHeight")) {
+        vi.setSystemTime(100);
+        return 8000;
+      }
+      return undefined;
+    });
+    const page = { evaluate, screenshot } as unknown as Page;
+
+    try {
+      const plate = await captureFullPagePlate(page, dir, {
+        remainingMs: () => Math.max(0, 50 - Date.now()),
+      });
+
+      expect(plate).toBeNull();
+      expect(screenshot).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("captureFullPagePlate — guards against a silently clipped plate", () => {

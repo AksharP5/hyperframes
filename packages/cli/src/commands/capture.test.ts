@@ -52,6 +52,15 @@ describe("capture command — vision control", () => {
     });
   });
 
+  it("declares --capture-budget separately from navigation --timeout", () => {
+    const captureBudgetArg = captureCommand.args
+      ? Reflect.get(captureCommand.args, "capture-budget")
+      : undefined;
+    expect(captureBudgetArg).toMatchObject({ type: "string" });
+    expect(captureBudgetArg?.description.toLowerCase()).toContain("post-navigation");
+    expect(captureBudgetArg?.description).toContain("--timeout");
+  });
+
   it("plumbs --skip-vision into capture options", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -71,6 +80,50 @@ describe("capture command — vision control", () => {
       undefined,
     );
   });
+
+  it("plumbs a positive --capture-budget into the post-navigation budget", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await captureCommand.run!({
+      args: {
+        url: "https://example.com",
+        output: "/tmp/hf-capture-budget-test",
+        "skip-assets": false,
+        "skip-vision": false,
+        "capture-budget": "45000",
+        json: true,
+      },
+    } as never);
+
+    expect(captureWebsiteMock).toHaveBeenCalledWith(
+      expect.objectContaining({ postNavigationBudgetMs: 45_000 }),
+      undefined,
+    );
+  });
+
+  it.each(["0", "-1", "Infinity", "not-a-number"])(
+    "rejects invalid --capture-budget %s before capture starts",
+    async (captureBudget) => {
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await expect(
+        captureCommand.run!({
+          args: {
+            url: "https://example.com",
+            output: "/tmp/hf-invalid-capture-budget-test",
+            "skip-assets": false,
+            "skip-vision": false,
+            "capture-budget": captureBudget,
+            json: true,
+          },
+        } as never),
+      ).rejects.toBeInstanceOf(CliRuntimeError);
+
+      expect(captureWebsiteMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("emits a versioned phase record without the captured URL", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});

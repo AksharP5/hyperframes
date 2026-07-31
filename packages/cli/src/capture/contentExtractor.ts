@@ -17,9 +17,30 @@ import type { DesignTokens } from "./types.js";
 
 const DEFAULT_VISION_REQUEST_TIMEOUT_MS = 30_000;
 
+export interface VisionCaptionOutcome {
+  timedOutRequests: number;
+  budgetExhausted: boolean;
+}
+
 interface VisionCaptionOptions {
   skipVision?: boolean;
   remainingMs?: () => number;
+  onOutcome?: (outcome: VisionCaptionOutcome) => void;
+}
+
+export function resolveVisionPhaseCompletion(
+  outcome: VisionCaptionOutcome,
+  remainingMs: number,
+):
+  | { status: "completed" }
+  | { status: "degraded"; reason: "budget-exhausted" | "request-timeout" } {
+  if (outcome.budgetExhausted || remainingMs <= 0) {
+    return { status: "degraded", reason: "budget-exhausted" };
+  }
+  if (outcome.timedOutRequests > 0) {
+    return { status: "degraded", reason: "request-timeout" };
+  }
+  return { status: "completed" };
 }
 
 class VisionRequestTimeoutError extends Error {
@@ -214,10 +235,21 @@ export async function captionImagesWithGemini(
   options: VisionCaptionOptions = {},
 ): Promise<Record<string, string>> {
   const geminiCaptions: Record<string, string> = {};
-  if (options.skipVision) return geminiCaptions;
+  let timedOutCount = 0;
+  let budgetExhausted = false;
+  const reportOutcome = (): void => {
+    options.onOutcome?.({ timedOutRequests: timedOutCount, budgetExhausted });
+  };
+  if (options.skipVision) {
+    reportOutcome();
+    return geminiCaptions;
+  }
   const openRouterKey = process.env.OPENROUTER_API_KEY;
   const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (!openRouterKey && !geminiKey) return geminiCaptions;
+  if (!openRouterKey && !geminiKey) {
+    reportOutcome();
+    return geminiCaptions;
+  }
 
   // OpenRouter takes priority when both keys are set — it's the explicit opt-in
   // for users without Google access. Both providers satisfy the same
@@ -321,7 +353,6 @@ export async function captionImagesWithGemini(
     // on Promise.allSettled so a rate-limited image degrades to "" rather than
     // failing the batch.
     const BATCH_SIZE = 20;
-    let timedOutCount = 0;
     const collectCaptionResults = (
       results: PromiseSettledResult<{ file: string; caption: string }>[],
     ): number => {
@@ -340,7 +371,10 @@ export async function captionImagesWithGemini(
     };
     for (let i = 0; i < imageFiles.length; i += BATCH_SIZE) {
       const remainingMs = options.remainingMs?.() ?? Number.POSITIVE_INFINITY;
-      if (remainingMs <= 0) break;
+      if (remainingMs <= 0) {
+        budgetExhausted = true;
+        break;
+      }
       const timeoutMs = Math.max(1, Math.min(requestTimeoutMs, remainingMs));
       const batch = imageFiles.slice(i, i + BATCH_SIZE);
       const results = await Promise.allSettled(
@@ -404,6 +438,7 @@ export async function captionImagesWithGemini(
           `Skipped ${svgFiles.length} SVG caption(s): sharp could not load (${(err as Error).message}). ` +
             `Reinstall with optional dependencies enabled (e.g. \`npm i sharp\`) to caption SVG assets.`,
         );
+        reportOutcome();
         return geminiCaptions;
       }
       progress("design", `Rasterizing + captioning ${svgFiles.length} SVGs via vision API...`);
@@ -412,7 +447,10 @@ export async function captionImagesWithGemini(
       let svgsSkipped = 0;
       for (let i = 0; i < svgFiles.length; i += SVG_BATCH) {
         const remainingMs = options.remainingMs?.() ?? Number.POSITIVE_INFINITY;
-        if (remainingMs <= 0) break;
+        if (remainingMs <= 0) {
+          budgetExhausted = true;
+          break;
+        }
         const timeoutMs = Math.max(1, Math.min(requestTimeoutMs, remainingMs));
         const batch = svgFiles.slice(i, i + SVG_BATCH);
         const results = await Promise.allSettled(
@@ -489,6 +527,7 @@ export async function captionImagesWithGemini(
     warnings.push(`${providerName} captioning failed: ${err}`);
   }
 
+  reportOutcome();
   return geminiCaptions;
 }
 

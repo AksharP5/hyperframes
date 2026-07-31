@@ -12,6 +12,16 @@ function emitCapturePhase(event: CapturePhaseProgress): void {
   diag.notice(`${CAPTURE_PHASE_PREFIX}${JSON.stringify(event)}`);
 }
 
+function parseCaptureBudget(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error("--capture-budget must be a positive finite number of milliseconds.");
+    failCommand();
+  }
+  return parsed;
+}
+
 export const examples: Example[] = [
   ["Capture a website into ./capture/", "hyperframes capture https://stripe.com"],
   ["Capture to a different directory", "hyperframes capture https://linear.app -o linear-video"],
@@ -59,6 +69,11 @@ export default defineCommand({
     timeout: {
       type: "string",
       description: "Page load timeout in ms (default: 120000)",
+    },
+    "capture-budget": {
+      type: "string",
+      description:
+        "Post-navigation capture budget in ms (default: 120000); separate from page-load --timeout",
     },
     json: {
       type: "boolean",
@@ -112,6 +127,8 @@ export default defineCommand({
       failCommand();
     }
 
+    const captureBudgetMs = parseCaptureBudget(args["capture-budget"] as string | undefined);
+
     const isDefaultOutput = !args.output;
     let outputName = (args.output as string | undefined) ?? "capture";
     let outputDir = resolve(outputName);
@@ -157,6 +174,7 @@ export default defineCommand({
             ? parseInt(args["max-screenshots"] as string)
             : undefined,
           timeout: args.timeout ? parseInt(args.timeout as string) : undefined,
+          postNavigationBudgetMs: captureBudgetMs,
           json: isJson,
           onPhase: emitCapturePhase,
         },
