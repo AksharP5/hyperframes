@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser, Page } from "puppeteer-core";
@@ -74,6 +74,55 @@ describe("Lottie capture budget", () => {
     expect(newPage).toHaveBeenCalledTimes(1);
     expect(previewPage.setViewport).not.toHaveBeenCalled();
     expect(previewPage.screenshot).not.toHaveBeenCalled();
+  });
+
+  it("omits a preview path when the budget expires after Lottie readiness", async () => {
+    const dir = tempDir();
+    const lottieDir = join(dir, "assets", "lottie");
+    mkdirSync(join(dir, "extracted"), { recursive: true });
+    mkdirSync(lottieDir, { recursive: true });
+    writeFileSync(
+      join(lottieDir, "logo.json"),
+      JSON.stringify({
+        nm: "Logo",
+        w: 100,
+        h: 100,
+        fr: 30,
+        ip: 0,
+        op: 30,
+        layers: [],
+      }),
+    );
+
+    const screenshot = vi.fn(async () => undefined);
+    const previewPage = {
+      setViewport: vi.fn(async () => undefined),
+      setContent: vi.fn(async () => undefined),
+      evaluate: vi.fn(async () => undefined),
+      waitForFunction: vi.fn(async () => undefined),
+      screenshot,
+      close: vi.fn(async () => undefined),
+    };
+    const browser = { newPage: vi.fn(async () => previewPage) } as unknown as Browser;
+    let budgetChecks = 0;
+
+    await renderLottiePreviews(browser, lottieDir, dir, {
+      remainingMs: () => (++budgetChecks < 4 ? 10_000 : 0),
+    });
+
+    const manifest = JSON.parse(
+      readFileSync(join(dir, "extracted", "lottie-manifest.json"), "utf-8"),
+    );
+    expect(screenshot).not.toHaveBeenCalled();
+    expect(manifest).toHaveLength(1);
+    expect(manifest[0]).toMatchObject({
+      file: "assets/lottie/logo.json",
+      name: "Logo",
+      width: 100,
+      height: 100,
+    });
+    expect(manifest[0]).not.toHaveProperty("preview");
+    expect(existsSync(join(lottieDir, "previews", "logo-preview.png"))).toBe(false);
   });
 });
 

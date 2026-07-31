@@ -122,7 +122,7 @@ export async function saveLottieAnimations(
  *
  * Opens each Lottie JSON in a headless Chrome page via lottie-web,
  * seeks to ~30% through the animation, and takes a transparent screenshot.
- * Writes a lottie-manifest.json with metadata + preview paths.
+ * Writes a lottie-manifest.json with metadata and successfully rendered preview paths.
  */
 // fallow-ignore-next-line complexity
 export async function renderLottiePreviews(
@@ -133,7 +133,7 @@ export async function renderLottiePreviews(
 ): Promise<void> {
   const manifest: Array<{
     file: string;
-    preview: string;
+    preview?: string;
     name: string;
     width: number;
     height: number;
@@ -152,6 +152,7 @@ export async function renderLottiePreviews(
       const fr = raw.fr || 30;
       const dur = ((raw.op || 0) - (raw.ip || 0)) / fr;
       const previewName = file.replace(".json", "-preview.png");
+      let preview: string | undefined;
 
       // Render a mid-frame thumbnail using Puppeteer + lottie-web
       // Skip huge Lottie files for preview (CDP has a ~256MB message limit)
@@ -202,6 +203,7 @@ export async function renderLottiePreviews(
             type: "png",
             omitBackground: true,
           });
+          preview = `assets/lottie/previews/${previewName}`;
         }
       } catch {
         /* preview rendering failed — non-critical */
@@ -211,7 +213,7 @@ export async function renderLottiePreviews(
 
       manifest.push({
         file: `assets/lottie/${file}`,
-        preview: `assets/lottie/previews/${previewName}`,
+        ...(preview ? { preview } : {}),
         name: raw.nm || file,
         width: raw.w || 0,
         height: raw.h || 0,
