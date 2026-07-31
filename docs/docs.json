@@ -111,6 +111,7 @@
                   "prompting/overlays-and-lower-thirds",
                   "prompting/captions-catalog",
                   "prompting/generated-artwork",
+                  "prompting/color-grading",
                   "prompting/vfx-and-liquid-glass",
                   "prompting/runtimes-and-3d"
                 ]
