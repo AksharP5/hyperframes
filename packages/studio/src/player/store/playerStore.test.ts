@@ -408,9 +408,11 @@ describe("usePlayerStore", () => {
       expect(usePlayerStore.getState().manualZoomPercent).toBe(10);
     });
 
-    it("clamps to the maximum supported zoom percent", () => {
-      usePlayerStore.getState().setManualZoomPercent(5000);
-      expect(usePlayerStore.getState().manualZoomPercent).toBe(2000);
+    it("clamps to the frame-level zoom for the current fit scale", () => {
+      usePlayerStore.getState().setTimelineScale(12, 12);
+      usePlayerStore.getState().setManualZoomPercent(100_000);
+      expect(usePlayerStore.getState().manualZoomPercent).toBe(12_000);
+      usePlayerStore.getState().setTimelineScale(100, 100);
     });
   });
 
@@ -441,6 +443,21 @@ describe("usePlayerStore", () => {
   });
 
   describe("reset", () => {
+    it("increments the session epoch only for a hard project switch", () => {
+      usePlayerStore.getState().beginTimelineSession("project-a");
+      const firstEpoch = usePlayerStore.getState().timelineSessionEpoch;
+
+      usePlayerStore.getState().reset();
+      expect(usePlayerStore.getState().timelineSessionEpoch).toBe(firstEpoch);
+
+      usePlayerStore.getState().beginTimelineSession("project-a");
+      expect(usePlayerStore.getState().timelineSessionEpoch).toBe(firstEpoch);
+
+      usePlayerStore.getState().beginTimelineSession("project-b");
+      expect(usePlayerStore.getState().timelineSessionEpoch).toBe(firstEpoch + 1);
+      expect(usePlayerStore.getState().timelineProjectId).toBe("project-b");
+    });
+
     it("resets all state to defaults", () => {
       // Mutate everything
       const store = usePlayerStore.getState();

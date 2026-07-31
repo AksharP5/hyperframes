@@ -15,9 +15,50 @@ import {
   getTimelineRowFromY,
   getTimelineRowOffsets,
   getTimelineCanvasHeight,
+  createTimelineRowGeometry,
+  getTimelineRowGeometry,
   trackHeights,
   resolveTimelineAssetDrop,
+  getTimelineBeatEntries,
 } from "./timelineLayout";
+import { generateTicks, getTimelineMajorTickInterval } from "./timelineRulerGeometry";
+import { getTimelineRenderTimeRange } from "./timelineViewportGeometry";
+
+describe("horizontal timeline window", () => {
+  it("adds the shared quarter-viewport overscan on each side and clamps to duration", () => {
+    expect(getTimelineRenderTimeRange({ scrollLeft: 300, clientWidth: 500 }, 100, 200, 20)).toEqual(
+      { start: 0, end: 7.25 },
+    );
+    expect(
+      getTimelineRenderTimeRange({ scrollLeft: 1_900, clientWidth: 500 }, 100, 200, 20),
+    ).toEqual({ start: 15.75, end: 20 });
+  });
+
+  it("generates globally aligned ticks directly inside the bounded window", () => {
+    const ticks = generateTicks(10_000, 100, undefined, { start: 500.2, end: 501.8 });
+    const interval = getTimelineMajorTickInterval(10_000, 100);
+    expect(ticks.major.every((time) => time >= 500.2 && time <= 501.8)).toBe(true);
+    expect(
+      ticks.major.every((time) => Math.abs(time / interval - Math.round(time / interval)) < 1e-6),
+    ).toBe(true);
+    expect(ticks.major.length + ticks.minor.length).toBeLessThan(100);
+  });
+
+  it("slices beat records with original strength indexes and unions a pinned beat", () => {
+    expect(
+      getTimelineBeatEntries(
+        [0, 1, 2, 3],
+        [0.1, 0.2, 0.3, 0.4],
+        { start: 1, end: 3 },
+        new Set([3]),
+      ),
+    ).toEqual([
+      { index: 1, time: 1, strength: 0.2 },
+      { index: 2, time: 2, strength: 0.3 },
+      { index: 3, time: 3, strength: 0.4 },
+    ]);
+  });
+});
 
 /** N collapsed rows, the shape every caller passes when nothing is expanded. */
 const baseRows = (count: number) => Array.from({ length: count }, () => TRACK_H);
@@ -63,6 +104,24 @@ describe("variable timeline row geometry", () => {
     expect(getTimelineCanvasHeight(heights)).toBe(
       RULER_H + TRACKS_TOP_PAD + 3 * TRACK_H + 2 * LANE_H + TRACKS_BOTTOM_PAD,
     );
+  });
+
+  it("reuses one immutable geometry snapshot for one height array", () => {
+    const heights = trackHeights(tracks, new Set(["b"]));
+    const first = getTimelineRowGeometry(heights);
+    expect(getTimelineRowGeometry(heights)).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.rowOffsets)).toBe(true);
+  });
+
+  it("looks up row boundaries through the precomputed geometry", () => {
+    const geometry = createTimelineRowGeometry([4, 8, 12], [48, 104, 76]);
+    expect(getTimelineRowGeometry(geometry.rowHeights)).toBe(geometry);
+    expect(geometry.getRowIndex(8)).toBe(1);
+    expect(geometry.getRowFromY(geometry.getRowTop(1))).toBe(1);
+    expect(geometry.getRowFromY(geometry.getRowTop(2) - 0.001)).toBeLessThan(2);
+    expect(geometry.getRowFromY(geometry.getRowTop(2))).toBe(2);
+    expect(geometry.canvasHeight).toBe(RULER_H + TRACKS_TOP_PAD + 228 + TRACKS_BOTTOM_PAD);
   });
 });
 

@@ -1,56 +1,180 @@
-/**
- * Consumes playerStore.clipRevealRequest: when another surface (the sidebar
- * asset card / audio row) asks for a clip to be revealed, smooth-scroll the
- * timeline's scroll container so that clip is visible — horizontally to its
- * time and vertically to its lane.
- *
- * The request is consumed (cleared) whether or not the clip node is found, so
- * a stale request can never replay a scroll later. Respects zoom mode: in
- * "fit" the timeline disables horizontal scrolling (overflow-x-hidden), so
- * only the vertical axis is scrolled there.
- */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import type { TimelineElement } from "../store/playerStore";
 import { usePlayerStore } from "../store/playerStore";
-import { GUTTER, RULER_H } from "./timelineLayout";
+import { getTimelineElementIdentity } from "../lib/timelineElementHelpers";
+import { CLIP_Y, RULER_H, type TimelineRowGeometry } from "./timelineLayout";
 import { computeRevealScroll } from "./timelineRevealScroll";
 
-export function useTimelineRevealClip(scrollRef: React.RefObject<HTMLDivElement | null>): void {
-  const revealRequest = usePlayerStore((s) => s.clipRevealRequest);
+interface UseTimelineRevealClipInput {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  elements: readonly TimelineElement[];
+  rowGeometry: TimelineRowGeometry;
+  pixelsPerSecond: number;
+  contentOrigin: number;
+  allowHorizontal: boolean;
+  deferFocusUntilViewportUpdate: boolean;
+  focusedElementId?: string;
+  viewportVersion: unknown;
+  sessionEpoch: number;
+}
+
+function escapeSelectorValue(value: string): string {
+  return typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, "\\$&");
+}
+
+function scrollToTimelineElement(
+  container: HTMLDivElement,
+  element: TimelineElement,
+  row: number,
+  rowGeometry: TimelineRowGeometry,
+  pixelsPerSecond: number,
+  contentOrigin: number,
+  allowHorizontal: boolean,
+): boolean {
+  const clipLeft = contentOrigin + element.start * pixelsPerSecond;
+  const target = computeRevealScroll({
+    scrollLeft: container.scrollLeft,
+    scrollTop: container.scrollTop,
+    viewportWidth: container.clientWidth,
+    viewportHeight: container.clientHeight,
+    clipLeft,
+    clipRight: clipLeft + Math.max(element.duration * pixelsPerSecond, 4),
+    clipTop: rowGeometry.getRowTop(row) + CLIP_Y,
+    clipBottom: rowGeometry.getRowTop(row) + rowGeometry.getRowHeight(row) - CLIP_Y,
+    stickyLeft: contentOrigin,
+    stickyTop: RULER_H,
+    allowHorizontal,
+  });
+  if (target.left !== null) container.scrollLeft = target.left;
+  if (target.top !== null) container.scrollTop = target.top;
+  const didScroll = target.left !== null || target.top !== null;
+  if (didScroll) container.dispatchEvent(new Event("scroll"));
+  return didScroll;
+}
+
+function focusRevealedElement(container: HTMLDivElement, elementId: string): boolean {
+  const clip = container.querySelector(`[data-el-id="${escapeSelectorValue(elementId)}"]`);
+  if (!(clip instanceof HTMLElement)) return false;
+  const alreadyHighlighted = clip.hasAttribute("data-reveal-highlight");
+  clip.setAttribute("data-reveal-highlight", "true");
+  clip.focus({ preventScroll: true });
+  if (document.activeElement !== clip) {
+    clip.removeAttribute("data-reveal-highlight");
+    return false;
+  }
+  if (!alreadyHighlighted) {
+    clip.addEventListener("blur", () => clip.removeAttribute("data-reveal-highlight"), {
+      once: true,
+    });
+  }
+  return true;
+}
+
+function focusAndConsumeReveal(
+  container: HTMLDivElement,
+  request: { elementId: string; nonce: number },
+  deferUntilFocusPin: boolean,
+  focusedElementId?: string,
+): void {
+  if (!focusRevealedElement(container, request.elementId)) return;
+  if (deferUntilFocusPin && focusedElementId !== request.elementId) return;
+  if (usePlayerStore.getState().clipRevealRequest === request) {
+    usePlayerStore.getState().clearClipRevealRequest();
+  }
+}
+
+function resolveRevealTarget(
+  elements: readonly TimelineElement[],
+  rowGeometry: TimelineRowGeometry,
+  elementId: string,
+): { element: TimelineElement; row: number } | null {
+  const element = elements.find((candidate) => getTimelineElementIdentity(candidate) === elementId);
+  if (!element) return null;
+  const row = rowGeometry.getRowIndex(element.track);
+  return row < 0 ? null : { element, row };
+}
+
+function shouldScrollReveal(
+  previous: { request: { elementId: string; nonce: number }; sessionEpoch: number } | null,
+  request: { elementId: string; nonce: number },
+  sessionEpoch: number,
+): boolean {
+  return previous?.request !== request || previous.sessionEpoch !== sessionEpoch;
+}
+
+/** Coordinate-first reveal; the request remains pinned until its clip mounts. */
+export function useTimelineRevealClip({
+  scrollRef,
+  elements,
+  rowGeometry,
+  pixelsPerSecond,
+  contentOrigin,
+  allowHorizontal,
+  deferFocusUntilViewportUpdate,
+  focusedElementId,
+  viewportVersion,
+  sessionEpoch,
+}: UseTimelineRevealClipInput): void {
+  const revealRequest = usePlayerStore((state) => state.clipRevealRequest);
+  const scrolledRequestRef = useRef<{
+    request: { elementId: string; nonce: number };
+    sessionEpoch: number;
+  } | null>(null);
 
   useEffect(() => {
-    if (!revealRequest) return;
-    // Consume the request first — reveal is one-shot, even when the clip node
-    // isn't currently rendered (e.g. drilled into a different composition).
-    usePlayerStore.getState().clearClipRevealRequest();
-
+    if (!revealRequest) {
+      scrolledRequestRef.current = null;
+      return;
+    }
+    const target = resolveRevealTarget(elements, rowGeometry, revealRequest.elementId);
+    if (!target) {
+      usePlayerStore.getState().clearClipRevealRequest();
+      return;
+    }
     const container = scrollRef.current;
     if (!container) return;
-    const clip = container.querySelector(`[data-el-id="${CSS.escape(revealRequest.elementId)}"]`);
-    if (!(clip instanceof HTMLElement)) return;
+    if (container.clientWidth <= 0 || container.clientHeight <= 0) return;
 
-    const containerRect = container.getBoundingClientRect();
-    const clipRect = clip.getBoundingClientRect();
-    const clipLeft = clipRect.left - containerRect.left + container.scrollLeft;
-    const clipTop = clipRect.top - containerRect.top + container.scrollTop;
+    if (shouldScrollReveal(scrolledRequestRef.current, revealRequest, sessionEpoch)) {
+      scrolledRequestRef.current = { request: revealRequest, sessionEpoch };
+      const didScroll = scrollToTimelineElement(
+        container,
+        target.element,
+        target.row,
+        rowGeometry,
+        pixelsPerSecond,
+        contentOrigin,
+        allowHorizontal,
+      );
+      // Keep the reveal pin alive until the scroll snapshot catches up. If the
+      // request were consumed here, horizontal windowing could unmount and
+      // recreate the focused clip between the programmatic scroll and the next
+      // viewport publication.
+      if (didScroll && deferFocusUntilViewportUpdate) return;
+    }
 
-    const target = computeRevealScroll({
-      scrollLeft: container.scrollLeft,
-      scrollTop: container.scrollTop,
-      viewportWidth: container.clientWidth,
-      viewportHeight: container.clientHeight,
-      clipLeft,
-      clipRight: clipLeft + clipRect.width,
-      clipTop,
-      clipBottom: clipTop + clipRect.height,
-      stickyLeft: GUTTER,
-      stickyTop: RULER_H,
-      allowHorizontal: usePlayerStore.getState().zoomMode === "manual",
-    });
-    if (target.left === null && target.top === null) return;
-    container.scrollTo({
-      left: target.left ?? container.scrollLeft,
-      top: target.top ?? container.scrollTop,
-      behavior: "smooth",
-    });
-  }, [revealRequest, scrollRef]);
+    // Focus is the durable row/clip pin. Do not consume the reveal pin until
+    // the focus listener has published that replacement, or windowing can
+    // briefly unmount and recreate the element between the two owners.
+    focusAndConsumeReveal(
+      container,
+      revealRequest,
+      deferFocusUntilViewportUpdate,
+      focusedElementId,
+    );
+  }, [
+    allowHorizontal,
+    contentOrigin,
+    deferFocusUntilViewportUpdate,
+    elements,
+    focusedElementId,
+    pixelsPerSecond,
+    revealRequest,
+    rowGeometry,
+    scrollRef,
+    sessionEpoch,
+    viewportVersion,
+  ]);
 }

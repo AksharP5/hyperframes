@@ -1,10 +1,15 @@
 import { create } from "zustand";
 import type { MusicBeatAnalysis } from "@hyperframes/core/beats";
+import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { BeatEditState } from "../../utils/beatEditing";
 import type { ClipManifestClip } from "../lib/playbackTypes";
-import { readStudioUiPreferences, writeStudioUiPreferences } from "../../utils/studioUiPreferences";
-import { computePinnedZoomPercent } from "../components/timelineZoom";
-import { createKeyframeSlice, type KeyframeSlice } from "./keyframeSlice";
+import {
+  readStudioUiPreferences,
+  writeStudioUiPreferences,
+  type TimelineTimeDisplayMode,
+} from "../../utils/studioUiPreferences";
+import { clampTimelineZoomPercent, computePinnedZoomPercent } from "../components/timelineZoom";
+import { createKeyframeSlice, type KeyframeCacheEntry, type KeyframeSlice } from "./keyframeSlice";
 
 export type { KeyframeCacheEntry } from "./keyframeSlice";
 
@@ -101,6 +106,10 @@ interface PlayerState extends KeyframeSlice {
   currentTime: number;
   duration: number;
   timelineReady: boolean;
+  /** Increments exactly once when the Studio switches to a different project. */
+  timelineSessionEpoch: number;
+  /** Project owning the current timeline session; null outside a project-scoped reset. */
+  timelineProjectId: string | null;
   /** True while a beat dot is being dragged — hides the playhead guideline. */
   beatDragging: boolean;
   elements: TimelineElement[];
@@ -155,18 +164,15 @@ interface PlayerState extends KeyframeSlice {
   timelineSnapEnabled: boolean;
   setTimelineSnapEnabled: (enabled: boolean) => void;
   /** Transport + ruler readout: timecode ("time") or frame number ("frame"). */
-  timeDisplayMode: "time" | "frame";
-  setTimeDisplayMode: (mode: "time" | "frame") => void;
+  timeDisplayMode: TimelineTimeDisplayMode;
+  setTimeDisplayMode: (mode: TimelineTimeDisplayMode) => void;
   /**
    * Pin the timeline zoom to its current visual scale before a duration-changing
    * edit, so a subsequent duration change (which recomputes fit-pps) stops
    * rescaling every clip. No-op once already pinned (mode is "manual").
    */
   pinTimelineZoom: (currentPixelsPerSecond: number, fitPixelsPerSecond: number) => void;
-  /**
-   * The timeline's live pixels-per-second + fit basis, published by <Timeline> on
-   * every render. Non-reactive scratch state (never read as a render input).
-   */
+  /** The timeline's live pixels-per-second + fit basis, published by <Timeline>. */
   timelinePps: number;
   timelineFitPps: number;
   setTimelineScale: (pps: number, fitPps: number) => void;
@@ -201,6 +207,9 @@ interface PlayerState extends KeyframeSlice {
   bumpZEditVersion: () => void;
   setInPoint: (time: number | null) => void;
   setOutPoint: (time: number | null) => void;
+  /** Owns the hard project boundary; repeated calls for one project are no-ops. */
+  beginTimelineSession: (projectId: string) => void;
+  /** Clears project data without creating a new hard-project session. */
   reset: () => void;
 
   /**
@@ -283,11 +292,49 @@ export const liveTime = {
   },
 };
 
+export function createTimelineResetState() {
+  return {
+    isPlaying: false,
+    currentTime: 0,
+    duration: 0,
+    timelineReady: false,
+    beatDragging: false,
+    elements: [],
+    selectedElementId: null,
+    zEditVersion: 0,
+    inPoint: null,
+    outPoint: null,
+    activeTool: "select" as const,
+    activeKeyframePct: null,
+    motionPathArmed: false,
+    motionPathCreateAvailable: false,
+    selectedKeyframes: new Set<string>(),
+    expandedClipIds: new Set<string>(),
+    focusedEaseSegment: null,
+    selectedElementIds: new Set<string>(),
+    requestedSeekTime: null,
+    clipRevealRequest: null,
+    lintFindingsByElement: new Map<string, { count: number; messages: string[] }>(),
+    keyframeCache: new Map<string, KeyframeCacheEntry>(),
+    gsapAnimations: new Map<string, GsapAnimation[]>(),
+    beatAnalysis: null,
+    beatEdits: null,
+    beatUndo: [],
+    beatRedo: [],
+    beatPersist: null,
+    clipManifest: null,
+    clipParentMap: new Map<string, string>(),
+    domClipChildren: [],
+  };
+}
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   isPlaying: false,
   currentTime: 0,
   duration: 0,
   timelineReady: false,
+  timelineSessionEpoch: 0,
+  timelineProjectId: null,
   beatDragging: false,
   elements: [],
   selectedElementId: null,
@@ -436,12 +483,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       return { zoomMode: "manual", manualZoomPercent: percent };
     }),
   setTimelineScale: (pps, fitPps) => {
-    // Non-reactive publish: mutate in place + reuse the same object identity so no
-    // subscriber re-renders (these fields are never a render input, only read
-    // imperatively before pinning).
     const state = get();
-    state.timelinePps = pps;
-    state.timelineFitPps = fitPps;
+    if (state.timelinePps === pps && state.timelineFitPps === fitPps) return;
+    set({ timelinePps: pps, timelineFitPps: fitPps });
   },
   setInPoint: (time) =>
     set((state) => {
@@ -465,7 +509,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       };
     }),
   setManualZoomPercent: (percent) =>
-    set({ manualZoomPercent: Math.max(10, Math.min(2000, Math.round(percent))) }),
+    set((state) => ({
+      manualZoomPercent: clampTimelineZoomPercent(percent, state.timelineFitPps),
+    })),
   bumpZEditVersion: () => set((state) => ({ zEditVersion: state.zEditVersion + 1 })),
   setCurrentTime: (time) => set({ currentTime: Number.isFinite(time) ? time : 0 }),
   setDuration: (duration) => set({ duration: Number.isFinite(duration) ? duration : 0 }),
@@ -514,37 +560,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         (el.key ?? el.id) === elementId ? { ...el, ...updates } : el,
       ),
     })),
-  // Resets project-specific state when switching compositions.
-  // playbackRate, audioMuted, loopEnabled, zoomMode, and manualZoomPercent are intentionally preserved
-  // because they are user preferences that should survive project switches.
-  reset: () =>
-    set({
-      isPlaying: false,
-      currentTime: 0,
-      duration: 0,
-      timelineReady: false,
-      beatDragging: false,
-      elements: [],
-      selectedElementId: null,
-      inPoint: null,
-      outPoint: null,
-      activeTool: "select",
-      selectedKeyframes: new Set(),
-      expandedClipIds: new Set(),
-      focusedEaseSegment: null,
-      selectedElementIds: new Set(),
-      clipRevealRequest: null,
-      keyframeCache: new Map(),
-      gsapAnimations: new Map(),
-      beatAnalysis: null,
-      beatEdits: null,
-      beatUndo: [],
-      beatRedo: [],
-      beatPersist: null,
-      clipManifest: null,
-      clipParentMap: new Map(),
-      domClipChildren: [],
+  // playbackRate, audioMuted, loopEnabled, zoomMode, and manualZoomPercent are
+  // intentionally absent from createTimelineResetState because they are user
+  // preferences that survive both source refreshes and project switches.
+  beginTimelineSession: (projectId) =>
+    set((state) => {
+      if (state.timelineProjectId === projectId) return state;
+      return {
+        ...createTimelineResetState(),
+        timelineSessionEpoch: state.timelineSessionEpoch + 1,
+        timelineProjectId: projectId,
+      };
     }),
+  reset: () => set(createTimelineResetState()),
 }));
 
 // Bug-bash aid: expose the store so a reproduction can dump live state from the

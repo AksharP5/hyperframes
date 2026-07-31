@@ -49,8 +49,10 @@
     "build": "vite build && tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:timeline-virtualization": "TIMELINE_ROW_VIRTUALIZATION=on TIMELINE_ELEMENT_COUNT=50000 node tests/e2e/timeline-virtualization.mjs",
     "test:watch": "vitest",
-    "report:sdk-cutover": "bun src/utils/sdkCutoverPolicy.report.ts"
+    "report:sdk-cutover": "bun src/utils/sdkCutoverPolicy.report.ts",
+    "test:timeline-default": "TIMELINE_ROW_VIRTUALIZATION=off TIMELINE_ELEMENT_COUNT=1000 node tests/e2e/timeline-virtualization.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",
@@ -70,6 +72,7 @@
     "@hyperframes/sdk": "workspace:*",
     "@hyperframes/studio-server": "workspace:*",
     "@phosphor-icons/react": "^2.1.10",
+    "@tanstack/react-virtual": "^3.14.6",
     "bpm-detective": "^2.0.5",
     "dompurify": "^3.2.4",
     "gsap": "^3.13.0",

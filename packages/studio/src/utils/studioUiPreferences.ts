@@ -4,6 +4,8 @@ export interface StoredPreviewZoomState {
   panY: number;
 }
 
+export type TimelineTimeDisplayMode = "time" | "frame";
+
 export interface StudioUiPreferences {
   leftCollapsed?: boolean;
   leftWidth?: number;
@@ -21,7 +23,7 @@ export interface StudioUiPreferences {
   /** Timeline magnet: snap clip drags/trims/drops to playhead, clip edges, and beats. */
   timelineSnapEnabled?: boolean;
   /** Transport + ruler readout mode: timecode or frame number. */
-  timeDisplayMode?: "time" | "frame";
+  timeDisplayMode?: TimelineTimeDisplayMode;
   /**
    * Timeline zoom mode. Persisted so a zoom PINNED on the first edit survives the
    * post-edit iframe reload — otherwise the store reset to "fit" and the duration
