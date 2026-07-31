@@ -326,19 +326,54 @@ function readTagCI(tags: Record<string, string | undefined> | undefined, name: s
   return "";
 }
 
-function parseFrameRate(frameRateStr: string | undefined): number {
+/**
+ * Parse an ffprobe rational frame rate ("30000/1001") or plain number.
+ *
+ * Returns 0 for anything not a usable positive rate. Exported so tests
+ * exercise the shipped function directly instead of re-importing the module
+ * behind a spawn mock.
+ *
+ * Every guard here is load-bearing, because a bad value is NOT caught
+ * downstream: callers use `meta.fps || 30`, which only rescues 0 and NaN.
+ * Infinity and negatives are truthy and flow into buildEncoderArgs as
+ * `-r Infinity` / `-r -30`, which ffmpeg rejects mid-render, and into
+ * frameCount arithmetic that then goes negative or non-finite.
+ *
+ *  - the QUOTIENT is checked, not just the operands: "1e308/1e-10" and
+ *    "2/1e-320" have finite parts and an infinite result;
+ *  - the sign is checked: "-30/1", "30/-1" and "-60" all parsed clean;
+ *  - more than two parts is rejected: "30/1/2" used to fall through to the
+ *    bare parseFloat below and return 30, as did "60fps", because parseFloat
+ *    stops at trailing garbage;
+ *  - sub-0.005 rates round to 0 at 2dp and would be replaced by the caller's
+ *    30fps default, re-encoding a 300-second 1/300-fps timelapse as a
+ *    ~1/30-second clip. Kept as 0 is wrong too, so they are floored to the
+ *    smallest representable 2dp rate instead.
+ */
+export function parseFrameRate(frameRateStr: string | undefined): number {
   if (!frameRateStr) return 0;
+
   const parts = frameRateStr.split("/");
-  if (parts.length === 2) {
-    const num = parseFloat(parts[0] ?? "");
-    const den = parseFloat(parts[1] ?? "");
-    if (Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
-      return Math.round((num / den) * 100) / 100;
-    }
-    return 0;
-  }
-  const parsed = parseFloat(frameRateStr);
-  return Number.isFinite(parsed) ? parsed : 0;
+  if (parts.length > 2) return 0;
+
+  const raw =
+    parts.length === 2
+      ? (() => {
+          const num = parseFloat(parts[0] ?? "");
+          const den = parseFloat(parts[1] ?? "");
+          if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) return NaN;
+          return num / den;
+        })()
+      : // Not parseFloat: it stops at trailing garbage, so "60fps" parsed as
+        // 60. Number() rejects the whole string.
+        Number(frameRateStr.trim());
+
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+
+  const rounded = Math.round(raw * 100) / 100;
+  // A real but very slow rate must not collapse to 0 and inherit the
+  // caller's 30fps default.
+  return rounded > 0 ? rounded : 0.01;
 }
 
 /**
