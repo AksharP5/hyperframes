@@ -616,18 +616,6 @@
       "type": "hyperframes:block"
     },
     {
-      "name": "mk-logo-sting",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "mk-pill-callout",
-      "type": "hyperframes:component"
-    },
-    {
-      "name": "mk-cta-button",
-      "type": "hyperframes:component"
-    },
-    {
       "name": "mk-usage-arc",
       "type": "hyperframes:component"
     },
@@ -656,15 +644,7 @@
       "type": "hyperframes:block"
     },
     {
-      "name": "yt-doc-lower-third",
-      "type": "hyperframes:block"
-    },
-    {
       "name": "yt-camera-move",
-      "type": "hyperframes:component"
-    },
-    {
-      "name": "yt-avatar-pip",
       "type": "hyperframes:component"
     },
     {

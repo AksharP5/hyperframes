@@ -4,7 +4,7 @@
   "type": "hyperframes:block",
   "title": "Text Along a Path",
   "description": "Handwriting flowing along any SVG path with a per-character reveal; the path is the only geometry input",
-  "tags": ["handwritten", "typography", "path"],
+  "tags": ["handwritten", "typography", "path", "overlay"],
   "dimensions": {
     "width": 1920,
     "height": 1080

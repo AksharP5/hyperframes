@@ -4,7 +4,7 @@
   "type": "hyperframes:block",
   "title": "Hand-Drawn Flowchart",
   "description": "Wobbled boxes with handwritten labels joined by curved connectors, drawing on in sequence from a node list",
-  "tags": ["handwritten", "diagram", "data-viz"],
+  "tags": ["handwritten", "diagram", "data-viz", "overlay"],
   "dimensions": {
     "width": 1920,
     "height": 1080

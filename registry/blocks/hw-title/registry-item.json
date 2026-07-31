@@ -4,7 +4,7 @@
   "type": "hyperframes:block",
   "title": "Handwritten Title",
   "description": "Handwritten display text with a scalar-driven word-by-word highlight sweep and a seeded squiggle underline sized to the text; boils",
-  "tags": ["handwritten", "typography", "title-card"],
+  "tags": ["handwritten", "typography", "title-card", "overlay"],
   "dimensions": {
     "width": 1920,
     "height": 1080

@@ -57,7 +57,11 @@
         letter-spacing: -0.01em;
         color: var(--mk-ink);
         font-variant-numeric: tabular-nums;
-        transform: translate(-50%, -100%);
+        /* Horizontal centring only. The label's vertical offset is baked into
+           `top` instead of a CSS translate, because the entrance tween animates
+           `y` and GSAP rewrites this transform, dropping any vertical shift. */
+        transform: translate(-50%, 0);
+        line-height: 38px;
         white-space: nowrap;
       }
       .mk-lg-xlabel {
@@ -197,11 +201,16 @@
 
             if (CONFIG.showValues) {
               var val = document.createElement("div");
+              /* Series after the first label downward. With every series
+                 labelling upward the numbers collide wherever the lines run
+                 close together. GAP clears the dot radius plus line stroke. */
+              var below = si > 0;
+              var GAP = 22;
               val.className = "mk-lg-value";
               val.id = "mk-lg-val-" + si + "-" + i;
               val.textContent = v;
               val.style.left = px(i) + "px";
-              val.style.top = py(v) - 20 + "px";
+              val.style.top = py(v) + (below ? GAP : -(GAP + 38)) + "px";
               labels.appendChild(val);
               vals.push({ el: val, si: si, i: i });
             }
