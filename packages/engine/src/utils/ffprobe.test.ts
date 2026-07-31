@@ -642,3 +642,70 @@ describe("extractPngMetadataFromBuffer cICP ordering", () => {
     expect(extractPngMetadataFromBuffer(onlyCicp)).toBeNull();
   });
 });
+
+describe("PNG chunk walk — integrity of the fallback itself", () => {
+  const IHDR_4K = [0, 0, 0x0f, 0, 0, 0, 0x08, 0x70, 16, 2, 0, 0, 0];
+  const CICP_PQ = [9, 16, 0, 1];
+
+  // Regression: the walk used to continue past cICP to IEND, which made
+  // whole-file integrity a precondition for returning anything. A damaged
+  // trailing chunk in an otherwise-good HDR PNG nulled the whole result, and
+  // extractMediaMetadata then re-throws the ffprobe error it had swallowed
+  // rather than using the fallback it just computed.
+  it("returns metadata even when a chunk AFTER cICP is corrupt", () => {
+    const bad = pngChunk("tEXt", [65, 66]);
+    bad[bad.length - 1] ^= 0xff; // break the CRC
+    const png = buildPngWithChunks([
+      pngChunk("IHDR", IHDR_4K),
+      pngChunk("cICP", CICP_PQ),
+      pngChunk("IDAT", [0x78, 0x9c, 0x63, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01]),
+      bad,
+      pngChunk("IEND", []),
+    ]);
+    expect(extractPngMetadataFromBuffer(png)).toEqual({
+      width: 3840,
+      height: 2160,
+      colorSpace: { colorPrimaries: "bt2020", colorTransfer: "smpte2084", colorSpace: "gbr" },
+    });
+  });
+
+  it("survives outright truncation after cICP", () => {
+    const png = buildPngWithChunks([pngChunk("IHDR", IHDR_4K), pngChunk("cICP", CICP_PQ)]);
+    const truncated = Buffer.concat([png, Buffer.from([0, 0, 0x7f, 0xff, 73, 68, 65, 84])]);
+    expect(extractPngMetadataFromBuffer(truncated)?.width).toBe(3840);
+  });
+
+  // Regression: IHDR had no first-chunk anchor, so a later one overwrote the
+  // real dimensions and the producer laid out a 1-pixel image.
+  it("ignores a second IHDR", () => {
+    const png = buildPngWithChunks([
+      pngChunk("IHDR", IHDR_4K),
+      pngChunk("cICP", CICP_PQ),
+      pngChunk("IDAT", [0x78, 0x9c, 0x63, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01]),
+      pngChunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 16, 2, 0, 0, 0]),
+      pngChunk("IEND", []),
+    ]);
+    const meta = extractPngMetadataFromBuffer(png);
+    expect(meta?.width).toBe(3840);
+    expect(meta?.height).toBe(2160);
+  });
+
+  // A truncated 8-byte IHDR used to be accepted, reading height out of the
+  // CRC bytes; the spec length is 13.
+  it("rejects a short IHDR rather than reading garbage dimensions", () => {
+    const png = buildPngWithChunks([
+      pngChunk("IHDR", [0, 0, 0, 7, 0, 0, 0, 9]),
+      pngChunk("cICP", CICP_PQ),
+      pngChunk("IEND", []),
+    ]);
+    expect(extractPngMetadataFromBuffer(png)).toBeNull();
+  });
+
+  it("still rejects a PNG whose IHDR or cICP itself is corrupt", () => {
+    const badIhdr = pngChunk("IHDR", IHDR_4K);
+    badIhdr[badIhdr.length - 1] ^= 0xff;
+    expect(
+      extractPngMetadataFromBuffer(buildPngWithChunks([badIhdr, pngChunk("IEND", [])])),
+    ).toBeNull();
+  });
+});
