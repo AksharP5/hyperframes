@@ -6,6 +6,14 @@ import { evaluateCanary } from "@hyperframes/core/canary";
 // Pin the registry: real entries move as rollouts ramp, and these tests are
 // about the BINDING (does the browser supply the right three inputs?), not
 // about whichever canaries happen to be live today.
+// The policy reads import.meta.env.DEV, which vitest sets true — without
+// this every case would resolve to telemetry_opt_out. Controlled explicitly
+// so each test states the privacy posture it is exercising.
+const policyState = { allowed: true };
+vi.mock("./policy", () => ({
+  browserTelemetryAllowed: () => policyState.allowed,
+}));
+
 vi.mock("@hyperframes/core/canary-registry", async () => {
   const actual = await vi.importActual<typeof import("@hyperframes/core/canary-registry")>(
     "@hyperframes/core/canary-registry",
@@ -43,6 +51,7 @@ function setSearch(search: string): void {
 }
 
 beforeEach(() => {
+  policyState.allowed = true;
   localStorage.clear();
   sessionStorage.clear();
   setSearch("");
@@ -198,6 +207,7 @@ describe("telemetry opt-out is canary opt-out", () => {
   const OPT_OUT_KEY = "hyperframes-studio:telemetryDisabled";
 
   it("does not enrol an opted-out browser profile", () => {
+    policyState.allowed = false;
     localStorage.setItem(OPT_OUT_KEY, "1");
     // on-everywhere is at 100% — it would be on for everyone otherwise.
     expect(resolveCanary("on-everywhere")).toEqual({
@@ -207,17 +217,20 @@ describe("telemetry opt-out is canary opt-out", () => {
   });
 
   it("never buckets an opted-out profile — no cohort is assigned at all", () => {
+    policyState.allowed = false;
     localStorage.setItem(OPT_OUT_KEY, "1");
     expect(resolveCanary("on-everywhere").bucket).toBeUndefined();
   });
 
   it("still honours an explicit URL override", () => {
+    policyState.allowed = false;
     localStorage.setItem(OPT_OUT_KEY, "1");
     setSearch("?hf_canary_off_everywhere=on");
     expect(resolveCanary("off-everywhere")).toEqual({ enabled: true, reason: "forced_on" });
   });
 
   it("reports every canary as false when opted out", () => {
+    policyState.allowed = false;
     localStorage.setItem(OPT_OUT_KEY, "1");
     expect(canaryEventProperties()).toEqual({
       "$feature/canary-on-everywhere": "false",
@@ -281,6 +294,7 @@ describe("CLI-launched Studio adopts the CLI's decisions", () => {
   // opt-outs, and CLI telemetry being on says nothing about this profile.
   describe("precedence against Studio's own opt-out", () => {
     beforeEach(() => {
+      policyState.allowed = false;
       localStorage.setItem(OPT_OUT_KEY, "1");
     });
 

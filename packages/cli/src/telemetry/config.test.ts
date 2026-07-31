@@ -494,3 +494,62 @@ describe("a tripped breaker survives even total marker+seed corruption", () => {
     expect(readConfig().stateFileCorrupt).toBe(true);
   });
 });
+
+describe("the breaker latch is authoritative from install-state", () => {
+  let readConfig: typeof import("./config.js").readConfig;
+  let writeConfigWithResult: typeof import("./config.js").writeConfigWithResult;
+  let CONFIG_PATH: typeof import("./config.js").CONFIG_PATH;
+  let STATE_PATH: typeof import("./config.js").STATE_PATH;
+
+  beforeEach(async () => {
+    fsState.files.clear();
+    vi.resetModules();
+    ({ readConfig, writeConfigWithResult, CONFIG_PATH, STATE_PATH } = await import("./config.js"));
+  });
+
+  // The stale-writer race: a concurrent process rewrites config.json from a
+  // snapshot taken before the breaker fired, clearing the flag there. Without
+  // merging the latch on read, the next process re-enrols a machine whose
+  // router already failed.
+  it("rehydrates a latched breaker when config.json says otherwise", () => {
+    fsState.files.set(
+      STATE_PATH,
+      JSON.stringify({ markerAt: "2026-07-28T00:00:00.000Z", deParallelRouterTrialFired: true }),
+    );
+    fsState.files.set(
+      CONFIG_PATH,
+      JSON.stringify({ telemetryEnabled: true, anonymousId: "id", bucketSeed: "seed" }),
+    );
+    expect(readConfig().deParallelRouterTrialFired).toBe(true);
+  });
+
+  it("does not invent a latch when neither store has one", () => {
+    fsState.files.set(STATE_PATH, JSON.stringify({ markerAt: "2026-07-28T00:00:00.000Z" }));
+    fsState.files.set(
+      CONFIG_PATH,
+      JSON.stringify({ telemetryEnabled: true, anonymousId: "id", bucketSeed: "seed" }),
+    );
+    expect(readConfig().deParallelRouterTrialFired).toBeUndefined();
+  });
+
+  it("reports mirrored:false when the state write fails but config.json lands", async () => {
+    const config = readConfig();
+    const fs = await import("node:fs");
+    const { __resetInstallStateSyncForTests } = await import("./config.js");
+    __resetInstallStateSyncForTests();
+    fsState.files.delete(STATE_PATH);
+    vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
+      if (String(path).startsWith(STATE_PATH)) throw new Error("EACCES");
+      fsState.files.set(String(path), String(content));
+    });
+
+    config.deParallelRouterTrialFired = true;
+    // The config write still succeeds — a failed mirror must never break it —
+    // but the caller can now see the safety fact reached only one store.
+    expect(writeConfigWithResult(config)).toEqual({ ok: true, mirrored: false });
+
+    vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
+      fsState.files.set(String(path), String(content));
+    });
+  });
+});

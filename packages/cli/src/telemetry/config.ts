@@ -147,6 +147,29 @@ function backfillBucketSeed(config: HyperframesConfig): void {
   if (!write.ok) warnSeedBackfillFailed(write.error);
 }
 
+// The latch is monotonic — once tripped it never untrips — so one read per
+// process is enough, and readConfig is hot (every command, every render).
+let latchFromStateFile: boolean | undefined;
+
+/**
+ * Is the breaker latched according to install-state?
+ *
+ * Merged into EVERY effective read, which is what makes install-state
+ * authoritative for the latch rather than merely a mirror of config.json.
+ * Without this a failed mirror, or a stale concurrent writer that rewrites
+ * config.json from a pre-trip snapshot, leaves state latched and config
+ * false — and the next process happily re-enrols a machine whose router
+ * already failed. Verifying the write is not enough on its own; the read has
+ * to prefer the safety fact.
+ */
+function installStateLatchedFired(): boolean {
+  if (latchFromStateFile === undefined) {
+    const state = readInstallState();
+    latchFromStateFile = isInstallState(state) && state.deParallelRouterTrialFired === true;
+  }
+  return latchFromStateFile;
+}
+
 /** Narrow the parse result to a usable record. */
 function isInstallState(value: InstallState | InstallStateMiss): value is InstallState {
   return typeof value !== "string";
@@ -249,18 +272,27 @@ function nextInstallState(
   return next;
 }
 
-function syncInstallState(config: HyperframesConfig): void {
+/** @returns false if the mirror could not be written this call. */
+/** The write half, split out to keep the memo bookkeeping legible. */
+function applyInstallState(config: HyperframesConfig, wantFired: boolean): void {
+  const read = readInstallState();
+  const state = isInstallState(read) ? read : null;
+  const next = nextInstallState(state, config);
+  if (next !== null) writeInstallState(next);
+  stateMarkerSynced = true;
+  stateFiredSynced = wantFired || state?.deParallelRouterTrialFired === true;
+  if (wantFired) latchFromStateFile = true;
+}
+
+function syncInstallState(config: HyperframesConfig): boolean {
   const wantFired = config.deParallelRouterTrialFired === true;
-  if (stateMarkerSynced && (stateFiredSynced || !wantFired)) return;
+  if (stateMarkerSynced && (stateFiredSynced || !wantFired)) return true;
   try {
-    const read = readInstallState();
-    const state = isInstallState(read) ? read : null;
-    const next = nextInstallState(state, config);
-    if (next !== null) writeInstallState(next);
-    stateMarkerSynced = true;
-    stateFiredSynced = wantFired || state?.deParallelRouterTrialFired === true;
+    applyInstallState(config, wantFired);
+    return true;
   } catch {
     // Leave the memo unset so a later write retries.
+    return false;
   }
 }
 
@@ -504,7 +536,10 @@ export function readConfig(): HyperframesConfig {
       // non-boolean/non-number JSON value (e.g. the STRING "false", which is
       // truthy in JS) for these two fields specifically, since they're read
       // with a bare truthy check at the call site (review finding).
-      deParallelRouterTrialFired: parsed.deParallelRouterTrialFired === true ? true : undefined,
+      // `|| installStateLatchedFired()` — a latch recorded in install-state
+      // wins over an untripped config.json, never the reverse.
+      deParallelRouterTrialFired:
+        parsed.deParallelRouterTrialFired === true || installStateLatchedFired() ? true : undefined,
       deParallelRouterTrialRenderCount:
         typeof parsed.deParallelRouterTrialRenderCount === "number"
           ? parsed.deParallelRouterTrialRenderCount
@@ -575,7 +610,11 @@ export function writeConfig(config: HyperframesConfig): boolean {
   return writeConfigWithResult(config).ok;
 }
 
-export type ConfigWriteResult = { ok: true } | { ok: false; error: string };
+export type ConfigWriteResult =
+  // `mirrored: false` means config.json landed but the install-state mirror
+  // did not. Not a write failure — the latch is merged back in on read — but
+  // callers persisting a tripped breaker may want to retry or warn.
+  { ok: true; mirrored?: false } | { ok: false; error: string };
 
 /**
  * Persist config and retain the failure reason for user-facing commands that
@@ -589,9 +628,13 @@ export function writeConfigWithResult(config: HyperframesConfig): ConfigWriteRes
     renameSync(tmpFile, CONFIG_FILE);
     cachedConfig = { ...config };
     // Mirror into the install-state file (marker + tripped breaker) so no
-    // breaker write site has to remember to do it.
-    syncInstallState(config);
-    return { ok: true };
+    // breaker write site has to remember to do it. A failed mirror does NOT
+    // fail the config write — config.json landed, and the latch is merged
+    // back in on read — but it is reported rather than swallowed so a caller
+    // persisting a tripped breaker can tell the safety fact only reached one
+    // of the two stores.
+    const mirrored = syncInstallState(config);
+    return mirrored ? { ok: true } : { ok: true, mirrored: false };
   } catch (error) {
     // Non-fatal — telemetry should never break the CLI
     return { ok: false, error: normalizeErrorMessage(error) };

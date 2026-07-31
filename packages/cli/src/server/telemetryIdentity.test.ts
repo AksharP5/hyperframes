@@ -25,6 +25,7 @@ const {
   buildCliIdentityScript,
   buildStudioHeadScripts,
   isLoopbackHost,
+  buildStudioHeadScriptsForHost,
 } = await import("./telemetryIdentity.js");
 
 describe("resolveCliTelemetryDistinctId", () => {
@@ -204,5 +205,49 @@ describe("isLoopbackHost (DNS-rebinding guard on the identity endpoint)", () => 
     "0.0.0.0",
   ])("rejects %s", (host) => {
     expect(isLoopbackHost(host)).toBe(false);
+  });
+});
+
+describe("buildStudioHeadScriptsForHost — Host split", () => {
+  const ENV = "<script>window.__HF_STUDIO_ENV__={};</script>";
+
+  beforeEach(() => {
+    shouldTrack.mockReset();
+    readConfig.mockReset();
+    canaryDecisions.mockReset();
+    shouldTrack.mockReturnValue(true);
+    readConfig.mockReturnValue({ anonymousId: "machine-uuid", bucketSeed: "seed-uuid" });
+    canaryDecisions.mockReturnValue({ "de-parallel-router": { enabled: true, forced: false } });
+  });
+
+  it("publishes identity and decisions on a loopback Host", () => {
+    const head = buildStudioHeadScriptsForHost(ENV, "127.0.0.1:5173");
+    expect(head).toContain("__HF_CLI_DISTINCT_ID");
+    expect(head).toContain("__HF_CLI_BUCKET_SEED");
+    expect(head).toContain("__HF_CLI_CANARY_DECISIONS");
+  });
+
+  // DNS rebinding: identity must not be readable from a hostile origin.
+  it("withholds identity and seed from a hostile Host", () => {
+    const head = buildStudioHeadScriptsForHost(ENV, "evil.example.com");
+    expect(head).not.toContain("__HF_CLI_DISTINCT_ID");
+    expect(head).not.toContain("__HF_CLI_BUCKET_SEED");
+  });
+
+  // ...but the decisions map is NOT identifying, and withholding it would send
+  // a supported LAN preview (HYPERFRAMES_PREVIEW_HOST=0.0.0.0) back to
+  // re-deriving locally and disagreeing with the CLI.
+  it.each(["evil.example.com", "192.168.1.10:5173", "my-dev-box.local:5173", undefined])(
+    "still publishes canary decisions for non-loopback Host %s",
+    (host) => {
+      const head = buildStudioHeadScriptsForHost(ENV, host);
+      expect(head).toContain("__HF_CLI_CANARY_DECISIONS");
+      expect(head).not.toContain("__HF_CLI_DISTINCT_ID");
+    },
+  );
+
+  it("always keeps the env script, whatever the Host", () => {
+    expect(buildStudioHeadScriptsForHost(ENV, "evil.example.com")).toContain("__HF_STUDIO_ENV__");
+    expect(buildStudioHeadScriptsForHost(ENV, "localhost")).toContain("__HF_STUDIO_ENV__");
   });
 });

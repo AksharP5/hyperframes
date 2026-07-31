@@ -6,11 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // canary work established: the documented opt-out did not silence it, and its
 // events carried no cohort assignment. These pin both.
 
-const DOCUMENTED_OPT_OUT = "hyperframes-studio:telemetryDisabled";
-const LEGACY_OPT_OUT = "hf-studio-telemetry-opt-out";
-
 vi.mock("../telemetry/canary", () => ({
   canaryEventProperties: () => ({ "$feature/canary-test-one": "true" }),
+}));
+
+// One shared policy now governs this transport, telemetry/client.ts and
+// canary enrolment. Exercised directly here so each case names the control
+// under test rather than relying on ambient import.meta.env.
+const policyState = { allowed: true };
+vi.mock("../telemetry/policy", () => ({
+  browserTelemetryAllowed: () => policyState.allowed,
 }));
 
 describe("studioTelemetry — shared opt-out and canary properties", () => {
@@ -18,6 +23,7 @@ describe("studioTelemetry — shared opt-out and canary properties", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
+    policyState.allowed = true;
     localStorage.clear();
     vi.resetModules();
     vi.useFakeTimers();
@@ -40,19 +46,15 @@ describe("studioTelemetry — shared opt-out and canary properties", () => {
     return parsed.batch ?? [];
   }
 
-  it("honours the documented opt-out key", async () => {
-    // Previously only the legacy key was checked, so a user who opted out the
-    // documented way kept emitting every `studio:*` event.
-    localStorage.setItem(DOCUMENTED_OPT_OUT, "1");
+  // Every control the shared policy enforces — documented key, legacy key,
+  // navigator.doNotTrack, VITE_HYPERFRAMES_NO_TELEMETRY, Vite dev mode, API
+  // key eligibility. Before the policy was shared this transport honoured
+  // only the legacy key, so all of the others still emitted `studio:*`.
+  it("sends nothing when the shared policy refuses", async () => {
+    policyState.allowed = false;
     trackStudioEvent("thing_happened");
     expect(await sentEvents()).toHaveLength(0);
-  });
-
-  it("still honours the legacy opt-out key", async () => {
-    // Anyone already opted out this way must not be quietly re-enabled.
-    localStorage.setItem(LEGACY_OPT_OUT, "1");
-    trackStudioEvent("thing_happened");
-    expect(await sentEvents()).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("attaches canary assignments to every event", async () => {

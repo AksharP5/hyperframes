@@ -119,10 +119,16 @@ function resolveCliCanaryDecisions(): Record<string, CliCanaryDecision> | null {
  * or browser history. Empty string only when there is nothing at all to
  * publish.
  */
-export function buildCliIdentityScript(): string {
+export function buildCliIdentityScript(options: { includeIdentity?: boolean } = {}): string {
+  const { includeIdentity = true } = options;
   const parts: string[] = [];
 
-  const cliId = resolveCliTelemetryDistinctId();
+  // Identity is the only part gated on a trusted Host. The decisions map below
+  // is not identifying, and withholding it would push a LAN/remote Studio
+  // (`HYPERFRAMES_PREVIEW_HOST=0.0.0.0`, an explicitly supported mode) back to
+  // re-deriving locally — reopening exactly the CLI/Studio disagreement this
+  // whole mechanism exists to close.
+  const cliId = includeIdentity ? resolveCliTelemetryDistinctId() : null;
   if (cliId) {
     parts.push(`window.__HF_CLI_DISTINCT_ID=${encodeInlineScriptValue(cliId)};`);
     const seed = resolveCliBucketSeed();
@@ -154,6 +160,21 @@ export function buildCliIdentityScript(): string {
  * ordering in one pure, tested function guards against a future `<head>` inject
  * silently landing ahead of the identity script and reintroducing a boot race.
  */
-export function buildStudioHeadScripts(envScript: string): string {
-  return `${buildCliIdentityScript()}${envScript}`;
+export function buildStudioHeadScripts(
+  envScript: string,
+  options: { includeIdentity?: boolean } = {},
+): string {
+  return `${buildCliIdentityScript(options)}${envScript}`;
+}
+
+/**
+ * The `<head>` scripts for a request, given its `Host`.
+ *
+ * The Host split lives here rather than in the route so it is testable
+ * without a Studio bundle on disk — the route's own test can only reach the
+ * injection branch when `packages/studio/dist` happens to be built, which is
+ * true locally and false in the CI test lane.
+ */
+export function buildStudioHeadScriptsForHost(envScript: string, host: string | undefined): string {
+  return buildStudioHeadScripts(envScript, { includeIdentity: isLoopbackHost(host) });
 }

@@ -41,7 +41,7 @@ import {
 } from "@hyperframes/core/canary";
 import { CANARIES, findCanary } from "@hyperframes/core/canary-registry";
 import { resolveStudioDistinctId } from "./distinctId";
-import { isOptedOut } from "./config";
+import { browserTelemetryAllowed } from "./policy";
 import { safeSessionStorage } from "../utils/safeStorage";
 
 /** `my-feature` → `hf_canary_my_feature`, the query param and storage key. */
@@ -212,7 +212,7 @@ function decideStudioCanary(name: string): CanaryDecision {
 
   const override = readOverride(definition.name);
   if (override === undefined) {
-    if (isOptedOut()) return { enabled: false, reason: "telemetry_opt_out" };
+    if (!browserTelemetryAllowed()) return { enabled: false, reason: "telemetry_opt_out" };
     if (fromCli !== undefined) return cohortOutcome(fromCli.enabled);
   }
 

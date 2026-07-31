@@ -17,7 +17,7 @@ import {
 } from "./runtimeSource.js";
 import { VERSION as version } from "../version.js";
 import {
-  buildStudioHeadScripts,
+  buildStudioHeadScriptsForHost,
   isLoopbackHost,
   resolveCliTelemetryDistinctId,
 } from "./telemetryIdentity.js";
@@ -818,13 +818,13 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
     // Host-guarded for the same reason /api/telemetry-identity is, and it has
     // to be checked HERE too: guarding only the endpoint leaves this route as
     // an open side door, since a rebound origin can simply fetch `/` and read
-    // the same distinct id and seed out of the returned HTML. Untrusted Host
-    // still gets a working Studio — it just gets the env script alone, with no
-    // identity, no seed, and no canary decisions.
-    const trustedHost = isLoopbackHost(c.req.header("host"));
-    const headScript = trustedHost
-      ? buildStudioHeadScripts(buildRuntimeEnvScript())
-      : buildRuntimeEnvScript();
+    // the same distinct id and seed out of the returned HTML.
+    //
+    // Only IDENTITY is withheld from an untrusted Host. The canary decisions
+    // map still goes out — it is non-identifying, and a LAN/remote Studio
+    // (`HYPERFRAMES_PREVIEW_HOST=0.0.0.0`) needs it to stay in agreement with
+    // the CLI. See buildStudioHeadScriptsForHost.
+    const headScript = buildStudioHeadScriptsForHost(buildRuntimeEnvScript(), c.req.header("host"));
     if (headScript) {
       html = html.replace("<head>", `<head>${headScript}`);
     }

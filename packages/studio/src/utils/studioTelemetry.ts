@@ -1,5 +1,5 @@
 import { resolveStudioDistinctId } from "../telemetry/distinctId";
-import { isOptedOut } from "../telemetry/config";
+import { browserTelemetryAllowed } from "../telemetry/policy";
 import { canaryEventProperties } from "../telemetry/canary";
 
 // PostHog public ingest key — write-only, safe to ship in the client bundle
@@ -29,21 +29,14 @@ function getDistinctId(): string {
 }
 
 /**
- * Honours BOTH opt-out keys.
- *
- * This path predates telemetry/config.ts and shipped its own key, so the
- * documented `hyperframes-studio:telemetryDisabled` was silently ignored here
- * — `studio:*` events kept flowing for anyone who opted out the documented
- * way. The legacy key stays honoured so nobody who already opted out gets
- * quietly re-enabled by this fix.
+ * This path predates telemetry/config.ts and enforced only its own
+ * localStorage key, so `navigator.doNotTrack`, VITE_HYPERFRAMES_NO_TELEMETRY,
+ * Vite dev mode and the documented `hyperframes-studio:telemetryDisabled` all
+ * failed to silence `studio:*` events. Now one shared policy governs every
+ * transport — including the legacy key, which it still honours.
  */
 function isEnabled(): boolean {
-  if (isOptedOut()) return false;
-  try {
-    return localStorage.getItem("hf-studio-telemetry-opt-out") !== "1";
-  } catch {
-    return true;
-  }
+  return browserTelemetryAllowed();
 }
 
 function getSessionProperties(): EventProperties {

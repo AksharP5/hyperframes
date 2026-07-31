@@ -116,9 +116,11 @@ during the window*, not the instantaneous rate. Two practical consequences:
   far tighter than a 60-day one.
 - **The percentage is not the safety mechanism.** It bounds *initial* exposure
   and decays from there. Per-render verification and per-install circuit
-  breakers are what actually bound harm — and note that a breaker's state
-  lives in the same config file as the id, so a wipe loses both and the
-  install can re-enrol into a path that already failed it.
+  breakers are what actually bound harm. A breaker's tripped state lives in
+  `install-state.json`, separate from `config.json` and merged back in on every
+  read, so a `config.json` re-mint cannot re-enrol an install into a path that
+  already failed it. Deleting `~/.hyperframes` clears both, deliberately —
+  that is the user's reset.
 
 For *measurement* — "is this feature better?" — churn is harmless: re-bucketing
 is random, so it adds noise, not bias. It is specifically the blast-radius
@@ -223,14 +225,33 @@ bucketing unit is a dedicated seed in `install-state.json`, inherited across
 telemetry id and never emitted. It does not outlive `~/.hyperframes`.
 
 **A CLI-launched Studio adopts the CLI's decisions rather than re-deriving
-them.** The CLI publishes `window.__HF_CLI_CANARY_DECISIONS` — a plain
-`{ name: boolean }` map — and Studio takes it as authoritative over its own
-seed, URL override and the registry percentage. Re-deriving cannot agree in
-the cases that matter: telemetry off (the CLI resolves `telemetry_opt_out`,
-but Studio's opt-out is a separate localStorage flag it cannot see), an
-`HF_CANARY_*` override (env vars never cross into the browser), or no seed
-injected (Studio falls back to a different unit, so a different bucket). One
-render spanning both surfaces must not run half-enrolled.
+them.** The CLI publishes `window.__HF_CLI_CANARY_DECISIONS` — a
+`{ name: { enabled, forced } }` map. Re-deriving cannot agree in the cases
+that matter: telemetry off (the CLI resolves `telemetry_opt_out`, but Studio's
+opt-out is a separate localStorage flag it cannot see), an `HF_CANARY_*`
+override (env vars never cross into the browser), or no seed injected (Studio
+falls back to a different unit, so a different bucket). One render spanning
+both surfaces must not run half-enrolled.
+
+`forced` carries the provenance, and the precedence follows from it — highest
+first:
+
+1. A **forced** CLI decision (`HF_CANARY_*`). Wins outright, including over
+   this profile's opt-out, exactly as a local URL override does.
+2. A local `?hf_canary_*=` override, same reasoning.
+3. **This profile's telemetry opt-out.** Checked before any percentage
+   decision: the two surfaces have independent opt-outs, and CLI telemetry
+   being on says nothing about whether this browser profile agreed to be
+   measured. A cohort roll must never enrol an opted-out profile.
+4. The CLI's percentage decision.
+5. Local evaluation (standalone Studio, or a canary the CLI did not publish).
+
+Identity is treated differently from decisions. `__HF_CLI_DISTINCT_ID` and
+`__HF_CLI_BUCKET_SEED` are injected only for a loopback `Host` — a page that
+rebinds its hostname to `127.0.0.1` would otherwise read them as same-origin.
+The decisions map is not identifying, so it is published regardless, which
+keeps a LAN preview (`HYPERFRAMES_PREVIEW_HOST=0.0.0.0`) in agreement with the
+CLI instead of silently re-deriving.
 
 The decisions map is published even when telemetry is off — that is the case
 it exists for. It is safe to expose where the seed is not: booleans about

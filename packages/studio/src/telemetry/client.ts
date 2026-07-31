@@ -4,7 +4,8 @@
 // All calls are fire-and-forget; telemetry must never break the studio UI.
 // ---------------------------------------------------------------------------
 
-import { getAnonymousId, hasShownNotice, isOptedOut, markNoticeShown } from "./config";
+import { getAnonymousId, hasShownNotice, markNoticeShown } from "./config";
+import { browserTelemetryAllowed } from "./policy";
 import { getBrowserSystemMeta } from "./system";
 import { canaryEventProperties } from "./canary";
 
@@ -25,46 +26,11 @@ let eventQueue: QueuedEvent[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let telemetryEnabled: boolean | null = null;
 
-function isDoNotTrackOn(): boolean {
-  return typeof navigator !== "undefined" && navigator.doNotTrack === "1";
-}
-
-function isApiKeyConfigured(): boolean {
-  return POSTHOG_API_KEY.startsWith("phc_");
-}
-
-// VITE_HYPERFRAMES_NO_TELEMETRY mirrors the CLI's HYPERFRAMES_NO_TELEMETRY=1
-// opt-out so HeyGen's own dev/CI builds can suppress telemetry from the studio
-// bundle the same way. Vite injects it at build time. Match the CLI's
-// affirmative privacy-control spellings.
-// `import.meta.env` may be undefined in non-Vite bundlers (Next.js Turbopack).
-function isBuildTimeOptOut(): boolean {
-  try {
-    const v = import.meta.env.VITE_HYPERFRAMES_NO_TELEMETRY as string | undefined;
-    return v !== undefined && ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
-// `import.meta.env.DEV` is true under `vite dev` / `vite preview`. Auto-suppress
-// so developers running `hyperframes preview` don't pollute production telemetry.
-function isViteDevMode(): boolean {
-  try {
-    return import.meta.env.DEV === true;
-  } catch {
-    return false;
-  }
-}
-
 export function shouldTrack(): boolean {
   if (telemetryEnabled !== null) return telemetryEnabled;
-  telemetryEnabled =
-    isApiKeyConfigured() &&
-    !isBuildTimeOptOut() &&
-    !isViteDevMode() &&
-    !isOptedOut() &&
-    !isDoNotTrackOn();
+  // Delegated to telemetry/policy.ts so this transport, the older `studio:*`
+  // transport, and canary enrolment cannot drift apart again.
+  telemetryEnabled = browserTelemetryAllowed();
   return telemetryEnabled;
 }
 
