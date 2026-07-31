@@ -82,7 +82,11 @@
       data-height="1080"
     >
       <div id="hw-ar-scene"><span>point at things</span></div>
-      <div class="hw-arrow" id="hw-ar-demo" style="left: 560px; top: 320px; width: 380px; height: 180px">
+      <div
+        class="hw-arrow"
+        id="hw-ar-demo"
+        style="left: 560px; top: 320px; width: 380px; height: 180px"
+      >
         <svg viewBox="0 0 380 180"><path id="hw-ar-demo-path"></path></svg>
       </div>
       <div
@@ -91,7 +95,7 @@
         data-start="0"
         data-duration="4"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -153,26 +157,58 @@
           var ang = Math.atan2(y1 - cy2, x1 - cx2);
           function head(da, len) {
             var a = ang + Math.PI + da;
-            return "M " + x1.toFixed(1) + " " + y1.toFixed(1) + " l " + (Math.cos(a) * len).toFixed(1) + " " + (Math.sin(a) * len).toFixed(1);
+            return (
+              "M " +
+              x1.toFixed(1) +
+              " " +
+              y1.toFixed(1) +
+              " l " +
+              (Math.cos(a) * len).toFixed(1) +
+              " " +
+              (Math.sin(a) * len).toFixed(1)
+            );
           }
           return (
-            "M " + x0.toFixed(1) + " " + y0.toFixed(1) +
-            " C " + cx1.toFixed(1) + " " + cy1.toFixed(1) + ", " + cx2.toFixed(1) + " " + cy2.toFixed(1) + ", " + x1.toFixed(1) + " " + y1.toFixed(1) +
-            " " + head(0.5, wob(34, 9, 6)) + " " + head(-0.5, wob(34, 10, 6))
+            "M " +
+            x0.toFixed(1) +
+            " " +
+            y0.toFixed(1) +
+            " C " +
+            cx1.toFixed(1) +
+            " " +
+            cy1.toFixed(1) +
+            ", " +
+            cx2.toFixed(1) +
+            " " +
+            cy2.toFixed(1) +
+            ", " +
+            x1.toFixed(1) +
+            " " +
+            y1.toFixed(1) +
+            " " +
+            head(0.5, wob(34, 9, 6)) +
+            " " +
+            head(-0.5, wob(34, 10, 6))
           );
         };
         window.hwArrowOn = function (tl, target, at, dur) {
           var p = document.querySelector(target + " path");
           var len = p.getTotalLength();
           gsap.set(p, { strokeDasharray: len, strokeDashoffset: len });
-          tl.to(p, { strokeDashoffset: 0, duration: dur === undefined ? 0.7 : dur, ease: "power2.inOut" }, at);
+          tl.to(
+            p,
+            { strokeDashoffset: 0, duration: dur === undefined ? 0.7 : dur, ease: "power2.inOut" },
+            at,
+          );
         };
         window.hwArrowOff = function (tl, target, at) {
           tl.to(target, { opacity: 0, duration: 0.3, ease: "power2.in" }, at);
         };
 
         // ---- self-preview ----
-        document.getElementById("hw-ar-demo-path").setAttribute("d", window.hwArrowPath(380, 180, "swoop", 7));
+        document
+          .getElementById("hw-ar-demo-path")
+          .setAttribute("d", window.hwArrowPath(380, 180, "swoop", 7));
         var tl = gsap.timeline({ paused: true });
         window.hwArrowOn(tl, "#hw-ar-demo", 0.4);
         window.hwBoil(tl, "#hw-ar-demo", { amp: 2, rot: 0.6, frameDrop: 3, seed: 7 });

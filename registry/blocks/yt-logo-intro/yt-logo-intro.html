@@ -135,7 +135,9 @@
         <div id="yt-li-logo"></div>
         <div id="yt-li-textrow">
           <div id="yt-li-text"></div>
-          <div id="yt-li-arrow"><svg viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" /></svg></div>
+          <div id="yt-li-arrow">
+            <svg viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" /></svg>
+          </div>
         </div>
       </div>
       <div
@@ -144,7 +146,7 @@
         data-start="0"
         data-duration="6"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -213,14 +215,22 @@
 
         /* logo pops */
         gsap.set(logo, { opacity: 0, scale: 0.55, y: 24 });
-        tl.to(logo, { opacity: 1, scale: 1, y: 0, duration: 0.55, ease: "back.out(1.5)" }, IN * 0.6);
+        tl.to(
+          logo,
+          { opacity: 1, scale: 1, y: 0, duration: 0.55, ease: "back.out(1.5)" },
+          IN * 0.6,
+        );
 
         /* kicker -> swap -> title + arrow */
         gsap.set(text, { opacity: 0, y: 14 });
         tl.set(text, { textContent: CONFIG.kicker, letterSpacing: "0.22em", fontSize: "40px" }, 0);
         tl.to(text, { opacity: 1, y: 0, duration: 0.45, ease: "power2.out" }, IN * 0.6 + 0.45);
         tl.to(text, { opacity: 0, y: -12, duration: 0.3, ease: "power2.in" }, 2.3);
-        tl.set(text, { textContent: CONFIG.title, letterSpacing: "-0.015em", fontSize: "74px", y: 14 }, 2.62);
+        tl.set(
+          text,
+          { textContent: CONFIG.title, letterSpacing: "-0.015em", fontSize: "74px", y: 14 },
+          2.62,
+        );
         tl.to(text, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 2.66);
         gsap.set(arrow, { scale: 0.5, x: -14 });
         tl.to(arrow, { opacity: 1, scale: 1, x: 0, duration: 0.45, ease: "back.out(1.6)" }, 2.9);

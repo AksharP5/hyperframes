@@ -102,7 +102,10 @@
       <svg viewBox="0 0 1920 1080">
         <g id="hw-b-circle-g"><path id="hw-b-circle"></path></g>
         <g id="hw-b-arrow-g">
-          <path id="hw-b-arrow" d="M 640 640 C 760 700, 980 720, 1130 620 M 1130 620 l -64 -6 M 1130 620 l -18 58"></path>
+          <path
+            id="hw-b-arrow"
+            d="M 640 640 C 760 700, 980 720, 1130 620 M 1130 620 l -64 -6 M 1130 620 l -18 58"
+          ></path>
         </g>
       </svg>
       <div class="hw-b-label" id="hw-b-word" style="left: 1230px; top: 560px">the boil</div>
@@ -115,7 +118,7 @@
         data-start="0"
         data-duration="4"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -182,7 +185,15 @@
           for (var j = 0; j < N; j++) {
             var p = pts[j],
               q = pts[(j + 1) % N];
-            d += " Q" + p[0].toFixed(1) + " " + p[1].toFixed(1) + " " + ((p[0] + q[0]) / 2).toFixed(1) + " " + ((p[1] + q[1]) / 2).toFixed(1);
+            d +=
+              " Q" +
+              p[0].toFixed(1) +
+              " " +
+              p[1].toFixed(1) +
+              " " +
+              ((p[0] + q[0]) / 2).toFixed(1) +
+              " " +
+              ((p[1] + q[1]) / 2).toFixed(1);
           }
           return d;
         };

@@ -94,7 +94,7 @@
         data-start="0"
         data-duration="6"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -179,7 +179,15 @@
           for (var j = 0; j < N; j++) {
             var p = pts[j],
               q = pts[(j + 1) % N];
-            d += " Q" + p[0].toFixed(1) + " " + p[1].toFixed(1) + " " + ((p[0] + q[0]) / 2).toFixed(1) + " " + ((p[1] + q[1]) / 2).toFixed(1);
+            d +=
+              " Q" +
+              p[0].toFixed(1) +
+              " " +
+              p[1].toFixed(1) +
+              " " +
+              ((p[0] + q[0]) / 2).toFixed(1) +
+              " " +
+              ((p[1] + q[1]) / 2).toFixed(1);
           }
           d += "Z";
           /* tail */
@@ -189,9 +197,26 @@
           var tx = bx + (left ? -tip.len * 0.5 : tip.len * 0.5),
             ty = by + tip.len;
           d +=
-            " M " + (bx - 26).toFixed(1) + " " + (by - 6).toFixed(1) +
-            " Q " + (bx - 8 + window.hwHash(31, seed) * 6).toFixed(1) + " " + ((by + ty) / 2).toFixed(1) + " " + tx.toFixed(1) + " " + ty.toFixed(1) +
-            " Q " + (bx + 18).toFixed(1) + " " + ((by + ty) / 2).toFixed(1) + " " + (bx + 30).toFixed(1) + " " + (by - 2).toFixed(1);
+            " M " +
+            (bx - 26).toFixed(1) +
+            " " +
+            (by - 6).toFixed(1) +
+            " Q " +
+            (bx - 8 + window.hwHash(31, seed) * 6).toFixed(1) +
+            " " +
+            ((by + ty) / 2).toFixed(1) +
+            " " +
+            tx.toFixed(1) +
+            " " +
+            ty.toFixed(1) +
+            " Q " +
+            (bx + 18).toFixed(1) +
+            " " +
+            ((by + ty) / 2).toFixed(1) +
+            " " +
+            (bx + 30).toFixed(1) +
+            " " +
+            (by - 2).toFixed(1);
           return d;
         }
 

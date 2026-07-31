@@ -87,7 +87,13 @@
       <div class="mk-arc" id="mk-arc-demo" style="top: 430px; left: 850px">
         <svg viewBox="0 0 220 220">
           <circle class="mk-arc-track" cx="110" cy="110" r="92"></circle>
-          <circle class="mk-arc-fill" cx="110" cy="110" r="92" transform="rotate(-90 110 110)"></circle>
+          <circle
+            class="mk-arc-fill"
+            cx="110"
+            cy="110"
+            r="92"
+            transform="rotate(-90 110 110)"
+          ></circle>
         </svg>
         <div class="mk-arc-center">
           <span class="mk-arc-num">0%</span>
@@ -100,7 +106,7 @@
         data-start="0"
         data-duration="4"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -118,7 +124,11 @@
           gsap.set(el, { opacity: 0, y: 16 });
           gsap.set(fill, { strokeDasharray: C, strokeDashoffset: C });
           tl.to(el, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, at);
-          tl.to(fill, { strokeDashoffset: C * (1 - value), duration: 1.1, ease: "power2.inOut" }, at + 0.15);
+          tl.to(
+            fill,
+            { strokeDashoffset: C * (1 - value), duration: 1.1, ease: "power2.inOut" },
+            at + 0.15,
+          );
           var st = { v: 0 };
           tl.to(
             st,
@@ -130,7 +140,7 @@
                 num.textContent = Math.round(st.v * 100) + "%";
               },
             },
-            at + 0.15
+            at + 0.15,
           );
         };
         window.mkArcOut = function (tl, target, at) {

@@ -80,7 +80,7 @@
         data-start="0"
         data-duration="6"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -169,8 +169,10 @@
 
         /* measure + position; build squiggle underline to match width */
         var rect = line.getBoundingClientRect();
-        wrap.style.left = (CONFIG.x === null ? Math.round((1920 - rect.width) / 2) : CONFIG.x) + "px";
-        wrap.style.top = (CONFIG.y === null ? Math.round((1080 - rect.height) / 2) - 20 : CONFIG.y) + "px";
+        wrap.style.left =
+          (CONFIG.x === null ? Math.round((1920 - rect.width) / 2) : CONFIG.x) + "px";
+        wrap.style.top =
+          (CONFIG.y === null ? Math.round((1080 - rect.height) / 2) - 20 : CONFIG.y) + "px";
 
         var underPath = document.getElementById("hw-t-under-path");
         if (CONFIG.underline.enabled) {
@@ -185,7 +187,15 @@
             var y = 16 + window.hwHash(i * 5 + 1, CONFIG.seed) * CONFIG.underline.wobble;
             var cxp = x - uw / segs / 2 + window.hwHash(i * 5 + 2, CONFIG.seed) * 10;
             var cyp = 16 + (i % 2 ? -1 : 1) * (8 + window.hwHash(i * 5 + 3, CONFIG.seed) * 4);
-            d += " Q " + cxp.toFixed(1) + " " + cyp.toFixed(1) + " " + x.toFixed(1) + " " + y.toFixed(1);
+            d +=
+              " Q " +
+              cxp.toFixed(1) +
+              " " +
+              cyp.toFixed(1) +
+              " " +
+              x.toFixed(1) +
+              " " +
+              y.toFixed(1);
           }
           underPath.setAttribute("d", d);
         } else {
@@ -211,7 +221,11 @@
               wordEls[i].style.color = mix(f);
             }
           });
-          tl.to(st, { p: 1, duration: CONFIG.sweep.end - CONFIG.sweep.start, ease: "none" }, CONFIG.sweep.start);
+          tl.to(
+            st,
+            { p: 1, duration: CONFIG.sweep.end - CONFIG.sweep.start, ease: "none" },
+            CONFIG.sweep.start,
+          );
         }
 
         /* underline draws as the sweep lands */

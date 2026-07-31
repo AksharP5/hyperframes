@@ -104,7 +104,7 @@
         data-start="0"
         data-duration="8"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -182,7 +182,15 @@
           d += " Q " + (w + wob(7)) + " " + wob(8) + " " + (w + wob(9)) + " " + (r + wob(10));
           d += " L " + (w + wob(11)) + " " + (h / 2 + wob(12));
           d += " L " + (w + wob(13)) + " " + (h - r + wob(14));
-          d += " Q " + (w + wob(15)) + " " + (h + wob(16)) + " " + (w - r + wob(17)) + " " + (h + wob(18));
+          d +=
+            " Q " +
+            (w + wob(15)) +
+            " " +
+            (h + wob(16)) +
+            " " +
+            (w - r + wob(17)) +
+            " " +
+            (h + wob(18));
           d += " L " + (w / 2 + wob(19)) + " " + (h + wob(20));
           d += " L " + (r + wob(21)) + " " + (h + wob(22));
           d += " Q " + wob(23) + " " + (h + wob(24)) + " " + wob(25) + " " + (h - r + wob(26));
@@ -232,7 +240,16 @@
             for (var k = 0; k < 3; k++) {
               var a = -0.6 - k * 0.5 + window.hwHash(i * 9 + k, CONFIG.seed) * 0.2;
               var l = 26 + window.hwHash(i * 9 + k + 4, CONFIG.seed) * 8;
-              dd += "M " + pt[0] + " " + pt[1] + " l " + (Math.cos(a) * l).toFixed(1) + " " + (Math.sin(a) * l).toFixed(1) + " ";
+              dd +=
+                "M " +
+                pt[0] +
+                " " +
+                pt[1] +
+                " l " +
+                (Math.cos(a) * l).toFixed(1) +
+                " " +
+                (Math.sin(a) * l).toFixed(1) +
+                " ";
             }
             p.setAttribute("d", dd);
             svg.appendChild(p);

@@ -164,7 +164,7 @@
         data-start="0"
         data-duration="8"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -234,7 +234,11 @@
           } else {
             av.textContent = c.initials || "?";
             av.style.background =
-              "linear-gradient(135deg, hsl(" + (c.avatarHue || 210) + ", 62%, 52%), hsl(" + ((c.avatarHue || 210) + 40) + ", 62%, 42%))";
+              "linear-gradient(135deg, hsl(" +
+              (c.avatarHue || 210) +
+              ", 62%, 52%), hsl(" +
+              ((c.avatarHue || 210) + 40) +
+              ", 62%, 42%))";
           }
           card.appendChild(av);
 
@@ -266,7 +270,8 @@
           var row = document.createElement("div");
           row.className = "yt-cc-row";
           row.id = "yt-cc-row-" + i;
-          row.innerHTML = THUMB + "<span>" + (c.likes || 0) + '</span><span class="yt-cc-reply">REPLY</span>';
+          row.innerHTML =
+            THUMB + "<span>" + (c.likes || 0) + '</span><span class="yt-cc-reply">REPLY</span>';
           body.appendChild(row);
           card.appendChild(body);
           col.appendChild(card);
@@ -275,7 +280,8 @@
         /* position (measure after building) */
         col.style.left = CONFIG.x + "px";
         var rect = col.getBoundingClientRect();
-        col.style.top = (CONFIG.y === null ? Math.round((1080 - rect.height) / 2) : CONFIG.y) + "px";
+        col.style.top =
+          (CONFIG.y === null ? Math.round((1080 - rect.height) / 2) : CONFIG.y) + "px";
 
         var tl = gsap.timeline({ paused: true });
 

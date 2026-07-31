@@ -91,7 +91,11 @@
       data-height="1080"
     >
       <div id="yt-ptr-scene"><span>the thing</span></div>
-      <div class="yt-circle" id="yt-ptr-circle" style="left: 760px; top: 440px; width: 420px; height: 210px">
+      <div
+        class="yt-circle"
+        id="yt-ptr-circle"
+        style="left: 760px; top: 440px; width: 420px; height: 210px"
+      >
         <svg viewBox="0 0 420 210"><ellipse cx="210" cy="105" rx="196" ry="88"></ellipse></svg>
       </div>
       <div class="yt-count" id="yt-ptr-count" style="right: 140px; top: 110px">
@@ -103,7 +107,7 @@
         data-start="0"
         data-duration="5"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -115,7 +119,11 @@
           var el = document.querySelector(target + " ellipse");
           var len = el.getTotalLength();
           gsap.set(el, { strokeDasharray: len, strokeDashoffset: len });
-          tl.to(el, { strokeDashoffset: 0, duration: dur === undefined ? 0.7 : dur, ease: "power2.inOut" }, at);
+          tl.to(
+            el,
+            { strokeDashoffset: 0, duration: dur === undefined ? 0.7 : dur, ease: "power2.inOut" },
+            at,
+          );
         };
         window.ytCircleOff = function (tl, target, at) {
           tl.to(target, { opacity: 0, duration: 0.35, ease: "power2.in" }, at);
@@ -137,7 +145,7 @@
                 num.textContent = String(Math.ceil(st.v));
               },
             },
-            at
+            at,
           );
           for (var i = 1; i <= from; i++) {
             tl.to(target, { scale: 1.07, duration: 0.09, ease: "sine.out" }, at + i - 0.09);

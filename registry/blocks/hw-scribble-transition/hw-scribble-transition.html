@@ -62,7 +62,7 @@
         data-start="0"
         data-duration="2.2"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -104,7 +104,8 @@
           var zigs = 7;
           for (var i = 1; i <= zigs; i++) {
             var x = (W + 160) * (i / zigs) - 80;
-            var y = y0 + (i % 2 ? -1 : 1) * bandH * 0.32 + window.hwHash(b * 17 + i, CONFIG.seed) * 16;
+            var y =
+              y0 + (i % 2 ? -1 : 1) * bandH * 0.32 + window.hwHash(b * 17 + i, CONFIG.seed) * 16;
             d += " L " + x.toFixed(1) + " " + y.toFixed(1);
           }
           var p = document.createElementNS(NS, "path");
@@ -131,7 +132,11 @@
         tl.to("#hw-st-solid", { opacity: 0, duration: 0.15, ease: "none" }, 1.42);
         paths.forEach(function (p, i) {
           var len = p.getTotalLength();
-          tl.to(p, { strokeDashoffset: i % 2 ? len : -len, duration: 0.5, ease: "power2.out" }, 1.42 + 0.035 * i);
+          tl.to(
+            p,
+            { strokeDashoffset: i % 2 ? len : -len, duration: 0.5, ease: "power2.out" },
+            1.42 + 0.035 * i,
+          );
         });
 
         /* hard kill the moment the last band clears (learning: kill roots

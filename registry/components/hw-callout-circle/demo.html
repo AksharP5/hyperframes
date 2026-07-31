@@ -110,7 +110,11 @@
     >
       <div id="hw-co-scene"></div>
       <div id="hw-co-target">subject</div>
-      <div class="hw-callout" id="hw-co-demo" style="left: 640px; top: 370px; width: 340px; height: 250px">
+      <div
+        class="hw-callout"
+        id="hw-co-demo"
+        style="left: 640px; top: 370px; width: 340px; height: 250px"
+      >
         <svg viewBox="0 0 340 250">
           <path class="hw-co-scribble" id="hw-co-demo-scribble"></path>
           <path class="hw-co-outline" id="hw-co-demo-outline"></path>
@@ -124,7 +128,7 @@
         data-start="0"
         data-duration="5"
         data-track-index="0"
-        style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none"
+        style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none"
       ></div>
     </div>
     <script>
@@ -180,7 +184,15 @@
           for (var j = 0; j < N; j++) {
             var p = pts[j],
               q = pts[(j + 1) % N];
-            d += " Q" + p[0].toFixed(1) + " " + p[1].toFixed(1) + " " + ((p[0] + q[0]) / 2).toFixed(1) + " " + ((p[1] + q[1]) / 2).toFixed(1);
+            d +=
+              " Q" +
+              p[0].toFixed(1) +
+              " " +
+              p[1].toFixed(1) +
+              " " +
+              ((p[0] + q[0]) / 2).toFixed(1) +
+              " " +
+              ((p[1] + q[1]) / 2).toFixed(1);
           }
           return d;
         };
@@ -202,7 +214,10 @@
             rx = W * 0.42,
             ry = H * 0.36;
 
-          el.querySelector(".hw-co-outline").setAttribute("d", window.hwWobbleEllipse(cx, cy, rx, ry, seed, 4));
+          el.querySelector(".hw-co-outline").setAttribute(
+            "d",
+            window.hwWobbleEllipse(cx, cy, rx, ry, seed, 4),
+          );
 
           var scr = el.querySelector(".hw-co-scribble");
           if (opts.scribble === false) {
@@ -218,7 +233,11 @@
               var xa = cx - xw + window.hwHash(i * 7 + 2, seed) * 8;
               var xb = cx + xw + window.hwHash(i * 7 + 3, seed) * 8;
               d += (i === 0 ? "M " : " L ") + (i % 2 ? xa : xb).toFixed(1) + " " + yy.toFixed(1);
-              d += " L " + (i % 2 ? xb : xa).toFixed(1) + " " + (yy + window.hwHash(i * 7 + 4, seed) * 4).toFixed(1);
+              d +=
+                " L " +
+                (i % 2 ? xb : xa).toFixed(1) +
+                " " +
+                (yy + window.hwHash(i * 7 + 4, seed) * 4).toFixed(1);
             }
             scr.setAttribute("d", d);
           }
@@ -235,7 +254,18 @@
             var ey = sy + 55;
             conn.setAttribute(
               "d",
-              "M " + sx.toFixed(1) + " " + sy.toFixed(1) + " Q " + ((sx + ex) / 2 + window.hwHash(21, seed) * 14).toFixed(1) + " " + (sy + 46).toFixed(1) + " " + ex.toFixed(1) + " " + ey.toFixed(1)
+              "M " +
+                sx.toFixed(1) +
+                " " +
+                sy.toFixed(1) +
+                " Q " +
+                ((sx + ex) / 2 + window.hwHash(21, seed) * 14).toFixed(1) +
+                " " +
+                (sy + 46).toFixed(1) +
+                " " +
+                ex.toFixed(1) +
+                " " +
+                ey.toFixed(1),
             );
             label.style.left = (at === "left" ? ex - 180 : ex + 12) + "px";
             label.style.top = ey - 24 + "px";
@@ -264,7 +294,12 @@
         };
 
         // ---- self-preview ----
-        window.hwCalloutBuild("#hw-co-demo", { scribble: true, seed: 4, label: "look here!", labelAt: "right" });
+        window.hwCalloutBuild("#hw-co-demo", {
+          scribble: true,
+          seed: 4,
+          label: "look here!",
+          labelAt: "right",
+        });
         var tl = gsap.timeline({ paused: true });
         window.hwCalloutOn(tl, "#hw-co-demo", 0.4);
         window.hwBoil(tl, "#hw-co-demo", { amp: 1.8, rot: 0.4, frameDrop: 3, seed: 4 });
