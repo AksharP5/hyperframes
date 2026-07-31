@@ -465,3 +465,32 @@ describe("seed backfill write failure is surfaced", () => {
     });
   });
 });
+
+describe("a tripped breaker survives even total marker+seed corruption", () => {
+  let readConfig: typeof import("./config.js").readConfig;
+  let STATE_PATH: typeof import("./config.js").STATE_PATH;
+
+  beforeEach(async () => {
+    fsState.files.clear();
+    vi.resetModules();
+    ({ readConfig, STATE_PATH } = await import("./config.js"));
+  });
+
+  // Dropping the latch re-enrols a machine into an experimental path that
+  // already FAILED on it — the one outcome install-state exists to prevent.
+  // So the tripped bit is salvageable independently of the other two fields.
+  it("keeps deParallelRouterTrialFired when markerAt and bucketSeed are both unusable", () => {
+    fsState.files.set(
+      STATE_PATH,
+      JSON.stringify({ markerAt: 42, bucketSeed: "", deParallelRouterTrialFired: true }),
+    );
+    const config = readConfig();
+    expect(config.deParallelRouterTrialFired).toBe(true);
+    expect(config.predecessorFound).toBe(true);
+  });
+
+  it("still reports corrupt when none of the three fields survive", () => {
+    fsState.files.set(STATE_PATH, JSON.stringify({ markerAt: 42, bucketSeed: "" }));
+    expect(readConfig().stateFileCorrupt).toBe(true);
+  });
+});

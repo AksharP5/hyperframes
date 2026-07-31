@@ -814,7 +814,17 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
     // Inject before the studio bundle runs. Identity script first (see
     // buildStudioHeadScripts) so the CLI distinct id is on `window` by the time
     // telemetry init reads it.
-    const headScript = buildStudioHeadScripts(buildRuntimeEnvScript());
+    //
+    // Host-guarded for the same reason /api/telemetry-identity is, and it has
+    // to be checked HERE too: guarding only the endpoint leaves this route as
+    // an open side door, since a rebound origin can simply fetch `/` and read
+    // the same distinct id and seed out of the returned HTML. Untrusted Host
+    // still gets a working Studio — it just gets the env script alone, with no
+    // identity, no seed, and no canary decisions.
+    const trustedHost = isLoopbackHost(c.req.header("host"));
+    const headScript = trustedHost
+      ? buildStudioHeadScripts(buildRuntimeEnvScript())
+      : buildRuntimeEnvScript();
     if (headScript) {
       html = html.replace("<head>", `<head>${headScript}`);
     }

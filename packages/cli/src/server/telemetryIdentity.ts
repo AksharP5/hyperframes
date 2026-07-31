@@ -18,7 +18,7 @@
 
 import { readConfig } from "../telemetry/config.js";
 import { shouldTrack as telemetryShouldTrack } from "../telemetry/client.js";
-import { canaryDecisionsForStudio } from "../telemetry/canary.js";
+import { canaryDecisionsForStudio, type CliCanaryDecision } from "../telemetry/canary.js";
 
 /**
  * The CLI's anonymous distinct id to hand to Studio, or null when CLI telemetry
@@ -102,7 +102,7 @@ function encodeInlineScriptJson(value: unknown): string {
  * The CLI's resolved canary decisions for a launched Studio, or null when
  * there are none to publish. Fail-silent, like everything else here.
  */
-function resolveCliCanaryDecisions(): Record<string, boolean> | null {
+function resolveCliCanaryDecisions(): Record<string, CliCanaryDecision> | null {
   try {
     const decisions = canaryDecisionsForStudio();
     return Object.keys(decisions).length > 0 ? decisions : null;

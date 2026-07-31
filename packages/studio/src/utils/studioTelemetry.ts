@@ -1,4 +1,6 @@
 import { resolveStudioDistinctId } from "../telemetry/distinctId";
+import { isOptedOut } from "../telemetry/config";
+import { canaryEventProperties } from "../telemetry/canary";
 
 // PostHog public ingest key — write-only, safe to ship in the client bundle
 const POSTHOG_API_KEY = "phc_zjjbX0PnWxERXrMHhkEJWj9A9BhGVLRReICgsfTMmpx";
@@ -26,7 +28,17 @@ function getDistinctId(): string {
   return resolveStudioDistinctId();
 }
 
+/**
+ * Honours BOTH opt-out keys.
+ *
+ * This path predates telemetry/config.ts and shipped its own key, so the
+ * documented `hyperframes-studio:telemetryDisabled` was silently ignored here
+ * — `studio:*` events kept flowing for anyone who opted out the documented
+ * way. The legacy key stays honoured so nobody who already opted out gets
+ * quietly re-enabled by this fix.
+ */
 function isEnabled(): boolean {
+  if (isOptedOut()) return false;
   try {
     return localStorage.getItem("hf-studio-telemetry-opt-out") !== "1";
   } catch {
@@ -56,7 +68,10 @@ export function trackStudioEvent(event: string, properties: EventProperties = {}
 
   queue.push({
     event: `studio:${event}`,
-    properties: { ...getSessionProperties(), ...properties },
+    // Canary assignments on every event, matching the CLI and the newer
+    // studio client — "every telemetry event carries the assignment" has to
+    // include this path or a cohort breakdown silently omits `studio:*`.
+    properties: { ...getSessionProperties(), ...canaryEventProperties(), ...properties },
     timestamp: new Date().toISOString(),
   });
 

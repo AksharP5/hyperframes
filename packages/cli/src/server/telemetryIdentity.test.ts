@@ -8,7 +8,7 @@ const shouldTrack = vi.fn();
 const readConfig = vi.fn();
 // Pinned rather than using the real registry, so these string assertions
 // don't move every time a canary is added, ramped, or retired.
-const canaryDecisions = vi.fn<() => Record<string, boolean>>();
+const canaryDecisions = vi.fn<() => Record<string, { enabled: boolean; forced: boolean }>>();
 
 vi.mock("../telemetry/client.js", () => ({
   shouldTrack: (...args: unknown[]) => shouldTrack(...args),
@@ -99,10 +99,11 @@ describe("buildCliIdentityScript", () => {
   // stops Studio evaluating independently and enrolling anyway.
   it("still publishes canary decisions when telemetry is off, but no identity", () => {
     shouldTrack.mockReturnValue(false);
-    canaryDecisions.mockReturnValue({ "de-parallel-router": false });
+    canaryDecisions.mockReturnValue({ "de-parallel-router": { enabled: false, forced: false } });
     const script = buildCliIdentityScript();
     expect(script).toBe(
-      '<script>window.__HF_CLI_CANARY_DECISIONS={"de-parallel-router":false};</script>',
+      "<script>window.__HF_CLI_CANARY_DECISIONS=" +
+        '{"de-parallel-router":{"enabled":false,"forced":false}};</script>',
     );
     expect(script).not.toContain("__HF_CLI_DISTINCT_ID");
     expect(script).not.toContain("__HF_CLI_BUCKET_SEED");
@@ -111,17 +112,20 @@ describe("buildCliIdentityScript", () => {
   it("publishes decisions alongside the identity when telemetry is on", () => {
     shouldTrack.mockReturnValue(true);
     readConfig.mockReturnValue({ anonymousId: "machine-uuid", bucketSeed: "seed-uuid" });
-    canaryDecisions.mockReturnValue({ "de-parallel-router": true });
+    canaryDecisions.mockReturnValue({ "de-parallel-router": { enabled: true, forced: true } });
     expect(buildCliIdentityScript()).toBe(
       '<script>window.__HF_CLI_DISTINCT_ID="machine-uuid";' +
         'window.__HF_CLI_BUCKET_SEED="seed-uuid";' +
-        'window.__HF_CLI_CANARY_DECISIONS={"de-parallel-router":true};</script>',
+        "window.__HF_CLI_CANARY_DECISIONS=" +
+        '{"de-parallel-router":{"enabled":true,"forced":true}};</script>',
     );
   });
 
   it("escapes a canary name that tries to close the script tag", () => {
     shouldTrack.mockReturnValue(false);
-    canaryDecisions.mockReturnValue({ "</script><script>alert(1)": true });
+    canaryDecisions.mockReturnValue({
+      "</script><script>alert(1)": { enabled: true, forced: false },
+    });
     const script = buildCliIdentityScript();
     expect(script).not.toContain("</script><script>alert(1)");
     expect(script).toContain("__HF_CLI_CANARY_DECISIONS");

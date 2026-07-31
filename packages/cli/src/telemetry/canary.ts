@@ -119,6 +119,15 @@ export function isCanaryEnabled(name: string): boolean {
 }
 
 /**
+ * One canary's outcome as handed to Studio: the answer, plus whether it came
+ * from an explicit override rather than a percentage roll.
+ */
+export interface CliCanaryDecision {
+  enabled: boolean;
+  forced: boolean;
+}
+
+/**
  * Every registered canary's resolved on/off for this process, for handing to
  * a CLI-launched Studio.
  *
@@ -138,9 +147,20 @@ export function isCanaryEnabled(name: string): boolean {
  * impossible: one evaluation, two surfaces. It is also strictly less to
  * expose — booleans about features, not the seed the buckets derive from.
  */
-export function canaryDecisionsForStudio(): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  for (const canary of CANARIES) out[canary.name] = resolveCanary(canary.name).enabled;
+export function canaryDecisionsForStudio(): Record<string, CliCanaryDecision> {
+  const out: Record<string, CliCanaryDecision> = {};
+  for (const canary of CANARIES) {
+    const { enabled, reason } = resolveCanary(canary.name);
+    out[canary.name] = {
+      enabled,
+      // Provenance, not decoration. Studio has its own telemetry opt-out that
+      // the CLI cannot see, and it must be able to refuse ordinary cohort
+      // enrolment while still honouring a deliberate `HF_CANARY_*` override.
+      // A bare boolean cannot express that difference, so Studio would have
+      // had to either ignore its own opt-out or drop the override.
+      forced: reason === "forced_on" || reason === "forced_off",
+    };
+  }
   return out;
 }
 

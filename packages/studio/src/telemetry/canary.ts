@@ -53,8 +53,12 @@ export function canaryParamName(name: string): string {
 declare global {
   interface Window {
     __HF_CLI_BUCKET_SEED?: string;
-    /** Resolved on/off per canary from the launching CLI. Authoritative. */
-    __HF_CLI_CANARY_DECISIONS?: Record<string, boolean>;
+    /**
+     * Resolved per-canary outcome from the launching CLI. `forced` marks an
+     * explicit `HF_CANARY_*` override as opposed to a percentage roll — the
+     * two get different precedence against Studio's own opt-out.
+     */
+    __HF_CLI_CANARY_DECISIONS?: Record<string, { enabled?: boolean; forced?: boolean }>;
   }
 }
 
@@ -74,11 +78,12 @@ declare global {
  * In all three the CLI has already decided, and one render spanning both
  * surfaces must not run half-enrolled.
  */
-function cliDecision(name: string): boolean | undefined {
+function cliDecision(name: string): { enabled: boolean; forced: boolean } | undefined {
   try {
     if (typeof window === "undefined") return undefined;
     const decision = window.__HF_CLI_CANARY_DECISIONS?.[name];
-    return typeof decision === "boolean" ? decision : undefined;
+    if (typeof decision?.enabled !== "boolean") return undefined;
+    return { enabled: decision.enabled, forced: decision.forced === true };
   } catch {
     return undefined;
   }
@@ -171,27 +176,44 @@ export function __resetStudioCanaryCacheForTests(): void {
 }
 
 /** The uncached decision. Split out so `resolveCanary` is purely the memo. */
+const forcedOutcome = (enabled: boolean): CanaryDecision => ({
+  enabled,
+  reason: enabled ? "forced_on" : "forced_off",
+});
+
+const cohortOutcome = (enabled: boolean): CanaryDecision => ({
+  enabled,
+  reason: enabled ? "in_cohort" : "out_of_cohort",
+});
+
+/**
+ * Precedence, highest first:
+ *
+ *   1. An explicit `HF_CANARY_*` from the launching CLI. A deliberate operator
+ *      choice — the documented escalation channel (dogfooding, bisect,
+ *      panic-off) — so it wins outright, including over this profile's
+ *      opt-out, exactly as a local URL override does.
+ *   2. A local URL / sessionStorage override, same reasoning.
+ *   3. This profile's telemetry opt-out. Checked BEFORE any percentage-derived
+ *      CLI decision: the two surfaces have independent opt-outs, and CLI
+ *      telemetry being on says nothing about whether THIS browser profile
+ *      agreed to be measured. A cohort roll must never enrol an opted-out
+ *      profile.
+ *   4. The CLI's percentage decision — authoritative, since it already applied
+ *      the shared seed and re-deriving is what let the surfaces disagree.
+ *   5. Local evaluation (standalone Studio, or a canary the CLI didn't publish).
+ */
 function decideStudioCanary(name: string): CanaryDecision {
   const definition = findCanary(name);
   if (!definition) return { enabled: false, reason: "out_of_cohort" };
 
-  // The launching CLI's decision, when there is one, is the whole answer:
-  // it already applied telemetry opt-out, HF_CANARY_* overrides and the
-  // percentage against the shared seed. Re-deriving here is what let the two
-  // surfaces disagree on the same render.
   const fromCli = cliDecision(definition.name);
-  if (fromCli !== undefined) {
-    return { enabled: fromCli, reason: fromCli ? "forced_on" : "forced_off" };
-  }
+  if (fromCli?.forced) return forcedOutcome(fromCli.enabled);
 
   const override = readOverride(definition.name);
-  // Standalone Studio. Opting out of telemetry opts you out of canaries —
-  // same rule as the CLI (see packages/cli/src/telemetry/canary.ts). A
-  // profile that sends nothing can't be compared against anyone, so
-  // enrolling it changes that user's code path for no signal. An explicit
-  // override still wins: a deliberate local choice, not silent enrolment.
-  if (override === undefined && isOptedOut()) {
-    return { enabled: false, reason: "telemetry_opt_out" };
+  if (override === undefined) {
+    if (isOptedOut()) return { enabled: false, reason: "telemetry_opt_out" };
+    if (fromCli !== undefined) return cohortOutcome(fromCli.enabled);
   }
 
   return evaluateCanary({

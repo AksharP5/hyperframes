@@ -80,7 +80,9 @@ tooling, so whoever operates the telemetry backend can split any metric by
 cohort with **nothing configured server-side** — while the decision itself
 still happens locally and offline, which the render path requires.
 (Assignments ride the same anonymous, opt-out telemetry pipeline as every
-other event; disabling telemetry disables the reporting, not the enrolment.)
+other event — and disabling telemetry disables the **enrolment**, not just the
+reporting: an opted-out install is never bucketed at all. See the note at the
+top of this page.)
 
 Two details worth knowing:
 

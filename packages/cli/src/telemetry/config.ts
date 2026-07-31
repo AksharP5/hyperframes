@@ -89,13 +89,15 @@ type InstallStateMiss = "absent" | "corrupt";
 function salvageInstallState(parsed: Partial<InstallState>): InstallState | InstallStateMiss {
   const markerAt = typeof parsed.markerAt === "string" ? parsed.markerAt : undefined;
   const bucketSeed = parseNonEmptyString(parsed.bucketSeed);
-  // Nothing salvageable in the record at all — treat as corrupt rather than
-  // inventing a marker, so the miss is still counted as "we knew this machine"
-  // instead of masquerading as a fresh install.
-  if (markerAt === undefined && bucketSeed === undefined) return "corrupt";
+  const fired = parsed.deParallelRouterTrialFired === true ? true : undefined;
+  // Each of the three is independently salvageable, and the tripped breaker
+  // most of all: dropping it re-enrols a machine into an experimental path
+  // that already FAILED there, which is the one outcome this file exists to
+  // prevent. `markerAt` is only a timestamp and can be restamped.
+  if (markerAt === undefined && bucketSeed === undefined && fired === undefined) return "corrupt";
   return {
     markerAt: markerAt ?? new Date().toISOString(),
-    deParallelRouterTrialFired: parsed.deParallelRouterTrialFired === true ? true : undefined,
+    deParallelRouterTrialFired: fired,
     bucketSeed,
   };
 }
