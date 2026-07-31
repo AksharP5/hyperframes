@@ -41,6 +41,7 @@ import {
 } from "./contentExtractor.js";
 import type { VisionCaptionOutcome } from "./contentExtractor.js";
 import { loadEnvFile, generateProjectScaffold } from "./scaffolding.js";
+import { detectBlockedPage } from "./pageBlockDetection.js";
 import type { CaptureOptions, CapturePhase, CapturePhaseProgress, CaptureResult } from "./types.js";
 
 export type { CaptureOptions, CaptureResult } from "./types.js";
@@ -240,15 +241,13 @@ export async function captureWebsite(
     // Use networkidle2 (allows 2 ongoing connections) instead of networkidle0 —
     // modern SPAs often have persistent WebSocket/analytics connections that
     // prevent networkidle0 from ever resolving.
-    await page1.goto(url, { waitUntil: "networkidle2", timeout });
+    const navigationResponse = await page1.goto(url, { waitUntil: "networkidle2", timeout });
     postNavigationDeadline = Date.now() + budgetMs;
     await new Promise((r) => setTimeout(r, settleTime));
-    phase("navigation", "completed");
-    phase("core-extraction", "started");
 
     // Check if the page loaded real content or an anti-bot challenge
-    // Use structural detection (DOM elements + cookies), not text regex matching —
-    // text matching causes false positives on sites that mention "blocked" or "verify" in copy
+    // Combine structural evidence with the main response status/title. Low text
+    // alone stays non-fatal so image-led sites are not rejected.
     const pageContentCheck = (await page1.evaluate(`(() => {
       var text = (document.body.innerText || "").trim();
       var title = document.title || "";
@@ -256,19 +255,28 @@ export async function captureWebsite(
       var hasCfTurnstile = !!document.querySelector('.cf-turnstile, [data-sitekey], iframe[src*="challenges.cloudflare.com"], #challenge-running, #challenge-form');
       // Structural: page is almost empty (challenge pages have minimal DOM)
       var bodyChildCount = document.body.children.length;
-      var isMinimalDom = bodyChildCount <= 5 && text.length < 500;
-      // Title-based: only check title on near-empty pages
-      var hasChallengeTitle = isMinimalDom && /just a moment|attention required|access denied/i.test(title);
-      var isChallenged = hasCfTurnstile || hasChallengeTitle;
-      return { textLength: text.length, title: title, isChallenged: isChallenged, bodyChildCount: bodyChildCount };
-    })()`)) as { textLength: number; title: string; isChallenged: boolean; bodyChildCount: number };
+      return { textLength: text.length, title: title, hasChallengeElement: hasCfTurnstile, bodyChildCount: bodyChildCount };
+    })()`)) as {
+      textLength: number;
+      title: string;
+      hasChallengeElement: boolean;
+      bodyChildCount: number;
+    };
 
-    if (pageContentCheck.isChallenged || pageContentCheck.textLength < 100) {
-      const reason = pageContentCheck.isChallenged
-        ? "Anti-bot protection detected (Cloudflare challenge or similar)"
-        : "Page has very little text content (" +
-          pageContentCheck.textLength +
-          " chars) — may be blocked or a client-rendered SPA that needs more time";
+    const blockedReason = detectBlockedPage({
+      httpStatus: navigationResponse?.status() ?? null,
+      ...pageContentCheck,
+    });
+    if (blockedReason) throw new Error(blockedReason);
+
+    phase("navigation", "completed");
+    phase("core-extraction", "started");
+
+    if (pageContentCheck.textLength < 100) {
+      const reason =
+        "Page has very little text content (" +
+        pageContentCheck.textLength +
+        " chars) — may be blocked or a client-rendered SPA that needs more time";
       warnings.push(reason);
       progress("warn", reason);
     }
