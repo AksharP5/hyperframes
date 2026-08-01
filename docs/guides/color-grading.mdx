@@ -123,7 +123,9 @@ skin from a broad creative grade.
 
 HyperFrames supports up to four ordered selections. These are static
 media-level qualifiers: they do not include object tracking, rotoscoping,
-facial recognition, or spatial masks.
+facial recognition, or spatial masks. To confine a grade to a region of the
+frame rather than a range of colors, see
+[Limiting a Grade to Part of the Frame](#limiting-a-grade-to-part-of-the-frame).
 
 ### Scopes
 
@@ -178,6 +180,13 @@ return exact controls, bounds, and examples. Start from source analysis or a
 tested preset, then add small, explainable adjustments. Avoid inventing many
 unrelated curve and secondary values: they are difficult to review and easy to
 overcook.
+
+For worked examples — ten graded A/B renders, each with the plain-language
+prompt that produced it and the payload it compiled to — see
+[Color grading and film effects](/prompting/color-grading) in the Prompt Guide.
+It covers the failures this page cannot: choosing a source that actually has
+something for the treatment to remove, and separating a subject so one part of
+the frame can be graded while the rest is protected.
 
 ## Low-Level HTML Contract
 
@@ -237,6 +246,175 @@ npx hyperframes media-treatment --all --json
 
 Use `--all` only for exhaustive tooling or contract inspection.
 
+## Animating a Grade
+
+Nine grading properties are exposed as CSS custom properties and can be tweened
+directly:
+
+```text
+--hf-color-grading-ascii      --hf-color-grading-bloom     --hf-color-grading-blur
+--hf-color-grading-dither     --hf-color-grading-exposure  --hf-color-grading-intensity
+--hf-color-grading-kuwahara   --hf-color-grading-pixelate
+--hf-color-grading-lut-intensity
+```
+
+```js
+tl.to("#plate", { "--hf-color-grading-pixelate": 0.5, duration: 3, ease: "power2.inOut" }, 0.3);
+```
+
+Start the value at identity in the payload and in an inline `style`, so frame 0
+is the ungraded reference and every intermediate value is rendered rather than
+just the endpoints.
+
+Two things this list does **not** give you:
+
+- **`--hf-color-grading-intensity` scales the primary grade only.** The shader
+  mixes between the ungraded sample and the graded one at that value, so it
+  ramps `adjust`, `wheels`, `curves`, `hueCurves`, `secondaries` and the LUT.
+  `details` and `effects` sit outside that mix entirely and it scales neither.
+  Some of them shape the sampled media *before* the mix — CRT warp, blur,
+  Kuwahara, pixelate, the tape family, chromatic aberration, digital glitch —
+  and so are already present on both sides of it. Others run *after* it —
+  grain, halftone, bloom, scanlines, vignette. Either way intensity does not
+  reach them, so it is not a master "ramp the whole look" dial when the look is
+  effect-based; animate the specific effect instead.
+- **Every other property — `halftone`, `twoInkPrint`, `tapeDamage`, hue curves,
+  secondaries — has no custom property**, so it cannot be tweened this way.
+
+For some of those, you can drive the payload itself from the timeline.
+Rewriting `data-color-grading` re-applies the grade:
+
+```js
+const plate = document.getElementById("plate");
+const v = { halftone: 0, bloom: 0 };
+
+tl.to(v, {
+  halftone: 0.72,
+  bloom: 0.7,
+  duration: 3.4,
+  ease: "power2.inOut",
+  onUpdate: () => {
+    plate.setAttribute("data-color-grading", JSON.stringify({
+      intensity: 1,
+      effects: {
+        halftone: v.halftone, halftoneSize: 0.38,
+        bloom: v.bloom, bloomRadius: 18,
+      },
+    }));
+  },
+}, 0.3);
+```
+
+This stays deterministic: the value is derived from timeline position, never
+from wall-clock time, so seeking to a frame always produces the same result.
+It costs a payload parse per tick, so prefer a custom property when one exists.
+
+<Warning>
+  **This does not work for every effect.** It is verified working for `halftone`
+  and `twoInkPrint`. It is verified *not* working for `crtCurvature`,
+  `scanlines`, `chromaBleed`, and `chromaticAberration` — the identical payload
+  applied statically renders correctly, but the same values driven through
+  `setAttribute` produce no visible change, and seeding them non-zero at init
+  does not help. Measure the effect you intend to animate before committing to
+  it, and fall back to a static treatment if the ramp does not move.
+</Warning>
+
+## Limiting a Grade to Part of the Frame
+
+Grading qualifies pixels **by value, never by position**. Selections key on hue,
+saturation, and luma; the one spatially-varying control, `vignette`, is locked
+to the frame centre and cannot be moved or reshaped into a power window. There
+are no masks, shapes, or tracked regions in the contract.
+
+A grade also applies to a whole media element. So to treat part of the frame,
+split that part into its own layer and grade the layer:
+
+| You want | Build |
+| --- | --- |
+| Subject graded, background clean | Matted cutout on top, graded; original clip underneath, clean |
+| Background graded, subject clean | Original clip underneath, graded; matted cutout on top, clean |
+| One region of the subject graded | Two copies of the cutout — clean underneath, graded copy on top clipped to the region |
+
+Two rules that are easy to get wrong:
+
+- **Use the original clip as the background plate, not a subject-removed
+  plate.** A subject-removed plate is a hole where the subject was, and a
+  feathered cutout composited over it produces a dark rim.
+- **If your cutout ships premultiplied alpha**, the browser composites it as
+  straight and edge pixels get multiplied twice, giving a black outline. Rebuild
+  it from the original plus its matte:
+  `ffmpeg -i clip.mp4 -i matte.mp4 -filter_complex "[1:v]format=gray[m];[0:v][m]alphamerge" -c:v libvpx-vp9 out.webm`
+
+### Worked Example: Redacting a Face
+
+Only the face is pixelated. The rest of the subject and the entire room are
+untouched. Three layers, and the region comes from `clip-path` on the third:
+
+```html index.html
+<div class="band">
+  <!-- 1. the room, clean -->
+  <video src="media/room.mp4" muted
+         data-start="0" data-duration="4" data-track-index="2"></video>
+
+  <!-- 2. the subject, clean -->
+  <video src="media/subject.webm" muted class="fg"
+         data-start="0" data-duration="4" data-track-index="3"></video>
+
+  <!-- 3. the same subject, graded, clipped to the head -->
+  <video src="media/subject.webm" muted class="fx"
+         data-start="0" data-duration="4" data-track-index="4"
+         style="clip-path: ellipse(9.8% 15.5% at 50.7% 14.5%)"
+         data-color-grading='{"intensity":1,"effects":{"pixelate":0.5}}'></video>
+</div>
+```
+
+```css
+.band .fg { z-index: 2; }
+.band .fx { z-index: 3; }
+```
+
+Everything outside the clip falls through to the clean copy beneath. Because the
+graded layer *is* the cutout, the ellipse can overshoot the head without
+touching the room — there is nothing outside the silhouette to paint — so size
+it generously rather than tightly around the features.
+
+Pixelate preserves alpha, so the block grid clips to the silhouette instead of
+filling a rectangle.
+
+<Warning>
+  A fixed `clip-path` is only valid for footage where the subject barely moves.
+  Measure before relying on it. Anything with real subject movement needs a
+  tracked matte produced outside HyperFrames — there is no tracking in the
+  grading pipeline.
+</Warning>
+
+The prompt that produces the composition above:
+
+```text
+Take room.mp4 and its matted cutout subject.webm and build a 4-second
+1920x1080 composition that redacts only the subject's face.
+
+Three stacked layers inside one band, all playing the same 4 seconds:
+  1. room.mp4, no grading at all
+  2. subject.webm, no grading at all
+  3. subject.webm again, on top, carrying the grade
+
+Layer 3 is the only graded element: pixelate at 0.5, held constant for the
+whole shot — no ramp and no fade-up. A redaction that animates on reads as an
+effect; one that is simply on reads as policy. Mid strength should leave a
+recognisable human shape without a readable face.
+
+Limit layer 3 to the head with a CSS clip-path ellipse. Do not try to do this
+with the grading payload — it has no spatial masking. Size the ellipse
+generously so it takes in the hairline, ears, and jaw rather than sitting tight
+on the features; it can overshoot the head safely, because outside the
+silhouette the cutout is transparent and there is nothing to paint.
+
+Use the original room clip as the background plate rather than a
+subject-removed plate, and if the cutout has premultiplied alpha, rebuild it
+with ffmpeg alphamerge first so the edges do not come out with a black rim.
+```
+
 ## Custom LUTs
 
 HyperFrames supports project-local 3D `.cube` LUTs:
@@ -275,7 +453,7 @@ validation, and rendered comparisons to evaluate it.
 | HDR delivery render | Separate workflow | The native HDR compositor preserves HDR source pixels and does not apply this SDR grading/effects pipeline to native HDR layers |
 | LOG camera footage | Partial | Requires a known matching transform/LUT; no automatic camera profile management |
 | Full-scene grade including DOM/text | Not supported | Current grading targets individual media elements |
-| Face or region tracking | Not supported | Use a separate isolated media layer or external tracking/masking workflow |
+| Face or region tracking | Not supported | No masks or tracking in the contract. Isolate the region as its own layer — see [Limiting a Grade to Part of the Frame](#limiting-a-grade-to-part-of-the-frame) |
 | Remote media | Partial | Requires compatible CORS headers; project-local assets are reliable |
 | ACES/OCIO finishing | Not supported | Outside the current browser shader pipeline |
 
