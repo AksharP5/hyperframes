@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   extractMediaMetadata,
   extractPngMetadataFromBuffer,
+  parseFrameRate,
   pixelFormatHasAlpha,
 } from "./ffprobe.js";
 
@@ -578,47 +579,68 @@ describe("ffprobe option separator", () => {
   });
 });
 
-describe("ffprobe frame rate parsing", () => {
-  afterEach(() => {
-    vi.resetModules();
-    vi.doUnmock("child_process");
+describe("parseFrameRate", () => {
+  // Direct against the exported function. The previous table drove this
+  // through extractMediaMetadata behind a spawn mock, which cost a
+  // vi.resetModules() plus a dynamic re-import of core's 238-file barrel per
+  // row (74.9 ms vs 0.094 ms) — and 4 of its 7 rows produced identical values
+  // against the pre-fix implementation, so it could not fail for the bugs it
+  // was written to catch.
+  it.each([
+    ["30/1", 30],
+    ["30000/1001", 29.97],
+    ["24000/1001", 23.98],
+    ["60", 60],
+    ["25.5", 25.5],
+  ])("parses %s as %s", (input, expected) => {
+    expect(parseFrameRate(input)).toBe(expected);
   });
 
   it.each([
-    { r: "30/1", avg: "30/1", expected: 30 },
-    { r: "30000/1001", avg: "30000/1001", expected: 29.97 },
-    { r: "30/", avg: undefined, expected: 0 },
-    { r: "30/0", avg: undefined, expected: 0 },
-    { r: "0/0", avg: undefined, expected: 0 },
-    { r: "abc/def", avg: undefined, expected: 0 },
-    { r: "60", avg: undefined, expected: 60 },
-  ])("parses r=$r avg=$avg as fps=$expected", async ({ r, avg, expected }) => {
-    const { spawn } = createSpawnSpy([
-      {
-        kind: "exit",
-        code: 0,
-        stdout: JSON.stringify({
-          streams: [
-            {
-              codec_type: "video",
-              codec_name: "h264",
-              width: 320,
-              height: 180,
-              r_frame_rate: r,
-              avg_frame_rate: avg,
-            },
-          ],
-          format: { duration: "1.5" },
-        }),
-      },
-    ]);
-    vi.resetModules();
-    vi.doMock("child_process", () => ({ spawn }));
+    ["30/", 0],
+    ["30/0", 0],
+    ["0/0", 0],
+    ["abc/def", 0],
+    ["", 0],
+    [undefined, 0],
+  ])("returns 0 for unusable input %s", (input, expected) => {
+    expect(parseFrameRate(input)).toBe(expected);
+  });
 
-    const { extractMediaMetadata } = await import("./ffprobe.js");
-    const meta = await extractMediaMetadata("/tmp/frame-rate.mp4");
+  // Finite operands, infinite quotient — the operand-only guard missed these.
+  it.each(["1e308/1e-10", "2/1e-320"])("returns 0 for overflowing quotient %s", (input) => {
+    expect(parseFrameRate(input)).toBe(0);
+  });
 
-    expect(meta.fps).toBe(expected);
+  // Negatives were truthy, so `meta.fps || 30` did not rescue them and
+  // buildEncoderArgs emitted `-r -30`.
+  it.each(["-30/1", "30/-1", "-60"])("returns 0 for negative rate %s", (input) => {
+    expect(parseFrameRate(input)).toBe(0);
+  });
+
+  // Fell through to a bare parseFloat that stops at trailing garbage. The
+  // rational operands had the same defect after the plain path was fixed.
+  it.each(["30/1/2", "60fps", "60fps/1", "60/1fps", "30garbage/1garbage", "/", "/1", "30/"])(
+    "returns 0 for malformed input %s",
+    (input) => {
+      expect(parseFrameRate(input)).toBe(0);
+    },
+  );
+
+  // raw * 100 overflows for a finite-but-huge rate, so the rounded value was
+  // Infinity even though the pre-round guard passed.
+  it.each(["1e307", "1e307/1", "1e308/0.5"])("returns 0 when rounding overflows: %s", (input) => {
+    expect(parseFrameRate(input)).toBe(0);
+  });
+
+  // 2dp rounding collapsed these to 0, and the caller's `|| 30` then
+  // re-encoded a 300-second timelapse as a ~1/30-second clip.
+  it.each([
+    ["1/300", 0.01],
+    ["1/1000", 0.01],
+    ["1/200", 0.01],
+  ])("floors sub-0.005 rate %s to %s rather than 0", (input, expected) => {
+    expect(parseFrameRate(input)).toBe(expected);
   });
 });
 
