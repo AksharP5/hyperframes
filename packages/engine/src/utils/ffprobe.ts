@@ -136,6 +136,9 @@ export interface AudioMetadata {
 interface FFProbeStream {
   codec_type: string;
   codec_name?: string;
+  /** e.g. "LC", "HE-AAC", "HE-AACv2" — where the SBR marker lives, since
+   *  codec_name is plain "aac" for all of them. */
+  profile?: string;
   width?: number;
   height?: number;
   duration?: string;
@@ -538,20 +541,59 @@ export async function extractAudioMetadata(
     const streamDuration = audioStream.duration ? parseFloat(audioStream.duration) : undefined;
     const sampleRate = audioStream.sample_rate ? parseInt(audioStream.sample_rate) : 44100;
     const audioCodec = audioStream.codec_name || "unknown";
-    if (audioCodec === "aac" && sampleRate > 0) {
-      const packetStdout = await runFfprobe(filePath, [
-        "-select_streams",
-        "a:0",
-        "-count_packets",
-        "-show_entries",
-        "stream=nb_read_packets",
-        "-print_format",
-        "json",
-      ]);
-      const packetOutput = parseProbeJson(packetStdout);
-      const packetCount = Number(packetOutput.streams[0]?.nb_read_packets);
-      if (Number.isFinite(packetCount) && packetCount > 0) {
-        durationSeconds = (packetCount * AAC_LC_SAMPLES_PER_PACKET) / sampleRate;
+    // AAC-LC container durations are often slightly wrong, so the packet
+    // count gives a better one. Three constraints on that refinement:
+    //
+    // 1. It must never fail the call. durationSeconds is ALREADY correct from
+    //    format.duration at this point. `-count_packets` demuxes the whole
+    //    container against runFfprobe's fixed 30s deadline, so a long file on
+    //    slow or network storage times out — and the caller in htmlCompiler
+    //    catches that under "Source file has no audio stream", returns
+    //    duration 0, drops the audio element and ships a silent render.
+    // 2. It must honour the caller's AbortSignal. Only the first probe
+    //    received it, so aborting during this one was ignored and the call
+    //    resolved with full metadata long after cancellation.
+    // 3. It must apply ONLY to profiles whose 1024-sample framing is
+    //    established. ffprobe reports codec_name "aac" for every AAC
+    //    variant — the framing lives in the profile:
+    //
+    //      LC            1024 samples/frame   <- the only one this maths fits
+    //      HE-AAC v1/v2  2048 output samples against a doubled sample_rate
+    //      LD            512
+    //      ELD           480
+    //      Main/SSR/LTP  1024 nominally, but not verified here
+    //      xHE-AAC (USAC) variable
+    //
+    //    An ALLOWLIST, not a HE-AAC denylist. The denylist form let LD/ELD
+    //    through (halving to a third of the true duration), and let an
+    //    unknown or missing profile through too — so an unrecognised HE
+    //    spelling preserved the exact truncation this is meant to close.
+    //    A skipped refinement is harmless: format.duration is already correct.
+    const isAacLc = /^\s*LC\s*$/i.test(audioStream.profile ?? "");
+    if (audioCodec === "aac" && isAacLc && sampleRate > 0) {
+      try {
+        const packetStdout = await runFfprobe(
+          filePath,
+          [
+            "-select_streams",
+            "a:0",
+            "-count_packets",
+            "-show_entries",
+            "stream=nb_read_packets",
+            "-print_format",
+            "json",
+          ],
+          options?.signal,
+        );
+        const packetOutput = parseProbeJson(packetStdout);
+        const packetCount = Number(packetOutput.streams[0]?.nb_read_packets);
+        if (Number.isFinite(packetCount) && packetCount > 0) {
+          durationSeconds = (packetCount * AAC_LC_SAMPLES_PER_PACKET) / sampleRate;
+        }
+      } catch (error) {
+        // An abort is the caller's intent, not a refinement failure — let it
+        // through. Anything else keeps the container duration we already have.
+        if (options?.signal?.aborted) throw error;
       }
     }
 

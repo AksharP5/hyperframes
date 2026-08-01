@@ -212,40 +212,81 @@ describe("ffprobe missing-binary fallback", () => {
     expect(calls[0]?.args.slice(0, 2)).toEqual(["-v", "error"]);
   });
 
+  // `profile` matters now: the packet refinement is an allowlist on AAC-LC,
+  // because the 1024-sample formula is wrong for LD/ELD/HE and unverified for
+  // the rest. An unprofiled "aac" stream deliberately keeps its container
+  // duration rather than being refined on an assumption.
   it.each([
-    { name: "non-AAC metadata", codec: "mp3", packets: undefined, expected: 1.25, calls: 1 },
-    { name: "valid AAC packet count", codec: "aac", packets: "783", expected: 16.704, calls: 2 },
+    {
+      name: "non-AAC metadata",
+      codec: "mp3",
+      profile: undefined,
+      packets: undefined,
+      expected: 1.25,
+      calls: 1,
+    },
+    {
+      name: "unprofiled AAC",
+      codec: "aac",
+      profile: undefined,
+      packets: "783",
+      expected: 1.25,
+      calls: 1,
+    },
+    {
+      name: "valid AAC-LC packet count",
+      codec: "aac",
+      profile: "LC",
+      packets: "783",
+      expected: 16.704,
+      calls: 2,
+    },
     {
       name: "missing AAC packet count",
       codec: "aac",
+      profile: "LC",
       packets: undefined,
       expected: 1.25,
       calls: 2,
     },
-    { name: "zero AAC packet count", codec: "aac", packets: "0", expected: 1.25, calls: 2 },
+    {
+      name: "zero AAC packet count",
+      codec: "aac",
+      profile: "LC",
+      packets: "0",
+      expected: 1.25,
+      calls: 2,
+    },
     {
       name: "invalid AAC packet count",
       codec: "aac",
+      profile: "LC",
       packets: "invalid",
       expected: 1.25,
       calls: 2,
     },
   ])(
     "derives audio duration for $name",
-    async ({ codec, packets, expected, calls: expectedCalls }) => {
+    async ({ codec, profile, packets, expected, calls: expectedCalls }) => {
       const outcomes: SpawnOutcome[] = [
         {
           kind: "exit",
           code: 0,
           stdout: JSON.stringify({
             streams: [
-              { codec_type: "audio", codec_name: codec, sample_rate: "48000", channels: 2 },
+              {
+                codec_type: "audio",
+                codec_name: codec,
+                sample_rate: "48000",
+                channels: 2,
+                profile,
+              },
             ],
             format: { duration: "1.25", bit_rate: "128000" },
           }),
         },
       ];
-      if (codec === "aac") {
+      if (codec === "aac" && profile === "LC") {
         outcomes.push({
           kind: "exit",
           code: 0,
@@ -553,7 +594,17 @@ describe("ffprobe option separator", () => {
         kind: "exit",
         code: 0,
         stdout: JSON.stringify({
-          streams: [{ codec_type: "audio", codec_name: "aac", sample_rate: "48000", channels: 2 }],
+          streams: [
+            {
+              codec_type: "audio",
+              codec_name: "aac",
+              // LC, so the packet-count refinement actually runs and its
+              // argv is covered here too.
+              profile: "LC",
+              sample_rate: "48000",
+              channels: 2,
+            },
+          ],
           format: { duration: "1.25" },
         }),
       },
@@ -574,8 +625,14 @@ describe("ffprobe option separator", () => {
     await extractAudioMetadata("/tmp/-audio.wav");
     await analyzeKeyframeIntervals("/tmp/-video.mp4");
 
-    const args = calls.flatMap((call) => [...(call.args ?? [])]);
-    expect(args.filter((arg) => arg === "--")).toHaveLength(3);
+    // Per call, not a flattened count. A total of 3 is satisfied by one call
+    // emitting three `--` and two emitting none — i.e. it cannot fail for
+    // misplacement, which is the shape of bug this exists to catch.
+    expect(calls.map((call) => (call.args ?? []).slice(-2))).toEqual([
+      ["--", "/tmp/-audio.wav"],
+      ["--", "/tmp/-audio.wav"],
+      ["--", "/tmp/-video.mp4"],
+    ]);
   });
 });
 
@@ -796,4 +853,111 @@ describe("pix_fmt alpha detection", () => {
 
   it.each(ALPHA)("detects alpha in %s", (fmt) => expect(pixelFormatHasAlpha(fmt)).toBe(true));
   it.each(OPAQUE)("reports %s as opaque", (fmt) => expect(pixelFormatHasAlpha(fmt)).toBe(false));
+});
+
+describe("AAC duration refinement must never fail or distort the call", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("child_process");
+  });
+
+  const aacStream = (profile?: string) =>
+    JSON.stringify({
+      streams: [
+        { codec_type: "audio", codec_name: "aac", sample_rate: "44100", channels: 2, profile },
+      ],
+      format: { duration: "600", bit_rate: "128000" },
+    });
+
+  async function probe(outcomes: SpawnOutcome[], file: string) {
+    const { spawn, calls } = createSpawnSpy(outcomes);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { extractAudioMetadata } = await import("./ffprobe.js");
+    return { meta: await extractAudioMetadata(file), calls };
+  }
+
+  // Regression: the refinement had no try/catch, so its failure rejected a
+  // call whose duration was already correct. htmlCompiler catches that as
+  // "no audio stream", returns 0, and the render ships silent.
+  it("keeps the container duration when the packet probe fails", async () => {
+    const { meta } = await probe(
+      [
+        { kind: "exit", code: 0, stdout: aacStream("LC") },
+        { kind: "exit", code: 1, stdout: "", stderr: "ffprobe exploded" },
+      ],
+      "/tmp/aac-packet-probe-fails.m4a",
+    );
+    expect(meta.durationSeconds).toBe(600);
+  });
+
+  it("keeps the container duration when the packet probe returns junk", async () => {
+    const { meta } = await probe(
+      [
+        { kind: "exit", code: 0, stdout: aacStream("LC") },
+        { kind: "exit", code: 0, stdout: "not json at all" },
+      ],
+      "/tmp/aac-packet-probe-junk.m4a",
+    );
+    expect(meta.durationSeconds).toBe(600);
+  });
+
+  // Regression: codec_name is "aac" for HE-AAC too, but its packets carry
+  // 2048 output samples — assuming 1024 halved a 10:00 podcast to 5:00.
+  it.each([
+    "HE-AAC",
+    "HE-AACv2",
+    "he-aac",
+    // 512- and 480-sample framing: the 1024 multiplier overstates these by
+    // 2x and ~2.13x, overwriting an already-correct container duration.
+    "LD",
+    "ELD",
+    // Not verified for this maths, so not allowlisted.
+    "Main",
+    "SSR",
+    "LTP",
+    "xHE-AAC",
+    // Missing or unrecognised profile must NOT fall through to the formula —
+    // that is how an unknown HE spelling kept the truncation bug.
+    "",
+    "SomethingNew",
+  ])("does not apply the LC packet maths to profile %s", async (profile) => {
+    const { meta, calls } = await probe(
+      [{ kind: "exit", code: 0, stdout: aacStream(profile) }],
+      `/tmp/heaac-${profile}.m4a`,
+    );
+    expect(meta.durationSeconds).toBe(600);
+    // The second probe is not even attempted.
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each(["LC", " lc "])("still refines AAC profile %s", async (profile) => {
+    const { meta } = await probe(
+      [
+        { kind: "exit", code: 0, stdout: aacStream(profile) },
+        {
+          kind: "exit",
+          code: 0,
+          stdout: JSON.stringify({ streams: [{ nb_read_packets: "861" }], format: {} }),
+        },
+      ],
+      `/tmp/aac-lc-${profile.trim()}.m4a`,
+    );
+    expect(meta.durationSeconds).toBeCloseTo((861 * 1024) / 44100, 5);
+  });
+
+  it("still refines a plain AAC-LC stream", async () => {
+    const { meta } = await probe(
+      [
+        { kind: "exit", code: 0, stdout: aacStream("LC") },
+        {
+          kind: "exit",
+          code: 0,
+          stdout: JSON.stringify({ streams: [{ nb_read_packets: "861" }], format: {} }),
+        },
+      ],
+      "/tmp/aac-lc-refined.m4a",
+    );
+    expect(meta.durationSeconds).toBeCloseTo((861 * 1024) / 44100, 5);
+  });
 });
