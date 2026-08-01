@@ -3,7 +3,11 @@ import { EventEmitter } from "events";
 import { readFileSync } from "fs";
 import { basename, resolve } from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { extractMediaMetadata, extractPngMetadataFromBuffer } from "./ffprobe.js";
+import {
+  extractMediaMetadata,
+  extractPngMetadataFromBuffer,
+  pixelFormatHasAlpha,
+} from "./ffprobe.js";
 
 function crc32(buf: Buffer): number {
   let crc = 0xffffffff;
@@ -749,4 +753,25 @@ describe("crc32 works on every runtime the package declares", () => {
     const fresh = await loadWithoutNativeCrc32();
     expect(fresh.extractPngMetadataFromBuffer(png)).toBeNull();
   });
+});
+
+describe("pix_fmt alpha detection", () => {
+  // The old pattern's (^|[^a-z]) anchor bound to `yuva` alone, and the list
+  // omitted formats real files actually use.
+  const ALPHA = [
+    "yuva420p",
+    "rgba",
+    "argb",
+    "bgra",
+    "abgr",
+    "gbrap",
+    "ya8",
+    "ya16le",
+    "ayuv64le",
+    "yuva444p12le",
+  ];
+  const OPAQUE = ["yuv420p", "rgb24", "gray", "gbrp", "nv12", "yuv444p10le", "bgr0", "rgb0"];
+
+  it.each(ALPHA)("detects alpha in %s", (fmt) => expect(pixelFormatHasAlpha(fmt)).toBe(true));
+  it.each(OPAQUE)("reports %s as opaque", (fmt) => expect(pixelFormatHasAlpha(fmt)).toBe(false));
 });
