@@ -268,9 +268,13 @@ just the endpoints.
 
 Two things this list does **not** give you:
 
-- **`--hf-color-grading-intensity` does not scale a grade at render time.**
-  Setting it to `0.5` renders the same as `0`, and animating `0 → 1` produces no
-  change. Do not reach for it as a generic "ramp the whole look" dial.
+- **`--hf-color-grading-intensity` scales the primary grade only.** The shader
+  mixes between the ungraded sample and the graded one at that value, so it
+  ramps `adjust`, `wheels`, `curves`, `hueCurves`, `secondaries` and the LUT.
+  It does **not** touch `details` or `effects` — grain, vignette, halftone,
+  twoInkPrint, bloom, the tape and CRT families are all applied *after* that
+  mix. So it is not a master "ramp the whole look" dial when the look is
+  effect-based; animate the specific effect instead.
 - **Every other property — `halftone`, `twoInkPrint`, `tapeDamage`, hue curves,
   secondaries — has no custom property**, so it cannot be tweened this way.
 
