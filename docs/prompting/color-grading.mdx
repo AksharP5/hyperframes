@@ -159,7 +159,7 @@ Nine properties expose a CSS custom property and tween directly — `ascii`, `bl
 
 Two caveats worth knowing before you promise a client a ramp:
 
-- **`--hf-color-grading-intensity` scales the primary grade only** — `adjust`, `wheels`, `curves`, `hueCurves`, `secondaries` and the LUT. It does *not* scale `details` or `effects`, which are applied after that mix, so it will not ramp grain, halftone, bloom or the tape and CRT families. Reach for the specific effect instead of treating it as a master dial.
+- **`--hf-color-grading-intensity` scales the primary grade only** — `adjust`, `wheels`, `curves`, `hueCurves`, `secondaries` and the LUT. `details` and `effects` sit outside that mix and it scales neither: some shape the sampled media before it, others run after it. So it will not ramp grain, halftone, bloom, or the tape and CRT families. Reach for the specific effect instead of treating it as a master dial.
 - **Everything else has no custom property.** Some of those can still be animated by rewriting the `data-color-grading` payload from the timeline, and some cannot — the verified list of which is which lives in the guide's [Animating a Grade](/guides/color-grading#animating-a-grade), so it only has to be maintained in one place. Measure the effect you intend to animate before you promise a ramp, and fall back to a static treatment if it does not move.
 
 ## Next steps

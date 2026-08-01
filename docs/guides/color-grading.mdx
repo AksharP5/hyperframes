@@ -271,9 +271,12 @@ Two things this list does **not** give you:
 - **`--hf-color-grading-intensity` scales the primary grade only.** The shader
   mixes between the ungraded sample and the graded one at that value, so it
   ramps `adjust`, `wheels`, `curves`, `hueCurves`, `secondaries` and the LUT.
-  It does **not** touch `details` or `effects` — grain, vignette, halftone,
-  twoInkPrint, bloom, the tape and CRT families are all applied *after* that
-  mix. So it is not a master "ramp the whole look" dial when the look is
+  `details` and `effects` sit outside that mix entirely and it scales neither.
+  Some of them shape the sampled media *before* the mix — CRT warp, blur,
+  Kuwahara, pixelate, the tape family, chromatic aberration, digital glitch —
+  and so are already present on both sides of it. Others run *after* it —
+  grain, halftone, bloom, scanlines, vignette. Either way intensity does not
+  reach them, so it is not a master "ramp the whole look" dial when the look is
   effect-based; animate the specific effect instead.
 - **Every other property — `halftone`, `twoInkPrint`, `tapeDamage`, hue curves,
   secondaries — has no custom property**, so it cannot be tweened this way.
