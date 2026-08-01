@@ -128,7 +128,15 @@ interface FakeProc extends EventEmitter {
 type SpawnOutcome =
   | { kind: "missing" }
   | { kind: "error"; message: string; code?: string }
-  | { kind: "exit"; code: number; stdout?: string; stderr?: string };
+  | {
+      kind: "exit";
+      code: number;
+      stdout?: string;
+      stderr?: string;
+      /** Emit stdout as these exact byte chunks, to exercise a multi-byte
+       *  character split across a pipe-chunk boundary. */
+      stdoutChunks?: Buffer[];
+    };
 
 function createSpawnSpy(outcomes: SpawnOutcome[]): {
   spawn: (command: string, args: readonly string[]) => FakeProc;
@@ -159,7 +167,9 @@ function createSpawnSpy(outcomes: SpawnOutcome[]): {
         proc.emit("error", err);
         return;
       }
-      if (outcome.stdout) proc.stdout.emit("data", Buffer.from(outcome.stdout));
+      if (outcome.stdoutChunks) {
+        for (const chunk of outcome.stdoutChunks) proc.stdout.emit("data", chunk);
+      } else if (outcome.stdout) proc.stdout.emit("data", Buffer.from(outcome.stdout));
       if (outcome.stderr) proc.stderr.emit("data", Buffer.from(outcome.stderr));
       proc.emit("close", outcome.code);
     });
@@ -959,5 +969,74 @@ describe("AAC duration refinement must never fail or distort the call", () => {
       "/tmp/aac-lc-refined.m4a",
     );
     expect(meta.durationSeconds).toBeCloseTo((861 * 1024) / 44100, 5);
+  });
+});
+
+describe("runFfprobe process and stream handling", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("child_process");
+  });
+
+  // Regression: `--` protects "-intro.mp4" but not a path of exactly "-",
+  // which ffprobe rewrites to fd: AFTER option parsing and then reads stdin.
+  // With stdin left as an unwritten pipe the probe hung for the full 30s
+  // deadline and failed with an empty diagnostic.
+  it("rejects a filePath of '-' immediately instead of hanging on stdin", async () => {
+    const { spawn, calls } = createSpawnSpy([{ kind: "exit", code: 0, stdout: "{}" }]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { extractMediaMetadata } = await import("./ffprobe.js");
+
+    await expect(extractMediaMetadata("-")).rejects.toThrow(/stdin is not a supported input path/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("never leaves the child's stdin as a writable pipe", async () => {
+    const stdios: unknown[] = [];
+    const spawn = (_c: string, _a: readonly string[], opts?: { stdio?: unknown }) => {
+      stdios.push(opts?.stdio);
+      const proc = new EventEmitter() as FakeProc;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      process.nextTick(() => {
+        proc.stdout.emit(
+          "data",
+          Buffer.from(
+            JSON.stringify({
+              streams: [{ codec_type: "video", codec_name: "h264", width: 2, height: 2 }],
+              format: { duration: "1" },
+            }),
+          ),
+        );
+        proc.emit("close", 0);
+      });
+      return proc;
+    };
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { extractMediaMetadata } = await import("./ffprobe.js");
+
+    await extractMediaMetadata("/tmp/stdio-shape.mp4");
+    expect(stdios[0]).toEqual(["ignore", "pipe", "pipe"]);
+  });
+
+  // NOTE on the StringDecoder change: a per-chunk toString() corrupts a
+  // multi-byte character split across a pipe boundary into U+FFFD, but
+  // U+FFFD is valid JSON string content, so JSON.parse still succeeds and
+  // extractMediaMetadata's public surface returns nothing that exposes the
+  // mangled tag value. There is no assertion here that fails on the old
+  // implementation, so rather than ship a test that cannot fail, the
+  // corruption is stated in the commit and this covers the bound instead.
+  it("refuses to parse stdout that exceeds the size bound", async () => {
+    const huge = "x".repeat(8_000_001);
+    const { spawn } = createSpawnSpy([{ kind: "exit", code: 0, stdout: huge }]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { extractMediaMetadata } = await import("./ffprobe.js");
+
+    await expect(extractMediaMetadata("/tmp/unbounded-output.mov")).rejects.toThrow(
+      /exceeded 8000000 characters/,
+    );
   });
 });

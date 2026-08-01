@@ -2,6 +2,7 @@
 import { spawn } from "child_process";
 import { readFileSync } from "fs";
 import * as zlib from "node:zlib";
+import { StringDecoder } from "node:string_decoder";
 import { basename, extname } from "path";
 import { redactTelemetryString } from "@hyperframes/core";
 import { FFPROBE_PATH_ENV, getFfprobeBinary } from "./ffmpegBinaries.js";
@@ -9,6 +10,10 @@ import { ManagedChildProcess } from "./managedChildProcess.js";
 import { trackChildProcess } from "./processTracker.js";
 
 const FFPROBE_STDERR_MAX_BYTES = 8 * 1024;
+/** Bound on collected stdout. Generous — real -show_streams JSON is well
+ *  under this — but finite, unlike the previous unbounded accumulation. */
+const FFPROBE_STDOUT_MAX_CHARS = 8_000_000;
+
 const FFPROBE_ERROR_MAX_CHARS = 4 * 1024;
 
 function redactFfprobeInput(stderr: string, filePath: string): string {
@@ -48,12 +53,44 @@ async function runFfprobe(
   argsWithoutInput: string[],
   signal?: AbortSignal,
 ): Promise<string> {
+  // `--` stops option parsing so a path like "-intro.mp4" is a filename, but
+  // it does NOT cover a path of exactly "-": ffprobe rewrites that to `fd:`
+  // AFTER option parsing and then reads stdin. Since stdin here is a pipe the
+  // parent never writes to and never ends, the probe hangs for the full 30s
+  // deadline and fails with an empty diagnostic (ffprobe never errored, so
+  // stderr is blank). Reject it up front with something a caller can read.
+  if (filePath === "-") {
+    throw new Error('[FFmpeg] Refusing to probe "-": stdin is not a supported input path.');
+  }
+
   const command = getFfprobeBinary();
-  const proc = spawn(command, ["-v", "error", ...argsWithoutInput, "--", filePath]);
+  const proc = spawn(command, ["-v", "error", ...argsWithoutInput, "--", filePath], {
+    // Nothing is ever written to the child's stdin; leaving it as a pipe is
+    // what lets a stdin-reading invocation block indefinitely.
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   trackChildProcess(proc);
+  // Decoded through StringDecoder rather than per-chunk toString(): a
+  // multi-byte character split across a 64 KiB pipe boundary decodes to U+FFFD
+  // on both sides. -show_format output above ~64 KiB with non-ASCII tag text
+  // (an MKV with many chapters, or title/artist tags) came back silently
+  // mangled — JSON.parse still succeeds, so nothing surfaced it, and tag
+  // lookups like alpha_mode could miss.
+  const decoder = new StringDecoder("utf8");
   let stdout = "";
-  proc.stdout.on("data", (data) => {
-    stdout += data.toString();
+  let stdoutTruncated = false;
+  proc.stdout.on("data", (data: Buffer) => {
+    // stderr is capped by ManagedChildProcess; stdout had no bound at all, and
+    // analyzeKeyframeIntervals emits one line per frame — an all-intra ProRes
+    // proxy can produce an unbounded string.
+    if (stdoutTruncated) return;
+    stdout += decoder.write(data);
+    // Checked AFTER appending: a single chunk can already exceed the bound,
+    // so a pre-append check only ever stops the second one.
+    if (stdout.length > FFPROBE_STDOUT_MAX_CHARS) {
+      stdoutTruncated = true;
+      stdout = "";
+    }
   });
   const managed = new ManagedChildProcess(proc, {
     signal,
@@ -61,6 +98,12 @@ async function runFfprobe(
     stderrMaxBytes: FFPROBE_STDERR_MAX_BYTES,
   });
   const outcome = await managed.wait();
+  stdout += decoder.end();
+  if (stdoutTruncated) {
+    throw new Error(
+      `[FFmpeg] ffprobe output exceeded ${FFPROBE_STDOUT_MAX_CHARS} characters; refusing to parse a truncated result.`,
+    );
+  }
   if (outcome.reason === "spawn_error") {
     if ((outcome.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
       const configured = process.env[FFPROBE_PATH_ENV]?.trim();
