@@ -30,7 +30,7 @@ import {
   trackChildProcess,
   type AudioMetadata,
 } from "@hyperframes/engine";
-import { redactTelemetryString } from "@hyperframes/core";
+import { redactKnownPaths, redactTelemetryString } from "@hyperframes/core";
 
 /**
  * Tolerance used to decide whether an audio file is already short enough to
@@ -461,9 +461,14 @@ async function runFfprobeJson<T>(args: string[], signal?: AbortSignal): Promise<
     throw outcome.error ?? new Error(outcome.stderr);
   }
   if (outcome.reason !== "exit" || outcome.exitCode !== 0) {
-    // Redacted: raw ffprobe stderr echoes the input path, and this message
-    // reaches logs and telemetry.
-    throw new Error(`ffprobe ${outcome.reason}: ${redactTelemetryString(outcome.stderr, 2000)}`);
+    // Redacted twice, deliberately. The shape-based scrub is a net with
+    // holes — it cannot know that `customer/acme-secret/video.mp4` is a path
+    // and `48000/1001` is not — but THIS caller knows the exact path it put
+    // in the argv, so it names it literally first. The message reaches logs,
+    // telemetry, and `PadTrimAudioResult.error`.
+    const probed = args[args.length - 1];
+    const scrubbed = redactKnownPaths(outcome.stderr, probed === undefined ? [] : [probed]);
+    throw new Error(`ffprobe ${outcome.reason}: ${redactTelemetryString(scrubbed, 2000)}`);
   }
   try {
     return JSON.parse(stdout) as T;

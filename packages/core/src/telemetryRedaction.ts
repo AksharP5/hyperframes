@@ -17,6 +17,9 @@ function redactUrlQueryStrings(value: string): string {
  */
 const SEGMENT = String.raw`[\w.\-@+()~]+`;
 
+/** Same, minus the dot, so a trailing `.ext` can be matched separately. */
+const SEGMENT_NODOT = String.raw`[\w\-@+()~]+`;
+
 /**
  * Once a match is established as a path, consume the rest of the token.
  * Windows forbids `?` in a filename, so `video.mov?not-a-query` is not a real
@@ -62,6 +65,53 @@ const RELATIVE_PATH = new RegExp(
 const ASSET_BASENAME =
   /(?<![\w/\\])[\w.\-@+()~]+\.(?:mp4|mov|mkv|webm|avi|m4v|mpe?g|ts|mp3|wav|aac|m4a|flac|ogg|opus|png|jpe?g|gif|webp|svg|html?|json|srt|vtt|ass)\b/gi;
 
+/**
+ * A relative path with NO `./` prefix — `assets/bgm.mp3`,
+ * `customer/acme-secret/video.mp4`. These leak exactly as much as an absolute
+ * path and were missed by both rules above: the absolute rule requires a
+ * leading slash, and the `./` rule requires the dot.
+ *
+ * Qualifying needs either two separators or one plus a file extension, so the
+ * ordinary non-paths in ffprobe stderr — `N/A`, a `24/1` frame rate,
+ * `48000/1001` — do not match. The lookbehind keeps it off URL paths, whose
+ * host is deliberately kept.
+ */
+const BARE_RELATIVE_PATH = new RegExp(
+  [
+    // Two or more separators: `customer/acme/video.mp4`. No extension needed —
+    // that much structure is already a path.
+    String.raw`(?<![\w/\\.:@-])(?:${SEGMENT}[\\/]){2,}${SEGMENT}${TOKEN_TAIL}`,
+    // One separator, but the last segment carries a file extension:
+    // `assets/bgm.mp3`. That segment is dot-free on purpose — SEGMENT includes
+    // `.`, so a greedy one swallows the extension this rule needs.
+    String.raw`(?<![\w/\\.:@-])${SEGMENT}[\\/]${SEGMENT_NODOT}\.\w{1,8}\b${TOKEN_TAIL}`,
+  ].join("|"),
+  "g",
+);
+
+/**
+ * Redact literal strings — the exact paths a caller KNOWS it passed — before
+ * any shape-based rule runs.
+ *
+ * Shape matching is a net with holes by construction; this is not. When the
+ * caller has the path in hand (it built the argv), spell it out rather than
+ * hoping a regex recognises it, and take the basename too since ffprobe often
+ * reports only that.
+ */
+export function redactKnownPaths(value: string, paths: readonly string[]): string {
+  let out = value;
+  for (const path of paths) {
+    if (typeof path !== "string" || path.length === 0) continue;
+    // Longest first: replacing the basename before the full path would leave
+    // the directory prefix stranded.
+    const basename = path.split(/[\\/]/).pop() ?? "";
+    for (const literal of [path, basename].filter((v) => v.length > 2)) {
+      out = out.split(literal).join("[path]");
+    }
+  }
+  return out;
+}
+
 function redactFilePaths(value: string): string {
   return (
     value
@@ -71,6 +121,7 @@ function redactFilePaths(value: string): string {
       // leading `.` stranded outside the redaction.
       .replace(RELATIVE_PATH, "[path]")
       .replace(ABSOLUTE_PATH, "[path]")
+      .replace(BARE_RELATIVE_PATH, "[path]")
       .replace(ASSET_BASENAME, "[file]")
   );
 }

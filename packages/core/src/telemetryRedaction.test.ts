@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { redactTelemetryString } from "./telemetryRedaction.js";
+import { redactKnownPaths, redactTelemetryString } from "./telemetryRedaction.js";
 
 describe("redactTelemetryString", () => {
   it("redacts macOS, Linux, Windows, file URLs, and URL query strings", () => {
@@ -64,5 +64,53 @@ describe("redactTelemetryString", () => {
   it("truncates after redacting, so a long path cannot survive by being cut", () => {
     const out = redactTelemetryString(`/data/${"x".repeat(500)}/a.mp4`, 40);
     expect(out).not.toContain("xxx");
+  });
+
+  // Named explicitly in review: a relative path with NO `./` prefix was
+  // missed by both the absolute rule (needs a leading slash) and the `./`
+  // rule (needs the dot), so it reached telemetry completely unredacted.
+  it.each([
+    "customer/acme-secret/video.mp4",
+    "assets/bgm.mp3",
+    "projects/client-name/cut/final.mov",
+    "a\\b\\c.wav",
+  ])("redacts the bare relative path %s", (path) => {
+    const out = redactTelemetryString(`Invalid data found when processing ${path}`);
+    expect(out).toBe("Invalid data found when processing [path]");
+  });
+
+  it("redacts a dash-prefixed bare basename", () => {
+    expect(redactTelemetryString("could not open -customer-secret-intro.mp4")).toBe(
+      "could not open [file]",
+    );
+  });
+});
+
+describe("redactKnownPaths", () => {
+  // Shape matching has holes by construction. A caller that built the argv
+  // knows the exact path, so it can name it instead of hoping a regex does.
+  it("redacts an exact path a regex would not recognise as one", () => {
+    const weird = "acme_secret_project";
+    expect(redactKnownPaths(`ffprobe: ${weird}: Invalid data`, [weird])).toBe(
+      "ffprobe: [path]: Invalid data",
+    );
+  });
+
+  it("redacts the basename too — ffprobe often reports only that", () => {
+    const out = redactKnownPaths("moov atom not found in secret-cut.mp4", [
+      "/data/x/secret-cut.mp4",
+    ]);
+    expect(out).toContain("[path]");
+    expect(out).not.toContain("secret-cut");
+  });
+
+  it("leaves the message alone when no path was supplied", () => {
+    expect(redactKnownPaths("moov atom not found", [])).toBe("moov atom not found");
+  });
+
+  // Guards against a one/two-character basename turning every occurrence of
+  // that letter into [path].
+  it("ignores paths too short to be distinctive", () => {
+    expect(redactKnownPaths("a stream at a rate", ["a"])).toBe("a stream at a rate");
   });
 });
