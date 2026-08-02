@@ -18,11 +18,14 @@ describe("shouldWatchProjectFile", () => {
     expect(shouldWatchProjectFile("Dockerfile")).toBe(true);
   });
 
-  it("skips generated and dependency directories excluded from signatures", () => {
+  it("skips generated and dependency directories", () => {
     expect(shouldWatchProjectFile("node_modules/pkg/index.js")).toBe(false);
     expect(shouldWatchProjectFile("renders/output.mp4")).toBe(false);
     expect(shouldWatchProjectFile("dist/index.html")).toBe(false);
     expect(shouldWatchProjectFile(".hyperframes/cache.json")).toBe(false);
+    expect(shouldWatchProjectFile(".transcode-cache/proxy.mp4")).toBe(false);
+    expect(shouldWatchProjectFile(".thumbnails/frame.jpg")).toBe(false);
+    expect(shouldWatchProjectFile(".waveform-cache/peaks.json")).toBe(false);
   });
 });
 
