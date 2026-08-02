@@ -15,6 +15,7 @@ const WATCHER_EXCLUDED_DIRS = new Set([
   ".next",
   ".thumbnails",
   ".transcode-cache",
+  ".waveform-cache",
   ".vite",
   "build",
   "coverage",
