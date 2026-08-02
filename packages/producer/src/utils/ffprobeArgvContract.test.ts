@@ -1,59 +1,201 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 
 /**
- * Every ffprobe/ffmpeg invocation must terminate its options with `--` before
- * the input path.
+ * Every ffprobe/ffmpeg invocation must terminate its options with `--`
+ * IMMEDIATELY before the input path.
  *
- * This is a SOURCE-level contract test on purpose. #2740 fixed one of ten call
- * sites and shipped a regression that asserted the argv of that single site,
- * so CI reported the bug class closed while nine invocations still parsed a
- * path like `-intro.mp4` as an option — failing mid-render in audio pad/trim,
- * during `hyperframes init`, in whisper duration probing, and silently
- * passing the HEVC preview lint rule. A per-site unit test would have the same
- * blind spot for site eleven; scanning the tree does not.
+ * Source-level and DISCOVERY-based on purpose. Two prior attempts failed
+ * differently and both reported the bug class closed:
+ *
+ *  - #2740 fixed one of ten call sites and asserted the argv of that one site.
+ *  - Its follow-up scanned a hardcoded file list for a format flag followed by
+ *    a bare identifier, which only matched the shape it was written against —
+ *    mutation-testing showed removal of `--` from `engine/utils/ffprobe.ts`
+ *    and `cli/commands/init.ts` did not fail it.
+ *
+ * So this walks the tree, finds the callers itself, and checks the TERMINATOR
+ * POSITION rather than its mere presence. A new caller is discovered rather
+ * than needing to be remembered.
  */
 const REPO_ROOT = join(import.meta.dirname, "..", "..", "..", "..");
+const PACKAGES = join(REPO_ROOT, "packages");
 
-/** Argument arrays end with `<...flags>, "--", <path>`. Find the ones that don't. */
-const PROBE_CALL_RE =
-  /["'](?:-of|-print_format|json|default=noprint_wrappers=1:nokey=1)["']\s*,\s*\n?\s*([A-Za-z_$][\w$.]*)\s*,/g;
-
-const SCANNED = [
-  "packages/engine/src/utils/ffprobe.ts",
-  "packages/producer/src/services/render/audioPadTrim.ts",
-  "packages/producer/src/plan-parity-analysis.ts",
-  "packages/producer/src/utils/audioRegression.ts",
+/**
+ * The caller set as of the sweep that introduced this contract.
+ *
+ * Discovery is authoritative — a NEW caller is picked up without touching this
+ * list. The manifest runs the comparison the other way: if a regex change or a
+ * refactor drops a known caller out of discovery, every assertion for it stops
+ * running and the suite still reports green. That silent-vacuum failure is how
+ * the two previous versions of this test stayed passing over a live bug.
+ */
+const MANIFEST = [
   "packages/cli/src/commands/init.ts",
   "packages/cli/src/utils/webmAlphaCheck.ts",
   "packages/cli/src/whisper/transcribe.ts",
   "packages/core/src/mediaGradeAnalyzer.ts",
+  "packages/engine/src/utils/ffprobe.ts",
   "packages/lint/src/hevcPreviewLint.ts",
-  "packages/studio-server/src/helpers/mediaValidation.ts",
+  "packages/producer/src/plan-parity-analysis.ts",
+  "packages/producer/src/services/render/audioPadTrim.ts",
+  "packages/producer/src/utils/audioRegression.ts",
   "packages/studio-server/src/helpers/mediaMetadata.ts",
+  "packages/studio-server/src/helpers/mediaValidation.ts",
 ];
 
-describe("ffprobe argv contract", () => {
-  it.each(SCANNED)("%s terminates options before every input path", (relPath) => {
-    const source = readFileSync(join(REPO_ROOT, relPath), "utf8");
-    const offenders: string[] = [];
+/** Files that actually invoke ffprobe/ffmpeg, found rather than listed. */
+/**
+ * Runs ffprobe but produced no argv the matcher understood. Not necessarily a
+ * bug — a file may only pass a probe path around — but it IS the blind spot,
+ * so it is surfaced rather than dropped.
+ */
+function mentionsProbe(src: string): boolean {
+  // The first argument of the spawn must itself name a probe binary. A looser
+  // "file mentions ffprobe anywhere AND spawns anything" rule flagged four
+  // files that build no argv at all: binary resolution (`ffBinaries.ts`,
+  // `browser/ffmpeg.ts`), error-string matching (`videoFrameExtractor.ts`) and
+  // prose (`mediaCodecMap.ts`).
+  //
+  // ponytail: names the binary at the call site; a caller that spawns through
+  // an opaquely-named variable (`spawn(command, argv)`) is invisible here.
+  // Those still get caught by argv matching whenever their flags are literal —
+  // widen this if one ever slips through both.
+  return /(?:spawn|spawnSync|execFile\w*|exec)\s*\(\s*[^,)]*(?:ffprobe|ffProbe|probeBin|probePath)/i.test(
+    src,
+  );
+}
 
-    for (const match of source.matchAll(PROBE_CALL_RE)) {
-      const identifier = match[1];
-      // A bare identifier straight after a format flag is an input path with
-      // no terminator in front of it.
-      if (identifier && identifier !== "undefined") {
-        offenders.push(identifier);
-      }
+const SKIP_DIRS = new Set(["node_modules", "dist"]);
+
+function isSourceFile(entry: string): boolean {
+  return entry.endsWith(".ts") && !entry.includes(".test.");
+}
+
+function discoverCallers(): { found: string[]; unclassified: string[] } {
+  const found: string[] = [];
+  const unclassified: string[] = [];
+  const classify = (abs: string): void => {
+    const src = readFileSync(abs, "utf8");
+    // Discovery is ARGV-shaped, not call-shaped. Matching on spawn/execFile
+    // misses a dependency-injected runner — `runner("ffprobe", [...])` in
+    // studio-server's mediaValidation.ts is exactly that, and a call-shaped
+    // predicate skipped it silently. Anything that BUILDS a probe argv is a
+    // caller, however it is invoked.
+    if (argvTails(src).length > 0) found.push(relative(REPO_ROOT, abs));
+    else if (mentionsProbe(src)) unclassified.push(relative(REPO_ROOT, abs));
+  };
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
+      const abs = join(dir, entry);
+      if (statSync(abs).isDirectory()) walk(abs);
+      else if (isSourceFile(entry)) classify(abs);
     }
+  };
+  for (const pkg of readdirSync(PACKAGES)) {
+    const src = join(PACKAGES, pkg, "src");
+    try {
+      if (statSync(src).isDirectory()) walk(src);
+    } catch {
+      /* package without src */
+    }
+  }
+  return { found: found.sort(), unclassified: unclassified.sort() };
+}
 
-    expect(offenders, `${relPath}: input passed without a "--" terminator`).toEqual([]);
+/**
+ * Argv arrays that carry ffprobe/ffmpeg flags, with their trailing tokens.
+ *
+ * Deliberately shape-agnostic: it finds `[ ... ]` literals containing a known
+ * probe flag and reports the last two entries, so `["-v","error",...spread,"--",p]`
+ * and a multi-line `["-of","json","--",p]` are both covered.
+ */
+// ffPROBE-shaped only. ffmpeg takes its input via `-i` (already unambiguous,
+// the flag consumes the next token) and its OUTPUT as the trailing positional,
+// where `--` is not the convention — so matching those produced false
+// positives on every encode call (`..., "-y", outputPath`).
+const PROBE_ONLY_FLAG =
+  /"-(?:of|print_format|show_entries|show_format|show_streams|select_streams|count_packets)"/;
+/** `-y` (overwrite output) and `-i` (input flag) mark an ffmpeg argv. */
+const FFMPEG_SHAPE = /"-(?:y|i)"/;
+/**
+ * A generic wrapper builds its flags from a spread — `["-v", "error",
+ * ...argsWithoutInput, "--", filePath]` — so it carries no literal probe flag
+ * of its own. That is the exact shape `engine/utils/ffprobe.ts` uses, and the
+ * shape a probe-flag-only matcher silently skipped.
+ */
+const SPREAD_WRAPPER = /"-v"[\s\S]*\.\.\.[A-Za-z_$]/;
+
+function argvTails(source: string): Array<{ snippet: string; tail: string[] }> {
+  const tails: Array<{ snippet: string; tail: string[] }> = [];
+  // Non-greedy array literal, tolerant of newlines and spreads.
+  for (const m of source.matchAll(/\[((?:[^[\]]|\[[^\]]*\])*?)\]/gs)) {
+    const body = m[1] ?? "";
+    const isProbeArgv = PROBE_ONLY_FLAG.test(body) || SPREAD_WRAPPER.test(body);
+    if (!isProbeArgv || FFMPEG_SHAPE.test(body)) continue;
+    const parts = body
+      .split(",")
+      .map((p) => p.replace(/\/\/[^\n]*/g, "").trim())
+      .filter((p) => p !== "");
+    if (parts.length < 2) continue;
+    tails.push({ snippet: m[0].replace(/\s+/g, " ").slice(0, 90), tail: parts.slice(-2) });
+  }
+  return tails;
+}
+
+describe("ffprobe argv contract", () => {
+  const { found: callers, unclassified } = discoverCallers();
+
+  it("still discovers every caller in the manifest", () => {
+    const missing = MANIFEST.filter((f) => !callers.includes(f));
+    expect(missing, "discovery regressed — these are no longer being checked").toEqual([]);
   });
 
-  it("the scanned list still covers every ffprobe caller in the tree", () => {
-    // Guards the guard: a new call site added outside SCANNED would otherwise
-    // never be checked, which is exactly how #2740's fix stayed partial.
-    expect(SCANNED.length).toBeGreaterThanOrEqual(11);
+  it("classifies every file that spawns ffprobe", () => {
+    // A caller written in a shape the matcher does not recognise is checked by
+    // nothing. Fail loudly and widen the matcher rather than skip it.
+    expect(unclassified, "spawns ffprobe but built no argv this test understands").toEqual([]);
+  });
+
+  it.each(callers)("%s terminates options immediately before the input", (relPath) => {
+    const source = readFileSync(join(REPO_ROOT, relPath), "utf8");
+    const offenders = argvTails(source)
+      .filter(({ tail }) => {
+        const [penultimate, last] = tail;
+        // A trailing string literal is a flag/value, not a path — those argv
+        // arrays do not take an input here.
+        if (last === undefined || /^["'`]/.test(last)) return false;
+        return penultimate !== '"--"';
+      })
+      .map(({ snippet, tail }) => `${tail.join(" , ")}  in  ${snippet}`);
+
+    expect(offenders, `${relPath}: "--" must be immediately before the input`).toEqual([]);
+  });
+
+  // MISORDERING, not just removal. `["-of","json",path,"--"]` contains the
+  // terminator but does nothing, and a presence-only check passes it.
+  it.each(callers)("%s never places the terminator after the input", (relPath) => {
+    const source = readFileSync(join(REPO_ROOT, relPath), "utf8");
+    const misordered = argvTails(source)
+      .filter(({ tail }) => tail[1] === '"--"')
+      .map(({ snippet }) => snippet);
+    expect(misordered, `${relPath}: "--" must precede the input, not follow it`).toEqual([]);
+  });
+
+  // audioPadTrim's runFfprobeJson takes a pre-built argv, so it cannot add the
+  // terminator itself and instead asserts one is present. Presence is weaker
+  // than position — pin that the callers put it immediately before the path.
+  it("audioPadTrim's pre-built argv puts the terminator immediately before the input", () => {
+    const src = readFileSync(
+      join(REPO_ROOT, "packages/producer/src/services/render/audioPadTrim.ts"),
+      "utf8",
+    );
+    const probeArgvs = argvTails(src);
+    expect(probeArgvs.length).toBeGreaterThan(0);
+    for (const { tail, snippet } of probeArgvs) {
+      expect(tail[0], `terminator not penultimate in ${snippet}`).toBe('"--"');
+    }
   });
 });
