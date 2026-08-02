@@ -19,6 +19,7 @@ import { VERSION as version } from "../version.js";
 import {
   buildStudioHeadScriptsForHost,
   identityAllowed,
+  refreshTelemetryPosture,
   resolveCliTelemetryDistinctId,
 } from "./telemetryIdentity.js";
 import { emitStudioRenderComplete, emitStudioRenderError } from "./studioRenderTelemetry.js";
@@ -671,6 +672,10 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
     if (!identityAllowed(c.req.header("host"))) {
       return c.json({ error: "forbidden" }, 403);
     }
+    // Same request-boundary refresh the head-script route does: this endpoint
+    // is polled by a long-lived Studio tab, so a cached posture here outlives
+    // an opt-out run in another terminal just as visibly.
+    refreshTelemetryPosture();
     return c.json({ distinctId: resolveCliTelemetryDistinctId() });
   });
 

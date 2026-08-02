@@ -179,16 +179,20 @@ function installStateLatchedFired(): boolean {
   return latchedFiredSeen;
 }
 
-// Same shape as the latch memo, and same reason for existing: readConfig is
-// hot. A seed never changes once recorded, so the positive is cacheable.
-let seedFromStateFile: string | undefined;
-
-/** The seed install-state has recorded for this machine, if any. */
+/**
+ * The seed install-state has recorded for this machine, if any.
+ *
+ * Deliberately NOT memoized, unlike the latch above. This is only reached on a
+ * `readConfig` cache miss, so a memo saved one `readFileSync` per re-parse —
+ * and cost the documented full reset: a long-lived preview that had read seed
+ * A, observed `rm -rf ~/.hyperframes`, and minted B would still be handed the
+ * cached A, resurrecting the cohort the user just cleared. The latch memo is
+ * different on purpose: it caches only `true`, and a breaker that survives a
+ * reset fails safe.
+ */
 function installStateSeed(): string | undefined {
-  if (seedFromStateFile !== undefined) return seedFromStateFile;
   const state = readInstallState();
-  if (isInstallState(state) && state.bucketSeed !== undefined) seedFromStateFile = state.bucketSeed;
-  return seedFromStateFile;
+  return isInstallState(state) ? state.bucketSeed : undefined;
 }
 
 /** Narrow the parse result to a usable record. */
@@ -309,7 +313,6 @@ function applyInstallState(config: HyperframesConfig, wantFired: boolean): void 
   stateMarkerSynced = true;
   stateFiredSynced = wantFired || state?.deParallelRouterTrialFired === true;
   if (wantFired) latchedFiredSeen = true;
-  if (next?.bucketSeed !== undefined) seedFromStateFile = next.bucketSeed;
 }
 
 function syncInstallState(config: HyperframesConfig): boolean {

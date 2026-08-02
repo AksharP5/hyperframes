@@ -313,9 +313,12 @@ describe("registry", () => {
   // Deliberately NOT `overdueCanaries()` with the ambient date. That assertion
   // reads wall-clock time, so it turns the entire @hyperframes/core suite red
   // on a calendar date for every unrelated PR — a broken build nobody caused
-  // and whose fix is unrelated to the change under test. The registry's own
-  // freshness is enforced by the pinned dates below plus the sunset REPORT,
-  // which is advisory rather than a gate.
+  // and whose fix is unrelated to the change under test.
+  //
+  // Enforcement against the CURRENT date is real, it just is not here: the
+  // scheduled `Canary sunset` workflow runs `scripts/check-canary-sunset.ts`
+  // weekly and fails on the rollout's owner rather than on a passing author.
+  // These two tests cover the pinned-date and boundary logic it depends on.
   it("every canary carries a parseable sunset date in the future at authoring time", () => {
     const authored = new Date("2026-07-31T00:00:00Z");
     for (const c of CANARIES) {

@@ -39,6 +39,23 @@ export function shouldTrack(): boolean {
 }
 
 /**
+ * Drop the cached posture so the next `shouldTrack()` re-reads the persisted
+ * preference.
+ *
+ * The memo is right for a CLI command — one process, one answer, and the
+ * question is asked per event. It is wrong for `hyperframes preview`, which
+ * lives for hours: run `hyperframes telemetry disable` in another terminal and
+ * this process kept the old answer indefinitely, still resolving canaries and
+ * still injecting the CLI id into every page load. Callers that serve requests
+ * refresh at a request boundary; see `refreshTelemetryPosture` in
+ * server/telemetryIdentity.ts, which invalidates this and the config cache
+ * together so the two cannot disagree.
+ */
+export function resetTelemetryPostureCache(): void {
+  telemetryEnabled = null;
+}
+
+/**
  * Queue a telemetry event. Non-blocking, fail-silent.
  * Enriches the event with system metadata, then hands it to the transport
  * queue (which stamps the dedup uuid + timestamp).

@@ -1,3 +1,4 @@
+import { hostname, networkInterfaces } from "node:os";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 // CLI → Studio telemetry identity seeding (Layer 1). Verifies the server only
@@ -253,6 +254,23 @@ describe("buildStudioHeadScriptsForHost — Host split", () => {
   });
 });
 
+/**
+ * Non-loopback names this machine answers to. Computed, not hardcoded: the
+ * rule under test is "an address/name this host actually has", so a literal
+ * like `192.168.1.10` would pass only by accident on one developer's laptop.
+ */
+function localHostCandidates(): string[] {
+  const names = new Set<string>();
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (!entry.internal && entry.family === "IPv4") names.add(entry.address);
+    }
+  }
+  const self = hostname().split(".")[0];
+  if (self !== undefined && self !== "") names.add(`${self}.local`);
+  return [...names];
+}
+
 describe("identityAllowed — loopback-bound vs explicitly LAN-bound", () => {
   const original = process.env["HYPERFRAMES_PREVIEW_HOST"];
 
@@ -285,16 +303,44 @@ describe("identityAllowed — loopback-bound vs explicitly LAN-bound", () => {
     });
 
     // The mode this regressed: browsing your own LAN-exposed Studio lost the
-    // CLI stitch entirely, so the same human became two PostHog persons.
-    it.each(["0.0.0.0:3000", "192.168.1.10:3000", "my-dev-box.local:3000"])(
+    // CLI stitch entirely, so the same human became two PostHog persons. The
+    // names come from this machine, because that is now the actual rule —
+    // a hardcoded `192.168.1.10` asserted only that the check was absent.
+    it.each(["0.0.0.0:3000", ...localHostCandidates().map((n) => `${n}:3000`)])(
       "allows %s once the operator opted into LAN exposure",
       (host) => {
         expect(identityAllowed(host)).toBe(true);
       },
     );
 
-    it("still allows loopback in that mode", () => {
-      expect(identityAllowed("localhost:3000")).toBe(true);
+    // Setting the env var opted into LAN exposure, NOT into handing identity
+    // to whatever name a rebinding page invents. This is the hole: the old
+    // rule returned true for every one of these.
+    it.each(["evil.example.com", "127.0.0.1.evil.com", "attacker.test:3000", undefined])(
+      "still refuses hostile Host %s",
+      (host) => {
+        expect(identityAllowed(host)).toBe(false);
+      },
+    );
+
+    it("refuses a LAN address this machine does not answer on", () => {
+      expect(identityAllowed("203.0.113.7:3000")).toBe(false);
+    });
+  });
+
+  // A loopback bind exposes nothing, so the Host check stays a live rebinding
+  // mitigation — previously ANY non-empty value disabled it wholesale.
+  describe("bound to loopback explicitly", () => {
+    beforeEach(() => {
+      process.env["HYPERFRAMES_PREVIEW_HOST"] = "127.0.0.1";
+    });
+
+    it.each(["localhost:5173", "127.0.0.1"])("still allows %s", (host) => {
+      expect(identityAllowed(host)).toBe(true);
+    });
+
+    it.each(["evil.example.com", "192.168.1.10:3000"])("still refuses %s", (host) => {
+      expect(identityAllowed(host)).toBe(false);
     });
   });
 });

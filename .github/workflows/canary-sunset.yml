@@ -1,0 +1,26 @@
+# Canary sunset governance.
+#
+# Deliberately NOT a PR gate. The check reads the current date, so as a PR gate
+# it would fail builds for authors who touched nothing related, on a calendar
+# date, with no fix available to them. On a schedule the failure lands on the
+# rollout's owner instead, which is who can actually ramp it to 100 and delete
+# the guard.
+name: Canary sunset
+
+on:
+  schedule:
+    # Mondays at 15:10 UTC, shortly after the CodeQL run.
+    - cron: "10 15 * * 1"
+  workflow_dispatch:
+
+jobs:
+  sunset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # No install/build: the script imports the registry source directly and
+      # bun runs TypeScript natively.
+      - run: bun scripts/check-canary-sunset.ts

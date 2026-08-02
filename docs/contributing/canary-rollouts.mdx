@@ -54,8 +54,15 @@ call site.
 **3. Ramp it** by editing `percentage` in a patch release: `0 → 5 → 25 → 100`.
 
 **4. Delete it** once it is at 100 and holding — both the registry entry and
-the branch it guarded. `sunsetAfter` exists to force this: a test fails once
-the date passes.
+the branch it guarded. `sunsetAfter` exists to force this: the scheduled
+**Canary sunset** workflow runs weekly and fails once the date passes, naming
+the rollout and its owner.
+
+It is a scheduled job rather than a PR check on purpose. A current-date
+assertion in the unit suite would redden builds for authors who changed
+nothing related, on a calendar date, with no fix available to them — so the
+failure is routed to the person who can actually ramp or remove the canary.
+Run it yourself with `bun scripts/check-canary-sunset.ts`.
 
 ## Overriding
 
@@ -247,11 +254,16 @@ first:
 5. Local evaluation (standalone Studio, or a canary the CLI did not publish).
 
 Identity is treated differently from decisions. `__HF_CLI_DISTINCT_ID` and
-`__HF_CLI_BUCKET_SEED` are injected only for a loopback `Host` — a page that
-rebinds its hostname to `127.0.0.1` would otherwise read them as same-origin.
+`__HF_CLI_BUCKET_SEED` are injected only for a `Host` this server can vouch
+for — a page that rebinds its hostname to `127.0.0.1` would otherwise read
+them as same-origin. That means loopback by default, and on an explicit LAN
+bind (`HYPERFRAMES_PREVIEW_HOST=0.0.0.0`) a `Host` naming an address or
+hostname this machine actually answers on. Setting the variable does not
+disable the check; a hostile `Host` is refused in either mode.
+
 The decisions map is not identifying, so it is published regardless, which
-keeps a LAN preview (`HYPERFRAMES_PREVIEW_HOST=0.0.0.0`) in agreement with the
-CLI instead of silently re-deriving.
+keeps a LAN preview in agreement with the CLI instead of silently
+re-deriving.
 
 The decisions map is published even when telemetry is off — that is the case
 it exists for. It is safe to expose where the seed is not: booleans about
@@ -283,12 +295,18 @@ An explicit `HF_CANARY_<FEATURE>` (or `?hf_canary_<feature>=` in Studio)
 override still wins — that is a deliberate local choice, and it stays the way
 to exercise a canary with telemetry off.
 
-**It fails closed.** No install id, an unregistered name, or a CI machine all
-resolve to *not enrolled*. A canary exists to bound blast radius, so "we
-don't know who this is" must never mean "enrol everyone". CI is excluded
-because its config is regenerated per run, so its ids are ephemeral and would
-hop cohorts between runs — an explicit override still reaches it, which is
-how you test a canary in CI.
+**It fails closed below 100%.** No install id, an unregistered name, or a CI
+machine all resolve to *not enrolled*. A canary exists to bound blast radius,
+so "we don't know who this is" must never mean "enrol everyone". CI is
+excluded because its config is regenerated per run, so its ids are ephemeral
+and would hop cohorts between runs — an explicit override still reaches it,
+which is how you test a canary in CI.
+
+At exactly 100% those exclusions stop applying, deliberately. 100% is the step
+before deleting the entry and the guard, so anything still resolving false
+there would take the new path for the FIRST time at deletion, unstaged — and
+CI and seedless installs are precisely the populations a dashboard cannot see,
+so "100% and holding" would look green while they were never exercised.
 
 **Decisions are stable and memoized.** The same install always resolves the
 same way, and the answer is fixed for the life of a process — a render that
