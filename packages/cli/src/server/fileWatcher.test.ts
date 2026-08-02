@@ -18,7 +18,7 @@ describe("shouldWatchProjectFile", () => {
     expect(shouldWatchProjectFile("Dockerfile")).toBe(true);
   });
 
-  it("skips generated and dependency directories excluded from signatures", () => {
+  it("skips generated and dependency directories", () => {
     expect(shouldWatchProjectFile("node_modules/pkg/index.js")).toBe(false);
     expect(shouldWatchProjectFile("renders/output.mp4")).toBe(false);
     expect(shouldWatchProjectFile("dist/index.html")).toBe(false);
