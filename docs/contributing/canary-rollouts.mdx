@@ -56,7 +56,8 @@ call site.
 **4. Delete it** once it is at 100 and holding — both the registry entry and
 the branch it guarded. `sunsetAfter` exists to force this: the scheduled
 **Canary sunset** workflow runs weekly and fails once the date passes, naming
-the rollout and its owner.
+the overdue rollout and its owner in the run log. It does not notify anyone —
+watch the workflow if you own a canary.
 
 It is a scheduled job rather than a PR check on purpose. A current-date
 assertion in the unit suite would redden builds for authors who changed

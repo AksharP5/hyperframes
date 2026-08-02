@@ -387,6 +387,10 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
     rendersDir: () => join(projectDir, "renders"),
 
     startRender(opts): RenderJobState {
+      // The render POST is a request boundary like any other. Without this an
+      // already-open Studio tab keeps rendering under the posture cached when
+      // the server booted.
+      refreshTelemetryPosture();
       const abortController = new AbortController();
       const state: RenderJobState = {
         id: opts.jobId,
@@ -466,6 +470,12 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
             metaPath,
             JSON.stringify({ status: "complete", durationMs: Date.now() - startTime }),
           );
+          // Refreshed HERE, not just at render start: a render can run for
+          // minutes, and `hyperframes telemetry disable` during one must be
+          // honoured by the event that reports it. Studio never polls
+          // /api/telemetry-identity, so this process would otherwise keep its
+          // startup-cached posture for the life of the preview server.
+          refreshTelemetryPosture();
           emitStudioRenderComplete(opts, Date.now() - startTime, job.perfSummary);
         } catch (err) {
           if (abortController.signal.aborted) {
@@ -475,6 +485,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
           state.status = "failed";
           state.error = err instanceof Error ? err.message : String(err);
           // fallow-ignore-next-line code-duplication
+          refreshTelemetryPosture();
           emitStudioRenderError(opts, Date.now() - startTime, state.stage, err, renderJob);
           try {
             const metaPath = opts.outputPath.replace(/\.(mp4|webm|mov)$/, ".meta.json");

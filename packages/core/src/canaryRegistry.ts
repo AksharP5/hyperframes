@@ -38,8 +38,9 @@ export interface CanaryDefinition {
   /**
    * ISO date after which this canary is overdue for removal. A canary that
    * outlives its rollout is a permanent fork of the product with none of the
-   * review a permanent fork would have received. `assertNoOverdueCanaries`
-   * turns the date into a failing test rather than a good intention.
+   * review a permanent fork would have received. The scheduled `Canary sunset`
+   * workflow runs `scripts/check-canary-sunset.ts` weekly and fails once the
+   * date passes, so this is an enforced deadline rather than a good intention.
    */
   sunsetAfter: string;
 }

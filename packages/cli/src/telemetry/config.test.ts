@@ -276,6 +276,27 @@ describe("install-state rollover (breaker survives a config re-mint)", () => {
     expect(readConfigFresh().predecessorFound).toBeUndefined();
   });
 
+  // A full reset in a LONG-LIVED process. The memo that says "this process
+  // already mirrored the state file" stayed set after the file was deleted, so
+  // the mirror was never recreated: the freshly minted seed lived in
+  // config.json alone, and the NEXT config-only re-mint rolled a THIRD seed
+  // instead of inheriting the second. The old test stopped at the second mint
+  // and so missed the durability half entirely.
+  it("recreates install-state after a full wipe, so the new seed's lineage is durable", () => {
+    const first = readConfig().bucketSeed;
+    fsState.files.delete(CONFIG_PATH);
+    fsState.files.delete(STATE_PATH);
+
+    const second = readConfigFresh().bucketSeed;
+    expect(second, "a full reset must mint a new cohort").not.toBe(first);
+    expect(fsState.files.has(STATE_PATH), "state file must be recreated").toBe(true);
+    expect(stateFile()["bucketSeed"]).toBe(second);
+
+    // Config-only re-mint: the seed must now be inherited, not rolled again.
+    fsState.files.delete(CONFIG_PATH);
+    expect(readConfigFresh().bucketSeed, "lineage lost after reset").toBe(second);
+  });
+
   // The move: state used to live in ~/.local/state/hyperframes/ so it would
   // survive `rm -rf ~/.hyperframes`. Review rejected persisting state outside
   // the config dir to defeat the user's reset, so it now shares CONFIG_DIR.

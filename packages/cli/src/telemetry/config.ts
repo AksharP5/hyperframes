@@ -317,6 +317,16 @@ function applyInstallState(config: HyperframesConfig, wantFired: boolean): void 
 
 function syncInstallState(config: HyperframesConfig): boolean {
   const wantFired = config.deParallelRouterTrialFired === true;
+  // The memo says "this process already wrote the state file". That is only
+  // true while the file is still there. `rm -rf ~/.hyperframes` under a
+  // long-lived preview left the memo set, so the mirror was never recreated:
+  // the freshly minted seed lived in config.json alone, and the NEXT
+  // config-only re-mint rolled a third seed instead of inheriting the second.
+  // One existsSync on a path we are about to write anyway.
+  if (stateMarkerSynced && !existsSync(STATE_FILE)) {
+    stateMarkerSynced = false;
+    stateFiredSynced = false;
+  }
   if (stateMarkerSynced && (stateFiredSynced || !wantFired)) return true;
   try {
     applyInstallState(config, wantFired);

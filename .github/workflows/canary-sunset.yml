@@ -2,9 +2,12 @@
 #
 # Deliberately NOT a PR gate. The check reads the current date, so as a PR gate
 # it would fail builds for authors who touched nothing related, on a calendar
-# date, with no fix available to them. On a schedule the failure lands on the
-# rollout's owner instead, which is who can actually ramp it to 100 and delete
-# the guard.
+# date, with no fix available to them. On a schedule the failure stands on its
+# own instead of blocking an unrelated author.
+#
+# The job names the overdue canary and its owner in the run log; it does not
+# notify anyone. Routing that to the owner automatically (an issue, a ping)
+# is worth doing and is not done here.
 name: Canary sunset
 
 permissions:

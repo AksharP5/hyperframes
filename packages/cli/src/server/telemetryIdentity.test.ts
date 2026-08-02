@@ -11,11 +11,20 @@ const readConfig = vi.fn();
 // don't move every time a canary is added, ramped, or retired.
 const canaryDecisions = vi.fn<() => Record<string, { enabled: boolean; forced: boolean }>>();
 
+// Every export the module under test imports must be mocked. Omitting
+// `resetTelemetryPostureCache` / `readConfigFresh` made `refreshTelemetryPosture`
+// throw a missing-export error that its own catch swallowed, so every
+// assertion below ran against a refresh that silently did nothing.
+const resetPostureCache = vi.fn();
+const readConfigFresh = vi.fn();
+
 vi.mock("../telemetry/client.js", () => ({
   shouldTrack: (...args: unknown[]) => shouldTrack(...args),
+  resetTelemetryPostureCache: () => resetPostureCache(),
 }));
 vi.mock("../telemetry/config.js", () => ({
   readConfig: (...args: unknown[]) => readConfig(...args),
+  readConfigFresh: () => readConfigFresh(),
 }));
 vi.mock("../telemetry/canary.js", () => ({
   canaryDecisionsForStudio: () => canaryDecisions(),
@@ -27,6 +36,7 @@ const {
   buildStudioHeadScripts,
   isLoopbackHost,
   buildStudioHeadScriptsForHost,
+  refreshTelemetryPosture,
   identityAllowed,
 } = await import("./telemetryIdentity.js");
 
@@ -342,5 +352,44 @@ describe("identityAllowed — loopback-bound vs explicitly LAN-bound", () => {
     it.each(["evil.example.com", "192.168.1.10:3000"])("still refuses %s", (host) => {
       expect(identityAllowed(host)).toBe(false);
     });
+  });
+});
+
+// A long-lived preview server: the posture it cached at boot must not outlive
+// an opt-out run in another terminal. Studio has no poller for
+// /api/telemetry-identity, so the refresh has to happen on the paths that
+// actually run — the SPA document and the render boundary.
+describe("cross-process opt-out refresh", () => {
+  beforeEach(() => {
+    resetPostureCache.mockClear();
+    readConfigFresh.mockClear();
+  });
+
+  it("actually invalidates both caches — the mocks used to swallow this", () => {
+    refreshTelemetryPosture();
+    expect(readConfigFresh).toHaveBeenCalledTimes(1);
+    expect(resetPostureCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes before building a head script", () => {
+    shouldTrack.mockReturnValue(true);
+    readConfig.mockReturnValue({ anonymousId: "id-1", bucketSeed: "seed-1" });
+    canaryDecisions.mockReturnValue({});
+    buildStudioHeadScriptsForHost("", "localhost:3000");
+    expect(resetPostureCache).toHaveBeenCalled();
+  });
+
+  it("stops publishing identity once another process disables telemetry", () => {
+    canaryDecisions.mockReturnValue({});
+    readConfig.mockReturnValue({ anonymousId: "id-1", bucketSeed: "seed-1" });
+
+    shouldTrack.mockReturnValue(true);
+    expect(buildStudioHeadScriptsForHost("", "localhost:3000")).toContain("__HF_CLI_DISTINCT_ID");
+
+    // `hyperframes telemetry disable` in another terminal.
+    shouldTrack.mockReturnValue(false);
+    const after = buildStudioHeadScriptsForHost("", "localhost:3000");
+    expect(after).not.toContain("__HF_CLI_DISTINCT_ID");
+    expect(after).not.toContain("__HF_CLI_BUCKET_SEED");
   });
 });
