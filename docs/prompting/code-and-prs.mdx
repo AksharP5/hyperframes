@@ -3,6 +3,8 @@ title: Code changes and PRs
 description: "What to say to turn a GitHub pull request into a code-change explainer — changelog, feature reveal, fix, or refactor walkthrough."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 Two rides in, both built from nothing yet on the page. This one starts from something that already exists and is already true — a merged PR — and turns the diff itself into the story.
 
 ## Your first win
@@ -13,7 +15,11 @@ Verified, from the [examples](/prompting/examples) page — a 30-second feature 
 
 > /pr-to-video Make a 30-second 1920x1080 feature-reveal video from [PR URL]. Lead with what users get, not the diff; show the key code change with the `code-diff` block for one beat only; end on version number + repo URL. No narration, kinetic captions instead.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/example-pr-video.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Example Pr Video"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/example-pr-video.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited.*
 
 
@@ -47,8 +53,12 @@ What you can already steer from the prompt, before you've learned any technique.
 <AccordionGroup>
   <Accordion title="Changelog roundup">
     > /pr-to-video Make a ~40-second 1920x1080 changelog video from [PR URL]. Changelog angle: open with the release line, then one beat per notable change — a short label and a one-line "what it does" each. Show at most two `code-diff` hunks across the whole video. End on version + repo URL. Calm male TTS narration, no captions.
-    
-    <video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/variant-pr-changelog.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+
+    <DocsVideo
+      title="HyperFrames video: Variant Pr Changelog"
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/variant-pr-changelog.mp4#t=0.1"
+      loop
+    />
     *Rendered from this prompt with [PR URL] = heygen-com/hyperframes#2092, unedited.*
 
     A changelog trades depth for breadth — many small changes, each a beat, rather than one change explored deeply. Keep code beats sparse so the pace stays fast. A PR doesn't carry its shipping version — the agent finds it from the release tag or the package manifest on main.

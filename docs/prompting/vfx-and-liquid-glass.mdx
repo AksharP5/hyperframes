@@ -3,6 +3,8 @@ title: VFX and liquid glass
 description: "Prompt device mockups, liquid-glass UI, shatter/portal/magnetic moments, and ambient polish — and know which effects need the canvas pipeline."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 Your motion-graphics terminal piece from Level 1 already named one of these — `vfx-shatter`, for the beat where the terminal breaks apart. This chapter is the rest of that showy end of the catalog: 3D device mockups, frosted-glass Apple UI, and cinematic moments where HTML shatters or gets sucked through a portal. Two groups do the work — the [HTML-in-Canvas](/catalog/blocks/vfx-iphone-device) blocks (real WebGL, live HTML rendered as GPU textures) and the [Effects](/catalog/components/vignette) components (lightweight CSS polish). Knowing which is which is the difference between an effect that renders and one that surprises you. All of it slots into the [one-shot skeleton](/prompting/anatomy) at the "technique" step.
 
 ### Device mockups
@@ -11,7 +13,11 @@ To put your product UI inside a real phone or laptop, name [`vfx-iphone-device`]
 
 > /product-launch-video 15-second 1920x1080 video. Our dashboard UI lives on the screen of a real iPhone 15 Pro Max that turntables slowly under product-review lighting, then a MacBook Pro slides in beside it showing the same UI wider. Use the `vfx-iphone-device` registry block. No narration.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-device-mockup.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Validate Device Mockup"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-device-mockup.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above (the block's demo UI on screen), unedited.*
 
 
@@ -36,7 +42,11 @@ The four `liquid-glass-*` panel blocks share the aurora-shader stage, so they co
 
 > /motion-graphics 8-second 1920x1080 video. Frosted glass notification cards drift in and stack over an aurora shader background, each reading a fake alert ("Build passed", "Deploy live", "0 incidents"). Real translucency — the aurora must be visible through each card. Smoke the glass enough to keep white text above 3:1 against the brightest part of the aurora. No audio.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/glass-notify.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Glass Notify"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/glass-notify.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited — CSS `backdrop-filter` glass over a Three.js aurora.*
 
 <Warning>
@@ -63,7 +73,11 @@ The `vfx-*` blocks are single cinematic beats — spend them on a transition or 
 
 > /motion-graphics 8-second 1920x1080 video. Beat 1 (0-4s): a landing-page hero holds under directional light. Beat 2 (4-6s): the whole page shatters into glass fragments that scatter. Beat 3 (6-8s): bold white text slams in on black. Use the `vfx-shatter` registry block; the final beat reads "HTML IS VIDEO". No narration, no image or media files.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/vfx-shatter.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Vfx Shatter"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/vfx-shatter.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited.*
 
 
@@ -88,7 +102,11 @@ These are the ambient layer of the [motion grammar](/prompting/motion): grain an
 
 > /motion-graphics 6-second 1920x1080 video. A wordmark logo — "HYPERFRAMES" in platinum on near-black — settles center-frame, then holds — but keep it alive with a film grain overlay and a slow 3% push-in, plus one shimmer sweep across the wordmark at 4s. Use the `grain-overlay`, `parallax-zoom`, and `shimmer-sweep` registry components. No audio.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/logo-polish.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Logo Polish"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/logo-polish.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited — the "hold" stays alive on grain, a 3% push, and one shimmer pass.*
 
 
@@ -125,7 +143,11 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 
 > Inside: frosted-glass inspector panels (real translucency — blur over what's behind; the product's Studio design language) hover above the wire carrying live values (`ease: power3.out`, a color token, an fps readout) […] Glass surfaces use the file's `--glass-*` tokens with real backdrop blur.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-surface.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Capstone Region Surface"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-surface.mp4#t=0.1"
+  loop
+/>
 *That clause, rendered — the region cut from the finished film.*
 
 *Next: [Runtimes and 3D](/prompting/runtimes-and-3d) — picking GSAP, Three.js, or Lottie by what the moment actually needs, including the real depth these effects render on.*

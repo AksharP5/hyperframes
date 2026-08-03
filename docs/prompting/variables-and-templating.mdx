@@ -3,15 +3,25 @@ title: Variables and templating
 description: "Ask for the parts that should change to become named slots, then re-render the same composition with different values — one output per record."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 [Design systems](/prompting/design-systems) covered the parts of a video that should *never* change per render — the brand. This page covers the parts that should: a card per customer, a stat per quarter, a name per recipient. When you know a composition will be reused, say so in the prompt, and name the parts that change. The agent turns them into declared [variables](/concepts/variables): typed, labeled slots filled at render time instead of hardcoded into the HTML.
 
 The trigger phrase is simple — call out the slots:
 
 > Build a 6-second title card. Make the **name**, the **logo**, and the **accent color** variables; everything else stays fixed.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-variables-default.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Validate Variables Default"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-variables-default.mp4#t=0.1"
+  loop
+/>
 *Default variable values.*
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-variables-variant.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Validate Variables Variant"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-variables-variant.mp4#t=0.1"
+  loop
+/>
 *The same composition re-rendered with `--variables` overrides — different name, logo, and accent, zero re-prompting.*
 
 

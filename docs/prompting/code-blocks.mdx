@@ -3,6 +3,8 @@ title: Code animations
 description: "Prompt code walkthroughs — typing, diffing, highlighting, scrolling — and pick a terminal or editor theme by name."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 Your PR video from Level 1 named `code-diff` for a single beat and moved on. This chapter is the rest of that catalog: typing, diffing, highlighting, scrolling, and picking a terminal or editor theme by name — for the moments a walkthrough needs to slow down and let the code itself carry the scene.
 
 Code is the one subject where the framework does the hard part for you. The [Code Animations](/catalog/blocks/code-typing) blocks handle syntax highlighting, caret tracking, diff coloring, and camera moves deterministically — you describe the *walkthrough*, name the block, and paste your snippet. This page is the vocabulary for doing that well; for turning a real pull request into a code-change video, see [Code and PRs](/prompting/code-and-prs).
@@ -44,7 +46,11 @@ The first four are the workhorses of a code *walkthrough* — they keep the code
 > ```
 > Use the `code-typing` registry block. No narration, no image or media files.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-code-typing.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Validate Code Typing"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-code-typing.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited.*
 
 
@@ -65,13 +71,21 @@ For "here's what changed," hand `code-diff` the before and after and let it colo
 > added: `const res = await fetch(url, { signal })`
 > Use the `code-diff` registry block. No audio.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-code-diff.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Validate Code Diff"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-code-diff.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited.*
 
 
 > /motion-graphics 5-second 1920x1080 video. Show a 12-line config file; a highlight band sweeps to line 7 (`timeout: 30_000`) while the surrounding lines dim. Hold with line 7 lit and the cursor blinking. Use the `code-highlight` registry block. No audio.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-code-highlight.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Validate Code Highlight"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-code-highlight.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited — the agent authors plausible surrounding config lines; paste all 12 if the exact file matters.*
 
 
@@ -85,7 +99,11 @@ For "here's what changed," hand `code-diff` the before and after and let it colo
 
 > /motion-graphics 6-second 1920x1080 video. Scroll a ~60-line source file so line 44 (`return dedupeFrames(frames)`) arrives at center and gets spotlighted; ease the scroll and let it settle without snapping. Use the `code-scroll` registry block. No audio.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/code-scroll.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Code Scroll"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/code-scroll.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited.*
 
 **Ask the scroll to ease and settle, not snap.** A linear scroll that stops dead reads mechanical.
@@ -120,7 +138,11 @@ The [Code Snippets](/catalog/blocks/code-snippet-monokai) blocks are pre-styled 
 
 > /motion-graphics 5-second 1920x1080 video. A macOS Terminal window in the Ocean profile types `npx skills add heygen-com/hyperframes` character by character, then holds on the typed, unexecuted command with the cursor blinking — no output, no second prompt. Use the `code-snippet-apple-terminal-ocean` registry block. No narration.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/terminal-ocean.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Terminal Ocean"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/terminal-ocean.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited.*
 
 
@@ -151,7 +173,11 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 
 > **Type (0–7s).** Black-on-charcoal close-up: a cursor types real HyperFrames markup character by character — `<div class="clip" data-start="0" data-duration="4">` and a `gsap.timeline({ paused: true })` line. As the typed line completes, the text's baseline extends and becomes **the wire** — the underline literally grows into the timeline and the camera begins its dolly along it. The typed div folds into a compact clip chip (persistent element 3) that drops onto the wire. Kinetic display type states "WRITE HTML." as the travel begins.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-type.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Capstone Region Type"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-type.mp4#t=0.1"
+  loop
+/>
 *That clause, rendered — the region cut from the finished film.*
 
 *Next: [Data and maps](/prompting/data-and-maps) — the same named-block, quoted-copy pattern, for charts, stats, and maps instead of code.*

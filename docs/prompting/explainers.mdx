@@ -3,6 +3,8 @@ title: Explainers
 description: "What to say to turn an article, notes, or a topic into a faceless explainer — where every visual is invented, not captured."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 The last ride pointed a workflow at a website. This one drops the site entirely — arbitrary text is the whole input, and every visual downstream is invented rather than captured.
 
 ## Your first win
@@ -13,7 +15,12 @@ Verified, from the [examples](/prompting/examples) page — a ~60-second vertica
 
 > /faceless-explainer Turn this into a ~60-second 1080x1920 vertical explainer: [paste your text]. One idea per scene, big typography, diagrams over stock footage, brand color #FF5533 on off-black. Male TTS voice, calm. Embedded captions, keywords highlighted in the brand color.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/example-explainer.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Example Explainer"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/example-explainer.mp4#t=0.1"
+  portrait
+  loop
+/>
 *Rendered from the prompt above, unedited.*
 
 
@@ -51,7 +58,11 @@ What you can already steer from the prompt, before you've learned any technique.
 
     Shorter runtime, landscape for YouTube / embed. Fewer scenes means the topic has to compress — naming the takeaway tells the workflow what to keep.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/variant-explainer-landscape.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Variant Explainer Landscape"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/variant-explainer-landscape.mp4#t=0.1"
+  loop
+/>
 *Rendered from this prompt with the topic swapped to HTTP caching (cache diagram as the metaphor), unedited — 26s, because the narration sets the length.*
 
   </Accordion>

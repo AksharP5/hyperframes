@@ -3,7 +3,13 @@ title: Capstone — every technique, one journey
 description: "One prompt, one continuous camera move, every technique in this guide — the viewer rides the timeline itself from typed markup to rendered MP4."
 ---
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-timeline-default.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
+<DocsVideo
+  title="HyperFrames video: Capstone Timeline Default"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-timeline-default.mp4#t=0.1"
+  loop
+/>
 *"The Timeline" — 1920x1080, ~62 seconds, one prompt, one unbroken camera move, unedited.*
 
 The prompt targeted roughly 60 seconds; the delivered render runs 1:02 because the final lockup holds for a two-second breath.
@@ -111,7 +117,11 @@ HyperFrames scopes `data-composition-variables` **per composition file**, so the
 hyperframes render --variables '{"ground":"#0d1420","ink":"#c8ff3d"}' --strict-variables
 ```
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-timeline-reskin.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Capstone Timeline Reskin"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-timeline-reskin.mp4#t=0.1"
+  loop
+/>
 *The same composition, navy/acid-green — the wire, ruler, chart, map, glass, and even the generated mural all follow the override.*
 
 The mural trick from the previous capstone carries over: the artwork is generated **palette-neutral** (grayscale) and duotoned live by CSS layers driven by the `ground`/`ink` variables, so even the raster re-skins. Keep color in CSS and shapes in the raster whenever a template frame needs to survive a re-skin.

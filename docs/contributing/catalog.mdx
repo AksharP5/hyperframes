@@ -1,76 +1,53 @@
 ---
-title: Contributing to the Catalog
-description: How to add blocks and components to the HyperFrames registry.
+title: Contribute to the Catalog
+description: Add a reusable block or component to the HyperFrames registry.
 ---
 
-Your agent already knows how to build video components. It writes HTML. HyperFrames renders it. The registry is the collection of everything that's been built — 113 blocks and 25 components.
+The Catalog is generated from the registry in the HyperFrames repository. You
+can contribute a visual idea or build an item that anyone can install.
 
-This guide shows you how to add to it.
+## Choose how to contribute
 
-<Info>
-**Quick version** — Fork the repo. Write one HTML file with a paused GSAP timeline. Add `registry-item.json`. Run `hyperframes lint` + `hyperframes check`. Publish with `npx hyperframes publish`. Open a PR.
-</Info>
+### Suggest an idea
 
-## Why Contribute?
+Open a [GitHub issue](https://github.com/heygen-com/hyperframes/issues) with a
+visual reference and explain where the effect would be useful. A screen
+recording, Figma sketch, or example from another tool is enough to start.
 
-Every block in the registry exists because someone needed it and built it. When you add a block, every HyperFrames user gets it with one command:
+### Build an item
 
-```bash
-npx hyperframes add instagram-follow
-```
+Ask your agent to use the `/hyperframes-registry` skill, or follow the same
+workflow below.
 
-The registry grows, HyperFrames gets more useful, and your work ships to everyone.
+## Choose the item type
 
-## Two Paths
+| Type | Use it for | Required files |
+| --- | --- | --- |
+| Block | A standalone composition with fixed dimensions and duration | `registry-item.json` and the composition HTML |
+| Component | A snippet installed into another composition | `registry-item.json`, the snippet HTML, and a standalone `demo.html` |
 
-### Ideas (No Code)
+Each item has its own directory under `registry/blocks/` or
+`registry/components/`. Prefix every element ID with a short abbreviation of
+the item name so it cannot collide when installed as a sub-composition.
 
-You spot visual trends before anyone. That's the most valuable contribution.
-
-- Screen-record a caption style from TikTok/YouTube that doesn't exist yet
-- Sketch a lower-third in Figma with fonts, colors, and timing
-- Install a component, preview it, report what feels off
-
-Open an issue on [GitHub](https://github.com/heygen-com/hyperframes/issues) with a visual reference. Tag it `component-request`.
-
-<Tip>The bar for ideas is low. We'd rather have 100 and build the best 10.</Tip>
-
-### Build It
-
-Every block is a single HTML file. No build step, no framework.
-
-If you use Claude Code with HyperFrames skills:
-
-> "I want to contribute a new transition that looks like \[description\]"
-
-The `/hyperframes-registry` skill scaffolds the structure, validates, renders a preview, publishes to [hyperframes.dev](https://hyperframes.dev), and prepares the PR.
-
-## What Goes in the Registry
-
-**Blocks** (`registry/blocks/`) — full standalone compositions. Fixed dimensions, fixed duration. Caption styles, VFX effects, title cards, transitions.
-
-**Components** (`registry/components/`) — reusable snippets. No fixed size. CSS effects, text treatments, overlays that adapt to any composition.
-
-### Structure
-
-A block is two files. A component is three, because it also ships the demo the catalog renders it inside.
-
-```
+```text
 registry/blocks/my-block/
-  my-block.html           ← the composition
-  registry-item.json      ← metadata
+  my-block.html
+  registry-item.json
 
 registry/components/my-effect/
-  my-effect.html          ← the snippet
-  demo.html               ← the composition the catalog previews it in
-  registry-item.json      ← metadata
+  my-effect.html
+  demo.html
+  registry-item.json
 ```
 
-<Warning>
-`demo.html` is required for components. Preview generation skips any component without one, which fails the catalog CI job for your item.
-</Warning>
+The Catalog preview generator skips a component without `demo.html`.
 
-### registry-item.json
+## Define the manifest
+
+`registry-item.json` follows the
+[registry item schema](https://github.com/heygen-com/hyperframes/blob/main/packages/core/schemas/registry-item.json).
+Blocks declare `dimensions` and `duration`; components must not.
 
 ```json
 {
@@ -83,7 +60,12 @@ registry/components/my-effect/
   "dimensions": { "width": 1920, "height": 1080 },
   "duration": 5,
   "params": [
-    { "key": "--accent", "label": "Accent", "type": "color", "default": "#ff4d4d" }
+    {
+      "key": "--accent",
+      "label": "Accent",
+      "type": "color",
+      "default": "#ff4d4d"
+    }
   ],
   "files": [
     {
@@ -95,167 +77,73 @@ registry/components/my-effect/
 }
 ```
 
-#### Expose your block's knobs with `params`
+Use `params` for the values someone should be able to change in Studio without
+editing HTML. Supported controls are `color`, `text`, `number`, and `select`.
 
-Declare `params` and Studio opens a live customization panel the moment someone adds your block. Each entry maps a label to a CSS variable your composition reads, so a user can restyle it without editing HTML.
+Other useful optional fields include `author`, `authorUrl`, `relatedSkill`,
+`registryDependencies`, `license`, `sourcePrompt`, `minCliVersion`, and
+`deprecated`. The TypeScript registry types and existing manifests are the
+current authority. The published JSON schema validates the shared manifest
+fields but does not yet describe the block-only `params` field.
 
-```json
-"params": [
-  { "key": "--bg-color", "label": "Background", "type": "color", "default": "#faf9f6" },
-  { "key": "--headline", "label": "Headline", "type": "text", "default": "Ship it" },
-  { "key": "--speed", "label": "Speed", "type": "number", "default": "1", "min": 0.5, "max": 2, "step": 0.1 }
-]
+## Build for reuse
+
+Every registry item must:
+
+- use a paused GSAP timeline registered on `window.__timelines`;
+- match `data-composition-id` to the registered timeline ID;
+- use prefixed element IDs;
+- avoid `Date.now()`, unseeded `Math.random()`, and real-time animation loops;
+- seek correctly at any frame;
+- work after installation outside its source directory.
+
+A one-off example belongs in [Examples](/examples), not the Catalog.
+
+## Validate and preview
+
+Run the composition gates:
+
+```bash
+npx hyperframes lint
+npx hyperframes check
 ```
 
-Types are `color`, `text`, `number`, and `select` (which takes an `options` array).
+Generate the Catalog page and preview assets:
 
-<Tip>
-If your block has any brand surface — a color, a headline, a logo slot — expose it as a param. A block nobody can restyle gets forked instead of reused.
-</Tip>
+```bash
+npx tsx scripts/generate-catalog-pages.ts
+npx tsx scripts/generate-catalog-previews.ts --only my-block
+```
 
-#### Other optional fields
+These generators read the item directly from the working tree. The `add`
+command cannot install an unpublished local item by name: it resolves items
+from the registry URL in `hyperframes.json`. Test `npx hyperframes add my-block`
+from a clean project after the item is present in that registry manifest.
 
-| Field | What it does |
-|-------|--------------|
-| `author` / `authorUrl` | Credits you on the catalog page |
-| `relatedSkill` | Links the catalog page to the skill that authors this kind of block |
-| `registryDependencies` | Other registry items installed alongside yours |
-| `license` | SPDX identifier, if yours differs from the repo's |
-| `sourcePrompt` | The prompt that produced the block, for people remixing it |
-| `minCliVersion` | Guards against installing into a CLI too old to run it |
-| `deprecated` | Marks the item superseded, with the migration note as the value |
+Do not hand-edit the generated item page. Fix its registry manifest or the
+generator and regenerate it.
 
-## The Rules
+Watch the preview at full speed. Passing `check` proves the composition is
+valid; it does not prove that the motion is readable or useful.
 
-Five things that must be true for every registry item:
+| Review question | What good looks like |
+| --- | --- |
+| Is there one visual hero? | The eye knows where to look in the first second |
+| Can the important text be read once? | Information lands, then holds before the cut |
+| Does motion accelerate and settle? | It does not drift at constant speed like a slide |
+| Can someone restyle it? | Brand-facing values are exposed as parameters |
+| Is it meaningfully reusable? | It solves a repeated production problem |
 
-<Steps>
-  <Step title="Deterministic">
-    No `Math.random()`, no `Date.now()`. Use seeded PRNG only.
-  </Step>
-  <Step title="Paused timeline">
-    `gsap.timeline({ paused: true })`. The player controls playback.
-  </Step>
-  <Step title="Register timeline">
-    `window.__timelines["id"]` must match `data-composition-id`.
-  </Step>
-  <Step title="No requestAnimationFrame">
-    Use `tl.eventCallback("onUpdate", render)` for Three.js/WebGL scenes.
-  </Step>
-  <Step title="Hard kills on captions">
-    `tl.set(el, { opacity: 0, visibility: "hidden" }, group.end)` — no lingering text.
-  </Step>
-</Steps>
+## Open the pull request
 
-<Warning>
-Break any of these and renders won't be reproducible. The renderer captures every frame by seeking the timeline — if your animation depends on real time or random state, it breaks.
-</Warning>
+Include:
 
-Prefix every element ID with a 2-3 letter abbreviation of your item's name (`hz-cg-0`, `vc-canvas`). Unprefixed IDs collide when your block is used as a sub-composition.
+- the item directory;
+- the matching entry in `registry/registry.json`;
+- regenerated Catalog output;
+- a `hyperframes.dev` preview from `npx hyperframes publish`;
+- when to use it, its useful duration range, and any known pitfalls.
 
-## Quality Bar
-
-Not everything belongs in the registry. The bar is production quality.
-
-| Type | Minimum standard |
-|------|-----------------|
-| Captions | 96px+ font (64-72px for monospace), text-stroke or shadow, `window.__hyperframes.fitTextFontSize()` on every group |
-| VFX | Solves a problem that takes 4+ hours from scratch |
-| Transitions | Smoother than CSS — if opacity 0→1 works, it's not a transition |
-| Blocks | Would a professional use this in a client project? |
-
-### Motion review
-
-Passing `check` isn't the same as the motion being good. Watch your rendered preview once at full speed and answer these:
-
-| Rule | Ask yourself |
-|------|-------------|
-| Key information holds still before the block ends | Does the headline or number sit motionless for at least a second after it lands, or is it still drifting at the cut? |
-| Speed comes from acceleration, not constant velocity | Is anything moving at a constant rate? Linear motion reads as a slide deck. |
-| Default one notch slower than feels right | Was there anything you couldn't read on the first watch? |
-| One hero per block | Count what's animating in the first second. More than one and the eye has nowhere to land. |
-| Light effects aren't sprayed | Count the glints and sweeps. More than one, or any that spills past a rounded corner, is a cut. |
-
-### Common rejection reasons
-
-1. **"Looks like a demo"** — a spinning cube is not a component
-2. **"Text unreadable"** — font too small, no contrast treatment
-3. **"Non-deterministic"** — `Math.random()` or `Date.now()`
-4. **"Timeline not found"** — ID mismatch between HTML and JS
-5. **"Breaks as sub-composition"** — element IDs collide (prefix everything)
-6. **"Nothing to tune"** — a branded block with no `params`
-
-## Workflow
-
-<Steps>
-  <Step title="Fork and create">
-    Fork [heygen-com/hyperframes](https://github.com/heygen-com/hyperframes) and create your block directory:
-    ```bash
-    mkdir -p registry/blocks/your-block
-    ```
-  </Step>
-  <Step title="Write your block">
-    Create the HTML composition and `registry-item.json`. Use the templates above. For a component, add `demo.html` too.
-  </Step>
-  <Step title="Validate">
-    ```bash
-    hyperframes lint
-    hyperframes check
-    npx oxfmt registry/blocks/your-block/*.html
-    ```
-  </Step>
-  <Step title="Update registry">
-    ```bash
-    # Add to registry index
-    # Update registry/registry.json
-    npx tsx scripts/generate-catalog-pages.ts
-    ```
-  </Step>
-  <Step title="Render preview">
-    ```bash
-    hyperframes render -o preview.mp4
-    ```
-  </Step>
-  <Step title="Publish and PR">
-    ```bash
-    npx hyperframes publish
-    ```
-    Open a PR with your [hyperframes.dev](https://hyperframes.dev) preview link. Commit your item directory, `registry/registry.json`, and the generated `docs/catalog/` page.
-  </Step>
-</Steps>
-
-CI renders the catalog PNG and MP4 for every block or component your PR touches, so there's nothing to attach by hand. A maintainer publishes the final catalog image before merge.
-
-### What to write in the PR body
-
-The one-line `description` tells a reader what your block looks like. It doesn't tell them when to reach for it, which is what decides whether it gets used. Three lines in the PR body:
-
-- **When to use it** — name the moment, e.g. "second beat of a product promo, right after the hero card lands"
-- **Duration range** — your block has a fixed `duration`; say what range still reads correctly
-- **Known pitfalls** — a font that must be loaded, a background it needs contrast against, a length past which it stops working
-
-**HeyGen internal:** run `scripts/upload-docs-images.sh` to push catalog PNGs.
-
-## What's Needed Right Now
-
-The catalog is lopsided. It has 29 transitions and 33 code blocks, and almost nothing for the moments that carry a video's shape. These gaps are sorted by the job the shot does, not by the technique it uses.
-
-| Job in the video | Blocks today | Gap |
-|------------------|--------------|-----|
-| Opening / hero reveal | 2 | The most-used moment in any promo has two options |
-| Outro / end card | 1 | Every video needs one |
-| Beat-driven cuts | 0 | Speed ramps, freeze frames, cut-on-the-beat — nothing, despite a whole music-to-video workflow |
-| Interaction demo | 0 | Command palette summon, type-and-filter, cursor performance, theme switch — nothing, despite HyperFrames capturing real product pages |
-| Data readout | 1 generic | Odometer digit roll, gauge sweep, before-and-after slider scrub |
-| Captions | 0 blocks | 15 caption components exist, but no ready-to-drop caption block |
-
-Four specific holes that survived the last round:
-
-| Category | Gap | Difficulty |
-|----------|-----|-----------|
-| Captions | RTL language layouts (Arabic, Hebrew) | Medium |
-| Data viz | Sankey / flow diagrams | Medium |
-| VFX | Particle system with physics (collisions, gravity) | Hard |
-| VFX | Product turntable with HDRI | Hard |
-
-Pick one, and your first contribution fills a hole instead of being the 30th transition.
+External contributors should attach the preview MP4. A maintainer will publish
+the final Catalog media. HeyGen contributors can use
+`scripts/upload-docs-images.sh` after preview review.
