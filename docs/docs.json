@@ -680,8 +680,132 @@
   },
   "redirects": [
     {
+      "source": "/guides",
+      "destination": "/introduction"
+    },
+    {
+      "source": "/showcase",
+      "destination": "/examples"
+    },
+    {
+      "source": "/launch-videos",
+      "destination": "/examples"
+    },
+    {
+      "source": "/guides/claude-design",
+      "destination": "/guides/design-tools"
+    },
+    {
+      "source": "/guides/open-design",
+      "destination": "/guides/design-tools"
+    },
+    {
+      "source": "/guides/common-mistakes",
+      "destination": "/guides/troubleshooting"
+    },
+    {
+      "source": "/guides/create-with-agent",
+      "destination": "/workflows"
+    },
+    {
+      "source": "/guides/choose-your-path",
+      "destination": "/workflows"
+    },
+    {
+      "source": "/guides/help",
+      "destination": "/help"
+    },
+    {
+      "source": "/guides/project-tour",
+      "destination": "/concepts"
+    },
+    {
+      "source": "/guides/media-overlays",
+      "destination": "/catalog"
+    },
+    {
+      "source": "/guides/common-questions",
+      "destination": "/help"
+    },
+    {
+      "source": "/contributing/studio-manual-dom-editing",
+      "destination": "/studio/canvas"
+    },
+    {
+      "source": "/guides/video-editor-cheatsheet",
+      "destination": "/studio/shortcuts"
+    },
+    {
+      "source": "/guides/timeline-editing",
+      "destination": "/studio/timeline"
+    },
+    {
+      "source": "/guides/website-to-video",
+      "destination": "/guides/product-launch-video"
+    },
+    {
       "source": "/guides/prompting",
       "destination": "/prompting/overview",
+      "permanent": true
+    },
+    {
+      "source": "/guides/pipeline",
+      "destination": "/concepts",
+      "permanent": true
+    },
+    {
+      "source": "/guides/quality-checklist",
+      "destination": "/guides/export-and-share",
+      "permanent": true
+    },
+    {
+      "source": "/guides/publish-and-share",
+      "destination": "/guides/export-and-share",
+      "permanent": true
+    },
+    {
+      "source": "/guides/antigravity",
+      "destination": "/guides/skills",
+      "permanent": true
+    },
+    {
+      "source": "/guides/copilot-cli",
+      "destination": "/guides/skills",
+      "permanent": true
+    },
+    {
+      "source": "/studio/tour",
+      "destination": "/studio",
+      "permanent": true
+    },
+    {
+      "source": "/studio/layers",
+      "destination": "/studio/canvas",
+      "permanent": true
+    },
+    {
+      "source": "/studio/design",
+      "destination": "/studio/canvas",
+      "permanent": true
+    },
+    {
+      "source": "/guides/keyframes",
+      "destination": "/studio/animation",
+      "permanent": true
+    },
+    {
+      "source": "/studio/lint-and-agent",
+      "destination": "/studio/source",
+      "permanent": true
+    },
+    {
+      "source": "/guides/transcribe-and-caption",
+      "destination": "/guides/voice-and-audio",
+      "permanent": true
+    },
+    {
+      "source": "/sdk/overview",
+      "destination": "/sdk/quickstart",
       "permanent": true
     }
   ]
