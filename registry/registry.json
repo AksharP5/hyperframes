@@ -580,12 +580,132 @@
       "type": "hyperframes:block"
     },
     {
+      "name": "mk-background",
+      "type": "hyperframes:block"
+    },
+    {
       "name": "parallax-zoom",
       "type": "hyperframes:component"
     },
     {
       "name": "parallax-unzoom",
       "type": "hyperframes:component"
+    },
+    {
+      "name": "mk-specs-list",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "mk-callout-highlight",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "mk-placeholder-grid",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "mk-clone-wall-transition",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "mk-progress-stat",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "mk-line-graph",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "mk-usage-arc",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "mk-emphasis-type",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "yt-lcd-background",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "yt-comment-card",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "yt-prism-title",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "yt-logo-intro",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "yt-vertical-fill",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "yt-camera-move",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "yt-feather-highlight",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "yt-circle-pointer",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "yt-screen-warp",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "hw-text-cloud",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "hw-title",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "hw-pipeline",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "hw-path-text",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "hw-frame",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "hw-scribble-transition",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "hw-boil",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "hw-arrow",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "hw-callout-circle",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "hw-box-label",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "hw-underline",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "beat-freeze-cut",
+      "type": "hyperframes:block"
     }
   ]
 }
