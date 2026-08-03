@@ -182,13 +182,16 @@
         /* The wall sits in place from t=0, fully hidden beneath the
            full-bleed card — the card's shrink IS the wall's reveal. */
 
-        /* 0.2–0.95  outgoing frame shrinks to a rounded card on the wall */
+        /* 0.2–0.95  outgoing frame shrinks to a rounded card on the wall.
+           x/y rather than left/top — layout properties snap to integer device
+           pixels under seek-by-frame capture. Base is top:0/left:0, so the
+           values carry over unchanged, and the later scale composes cleanly. */
         if (CONFIG.card.enabled) {
           tl.to(
             card,
             {
-              top: 330,
-              left: 640,
+              y: 330,
+              x: 640,
               width: 640,
               height: 420,
               borderRadius: 40,

@@ -53,7 +53,8 @@
     "generate:catalog-previews": "tsx scripts/generate-catalog-previews.ts",
     "package:codex-plugin": "node scripts/package-codex-plugin.mjs",
     "upload:docs-images": "bash scripts/upload-docs-images.sh",
-    "prepare": "test -d .git && lefthook install || true"
+    "prepare": "test -d .git && lefthook install || true",
+    "lint:registry-items": "node scripts/lint-registry-items.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",

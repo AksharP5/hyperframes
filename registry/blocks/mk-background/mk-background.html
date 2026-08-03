@@ -189,13 +189,16 @@
           );
         }
 
-        /* bar-mask demo: full-bleed -> rounded card over the stage -> full-bleed */
+        /* bar-mask demo: full-bleed -> rounded card over the stage -> full-bleed.
+           Offset via x/y transforms, not top/left: layout properties snap to
+           integer device pixels and stutter under seek-by-frame capture. The
+           card's CSS base is top:0/left:0, so the transform values match 1:1. */
         if (CONFIG.bar.demo) {
           tl.to(
             card,
             {
-              top: CONFIG.bar.y,
-              left: CONFIG.bar.x,
+              y: CONFIG.bar.y,
+              x: CONFIG.bar.x,
               width: CONFIG.bar.width,
               height: CONFIG.bar.height,
               borderRadius: CONFIG.bar.roundness,
@@ -207,8 +210,8 @@
           tl.to(
             card,
             {
-              top: 0,
-              left: 0,
+              y: 0,
+              x: 0,
               width: W,
               height: H,
               borderRadius: 0,
