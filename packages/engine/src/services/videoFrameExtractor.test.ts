@@ -24,6 +24,8 @@ import {
   resolveFrameFormat,
   codecMayHaveAlpha,
   decoderForCodec,
+  resolveVideoExtractionWindow,
+  resolveVideoExtractionDuration,
   getFrameAtTime,
   analyzeClipMediaFit,
   classifyVideoExtractionError,
@@ -33,9 +35,14 @@ import {
   type ExtractedFrames,
   type ExtractionResult,
 } from "./videoFrameExtractor.js";
-import { extractVideoMetadata, type VideoMetadata } from "../utils/ffprobe.js";
+import {
+  extractFinalVideoFrameTimestamp,
+  extractVideoMetadata,
+  type VideoMetadata,
+} from "../utils/ffprobe.js";
 import { runFfmpeg } from "../utils/runFfmpeg.js";
 import { COMPLETE_SENTINEL, GC_MARKER, SCHEMA_PREFIX } from "./extractionCache.js";
+import { resolveRuntimeMediaClipDuration } from "../../../core/src/runtime/media.js";
 
 // ffmpeg is not preinstalled on GitHub's ubuntu-24.04 runners. The producer
 // regression test at packages/producer/tests/vfr-screen-recording/ runs inside
@@ -44,6 +51,261 @@ import { COMPLETE_SENTINEL, GC_MARKER, SCHEMA_PREFIX } from "./extractionCache.j
 // below run too — they exercise the extractor in isolation against a
 // synthesized VFR fixture.
 const HAS_FFMPEG = spawnSync("ffmpeg", ["-version"]).status === 0;
+
+describe("resolveVideoExtractionDuration", () => {
+  const metadata = (
+    durationSeconds: number,
+    videoStreamDurationSeconds = durationSeconds,
+  ): VideoMetadata => ({
+    durationSeconds,
+    videoStreamDurationSeconds,
+    width: 1920,
+    height: 1080,
+    fps: 30,
+    videoCodec: "h264",
+    hasAudio: false,
+    isVFR: false,
+    hasAlpha: false,
+    colorSpace: null,
+  });
+  const video = (overrides: Partial<VideoElement> = {}): VideoElement => ({
+    id: "root-video",
+    src: "video.mp4",
+    start: 0,
+    end: Number.POSITIVE_INFINITY,
+    mediaStart: 0,
+    loop: false,
+    hasAudio: false,
+    ...overrides,
+  });
+
+  it("caps an open 60-second root source to a two-second composition", () => {
+    expect(resolveVideoExtractionDuration(video(), metadata(60), 2)).toBe(2);
+  });
+
+  it("keeps a shorter natural source duration inside a longer composition", () => {
+    expect(resolveVideoExtractionDuration(video(), metadata(2), 10)).toBe(2);
+  });
+
+  it("falls back to container duration when stream duration is unavailable", () => {
+    expect(resolveVideoExtractionDuration(video(), metadata(2, 0), 10)).toBe(2);
+  });
+
+  it("preserves explicit bounds and loop flags while applying the timeline ceiling", () => {
+    const explicitLoop = video({ end: 8, loop: true });
+    expect(resolveVideoExtractionDuration(explicitLoop, metadata(60), 10)).toBe(8);
+    expect(explicitLoop.loop).toBe(true);
+  });
+
+  it("trims materially negative preroll and advances the source offset", () => {
+    const preroll = video({ start: -60, end: 120, mediaStart: 0 });
+    expect(resolveVideoExtractionWindow(preroll, metadata(120), 2)).toEqual({
+      compositionStart: 0,
+      mediaStart: 60,
+      durationSeconds: 2,
+    });
+    expect(resolveVideoExtractionDuration(preroll, metadata(120), 2)).toBe(2);
+  });
+
+  it("returns an empty window for a clip entirely before composition time zero", () => {
+    expect(resolveVideoExtractionWindow(video({ start: -60, end: -10 }), metadata(120), 2)).toEqual(
+      { compositionStart: 0, mediaStart: 60, durationSeconds: 0 },
+    );
+  });
+
+  it("preserves a short source cycle when negative preroll crosses a loop boundary", () => {
+    expect(
+      resolveVideoExtractionWindow(
+        video({ start: -5, end: 10, mediaStart: 0, loop: true }),
+        metadata(3),
+        2,
+      ),
+    ).toEqual({
+      compositionStart: -5,
+      mediaStart: 0,
+      durationSeconds: 3,
+      preserveTimelinePhase: true,
+    });
+  });
+
+  it("marks an entirely held interval for exact final-frame resolution", () => {
+    expect(
+      resolveVideoExtractionWindow(
+        video({ start: -5, end: 10, mediaStart: 0, loop: false }),
+        metadata(3),
+        2,
+      ),
+    ).toEqual({
+      compositionStart: -2.000001,
+      mediaStart: 2.999999,
+      durationSeconds: 0.000001,
+      preserveTimelineEnd: true,
+      ensureFinalFrame: true,
+    });
+  });
+
+  it.each([
+    { loop: true, preservation: { preserveTimelinePhase: true }, label: "loop" },
+    {
+      loop: false,
+      preservation: { preserveTimelineEnd: true, ensureFinalFrame: true },
+      label: "held tail",
+    },
+  ])(
+    "caps a finite long slot to one short source range for $label playback",
+    ({ loop, preservation }) => {
+      expect(resolveVideoExtractionWindow(video({ end: 60, loop }), metadata(3), 60)).toEqual({
+        compositionStart: 0,
+        mediaStart: 0,
+        durationSeconds: 3,
+        ...preservation,
+      });
+    },
+  );
+
+  it.each([
+    { loop: true, preservation: { preserveTimelinePhase: true }, label: "loop" },
+    {
+      loop: false,
+      preservation: { preserveTimelineEnd: true, ensureFinalFrame: true },
+      label: "held tail",
+    },
+  ])(
+    "uses the playable video-stream duration for a long-audio mux in $label playback",
+    ({ loop, preservation }) => {
+      expect(resolveVideoExtractionWindow(video({ end: 60, loop }), metadata(60, 3), 60)).toEqual({
+        compositionStart: 0,
+        mediaStart: 0,
+        durationSeconds: 3,
+        ...preservation,
+      });
+    },
+  );
+
+  it("preserves authored timing when the visible interval partially crosses a held tail", () => {
+    expect(
+      resolveVideoExtractionWindow(
+        video({ start: -2, end: 10, mediaStart: 0, loop: false }),
+        metadata(3),
+        2,
+      ),
+    ).toEqual({
+      compositionStart: 0,
+      mediaStart: 2,
+      durationSeconds: 1,
+      preserveTimelineEnd: true,
+      ensureFinalFrame: true,
+    });
+  });
+
+  it.each([
+    { start: 0, expected: { compositionStart: 0, mediaStart: 0, durationSeconds: 3 } },
+    { start: -2, expected: { compositionStart: 0, mediaStart: 2, durationSeconds: 1 } },
+    { start: -5, expected: { compositionStart: 0, mediaStart: 5, durationSeconds: 0 } },
+  ])(
+    "keeps an omitted-duration clip source-bounded like runtime (start=$start)",
+    ({ start, expected }) => {
+      for (const loop of [false, true]) {
+        const parsed = parseVideoElements(
+          `<video id="natural" src="video.mp4"${loop ? " loop" : ""}></video>`,
+        )[0]!;
+        const planned = { ...parsed, start };
+        const runtimeDuration = resolveRuntimeMediaClipDuration({
+          isVideo: true,
+          sourceDuration: 3,
+          hostRemaining: 15 - start,
+          explicitDuration: null,
+        });
+        expect(runtimeDuration).toBe(3);
+        expect(parsed.end).toBe(Number.POSITIVE_INFINITY);
+        expect(resolveVideoExtractionWindow(planned, metadata(3), 15)).toEqual(expected);
+      }
+    },
+  );
+
+  it("bounds an entirely held long source to its final-frame sample", () => {
+    expect(
+      resolveVideoExtractionWindow(
+        video({ start: -600, end: 10, mediaStart: 0, loop: false }),
+        metadata(120),
+        2,
+      ),
+    ).toEqual({
+      compositionStart: -480.000001,
+      mediaStart: 119.999999,
+      durationSeconds: 0.000001,
+      preserveTimelineEnd: true,
+      ensureFinalFrame: true,
+    });
+  });
+
+  it("preserves a complete loop cycle when visibility ends exactly on a wrap boundary", () => {
+    expect(
+      resolveVideoExtractionWindow(
+        video({ start: -1, end: 10, mediaStart: 0, loop: true }),
+        metadata(3),
+        2,
+      ),
+    ).toEqual({
+      compositionStart: -1,
+      mediaStart: 0,
+      durationSeconds: 3,
+      preserveTimelinePhase: true,
+    });
+  });
+
+  it("keeps an open-ended loop source-bounded instead of inventing a longer slot", () => {
+    expect(resolveVideoExtractionWindow(video({ loop: true }), metadata(3), 10)).toEqual({
+      compositionStart: 0,
+      mediaStart: 0,
+      durationSeconds: 3,
+    });
+  });
+
+  it("never plans more extraction than the playable source range", () => {
+    for (const loop of [false, true]) {
+      for (const sourceDuration of [0.5, 3, 120]) {
+        for (const mediaStart of [0, sourceDuration / 3]) {
+          for (const start of [-600, -5, -1, 0, 2]) {
+            const window = resolveVideoExtractionWindow(
+              video({ start, end: start + 60, mediaStart, loop }),
+              metadata(sourceDuration),
+              10,
+            );
+            expect(window.durationSeconds).toBeLessThanOrEqual(sourceDuration - mediaStart);
+            expect(window.durationSeconds).toBeGreaterThanOrEqual(0);
+          }
+        }
+      }
+    }
+  });
+
+  it("rejects a media start at source EOF before planning extraction", () => {
+    expect(() =>
+      resolveVideoExtractionWindow(video({ mediaStart: 3 }), metadata(3), 10),
+    ).toThrowError(expect.objectContaining({ kind: "media_start_out_of_range", retryable: false }));
+  });
+
+  it("rejects a media start at video-stream EOF even when the container continues", () => {
+    expect(() =>
+      resolveVideoExtractionWindow(video({ mediaStart: 3 }), metadata(60, 3), 10),
+    ).toThrowError(expect.objectContaining({ kind: "media_start_out_of_range", retryable: false }));
+  });
+
+  it("rebases a loop phase when the visible window stays within one cycle", () => {
+    expect(
+      resolveVideoExtractionWindow(
+        video({ start: -5, end: 10, mediaStart: 0, loop: true }),
+        metadata(3),
+        0.5,
+      ),
+    ).toEqual({ compositionStart: 0, mediaStart: 2, durationSeconds: 0.5 });
+  });
+
+  it("retains legacy behavior when no timeline end is supplied", () => {
+    expect(resolveVideoExtractionDuration(video(), metadata(60))).toBe(60);
+  });
+});
 
 describe("video extraction failure taxonomy and bounded retry", () => {
   it("classifies missing and transient HTTP sources without exposing retry ambiguity", () => {
@@ -507,6 +769,28 @@ describe("FrameLookupTable", () => {
     expect(table.getActiveFramePayloads(4.5).get("hero")?.frameIndex).toBe(15);
   });
 
+  it("wraps at video-stream EOF when a mux container has longer audio", () => {
+    const extracted = fakeExtracted(6, 2);
+    extracted.metadata.durationSeconds = 60;
+    extracted.metadata.videoStreamDurationSeconds = 3;
+    const table = createFrameLookupTable(
+      [
+        {
+          id: "hero",
+          src: "clip.webm",
+          start: 0,
+          end: 60,
+          mediaStart: 0,
+          loop: true,
+          hasAudio: false,
+        },
+      ],
+      [extracted],
+    );
+
+    expect(table.getActiveFramePayloads(4).get("hero")?.frameIndex).toBe(2);
+  });
+
   it("holds the last frame for a non-looping clip until its authored slot ends", () => {
     const table = createFrameLookupTable(
       [
@@ -958,6 +1242,137 @@ describe.skipIf(!HAS_FFMPEG)("video frame extraction format", () => {
   }, 60_000);
 });
 
+describe.skipIf(!HAS_FFMPEG)("held tails on sparse-timestamp sources", () => {
+  const fixtureDir = mkdtempSync(join(tmpdir(), "hf-sparse-held-tail-"));
+  const cfrFixture = join(fixtureDir, "sub-1fps-cfr.mp4");
+  const vfrFixture = join(fixtureDir, "sparse-vfr.mp4");
+  const nonZeroStartFixture = join(fixtureDir, "nonzero-start.mp4");
+  const negativeStartTransportFixture = join(fixtureDir, "negative-start.ts");
+
+  beforeAll(async () => {
+    const fixtures = [
+      {
+        path: cfrFixture,
+        input: "testsrc2=s=64x64:d=10:rate=1/5",
+        filters: [] as string[],
+      },
+      {
+        path: vfrFixture,
+        input: "testsrc2=s=64x64:d=10:rate=1/2",
+        filters: ["-vf", "select='eq(n,0)+eq(n,2)'", "-vsync", "vfr"],
+      },
+      {
+        path: nonZeroStartFixture,
+        input: "testsrc2=s=64x64:d=3:rate=1",
+        filters: ["-output_ts_offset", "5"],
+      },
+      {
+        path: negativeStartTransportFixture,
+        input: "testsrc2=s=64x64:d=3:rate=1",
+        filters: [
+          "-mpegts_copyts",
+          "1",
+          "-muxdelay",
+          "0",
+          "-avoid_negative_ts",
+          "disabled",
+          "-output_ts_offset",
+          "-2",
+        ],
+      },
+    ];
+    for (const fixture of fixtures) {
+      const result = await runFfmpeg([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        fixture.input,
+        ...fixture.filters,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-y",
+        fixture.path,
+      ]);
+      if (!result.success) {
+        throw new Error(`sparse fixture synthesis failed: ${result.stderr.slice(-400)}`);
+      }
+    }
+  }, 30_000);
+
+  afterAll(() => {
+    rmSync(fixtureDir, { recursive: true, force: true });
+  });
+
+  it.each([
+    {
+      label: "sub-1fps CFR",
+      src: cfrFixture,
+      expectedVfr: false,
+      finalTimestamp: 5,
+      streamStart: 0,
+    },
+    {
+      label: "sparse VFR",
+      src: vfrFixture,
+      expectedVfr: true,
+      finalTimestamp: 4,
+      streamStart: 0,
+    },
+    {
+      label: "non-zero stream start",
+      src: nonZeroStartFixture,
+      expectedVfr: false,
+      finalTimestamp: 2,
+      streamStart: 5,
+    },
+    {
+      label: "unindexed negative-base MPEG-TS",
+      src: negativeStartTransportFixture,
+      expectedVfr: false,
+      finalTimestamp: 2,
+      streamStart: -2,
+    },
+  ])(
+    "extracts one real final SDR frame for $label",
+    async ({ src, expectedVfr, finalTimestamp, streamStart }) => {
+      const metadata = await extractVideoMetadata(src);
+      expect(metadata.fps).toBeLessThanOrEqual(1);
+      expect(metadata.isVFR).toBe(expectedVfr);
+      expect(metadata.videoStreamStartSeconds).toBeCloseTo(streamStart, 6);
+      await expect(extractFinalVideoFrameTimestamp(src, metadata)).resolves.toBe(finalTimestamp);
+      const outputDir = mkdtempSync(join(fixtureDir, "out-"));
+      const video: VideoElement = {
+        id: `held-${String(expectedVfr)}`,
+        src,
+        start: -15,
+        end: 5,
+        mediaStart: 0,
+        loop: false,
+        hasAudio: false,
+      };
+
+      const result = await extractAllVideoFrames([video], fixtureDir, {
+        fps: 30,
+        format: "png",
+        outputDir,
+        timelineEnd: 2,
+      });
+
+      expect(result.errors).toEqual([]);
+      expect(result.extracted).toHaveLength(1);
+      expect(result.extracted[0]?.totalFrames).toBe(1);
+      expect(video).toMatchObject({ start: 0, end: 5, loop: false });
+      expect(video.mediaStart).toBeCloseTo(metadata.videoStreamDurationSeconds - 0.000001, 7);
+    },
+    30_000,
+  );
+});
+
 // Regression test for the VFR (variable frame rate) freeze bug.
 // Screen recordings and phone videos often have irregular timestamps.
 // When such inputs hit `extractVideoFramesRange`'s `-ss <start> -i ... -t <dur>
@@ -1016,6 +1431,90 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
   afterAll(() => {
     if (existsSync(FIXTURE_DIR)) rmSync(FIXTURE_DIR, { recursive: true, force: true });
   });
+
+  it("skips a clip entirely before time zero without reporting an extraction error", async () => {
+    const outputDir = join(FIXTURE_DIR, "out-before-timeline");
+    mkdirSync(outputDir, { recursive: true });
+    const video: VideoElement = {
+      id: "before-timeline",
+      src: VFR_FIXTURE,
+      start: -2,
+      end: -1,
+      mediaStart: 0,
+      loop: false,
+      hasAudio: false,
+    };
+
+    const result = await extractAllVideoFrames([video], FIXTURE_DIR, {
+      fps: 1,
+      outputDir,
+      timelineEnd: 2,
+    });
+
+    expect(result).toMatchObject({ success: true, extracted: [], errors: [] });
+  });
+
+  it("preserves loop phase when negative preroll crosses the source boundary", async () => {
+    const outputDir = join(FIXTURE_DIR, "out-negative-loop");
+    mkdirSync(outputDir, { recursive: true });
+    const video: VideoElement = {
+      id: "negative-loop",
+      src: VFR_FIXTURE,
+      start: -19,
+      end: 5,
+      mediaStart: 0,
+      loop: true,
+      hasAudio: false,
+    };
+
+    const result = await extractAllVideoFrames([video], FIXTURE_DIR, {
+      fps: 1,
+      outputDir,
+      timelineEnd: 2,
+    });
+
+    expect(result.errors).toEqual([]);
+    const extracted = result.extracted[0];
+    if (!extracted) throw new Error("expected loop source frames");
+    const lookup = createFrameLookupTable([video], result.extracted);
+    expect(video).toMatchObject({ start: -19, mediaStart: 0, loop: true });
+    expect(lookup.getFrame("negative-loop", 0)).toBe(
+      extracted.framePaths.get(extracted.totalFrames - 1),
+    );
+  }, 30_000);
+
+  it("preserves the held final frame after negative preroll exhausts a source", async () => {
+    const outputDir = join(FIXTURE_DIR, "out-negative-held-tail");
+    mkdirSync(outputDir, { recursive: true });
+    const video: VideoElement = {
+      id: "negative-held-tail",
+      src: VFR_FIXTURE,
+      start: -15,
+      end: 5,
+      mediaStart: 0,
+      loop: false,
+      hasAudio: false,
+    };
+
+    const result = await extractAllVideoFrames([video], FIXTURE_DIR, {
+      fps: 1,
+      outputDir,
+      timelineEnd: 2,
+    });
+
+    expect(result.errors).toEqual([]);
+    const extracted = result.extracted[0];
+    if (!extracted) throw new Error("expected held-tail source frames");
+    const lookup = createFrameLookupTable([video], result.extracted);
+    // The authored slot remains active through end=5, but lookup is rebased to
+    // one exact final frame instead of assuming the last second contains a
+    // timestamp or materializing the full source.
+    expect(video).toMatchObject({ start: 0, end: 5, mediaStart: 9.999999, loop: false });
+    expect(extracted.totalFrames).toBe(1);
+    expect(lookup.getFrame("negative-held-tail", 0)).toBe(
+      extracted.framePaths.get(extracted.totalFrames - 1),
+    );
+  }, 30_000);
 
   it("detects the synthesized fixture as VFR", async () => {
     const md = await extractVideoMetadata(VFR_FIXTURE);
@@ -1234,6 +1733,52 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
     expect(hit.extracted[0]!.totalFrames).toBe(miss.extracted[0]!.totalFrames);
 
     rmSync(CACHE_DIR, { recursive: true, force: true });
+  }, 60_000);
+
+  it("reuses one-cycle loop extraction across different authored starts", async () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), "hf-extract-loop-phase-cache-test-"));
+    const src = await synthCfrClip("cache-loop-phase-src.mp4", 3);
+    try {
+      const firstOutputDir = join(FIXTURE_DIR, "out-cache-loop-phase-first");
+      const secondOutputDir = join(FIXTURE_DIR, "out-cache-loop-phase-second");
+      mkdirSync(firstOutputDir, { recursive: true });
+      mkdirSync(secondOutputDir, { recursive: true });
+
+      const first = await extractAllVideoFrames(
+        [
+          {
+            ...cfrClipElement("loop-cache-first", src, 60),
+            loop: true,
+          },
+        ],
+        FIXTURE_DIR,
+        { fps: 30, outputDir: firstOutputDir, timelineEnd: 60 },
+        undefined,
+        { extractCacheDir: cacheDir },
+      );
+      expect(first.errors).toEqual([]);
+      expect(first.phaseBreakdown.cacheMisses).toBe(1);
+
+      const second = await extractAllVideoFrames(
+        [
+          {
+            ...cfrClipElement("loop-cache-second", src, 66),
+            start: -6,
+            loop: true,
+          },
+        ],
+        FIXTURE_DIR,
+        { fps: 30, outputDir: secondOutputDir, timelineEnd: 60 },
+        undefined,
+        { extractCacheDir: cacheDir },
+      );
+      expect(second.errors).toEqual([]);
+      expect(second.phaseBreakdown.cacheHits).toBe(1);
+      expect(second.phaseBreakdown.cacheMisses).toBe(0);
+      expect(second.extracted[0]?.totalFrames).toBe(first.extracted[0]?.totalFrames);
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
   }, 60_000);
 
   it("updates the cache sentinel mtime on a hit", async () => {

@@ -52,6 +52,7 @@ async function runFfprobe(
   filePath: string,
   argsWithoutInput: string[],
   signal?: AbortSignal,
+  stdoutOptions?: { retainTail?: boolean; maxChars?: number },
 ): Promise<string> {
   // `--` stops option parsing so a path like "-intro.mp4" is a filename, but
   // it does NOT cover a path of exactly "-": ffprobe rewrites that to `fd:`
@@ -79,6 +80,7 @@ async function runFfprobe(
   const decoder = new StringDecoder("utf8");
   let stdout = "";
   let stdoutTruncated = false;
+  const stdoutMaxChars = stdoutOptions?.maxChars ?? FFPROBE_STDOUT_MAX_CHARS;
   proc.stdout.on("data", (data: Buffer) => {
     // stderr is capped by ManagedChildProcess; stdout had no bound at all, and
     // analyzeKeyframeIntervals emits one line per frame — an all-intra ProRes
@@ -87,9 +89,13 @@ async function runFfprobe(
     stdout += decoder.write(data);
     // Checked AFTER appending: a single chunk can already exceed the bound,
     // so a pre-append check only ever stops the second one.
-    if (stdout.length > FFPROBE_STDOUT_MAX_CHARS) {
-      stdoutTruncated = true;
-      stdout = "";
+    if (stdout.length > stdoutMaxChars) {
+      if (stdoutOptions?.retainTail) {
+        stdout = stdout.slice(-stdoutMaxChars);
+      } else {
+        stdoutTruncated = true;
+        stdout = "";
+      }
     }
   });
   const managed = new ManagedChildProcess(proc, {
@@ -101,7 +107,7 @@ async function runFfprobe(
   stdout += decoder.end();
   if (stdoutTruncated) {
     throw new Error(
-      `[FFmpeg] ffprobe output exceeded ${FFPROBE_STDOUT_MAX_CHARS} characters; refusing to parse a truncated result.`,
+      `[FFmpeg] ffprobe output exceeded ${stdoutMaxChars} characters; refusing to parse a truncated result.`,
     );
   }
   if (outcome.reason === "spawn_error") {
@@ -135,6 +141,11 @@ function parseProbeJson(stdout: string): FFProbeOutput {
 }
 
 const videoMetadataCache = new Map<string, Promise<VideoMetadata>>();
+const finalVideoFrameTimestampCache = new Map<string, Promise<number>>();
+const finalVideoFrameTimestampSignalCaches = new WeakMap<
+  AbortSignal,
+  Map<string, Promise<number>>
+>();
 const audioMetadataCache = new Map<string, Promise<AudioMetadata>>();
 // FFmpeg's built-in AAC encoder emits AAC-LC, which has 1024 samples per packet.
 const AAC_LC_SAMPLES_PER_PACKET = 1024;
@@ -151,6 +162,11 @@ export interface VideoColorSpace {
 export interface VideoMetadata {
   durationSeconds: number;
   videoStreamDurationSeconds: number;
+  /** Absolute presentation timestamp at which the selected video stream
+   * starts. FFmpeg input seeks are relative to this point, while ffprobe frame
+   * timestamps are absolute, so callers crossing those APIs must normalize by
+   * this value. Absent only in legacy/manually-constructed metadata. */
+  videoStreamStartSeconds?: number;
   width: number;
   height: number;
   fps: number;
@@ -185,6 +201,7 @@ interface FFProbeStream {
   width?: number;
   height?: number;
   duration?: string;
+  start_time?: string;
   nb_frames?: string;
   nb_read_packets?: string;
   pix_fmt?: string;
@@ -478,6 +495,7 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
         return {
           durationSeconds: 0,
           videoStreamDurationSeconds: 0,
+          videoStreamStartSeconds: 0,
           width: stillImageMeta.width,
           height: stillImageMeta.height,
           fps: 0,
@@ -528,10 +546,13 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
 
     const containerDuration = output?.format.duration ? parseFloat(output.format.duration) : 0;
     const streamDuration = videoStream.duration ? parseFloat(videoStream.duration) : 0;
+    const parsedStreamStart = videoStream.start_time ? parseFloat(videoStream.start_time) : 0;
+    const streamStart = Number.isFinite(parsedStreamStart) ? parsedStreamStart : 0;
 
     return {
       durationSeconds: containerDuration,
       videoStreamDurationSeconds: streamDuration > 0 ? streamDuration : containerDuration,
+      videoStreamStartSeconds: streamStart,
       width: videoStream.width || stillImage()?.width || 0,
       height: videoStream.height || stillImage()?.height || 0,
       fps,
@@ -547,6 +568,93 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
   probePromise.catch(() => {
     if (videoMetadataCache.get(filePath) === probePromise) {
       videoMetadataCache.delete(filePath);
+    }
+  });
+  return probePromise;
+}
+
+/**
+ * Return the FFmpeg input-seek position of the final decoded video frame.
+ *
+ * A fixed seek window near EOF is not sufficient: sub-1fps and sparse VFR
+ * sources can have no frame timestamp inside that window even though the last
+ * decoded frame remains displayed through the stream duration. ffprobe seeks
+ * to the preceding keyframe and walks forward; retaining only its stdout tail
+ * keeps memory bounded even for a pathological long GOP. ffprobe reports
+ * absolute presentation timestamps, but FFmpeg input `-ss` is relative to the
+ * stream start; the result is normalized into that relative seek domain. Some
+ * unindexed transports cannot decode after an interval seek, so an empty tail
+ * probe falls back to a bounded-output full scan rather than rejecting valid
+ * media. The scan may cost decode time, but retains only 64 KiB of timestamps.
+ */
+export async function extractFinalVideoFrameTimestamp(
+  filePath: string,
+  metadata: Pick<VideoMetadata, "videoStreamDurationSeconds" | "videoStreamStartSeconds">,
+  signal?: AbortSignal,
+): Promise<number> {
+  const videoDurationSeconds = metadata.videoStreamDurationSeconds;
+  const candidateStreamStart = metadata.videoStreamStartSeconds ?? 0;
+  const videoStreamStartSeconds = Number.isFinite(candidateStreamStart) ? candidateStreamStart : 0;
+  const cacheKey = `${filePath}\0${String(videoStreamStartSeconds)}\0${String(videoDurationSeconds)}`;
+  // A caller-owned abort signal cannot safely own a globally shared process
+  // promise: aborting one render would fail unrelated consumers. Calls in the
+  // SAME cancellation scope should still share the expensive interval +
+  // fallback chain, though — duplicate held-tail elements in one render carry
+  // the same signal and otherwise fan out N full-file scans before extraction
+  // dedupe. Weakly key the cache by cancellation owner to preserve both
+  // aggregate work bounds and cross-render isolation.
+  let probeCache = finalVideoFrameTimestampCache;
+  if (signal) {
+    probeCache = finalVideoFrameTimestampSignalCaches.get(signal) ?? new Map();
+    finalVideoFrameTimestampSignalCaches.set(signal, probeCache);
+  }
+  const cached = probeCache.get(cacheKey);
+  if (cached) return cached;
+
+  const probePromise = (async () => {
+    if (!(videoDurationSeconds > 0) || !Number.isFinite(videoDurationSeconds)) {
+      throw new Error(
+        `[FFmpeg] Cannot locate final video frame for invalid duration ${String(videoDurationSeconds)}`,
+      );
+    }
+    const streamEnd = videoStreamStartSeconds + videoDurationSeconds;
+    const intervalStart = Math.max(videoStreamStartSeconds, streamEnd - 1);
+    const parseFinalTimestamp = (stdout: string): number | undefined =>
+      stdout
+        .split("\n")
+        .map((line) => line.trim().split(",")[0]?.trim() ?? "")
+        .filter((value) => value.length > 0)
+        .map((value) => Number(value))
+        .filter((timestamp) => Number.isFinite(timestamp))
+        .at(-1);
+    const probe = async (readInterval?: string): Promise<number | undefined> => {
+      const args = [
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "frame=best_effort_timestamp_time",
+        "-of",
+        "csv=p=0",
+      ];
+      if (readInterval) args.splice(2, 0, "-read_intervals", readInterval);
+      const stdout = await runFfprobe(filePath, args, signal, {
+        retainTail: true,
+        maxChars: 64 * 1024,
+      });
+      return parseFinalTimestamp(stdout);
+    };
+    const timestamp =
+      (await probe(`${intervalStart}%${streamEnd}`)) ?? (await probe(/* full scan */));
+    if (timestamp === undefined) {
+      throw new Error("[FFmpeg] ffprobe found no decodable final video frame");
+    }
+    return Math.min(Math.max(timestamp - videoStreamStartSeconds, 0), videoDurationSeconds);
+  })();
+
+  probeCache.set(cacheKey, probePromise);
+  probePromise.catch(() => {
+    if (probeCache.get(cacheKey) === probePromise) {
+      probeCache.delete(cacheKey);
     }
   });
   return probePromise;
