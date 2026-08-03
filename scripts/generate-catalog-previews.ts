@@ -131,6 +131,24 @@ async function prepareProjectDir(item: CatalogItem): Promise<string> {
   mkdirSync(tmpDir, { recursive: true });
   cpSync(item.sourceDir, tmpDir, { recursive: true });
 
+  // Preview the item in the same layout users get after installation. Some
+  // components reference assets by their registry target path rather than by
+  // the flat source path stored beside the manifest.
+  const registryItemPath = join(tmpDir, "registry-item.json");
+  if (existsSync(registryItemPath)) {
+    const manifest = JSON.parse(readFileSync(registryItemPath, "utf-8")) as {
+      files?: { path?: string; target?: string }[];
+    };
+    for (const file of manifest.files ?? []) {
+      if (!file.path || !file.target) continue;
+      const sourcePath = join(tmpDir, file.path);
+      const targetPath = join(tmpDir, file.target);
+      if (!existsSync(sourcePath) || sourcePath === targetPath) continue;
+      mkdirSync(dirname(targetPath), { recursive: true });
+      cpSync(sourcePath, targetPath);
+    }
+  }
+
   // The HyperFrames producer navigates to index.html at the project root.
   // Blocks and component demos are standalone HTML files, not index.html.
   // If the entry file is a standalone HTML (has its own timeline registration),

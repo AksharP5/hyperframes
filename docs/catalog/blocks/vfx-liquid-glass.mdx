@@ -3,10 +3,6 @@ title: "Liquid Glass"
 description: "VFX composition block"
 ---
 
-# Liquid Glass
-
-VFX composition block
-
 `html-in-canvas` `webgl`
 
 <Warning>
@@ -15,15 +11,20 @@ VFX composition block
 
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-liquid-glass.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-liquid-glass.png" autoPlay muted loop playsInline />
 
-## Install
+## Add it to a project
 
-<CodeGroup>
+### Ask your agent
 
-```bash Terminal
-npx hyperframes add vfx-liquid-glass
+```text
+Add the Liquid Glass block from the HyperFrames Catalog to this project.
+Replace the demo content with mine and match the existing design and timing.
 ```
 
-</CodeGroup>
+### Install from the terminal
+
+```bash
+npx hyperframes add vfx-liquid-glass
+```
 
 ## Details
 
@@ -33,16 +34,24 @@ npx hyperframes add vfx-liquid-glass
 | Dimensions | 1920×1080 |
 | Duration | 20s |
 
-## Files
+**Installed files**
 
 | File | Target | Type |
 | --- | --- | --- |
 | `vfx-liquid-glass.html` | `compositions/vfx-liquid-glass.html` | hyperframes:composition |
 
-## Usage
+## Use it
 
-After installing, add the block to your host composition:
+Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
+
+**Wiring it by hand.** The installed block can be added to a host composition with:
 
 ```html
 <div data-composition-id="vfx-liquid-glass" data-composition-src="compositions/vfx-liquid-glass.html" data-start="0" data-duration="20" data-track-index="1" data-width="1920" data-height="1080"></div>
 ```
+
+## Related topics
+
+- [Browse the complete Catalog](/catalog)
+- [Add assets and Catalog items in Studio](/studio/assets-and-blocks)
+- [Build a richer composition](/go-further)

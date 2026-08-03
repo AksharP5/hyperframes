@@ -304,7 +304,8 @@ function generateTexturePreview(manifest: RegistryItem, textureGroups: TextureGr
   return lines;
 }
 
-function catalogPreviewFor(kind: ItemKind, manifest: RegistryItem): string {
+function catalogPreviewFor(kind: ItemKind, manifest: RegistryItem): string | undefined {
+  if (manifest.preview) return manifest.preview.poster;
   const dir = typeDir(kind);
   return `${catalogImageBase}/${dir}/${manifest.name}.png`;
 }
@@ -320,15 +321,12 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
   const source = manifest as RegistryItem & SourceMetadata;
   const textureGroups = textureGroupsFor(manifest);
 
-  const lines: string[] = ["---", `title: ${yamlString(manifest.title)}`];
-  if (textureGroups.length === 0) {
-    lines.push(`description: ${yamlString(manifest.description)}`);
-  }
+  const lines: string[] = [
+    "---",
+    `title: ${yamlString(manifest.title)}`,
+    `description: ${yamlString(manifest.description)}`,
+  ];
   lines.push("---", "");
-
-  if (textureGroups.length === 0) {
-    lines.push(`# ${manifest.title}`, "", manifest.description, "");
-  }
 
   if (tagBadges) {
     lines.push(tagBadges, "");
@@ -355,33 +353,41 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
   if (textureGroups.length > 0) {
     lines.push(...generateTexturePreview(manifest, textureGroups));
   } else {
-    // Preview video with poster — muted loop, no autoPlay (matches examples page).
     const previewPath = `${catalogImageBase}/${typeDir(kind)}/${manifest.name}`;
+    const previewVideo = manifest.preview?.video ?? `${previewPath}.mp4`;
+    const previewPoster = manifest.preview ? manifest.preview.poster : `${previewPath}.png`;
+    const posterAttribute = previewPoster ? ` poster="${previewPoster}"` : "";
     lines.push(
-      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewPath}.mp4" poster="${previewPath}.png" autoPlay muted loop playsInline />`,
+      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewVideo}"${posterAttribute} autoPlay muted loop playsInline />`,
       "",
     );
   }
 
-  // Install command
+  // Keep both paths visible. The agent path leads for the general audience;
+  // the terminal remains available without hiding it behind a control.
   lines.push(
-    "## Install",
+    "## Add it to a project",
     "",
-    "<CodeGroup>",
+    "### Ask your agent",
     "",
-    "```bash Terminal",
+    "```text",
+    `Add the ${manifest.title} ${kind} from the HyperFrames Catalog to this project.`,
+    "Replace the demo content with mine and match the existing design and timing.",
+    "```",
+    "",
+    "### Install from the terminal",
+    "",
+    "```bash",
     installCmd,
     "```",
     "",
-    "</CodeGroup>",
-    "",
   );
 
-  // Details
+  // Registry metadata, visible. It is short — three rows and a file list — so
+  // hiding it behind a click bought nothing and cost Cmd+F and printing.
+  lines.push("## Details", "");
   if (kind === "block" && manifest.dimensions && manifest.duration) {
     lines.push(
-      "## Details",
-      "",
       `| Property | Value |`,
       `| --- | --- |`,
       `| Type | ${typeLabel(kind)} |`,
@@ -390,29 +396,21 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
       "",
     );
   } else {
-    lines.push(
-      "## Details",
-      "",
-      `| Property | Value |`,
-      `| --- | --- |`,
-      `| Type | ${typeLabel(kind)} |`,
-      "",
-    );
-  }
-
-  if (textureGroups.length > 0) {
-    lines.push(...generateTextureAgentUsage(manifest, textureGroups));
-    lines.push(...generateTextureAnimationExample(manifest, textureGroups));
-    lines.push(...generateTextureExamples(manifest, textureGroups));
+    lines.push(`| Property | Value |`, `| --- | --- |`, `| Type | ${typeLabel(kind)} |`, "");
   }
 
   // Files
   if (textureGroups.length === 0) {
-    lines.push("## Files", "", "| File | Target | Type |", "| --- | --- | --- |");
+    lines.push("**Installed files**", "", "| File | Target | Type |", "| --- | --- | --- |");
     for (const f of manifest.files) {
       lines.push(`| \`${f.path}\` | \`${f.target}\` | ${f.type} |`);
     }
     lines.push("");
+  }
+  if (textureGroups.length > 0) {
+    lines.push(...generateTextureAgentUsage(manifest, textureGroups));
+    lines.push(...generateTextureAnimationExample(manifest, textureGroups));
+    lines.push(...generateTextureExamples(manifest, textureGroups));
   }
 
   // Usage hint — find the primary file by type, not array position.
@@ -426,9 +424,11 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
     const w = manifest.dimensions.width;
     const h = manifest.dimensions.height;
     lines.push(
-      "## Usage",
+      "## Use it",
       "",
-      "After installing, add the block to your host composition:",
+      "Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.",
+      "",
+      "**Wiring it by hand.** The installed block can be added to a host composition with:",
       "",
       "```html",
       `<div data-composition-id="${manifest.name}" data-composition-src="${primaryTarget}" data-start="0" data-duration="${manifest.duration}" data-track-index="1" data-width="${w}" data-height="${h}"></div>`,
@@ -438,16 +438,18 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
   } else {
     if (textureGroups.length > 0) {
       lines.push(
-        "## Usage",
+        "## Use it",
         "",
         `After \`${installCmd}\`, the installed snippet lives at \`${primaryTarget}\` inside your current HyperFrames project. Open that file and paste the real \`<style>\` element near the bottom into your composition once; it defines \`hf-texture-text\` and every \`hf-texture-*\` class used by the examples above. Keep the installed texture PNGs in \`assets/${manifest.name}/masks/\`; the CSS references them with project-root URLs.`,
         "",
       );
     } else {
       lines.push(
-        "## Usage",
+        "## Use it",
         "",
-        `Open \`${primaryTarget}\` and paste its contents into your composition. See the comment header in the file for detailed instructions.`,
+        "Ask your agent to apply the component to the intended element and preserve the project’s existing timing.",
+        "",
+        `**Wiring it by hand.** Open \`${primaryTarget}\` and paste its contents into your composition. The comment header in that file contains any item-specific instructions.`,
         "",
       );
     }
@@ -457,6 +459,15 @@ function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
   if (manifest.relatedSkill) {
     lines.push(`<Tip>Related skill: \`/${manifest.relatedSkill}\`</Tip>`, "");
   }
+
+  lines.push(
+    "## Related topics",
+    "",
+    "- [Browse the complete Catalog](/catalog)",
+    "- [Add assets and Catalog items in Studio](/studio/assets-and-blocks)",
+    "- [Build a richer composition](/go-further)",
+    "",
+  );
 
   return lines.join("\n");
 }
@@ -521,38 +532,49 @@ function main(): void {
   const GROUP_ORDER: Record<string, number> = {
     "Code Animations": 0,
     Captions: 1,
-    "HTML-in-Canvas": 2,
+    "Interface & VFX": 2,
     "Social Overlays": 3,
     "Lower Thirds": 4,
-    "Shader Transitions": 5,
-    "CSS Transitions": 6,
-    Showcases: 7,
-    Data: 8,
-    Effects: 9,
-    Blocks: 10,
+    Transitions: 5,
+    "Code Themes": 6,
+    "Complete Scenes": 7,
+    "Data & Diagrams": 8,
+    "Effects & Annotations": 9,
+    "Titles & Layouts": 10,
   };
 
   // fallow-ignore-next-line complexity
   function groupForItem(entry: CatalogEntry): string {
     const tags = entry.tags;
     // Two-tag combos for specific grouping
-    if (tags.includes("transition") && tags.includes("shader")) return "Shader Transitions";
-    if (tags.includes("transition") && tags.includes("showcase")) return "CSS Transitions";
+    if (tags.includes("transition")) return "Transitions";
     if (tags.includes("captions")) return "Captions";
-    if (tags.includes("html-in-canvas")) return "HTML-in-Canvas";
+    if (tags.includes("html-in-canvas")) return "Interface & VFX";
     // Code animations (morph, flight, diff, …) — keyed on the code-animation tag so
     // they group separately from the static code-snippet themes.
     if (tags.includes("code-animation")) return "Code Animations";
     // Single-tag mapping
     if (tags.includes("lower-third")) return "Lower Thirds";
     if (tags.includes("social")) return "Social Overlays";
-    if (tags.includes("transition"))
-      return entry.type === "component" ? "Effects" : "CSS Transitions";
-    if (tags.includes("showcase") || tags.includes("3d")) return "Showcases";
-    if (tags.includes("data") || tags.includes("chart") || tags.includes("ascii")) return "Data";
-    if (entry.type === "component") return "Effects";
+    if (entry.name.startsWith("code-snippet-")) return "Code Themes";
+    if (tags.includes("showcase") || tags.includes("3d")) return "Complete Scenes";
+    if (
+      tags.includes("data") ||
+      tags.includes("chart") ||
+      tags.includes("ascii") ||
+      [
+        "flowchart",
+        "flowchart-vertical",
+        "hw-pipeline",
+        "hw-text-cloud",
+        "mk-progress-stat",
+        "mk-specs-list",
+      ].includes(entry.name)
+    )
+      return "Data & Diagrams";
+    if (entry.type === "component") return "Effects & Annotations";
     // Remaining blocks
-    return "Blocks";
+    return "Titles & Layouts";
   }
 
   const groupMap = new Map<string, string[]>();
@@ -569,19 +591,51 @@ function main(): void {
     .map(([group, pages]) => ({ group, pages }));
 
   if (catalogGroups.length > 0) {
-    // Replace or insert the Catalog tab
+    // Update the existing Catalog tab in place. Rebuilding the object dropped
+    // everything except the groups — the tab lost its `icon` — and removing it
+    // before re-inserting moved it, because the anchor tab it looked for
+    // ("Documentation") no longer exists and the fallback index put Catalog
+    // ahead of Studio. Only `groups` is generated; every other property and the
+    // tab's position belong to whoever curates docs.json.
     const existingIdx = tabs.findIndex((t) => t.tab === "Catalog");
-    const catalogTab = { tab: "Catalog", groups: catalogGroups };
-    // Remove existing Catalog tab if present, then insert at position 1
-    // (after Documentation, before Packages).
+    let navigationChanged = false;
     if (existingIdx >= 0) {
-      tabs.splice(existingIdx, 1);
+      const existingGroups = Array.isArray(tabs[existingIdx].groups)
+        ? tabs[existingIdx].groups
+        : [];
+      const isGeneratedCatalogGroup = (group: { pages?: unknown }): boolean => {
+        if (!Array.isArray(group.pages)) return true;
+        return group.pages.some(
+          (page) =>
+            typeof page === "string" &&
+            (page.startsWith("catalog/blocks/") || page.startsWith("catalog/components/")),
+        );
+      };
+      const generatedGroups = existingGroups.filter(isGeneratedCatalogGroup);
+      if (JSON.stringify(generatedGroups) !== JSON.stringify(catalogGroups)) {
+        const manualGroups = existingGroups.filter((group) => !isGeneratedCatalogGroup(group));
+        tabs[existingIdx] = {
+          ...tabs[existingIdx],
+          groups: [...manualGroups, ...catalogGroups],
+        };
+        navigationChanged = true;
+      }
+    } else {
+      const anchorIdx = tabs.findIndex((t) => t.tab === "Guides" || t.tab === "Documentation");
+      tabs.splice(anchorIdx >= 0 ? anchorIdx + 1 : 1, 0, {
+        tab: "Catalog",
+        icon: "grid-2",
+        groups: catalogGroups,
+      });
+      navigationChanged = true;
     }
-    const docsIdx = tabs.findIndex((t) => t.tab === "Documentation");
-    tabs.splice(docsIdx >= 0 ? docsIdx + 1 : 1, 0, catalogTab);
-    writeFileSync(docsJsonPath, JSON.stringify(docsJson, null, 2) + "\n", "utf-8");
+    if (navigationChanged) {
+      writeFileSync(docsJsonPath, JSON.stringify(docsJson, null, 2) + "\n", "utf-8");
+    }
     const totalPages = catalogGroups.reduce((n, g) => n + g.pages.length, 0);
-    console.log(`  ✓ docs.json updated with ${catalogGroups.length} groups, ${totalPages} pages`);
+    console.log(
+      `  ✓ docs.json ${navigationChanged ? "updated" : "already current"} with ${catalogGroups.length} groups, ${totalPages} pages`,
+    );
   }
 
   console.log("\nDone.");

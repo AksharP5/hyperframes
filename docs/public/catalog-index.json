@@ -448,8 +448,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-basic",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-basic.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-basic"
   },
   {
     "name": "code-snippet-apple-terminal-clear-dark",
@@ -464,8 +463,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-clear-dark",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-clear-dark.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-clear-dark"
   },
   {
     "name": "code-snippet-apple-terminal-clear-light",
@@ -480,8 +478,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-clear-light",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-clear-light.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-clear-light"
   },
   {
     "name": "code-snippet-apple-terminal-grass",
@@ -496,8 +493,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-grass",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-grass.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-grass"
   },
   {
     "name": "code-snippet-apple-terminal-homebrew",
@@ -512,8 +508,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-homebrew",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-homebrew.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-homebrew"
   },
   {
     "name": "code-snippet-apple-terminal-man-page",
@@ -528,8 +523,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-man-page",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-man-page.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-man-page"
   },
   {
     "name": "code-snippet-apple-terminal-novel",
@@ -544,8 +538,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-novel",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-novel.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-novel"
   },
   {
     "name": "code-snippet-apple-terminal-ocean",
@@ -560,8 +553,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-ocean",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-ocean.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-ocean"
   },
   {
     "name": "code-snippet-apple-terminal-pro",
@@ -576,8 +568,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-pro",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-pro.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-pro"
   },
   {
     "name": "code-snippet-apple-terminal-red-sands",
@@ -592,8 +583,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-red-sands",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-red-sands.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-red-sands"
   },
   {
     "name": "code-snippet-apple-terminal-silver-aerogel",
@@ -608,8 +598,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-silver-aerogel",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-silver-aerogel.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-silver-aerogel"
   },
   {
     "name": "code-snippet-apple-terminal-solid-colors",
@@ -624,8 +613,7 @@
       "apple",
       "apple-terminal"
     ],
-    "href": "/catalog/blocks/code-snippet-apple-terminal-solid-colors",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-snippet-apple-terminal-solid-colors.png"
+    "href": "/catalog/blocks/code-snippet-apple-terminal-solid-colors"
   },
   {
     "name": "code-snippet-dark-2026",
@@ -1569,8 +1557,7 @@
       "kinetic",
       "animation"
     ],
-    "href": "/catalog/components/morph-text",
-    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/components/morph-text.png"
+    "href": "/catalog/components/morph-text"
   },
   {
     "name": "motion-blur",

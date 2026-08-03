@@ -309,7 +309,6 @@
           {
             "group": "Social Overlays",
             "pages": [
-              "catalog/blocks/editorial-flash-overlay",
               "catalog/blocks/freeze-frame-dressing",
               "catalog/blocks/instagram-follow",
               "catalog/blocks/macos-notification",
@@ -341,24 +340,27 @@
           {
             "group": "Transitions",
             "pages": [
+              "catalog/blocks/beat-freeze-cut",
               "catalog/blocks/chromatic-radial-split",
               "catalog/blocks/cinematic-zoom",
               "catalog/blocks/cross-warp-morph",
               "catalog/blocks/domain-warp-dissolve",
+              "catalog/blocks/editorial-flash-overlay",
               "catalog/blocks/flash-through-white",
               "catalog/blocks/glitch",
               "catalog/blocks/gravitational-lens",
+              "catalog/components/grid-pixelate-wipe",
+              "catalog/blocks/hw-scribble-transition",
               "catalog/blocks/light-leak",
+              "catalog/blocks/mk-clone-wall-transition",
+              "catalog/blocks/organic-light-leak-overlay",
+              "catalog/components/parallax-unzoom",
+              "catalog/components/parallax-zoom",
               "catalog/blocks/ridged-burn",
               "catalog/blocks/ripple-waves",
               "catalog/blocks/sdf-iris",
               "catalog/blocks/swirl-vortex",
               "catalog/blocks/thermal-distortion",
-              "catalog/blocks/whip-pan",
-              "catalog/blocks/beat-freeze-cut",
-              "catalog/blocks/hw-scribble-transition",
-              "catalog/blocks/mk-clone-wall-transition",
-              "catalog/blocks/organic-light-leak-overlay",
               "catalog/blocks/transitions-3d",
               "catalog/blocks/transitions-blur",
               "catalog/blocks/transitions-cover",
@@ -371,7 +373,8 @@
               "catalog/blocks/transitions-other",
               "catalog/blocks/transitions-push",
               "catalog/blocks/transitions-radial",
-              "catalog/blocks/transitions-scale"
+              "catalog/blocks/transitions-scale",
+              "catalog/blocks/whip-pan"
             ]
           },
           {
@@ -439,7 +442,6 @@
             "pages": [
               "catalog/components/caption-blend-difference",
               "catalog/components/grain-overlay",
-              "catalog/components/grid-pixelate-wipe",
               "catalog/components/hw-arrow",
               "catalog/components/hw-boil",
               "catalog/components/hw-box-label",
@@ -449,8 +451,6 @@
               "catalog/components/mk-usage-arc",
               "catalog/components/morph-text",
               "catalog/components/motion-blur",
-              "catalog/components/parallax-unzoom",
-              "catalog/components/parallax-zoom",
               "catalog/components/shimmer-sweep",
               "catalog/components/texture-mask-text",
               "catalog/components/vignette",
