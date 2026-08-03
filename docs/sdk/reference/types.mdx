@@ -81,7 +81,7 @@ interface HyperFramesElement {
 </ResponseField>
 
 <ResponseField name="trackIndex" type="number | null">
-  Zero-based track index (`data-track`). `null` when not set.
+  Zero-based track index (`data-track-index`). `null` when not set.
 </ResponseField>
 
 <ResponseField name="animationIds" type="readonly string[]">
@@ -213,7 +213,7 @@ interface FindQuery {
 </ResponseField>
 
 <ResponseField name="track" type="number">
-  Match by zero-based track index (`data-track`).
+  Match by zero-based track index (`data-track-index`).
 </ResponseField>
 
 <ResponseField name="composition" type="string">
@@ -766,4 +766,3 @@ interface PersistErrorEvent {
 <ResponseField name="error.cause" type="unknown">
   Underlying error object, if available.
 </ResponseField>
-

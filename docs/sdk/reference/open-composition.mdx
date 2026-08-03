@@ -6,7 +6,7 @@ description: "Open a composition HTML string for editing. Returns a Composition 
 `openComposition` is the single entry point for every SDK session. It parses the composition HTML, stamps stable `hf-id` attributes on any elements that lack them, and returns a [`Composition`](/sdk/reference/composition) ready to receive edits.
 
 ```typescript
-import { openComposition } from "@hyperframes/sdk";
+import { openComposition, ORIGIN_APPLY_PATCHES } from "@hyperframes/sdk";
 
 const comp = await openComposition(html, opts?);
 ```
@@ -172,4 +172,3 @@ const comp = await openComposition(html, {
     Template-driven products with host-owned history.
   </Card>
 </CardGroup>
-
