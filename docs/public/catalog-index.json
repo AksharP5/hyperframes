@@ -28,6 +28,20 @@
     "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/apple-money-count.png"
   },
   {
+    "name": "beat-freeze-cut",
+    "type": "block",
+    "title": "Beat Freeze Cut",
+    "description": "A beat-driven speed ramp, freeze-frame hit, and hard-cut sequence for music-led promos and montages.",
+    "tags": [
+      "transition",
+      "music",
+      "beat-driven",
+      "freeze-frame"
+    ],
+    "href": "/catalog/blocks/beat-freeze-cut",
+    "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/beat-freeze-cut.png"
+  },
+  {
     "name": "blue-sweater-intro-video",
     "type": "block",
     "title": "Blue Sweater Intro Video",

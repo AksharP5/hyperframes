@@ -303,6 +303,7 @@
           {
             "group": "CSS Transitions",
             "pages": [
+              "catalog/blocks/beat-freeze-cut",
               "catalog/blocks/hw-scribble-transition",
               "catalog/blocks/mk-clone-wall-transition",
               "catalog/blocks/organic-light-leak-overlay",
