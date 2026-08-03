@@ -8,15 +8,16 @@
 //
 // commandFailed must be declared here (before the handlers) so the EPIPE
 // stream-error path can set it before process.exit(0). The telemetry exit
-// handler reads this flag to determine success/failure — an EPIPE exit
-// should NOT score as success:true in telemetry.
+// handler reads this flag to determine success/failure — an EPIPE that
+// interrupts a command should NOT score as success:true, but one that
+// arrives after the render artifact was validated is the normal agent-pipe
+// teardown and must stay success:true (see handleStreamEpipe).
 let commandFailed = false;
 
 for (const stream of [process.stdout, process.stderr]) {
   stream.on("error", (err) => {
     if ((err as NodeJS.ErrnoException).code === "EPIPE") {
-      commandFailed = true;
-      process.exit(0);
+      handleStreamEpipe();
     }
   });
 }
@@ -285,7 +286,7 @@ async function finalizeCli(result: CommandResult): Promise<void> {
   await telemetryReady.catch(() => {});
   _trackCommandResult?.({
     command,
-    success: result.exitCode === 0 && !commandFailed,
+    success: result.exitCode === 0 && commandSucceededForTelemetry(),
     exitCode: result.exitCode,
     durationMs: Date.now() - commandStart,
     runId,
@@ -320,14 +321,21 @@ process.on(
   "exit",
   // fallow-ignore-next-line complexity
   (code) => {
-    if (finalized) return;
-    _trackCommandResult?.({
-      command,
-      success: code === 0 && !commandFailed,
-      exitCode: code,
-      durationMs: Date.now() - commandStart,
-      runId,
-    });
+    if (!finalized) {
+      _trackCommandResult?.({
+        command,
+        success: code === 0 && commandSucceededForTelemetry(),
+        exitCode: code,
+        durationMs: Date.now() - commandStart,
+        runId,
+      });
+    }
+    // Unconditional — `finalized` only means finalizeCli STARTED its awaited
+    // flush(). A process.exit() racing that flush (the EPIPE path under agent
+    // pipes) kills the in-flight request, and gating this fallback behind
+    // `finalized` silently dropped the still-queued events — the 0.7.65
+    // render_complete regression. flushSync() is safe to over-call: an empty
+    // queue is a no-op, and event uuids make re-sends idempotent.
     _flushSync?.();
   },
 );
@@ -377,6 +385,30 @@ function exitAfterPostRenderTermination(
   process.exit(0);
 }
 
+// A closed pipe (EPIPE) is the NORMAL teardown when the CLI runs under a
+// piped agent (Claude Code, Codex, …) — the reader may stop consuming as
+// soon as it has what it needs. Exit cleanly, but only score the run as a
+// failure when the pipe died BEFORE the render artifact was validated:
+// unconditionally setting `commandFailed = true` here marked every piped
+// successful render as success:false (0.7.65–0.7.90). Delivery of anything
+// still queued (render_complete's eager flush() dies with the process) is
+// owned by the unconditional flushSync() in the `exit` handler below.
+function handleStreamEpipe(): never {
+  if (!isRenderSucceeded()) commandFailed = true;
+  process.exit(0);
+}
+
+// Success gate for the cli_command_result telemetry field. `commandFailed`
+// can be set by pre-artifact noise — a stray unhandledRejection mid-render,
+// or an EPIPE that fires before validation on a run that still completes.
+// Once the render artifact has been validated (`isRenderSucceeded()`), that
+// earlier noise must not score the run as a failure: the run delivered.
+// Genuine failures keep a non-zero exit code and are caught by the
+// `exitCode === 0 &&` half of the expression at both call sites.
+function commandSucceededForTelemetry(): boolean {
+  return !commandFailed || isRenderSucceeded();
+}
+
 // Terminate the process after a genuine CLI failure — mark commandFailed,
 // emit telemetry, flush, exit(1). Same rationale as above: keeps the arrow
 // handler linear so fallow CRAP stays under threshold.
@@ -392,8 +424,7 @@ function exitAfterCliFailure(
 
 process.on("uncaughtException", (error) => {
   if ((error as NodeJS.ErrnoException).code === "EPIPE") {
-    commandFailed = true;
-    process.exit(0);
+    handleStreamEpipe();
   }
   // Post-artifact-validated shutdown throws must not turn a valid render
   // into an exit-1 "no final error message" failure. The render command
