@@ -4,6 +4,8 @@ sidebarTitle: "Color grading"
 description: "Fix exposure and color on an image or video, shape a look with wheels and curves, apply a LUT, and check the result against real measurements."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 Grading changes how a photo or video **looks** — brighter, warmer, moodier, more
 or less colorful. It runs on one media element at a time. The file on disk never
 changes, and text, captions, SVG and ordinary HTML stay on their own layers,
@@ -15,6 +17,15 @@ untouched.
     alt="The same presenter frame before and after a restrained natural portrait grade"
   />
 </Frame>
+
+<DocsVideo
+  title="Correction, presets, curves, selective colour, scopes and a LUT on real footage"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/color-grading-demo-v1.mp4"
+  poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/color-grading-demo-v1.jpg"
+/>
+
+Every control moves and the picture answers. The numbers on screen are measured
+from the frame, not illustrative — shadows lifted 2% to 23%, median 28% to 41%.
 
 ## Correct first, then style
 

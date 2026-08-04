@@ -4,17 +4,18 @@ sidebarTitle: "Captions and talking head"
 description: "Add captions, add designed overlays, or change the spoken edit."
 ---
 
-<Frame caption="One source clip, three caption treatments. The spoken edit stays untouched.">
-  <video
-    autoPlay
-    loop
-    muted
-    playsInline
-    preload="metadata"
-    poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/wfv2-captions.jpg"
-    src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/wfv2-captions-v4.mp4"
-  />
-</Frame>
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
+
+<DocsVideo
+  title="Five caption treatments on the same untouched clip"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/captions-recut-demo-v1.mp4"
+  poster="https://static.heygen.ai/hyperframes-oss/docs/images/showcase/captions-recut-demo-v1.jpg"
+/>
+
+A verbatim rail, an embedded climax word, kinetic emphasis, a lower third and a
+pull-quote. The footage underneath is never re-edited — the overlays carry all
+of it.
 
 ## Make the request
 
