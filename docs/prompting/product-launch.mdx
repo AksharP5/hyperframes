@@ -3,6 +3,8 @@ title: Product launch videos
 description: "What to say to turn a product URL, a script, or a brief into a launch or promo video — and when to reach for a site tour instead."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 This is Level 1 of the Prompt Guide: a run of one-prompt rides, each handing a workflow a single ask and getting a finished video back. You don't need any technique yet — one sentence describing your product, aimed at the right workflow, is already enough for a first draft.
 
 ## Your first win
@@ -13,7 +15,11 @@ Verified, from the [examples](/prompting/examples) page — a 45-second launch f
 
 > /product-launch-video Make a 45-second 1920x1080 launch video for https://linear.app. Energetic but minimal, use the site's own palette and screenshots. Structure: hook stating the problem, 3 feature beats with UI captures and one-line captions, end card with logo + "Try it free". Female TTS voice, confident tone, subtle electronic BGM under -18dB.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/example-product-launch.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Example Product Launch"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/example-product-launch.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited.*
 
 
@@ -62,7 +68,11 @@ What you can already steer from the prompt, before you've learned any technique.
 
     With no URL the workflow takes the no-capture path: no screenshots, no site palette to borrow, so name your brand colors and fonts if you have them (or the agent invents a palette). Verbatim scripts set the duration — figure roughly 130 spoken words per minute, so a 30-second video wants a 65–70 word script. Saying "use it verbatim" pre-answers the workflow's keep-or-restructure question.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/variant-launch-script.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Variant Launch Script"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/variant-launch-script.mp4#t=0.1"
+  loop
+/>
 *Rendered from this prompt shape with a different, longer script (78 words, fictional dev-tool "Relay"), unedited — it ran 35.5s because the words set the length.*
 
   </Accordion>

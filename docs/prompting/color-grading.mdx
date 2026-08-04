@@ -3,6 +3,8 @@ title: Color grading and film effects
 description: "Grade media with a fixed-order pipeline — tonal work, hue keys, print and analogue treatments — and know why the source matters more than the payload."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 Every chapter so far has built the image. This one changes what the image appears to have been *recorded on*. A grade is not decoration applied at the end; it is a claim about the medium — that this came off tape, or a press, or a tube, or a camera with a particular stock in it. Viewers read that claim instantly and they read it whether or not you meant it.
 
 Grading attaches to a single `<img>` or `<video>` through a `data-color-grading` payload. It never touches your text, your cards, or your captions — only the pixels of the media element it is on. The full contract lives in the [Color Grading guide](/guides/color-grading); this chapter is about what to *ask for*, and about the three ways these prompts go wrong.
@@ -45,7 +47,11 @@ The most useful thing grading does is not a look. It is protecting one part of t
 
 > Take the talking-head clip and separate the subject from the room. Leave the person photographic — a gentle skin-softening pass and about a third of a stop of extra exposure, nothing that reads as an effect on skin. Grade the room behind them instead: across the four seconds bring up a halftone screen so the space resolves into small colored dots, and let a restrained bloom build alongside it so the windows lift. Both start at zero so the shot opens ungraded.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-matte-separation-b0ef8e73.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Matte Separation B0ef8e73"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-matte-separation-b0ef8e73.mp4#t=0.1"
+  loop
+/>
 *The room takes the halftone screen and the bloom; the subject takes nothing but a skin-soft pass and a third of a stop.*
 
 Two traps here. Use the **original clip** as the background plate, not a subject-removed plate — that plate is a hole where the subject was, and a feathered cutout over it gives a dark rim. And if your cutout ships premultiplied alpha, the browser composites it as straight, multiplying edge pixels twice and producing a black outline; rebuild it with `ffmpeg alphamerge` from the original plus its matte.
@@ -54,7 +60,11 @@ Two traps here. Use the **original clip** as the background plate, not a subject
 
 > Matte the subject off the plate, then redact just their face — the rest of them and the room behind both stay completely untouched. Hold pixelation constant at about half strength for the whole shot: no ramp, no fade-up. A redaction that animates on reads as an effect; one that is simply on reads as policy. Size the redaction generously so it takes in the hairline, ears and jaw rather than sitting tight on the features.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-redaction-engaging-ec781f26.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Redaction Engaging Ec781f26"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-redaction-engaging-ec781f26.mp4#t=0.1"
+  loop
+/>
 *Face pixelated, body and room untouched — the region is a `clip-path` on a third layer, not a payload setting.*
 
 The region comes from a `clip-path` on a *third* layer — a second copy of the cutout carrying the grade, stacked over an ungraded copy. Because the graded layer **is** the cutout, the ellipse can overshoot the head without touching the room; there is nothing outside the silhouette to paint. Size it generously rather than tightly.
@@ -71,12 +81,20 @@ Three ways to take the image apart, each saying something different. Pixelation 
 
 > Degrade the picture into a screen over four seconds. Ramp dithering from clean up to 0.85 at mid pattern size, so continuous tone breaks into discrete quantised levels. It should read as a display failing, not as a filter being applied.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-signal-loss-babe88ef.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Signal Loss Babe88ef"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-signal-loss-babe88ef.mp4#t=0.1"
+  loop
+/>
 *Dither ramping from clean to 0.85 — continuous tone breaking into discrete levels.*
 
 > Blow the highlights out over four seconds. Ramp bloom from nothing all the way to 3 — well past a tasteful highlight lift — on a wide radius, so light spills out of the windows and progressively swallows the frame. I want to see the top of the range, not a subtle glow.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-bloom-out-11531968.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Bloom Out 11531968"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-bloom-out-11531968.mp4#t=0.1"
+  loop
+/>
 *Bloom driven to 3, well past a highlight lift, until the light swallows the frame.*
 
 <Warning>
@@ -87,7 +105,11 @@ Three ways to take the image apart, each saying something different. Pixelation 
 
 > Turn the shot into a painting over four seconds without turning it to mush. Ramp a Kuwahara filter from nothing to full — mid radius, fairly high sharpness so edges stay crisp, and pull the saturation back a little so it reads as brushwork rather than as a filter. Boundaries stay defined while flat areas smooth into strokes. Pick a subject with dense color and dense edges; the effect has nothing to preserve on flat skin or a soft-focus background.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-painterly-ffd5c0f9.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Painterly Ffd5c0f9"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-painterly-ffd5c0f9.mp4#t=0.1"
+  loop
+/>
 *Kuwahara at full strength, on a subject with enough edges to be worth preserving.*
 
 ---
@@ -98,7 +120,11 @@ Three ways to take the image apart, each saying something different. Pixelation 
 
 > Take the poster and print it in two inks only: a near-black navy and a warm cream, at mid dot size, like a two-color press run. Everything collapses to those two colors. Bring it up across the four seconds from the untouched poster rather than cutting straight to it. Give it the exact hex values rather than a named palette.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-two-ink-press-3c5662f1.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Two Ink Press 3c5662f1"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-two-ink-press-3c5662f1.mp4#t=0.1"
+  loop
+/>
 *Ten hue families collapsing to three. Dense type is the harshest test of a two-ink reduction.*
 
 Type is the harshest test of a two-ink reduction — dense small copy either survives the dot screen or turns to mud, and you can see which at a glance. Note the payload takes an explicit hex array; a named palette id is rejected.
@@ -107,7 +133,11 @@ Type is the harshest test of a two-ink reduction — dense small copy either sur
 
 > A single red apple on a teal backdrop. Hold the apple's color and drain everything else — key off hue and collapse saturation everywhere outside the reds, so the backdrop goes fully neutral grey while the apple stays exactly as saturated as it was. Use a hue-vs-saturation curve rather than a global desaturation with the apple keyed back in: global saturation runs first in the pipeline and would kill the apple before the key ever sees it. Keep a generous skirt on the band so the apple's shadowed side doesn't clip grey.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-brand-spotlight-5ebe45bf.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Brand Spotlight 5ebe45bf"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-brand-spotlight-5ebe45bf.mp4#t=0.1"
+  loop
+/>
 *The backdrop drains to neutral grey; the apple holds its saturation exactly.*
 
 Three things have to be true of the subject, and each one killed an earlier attempt at this shot. It must be **inanimate** — the grade desaturates everything outside the band, and on a person that means a grey, corpse-like face. It must be a **single** subject — a still life of mixed produce is full of color, but half the items fall outside the band and grey out, so it reads as a filter misfiring rather than one color deliberately held. And the surround must **carry** color: against a neutral grey backdrop the grade would desaturate grey to grey and do nothing at all.
@@ -130,14 +160,22 @@ The rolling wave is `tapeTracking` and `tapeDamage`. Static interlacing is `scan
 
 > Make it look like a worn VHS tape. Not one artefact — layer them: strong tape damage with tracking error, a little noise, mid tape speed, scanlines, and noticeable chroma bleed. Any one of these alone reads as a filter; together they read as a failing signal.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-tape-degradation-6050228f.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Tape Degradation 6050228f"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-tape-degradation-6050228f.mp4#t=0.1"
+  loop
+/>
 *Six tape artefacts at once — any one of them alone reads as a filter.*
 
 ### Tube
 
 > Make this look like it is being displayed on an old CRT television, not like it came off a worn tape. Bow the geometry with barrel curvature so the straight lines curve and the corners pull inward, lay scanlines across it at a fairly fine pitch, add phosphor bleed and enough chromatic aberration to give visible RGB fringing at the edges. Bleed and scanlines want to sit near the top of their range — bleed is subtle even at 0.9. Curvature and chromatic aberration are the exceptions: both read strongly, so hold curvature around half and keep the aberration modest, or the tube turns into a fisheye novelty. Grade the tone as well as the geometry: crush the shadows and blacks, lift the highlights and whites, nudge saturation up, and add a restrained bloom — a CRT has no true black and lets its top end halate. Add grain and a vignette. Use a test card or something with dead-straight lines: curvature is invisible on organic subject matter.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-crt-broadcast-b64dc1a8.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Crt Broadcast B64dc1a8"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-crt-broadcast-b64dc1a8.mp4#t=0.1"
+  loop
+/>
 *Geometry bowed, scanlines laid over it, tone crushed — a tube rather than a filter on a clean image.*
 
 The tonal work is doing as much as the geometry. Without crushed shadows and a halating top end, curvature and scanlines read as a filter laid over a clean digital image.
@@ -148,7 +186,11 @@ If you composite a subject into the shot, do it **before** grading. A CRT warps 
 
 > Take the clip and give it a camcorder grade: crush the shadows and blacks, lift the highlights and whites, pull the saturation back slightly, and add a restrained bloom, film grain for noise, a vignette, interlacing lines, and a little RGB splitting at the edges. Crushed contrast with muted color is what consumer tape actually looked like — crushed and punchy reads as a modern filter. For the split use chromatic aberration, which offsets the channels; chroma bleed is a different thing, a smear rather than a fringe. Keep the interlacing static — no tape tracking and no tape damage, because those produce a rolling horizontal wave that reads as a broken deck rather than as a camera.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-camcorder-overlay-18e80485.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Grade Camcorder Overlay 18e80485"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/grade-camcorder-overlay-18e80485.mp4#t=0.1"
+  loop
+/>
 *The footage degrades; the HUD does not. It is an overlay, composed above the media canvas.*
 
 The HUD in that shot is not part of the grade. It is a [`camcorder-hud`](/guides/media-overlays) registry block — real HTML, CSS, and a paused GSAP timeline composed *above* the media canvas. Grading never touches it, which is exactly what you want: burn a timestamp into the source pixels and it degrades with them; put it in an overlay and it stays crisp, editable, and timeline-driven while the footage falls apart underneath.
@@ -165,5 +207,7 @@ Two caveats worth knowing before you promise a client a ramp:
 ## Next steps
 
 - [Color Grading guide](/guides/color-grading) — the full contract, every key and bound
-- [Media Overlays](/guides/media-overlays) — HUD, flash, light leak, freeze-frame dressing
+- [Catalog: overlays and effects](/catalog) — HUD, flash, light leak, freeze-frame dressing
 - [VFX and liquid glass](/prompting/vfx-and-liquid-glass) — the canvas-pipeline end of the catalog
+
+*Next: [VFX and liquid glass](/prompting/vfx-and-liquid-glass) — the same grading vocabulary pushed into the canvas pipeline.*

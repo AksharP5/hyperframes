@@ -3,6 +3,8 @@ title: Overlays and lower thirds
 description: "Prompt named lower-third and social-post overlay blocks with timing, copy, and brand tone."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 Level 1's founder-clip.mp4 got named lower-thirds and card overlays through `/talking-head-recut`, which designs bespoke cards synced to that specific transcript. This chapter is the reverse case: ready-made lower-third and social-overlay blocks you drop into a composition you're building from scratch, no existing footage required — the same vocabulary, pointed at a scene instead of a shot.
 
 ## What overlays do and when they trigger
@@ -51,7 +53,11 @@ Quote the exact copy — unquoted names and titles get paraphrased (see [anatomy
 
 > Add a lower third at 0:03 for 5 seconds, on a track above the footage, with [`lt-clean-bar`](/catalog/blocks/lt-clean-bar). Name: "Dana Ríos". Title: "Head of Design".
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-lower-third.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Validate Lower Third"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/validate-lower-third.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above over stand-in footage, unedited.*
 
 
@@ -63,13 +69,22 @@ Quote the exact copy — unquoted names and titles get paraphrased (see [anatomy
 
 > During the intro, show an [`x-post`](/catalog/blocks/x-post) card with the quote "we shipped it in a weekend" and 12.4K likes, then slide it out before the demo.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/overlay-xpost.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Overlay Xpost"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/overlay-xpost.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above over stand-in scenes, unedited — the card's built-in like-tap ticks 12.4K → 12.5K.*
 
 
 > /motion-graphics Transparent overlay only — a [`spotify-card`](/catalog/blocks/spotify-card) now-playing widget animating in, bottom-left. Export as transparent WebM so I can drop it over footage in my editor.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/overlay-spotify-preview.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Overlay Spotify Preview"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/overlay-spotify-preview.mp4#t=0.1"
+  portrait
+  loop
+/>
 *MP4 preview of the transparent WebM over a checkerboard — the delivered file carries real VP9 alpha (verified via ALPHA_MODE + alphaextract).*
 
 
@@ -112,7 +127,11 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 
 > […] as the camera arrives and BEFORE the person speaks, the framework mattes the footage — **the background peels away via background removal**, sliding off along the travel direction and leaving the cutout standing alone on the brand ground. […] A designed lower-third chip renders behind the subject.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-material.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Capstone Region Material"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-material.mp4#t=0.1"
+  loop
+/>
 *That clause, rendered — the region cut from the finished film.*
 
 *Next: [Caption styles](/prompting/captions-catalog) — the same timed-block pattern, tuned to on-screen text instead of name cards and social replicas.*

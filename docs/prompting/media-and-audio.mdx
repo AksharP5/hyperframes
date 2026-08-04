@@ -3,6 +3,8 @@ title: Media and audio
 description: "Ask for the voiceover, music, sound, captions, cutouts, and assets a composition needs — with the precise, unambiguous phrasing the media pipeline acts on."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 By now your video moves and reads right; this level gives it a voice. HyperFrames owns media *playback*; a sibling media pipeline resolves everything else — voice, music, sound effects, images, icons, logos, captions, and background removal. You reach all of it by describing what the composition needs, and the agent resolves each need to a frozen local file. The craft here is precision: vague media asks ("add some music," "no sound") are the ones that come back wrong, because the pipeline does exactly what the words say.
 
 ## Voiceover (TTS)
@@ -96,7 +98,11 @@ None of this changes how you phrase the ask: name the footage by path like any o
 
 > Build a short picture-in-picture piece from `source-hevc.mp4` — inset it bottom-right over a full-bleed background scene, with a soft rounded border.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/proxy-footage.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Proxy Footage"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/proxy-footage.mp4#t=0.1"
+  loop
+/>
 *Rendered from the prompt above, unedited — the source clip is a plain H.265/HEVC file; render decoded it directly via FFmpeg, while preview would have used the automatic H.264 proxy.*
 
 See the [Rendering guide](/guides/rendering#input-video-codecs) for the mechanics — proxy generation, caching, and which codecs it covers.
@@ -136,7 +142,11 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 
 > […] a real talking-head clip (generate a short clip of a person speaking one neutral line via the media pipeline's avatar video generation […] **transcode it to HEVC `hvc1`** so the automatic proxy subsystem carries preview) sits as a clip on the wire. The order of operations IS the story: as the camera arrives and BEFORE the person speaks, the framework mattes the footage — **the background peels away via background removal** […] THEN they speak, and the main **keywords of their own line — derived from the clip's transcription — land word-synced** […] The clip's own audio ducks the BGM briefly; the VO resumes as the camera pulls away.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-material.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Capstone Region Material"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-material.mp4#t=0.1"
+  loop
+/>
 *That clause, rendered — the region cut from the finished film.*
 
 *Next: [Design systems and brand](/prompting/design-systems) — pointing the agent at a source of brand truth instead of describing a vibe.*

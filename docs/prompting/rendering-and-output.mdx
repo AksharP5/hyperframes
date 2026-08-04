@@ -3,6 +3,8 @@ title: Rendering and output
 description: "What to say to get the right file out — quality tier, format, resolution, framerate, and cloud rendering — without over-speccing a render that slows to no benefit."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 Everything before this point — including the frame-by-frame matching in [Recreating something you saw](/prompting/recreating-references) — shapes the composition. This page is about the *export*: the words that pick a quality tier, a container format, a resolution, and where the render runs. The defaults — MP4, 1920×1080, 30fps, `standard` quality — are deliberately good, so most of the skill here is knowing when *not* to ask for more. The mechanics live in the [Rendering guide](/guides/rendering); this page owns what to say.
 
 ## Quality tier
@@ -41,7 +43,12 @@ Transparency also only *means something* on a design that has empty space to see
 - ❌ `render my full-screen product promo as a transparent WebM`
 - ✅ `render the promo as MP4; export just the lower-third overlay as transparent WebM` — transparency belongs to the layer meant to sit *over* other footage, not the finished full-frame film
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/overlay-spotify-preview.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Overlay Spotify Preview"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/overlay-spotify-preview.mp4#t=0.1"
+  portrait
+  loop
+/>
 *A transparent VP9 WebM overlay previewed over a checkerboard. To verify alpha from the CLI: VP9 stores it out-of-band, so look for ALPHA_MODE=1 in ffprobe (a pix_fmt-only check false-negatives) or extract it with ffmpeg alphaextract.*
 
 
@@ -124,7 +131,11 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 
 > A **seeded confetti burst** fires — mulberry32, **seed 42, each piece holding position for exactly two frames before stepping** (stop-motion feel) — and the VO lands the honest punchline: identical on every render, because determinism is the whole point.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Capstone Region Render"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4#t=0.1"
+  loop
+/>
 *That clause, rendered — the seeded confetti, identical on every render of this composition.*
 
 *Next: [Porting from Remotion](/prompting/remotion-migration) — bringing an existing Remotion project into everything you now know.*

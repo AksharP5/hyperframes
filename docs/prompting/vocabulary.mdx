@@ -23,12 +23,96 @@ Describe how motion should *feel* and the agent picks the matching GSAP ease:
 Each word, rendered — the same move, only the ease changes:
 
 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", margin: "1.25rem 0" }}>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-power2-out.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>smooth · power2.out</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-power4-out.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>snappy · power4.out</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-back-out.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>bouncy · back.out</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-elastic-out.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>springy · elastic.out</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-expo-out.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>dramatic · expo.out</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-sine-inout.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>dreamy · sine.inOut</div></div>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-power2-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="smooth preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      smooth <code>power2.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-power4-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="snappy preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      snappy <code>power4.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-back-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="bouncy preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      bouncy <code>back.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-elastic-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="springy preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      springy <code>elastic.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-expo-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="dramatic preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      dramatic <code>expo.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-sine-inout.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="dreamy preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      dreamy <code>sine.inOut</code>
+    </figcaption>
+  </figure>
 </div>
 
 
@@ -49,13 +133,111 @@ Compositions have no physical camera, but camera words translate directly into s
 The same scene under each camera word:
 
 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", margin: "1.25rem 0" }}>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-push-in.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>slow push-in</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-pull-back.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>pull back</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-pan.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>pan across</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-crane.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>crane down</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-whip.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>whip to</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-parallax.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>parallax</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-orbit.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>drone orbit (Three.js)</div></div>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-push-in.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="slow push-in preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      slow push-in
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-pull-back.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="pull back preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      pull back
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-pan.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="pan across preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      pan across
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-crane.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="crane down/up preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      crane down/up
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-whip.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="whip to preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      whip to
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-parallax.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="parallax preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      parallax
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-orbit.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="drone orbit preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      drone orbit
+    </figcaption>
+  </figure>
 </div>
 
 
@@ -171,11 +353,81 @@ Hand-drawn emphasis effects for text:
 The five modes on the same sentence:
 
 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", margin: "1.25rem 0" }}>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-highlight.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>highlight</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-circle.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>circle</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-burst.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>burst</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-scribble.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>scribble</div></div>
-<div><video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-sketchout.mp4#t=0.1" style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: "0.4rem", display: "block" }}></video><div style={{ fontSize: "0.8em", textAlign: "center", opacity: 0.7, marginTop: "0.35rem" }}>sketchout</div></div>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-highlight.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="highlight preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      highlight
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-circle.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="circle preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      circle
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-burst.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="burst preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      burst
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-scribble.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="scribble preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      scribble
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-sketchout.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="sketchout preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      sketchout
+    </figcaption>
+  </figure>
 </div>
 
 ## Text-to-speech voices

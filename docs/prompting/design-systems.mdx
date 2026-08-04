@@ -3,6 +3,8 @@ title: Design systems and brand
 description: "Point the agent at a source of brand truth — a design spec, a site, or a Figma file — instead of asking for 'on-brand', and let it compose the frame."
 ---
 
+import { DocsVideo } from "/snippets/docs-video.jsx";
+
 Everything so far was one scene at a time. This level is about videos as systems — design that persists across scenes, edits that don't regress, output that ships. It starts with the most systemic thing a video has: its brand.
 
 "Make it on-brand" is the single vaguest thing you can ask. The agent has no way to know what your brand *is*, so it invents one. The fix is always the same: give it a **source of brand truth** — a design spec, a live site, or a Figma file — and name it in the prompt. Everything on this page is a way to do that.
@@ -97,7 +99,11 @@ This is the clause in the [full capstone prompt](/prompting/capstone#the-full-pr
 
 > **Design system: the provided `frame.md` is the single source of brand truth — read it first and obey it exactly.** It is the real HyperFrames brand (by HeyGen), dark-first: flat near-black ground […] **mint `#3CE6AC` used sparingly as the single accent — mint means go / primary / active**. The mint→cyan gradient (`#3CE6AC → #00E3FF`) appears in exactly one place in the whole film: the final CTA lockup.
 
-<video controls muted loop playsinline preload="metadata" src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4#t=0.1" style={{ borderRadius: "0.5rem", marginTop: "0.75rem" }}></video>
+<DocsVideo
+  title="HyperFrames video: Capstone Region Render"
+  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/capstone-region-render.mp4#t=0.1"
+  loop
+/>
 *That clause paying off, rendered — the closing lockup, where the brand file's display face and its one sanctioned gradient finally appear together.*
 
 *Next: [Variables and templating](/prompting/variables-and-templating) — turn the brand tokens that repeat across a series into named slots you fill per render.*
