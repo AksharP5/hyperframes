@@ -21,14 +21,14 @@ export const WorkflowChooser = () => {
       title: "Explain an idea",
       bring: "Bring notes, an article, a script, or one rough thought.",
       href: "/guides/faceless-explainer",
-      video: `${CDN}/wfv2-explainer.mp4`,
+      video: `${CDN}/wfv2-explainer-v4.mp4`,
       poster: `${CDN}/wfv2-explainer.jpg`,
     },
     {
       title: "Work with existing footage",
       bring: "Bring a talking-head, interview, or podcast clip.",
       href: "/guides/captions-and-recuts",
-      video: `${CDN}/wfv2-captions.mp4`,
+      video: `${CDN}/wfv2-captions-v4.mp4`,
       poster: `${CDN}/wfv2-captions.jpg`,
     },
     {
@@ -56,7 +56,7 @@ export const WorkflowChooser = () => {
       title: "Build a presentation",
       bring: "Bring an outline, pitch, report, or existing deck.",
       href: "/guides/slideshow",
-      video: "https://static.heygen.ai/hyperframes-oss/docs/images/showcase/wfv2-slideshow.mp4",
+      video: "https://static.heygen.ai/hyperframes-oss/docs/images/showcase/wfv2-slideshow-v4.mp4",
       poster: "https://static.heygen.ai/hyperframes-oss/docs/images/showcase/wfv2-slideshow.jpg",
     },
     {
