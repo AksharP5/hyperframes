@@ -101,10 +101,19 @@ A one-off example belongs in [Examples](/examples), not the Catalog.
 
 ## Validate and preview
 
-Run the composition gates:
+Lint the item the way a user receives it — mounted into a real project. A bare
+`npx hyperframes lint` cannot validate a registry directory, because the CLI
+looks for `index.html` and items ship as `<name>.html` or `demo.html`:
 
 ```bash
-npx hyperframes lint
+bun run lint:registry-items my-block
+```
+
+To exercise the full gate, install the item into a scratch project and run there:
+
+```bash
+npx hyperframes init scratch && cd scratch
+npx hyperframes add my-block
 npx hyperframes check
 ```
 

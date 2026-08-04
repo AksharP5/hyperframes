@@ -33,11 +33,23 @@ bun run --filter '*' typecheck
 bun run test
 ```
 
-For a composition or registry item, also run:
+For a composition, run the gates from the project directory, or pass it:
 
 ```bash
-npx hyperframes lint
-npx hyperframes check
+npx hyperframes lint ./my-video
+npx hyperframes check ./my-video
+```
+
+Registry items need a different command. They ship as `<name>.html` or
+`demo.html`, and the CLI resolves a project by looking for `index.html`, so
+pointing it at an item directory fails with "No composition found" — which is
+how two `gsap_non_transform_motion` errors once reached `main` unlinted. Use the
+script that mounts each item into a throwaway project first, exactly where
+`hyperframes add` would put it:
+
+```bash
+bun run lint:registry-items              # every item
+bun run lint:registry-items my-block     # just one
 ```
 
 The pre-commit hooks format staged files and run checks for the files you changed.

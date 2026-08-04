@@ -93,13 +93,21 @@ bun run changelog:weekly --from 2026-06-01 --to 2026-06-07 --write
 
 Run it from an up-to-date `main` branch so the selected range reflects public history, not a feature branch.
 
-This creates internal editorial drafts:
+This writes three internal editorial drafts:
 
 - `updates/weekly/2026-06-07.md`
 - `updates/social/2026-06-07.discord.md`
 - `updates/social/2026-06-07.x.md`
 
-Review and rewrite the generated files before publishing anything. Social drafts are never posted automatically. Curated highlights from these packets go to [Weekly updates](/weekly-updates), which is unlisted in the sidebar and reachable by URL and RSS; exact versioned release notes stay in the [Changelog](/changelog).
+<Warning>
+  It also writes a fourth file, and that one is public. `--write` prepends the
+  generated entry straight into `docs/weekly-updates.mdx`, which ships in the
+  sidebar under **Explore**. Review that diff with the same care as the page it
+  is — it is not a draft. Re-running for a range already present is a no-op, so
+  the entry is safe to edit in place afterwards.
+</Warning>
+
+Review and rewrite all four before publishing anything. Social drafts are never posted automatically. Exact versioned release notes stay in the [Changelog](/changelog); [Weekly updates](/weekly-updates) carries the curated highlights and an RSS feed.
 
 ## Writing style
 
