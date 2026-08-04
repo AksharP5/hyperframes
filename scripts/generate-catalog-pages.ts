@@ -513,8 +513,20 @@ function generateItemMdx(
     lines.push(...generateTexturePreview(manifest, textureGroups));
   } else {
     const previewPath = `${catalogImageBase}/${typeDir(kind)}/${manifest.name}`;
+    // Only claim a poster when one was actually generated. Thirteen items have
+    // an .mp4 but no .png, and emitting the attribute regardless put thirteen
+    // 403s on the site — the browser requests the poster before the video.
+    const posterFile = join(
+      REPO_ROOT,
+      "docs",
+      "images",
+      "catalog",
+      typeDir(kind),
+      `${manifest.name}.png`,
+    );
+    const poster = existsSync(posterFile) ? ` poster="${previewPath}.png"` : "";
     lines.push(
-      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewPath}.mp4" poster="${previewPath}.png" autoPlay muted loop playsInline />`,
+      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewPath}.mp4"${poster} autoPlay muted loop playsInline />`,
       "",
     );
   }
