@@ -77,7 +77,17 @@ function mentionsProbe(src: string): boolean {
   // Comments and doc prose describing a spawn are not a spawn:
   // `tts.test.mjs` explains `ffprobeDuration's spawnSync("ffprobe", ...) call`
   // in a comment and was reported as an unclassified caller.
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  // A probe spawned with an all-literal argv takes no runtime input, so
+  // there is nothing to terminate: `spawnSync("ffprobe", ["-version"])` is a
+  // capability check, not a file probe. Dropping those before the test keeps
+  // them out of the unclassified list without weakening it — an argv carrying
+  // a bare identifier (a path) still has to be understood.
+  const NO_INPUT_PROBE =
+    /(?:spawn|spawnSync|execFile\w*|exec)\s*\(\s*["'`]ff(?:probe|mpeg)["'`]\s*,\s*\[\s*(?:"[^"]*"\s*,?\s*)+\]/g;
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(NO_INPUT_PROBE, "");
   return /(?:spawn|spawnSync|execFile\w*|exec)\s*\(\s*[^,)]*(?:ffprobe|ffProbe|probeBin|probePath)/i.test(
     code,
   );
