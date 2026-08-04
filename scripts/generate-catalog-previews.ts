@@ -43,6 +43,7 @@ import {
   executeRenderJob,
 } from "../packages/producer/src/index.js";
 import { compileForRender } from "../packages/producer/src/services/htmlCompiler.js";
+import { resolveContainedCopies } from "./registry-target-paths.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -126,10 +127,34 @@ function outputDir(kind: ItemKind): string {
   return resolve(repoRoot, "docs/images/catalog", typeDir);
 }
 
+/**
+ * Preview the item in the same layout users get after installation: some
+ * components reference assets by their registry target path rather than by the
+ * flat source path stored beside the manifest.
+ */
+function mirrorRegistryTargets(projectDir: string): void {
+  const manifestPath = join(projectDir, "registry-item.json");
+  if (!existsSync(manifestPath)) return;
+
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
+    files?: { path?: string; target?: string }[];
+  };
+
+  // registry-item.json is untrusted: catalog-previews.yml runs on pull_request
+  // for any registry change, so the manifest arrives from the PR. Containment
+  // lives in its own module so the traversal cases stay testable without this
+  // file's producer imports.
+  for (const [from, to] of resolveContainedCopies(projectDir, manifest.files, existsSync)) {
+    mkdirSync(dirname(to), { recursive: true });
+    cpSync(from, to);
+  }
+}
+
 async function prepareProjectDir(item: CatalogItem): Promise<string> {
   const tmpDir = join(tmpdir(), `hf-catalog-${item.name}-${Date.now()}`);
   mkdirSync(tmpDir, { recursive: true });
   cpSync(item.sourceDir, tmpDir, { recursive: true });
+  mirrorRegistryTargets(tmpDir);
 
   // The HyperFrames producer navigates to index.html at the project root.
   // Blocks and component demos are standalone HTML files, not index.html.

@@ -15,6 +15,9 @@ on:
       - "registry/blocks/**"
       - "registry/components/**"
       - "scripts/generate-catalog-previews.ts"
+      # The containment module the renderer imports. Without it a change to
+      # path-traversal defence alone never re-runs the job that exercises it.
+      - "scripts/registry-target-paths.mjs"
       - ".github/workflows/catalog-previews.yml"
 
 concurrency:
