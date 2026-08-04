@@ -77,20 +77,54 @@ function mentionsProbe(src: string): boolean {
   // Comments and doc prose describing a spawn are not a spawn:
   // `tts.test.mjs` explains `ffprobeDuration's spawnSync("ffprobe", ...) call`
   // in a comment and was reported as an unclassified caller.
-  // A probe spawned with an all-literal argv takes no runtime input, so
-  // there is nothing to terminate: `spawnSync("ffprobe", ["-version"])` is a
-  // capability check, not a file probe. Dropping those before the test keeps
-  // them out of the unclassified list without weakening it — an argv carrying
-  // a bare identifier (a path) still has to be understood.
-  const NO_INPUT_PROBE =
-    /(?:spawn|spawnSync|execFile\w*|exec)\s*\(\s*["'`]ff(?:probe|mpeg)["'`]\s*,\s*\[\s*(?:"[^"]*"\s*,?\s*)+\]/g;
-  const code = src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/[^\n]*/g, "")
-    .replace(NO_INPUT_PROBE, "");
-  return /(?:spawn|spawnSync|execFile\w*|exec)\s*\(\s*[^,)]*(?:ffprobe|ffProbe|probeBin|probePath)/i.test(
-    code,
-  );
+  // A probe spawned with an all-literal argv takes no runtime input, so there
+  // is nothing to terminate: `spawnSync("ffprobe", ["-version"])` is a
+  // capability check, not a file probe. Dropping those keeps them out of the
+  // unclassified list without weakening it — an argv carrying a bare
+  // identifier (a path) still has to be understood.
+  //
+  // Split into a linear scan plus a per-body check rather than one regex.
+  // The obvious `(?:"[^"]*"\s*,?\s*)+` form nests a quantifier inside a
+  // quantifier with an optional separator, so whitespace can be matched two
+  // ways and it backtracks exponentially on a long non-matching argv — CodeQL
+  // flagged it as js/redos, correctly.
+  const code = stripComments(src);
+  return CALLS_PROBE.test(withoutNoInputProbes(code));
+}
+
+const PROBE_SPAWN_HEAD =
+  /(?:spawn|spawnSync|execFile\w*|exec)\s*\(\s*["'`]ff(?:probe|mpeg)["'`]\s*,\s*\[/g;
+const CALLS_PROBE =
+  /(?:spawn|spawnSync|execFile\w*|exec)\s*\(\s*[^,)]*(?:ffprobe|ffProbe|probeBin|probePath)/i;
+
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+}
+
+/** Every entry a string literal → no runtime path in this argv. */
+function isLiteralOnlyArgv(body: string): boolean {
+  const entries = body
+    .split(",")
+    .map((e) => e.trim())
+    .filter((e) => e !== "");
+  return entries.length > 0 && entries.every((e) => /^"[^"]*"$/.test(e));
+}
+
+/** Blank out `spawn("ffprobe", [ ...all literals... ])` occurrences. */
+function withoutNoInputProbes(code: string): string {
+  let out = "";
+  let cursor = 0;
+  PROBE_SPAWN_HEAD.lastIndex = 0;
+  for (let m = PROBE_SPAWN_HEAD.exec(code); m !== null; m = PROBE_SPAWN_HEAD.exec(code)) {
+    const bodyStart = m.index + m[0].length;
+    const bodyEnd = code.indexOf("]", bodyStart);
+    if (bodyEnd === -1) continue;
+    if (!isLiteralOnlyArgv(code.slice(bodyStart, bodyEnd))) continue;
+    out += code.slice(cursor, m.index);
+    cursor = bodyEnd + 1;
+    PROBE_SPAWN_HEAD.lastIndex = cursor;
+  }
+  return out + code.slice(cursor);
 }
 
 const SKIP_DIRS = new Set(["node_modules", "dist"]);
