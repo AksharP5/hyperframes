@@ -66,24 +66,20 @@ source, revision notes, checks, and final render are all public.
 Using /hyperframes, make a 10-second product intro for https://example.com.
 ```
 
-<div className="not-prose my-6 grid overflow-hidden rounded-xl border border-zinc-200 bg-white md:grid-cols-4 dark:border-zinc-800 dark:bg-zinc-950">
-  <a className="border-b border-zinc-200 p-4 text-inherit no-underline md:border-b-0 md:border-r dark:border-zinc-800" href="https://github.com/heygen-com/hyperframes/blob/main/examples/docs-reference-project/BRIEF.md">
-    <span className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Brief</span>
-    <strong className="mt-1 block text-sm">What the agent decided</strong>
-  </a>
-  <a className="border-b border-zinc-200 p-4 text-inherit no-underline md:border-b-0 md:border-r dark:border-zinc-800" href="https://github.com/heygen-com/hyperframes/tree/main/examples/docs-reference-project">
-    <span className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Source</span>
-    <strong className="mt-1 block text-sm">Every editable project file</strong>
-  </a>
-  <a className="border-b border-zinc-200 p-4 text-inherit no-underline md:border-b-0 md:border-r dark:border-zinc-800" href="https://github.com/heygen-com/hyperframes/blob/main/examples/docs-reference-project/VERIFICATION.md#2-v1--v2">
-    <span className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Revision</span>
-    <strong className="mt-1 block text-sm">What changed after review</strong>
-  </a>
-  <a className="p-4 text-inherit no-underline" href="https://github.com/heygen-com/hyperframes/blob/main/examples/docs-reference-project/VERIFICATION.md">
-    <span className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Checks</span>
-    <strong className="mt-1 block text-sm">The real verification report</strong>
-  </a>
-</div>
+<CardGroup cols={2}>
+  <Card title="Brief" icon="clipboard-list" href="https://github.com/heygen-com/hyperframes/blob/main/examples/docs-reference-project/BRIEF.md">
+    What the agent decided before building anything.
+  </Card>
+  <Card title="Source" icon="folder-open" href="https://github.com/heygen-com/hyperframes/tree/main/examples/docs-reference-project">
+    Every editable project file, exactly as it renders.
+  </Card>
+  <Card title="Revision" icon="pen-to-square" href="https://github.com/heygen-com/hyperframes/blob/main/examples/docs-reference-project/VERIFICATION.md#2-v1--v2">
+    What changed between the first and second cut, and why.
+  </Card>
+  <Card title="Checks" icon="circle-check" href="https://github.com/heygen-com/hyperframes/blob/main/examples/docs-reference-project/VERIFICATION.md">
+    The real gate output: lint, check, contrast, and the final render.
+  </Card>
+</CardGroup>
 
 <div style={{ maxWidth: "36rem", margin: "1.5rem auto" }}>
   <DocsVideo
