@@ -56,7 +56,7 @@ So the rules are short:
 
 Every [frame adapter](/concepts/frame-adapters) follows these same rules. If you
 write your own, it must follow the
-[determinism contract](/concepts/frame-adapters#determinism-contract):
+[determinism contract](/concepts/frame-adapters#contract):
 `seekFrame(frame)` gives the same result for the same frame, seeks work in any
 order, nothing resolves after the frame is committed, and the lifecycle stays
 `init` → `seekFrame` (many times) → `destroy`.
