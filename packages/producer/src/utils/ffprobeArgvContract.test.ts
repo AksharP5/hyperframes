@@ -20,7 +20,19 @@ import { join, relative } from "node:path";
  * than needing to be remembered.
  */
 const REPO_ROOT = join(import.meta.dirname, "..", "..", "..", "..");
-const PACKAGES = join(REPO_ROOT, "packages");
+
+/**
+ * Roots to sweep.
+ *
+ * `skills/` is here because leaving it out was not a scoping choice, it was a
+ * hole: the shipped agent tools under `skills/**` spawn ffprobe directly, and
+ * 17 of those call sites were missing the terminator while this suite reported
+ * the bug class closed. They are distributed to users, not fixtures.
+ */
+const SWEEP_ROOTS = ["packages", "skills", "scripts"];
+
+/** `.mjs`/`.cjs` are first-class here — the skill scripts are not TypeScript. */
+const SOURCE_EXT = /\.(?:ts|mjs|cjs|js)$/;
 
 /**
  * The caller set as of the sweep that introduced this contract.
@@ -62,15 +74,25 @@ function mentionsProbe(src: string): boolean {
   // an opaquely-named variable (`spawn(command, argv)`) is invisible here.
   // Those still get caught by argv matching whenever their flags are literal —
   // widen this if one ever slips through both.
+  // Comments and doc prose describing a spawn are not a spawn:
+  // `tts.test.mjs` explains `ffprobeDuration's spawnSync("ffprobe", ...) call`
+  // in a comment and was reported as an unclassified caller.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
   return /(?:spawn|spawnSync|execFile\w*|exec)\s*\(\s*[^,)]*(?:ffprobe|ffProbe|probeBin|probePath)/i.test(
-    src,
+    code,
   );
 }
 
 const SKIP_DIRS = new Set(["node_modules", "dist"]);
 
 function isSourceFile(entry: string): boolean {
-  return entry.endsWith(".ts") && !entry.includes(".test.");
+  if (!SOURCE_EXT.test(entry) || entry.endsWith(".d.ts")) return false;
+  // This file documents the contract with example argvs, including a
+  // deliberately misordered one. Scanning itself reports its own prose.
+  if (entry === "ffprobeArgvContract.test.ts") return false;
+  // Test files are swept too. A test that probes a rendered output is itself a
+  // caller, and `dither.test.mjs` was one of the 17 broken sites.
+  return true;
 }
 
 function discoverCallers(): { found: string[]; unclassified: string[] } {
@@ -94,12 +116,12 @@ function discoverCallers(): { found: string[]; unclassified: string[] } {
       else if (isSourceFile(entry)) classify(abs);
     }
   };
-  for (const pkg of readdirSync(PACKAGES)) {
-    const src = join(PACKAGES, pkg, "src");
+  for (const root of SWEEP_ROOTS) {
+    const abs = join(REPO_ROOT, root);
     try {
-      if (statSync(src).isDirectory()) walk(src);
+      if (statSync(abs).isDirectory()) walk(abs);
     } catch {
-      /* package without src */
+      /* root absent in a partial checkout */
     }
   }
   return { found: found.sort(), unclassified: unclassified.sort() };

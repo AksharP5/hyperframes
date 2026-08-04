@@ -216,6 +216,25 @@ function formatSeconds(sec: number): string {
 }
 
 /**
+ * Every probe failure message, sanitized once, at the one place they all pass
+ * through on their way into the public `PadTrimAudioResult.error`.
+ *
+ * `runFfprobeJson` already scrubs the stderr it raises, but it is not the only
+ * thrower: `defaultProbeVideoFrameInfo` raises
+ * `ffprobe found no video stream in ${videoPath}` with the raw path, and a
+ * caller-supplied `probeVideoFrameInfo` / `probeAudioInfo` can raise anything
+ * at all. Sanitizing per-thrower is a list that will drift; sanitizing at the
+ * boundary cannot be bypassed by adding a new throw upstream.
+ *
+ * Known paths first (this function has them in hand, so no pattern has to
+ * recognise them), then the generic shape-based scrub for anything the message
+ * picked up elsewhere.
+ */
+function sanitizeProbeFailure(message: string, paths: readonly string[]): string {
+  return redactTelemetryString(redactKnownPaths(message, paths));
+}
+
+/**
  * Pad or trim `audio.aac` so its exact duration matches `frameCount / fps`
  * for the assembled video.
  */
@@ -235,12 +254,16 @@ export async function padOrTrimAudioToVideoFrameCount(
     probeAudio(input.audioPath, input.signal),
   ]);
 
+  const probePaths = [input.videoPath, input.audioPath, input.outputPath];
   if (videoResult.status === "rejected") {
     return failResult(
       input.outputPath,
       0,
       audioResult.status === "fulfilled" ? audioResult.value.durationSeconds : 0,
-      `audioPadTrim: failed to probe video: ${(videoResult.reason as Error).message}`,
+      `audioPadTrim: failed to probe video: ${sanitizeProbeFailure(
+        (videoResult.reason as Error).message,
+        probePaths,
+      )}`,
     );
   }
   if (audioResult.status === "rejected") {
@@ -248,7 +271,10 @@ export async function padOrTrimAudioToVideoFrameCount(
       input.outputPath,
       0,
       0,
-      `audioPadTrim: failed to probe audio: ${(audioResult.reason as Error).message}`,
+      `audioPadTrim: failed to probe audio: ${sanitizeProbeFailure(
+        (audioResult.reason as Error).message,
+        probePaths,
+      )}`,
     );
   }
 

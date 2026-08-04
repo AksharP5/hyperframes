@@ -270,3 +270,71 @@ describe("padOrTrimAudioToVideoFrameCount", () => {
     expect(result.targetDurationSeconds).toBe(6);
   });
 });
+
+// ── Public-path path redaction ────────────────────────────────────────────
+//
+// The redaction helpers have their own unit tests, but those pass whether or
+// not this module actually CALLS them: deleting the wiring in
+// padOrTrimAudioToVideoFrameCount left every one of them green. These drive
+// the public entry point and assert on the public `PadTrimAudioResult.error`,
+// which is what reaches logs, telemetry, and the caller.
+describe("PadTrimAudioResult.error never carries the input path", () => {
+  const cases: Array<{ name: string; videoPath: string; secret: string }> = [
+    {
+      name: "a dash-prefixed relative path",
+      videoPath: "./assets/-customer-secret-intro.mp4",
+      secret: "customer-secret-intro",
+    },
+    {
+      name: "a non-allowlisted absolute root",
+      videoPath: "/data/acme-secret/video.mp4",
+      secret: "acme-secret",
+    },
+    {
+      name: "a bare relative path",
+      videoPath: "customer/acme-secret/video.mp4",
+      secret: "acme-secret",
+    },
+  ];
+
+  for (const { name, videoPath, secret } of cases) {
+    it(`redacts ${name} raised by the video probe`, async () => {
+      const result = await padOrTrimAudioToVideoFrameCount({
+        videoPath,
+        audioPath: "/tmp/audio.aac",
+        outputPath: "/tmp/out.aac",
+        // Reproduces the real thrower: defaultProbeVideoFrameInfo raises
+        // `ffprobe found no video stream in ${videoPath}` with the raw path.
+        probeVideoFrameInfo: () =>
+          Promise.reject(new Error(`ffprobe found no video stream in ${videoPath}`)),
+        probeAudioInfo: () => Promise.resolve({ durationSeconds: 1 }),
+        runFfmpeg: () => Promise.resolve({ success: true }),
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error ?? "").not.toContain(secret);
+      expect(result.error ?? "").not.toContain(videoPath);
+      // Still diagnosable — the failure mode survives redaction.
+      expect(result.error ?? "").toContain("failed to probe video");
+    });
+  }
+
+  it("redacts raw ffprobe stderr surfaced through the audio probe", async () => {
+    const result = await padOrTrimAudioToVideoFrameCount({
+      videoPath: "/tmp/v.mp4",
+      audioPath: "/data/acme-secret/audio.aac",
+      outputPath: "/tmp/out.aac",
+      probeVideoFrameInfo: () => Promise.resolve({ frameCount: 30, fpsNum: 30, fpsDen: 1 }),
+      probeAudioInfo: () =>
+        Promise.reject(
+          new Error("/data/acme-secret/audio.aac: Invalid data found when processing input"),
+        ),
+      runFfmpeg: () => Promise.resolve({ success: true }),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error ?? "").not.toContain("acme-secret");
+    expect(result.error ?? "").toContain("failed to probe audio");
+  });
+});
