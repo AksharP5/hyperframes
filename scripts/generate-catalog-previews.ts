@@ -43,6 +43,7 @@ import {
   executeRenderJob,
 } from "../packages/producer/src/index.js";
 import { compileForRender } from "../packages/producer/src/services/htmlCompiler.js";
+import { resolveContainedCopies } from "./registry-target-paths.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
@@ -139,13 +140,11 @@ function mirrorRegistryTargets(projectDir: string): void {
     files?: { path?: string; target?: string }[];
   };
 
-  const copies = (manifest.files ?? [])
-    .map((file) => [file.path, file.target] as const)
-    .filter((pair): pair is readonly [string, string] => Boolean(pair[0] && pair[1]))
-    .map(([path, target]) => [join(projectDir, path), join(projectDir, target)] as const)
-    .filter(([from, to]) => from !== to && existsSync(from));
-
-  for (const [from, to] of copies) {
+  // registry-item.json is untrusted: catalog-previews.yml runs on pull_request
+  // for any registry change, so the manifest arrives from the PR. Containment
+  // lives in its own module so the traversal cases stay testable without this
+  // file's producer imports.
+  for (const [from, to] of resolveContainedCopies(projectDir, manifest.files, existsSync)) {
     mkdirSync(dirname(to), { recursive: true });
     cpSync(from, to);
   }
