@@ -29,7 +29,7 @@ import {
   writeFileSync,
   statSync,
 } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -320,7 +320,7 @@ async function generateVideo(item: CatalogItem, projectDir: string): Promise<voi
     format: "mp4",
   });
   await executeRenderJob(job, projectDir, masterMp4);
-  await encodeForWeb(masterMp4, outMp4);
+  encodeForWeb(masterMp4, outMp4);
   rmSync(masterMp4, { force: true });
   console.log(`  ✓ ${item.name}.mp4 (${(statSync(outMp4).size / 1048576).toFixed(1)} MB)`);
 }
@@ -331,63 +331,44 @@ async function generateVideo(item: CatalogItem, projectDir: string): Promise<voi
  * reader on a phone pays for the moment they press play. This pass is the
  * difference between a master and something you serve.
  */
-async function encodeForWeb(input: string, output: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const ff = spawn(
-      "ffmpeg",
-      [
-        "-v",
-        "error",
-        "-y",
-        "-i",
-        input,
-        // 1280 wide is twice the 590px docs column, so it stays sharp on retina
-        // without paying for pixels nobody sees.
-        "-vf",
-        "scale='min(1280,iw)':-2",
-        "-c:v",
-        "libx264",
-        "-profile:v",
-        "high",
-        "-crf",
-        "28",
-        "-preset",
-        "slow",
-        "-pix_fmt",
-        "yuv420p",
-        // faststart puts the index first so playback begins before the whole
-        // file has arrived.
-        "-movflags",
-        "+faststart",
-        ...(hasAudio(input) ? ["-c:a", "aac", "-b:a", "128k", "-ac", "2"] : ["-an"]),
-        output,
-      ],
-      { stdio: "inherit" },
-    );
-    ff.on("error", reject);
-    ff.on("close", (code) =>
-      code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code} encoding ${input}`)),
-    );
-  });
-}
-
-function hasAudio(file: string): boolean {
-  const probe = spawnSync(
-    "ffprobe",
+function encodeForWeb(input: string, output: string): void {
+  execFileSync(
+    "ffmpeg",
     [
       "-v",
       "error",
-      "-select_streams",
-      "a",
-      "-show_entries",
-      "stream=codec_name",
-      "-of",
-      "csv=p=0",
-      file,
+      "-y",
+      "-i",
+      input,
+      // 1280 wide is twice the 590px docs column: sharp on retina, no pixels
+      // nobody sees.
+      "-vf",
+      "scale='min(1280,iw)':-2",
+      "-c:v",
+      "libx264",
+      "-profile:v",
+      "high",
+      "-crf",
+      "28",
+      "-preset",
+      "slow",
+      "-pix_fmt",
+      "yuv420p",
+      // faststart puts the index first so playback can begin before the whole
+      // file has arrived.
+      "-movflags",
+      "+faststart",
+      // ffmpeg ignores these when the input carries no audio stream.
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-ac",
+      "2",
+      output,
     ],
-    { encoding: "utf8" },
+    { stdio: "inherit" },
   );
-  return probe.status === 0 && probe.stdout.trim().length > 0;
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────────

@@ -403,13 +403,9 @@ function generateTexturePreview(manifest: RegistryItem, textureGroups: TextureGr
   return lines;
 }
 
-function catalogPreviewFor(kind: ItemKind, manifest: RegistryItem): string | undefined {
+function catalogPreviewFor(kind: ItemKind, manifest: RegistryItem): string {
   const dir = typeDir(kind);
-  // Same rule as the page preview: thirteen items have an .mp4 and no .png, and
-  // a preview pointing at a file that does not exist is a broken thumbnail in
-  // the catalog grid rather than a missing one.
-  const file = join(REPO_ROOT, "docs", "images", "catalog", dir, `${manifest.name}.png`);
-  return existsSync(file) ? `${catalogImageBase}/${dir}/${manifest.name}.png` : undefined;
+  return `${catalogImageBase}/${dir}/${manifest.name}.png`;
 }
 
 function yamlString(value: string): string {
@@ -517,20 +513,13 @@ function generateItemMdx(
     lines.push(...generateTexturePreview(manifest, textureGroups));
   } else {
     const previewPath = `${catalogImageBase}/${typeDir(kind)}/${manifest.name}`;
-    // Only claim a poster when one was actually generated. Thirteen items have
-    // an .mp4 but no .png, and emitting the attribute regardless put thirteen
-    // 403s on the site — the browser requests the poster before the video.
-    const posterFile = join(
-      REPO_ROOT,
-      "docs",
-      "images",
-      "catalog",
-      typeDir(kind),
-      `${manifest.name}.png`,
-    );
-    const poster = existsSync(posterFile) ? ` poster="${previewPath}.png"` : "";
+    // No poster attribute. These autoplay muted, so a poster shows for
+    // milliseconds, and thirteen of the 168 .png files were never generated —
+    // the browser requests the poster before the video, so those were 403s on
+    // load. The images live only on the CDN (docs/images is gitignored), so a
+    // filesystem check here would strip all 168 on a clean checkout.
     lines.push(
-      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewPath}.mp4"${poster} autoPlay muted loop playsInline />`,
+      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewPath}.mp4" autoPlay muted loop playsInline />`,
       "",
     );
   }
