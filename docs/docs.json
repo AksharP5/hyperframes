@@ -64,7 +64,9 @@
             "group": "Explore",
             "pages": [
               "examples",
-              "product-updates"
+              "product-updates",
+              "weekly-updates",
+              "changelog"
             ]
           },
           {
@@ -750,7 +752,7 @@
     },
     {
       "source": "/guides/pipeline",
-      "destination": "/concepts",
+      "destination": "/workflows",
       "permanent": true
     },
     {
