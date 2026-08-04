@@ -41,10 +41,13 @@ hyperframes check
 hyperframes preview
 ```
 
-Remove the link when finished:
+Remove the link when finished. `bun unlink` takes no package name — it
+unregisters whichever directory you run it from, so go back to the CLI package
+first:
 
 ```bash
-bun unlink hyperframes
+cd packages/cli
+bun unlink
 ```
 
 ### Call the built entry directly

@@ -122,8 +122,7 @@ Audio has no visual lifecycle.
 
 | Attribute | Applies to | Meaning |
 | --- | --- | --- |
-| `data-media-start` | Video and audio | Offset into the source file |
-| `data-playback-start` | Video, audio, nested composition | Source-time offset used by trim and split operations |
+| `data-playback-start`<br />(alias: `data-media-start`) | Video, audio, nested composition | Offset into the source file, used by trim and split. The two names are one value — `data-playback-start` wins if both are set. |
 | `data-playback-rate` | Video, audio, nested composition | Playback multiplier from `0.1` to `5` |
 | `data-volume` | Video and audio | Static volume from `0` to `1` |
 | `data-has-audio="true"` | Video | Declares that the video contributes audio |
