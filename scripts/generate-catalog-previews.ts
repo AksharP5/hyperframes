@@ -126,28 +126,36 @@ function outputDir(kind: ItemKind): string {
   return resolve(repoRoot, "docs/images/catalog", typeDir);
 }
 
+/**
+ * Preview the item in the same layout users get after installation: some
+ * components reference assets by their registry target path rather than by the
+ * flat source path stored beside the manifest.
+ */
+function mirrorRegistryTargets(projectDir: string): void {
+  const manifestPath = join(projectDir, "registry-item.json");
+  if (!existsSync(manifestPath)) return;
+
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
+    files?: { path?: string; target?: string }[];
+  };
+
+  const copies = (manifest.files ?? [])
+    .map((file) => [file.path, file.target] as const)
+    .filter((pair): pair is readonly [string, string] => Boolean(pair[0] && pair[1]))
+    .map(([path, target]) => [join(projectDir, path), join(projectDir, target)] as const)
+    .filter(([from, to]) => from !== to && existsSync(from));
+
+  for (const [from, to] of copies) {
+    mkdirSync(dirname(to), { recursive: true });
+    cpSync(from, to);
+  }
+}
+
 async function prepareProjectDir(item: CatalogItem): Promise<string> {
   const tmpDir = join(tmpdir(), `hf-catalog-${item.name}-${Date.now()}`);
   mkdirSync(tmpDir, { recursive: true });
   cpSync(item.sourceDir, tmpDir, { recursive: true });
-
-  // Preview the item in the same layout users get after installation. Some
-  // components reference assets by their registry target path rather than by
-  // the flat source path stored beside the manifest.
-  const registryItemPath = join(tmpDir, "registry-item.json");
-  if (existsSync(registryItemPath)) {
-    const manifest = JSON.parse(readFileSync(registryItemPath, "utf-8")) as {
-      files?: { path?: string; target?: string }[];
-    };
-    for (const file of manifest.files ?? []) {
-      if (!file.path || !file.target) continue;
-      const sourcePath = join(tmpDir, file.path);
-      const targetPath = join(tmpDir, file.target);
-      if (!existsSync(sourcePath) || sourcePath === targetPath) continue;
-      mkdirSync(dirname(targetPath), { recursive: true });
-      cpSync(sourcePath, targetPath);
-    }
-  }
+  mirrorRegistryTargets(tmpDir);
 
   // The HyperFrames producer navigates to index.html at the project root.
   // Blocks and component demos are standalone HTML files, not index.html.
