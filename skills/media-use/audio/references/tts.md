@@ -11,14 +11,14 @@ bundled `heygen-tts.mjs` script below.
 Anything that will sit on hyperframes.heygen.com uses one narrator, so the site
 does not sound like two products.
 
-| | |
-| --- | --- |
-| Voice | **River** — "Relaxed, Neutral, Informative" |
-| Provider | ElevenLabs |
-| `voice_id` | `SAz9YHcvj6GT2YYXdXww` |
-| Model | `eleven_multilingual_v2` |
-| Pace | 145–155 words per minute, with room to breathe |
-| Music under it | about −31 LUFS, never masking the voice |
+|                |                                                |
+| -------------- | ---------------------------------------------- |
+| Voice          | **River** — "Relaxed, Neutral, Informative"    |
+| Provider       | ElevenLabs                                     |
+| `voice_id`     | `SAz9YHcvj6GT2YYXdXww`                         |
+| Model          | `eleven_multilingual_v2`                       |
+| Pace           | 145–155 words per minute, with room to breathe |
+| Music under it | about −31 LUFS, never masking the voice        |
 
 ```bash
 curl -s -X POST "https://api.elevenlabs.io/v1/text-to-speech/SAz9YHcvj6GT2YYXdXww" \
