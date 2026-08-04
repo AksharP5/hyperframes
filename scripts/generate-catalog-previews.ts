@@ -27,7 +27,9 @@ import {
   cpSync,
   rmSync,
   writeFileSync,
+  statSync,
 } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -311,13 +313,81 @@ async function generateVideo(item: CatalogItem, projectDir: string): Promise<voi
   mkdirSync(outDir, { recursive: true });
 
   const outMp4 = join(outDir, `${item.name}.mp4`);
+  const masterMp4 = join(outDir, `${item.name}.master.mp4`);
   const job = createRenderJob({
     fps: { num: 24, den: 1 },
     quality: "draft",
     format: "mp4",
   });
-  await executeRenderJob(job, projectDir, outMp4);
-  console.log(`  ✓ ${item.name}.mp4`);
+  await executeRenderJob(job, projectDir, masterMp4);
+  await encodeForWeb(masterMp4, outMp4);
+  rmSync(masterMp4, { force: true });
+  console.log(`  ✓ ${item.name}.mp4 (${(statSync(outMp4).size / 1048576).toFixed(1)} MB)`);
+}
+
+/**
+ * The render output is a master, not a deliverable. Publishing it directly put
+ * 25 Mbps files on the docs CDN — one 20-second preview was 60 MB, which a
+ * reader on a phone pays for the moment they press play. This pass is the
+ * difference between a master and something you serve.
+ */
+async function encodeForWeb(input: string, output: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn(
+      "ffmpeg",
+      [
+        "-v",
+        "error",
+        "-y",
+        "-i",
+        input,
+        // 1280 wide is twice the 590px docs column, so it stays sharp on retina
+        // without paying for pixels nobody sees.
+        "-vf",
+        "scale='min(1280,iw)':-2",
+        "-c:v",
+        "libx264",
+        "-profile:v",
+        "high",
+        "-crf",
+        "28",
+        "-preset",
+        "slow",
+        "-pix_fmt",
+        "yuv420p",
+        // faststart puts the index first so playback begins before the whole
+        // file has arrived.
+        "-movflags",
+        "+faststart",
+        ...(hasAudio(input) ? ["-c:a", "aac", "-b:a", "128k", "-ac", "2"] : ["-an"]),
+        output,
+      ],
+      { stdio: "inherit" },
+    );
+    ff.on("error", reject);
+    ff.on("close", (code) =>
+      code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code} encoding ${input}`)),
+    );
+  });
+}
+
+function hasAudio(file: string): boolean {
+  const probe = spawnSync(
+    "ffprobe",
+    [
+      "-v",
+      "error",
+      "-select_streams",
+      "a",
+      "-show_entries",
+      "stream=codec_name",
+      "-of",
+      "csv=p=0",
+      file,
+    ],
+    { encoding: "utf8" },
+  );
+  return probe.status === 0 && probe.stdout.trim().length > 0;
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────────
