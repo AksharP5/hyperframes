@@ -241,9 +241,33 @@ describe("resolveBrowserGpuMode", () => {
     expect(mode).toBe("software");
   });
 
-  it("passes 'hardware' through unchanged without probing", async () => {
+  it("passes 'hardware' through unchanged", async () => {
+    setMockWebGlProbe({ hasWebGL: true, vendor: "NVIDIA", renderer: "NVIDIA GeForce RTX 3070" });
     const mode = await resolveBrowserGpuMode("hardware");
     expect(mode).toBe("hardware");
+  });
+
+  it("warns when explicit 'hardware' probes to software, but still honours it", async () => {
+    // heygen-com/hyperframes#2967: `--browser-gpu` inside a container with no
+    // GPU passthrough rendered 19186 frames on CPU with no diagnostic.
+    setMockWebGlProbe({
+      hasWebGL: true,
+      vendor: "Google Inc. (Google)",
+      renderer: "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device))",
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mode = await resolveBrowserGpuMode("hardware", { platform: "linux" });
+    expect(mode).toBe("hardware");
+    const warning = warn.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(warning).toContain("browserGpuMode=hardware was requested");
+    expect(warning).toContain("--gpus all");
+  });
+
+  it("stays quiet when explicit 'hardware' probes to hardware", async () => {
+    setMockWebGlProbe({ hasWebGL: true, vendor: "NVIDIA", renderer: "NVIDIA GeForce RTX 3070" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await resolveBrowserGpuMode("hardware")).toBe("hardware");
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("falls back to 'software' when the probe browser cannot launch", async () => {
@@ -272,7 +296,8 @@ describe("resolveBrowserGpuMode", () => {
     expect(second).toBe("software");
     // Reset and re-probe to confirm the test-only reset works.
     _resetAutoBrowserGpuModeCacheForTests();
-    const third = await resolveBrowserGpuMode("hardware");
+    setMockWebGlProbe({ hasWebGL: true, vendor: "NVIDIA", renderer: "NVIDIA GeForce RTX 3070" });
+    const third = await resolveBrowserGpuMode("auto");
     expect(third).toBe("hardware");
   });
 

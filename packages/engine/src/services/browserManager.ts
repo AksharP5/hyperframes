@@ -507,14 +507,25 @@ async function probeAutoBrowserGpuMode(options: {
 /**
  * Resolve `browserGpuMode` to a concrete `"software" | "hardware"` answer.
  *
- * For `"software"` / `"hardware"` this is a pure pass-through. For `"auto"`
- * it launches a tiny Chrome with the platform's hardware GPU args, runs a
- * one-shot WebGL availability probe, and falls back to `"software"` if
- * hardware-mode WebGL is unavailable. The Promise is cached for the process
- * lifetime, so concurrent callers (parallel workers) share the same probe.
+ * For `"software"` this is a pure pass-through. For `"auto"` it launches a
+ * tiny Chrome with the platform's hardware GPU args, runs a one-shot WebGL
+ * availability probe, and falls back to `"software"` if hardware-mode WebGL
+ * is unavailable. The Promise is cached for the process lifetime, so
+ * concurrent callers (parallel workers) share the same probe.
  *
- * Any failure (Chrome launch error, navigation timeout, missing canvas API,
- * etc.) is treated as a `"software"` fallback. The render path with
+ * `"hardware"` (an explicit `--browser-gpu` / `PRODUCER_BROWSER_GPU_MODE=
+ * hardware`) is honoured verbatim — the operator asked for it — but runs the
+ * SAME probe to VERIFY it, because Chrome's hardware GL args are advisory:
+ * with no usable GPU in the sandbox (no `/dev/dri`, no NVIDIA container
+ * runtime, missing EGL/driver libraries) Chrome silently falls back to
+ * software WebGL and the render just runs at CPU speed. Without this check
+ * the only trace is a buried `Automatic fallback to software WebGL` browser
+ * warning — heygen-com/hyperframes#2967 rendered 19186 frames on CPU while
+ * `--browser-gpu` was set and nothing said so. The probe result never
+ * changes the returned mode; it only makes the fallback loud.
+ *
+ * Any probe failure (Chrome launch error, navigation timeout, missing canvas
+ * API, etc.) is treated as a `"software"` result. The render path with
  * SwiftShader always works, so a misclassification toward software is the
  * safe failure mode; misclassifying toward hardware would error on the real
  * render.
@@ -527,21 +538,56 @@ export function resolveBrowserGpuMode(
     platform?: NodeJS.Platform;
   } = {},
 ): Promise<"software" | "hardware"> {
-  if (mode !== "auto") return Promise.resolve(mode);
-  if (_autoBrowserGpuModeCache) return _autoBrowserGpuModeCache;
+  if (mode === "software") return Promise.resolve(mode);
 
-  _autoBrowserGpuModeCache = probeAutoBrowserGpuMode(options);
-  return _autoBrowserGpuModeCache;
+  _autoBrowserGpuModeCache ??= probeAutoBrowserGpuMode(options);
+  if (mode === "auto") return _autoBrowserGpuModeCache;
+
+  return _autoBrowserGpuModeCache.then((probed) => {
+    if (probed === "software") {
+      console.warn(buildUnverifiedHardwareGpuWarning(options.platform ?? process.platform));
+    }
+    return "hardware";
+  });
 }
 
 /**
- * Single observability surface for the auto-detect outcome. Logged exactly
+ * Warning text for "you asked for hardware GPU, the probe found none".
+ *
+ * Names the observable symptom (the render still completes, just on CPU) and
+ * the platform's actual remediation, so the operator doesn't have to infer it
+ * from Chrome's `Automatic fallback to software WebGL` warning. Exported for
+ * tests.
+ */
+export function buildUnverifiedHardwareGpuWarning(platform: NodeJS.Platform | string): string {
+  const remediation =
+    platform === "linux"
+      ? "Inside Docker, the container needs GPU passthrough: `--gpus all` with the NVIDIA " +
+        "Container Toolkit installed, or `--device /dev/dri` for Mesa/AMD/Intel. The image " +
+        "also needs the matching userspace driver + libEGL. Verify with " +
+        "`hyperframes render --browser-gpu` and watch for this warning disappearing."
+      : "Check that the host exposes a GPU to this process and that the graphics drivers are " +
+        "installed.";
+  return (
+    "[hyperframes] browserGpuMode=hardware was requested, but the WebGL probe found no " +
+    "hardware GPU — Chrome will silently fall back to software WebGL and the capture will " +
+    "run at CPU speed. Honouring the explicit request anyway.\n" +
+    `  ${remediation}\n` +
+    "  Pass --no-browser-gpu to select deterministic SwiftShader instead of waiting on a " +
+    "hardware path that is not there."
+  );
+}
+
+/**
+ * Single observability surface for the GPU probe outcome. Logged exactly
  * once per process (the probe runs once); without this line, a regression
  * to "always software even with a GPU present" would be invisible in
- * production. Goes to stderr to stay out of stdout pipelines.
+ * production. Goes to stderr to stay out of stdout pipelines. Says "probe"
+ * rather than "auto" because explicit `browserGpuMode=hardware` runs the
+ * same probe to verify itself.
  */
 function logResolvedBrowserGpuMode(resolved: "hardware" | "software", reason: string): void {
-  console.error(`[hyperframes] browserGpuMode auto → ${resolved} (${reason})`);
+  console.error(`[hyperframes] browserGpuMode probe → ${resolved} (${reason})`);
 }
 
 function createBrowserLaunchFingerprint(
