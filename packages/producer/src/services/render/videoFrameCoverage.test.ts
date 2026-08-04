@@ -97,6 +97,12 @@ describe("expectedFramesForClip", () => {
     expect(expectedFramesForClip(0, 0.633333, 30, "nearest")).toBe(19);
   });
 
+  it("uses exact NTSC rationals for short CFR and VFR boundaries", () => {
+    expect(expectedFramesForClip(0, 0.25025, { num: 30000, den: 1001 }, "nearest")).toBe(8);
+    expect(expectedFramesForClip(0, 0.125125, { num: 24000, den: 1001 })).toBe(3);
+    expect(expectedFramesForClip(0, 0.5005, { num: 24000, den: 1001 })).toBe(12);
+  });
+
   it("requires one frame for every positive sub-frame clip", () => {
     expect(expectedFramesForClip(0, 0.001, 30)).toBe(1);
     expect(expectedFramesForClip(0, 0.001, 30, "nearest")).toBe(1);
@@ -160,7 +166,7 @@ describe("computeVideoFrameCoverage", () => {
     expect(() => assertVideoFrameCoverage(reports, 0.95)).not.toThrow();
   });
 
-  it("keeps ceil coverage for the VFR extraction branch", () => {
+  it("tolerates a single FFmpeg boundary frame on a short 18/19 VFR extraction", () => {
     const videos = [makeVideo({ id: "short-vfr", start: 0, end: 0.616666 })];
     const reports = computeVideoFrameCoverage(
       videos,
@@ -172,7 +178,19 @@ describe("computeVideoFrameCoverage", () => {
       capturedFrames: 18,
       ratio: 18 / 19,
     });
-    expect(() => assertVideoFrameCoverage(reports, 0.95)).toThrow(VideoFrameCoverageError);
+    expect(() => assertVideoFrameCoverage(reports, 0.95)).not.toThrow();
+  });
+
+  it("does not reject complete 24000/1001 VFR extraction at an exact boundary", () => {
+    const videos = [makeVideo({ id: "ntsc-vfr", start: 0, end: 0.125125 })];
+    const reports = computeVideoFrameCoverage(
+      videos,
+      [makeExtracted("ntsc-vfr", 3, { isVFR: true })],
+      { num: 24000, den: 1001 },
+    );
+
+    expect(reports[0]).toMatchObject({ expectedFrames: 3, capturedFrames: 3, ratio: 1 });
+    expect(() => assertVideoFrameCoverage(reports, 0.95)).not.toThrow();
   });
 
   it("still fails closed when a positive sub-frame clip captured zero frames", () => {
@@ -339,6 +357,86 @@ describe("assertVideoFrameCoverage", () => {
         expectedFrames: 30,
         capturedFrames: 24,
         ratio: 0.8,
+      },
+    ];
+    expect(() => assertVideoFrameCoverage(reports, 0.95)).toThrow(VideoFrameCoverageError);
+  });
+
+  it.each([
+    [13, 14],
+    [18, 19],
+  ])(
+    "tolerates exactly one nonzero boundary frame for a short clip (%i/%i)",
+    (capturedFrames, expectedFrames) => {
+      const reports = [
+        {
+          videoId: "short-boundary",
+          clipStart: 0,
+          clipEnd: expectedFrames / 30,
+          expectedFrames,
+          capturedFrames,
+          ratio: capturedFrames / expectedFrames,
+        },
+      ];
+      expect(() => assertVideoFrameCoverage(reports, 0.95)).not.toThrow();
+    },
+  );
+
+  it("does not treat a one-frame deficit as tolerance when it represents major loss", () => {
+    const reports = [
+      {
+        videoId: "major-loss",
+        clipStart: 0,
+        clipEnd: 2 / 30,
+        expectedFrames: 2,
+        capturedFrames: 1,
+        ratio: 0.5,
+      },
+    ];
+    expect(() => assertVideoFrameCoverage(reports, 0.95)).toThrow(VideoFrameCoverageError);
+  });
+
+  it("does not tolerate two missing frames, zero captured frames, or an exact threshold", () => {
+    const report = {
+      videoId: "short-incomplete",
+      clipStart: 0,
+      clipEnd: 19 / 30,
+      expectedFrames: 19,
+      capturedFrames: 17,
+      ratio: 17 / 19,
+    };
+    expect(() => assertVideoFrameCoverage([report], 0.95)).toThrow(VideoFrameCoverageError);
+    expect(() =>
+      assertVideoFrameCoverage([{ ...report, capturedFrames: 0, ratio: 0 }], 0.95),
+    ).toThrow(VideoFrameCoverageError);
+    expect(() =>
+      assertVideoFrameCoverage([{ ...report, capturedFrames: 18, ratio: 18 / 19 }], 1),
+    ).toThrow(VideoFrameCoverageError);
+  });
+
+  it("does not apply the one-frame tolerance to longer clips", () => {
+    const reports = [
+      {
+        videoId: "long-boundary",
+        clipStart: 0,
+        clipEnd: 21 / 30,
+        expectedFrames: 21,
+        capturedFrames: 20,
+        ratio: 20 / 21,
+      },
+    ];
+    expect(() => assertVideoFrameCoverage(reports, 0.99)).toThrow(VideoFrameCoverageError);
+  });
+
+  it("still rejects a material long-clip shortfall even when it is five frames", () => {
+    const reports = [
+      {
+        videoId: "long-partial",
+        clipStart: 0,
+        clipEnd: 89 / 30,
+        expectedFrames: 89,
+        capturedFrames: 84,
+        ratio: 84 / 89,
       },
     ];
     expect(() => assertVideoFrameCoverage(reports, 0.95)).toThrow(VideoFrameCoverageError);

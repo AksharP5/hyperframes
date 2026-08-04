@@ -19,6 +19,7 @@ import {
   parseImageElements,
   extractAllVideoFrames,
   extractVideoFramesRange,
+  extractionFrameCountForDuration,
   createFrameLookupTable,
   resolveProjectRelativeSrc,
   resolveFrameFormat,
@@ -304,6 +305,51 @@ describe("resolveVideoExtractionDuration", () => {
 
   it("retains legacy behavior when no timeline end is supplied", () => {
     expect(resolveVideoExtractionDuration(video(), metadata(60))).toBe(60);
+  });
+});
+
+describe("extractionFrameCountForDuration", () => {
+  it("uses the same VFR ceil and CFR nearest-boundary rules as FFmpeg", () => {
+    expect(extractionFrameCountForDuration(0.466666, 30, true)).toBe(14);
+    expect(extractionFrameCountForDuration(0.466666, 30, false)).toBe(14);
+    expect(extractionFrameCountForDuration(0.616666, 30, true)).toBe(19);
+    expect(extractionFrameCountForDuration(0.616666, 30, false)).toBe(18);
+  });
+
+  it.each([
+    [0.33 - 0.03, 30, 9],
+    [0.29 - 0.04, 24, 6],
+    [0.35 - 0.05, 60, 18],
+    [4.03 - 3.53, 30, 15],
+    [4.03 - 3.78, 24, 6],
+  ])(
+    "snaps floating-point integral boundaries before VFR ceil (%s seconds at %i fps)",
+    (duration, fps, expectedFrames) => {
+      expect(extractionFrameCountForDuration(duration, fps, true)).toBe(expectedFrames);
+    },
+  );
+
+  it("still ceils a genuine fractional boundary beyond floating-point noise", () => {
+    expect(extractionFrameCountForDuration(0.300001, 30, true)).toBe(10);
+  });
+
+  it("matches FFmpeg's six-digit duration parsing", () => {
+    expect(extractionFrameCountForDuration(0.6000009, 30, true)).toBe(18);
+    expect(extractionFrameCountForDuration(0.600001, 30, true)).toBe(19);
+    expect(extractionFrameCountForDuration(2.05, 30, false)).toBe(62);
+  });
+
+  it("keeps exact NTSC rationals at short CFR and VFR boundaries", () => {
+    expect(extractionFrameCountForDuration(0.25025, { num: 30000, den: 1001 }, false)).toBe(8);
+    expect(extractionFrameCountForDuration(0.125125, { num: 24000, den: 1001 }, true)).toBe(3);
+    expect(extractionFrameCountForDuration(0.5005, { num: 24000, den: 1001 }, true)).toBe(12);
+  });
+
+  it("fails closed for invalid durations and emits one frame for positive sub-frame work", () => {
+    expect(extractionFrameCountForDuration(Number.NaN, 30, true)).toBe(0);
+    expect(extractionFrameCountForDuration(1, 0, true)).toBe(0);
+    expect(extractionFrameCountForDuration(0, 30, true)).toBe(0);
+    expect(extractionFrameCountForDuration(0.001, 30, false)).toBe(1);
   });
 });
 
@@ -1521,6 +1567,20 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
     expect(md.isVFR).toBe(true);
   });
 
+  it("passes an exact 24000/1001 rate through VFR normalization", async () => {
+    const outputDir = join(FIXTURE_DIR, "out-vfr-ntsc-boundary");
+    mkdirSync(outputDir, { recursive: true });
+
+    const result = await extractVideoFramesRange(VFR_FIXTURE, "vfr-ntsc-boundary", 0, 0.125125, {
+      fps: { num: 24000, den: 1001 },
+      outputDir,
+      format: "jpg",
+    });
+
+    expect(result.metadata.isVFR).toBe(true);
+    expect(result.totalFrames).toBe(3);
+  }, 60_000);
+
   it("produces the expected frame count for a mid-file segment", async () => {
     const outputDir = join(FIXTURE_DIR, "out-mid-segment");
     mkdirSync(outputDir, { recursive: true });
@@ -1733,6 +1793,49 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
     expect(hit.extracted[0]!.totalFrames).toBe(miss.extracted[0]!.totalFrames);
 
     rmSync(CACHE_DIR, { recursive: true, force: true });
+  }, 60_000);
+
+  it("does not reuse a decimal-rate VFR cache entry for the exact rational rate", async () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), "hf-extract-cache-ntsc-rate-test-"));
+    const decimalOutputDir = join(FIXTURE_DIR, "out-cache-vfr-ntsc-decimal");
+    const rationalOutputDir = join(FIXTURE_DIR, "out-cache-vfr-ntsc-rational");
+    mkdirSync(decimalOutputDir, { recursive: true });
+    mkdirSync(rationalOutputDir, { recursive: true });
+    try {
+      const decimal = await extractAllVideoFrames(
+        [cfrClipElement("vfr-ntsc-cache", VFR_FIXTURE, 0.125125)],
+        FIXTURE_DIR,
+        { fps: 24000 / 1001, outputDir: decimalOutputDir },
+        undefined,
+        { extractCacheDir: cacheDir },
+      );
+      expect(decimal.errors).toEqual([]);
+      expect(decimal.phaseBreakdown.cacheMisses).toBe(1);
+      expect(decimal.extracted[0]?.totalFrames).toBe(3);
+      // Model the warm v3 entry from before exact-rate extraction: the
+      // decimal path could persist one extra frame at this boundary. If the
+      // rational lookup collides, rehydration below will observe all four.
+      writeFileSync(
+        join(decimal.extracted[0]!.outputDir, "frame_00004.jpg"),
+        "stale-decimal-boundary-frame",
+        "utf-8",
+      );
+
+      const rational = await extractAllVideoFrames(
+        [cfrClipElement("vfr-ntsc-cache", VFR_FIXTURE, 0.125125)],
+        FIXTURE_DIR,
+        { fps: { num: 24000, den: 1001 }, outputDir: rationalOutputDir },
+        undefined,
+        { extractCacheDir: cacheDir },
+      );
+      expect(rational.errors).toEqual([]);
+      expect(rational.phaseBreakdown.cacheHits).toBe(0);
+      expect(rational.phaseBreakdown.cacheMisses).toBe(1);
+      expect(rational.extracted[0]?.totalFrames).toBe(3);
+      expect(cacheEntryNames(cacheDir)).toHaveLength(2);
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
   }, 60_000);
 
   it("reuses one-cycle loop extraction across different authored starts", async () => {
@@ -2067,6 +2170,97 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
     expect(supersetDirNames(outputDir)).toEqual([]);
   }, 60_000);
 
+  it.each([
+    { label: "decimal underflow half-frame", duration: 2.05, offset: 1, expectedFrames: 62 },
+    {
+      label: "non-half-integer boundary",
+      duration: 0.616666,
+      offset: 0.1,
+      expectedFrames: 18,
+    },
+  ])(
+    "keeps direct and superset CFR extraction equal at a $label",
+    async ({ label, duration, offset, expectedFrames }) => {
+      const fixtureKey = label.replaceAll(" ", "-");
+      const src = await synthCfrClip(`superset-cfr-${fixtureKey}.mp4`, 4);
+      const groupedOutputDir = join(FIXTURE_DIR, `out-superset-cfr-${fixtureKey}`);
+      const directOutputDir = join(FIXTURE_DIR, `out-direct-cfr-${fixtureKey}`);
+      mkdirSync(groupedOutputDir, { recursive: true });
+      mkdirSync(directOutputDir, { recursive: true });
+
+      const grouped = await extractAllVideoFrames(
+        [
+          cfrClipElement(`${fixtureKey}-base`, src, duration, 0),
+          cfrClipElement(`${fixtureKey}-member`, src, duration, offset),
+        ],
+        FIXTURE_DIR,
+        { fps: 30, outputDir: groupedOutputDir },
+      );
+      const direct = await extractVideoFramesRange(src, `${fixtureKey}-direct`, offset, duration, {
+        fps: 30,
+        outputDir: directOutputDir,
+        format: "jpg",
+      });
+
+      expect(grouped.errors).toEqual([]);
+      expect(direct.totalFrames).toBe(expectedFrames);
+      expect(extractedFor(grouped, `${fixtureKey}-base`).totalFrames).toBe(expectedFrames);
+      expect(extractedFor(grouped, `${fixtureKey}-member`).totalFrames).toBe(expectedFrames);
+      expect(statSync(framePath(grouped, `${fixtureKey}-base`, Math.round(offset * 30))).ino).toBe(
+        statSync(framePath(grouped, `${fixtureKey}-member`, 0)).ino,
+      );
+      for (let frame = 0; frame < expectedFrames; frame += 1) {
+        expect(
+          readFileSync(framePath(grouped, `${fixtureKey}-member`, frame)).equals(
+            readFileSync(direct.framePaths.get(frame)!),
+          ),
+        ).toBe(true);
+      }
+      expect(supersetDirNames(groupedOutputDir)).toEqual([]);
+    },
+    60_000,
+  );
+
+  it("keeps direct and superset CFR extraction equal at 30000/1001", async () => {
+    const src = await synthCfrClip("superset-cfr-ntsc.mp4", 4);
+    const groupedOutputDir = join(FIXTURE_DIR, "out-superset-cfr-ntsc");
+    const directOutputDir = join(FIXTURE_DIR, "out-direct-cfr-ntsc");
+    const fps = { num: 30000, den: 1001 };
+    const duration = 0.25025;
+    mkdirSync(groupedOutputDir, { recursive: true });
+    mkdirSync(directOutputDir, { recursive: true });
+
+    const grouped = await extractAllVideoFrames(
+      [
+        cfrClipElement("ntsc-base", src, 0.5005, 0),
+        cfrClipElement("ntsc-member", src, duration, 0),
+      ],
+      FIXTURE_DIR,
+      { fps, outputDir: groupedOutputDir },
+    );
+    const direct = await extractVideoFramesRange(src, "ntsc-direct", 0, duration, {
+      fps,
+      outputDir: directOutputDir,
+      format: "jpg",
+    });
+
+    expect(grouped.errors).toEqual([]);
+    expect(direct.totalFrames).toBe(8);
+    expect(extractedFor(grouped, "ntsc-base").totalFrames).toBe(15);
+    expect(extractedFor(grouped, "ntsc-member").totalFrames).toBe(8);
+    expect(statSync(framePath(grouped, "ntsc-base", 0)).ino).toBe(
+      statSync(framePath(grouped, "ntsc-member", 0)).ino,
+    );
+    for (let frame = 0; frame < 8; frame += 1) {
+      expect(
+        readFileSync(framePath(grouped, "ntsc-member", frame)).equals(
+          readFileSync(direct.framePaths.get(frame)!),
+        ),
+      ).toBe(true);
+    }
+    expect(supersetDirNames(groupedOutputDir)).toEqual([]);
+  }, 60_000);
+
   it("does not superset disjoint trims", async () => {
     const SRC = await synthCfrClip("superset-disjoint-src.mp4", 10);
     const outputDir = join(FIXTURE_DIR, "out-superset-disjoint");
@@ -2101,6 +2295,77 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
       statSync(framePath(result, "trim-b", 0)).ino,
     );
     expect(supersetDirNames(outputDir)).toEqual([]);
+  }, 60_000);
+
+  it("keeps overlapping VFR trims direct because CFR resampling phase resets per seek", async () => {
+    const outputDir = join(FIXTURE_DIR, "out-vfr-superset-short");
+    mkdirSync(outputDir, { recursive: true });
+
+    const result = await extractAllVideoFrames(
+      [
+        cfrClipElement("vfr-short-a", VFR_FIXTURE, 0.616666, 0),
+        cfrClipElement("vfr-short-b", VFR_FIXTURE, 0.616666, 0.1),
+      ],
+      FIXTURE_DIR,
+      { fps: 30, outputDir },
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(extractedFor(result, "vfr-short-a").metadata.isVFR).toBe(true);
+    expect(extractedFor(result, "vfr-short-a").totalFrames).toBe(19);
+    expect(extractedFor(result, "vfr-short-b").totalFrames).toBe(19);
+    expect(statSync(framePath(result, "vfr-short-a", 3)).ino).not.toBe(
+      statSync(framePath(result, "vfr-short-b", 0)).ino,
+    );
+    expect(supersetDirNames(outputDir)).toEqual([]);
+  }, 60_000);
+
+  it("keeps batched and direct VFR extraction equal at a floating integral boundary", async () => {
+    const groupedOutputDir = join(FIXTURE_DIR, "out-vfr-superset-integral-boundary");
+    const directOutputDir = join(FIXTURE_DIR, "out-vfr-direct-integral-boundary");
+    mkdirSync(groupedOutputDir, { recursive: true });
+    mkdirSync(directOutputDir, { recursive: true });
+
+    const first: VideoElement = {
+      id: "vfr-integral-a",
+      src: VFR_FIXTURE,
+      start: 0.03,
+      end: 0.33,
+      mediaStart: 0.03,
+      loop: false,
+      hasAudio: false,
+    };
+    const second: VideoElement = {
+      ...first,
+      id: "vfr-integral-b",
+      mediaStart: 0.13,
+    };
+
+    const direct = await extractAllVideoFrames([{ ...second }], FIXTURE_DIR, {
+      fps: 30,
+      outputDir: directOutputDir,
+    });
+    const grouped = await extractAllVideoFrames([{ ...first }, second], FIXTURE_DIR, {
+      fps: 30,
+      outputDir: groupedOutputDir,
+    });
+
+    expect(direct.errors).toEqual([]);
+    expect(grouped.errors).toEqual([]);
+    expect(extractedFor(direct, second.id).totalFrames).toBe(9);
+    expect(extractedFor(grouped, first.id).totalFrames).toBe(9);
+    expect(extractedFor(grouped, second.id).totalFrames).toBe(9);
+    for (let frame = 0; frame < 9; frame += 1) {
+      expect(
+        readFileSync(framePath(grouped, second.id, frame)).equals(
+          readFileSync(framePath(direct, second.id, frame)),
+        ),
+      ).toBe(true);
+    }
+    expect(statSync(framePath(grouped, first.id, 3)).ino).not.toBe(
+      statSync(framePath(grouped, second.id, 0)).ino,
+    );
+    expect(supersetDirNames(groupedOutputDir)).toEqual([]);
   }, 60_000);
 
   it("publishes overlapping superset slices to cache entries and hits them on the next render", async () => {
