@@ -346,7 +346,7 @@ function renderWeeklyNotes(
     "- Remove both TODO markers after review.",
     "- Keep every sentence under 25 words. Split a long one into two.",
     "- Replace semicolons with a full stop or a bullet.",
-    "- Use everyday words. Cut doc-speak such as \"leverage\" and \"surface\".",
+    '- Use everyday words. Cut doc-speak such as "leverage" and "surface".',
     "- Run this from an up-to-date `main` branch when drafting the real weekly update.",
     "- Keep the docs entry in `docs/weekly-updates.mdx` aligned with this source file.",
     "- Edit the Discord and X drafts before posting.",
