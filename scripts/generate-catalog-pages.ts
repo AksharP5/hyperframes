@@ -403,9 +403,13 @@ function generateTexturePreview(manifest: RegistryItem, textureGroups: TextureGr
   return lines;
 }
 
-function catalogPreviewFor(kind: ItemKind, manifest: RegistryItem): string {
+function catalogPreviewFor(kind: ItemKind, manifest: RegistryItem): string | undefined {
   const dir = typeDir(kind);
-  return `${catalogImageBase}/${dir}/${manifest.name}.png`;
+  // Same rule as the page preview: thirteen items have an .mp4 and no .png, and
+  // a preview pointing at a file that does not exist is a broken thumbnail in
+  // the catalog grid rather than a missing one.
+  const file = join(REPO_ROOT, "docs", "images", "catalog", dir, `${manifest.name}.png`);
+  return existsSync(file) ? `${catalogImageBase}/${dir}/${manifest.name}.png` : undefined;
 }
 
 function yamlString(value: string): string {
