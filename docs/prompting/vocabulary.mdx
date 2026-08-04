@@ -3,8 +3,6 @@ title: Vocabulary that changes output
 description: "Natural-language adjectives the skills map to specific framework settings — easing, captions, transitions, audio, voices."
 ---
 
-import { DocsVideo } from "/snippets/docs-video.jsx";
-
 [The dial](/prompting/specification-dial) told you *how much* to specify; this page is the word list for the cheap-precision setting — style tokens that cost you nothing to say and remove real ambiguity. The skills map natural-language adjectives to specific framework settings. Using the right word gets you the right result without specifying technical details.
 
 ## Motion & easing
@@ -25,36 +23,96 @@ Describe how motion should *feel* and the agent picks the matching GSAP ease:
 Each word, rendered — the same move, only the ease changes:
 
 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", margin: "1.25rem 0" }}>
-<DocsVideo
-  title="HyperFrames video: Ease Power2 Out"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-power2-out.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Ease Power4 Out"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-power4-out.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Ease Back Out"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-back-out.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Ease Elastic Out"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-elastic-out.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Ease Expo Out"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-expo-out.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Ease Sine Inout"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-sine-inout.mp4#t=0.1"
-  loop
-/>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-power2-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="smooth preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      smooth <code>power2.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-power4-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="snappy preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      snappy <code>power4.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-back-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="bouncy preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      bouncy <code>back.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-elastic-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="springy preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      springy <code>elastic.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-expo-out.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="dramatic preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      dramatic <code>expo.out</code>
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/ease-sine-inout.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="dreamy preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      dreamy <code>sine.inOut</code>
+    </figcaption>
+  </figure>
 </div>
 
 
@@ -75,41 +133,111 @@ Compositions have no physical camera, but camera words translate directly into s
 The same scene under each camera word:
 
 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", margin: "1.25rem 0" }}>
-<DocsVideo
-  title="HyperFrames video: Camera Push In"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-push-in.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Camera Pull Back"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-pull-back.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Camera Pan"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-pan.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Camera Crane"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-crane.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Camera Whip"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-whip.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Camera Parallax"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-parallax.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Camera Orbit"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-orbit.mp4#t=0.1"
-  loop
-/>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-push-in.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="slow push-in preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      slow push-in
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-pull-back.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="pull back preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      pull back
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-pan.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="pan across preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      pan across
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-crane.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="crane down/up preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      crane down/up
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-whip.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="whip to preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      whip to
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-parallax.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="parallax preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      parallax
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/camera-orbit.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="drone orbit preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      drone orbit
+    </figcaption>
+  </figure>
 </div>
 
 
@@ -225,31 +353,81 @@ Hand-drawn emphasis effects for text:
 The five modes on the same sentence:
 
 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", margin: "1.25rem 0" }}>
-<DocsVideo
-  title="HyperFrames video: Marker Highlight"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-highlight.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Marker Circle"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-circle.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Marker Burst"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-burst.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Marker Scribble"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-scribble.mp4#t=0.1"
-  loop
-/>
-<DocsVideo
-  title="HyperFrames video: Marker Sketchout"
-  src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-sketchout.mp4#t=0.1"
-  loop
-/>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-highlight.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="highlight preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      highlight
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-circle.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="circle preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      circle
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-burst.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="burst preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      burst
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-scribble.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="scribble preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      scribble
+    </figcaption>
+  </figure>
+  <figure style={{ margin: 0 }}>
+    <video
+      src="https://static.heygen.ai/hyperframes-oss/docs/images/prompting/marker-sketchout.mp4#t=0.1"
+      autoPlay
+      muted
+      loop
+      playsInline
+      preload="metadata"
+      aria-label="sketchout preview"
+      style={{ display: "block", width: "100%", borderRadius: "10px", background: "#000" }}
+    />
+    <figcaption style={{ marginTop: "0.4rem", fontSize: "0.8125rem", opacity: 0.75 }}>
+      sketchout
+    </figcaption>
+  </figure>
 </div>
 
 ## Text-to-speech voices

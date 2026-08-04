@@ -54,9 +54,18 @@ narrated film a reader watches intentionally. A plain `<video>` is only for a
 small, muted, autoplaying preview loop inside a visual explanation or Catalog
 item. Do not mix native browser controls with the custom player.
 
-**Related topics must be visible content.** Mintlify does not render a
-`related:` frontmatter list. Add a final `## Related topics` section with only
-the two or three destinations that genuinely help the reader continue.
+**End a page by pointing somewhere, and make the pointer visible content.**
+Mintlify does not render a `related:` frontmatter list, so a frontmatter key
+buys nothing. How the pointer looks depends on the page:
+
+- Task, guide, Studio, and Catalog pages end with a `## Related topics` section
+  naming the two or three destinations that genuinely help the reader continue.
+- Pages in a numbered sequence — the Prompt Guide — end with a single
+  `*Next: [page] — why*` line instead. A course has one useful destination, and
+  three competing links break the through-line.
+- Reference and concept pages (`/packages`, `/sdk`, `/reference`, `/concepts`)
+  may end without either. A reader arrives there from one specific question and
+  leaves the same way; inventing three related links is filler.
 
 ### Custom React components
 
