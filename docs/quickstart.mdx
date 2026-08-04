@@ -5,7 +5,6 @@ description: "Install the HyperFrames skills, make one short request, and contin
 
 import { QuickstartContinuationGrid } from "/snippets/quickstart-continuation-grid.jsx";
 import { DocsVideo } from "/snippets/docs-video.jsx";
-import { AgentAction } from "/snippets/agent-action.jsx";
 
 <div className="hf-docs-video-frame">
   <DocsVideo
@@ -20,6 +19,23 @@ import { AgentAction } from "/snippets/agent-action.jsx";
   agent and any optional hosted, voice, avatar, or generated-media services may have their own
   costs.
 </Note>
+
+## The short way: hand it to your agent
+
+If you already have a coding agent open in a folder, paste this and skip the
+rest of the page. It installs the skills, makes the video, and opens the
+preview — you only change the URL.
+
+```text
+Set this folder up for HyperFrames and make me a video.
+
+1. Run: npx hyperframes skills update
+2. Then, using /hyperframes, make a 10-second product intro for https://example.com
+3. Open the local preview when it is done and tell me the project folder.
+```
+
+Swap `https://example.com` for the page you want the video to show. Everything
+below is the same thing done by hand, if you would rather see each step.
 
 ## 1. Install the skills
 
@@ -50,8 +66,6 @@ and sound; it is not a guaranteed final cut. All three paths below work with
 the same project.
 
 <QuickstartContinuationGrid />
-
-<AgentAction request="Using /hyperframes, make a 10-second product intro for https://example.com." />
 
 ## Related topics
 
