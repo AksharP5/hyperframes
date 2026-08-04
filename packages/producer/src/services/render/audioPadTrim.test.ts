@@ -337,4 +337,45 @@ describe("PadTrimAudioResult.error never carries the input path", () => {
     expect(result.error ?? "").not.toContain("acme-secret");
     expect(result.error ?? "").toContain("failed to probe audio");
   });
+
+  // An injected probe can reject with anything. Casting the reason to Error and
+  // reading `.message` yielded undefined, which threw inside the redactor and
+  // turned a returned failure result into a rejected promise.
+  describe("a probe that rejects with a non-Error value", () => {
+    const nonErrors: Array<[string, unknown]> = [
+      ["a string", "probe failed"],
+      ["undefined", undefined],
+      ["null", null],
+      ["a number", 42],
+      ["a plain object", { code: "ENOENT" }],
+    ];
+
+    for (const [label, reason] of nonErrors) {
+      it(`still returns a failed result when the video probe rejects with ${label}`, async () => {
+        const result = await padOrTrimAudioToVideoFrameCount({
+          videoPath: "/data/acme-secret/video.mp4",
+          audioPath: "/tmp/audio.aac",
+          outputPath: "/tmp/out.aac",
+          probeVideoFrameInfo: () => Promise.reject(reason),
+          probeAudioInfo: () => Promise.resolve({ durationSeconds: 1 }),
+          runFfmpeg: () => Promise.resolve({ success: true }),
+        });
+        expect(result.success).toBe(false);
+        expect(result.error ?? "").toContain("failed to probe video");
+      });
+
+      it(`still returns a failed result when the audio probe rejects with ${label}`, async () => {
+        const result = await padOrTrimAudioToVideoFrameCount({
+          videoPath: "/tmp/v.mp4",
+          audioPath: "/data/acme-secret/audio.aac",
+          outputPath: "/tmp/out.aac",
+          probeVideoFrameInfo: () => Promise.resolve({ frameCount: 30, fpsNum: 30, fpsDen: 1 }),
+          probeAudioInfo: () => Promise.reject(reason),
+          runFfmpeg: () => Promise.resolve({ success: true }),
+        });
+        expect(result.success).toBe(false);
+        expect(result.error ?? "").toContain("failed to probe audio");
+      });
+    }
+  });
 });

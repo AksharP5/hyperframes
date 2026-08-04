@@ -15,10 +15,24 @@ function redactUrlQueryStrings(value: string): string {
  * prose after it, and a path with a space still gets its remaining segments
  * redacted, which is the part that carries the identifying information.
  */
-const SEGMENT = String.raw`[\w.\-@+()~]+`;
+/**
+ * A path segment is defined by what ENDS it, not by an alphabet.
+ *
+ * `[\w...]` is ASCII-only, so `/数据/客户/秘密视频.mp4` and `/data/客户/secret.mp4`
+ * passed through completely unredacted — the generic redactor also feeds CLI
+ * telemetry and producer observation messages, where no known-path list is
+ * supplied to cover for it. Enumerating Unicode classes instead (`\p{L}\p{N}…`)
+ * would work but has to be kept correct for marks, joiners and emoji; a
+ * delimiter-based rule is right for every script by construction.
+ *
+ * Whitespace and quotes end a segment; so do the separators themselves.
+ * Space stays excluded for the original reason: including it would let a match
+ * run past the path and swallow the prose after it.
+ */
+const SEGMENT = String.raw`[^\s/\\'"]+`;
 
 /** Same, minus the dot, so a trailing `.ext` can be matched separately. */
-const SEGMENT_NODOT = String.raw`[\w\-@+()~]+`;
+const SEGMENT_NODOT = String.raw`[^\s/\\'".]+`;
 
 /**
  * Once a match is established as a path, consume the rest of the token.
@@ -63,7 +77,7 @@ const RELATIVE_PATH = new RegExp(
  * whose host we deliberately keep.
  */
 const ASSET_BASENAME =
-  /(?<![\w/\\])[\w.\-@+()~]+\.(?:mp4|mov|mkv|webm|avi|m4v|mpe?g|ts|mp3|wav|aac|m4a|flac|ogg|opus|png|jpe?g|gif|webp|svg|html?|json|srt|vtt|ass)\b/gi;
+  /(?<![\w/\\])[^\s/\\'"]+\.(?:mp4|mov|mkv|webm|avi|m4v|mpe?g|ts|mp3|wav|aac|m4a|flac|ogg|opus|png|jpe?g|gif|webp|svg|html?|json|srt|vtt|ass)\b/gi;
 
 /**
  * A relative path with NO `./` prefix — `assets/bgm.mp3`,
@@ -80,11 +94,11 @@ const BARE_RELATIVE_PATH = new RegExp(
   [
     // Two or more separators: `customer/acme/video.mp4`. No extension needed —
     // that much structure is already a path.
-    String.raw`(?<![\w/\\.:@-])(?:${SEGMENT}[\\/]){2,}${SEGMENT}${TOKEN_TAIL}`,
+    String.raw`(?<![^\s'\"(=,\[])(?:${SEGMENT}[\\/]){2,}${SEGMENT}${TOKEN_TAIL}`,
     // One separator, but the last segment carries a file extension:
     // `assets/bgm.mp3`. That segment is dot-free on purpose — SEGMENT includes
     // `.`, so a greedy one swallows the extension this rule needs.
-    String.raw`(?<![\w/\\.:@-])${SEGMENT}[\\/]${SEGMENT_NODOT}\.\w{1,8}\b${TOKEN_TAIL}`,
+    String.raw`(?<![^\s'\"(=,\[])${SEGMENT}[\\/]${SEGMENT_NODOT}\.\w{1,8}\b${TOKEN_TAIL}`,
   ].join("|"),
   "g",
 );
@@ -99,6 +113,10 @@ const BARE_RELATIVE_PATH = new RegExp(
  * reports only that.
  */
 export function redactKnownPaths(value: string, paths: readonly string[]): string {
+  // Fail soft on a non-string. This sits on an error path, so throwing here
+  // converts a reported failure into an unhandled rejection — which is exactly
+  // what happened when a caller passed a non-Error rejection's `.message`.
+  if (typeof value !== "string") return "";
   let out = value;
   for (const path of paths) {
     if (typeof path !== "string" || path.length === 0) continue;
@@ -120,8 +138,10 @@ function redactFilePaths(value: string): string {
       // (`/assets/x.mp3`), so the absolute rule would consume it and leave the
       // leading `.` stranded outside the redaction.
       .replace(RELATIVE_PATH, "[path]")
-      .replace(ABSOLUTE_PATH, "[path]")
+      // Bare-relative BEFORE absolute: a bare path's interior satisfies the
+      // absolute rule, which would claim it and strand the first segment.
       .replace(BARE_RELATIVE_PATH, "[path]")
+      .replace(ABSOLUTE_PATH, "[path]")
       .replace(ASSET_BASENAME, "[file]")
   );
 }

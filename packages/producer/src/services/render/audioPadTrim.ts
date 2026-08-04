@@ -230,7 +230,13 @@ function formatSeconds(sec: number): string {
  * recognise them), then the generic shape-based scrub for anything the message
  * picked up elsewhere.
  */
-function sanitizeProbeFailure(message: string, paths: readonly string[]): string {
+function sanitizeProbeFailure(reason: unknown, paths: readonly string[]): string {
+  // Normalized here, not at the call sites. A caller-supplied probe can reject
+  // with anything — `Promise.reject("probe failed")` has no `.message`, so
+  // casting to Error yielded `undefined` and threw inside the redactor. That
+  // turned a returned failure result into a rejected promise, which is a
+  // behaviour regression the cast introduced.
+  const message = reason instanceof Error ? reason.message : String(reason);
   return redactTelemetryString(redactKnownPaths(message, paths));
 }
 
@@ -261,7 +267,7 @@ export async function padOrTrimAudioToVideoFrameCount(
       0,
       audioResult.status === "fulfilled" ? audioResult.value.durationSeconds : 0,
       `audioPadTrim: failed to probe video: ${sanitizeProbeFailure(
-        (videoResult.reason as Error).message,
+        videoResult.reason,
         probePaths,
       )}`,
     );
@@ -272,7 +278,7 @@ export async function padOrTrimAudioToVideoFrameCount(
       0,
       0,
       `audioPadTrim: failed to probe audio: ${sanitizeProbeFailure(
-        (audioResult.reason as Error).message,
+        audioResult.reason,
         probePaths,
       )}`,
     );

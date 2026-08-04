@@ -86,6 +86,39 @@ describe("redactTelemetryString", () => {
   });
 });
 
+// The segment classes were ASCII `\w`, so a non-Latin path went out verbatim.
+// This redactor also feeds CLI telemetry and producer observation messages,
+// where no known-path list is supplied to compensate.
+describe("non-Latin paths", () => {
+  it.each([
+    "/数据/客户/秘密视频.mp4",
+    "/данные/клиент/видео.mp4",
+    "/data/客户/secret.mp4",
+    "/Users/alice/проект/видео.mp4",
+  ])("redacts the absolute path %s", (path) => {
+    const out = redactTelemetryString(`ffprobe failed reading ${path}`);
+    expect(out).toBe("ffprobe failed reading [path]");
+  });
+
+  it("redacts a non-Latin bare relative path without stranding the first segment", () => {
+    // The lookbehind used to be `\w`-based, so a match could start mid-token
+    // when the preceding character was non-ASCII: this redacted to `客户[path]`.
+    expect(redactTelemetryString("could not open 客户/秘密/视频.mp4")).toBe(
+      "could not open [path]",
+    );
+  });
+
+  it.each(["./资产/背景.mp3", "../输出/final.wav"])("redacts the relative path %s", (path) => {
+    expect(redactTelemetryString(`could not open ${path}`)).toBe("could not open [path]");
+  });
+
+  it("redacts a non-Latin bare basename", () => {
+    expect(redactTelemetryString("Invalid data found in 秘密视频.mp4")).toBe(
+      "Invalid data found in [file]",
+    );
+  });
+});
+
 describe("redactKnownPaths", () => {
   // Shape matching has holes by construction. A caller that built the argv
   // knows the exact path, so it can name it instead of hoping a regex does.
@@ -112,5 +145,12 @@ describe("redactKnownPaths", () => {
   // that letter into [path].
   it("ignores paths too short to be distinctive", () => {
     expect(redactKnownPaths("a stream at a rate", ["a"])).toBe("a stream at a rate");
+  });
+
+  // This sits on an error path: throwing here turns a reported failure into an
+  // unhandled rejection, which is what a non-Error rejection's `undefined`
+  // message caused.
+  it.each([undefined, null, 42, {}])("returns a string for the non-string input %s", (value) => {
+    expect(() => redactKnownPaths(value as unknown as string, ["/tmp/x.mp4"])).not.toThrow();
   });
 });

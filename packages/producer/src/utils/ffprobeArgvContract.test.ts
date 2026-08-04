@@ -32,7 +32,20 @@ const REPO_ROOT = join(import.meta.dirname, "..", "..", "..", "..");
 const SWEEP_ROOTS = ["packages", "skills", "scripts"];
 
 /** `.mjs`/`.cjs` are first-class here — the skill scripts are not TypeScript. */
-const SOURCE_EXT = /\.(?:ts|mjs|cjs|js)$/;
+const SOURCE_EXT = /\.(?:ts|mjs|cjs|js|py|sh)$/;
+
+/**
+ * Shell-syntax invocations, checked separately and more weakly.
+ *
+ * A JS/Python argv is a bracketed literal, so the parser above can check that
+ * `--` is the PENULTIMATE entry. A shell command line is not a literal —
+ * `ffprobe -v error ... "$BG" 2>/dev/null | tr -dc '0-9.'` has redirections,
+ * pipes and substitutions after the input — so checking position would need a
+ * shell parser. This asserts the terminator is PRESENT on any ffprobe command
+ * line, which is weaker but is the part that was missing, and it is honest
+ * about being weaker rather than implying the same guarantee.
+ */
+const SHELL_EXT = /\.sh$/;
 
 /**
  * The caller set as of the sweep that introduced this contract.
@@ -139,11 +152,15 @@ function isSourceFile(entry: string): boolean {
   return true;
 }
 
-function discoverCallers(): { found: string[]; unclassified: string[] } {
+function discoverCallers(): { found: string[]; unclassified: string[]; shell: string[] } {
   const found: string[] = [];
   const unclassified: string[] = [];
+  const shell: string[] = [];
   const classify = (abs: string): void => {
     const src = readFileSync(abs, "utf8");
+    if (SHELL_EXT.test(abs) && /(?:^|[^\w-])ffprobe\s+-/m.test(src)) {
+      shell.push(relative(REPO_ROOT, abs));
+    }
     // Discovery is ARGV-shaped, not call-shaped. Matching on spawn/execFile
     // misses a dependency-injected runner — `runner("ffprobe", [...])` in
     // studio-server's mediaValidation.ts is exactly that, and a call-shaped
@@ -168,7 +185,7 @@ function discoverCallers(): { found: string[]; unclassified: string[] } {
       /* root absent in a partial checkout */
     }
   }
-  return { found: found.sort(), unclassified: unclassified.sort() };
+  return { found: found.sort(), unclassified: unclassified.sort(), shell: shell.sort() };
 }
 
 /**
@@ -210,6 +227,32 @@ function argvTails(source: string): Array<{ snippet: string; tail: string[] }> {
   }
   return tails;
 }
+
+describe("shell ffprobe invocations terminate their options", () => {
+  const shellFiles = discoverCallers().shell;
+
+  it("finds the shell callers", () => {
+    // Guards the guard: `frame_strip.sh` and `render-and-composite.sh` both
+    // shipped un-terminated while the JS-only sweep reported the class closed.
+    expect(shellFiles.length).toBeGreaterThan(0);
+  });
+
+  it.each(shellFiles)("%s passes -- on every ffprobe command line", (relPath) => {
+    const source = readFileSync(join(REPO_ROOT, relPath), "utf8");
+    const offenders = source
+      .split("\n")
+      .map((line, index) => ({ line: line.trim(), number: index + 1 }))
+      // An invocation passes flags. `command -v ffprobe >/dev/null` is a PATH
+      // check and `echo "ffmpeg/ffprobe not on PATH"` is a message; neither
+      // takes an input, and both were reported before this narrowed.
+      .filter(({ line }) => /(?:^|[^\w-])ffprobe\s+-/.test(line) && !line.startsWith("#"))
+      .filter(({ line }) => !/\b(?:command\s+-v|which|type)\s+ffprobe/.test(line))
+      .filter(({ line }) => !/\s--\s/.test(line))
+      .map(({ line, number }) => `${number}: ${line.slice(0, 80)}`);
+
+    expect(offenders, `${relPath}: ffprobe command lines missing "--"`).toEqual([]);
+  });
+});
 
 describe("ffprobe argv contract", () => {
   const { found: callers, unclassified } = discoverCallers();
