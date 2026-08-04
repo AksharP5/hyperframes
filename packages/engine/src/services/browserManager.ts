@@ -438,6 +438,7 @@ let _autoBrowserGpuModeCache: Promise<"software" | "hardware"> | undefined;
 /** Test-only: reset the cached probe result. */
 export function _resetAutoBrowserGpuModeCacheForTests(): void {
   _autoBrowserGpuModeCache = undefined;
+  _unverifiedHardwareGpuWarned = false;
 }
 
 async function getPuppeteerOrNull(): Promise<PuppeteerNode | null> {
@@ -544,12 +545,19 @@ export function resolveBrowserGpuMode(
   if (mode === "auto") return _autoBrowserGpuModeCache;
 
   return _autoBrowserGpuModeCache.then((probed) => {
-    if (probed === "software") {
+    // Warn once per process, not once per caller: `createCaptureSession`
+    // resolves the mode for the probe browser AND every parallel worker, so
+    // an un-deduplicated warning prints N+1 times and buries itself.
+    if (probed === "software" && !_unverifiedHardwareGpuWarned) {
+      _unverifiedHardwareGpuWarned = true;
       console.warn(buildUnverifiedHardwareGpuWarning(options.platform ?? process.platform));
     }
     return "hardware";
   });
 }
+
+/** One-shot latch for the explicit-hardware-probed-to-software warning. */
+let _unverifiedHardwareGpuWarned = false;
 
 /**
  * Warning text for "you asked for hardware GPU, the probe found none".

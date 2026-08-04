@@ -261,6 +261,11 @@ describe("resolveBrowserGpuMode", () => {
     const warning = warn.mock.calls.map((call) => String(call[0])).join("\n");
     expect(warning).toContain("browserGpuMode=hardware was requested");
     expect(warning).toContain("--gpus all");
+    // Once per process, not once per worker — the render path resolves the
+    // mode for the probe browser plus every parallel worker.
+    await resolveBrowserGpuMode("hardware", { platform: "linux" });
+    await resolveBrowserGpuMode("hardware", { platform: "linux" });
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it("stays quiet when explicit 'hardware' probes to hardware", async () => {
