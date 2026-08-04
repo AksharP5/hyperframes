@@ -7,8 +7,10 @@ import { parseHTML } from "linkedom";
 import { interpolateVolumeGain } from "@hyperframes/core/media-volume-envelope";
 import { defaultLogger } from "../logger.js";
 import {
+  assertNotHtmlPayload,
   collectExternalAssets,
   compileForRender,
+  HtmlNotVideoError,
   injectSdkPositionEditsRenderScript,
   detectAncestorBackgroundImage,
   detectRenderModeHints,
@@ -2265,5 +2267,197 @@ describe("sub-composition variable injection (render path, #2064)", () => {
     );
     const compiled = await compileForRender(projectDir, join(projectDir, "index.html"), projectDir);
     expect(compiled.html).not.toMatch(/window\.__hfVariablesByComp\s*=\s*Object\.assign/);
+  });
+});
+
+// ── HTML payload sniff (STUDIO-5433) ───────────────────────────────────────
+//
+// Producer's `resolveMediaDuration` is a two-step pipeline (download → probe)
+// that runs on every media element without an authored duration. Prior to
+// this defense, an authoring bug that handed a `.html` payload through as a
+// video src produced an opaque `[mov,mp4,m4a,3gp,3g2,mj2 @ ...] moov atom
+// not found` from ffprobe — the `mov,mp4,…` prefix was ffprobe's default
+// demuxer probe order, NOT the file's true format, so every alert routed as
+// a codec/ffmpeg bug. The sniff below converts the class into a domain-typed
+// `HtmlNotVideoError` naming the src so it can be alerted and routed
+// correctly, independent of the (separate) authoring-side root cause fix.
+
+describe("assertNotHtmlPayload", () => {
+  it("throws HtmlNotVideoError when the file starts with <!DOCTYPE html>", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-html-sniff-doctype-"));
+    const filePath = join(dir, "nested.html");
+    writeFileSync(
+      filePath,
+      "<!DOCTYPE html>\n<html><head><title>streamed-preview</title></head><body></body></html>",
+    );
+
+    let caught: unknown;
+    try {
+      // URL src (kept verbatim by redactTelemetryString apart from the query
+      // string) — makes the src-attribution assertion below meaningful.
+      await assertNotHtmlPayload(filePath, "https://cdn.example.com/streamed-preview.html");
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(HtmlNotVideoError);
+    const err = caught as HtmlNotVideoError;
+    // The host of a plain URL survives redactTelemetryString; the trailing
+    // `.html` basename gets replaced with `[file]` by the asset-basename rule.
+    // The `[src=…]` framing is what matters for observability.
+    expect(err.message).toContain("[src=https://cdn.example.com/");
+    expect(err.message).toContain("cdn.example.com");
+    // Sample of the file's first bytes appears in the message (case-insensitive
+    // "html" comes from either `<!DOCTYPE html>` or `<html>`).
+    expect(err.message.toLowerCase()).toContain("html");
+    expect(err.code).toBe("HTML_NOT_VIDEO");
+  });
+
+  it("redacts a relative-path src through redactTelemetryString before emitting", async () => {
+    // A bare-relative path (`assets/nested.html`) is exactly the shape the
+    // producer telemetry-redaction rules collapse to `[path]`. The error
+    // message must go through redactTelemetryString so we neither leak the
+    // path structure nor drop the `[src=…]` framing.
+    const dir = mkdtempSync(join(tmpdir(), "hf-html-sniff-redact-"));
+    const filePath = join(dir, "nested.html");
+    writeFileSync(filePath, "<!DOCTYPE html><html></html>");
+
+    let caught: unknown;
+    try {
+      await assertNotHtmlPayload(filePath, "assets/nested.html");
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(HtmlNotVideoError);
+    const err = caught as HtmlNotVideoError;
+    expect(err.message).toContain("[src=[path]]");
+    expect(err.message).not.toContain("assets/nested.html");
+  });
+
+  it("throws when the file starts with <html> (no doctype, missing lang, upper/lower case)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-html-sniff-htmltag-"));
+    const filePath = join(dir, "raw.html");
+    writeFileSync(filePath, "<HTML><body>hi</body></HTML>");
+
+    await expect(assertNotHtmlPayload(filePath, "raw.html")).rejects.toThrow(HtmlNotVideoError);
+  });
+
+  it("throws when the file starts with <?xml (SVG / generic XML)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-html-sniff-xml-"));
+    const filePath = join(dir, "asset.svg");
+    writeFileSync(
+      filePath,
+      '<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg"/>',
+    );
+
+    await expect(assertNotHtmlPayload(filePath, "asset.svg")).rejects.toThrow(HtmlNotVideoError);
+  });
+
+  it("tolerates a UTF-8 BOM and leading whitespace before the prefix", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-html-sniff-bom-"));
+    const filePath = join(dir, "bom.html");
+    // 0xEF 0xBB 0xBF + newline + spaces + <!doctype ...
+    const bomBuf = Buffer.from([0xef, 0xbb, 0xbf]);
+    writeFileSync(
+      filePath,
+      Buffer.concat([bomBuf, Buffer.from("\n  <!doctype html><html></html>")]),
+    );
+
+    await expect(assertNotHtmlPayload(filePath, "bom.html")).rejects.toThrow(HtmlNotVideoError);
+  });
+
+  it("does NOT throw for a real MP4 container (ftypmp42 header)", async () => {
+    // A minimal MP4 file signature: `\x00\x00\x00\x18 ftypmp42 ...`.
+    // We only care that the sniff prefix-match ignores it — downstream
+    // ffprobe is what actually parses the container, and this test does
+    // not exercise ffprobe.
+    const dir = mkdtempSync(join(tmpdir(), "hf-html-sniff-mp4-"));
+    const filePath = join(dir, "clip.mp4");
+    const mp4Header = Buffer.from([
+      0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32, 0x00, 0x00, 0x00,
+      0x00, 0x6d, 0x70, 0x34, 0x32, 0x69, 0x73, 0x6f, 0x6d,
+    ]);
+    writeFileSync(filePath, mp4Header);
+
+    // Should resolve without throwing.
+    await assertNotHtmlPayload(filePath, "clip.mp4");
+  });
+
+  it("does NOT throw for a WebM container (EBML header)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-html-sniff-webm-"));
+    const filePath = join(dir, "clip.webm");
+    // Matroska/WebM starts with EBML header: 0x1A 0x45 0xDF 0xA3
+    const webmHeader = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01]);
+    writeFileSync(filePath, webmHeader);
+
+    await assertNotHtmlPayload(filePath, "clip.webm");
+  });
+
+  it("does NOT throw for an empty file (0 bytes — separate code path handles it)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-html-sniff-empty-"));
+    const filePath = join(dir, "empty.bin");
+    writeFileSync(filePath, "");
+
+    await assertNotHtmlPayload(filePath, "empty.bin");
+  });
+
+  it("does NOT throw when the html prefix is deep inside the file, not at the start", async () => {
+    // Regression guard: the check must be a prefix match, not a substring
+    // scan. A legitimate media container that happens to contain the
+    // substring `<html` further in must NOT be misclassified.
+    const dir = mkdtempSync(join(tmpdir(), "hf-html-sniff-substr-"));
+    const filePath = join(dir, "not-html.bin");
+    writeFileSync(
+      filePath,
+      Buffer.concat([Buffer.from([0x00, 0x00, 0x01, 0xba]), Buffer.from("<html later on")]),
+    );
+
+    await assertNotHtmlPayload(filePath, "not-html.bin");
+  });
+});
+
+describe("compileForRender HTML sniff (STUDIO-5433)", () => {
+  it("aborts with HtmlNotVideoError when a <video> src points at an HTML payload", async () => {
+    // Mimics the STUDIO-5433 failure mode: an a-roll element with
+    // `content.src` pointing at a `streamed-preview.html` (legitimate
+    // 6.5 KB `<!DOCTYPE html>` page, NOT an MP4). The producer's ffprobe
+    // step would previously emit an opaque `moov atom not found` — with
+    // the sniff in place, we abort with a typed error naming the src.
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-html-sniff-e2e-"));
+    mkdirSync(join(projectDir, "assets"));
+    writeFileSync(
+      join(projectDir, "assets", "nested.html"),
+      "<!DOCTYPE html>\n<html><head><title>streamed-preview</title></head><body><p>Not a video.</p></body></html>",
+    );
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!DOCTYPE html>
+<html>
+  <body>
+    <div data-composition-id="root" data-width="640" data-height="360" data-start="0" data-duration="4">
+      <video id="v1" src="assets/nested.html" data-start="0" muted></video>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["root"] = { duration: () => 4 };
+    </script>
+  </body>
+</html>`,
+    );
+
+    let caught: unknown;
+    try {
+      await compileForRender(projectDir, join(projectDir, "index.html"), projectDir);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(HtmlNotVideoError);
+    const err = caught as HtmlNotVideoError;
+    // Bare relative src `assets/nested.html` is redacted to `[path]` by
+    // redactTelemetryString — but the `[src=…]` framing survives.
+    expect(err.message).toContain("[src=[path]]");
+    expect(err.message.toLowerCase()).toContain("html");
+    // The sniff must run BEFORE ffprobe, so no ffprobe-specific noise
+    // (`moov atom not found`) can appear.
+    expect(err.message).not.toMatch(/moov/i);
   });
 });
