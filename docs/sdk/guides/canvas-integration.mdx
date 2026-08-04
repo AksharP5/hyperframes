@@ -123,8 +123,11 @@ iframe.addEventListener("load", () => {
     targetId = hit.id;
     startX = event.clientX;
     startY = event.clientY;
-    if (event.target instanceof Element && "setPointerCapture" in event.target) {
-      event.target.setPointerCapture(event.pointerId);
+    // The target comes from the iframe's realm, so `instanceof Element` against
+    // this window's constructor is always false and capture would be skipped —
+    // then a pointer leaving the frame loses `pointerup` and drag state sticks.
+    if (event.target && "setPointerCapture" in event.target) {
+      (event.target as Element).setPointerCapture(event.pointerId);
     }
   });
 

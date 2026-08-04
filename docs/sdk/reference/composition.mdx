@@ -628,6 +628,8 @@ comp.on("selectionchange", (ids) => {
 Fires after every committed change with a `PatchEvent` containing RFC 6902 forward and inverse patches, the `origin`, and semantic `opTypes`. Use this to mirror edits into a host history stack, collaboration layer, or audit log.
 
 ```typescript
+import { ORIGIN_APPLY_PATCHES } from "@hyperframes/sdk";
+
 comp.on("patch", ({ patches, inversePatches, origin, opTypes }) => {
   if (origin !== ORIGIN_APPLY_PATCHES) {
     hostHistory.push({ patches, inversePatches });

@@ -301,8 +301,11 @@ Returns a `PreviewAdapter` that bridges the SDK to a same-origin `<iframe>` cont
 import { openComposition, createIframePreviewAdapter } from "@hyperframes/sdk";
 
 const iframe = document.querySelector<HTMLIFrameElement>("#preview-frame")!;
-let comp: Awaited<ReturnType<typeof openComposition>>;
-const preview = createIframePreviewAdapter(iframe, (op) => comp.dispatch(op));
+// Optional, and dispatched with `?.` — the callback cannot fire before
+// openComposition() resolves, but strict TypeScript cannot prove that and
+// rejects a definite `let` captured before assignment (TS2454).
+let comp: Awaited<ReturnType<typeof openComposition>> | undefined;
+const preview = createIframePreviewAdapter(iframe, (op) => comp?.dispatch(op));
 comp = await openComposition(html, { preview });
 
 // Hit-test at pointer position
