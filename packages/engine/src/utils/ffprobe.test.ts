@@ -1,6 +1,8 @@
 // fallow-ignore-file code-duplication
 import { EventEmitter } from "events";
-import { readFileSync } from "fs";
+import { spawnSync } from "child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { basename, resolve } from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -113,6 +115,272 @@ describe("extractPngMetadataFromBuffer", () => {
     );
     expect(extractPngMetadataFromBuffer(fixture)?.colorSpace?.colorTransfer).toBe("smpte2084");
   });
+
+  it("keeps metadata fallback independent from full PNG integrity validation", () => {
+    const ihdr = pngChunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 16, 2, 0, 0, 0]);
+    expect(extractPngMetadataFromBuffer(buildPngWithChunks([ihdr]))).toMatchObject({
+      width: 1,
+      height: 1,
+    });
+  });
+});
+
+describe("probeMediaProfile", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("child_process");
+  });
+
+  it("classifies still, moving, audio-only, and mixed streams from probe data", async () => {
+    const { spawn } = createSpawnSpy([
+      {
+        kind: "exit",
+        code: 0,
+        stdout: JSON.stringify({
+          streams: [{ codec_type: "video", codec_name: "png" }],
+          format: { format_name: "png_pipe" },
+        }),
+      },
+      {
+        kind: "exit",
+        code: 0,
+        stdout: JSON.stringify({
+          streams: [{ codec_type: "video", codec_name: "h264" }],
+          format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2" },
+        }),
+      },
+      {
+        kind: "exit",
+        code: 0,
+        stdout: JSON.stringify({
+          streams: [{ codec_type: "audio", codec_name: "mp3" }],
+          format: { format_name: "mp3" },
+        }),
+      },
+      {
+        kind: "exit",
+        code: 0,
+        stdout: JSON.stringify({
+          streams: [{ codec_type: "video" }, { codec_type: "audio" }],
+          format: { format_name: "matroska,webm" },
+        }),
+      },
+    ]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { probeMediaProfile } = await import("./ffprobe.js");
+
+    const validPngPath = resolve(
+      __dirname,
+      "../../../producer/tests/hdr-regression/src/hdr-photo-pq.png",
+    );
+    await expect(probeMediaProfile(validPngPath)).resolves.toEqual({
+      hasVideoStream: true,
+      hasAudioStream: false,
+      visualKind: "still",
+    });
+    await expect(probeMediaProfile("/tmp/extensionless-video")).resolves.toEqual({
+      hasVideoStream: true,
+      hasAudioStream: false,
+      visualKind: "moving",
+    });
+    await expect(probeMediaProfile("/tmp/extensionless-audio")).resolves.toEqual({
+      hasVideoStream: false,
+      hasAudioStream: true,
+      visualKind: "none",
+    });
+    await expect(probeMediaProfile("/tmp/mixed-av")).resolves.toEqual({
+      hasVideoStream: true,
+      hasAudioStream: true,
+      visualKind: "moving",
+    });
+  });
+
+  it("does not treat attached cover art in an audio container as an image asset", async () => {
+    const { spawn } = createSpawnSpy([
+      {
+        kind: "exit",
+        code: 0,
+        stdout: JSON.stringify({
+          streams: [
+            { codec_type: "video", disposition: { attached_pic: 1 } },
+            { codec_type: "audio" },
+          ],
+          format: { format_name: "mp3" },
+        }),
+      },
+    ]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { probeMediaProfile } = await import("./ffprobe.js");
+    await expect(probeMediaProfile("/tmp/audio-with-cover")).resolves.toMatchObject({
+      hasAudioStream: true,
+      visualKind: "none",
+    });
+  });
+
+  it("deduplicates probes within one cancellation scope without sharing across scopes", async () => {
+    const fixtureDir = mkdtempSync(resolve(tmpdir(), "hf-media-probe-cache-"));
+    const fixturePath = resolve(fixtureDir, "asset");
+    writeFileSync(fixturePath, "cache identity only");
+    const outcome = {
+      kind: "exit" as const,
+      code: 0,
+      stdout: JSON.stringify({
+        streams: [{ codec_type: "video", codec_name: "h264" }],
+        format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2" },
+      }),
+    };
+    const { spawn, calls } = createSpawnSpy([outcome, outcome]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { probeMediaProfile } = await import("./ffprobe.js");
+    const firstSignal = new AbortController().signal;
+    const secondSignal = new AbortController().signal;
+    try {
+      await Promise.all([
+        probeMediaProfile(fixturePath, { signal: firstSignal }),
+        probeMediaProfile(fixturePath, { signal: firstSignal }),
+      ]);
+      expect(calls).toHaveLength(1);
+      await probeMediaProfile(fixturePath, { signal: secondSignal });
+      expect(calls).toHaveLength(2);
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  it("bounds the process-scoped probe cache", async () => {
+    const fixtureDir = mkdtempSync(resolve(tmpdir(), "hf-media-probe-lru-"));
+    const fixturePaths = Array.from({ length: 129 }, (_, index) =>
+      resolve(fixtureDir, `asset-${index}`),
+    );
+    for (const fixturePath of fixturePaths) writeFileSync(fixturePath, "probe identity");
+    const outcome = {
+      kind: "exit" as const,
+      code: 0,
+      stdout: JSON.stringify({
+        streams: [{ codec_type: "audio", codec_name: "aac" }],
+        format: { format_name: "aac" },
+      }),
+    };
+    const { spawn, calls } = createSpawnSpy([outcome]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { probeMediaProfile } = await import("./ffprobe.js");
+    try {
+      for (const fixturePath of fixturePaths) await probeMediaProfile(fixturePath);
+      await probeMediaProfile(fixturePaths[0]!);
+      expect(calls).toHaveLength(130);
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  it("classifies extensionless AVIF from its ISO-BMFF brand instead of the generic mov demuxer", async () => {
+    const fixtureDir = mkdtempSync(resolve(tmpdir(), "hf-avif-profile-"));
+    const fixturePath = resolve(fixtureDir, "asset");
+    const ftyp = Buffer.alloc(24);
+    ftyp.writeUInt32BE(24, 0);
+    ftyp.write("ftyp", 4, 4, "ascii");
+    ftyp.write("avif", 8, 4, "ascii");
+    ftyp.writeUInt32BE(0, 12);
+    ftyp.write("mif1", 16, 4, "ascii");
+    ftyp.write("avif", 20, 4, "ascii");
+    writeFileSync(fixturePath, ftyp);
+    const { spawn } = createSpawnSpy([
+      {
+        kind: "exit",
+        code: 0,
+        stdout: JSON.stringify({
+          streams: [{ codec_type: "video", codec_name: "av1" }],
+          format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2" },
+        }),
+      },
+    ]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { probeMediaProfile } = await import("./ffprobe.js");
+    try {
+      await expect(probeMediaProfile(fixturePath)).resolves.toMatchObject({
+        hasVideoStream: true,
+        hasAudioStream: false,
+        visualKind: "still",
+      });
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses any non-attached video stream when cover art precedes moving video", async () => {
+    const { spawn } = createSpawnSpy([
+      {
+        kind: "exit",
+        code: 0,
+        stdout: JSON.stringify({
+          streams: [
+            { codec_type: "video", disposition: { attached_pic: 1 } },
+            { codec_type: "video", codec_name: "h264" },
+            { codec_type: "audio" },
+          ],
+          format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2" },
+        }),
+      },
+    ]);
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { probeMediaProfile } = await import("./ffprobe.js");
+    await expect(probeMediaProfile("/tmp/video-with-cover")).resolves.toMatchObject({
+      visualKind: "moving",
+    });
+  });
+
+  it.skipIf(spawnSync("ffprobe", ["-version"]).status !== 0)(
+    "rejects an IHDR-only truncated PNG even when ffprobe accepts png_pipe",
+    async () => {
+      vi.resetModules();
+      vi.doUnmock("child_process");
+      const fixtureDir = mkdtempSync(resolve(tmpdir(), "hf-truncated-png-profile-"));
+      const fixturePath = resolve(fixtureDir, "asset");
+      const ihdr = pngChunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 16, 2, 0, 0, 0]);
+      writeFileSync(fixturePath, buildPngWithChunks([ihdr]));
+      const { probeMediaProfile } = await import("./ffprobe.js");
+      try {
+        await expect(probeMediaProfile(fixturePath)).rejects.toThrow();
+      } finally {
+        rmSync(fixtureDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("does not turn an aborted PNG probe into a successful metadata fallback", async () => {
+    type KillableFakeProc = FakeProc & { kill: (signal?: NodeJS.Signals) => boolean };
+    const spawn = () => {
+      const proc = new EventEmitter() as KillableFakeProc;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.kill = vi.fn(() => {
+        process.nextTick(() => proc.emit("close", null, "SIGTERM"));
+        return true;
+      });
+      process.nextTick(() => proc.emit("spawn"));
+      return proc;
+    };
+    const fixtureDir = mkdtempSync(resolve(tmpdir(), "hf-aborted-png-profile-"));
+    const fixturePath = resolve(fixtureDir, "asset");
+    writeFileSync(fixturePath, buildMinimalPng());
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { probeMediaProfile } = await import("./ffprobe.js");
+    const controller = new AbortController();
+    try {
+      const pending = probeMediaProfile(fixturePath, { signal: controller.signal });
+      controller.abort(new Error("render cancelled"));
+      await expect(pending).rejects.toThrow("render cancelled");
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
+  });
 });
 
 interface SpawnCall {
@@ -220,6 +488,23 @@ describe("ffprobe missing-binary fallback", () => {
     expect(JSON.stringify(meta)).not.toContain(successfulStderr);
     expect(calls[0]?.command).toBe(resolve("/tools/ffprobe.exe"));
     expect(calls[0]?.args.slice(0, 2)).toEqual(["-v", "error"]);
+  });
+
+  it("does not accept an incomplete PNG through the missing-binary fallback", async () => {
+    const fixtureDir = mkdtempSync(resolve(tmpdir(), "hf-truncated-png-fallback-"));
+    const fixturePath = resolve(fixtureDir, "asset");
+    const ihdr = pngChunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 16, 2, 0, 0, 0]);
+    writeFileSync(fixturePath, buildPngWithChunks([ihdr]));
+    const { spawn } = createSpawnSpy([{ kind: "missing" }]);
+    hidePathBinaries();
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+    const { probeMediaProfile } = await import("./ffprobe.js");
+    try {
+      await expect(probeMediaProfile(fixturePath)).rejects.toThrow(/ffprobe/i);
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
   });
 
   // `profile` matters now: the packet refinement is an allowlist on AAC-LC,
@@ -715,11 +1000,12 @@ describe("extractPngMetadataFromBuffer cICP ordering", () => {
   it("does not emit color space until IHDR provides width and height", () => {
     const ihdr = pngChunk("IHDR", [0, 0, 0, 1, 0, 0, 0, 1, 16, 2, 0, 0, 0]);
     const cicp = pngChunk("cICP", [9, 16, 0, 1]);
+    const idat = pngChunk("IDAT", [0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]);
     const iend = pngChunk("IEND", []);
 
     // cICP before IHDR is invalid PNG ordering; make sure we don't return
     // zero-sized metadata in that case.
-    const malformed = buildPngWithChunks([cicp, ihdr, iend]);
+    const malformed = buildPngWithChunks([cicp, ihdr, idat, iend]);
     expect(extractPngMetadataFromBuffer(malformed)).toEqual({
       width: 1,
       height: 1,

@@ -49,7 +49,9 @@ import {
   parseAudioElements,
   type AudioElement,
   type AudioVolumeKeyframe,
+  type MediaProbeProfile,
   analyzeKeyframeIntervals,
+  probeMediaProfile,
 } from "@hyperframes/engine";
 import { assertPublicHttpsUrl, downloadToTemp, isHttpUrl } from "../utils/urlDownloader.js";
 import type { Page } from "puppeteer-core";
@@ -61,6 +63,8 @@ import { prepareAnimatedGifInputs } from "./animatedGifPrep.js";
 import { createStudioPositionSeekReapplyScript } from "@hyperframes/studio-server/manual-edits-render-script";
 import { getPositionEditsRenderScript } from "@hyperframes/core/runtime/position-edits-render";
 import { defaultLogger, type ProducerLogger } from "../logger.js";
+import { assertAssetMediaTypeProfile } from "./assetMediaType.js";
+import { withMediaProbeSlot } from "../utils/mediaProbeConcurrency.js";
 
 export interface CompiledComposition {
   html: string;
@@ -408,6 +412,7 @@ async function resolveMediaDuration(
   baseDir: string,
   downloadDir: string,
   tagName: string,
+  elementIdentity: string,
 ): Promise<{ duration: number; resolvedPath: string }> {
   let filePath = src;
 
@@ -428,25 +433,39 @@ async function resolveMediaDuration(
     return { duration: 0, resolvedPath: filePath };
   }
 
-  let metadata: { durationSeconds: number };
-  if (tagName === "video") {
-    metadata = await extractMediaMetadata(filePath);
-  } else {
+  return withMediaProbeSlot(async () => {
+    let profile: MediaProbeProfile;
     try {
-      metadata = await extractAudioMetadata(filePath);
-    } catch {
-      // Source file has no audio stream (e.g. a silent video used as an audio src).
-      // Return duration 0 so the element is excluded from the composition gracefully,
-      // matching how missing files and failed downloads are already handled above.
-      return { duration: 0, resolvedPath: filePath };
+      profile = await probeMediaProfile(filePath);
+    } catch (error) {
+      // Preserve the historical split: invalid video sources surface their
+      // probe failure, while invalid/unreadable audio sources resolve to zero
+      // duration and are excluded by the compiler.
+      if (tagName !== "video") return { duration: 0, resolvedPath: filePath };
+      throw error;
     }
-  }
+    assertAssetMediaTypeProfile(tagName === "video" ? "video" : "audio", profile, elementIdentity);
 
-  const fileDuration = metadata.durationSeconds;
-  const effectiveDuration = fileDuration - mediaStart;
-  const duration = effectiveDuration > 0 ? effectiveDuration : fileDuration;
+    let metadata: { durationSeconds: number };
+    if (tagName === "video") {
+      metadata = await extractMediaMetadata(filePath);
+    } else {
+      try {
+        metadata = await extractAudioMetadata(filePath);
+      } catch {
+        // Source file has no audio stream (e.g. a silent video used as an audio src).
+        // Return duration 0 so the element is excluded from the composition gracefully,
+        // matching how missing files and failed downloads are already handled above.
+        return { duration: 0, resolvedPath: filePath };
+      }
+    }
 
-  return { duration, resolvedPath: filePath };
+    const fileDuration = metadata.durationSeconds;
+    const effectiveDuration = fileDuration - mediaStart;
+    const duration = effectiveDuration > 0 ? effectiveDuration : fileDuration;
+
+    return { duration, resolvedPath: filePath };
+  });
 }
 
 /**
@@ -470,7 +489,7 @@ async function compileHtmlFile(
   // Phase 1: Resolve missing durations (parallel ffprobe)
   const resolvedResults = await Promise.all(
     mediaUnresolved.map((el) =>
-      resolveMediaDuration(el.src!, el.mediaStart, baseDir, downloadDir, el.tagName).then(
+      resolveMediaDuration(el.src!, el.mediaStart, baseDir, downloadDir, el.tagName, el.id).then(
         ({ duration }) => ({ id: el.id, duration }),
       ),
     ),
@@ -493,6 +512,7 @@ async function compileHtmlFile(
           baseDir,
           downloadDir,
           el.tagName,
+          el.id,
         );
         return { id: el.id, tagName: el.tagName, duration: el.duration, maxDuration, src: el.src! };
       }),
@@ -1992,7 +2012,10 @@ export async function compileForRender(
     if (isHttpUrl(video.src)) continue;
     const videoPath = resolve(projectDir, video.src);
     const reencode = `ffmpeg -i "${video.src}" -c:v libx264 -r 30 -g 30 -keyint_min 30 -movflags +faststart -c:a copy output.mp4`;
-    Promise.all([analyzeKeyframeIntervals(videoPath), extractMediaMetadata(videoPath)])
+    Promise.all([
+      withMediaProbeSlot(() => analyzeKeyframeIntervals(videoPath)),
+      withMediaProbeSlot(() => extractMediaMetadata(videoPath)),
+    ])
       .then(([analysis, metadata]) => {
         if (analysis.isProblematic) {
           defaultLogger.warn(
@@ -2056,7 +2079,7 @@ export async function compileForRender(
  */
 export interface BrowserMediaElement {
   id: string;
-  tagName: "video" | "audio";
+  tagName: "video" | "audio" | "image";
   src: string;
   start: number;
   end: number;
@@ -2090,13 +2113,29 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
       muted: boolean;
     }[] = [];
 
-    const mediaEls = document.querySelectorAll("video[data-start], audio[data-start]");
+    const autoImageIds = new Map<Element, string>();
+    let autoImageId = 0;
+    document.querySelectorAll("img[src]").forEach((image) => {
+      if (!image.id) autoImageIds.set(image, `hf-img-${autoImageId++}`);
+    });
+
+    const mediaEls = new Set<Element>(
+      document.querySelectorAll("video[data-start], audio[data-start], img[data-var-src]"),
+    );
+    // A variable-bound <picture><source> changes the owning image's currentSrc;
+    // the <img> fallback itself does not necessarily carry data-var-src.
+    document.querySelectorAll("picture source[data-var-src]").forEach((source) => {
+      const image = source.closest("picture")?.querySelector("img");
+      if (image) mediaEls.add(image);
+    });
     mediaEls.forEach((el) => {
-      const htmlEl = el as HTMLVideoElement | HTMLAudioElement;
-      const id = htmlEl.id;
+      const htmlEl = el as HTMLVideoElement | HTMLAudioElement | HTMLImageElement;
+      const isImage = htmlEl.tagName.toLowerCase() === "img";
+      const id = htmlEl.id || (isImage ? autoImageIds.get(htmlEl) : undefined);
       if (!id) return;
 
-      const src = htmlEl.src || htmlEl.getAttribute("src") || "";
+      // currentSrc is authoritative for <video>/<audio><source> and responsive images.
+      const src = htmlEl.currentSrc || htmlEl.src || htmlEl.getAttribute("src") || "";
       const start = parseFloat(htmlEl.getAttribute("data-start") || "0");
       const end = parseFloat(htmlEl.getAttribute("data-end") || "0");
       const duration = parseFloat(htmlEl.getAttribute("data-duration") || "0");
@@ -2104,11 +2143,13 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
       const loop = htmlEl.hasAttribute("loop");
       const hasAudio = htmlEl.getAttribute("data-has-audio") === "true";
       const volume = parseFloat(htmlEl.getAttribute("data-volume") || "1");
-      const muted = htmlEl.hasAttribute("muted") || htmlEl.muted;
+      const muted =
+        !isImage &&
+        (htmlEl.hasAttribute("muted") || (htmlEl as HTMLVideoElement | HTMLAudioElement).muted);
 
       results.push({
         id,
-        tagName: htmlEl.tagName.toLowerCase(),
+        tagName: isImage ? "image" : htmlEl.tagName.toLowerCase(),
         src,
         start,
         end,

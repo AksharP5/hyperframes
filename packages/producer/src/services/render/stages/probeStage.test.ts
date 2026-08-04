@@ -11,6 +11,13 @@ import {
 // in beginframe mode even when lowMemoryMode demanded screenshot capture).
 const capturedCfgs: unknown[] = [];
 const capturedOptions: unknown[] = [];
+let mediaPreflightCallCount = 0;
+let mediaPreflightError: Error | null = null;
+let mediaPreflightSignal: AbortSignal | undefined;
+let mediaPreflightComposition: unknown;
+let afterMediaPreflight: (() => void) | null = null;
+let fileServerCloseCallCount = 0;
+let browserMediaResults: unknown[] = [];
 
 type MockSession = {
   id: number;
@@ -55,7 +62,27 @@ function resetRetryMocks() {
   createdSessions.length = 0;
   closedSessions.length = 0;
   durationProbeSessions.length = 0;
+  mediaPreflightCallCount = 0;
+  mediaPreflightError = null;
+  mediaPreflightSignal = undefined;
+  mediaPreflightComposition = undefined;
+  afterMediaPreflight = null;
+  fileServerCloseCallCount = 0;
+  browserMediaResults = [];
 }
+
+mock.module("../../assetMediaType.js", () => ({
+  preflightCompositionAssetMediaTypes: async (input: {
+    signal?: AbortSignal;
+    composition?: unknown;
+  }) => {
+    mediaPreflightCallCount += 1;
+    mediaPreflightSignal = input.signal;
+    mediaPreflightComposition = input.composition;
+    if (mediaPreflightError) throw mediaPreflightError;
+    afterMediaPreflight?.();
+  },
+}));
 
 mock.module("@hyperframes/engine", () => ({
   createCaptureSession: async (
@@ -126,14 +153,17 @@ mock.module("../../fileServer.js", () => ({
   createFileServer: async () => ({
     url: "http://127.0.0.1:0",
     port: 0,
-    close: () => {},
+    close: () => {
+      fileServerCloseCallCount += 1;
+    },
     addPreHeadScript: () => {},
   }),
+  closeFileServerSafely: (fileServer: { close: () => void }) => fileServer.close(),
   VIRTUAL_TIME_SHIM: "",
 }));
 
 mock.module("../../htmlCompiler.js", () => ({
-  discoverMediaFromBrowser: async () => [],
+  discoverMediaFromBrowser: async () => browserMediaResults,
   discoverAudioVolumeAutomationFromTimeline: async () => [],
   discoverVideoVisibilityFromTimeline: async () => [],
   recompileWithResolutions: async (c: unknown) => c,
@@ -142,7 +172,11 @@ mock.module("../../htmlCompiler.js", () => ({
 
 mock.module("../shared.js", () => ({
   BROWSER_MEDIA_EPSILON: 0.0001,
-  projectBrowserEndToCompositionTimeline: () => 0,
+  projectBrowserEndToCompositionTimeline: (
+    existingStart: number,
+    browserStart: number,
+    browserEnd: number,
+  ) => browserEnd + (existingStart - browserStart),
   resolveBrowserMediaEnd: (_start: number, end: number, duration: number) =>
     Number.isFinite(duration) && duration > 0 ? _start + duration : end,
   writeCompiledArtifacts: () => {},
@@ -238,6 +272,7 @@ function makeProbeInput(overrides: {
       debug: () => {},
     },
     assertNotAborted: () => {},
+    abortSignal: undefined as AbortSignal | undefined,
   };
 }
 
@@ -299,16 +334,132 @@ describe("hasVariableBoundMedia", () => {
     expect(hasVariableBoundMedia(html, { voice_src: "row-02.wav" })).toBe(true);
   });
 
-  it("does not probe unrelated overrides or image-only bindings", () => {
+  it("ignores unrelated overrides and probes image-bound sources", () => {
     const audio = `<audio src="fallback.wav" data-var-src="voice_src"></audio>`;
     const image = `<img src="fallback.png" data-var-src="hero_src" />`;
 
     expect(hasVariableBoundMedia(audio, { title: "Row 02" })).toBe(false);
-    expect(hasVariableBoundMedia(image, { hero_src: "row-02.png" })).toBe(false);
+    expect(hasVariableBoundMedia(image, { hero_src: "row-02.png" })).toBe(true);
   });
 });
 
 describe("runProbeStage — forceScreenshot threading", () => {
+  it("runs media-type preflight after the browser-reconciliation phase", async () => {
+    mediaPreflightCallCount = 0;
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({});
+    input.composition.duration = 5;
+    input.compiled.html = "<div>static</div>";
+
+    await runProbeStage(input);
+
+    expect(mediaPreflightCallCount).toBe(1);
+  });
+
+  it("reconciles a sub-composition image without losing its parent timeline offset", async () => {
+    resetRetryMocks();
+    browserMediaResults = [
+      {
+        id: "hero",
+        tagName: "image",
+        src: "runtime-video.asset",
+        start: 0,
+        end: 2,
+        duration: 2,
+        mediaStart: 0,
+        loop: false,
+        hasAudio: false,
+        volume: 1,
+        muted: false,
+      },
+    ];
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({});
+    input.composition.duration = 5;
+    input.composition.images.push({ id: "hero", src: "fallback.png", start: 4, end: 6 });
+    input.compiled.html =
+      '<img id="hero" src="fallback.png" data-var-src="hero_src" data-start="0" data-end="2">';
+    input.job.config.variables = { hero_src: "runtime-video.asset" };
+
+    await runProbeStage(input);
+
+    expect(input.composition.images[0]?.src).toBe("runtime-video.asset");
+    expect(input.composition.images[0]?.start).toBe(4);
+    expect(input.composition.images[0]?.end).toBe(6);
+    expect(mediaPreflightComposition).toBe(input.composition);
+  });
+
+  it("reconciles a nested source's selected runtime URL before media-type preflight", async () => {
+    resetRetryMocks();
+    browserMediaResults = [
+      {
+        id: "clip",
+        tagName: "video",
+        src: "runtime-still.asset",
+        start: 0,
+        end: 5,
+        duration: 5,
+        mediaStart: 0,
+        loop: false,
+        hasAudio: false,
+        volume: 1,
+        muted: false,
+      },
+    ];
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({});
+    input.composition.duration = 5;
+    input.composition.videos.push({
+      id: "clip",
+      src: "fallback.mp4",
+      start: 0,
+      end: 5,
+      mediaStart: 0,
+      loop: false,
+      hasAudio: false,
+    });
+    input.compiled.html = `<video id="clip" data-start="0" data-end="5">
+      <source src="fallback.mp4" data-var-src="clip_src">
+    </video>`;
+    input.job.config.variables = { clip_src: "runtime-still.asset" };
+
+    await runProbeStage(input);
+
+    expect(input.composition.videos[0]?.src).toBe("runtime-still.asset");
+    expect(mediaPreflightComposition).toBe(input.composition);
+  });
+
+  it("passes cancellation through and closes probe-owned resources when preflight rejects", async () => {
+    resetRetryMocks();
+    mediaPreflightError = new Error("ASSET_MEDIA_TYPE_MISMATCH");
+    const controller = new AbortController();
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({});
+    input.abortSignal = controller.signal;
+
+    await expect(runProbeStage(input)).rejects.toThrow("ASSET_MEDIA_TYPE_MISMATCH");
+
+    expect(mediaPreflightSignal).toBe(controller.signal);
+    expect(closeCaptureSessionCallCount).toBe(1);
+    expect(fileServerCloseCallCount).toBe(1);
+    mediaPreflightError = null;
+  });
+
+  it("closes probe-owned resources when cancellation lands after an empty preflight", async () => {
+    resetRetryMocks();
+    const controller = new AbortController();
+    afterMediaPreflight = () => controller.abort(new Error("render cancelled"));
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({});
+    input.abortSignal = controller.signal;
+    input.assertNotAborted = () => controller.signal.throwIfAborted();
+
+    await expect(runProbeStage(input)).rejects.toThrow("render cancelled");
+
+    expect(closeCaptureSessionCallCount).toBe(1);
+    expect(fileServerCloseCallCount).toBe(1);
+  });
+
   it("launches a probe when a static-duration composition inserts video at runtime", async () => {
     capturedCfgs.length = 0;
     const { runProbeStage } = await import("./probeStage.js");
@@ -480,6 +631,40 @@ describe("runProbeStage — decimal duration frame count", () => {
 });
 
 describe("runProbeStage — transient browser error retry (#1687)", () => {
+  async function runWithTransientInitializeError(message: string) {
+    resetRetryMocks();
+    capturedCfgs.length = 0;
+    initializeSessionError = new Error(message);
+    initializeSessionFailUntilAttempt = 1;
+
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({ cfgForceScreenshot: false, stageForceScreenshot: false });
+    const result = await runProbeStage(input);
+
+    expect(initializeSessionCallCount).toBe(2);
+    expect(closeCaptureSessionCallCount).toBe(1);
+    expect(result.duration).toBe(5);
+    expect(result.probeSession).not.toBeNull();
+  }
+
+  async function expectInitializeFailure(input: {
+    message: string;
+    expectedMessage: string;
+    expectedAttempts: number;
+  }) {
+    resetRetryMocks();
+    capturedCfgs.length = 0;
+    initializeSessionError = new Error(input.message);
+    initializeSessionFailUntilAttempt = 999;
+
+    const { runProbeStage } = await import("./probeStage.js");
+    const probeInput = makeProbeInput({ cfgForceScreenshot: false, stageForceScreenshot: false });
+
+    await expect(runProbeStage(probeInput)).rejects.toThrow(input.expectedMessage);
+    expect(initializeSessionCallCount).toBe(input.expectedAttempts);
+    expect(closeCaptureSessionCallCount).toBe(input.expectedAttempts);
+  }
+
   it("uses the replacement session after a BeginFrame liveness fallback", async () => {
     resetRetryMocks();
     capturedCfgs.length = 0;
@@ -499,124 +684,42 @@ describe("runProbeStage — transient browser error retry (#1687)", () => {
   });
 
   it("retries once on a transient 'Navigating frame was detached' error and succeeds", async () => {
-    resetRetryMocks();
-    capturedCfgs.length = 0;
-    initializeSessionError = new Error("Navigating frame was detached");
-    initializeSessionFailUntilAttempt = 1;
-
-    const { runProbeStage } = await import("./probeStage.js");
-    const input = makeProbeInput({ cfgForceScreenshot: false, stageForceScreenshot: false });
-
-    const result = await runProbeStage(input);
-
-    expect(initializeSessionCallCount).toBe(2);
-    expect(closeCaptureSessionCallCount).toBe(1);
-    expect(result.duration).toBe(5);
-    expect(result.probeSession).not.toBeNull();
+    await runWithTransientInitializeError("Navigating frame was detached");
   });
 
   it("retries once on a browser-probe navigation timeout and succeeds", async () => {
-    resetRetryMocks();
-    capturedCfgs.length = 0;
-    initializeSessionError = new Error("Navigation timeout of 60000 ms exceeded");
-    initializeSessionFailUntilAttempt = 1;
-
-    const { runProbeStage } = await import("./probeStage.js");
-    const input = makeProbeInput({ cfgForceScreenshot: false, stageForceScreenshot: false });
-
-    const result = await runProbeStage(input);
-
-    expect(initializeSessionCallCount).toBe(2);
-    expect(closeCaptureSessionCallCount).toBe(1);
-    expect(result.duration).toBe(5);
-    expect(result.probeSession).not.toBeNull();
+    await runWithTransientInitializeError("Navigation timeout of 60000 ms exceeded");
   });
 
   it("throws immediately on a non-transient error without retrying", async () => {
-    resetRetryMocks();
-    capturedCfgs.length = 0;
-    initializeSessionError = new Error("FONT_FETCH_FAILED: Inter");
-    initializeSessionFailUntilAttempt = 999;
-
-    const { runProbeStage } = await import("./probeStage.js");
-    const input = makeProbeInput({ cfgForceScreenshot: false, stageForceScreenshot: false });
-
-    let caught: unknown;
-    try {
-      await runProbeStage(input);
-    } catch (err) {
-      caught = err;
-    }
-
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toContain("FONT_FETCH_FAILED");
-    expect(initializeSessionCallCount).toBe(1);
-    expect(closeCaptureSessionCallCount).toBe(1);
+    await expectInitializeFailure({
+      message: "FONT_FETCH_FAILED: Inter",
+      expectedMessage: "FONT_FETCH_FAILED",
+      expectedAttempts: 1,
+    });
   });
 
   it("throws after exhausting retry attempts on persistent transient errors", async () => {
-    resetRetryMocks();
-    capturedCfgs.length = 0;
-    initializeSessionError = new Error("Target closed");
-    initializeSessionFailUntilAttempt = 999;
-
-    const { runProbeStage } = await import("./probeStage.js");
-    const input = makeProbeInput({ cfgForceScreenshot: false, stageForceScreenshot: false });
-
-    let caught: unknown;
-    try {
-      await runProbeStage(input);
-    } catch (err) {
-      caught = err;
-    }
-
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toContain("Target closed");
-    expect(initializeSessionCallCount).toBe(2);
-    expect(closeCaptureSessionCallCount).toBe(2);
+    await expectInitializeFailure({
+      message: "Target closed",
+      expectedMessage: "Target closed",
+      expectedAttempts: 2,
+    });
   });
 
   it("retries once on a pollHfReady zero-duration timeout (renderReady: false) and succeeds", async () => {
-    resetRetryMocks();
-    capturedCfgs.length = 0;
-    initializeSessionError = new Error(
+    await runWithTransientInitializeError(
       "[FrameCapture] Composition has zero duration.\n  Runtime ready: false, __player: true, __hf.seek: true, GSAP timeline: true, data-duration: 53.3s",
     );
-    initializeSessionFailUntilAttempt = 1;
-
-    const { runProbeStage } = await import("./probeStage.js");
-    const input = makeProbeInput({ cfgForceScreenshot: false, stageForceScreenshot: false });
-
-    const result = await runProbeStage(input);
-
-    expect(initializeSessionCallCount).toBe(2);
-    expect(closeCaptureSessionCallCount).toBe(1);
-    expect(result.duration).toBe(5);
-    expect(result.probeSession).not.toBeNull();
   });
 
   it("throws immediately on a permanent zero-duration error (renderReady: true — genuine authoring bug)", async () => {
-    resetRetryMocks();
-    capturedCfgs.length = 0;
-    initializeSessionError = new Error(
-      "[FrameCapture] Composition has zero duration.\n  Runtime ready: true, __player: true, __hf.seek: true, GSAP timeline: false, data-duration: not set",
-    );
-    initializeSessionFailUntilAttempt = 999;
-
-    const { runProbeStage } = await import("./probeStage.js");
-    const input = makeProbeInput({ cfgForceScreenshot: false, stageForceScreenshot: false });
-
-    let caught: unknown;
-    try {
-      await runProbeStage(input);
-    } catch (err) {
-      caught = err;
-    }
-
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toContain("Runtime ready: true");
-    expect(initializeSessionCallCount).toBe(1);
-    expect(closeCaptureSessionCallCount).toBe(1);
+    await expectInitializeFailure({
+      message:
+        "[FrameCapture] Composition has zero duration.\n  Runtime ready: true, __player: true, __hf.seek: true, GSAP timeline: false, data-duration: not set",
+      expectedMessage: "Runtime ready: true",
+      expectedAttempts: 1,
+    });
   });
 
   it("retries on a transient browser LAUNCH failure (createCaptureSession throws)", async () => {

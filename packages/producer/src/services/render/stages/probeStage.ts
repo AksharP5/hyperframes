@@ -50,7 +50,12 @@ import {
   recompileWithResolutions,
   resolveCompositionDurations,
 } from "../../htmlCompiler.js";
-import { createFileServer, type FileServerHandle, VIRTUAL_TIME_SHIM } from "../../fileServer.js";
+import {
+  closeFileServerSafely,
+  createFileServer,
+  type FileServerHandle,
+  VIRTUAL_TIME_SHIM,
+} from "../../fileServer.js";
 import type { ProducerLogger } from "../../../logger.js";
 import {
   BROWSER_MEDIA_EPSILON,
@@ -61,6 +66,7 @@ import {
 } from "../shared.js";
 import type { RenderJob } from "../../renderOrchestrator.js";
 import { isActionableProbeFailure } from "./probeFailures.js";
+import { preflightCompositionAssetMediaTypes } from "../../assetMediaType.js";
 
 export interface ProbeStageInput {
   projectDir: string;
@@ -75,6 +81,7 @@ export interface ProbeStageInput {
   forceScreenshot: boolean;
   log: ProducerLogger;
   assertNotAborted: () => void;
+  abortSignal?: AbortSignal;
   /** From compileStage. May be replaced via `recompileWithResolutions`. */
   compiled: CompiledComposition;
   /** From compileStage. Mutated in place (videos/audios pushed, duration set). */
@@ -148,7 +155,7 @@ export function hasAutoStartVideos(html: string): boolean {
 }
 
 /**
- * Variable-bound audio/video sources are resolved by the browser runtime, not
+ * Variable-bound image/audio/video sources are resolved by the browser runtime, not
  * the static compiler. Probe them whenever the current render overrides the
  * referenced variable so media extraction follows the resolved row value.
  */
@@ -159,7 +166,9 @@ export function hasVariableBoundMedia(
   if (!variables || Object.keys(variables).length === 0) return false;
   const { document } = parseHTML(html);
   return Array.from(
-    document.querySelectorAll("audio[data-var-src], video[data-var-src], source[data-var-src]"),
+    document.querySelectorAll(
+      "img[data-var-src], audio[data-var-src], video[data-var-src], source[data-var-src]",
+    ),
   ).some((element) => {
     const variableId = element.getAttribute("data-var-src")?.trim();
     return Boolean(variableId && Object.hasOwn(variables, variableId));
@@ -224,6 +233,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
     forceScreenshot,
     log,
     assertNotAborted,
+    abortSignal,
     composition,
     width,
     height,
@@ -469,6 +479,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
     if (browserMedia.length > 0) {
       const existingVideoIds = new Set(composition.videos.map((v) => v.id));
       const existingAudioIds = new Set(composition.audios.map((a) => a.id));
+      const existingImageIds = new Set(composition.images.map((image) => image.id));
 
       pruneMutedBrowserMedia(composition, browserMedia, existingAudioIds);
 
@@ -575,6 +586,33 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
             });
             existingAudioIds.add(el.id);
           }
+        } else if (el.tagName === "image") {
+          if (existingImageIds.has(el.id)) {
+            const existing = composition.images.find((image) => image.id === el.id);
+            if (existing) {
+              existing.src = src;
+              const runtimeEnd = resolveBrowserMediaEnd(el.start, el.end, el.duration);
+              const projectedEnd = projectBrowserEndToCompositionTimeline(
+                existing.start,
+                el.start,
+                runtimeEnd,
+              );
+              if (
+                projectedEnd > existing.start &&
+                Math.abs(existing.end - projectedEnd) > BROWSER_MEDIA_EPSILON
+              ) {
+                existing.end = projectedEnd;
+              }
+            }
+          } else {
+            composition.images.push({
+              id: el.id,
+              src,
+              start: el.start,
+              end: resolveBrowserMediaEnd(el.start, el.end, el.duration),
+            });
+            existingImageIds.add(el.id);
+          }
         }
       }
     }
@@ -627,6 +665,38 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
         }
       }
     }
+  }
+
+  try {
+    await preflightCompositionAssetMediaTypes({
+      projectDir,
+      compiledDir: join(workDir, "compiled"),
+      composition,
+      signal: abortSignal,
+    });
+    // Keep the final cancellation check inside the ownership guard: an abort
+    // after the last probe resolves must still release the stage-owned browser
+    // session and file server before propagating.
+    assertNotAborted();
+  } catch (error) {
+    // The orchestrator only takes ownership after this stage returns. Until
+    // then, any post-browser validation failure must release both resources
+    // here or a deterministic user error strands Chrome and its file server.
+    if (probeSession) {
+      try {
+        await closeCaptureSession(probeSession);
+      } catch (closeError) {
+        log.warn("Failed to close probe session after media preflight failure", {
+          error: closeError instanceof Error ? closeError.message : String(closeError),
+        });
+      }
+      probeSession = null;
+    }
+    if (fileServer) {
+      closeFileServerSafely(fileServer, "probe media preflight", log);
+      fileServer = null;
+    }
+    throw error;
   }
   const browserProbeMs = Date.now() - probeStart;
 
