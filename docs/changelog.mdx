@@ -9,9 +9,9 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
-  label="HyperFrames v0.7.91"
+  label="HyperFrames v0.7.92"
   description="Released - 2026-08-04"
-  tags={["Release", "Studio", "Core", "CLI"]}
+  tags={["Release", "Release", "Studio", "Core"]}
 >
 Percentage-based canary rollouts land, so a change can ship to a stable slice of
 installs instead of all-or-nothing — decided locally and offline, with two inert
@@ -31,6 +31,7 @@ timeline, and sub-composition sibling asset paths now resolving everywhere.
 
 ## Fixes
 
+- **Studio:** Scope timeline ease focus lifecycle ([0a70ba671](https://github.com/heygen-com/hyperframes/commit/0a70ba67179f00bd149aed42421ed77f56436199), [#2710](https://github.com/heygen-com/hyperframes/pull/2710))
 - **Studio:** Scope timeline context targets ([423c5ffad](https://github.com/heygen-com/hyperframes/commit/423c5ffadb47d1a97a65c4ef0f7229097e14ad0e), [#2708](https://github.com/heygen-com/hyperframes/pull/2708))
 - **Core:** Resolve sub-composition sibling asset paths everywhere ([4e7fcf7f2](https://github.com/heygen-com/hyperframes/commit/4e7fcf7f2a5af2922ecb6855f08ed879018b8521), [#2994](https://github.com/heygen-com/hyperframes/pull/2994))
 - **Studio:** Resolve sibling asset paths in sub-composition previews ([cbd8a77d1](https://github.com/heygen-com/hyperframes/commit/cbd8a77d162be059126698f7e20680c5430dd3d5), [#2983](https://github.com/heygen-com/hyperframes/pull/2983))
@@ -51,6 +52,7 @@ timeline, and sub-composition sibling asset paths now resolving everywhere.
 
 ## Docs & Examples
 
+- Add the shared page components and the Reference Project ([edfe66a95](https://github.com/heygen-com/hyperframes/commit/edfe66a95375234f0d261a09a46a29424d040318), [#2977](https://github.com/heygen-com/hyperframes/pull/2977))
 - **Changelog:** Weekly digest 2026-07-27–2026-08-03 ([1d0d4d893](https://github.com/heygen-com/hyperframes/commit/1d0d4d8939d358edb7cdb017733b7641d5eec42c), [#2969](https://github.com/heygen-com/hyperframes/pull/2969))
 - **Canary:** Connect canary rollouts to the telemetry docs ([54534d53c](https://github.com/heygen-com/hyperframes/commit/54534d53c257fda8fa0f14d4d91fd58724f6b6a6))
 - **Canary:** Calibration check 2 reflects the breaker rollover ([0d98de023](https://github.com/heygen-com/hyperframes/commit/0d98de023f5d38b0f7767c7f4defc6a85bff217a))
@@ -102,8 +104,11 @@ timeline, and sub-composition sibling asset paths now resolving everywhere.
 
 ## Internal
 
-[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.7.90...v0.7.91).
+- **Release:** Fold the unpublished v0.7.91 artifacts into v0.7.92 ([e70ffad93](https://github.com/heygen-com/hyperframes/commit/e70ffad93987296ac8b351e85dd4872fdc2da285))
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.7.90...v0.7.92).
 </Update>
+
 
 <Update
   label="HyperFrames v0.7.90"
