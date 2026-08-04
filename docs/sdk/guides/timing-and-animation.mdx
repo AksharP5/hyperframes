@@ -195,7 +195,7 @@ const check = comp.can({
 
 if (!check.ok) {
   if (check.code === "E_NO_GSAP_TIMELINE") {
-    // Parser engine not yet available — show a disabled state or skip
+    // No gsap.timeline() in this composition — prompt to add one, or skip
     console.warn("GSAP timeline not available:", check.message);
   }
   return;
@@ -214,7 +214,7 @@ Stable error codes returned by `can()`:
 | -------------------- | --------------------------------------------------------------- |
 | `E_TARGET_NOT_FOUND` | The target `HfId` does not exist in the document.               |
 | `E_NO_ROOT`          | The document has no root element.                               |
-| `E_NO_GSAP_TIMELINE` | Op requires the GSAP parser engine, which is not yet available. |
+| `E_NO_GSAP_TIMELINE` | The GSAP script has no `gsap.timeline()` to attach to. Declare one and retry. |
 | `E_NO_GSAP_SCRIPT`   | The composition has no embedded GSAP script.                    |
 
 ---

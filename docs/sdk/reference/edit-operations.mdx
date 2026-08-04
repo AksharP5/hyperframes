@@ -72,11 +72,11 @@ Stable `code` values for `ok: false`:
 |------|---------|
 | `E_TARGET_NOT_FOUND` | The `target` hf-id does not exist in the document. |
 | `E_NO_ROOT` | The document has no root element (empty HTML). |
-| `E_NO_GSAP_TIMELINE` | Op requires a parsed GSAP timeline; parser engine not yet active. |
+| `E_NO_GSAP_TIMELINE` | The GSAP script has no `gsap.timeline()` to attach to. Declare one (`var tl = gsap.timeline(...)`) and retry. |
 | `E_NO_GSAP_SCRIPT` | Op requires a GSAP `<script>` block; none found in the document. |
 
 <Note>
-  Several Phase-3b GSAP ops (`addGsapTween`, `setGsapTween`, `removeGsapTween`, `addGsapKeyframe`, `setGsapKeyframe`, `removeGsapKeyframe`, etc.) return `{ ok: false, code: 'E_NO_GSAP_TIMELINE' }` from `can()` until the parser engine ships. `dispatch()` still applies those ops structurally even when `can()` returns false.
+  These ops need a timeline to attach to. If the composition's GSAP script has no `gsap.timeline()` declaration, `can()` returns `{ ok: false, code: 'E_NO_GSAP_TIMELINE' }` — add `var tl = gsap.timeline(...)` and it succeeds. `dispatch()` still applies the op structurally even when `can()` returns false.
 </Note>
 
 See also: [`Composition`](/sdk/reference/composition) for the typed-method wrappers, [`Types`](/sdk/reference/types) for `CanResult` and `EditOp`.
@@ -318,7 +318,7 @@ comp.dispatch({ type: "removeVariable", id: "brandColor" });
 These ops add, edit, and remove GSAP tween entries in the composition's GSAP script block. They operate by `animationId` — a stable string identifier minted when a tween is created. Use `comp.addGsapTween()` or `addWithKeyframes` to mint a new id; the typed wrapper returns it directly.
 
 <Note>
-  Several GSAP ops require the parser engine to be active. Until it ships, `can()` returns `{ ok: false, code: 'E_NO_GSAP_TIMELINE' }` for these ops. `dispatch()` still applies the op structurally.
+  These ops attach to a timeline. Without a `gsap.timeline()` declaration in the script, `can()` returns `{ ok: false, code: 'E_NO_GSAP_TIMELINE' }` — declare one and retry. `dispatch()` still applies the op structurally.
 </Note>
 
 | `type` | Key fields | What it does |
