@@ -173,7 +173,7 @@
               "guides/music-to-video",
               "guides/slideshow",
               "guides/general-video",
-              "guides/export-and-share"
+              "guides/hyperframes-vs-remotion"
             ]
           },
           {
@@ -186,7 +186,8 @@
               "guides/voice-and-audio",
               "guides/remove-background",
               "guides/color-grading",
-              "guides/media-effects"
+              "guides/media-effects",
+              "guides/export-and-share"
             ]
           },
           {
@@ -530,7 +531,6 @@
               "concepts/frame-adapters",
               "concepts/determinism",
               "guides/html-in-canvas",
-              "guides/hyperframes-vs-remotion",
               "guides/figma"
             ]
           },

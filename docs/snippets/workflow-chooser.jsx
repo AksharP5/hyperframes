@@ -66,6 +66,11 @@ export const WorkflowChooser = () => {
       video: `${CDN}/wfv2-general.mp4`,
       poster: `${CDN}/wfv2-general.jpg`,
     },
+    {
+      title: "Port a Remotion composition",
+      bring: "Bring an existing Remotion project. One-way migration, not a new build.",
+      href: "/guides/hyperframes-vs-remotion",
+    },
   ];
 
   // Lazy initializer, not a post-mount effect: with useState(false) the first
@@ -110,16 +115,23 @@ export const WorkflowChooser = () => {
           aria-label={`${route.title}. ${route.bring}`}
           className="hf-workflow-route"
         >
-          <video
-            src={reducedMotion ? undefined : route.video}
-            poster={route.poster}
-            autoPlay={!reducedMotion}
-            muted
-            loop={!reducedMotion}
-            playsInline
-            preload="metadata"
-            aria-hidden="true"
-          />
+          {/* A route without a preview renders no <video> at all. An empty
+              video element draws a black rectangle, which reads as a broken
+              tile rather than a route with no clip yet. */}
+          {route.video ? (
+            <video
+              src={reducedMotion ? undefined : route.video}
+              poster={route.poster}
+              autoPlay={!reducedMotion}
+              muted
+              loop={!reducedMotion}
+              playsInline
+              preload="metadata"
+              aria-hidden="true"
+            />
+          ) : (
+            <span className="hf-workflow-route-noclip" aria-hidden="true" />
+          )}
           <span>
             <span className="hf-workflow-route-title">{route.title}</span>
             <span className="hf-workflow-route-copy">{route.bring}</span>
