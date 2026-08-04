@@ -422,7 +422,25 @@ export const _probeBeginFrameSupportForTests = probeBeginFrameSupport;
 export const _closeBrowserAfterFailedProbeForTests = closeBrowserAfterFailedProbe;
 
 /**
- * Cached *in-flight or resolved* probe Promise for `resolveBrowserGpuMode("auto", ...)`.
+ * Outcome of the one-shot WebGL probe.
+ *
+ * `cause` distinguishes the two ways a probe lands on `"software"`, because
+ * they need OPPOSITE remediation:
+ *   - `"no-gpu"`  — the probe ran and Chrome reported a software renderer
+ *                   (SwiftShader / llvmpipe). Remediation: GPU passthrough.
+ *   - `"probe-error"` — the probe itself failed (Chrome couldn't launch, bad
+ *                   executable path, sandbox denied). We have NO evidence
+ *                   about the GPU either way; telling the operator to fix GPU
+ *                   passthrough would send them chasing the wrong problem.
+ */
+interface GpuProbeOutcome {
+  mode: "software" | "hardware";
+  cause?: "no-gpu" | "probe-error";
+}
+
+/**
+ * Cached *in-flight or resolved* probe Promise, shared by BOTH the `"auto"`
+ * and explicit `"hardware"` entry points of `resolveBrowserGpuMode`.
  *
  * Caching the Promise (rather than the resolved value) deduplicates concurrent
  * callers — the parallel coordinator runs N workers via `Promise.all`, so a
@@ -430,10 +448,8 @@ export const _closeBrowserAfterFailedProbeForTests = closeBrowserAfterFailedProb
  * simultaneous probe Chromes. The first call assigns the Promise and every
  * other concurrent caller awaits the same one, paying the ~240 ms probe cost
  * exactly once per process lifetime.
- *
- * Exported for tests; production callers go through `resolveBrowserGpuMode`.
  */
-let _autoBrowserGpuModeCache: Promise<"software" | "hardware"> | undefined;
+let _autoBrowserGpuModeCache: Promise<GpuProbeOutcome> | undefined;
 
 /** Test-only: reset the cached probe result. */
 export function _resetAutoBrowserGpuModeCacheForTests(): void {
@@ -479,7 +495,7 @@ async function probeAutoBrowserGpuMode(options: {
   chromePath?: string;
   browserTimeout?: number;
   platform?: NodeJS.Platform;
-}): Promise<"software" | "hardware"> {
+}): Promise<GpuProbeOutcome> {
   const platform = options.platform ?? process.platform;
   const browserTimeout = options.browserTimeout ?? DEFAULT_CONFIG.browserTimeout;
   const executablePath = options.chromePath ?? resolveHeadlessShellPath({});
@@ -487,7 +503,7 @@ async function probeAutoBrowserGpuMode(options: {
 
   if (ppt === null) {
     logResolvedBrowserGpuMode("software", "puppeteer unavailable");
-    return "software";
+    return { mode: "software", cause: "probe-error" };
   }
 
   try {
@@ -498,10 +514,10 @@ async function probeAutoBrowserGpuMode(options: {
     });
     const resolved = resolveWebGlProbeMode(info);
     logResolvedBrowserGpuMode(resolved, describeWebGlProbe(info));
-    return resolved;
+    return resolved === "hardware" ? { mode: "hardware" } : { mode: "software", cause: "no-gpu" };
   } catch (err) {
     logResolvedBrowserGpuMode("software", formatProbeFailure(err));
-    return "software";
+    return { mode: "software", cause: "probe-error" };
   }
 }
 
@@ -542,32 +558,53 @@ export function resolveBrowserGpuMode(
   if (mode === "software") return Promise.resolve(mode);
 
   _autoBrowserGpuModeCache ??= probeAutoBrowserGpuMode(options);
-  if (mode === "auto") return _autoBrowserGpuModeCache;
+  if (mode === "auto") return _autoBrowserGpuModeCache.then((probed) => probed.mode);
 
   return _autoBrowserGpuModeCache.then((probed) => {
-    // Warn once per process, not once per caller: `createCaptureSession`
+    // Warn once per cache lifetime, not once per caller: `createCaptureSession`
     // resolves the mode for the probe browser AND every parallel worker, so
     // an un-deduplicated warning prints N+1 times and buries itself.
-    if (probed === "software" && !_unverifiedHardwareGpuWarned) {
+    if (probed.mode === "software" && !_unverifiedHardwareGpuWarned) {
       _unverifiedHardwareGpuWarned = true;
-      console.warn(buildUnverifiedHardwareGpuWarning(options.platform ?? process.platform));
+      console.warn(
+        buildUnverifiedHardwareGpuWarning(options.platform ?? process.platform, probed.cause),
+      );
     }
     return "hardware";
   });
 }
 
-/** One-shot latch for the explicit-hardware-probed-to-software warning. */
+/**
+ * Latch for the explicit-hardware-probed-to-software warning: fires once per
+ * cache lifetime (re-armed by `_resetAutoBrowserGpuModeCacheForTests`).
+ */
 let _unverifiedHardwareGpuWarned = false;
 
 /**
- * Warning text for "you asked for hardware GPU, the probe found none".
+ * Warning text for "you asked for hardware GPU and we could not confirm it".
  *
- * Names the observable symptom (the render still completes, just on CPU) and
- * the platform's actual remediation, so the operator doesn't have to infer it
- * from Chrome's `Automatic fallback to software WebGL` warning. Exported for
- * tests.
+ * Splits on `cause` because the two failure shapes need opposite remediation.
+ * A probe that RAN and saw SwiftShader is a GPU-passthrough problem. A probe
+ * that could not run tells us nothing about the GPU — pointing that operator
+ * at `--gpus all` would send them chasing a phantom while their Chrome
+ * install is the actual fault.
  */
-export function buildUnverifiedHardwareGpuWarning(platform: NodeJS.Platform | string): string {
+function buildUnverifiedHardwareGpuWarning(
+  platform: NodeJS.Platform | string,
+  cause: GpuProbeOutcome["cause"],
+): string {
+  if (cause === "probe-error") {
+    return (
+      "[hyperframes] browserGpuMode=hardware was requested, but the GPU probe could not run, " +
+      "so hardware acceleration is UNVERIFIED — if Chrome falls back to software WebGL the " +
+      "capture will run at CPU speed. Honouring the explicit request anyway.\n" +
+      "  This is a probe failure, not evidence of a missing GPU: see the " +
+      "`browserGpuMode probe → software (probe failed ...)` line above for the underlying " +
+      "error, which usually means Chrome could not launch (bad HYPERFRAMES_BROWSER_PATH, " +
+      "missing shared libraries, or a denied sandbox) rather than a GPU problem.\n" +
+      "  Run `hyperframes doctor` to check the Chrome install."
+    );
+  }
   const remediation =
     platform === "linux"
       ? "Inside Docker, the container needs GPU passthrough: `--gpus all` with the NVIDIA " +
