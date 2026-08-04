@@ -361,11 +361,19 @@ function printReleaseNextSteps(version: string) {
     console.log(`Consumers install with: npm install @hyperframes/core@${distTag}`);
     console.log(`\nRun 'git push origin v${version}' to trigger the publish workflow.`);
   } else {
-    console.log(`\nRun the following to trigger the publish workflow:`);
-    console.log(`  git push origin main`);
-    console.log(`  git push origin v${version}`);
+    // A stable tag push does NOT publish — publish.yml's push trigger is
+    // `v*-*` (prerelease-only), and stable publishes exclusively from a merged
+    // release/v* PR. Printing the tag-push flow here sent a release straight to
+    // main with an unpublishable tag: the workflow never fired, and the stray
+    // tag then fails the next release's verify_remote_tag check.
+    console.log(`\nStable releases publish from a reviewed release PR, NOT a tag push.`);
+    console.log(`\nDo NOT push the local tag. Run:`);
+    console.log(`  git push origin HEAD:refs/heads/release/v${version}`);
+    console.log(`  gh pr create --base main --head release/v${version} --fill`);
     console.log(
-      `(push the specific tag, NOT 'git push --tags' — that fails on any pre-existing tag).`,
+      `\nMerging that PR publishes: the workflow checks out the merge SHA, creates` +
+        `\nthe v${version} tag there, publishes npm, and cuts the GitHub release.` +
+        `\nSee docs/contributing/release-channels.mdx.`,
     );
   }
 }

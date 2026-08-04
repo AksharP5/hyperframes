@@ -30,6 +30,7 @@ import {
   trackChildProcess,
   type AudioMetadata,
 } from "@hyperframes/engine";
+import { redactKnownPaths, redactTelemetryString } from "@hyperframes/core";
 
 /**
  * Tolerance used to decide whether an audio file is already short enough to
@@ -215,6 +216,31 @@ function formatSeconds(sec: number): string {
 }
 
 /**
+ * Every probe failure message, sanitized once, at the one place they all pass
+ * through on their way into the public `PadTrimAudioResult.error`.
+ *
+ * `runFfprobeJson` already scrubs the stderr it raises, but it is not the only
+ * thrower: `defaultProbeVideoFrameInfo` raises
+ * `ffprobe found no video stream in ${videoPath}` with the raw path, and a
+ * caller-supplied `probeVideoFrameInfo` / `probeAudioInfo` can raise anything
+ * at all. Sanitizing per-thrower is a list that will drift; sanitizing at the
+ * boundary cannot be bypassed by adding a new throw upstream.
+ *
+ * Known paths first (this function has them in hand, so no pattern has to
+ * recognise them), then the generic shape-based scrub for anything the message
+ * picked up elsewhere.
+ */
+function sanitizeProbeFailure(reason: unknown, paths: readonly string[]): string {
+  // Normalized here, not at the call sites. A caller-supplied probe can reject
+  // with anything — `Promise.reject("probe failed")` has no `.message`, so
+  // casting to Error yielded `undefined` and threw inside the redactor. That
+  // turned a returned failure result into a rejected promise, which is a
+  // behaviour regression the cast introduced.
+  const message = reason instanceof Error ? reason.message : String(reason);
+  return redactTelemetryString(redactKnownPaths(message, paths));
+}
+
+/**
  * Pad or trim `audio.aac` so its exact duration matches `frameCount / fps`
  * for the assembled video.
  */
@@ -234,12 +260,16 @@ export async function padOrTrimAudioToVideoFrameCount(
     probeAudio(input.audioPath, input.signal),
   ]);
 
+  const probePaths = [input.videoPath, input.audioPath, input.outputPath];
   if (videoResult.status === "rejected") {
     return failResult(
       input.outputPath,
       0,
       audioResult.status === "fulfilled" ? audioResult.value.durationSeconds : 0,
-      `audioPadTrim: failed to probe video: ${(videoResult.reason as Error).message}`,
+      `audioPadTrim: failed to probe video: ${sanitizeProbeFailure(
+        videoResult.reason,
+        probePaths,
+      )}`,
     );
   }
   if (audioResult.status === "rejected") {
@@ -247,7 +277,10 @@ export async function padOrTrimAudioToVideoFrameCount(
       input.outputPath,
       0,
       0,
-      `audioPadTrim: failed to probe audio: ${(audioResult.reason as Error).message}`,
+      `audioPadTrim: failed to probe audio: ${sanitizeProbeFailure(
+        audioResult.reason,
+        probePaths,
+      )}`,
     );
   }
 
@@ -361,6 +394,7 @@ async function defaultProbeVideoFrameInfo(
       "stream=nb_frames,r_frame_rate",
       "-of",
       "json",
+      "--",
       videoPath,
     ],
     signal,
@@ -381,6 +415,7 @@ async function defaultProbeVideoFrameInfo(
       "stream=nb_read_packets,r_frame_rate",
       "-of",
       "json",
+      "--",
       videoPath,
     ],
     signal,
@@ -434,7 +469,13 @@ async function defaultRunFfmpeg(
 // ── ffprobe JSON runner (shared between fast/slow video probe paths) ─────
 
 async function runFfprobeJson<T>(args: string[], signal?: AbortSignal): Promise<T> {
-  const proc = spawn(getFfprobeBinary(), args);
+  // Callers bake the input path into `args` (terminated with "--"), so this
+  // helper cannot add the terminator itself — assert they did rather than
+  // let a dash-prefixed path silently reach ffprobe as an option.
+  if (!args.includes("--")) {
+    throw new Error('[audioPadTrim] ffprobe args must terminate options with "--".');
+  }
+  const proc = spawn(getFfprobeBinary(), args, { stdio: ["ignore", "pipe", "pipe"] });
   trackChildProcess(proc);
   let stdout = "";
   proc.stdout.on("data", (data: Buffer) => {
@@ -452,7 +493,14 @@ async function runFfprobeJson<T>(args: string[], signal?: AbortSignal): Promise<
     throw outcome.error ?? new Error(outcome.stderr);
   }
   if (outcome.reason !== "exit" || outcome.exitCode !== 0) {
-    throw new Error(`ffprobe ${outcome.reason}: ${outcome.stderr}`);
+    // Redacted twice, deliberately. The shape-based scrub is a net with
+    // holes — it cannot know that `customer/acme-secret/video.mp4` is a path
+    // and `48000/1001` is not — but THIS caller knows the exact path it put
+    // in the argv, so it names it literally first. The message reaches logs,
+    // telemetry, and `PadTrimAudioResult.error`.
+    const probed = args[args.length - 1];
+    const scrubbed = redactKnownPaths(outcome.stderr, probed === undefined ? [] : [probed]);
+    throw new Error(`ffprobe ${outcome.reason}: ${redactTelemetryString(scrubbed, 2000)}`);
   }
   try {
     return JSON.parse(stdout) as T;
