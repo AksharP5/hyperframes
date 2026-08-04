@@ -403,7 +403,11 @@ function generateTexturePreview(manifest: RegistryItem, textureGroups: TextureGr
   return lines;
 }
 
-function catalogPreviewFor(kind: ItemKind, manifest: RegistryItem): string {
+function catalogPreviewFor(kind: ItemKind, manifest: RegistryItem): string | undefined {
+  // The manifest is the source of truth. Thirteen items declare a preview with
+  // a video and no poster, and that omission is deliberate — no .png was ever
+  // produced for them.
+  if (manifest.preview) return manifest.preview.poster;
   const dir = typeDir(kind);
   return `${catalogImageBase}/${dir}/${manifest.name}.png`;
 }
@@ -513,13 +517,13 @@ function generateItemMdx(
     lines.push(...generateTexturePreview(manifest, textureGroups));
   } else {
     const previewPath = `${catalogImageBase}/${typeDir(kind)}/${manifest.name}`;
-    // No poster attribute. These autoplay muted, so a poster shows for
-    // milliseconds, and thirteen of the 168 .png files were never generated —
-    // the browser requests the poster before the video, so those were 403s on
-    // load. The images live only on the CDN (docs/images is gitignored), so a
-    // filesystem check here would strip all 168 on a clean checkout.
+    // Same source of truth as the index: a manifest that declares a preview
+    // without a poster has no .png, and asking for one is a 403 the browser
+    // fetches before the video.
+    const posterUrl = catalogPreviewFor(kind, manifest);
+    const poster = posterUrl ? ` poster="${posterUrl}"` : "";
     lines.push(
-      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewPath}.mp4" autoPlay muted loop playsInline />`,
+      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewPath}.mp4"${poster} autoPlay muted loop playsInline />`,
       "",
     );
   }
