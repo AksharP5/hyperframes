@@ -3,13 +3,40 @@ title: "iOS 26 Liquid Glass Home Screen"
 description: "3D iPhone with a normal iOS 26 home screen, liquid glass app icons, shader wallpaper, dock, and fluid glass notifications that drop from the status area onto a GLTF device model."
 ---
 
-`liquid-glass-html-in-canvas` `webgpu` `3d` `iphone` `ios26` `notifications` `gltf` `html-in-canvas`
+<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/ios26-liquid-glass.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/ios26-liquid-glass.png" autoPlay muted loop playsInline />
+
+## Install
+
+```bash Terminal
+npx hyperframes add ios26-liquid-glass
+```
+
+That writes `compositions/ios26-liquid-glass.html`, plus 28 supporting files under `models/`, `lib/`, and `assets/icons/`.
 
 <Warning>
-**Requires Chrome flag.** Enable `chrome://flags/#canvas-draw-element` for live preview. Rendering via CLI enables the flag automatically. [Learn more](/guides/html-in-canvas).
+  Live preview needs the `chrome://flags/#canvas-draw-element` flag switched on.
+  Rendering from the CLI switches it on for you. [How it
+  works](/guides/html-in-canvas)
 </Warning>
 
-<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/ios26-liquid-glass.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/ios26-liquid-glass.png" autoPlay muted loop playsInline />
+## Add it to your video
+
+It runs for 15 seconds at 1920×1080. Paste this into your composition:
+
+```html index.html
+<div
+  data-composition-id="ios26-liquid-glass"
+  data-composition-src="compositions/ios26-liquid-glass.html"
+  data-start="0"
+  data-duration="15"
+  data-track-index="1"
+  data-width="1920"
+  data-height="1080"
+></div>
+```
+
+Move it in time with `data-start`. Put it on a different timeline row with
+`data-track-index`. See [data attributes](/concepts/data-attributes) for the rest.
 
 ## Add it to a project
 
@@ -26,48 +53,6 @@ Replace the demo content with mine and match the existing design and timing.
 npx hyperframes add ios26-liquid-glass
 ```
 
-## Details
-
-| Property | Value |
-| --- | --- |
-| Type | Block |
-| Dimensions | 1920×1080 |
-| Duration | 15s |
-
-**Installed files**
-
-| File | Target | Type |
-| --- | --- | --- |
-| `ios26-liquid-glass.html` | `compositions/ios26-liquid-glass.html` | hyperframes:composition |
-| `models/iphone.glb` | `models/iphone.glb` | hyperframes:asset |
-| `lib/liquid-glass.iife.js` | `lib/liquid-glass.iife.js` | hyperframes:asset |
-| `assets/icons/weather.jpg` | `assets/icons/weather.jpg` | hyperframes:asset |
-| `assets/icons/stocks.jpg` | `assets/icons/stocks.jpg` | hyperframes:asset |
-| `assets/icons/find-my.jpg` | `assets/icons/find-my.jpg` | hyperframes:asset |
-| `assets/icons/home.jpg` | `assets/icons/home.jpg` | hyperframes:asset |
-| `assets/icons/books.jpg` | `assets/icons/books.jpg` | hyperframes:asset |
-| `assets/icons/itunes-store.jpg` | `assets/icons/itunes-store.jpg` | hyperframes:asset |
-| `assets/icons/fitness.jpg` | `assets/icons/fitness.jpg` | hyperframes:asset |
-| `assets/icons/watch.jpg` | `assets/icons/watch.jpg` | hyperframes:asset |
-| `assets/icons/contacts.jpg` | `assets/icons/contacts.jpg` | hyperframes:asset |
-| `assets/icons/files.jpg` | `assets/icons/files.jpg` | hyperframes:asset |
-| `assets/icons/translate.jpg` | `assets/icons/translate.jpg` | hyperframes:asset |
-| `assets/icons/calendar.jpg` | `assets/icons/calendar.jpg` | hyperframes:asset |
-| `assets/icons/chatgpt.jpg` | `assets/icons/chatgpt.jpg` | hyperframes:asset |
-| `assets/icons/slack.jpg` | `assets/icons/slack.jpg` | hyperframes:asset |
-| `assets/icons/instagram.jpg` | `assets/icons/instagram.jpg` | hyperframes:asset |
-| `assets/icons/x.jpg` | `assets/icons/x.jpg` | hyperframes:asset |
-| `assets/icons/proton-mail.jpg` | `assets/icons/proton-mail.jpg` | hyperframes:asset |
-| `assets/icons/gmail.jpg` | `assets/icons/gmail.jpg` | hyperframes:asset |
-| `assets/icons/revolut.jpg` | `assets/icons/revolut.jpg` | hyperframes:asset |
-| `assets/icons/photos.jpg` | `assets/icons/photos.jpg` | hyperframes:asset |
-| `assets/icons/phone.jpg` | `assets/icons/phone.jpg` | hyperframes:asset |
-| `assets/icons/brave.jpg` | `assets/icons/brave.jpg` | hyperframes:asset |
-| `assets/icons/messages.jpg` | `assets/icons/messages.jpg` | hyperframes:asset |
-| `assets/icons/whatsapp.jpg` | `assets/icons/whatsapp.jpg` | hyperframes:asset |
-| `assets/icons/notify-messages.jpg` | `assets/icons/notify-messages.jpg` | hyperframes:asset |
-| `assets/icons/music.jpg` | `assets/icons/music.jpg` | hyperframes:asset |
-
 ## Use it
 
 Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
@@ -83,3 +68,7 @@ Ask your agent to replace the example content, match the project style, and plac
 - [Browse the complete Catalog](/catalog)
 - [Add assets and Catalog items in Studio](/studio/assets-and-blocks)
 - [Build a richer composition](/go-further)
+
+{/* hf:generated-footer */}
+
+Tagged `liquid-glass-html-in-canvas` `webgpu` `3d` `iphone` `ios26` `notifications` `gltf` `html-in-canvas`.

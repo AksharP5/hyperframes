@@ -3,17 +3,34 @@ title: "North Korea Locked Down"
 description: "Realistic map zoom into North Korea with a red scribble circle, locked-down pop-up label, and reddish editorial wash."
 ---
 
-`showcase` `map` `annotation` `youtube` `kinetic`
+<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/north-korea-locked-down.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/north-korea-locked-down.png" autoPlay muted loop playsInline />
 
-Created by [Stronkter](https://x.com/Stronkter).
+## Install
 
-## Source Prompt
-
-```text
-use 📷HyperFrames by HeyGen and Image Gen  if you need it for assets or like png images of assets without backround to make a youtube style camera moving in out and other things that are in youtube videos, to make a video of a map zooms in on north korea and a scribble style circle circles the country and a text pops up above it saying locked down when the text apears the video turns a bit redish make the video 7 seconds long id like the map to look realistic and accurate to real lfe
+```bash Terminal
+npx hyperframes add north-korea-locked-down
 ```
 
-<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/north-korea-locked-down.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/north-korea-locked-down.png" autoPlay muted loop playsInline />
+That writes `compositions/north-korea-locked-down.html`, plus 1 supporting file under `assets/`.
+
+## Add it to your video
+
+It runs for 7 seconds at 1920×1080. Paste this into your composition:
+
+```html index.html
+<div
+  data-composition-id="north-korea-locked-down"
+  data-composition-src="compositions/north-korea-locked-down.html"
+  data-start="0"
+  data-duration="7"
+  data-track-index="1"
+  data-width="1920"
+  data-height="1080"
+></div>
+```
+
+Move it in time with `data-start`. Put it on a different timeline row with
+`data-track-index`. See [data attributes](/concepts/data-attributes) for the rest.
 
 ## Add it to a project
 
@@ -30,21 +47,6 @@ Replace the demo content with mine and match the existing design and timing.
 npx hyperframes add north-korea-locked-down
 ```
 
-## Details
-
-| Property | Value |
-| --- | --- |
-| Type | Block |
-| Dimensions | 1920×1080 |
-| Duration | 7s |
-
-**Installed files**
-
-| File | Target | Type |
-| --- | --- | --- |
-| `north-korea-locked-down.html` | `compositions/north-korea-locked-down.html` | hyperframes:composition |
-| `assets/korea-map.png` | `assets/korea-map.png` | hyperframes:asset |
-
 ## Use it
 
 Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
@@ -60,3 +62,17 @@ Ask your agent to replace the example content, match the project style, and plac
 - [Browse the complete Catalog](/catalog)
 - [Add assets and Catalog items in Studio](/studio/assets-and-blocks)
 - [Build a richer composition](/go-further)
+
+{/* hf:generated-footer */}
+
+Tagged `showcase` `map` `annotation` `youtube` `kinetic`.
+
+Created by [Stronkter](https://x.com/Stronkter).
+
+<Accordion title="The prompt this was built from">
+
+```text
+use 📷HyperFrames by HeyGen and Image Gen  if you need it for assets or like png images of assets without backround to make a youtube style camera moving in out and other things that are in youtube videos, to make a video of a map zooms in on north korea and a scribble style circle circles the country and a text pops up above it saying locked down when the text apears the video turns a bit redish make the video 7 seconds long id like the map to look realistic and accurate to real lfe
+```
+
+</Accordion>

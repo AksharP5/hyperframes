@@ -3,9 +3,23 @@ title: "Motion Blur"
 description: "Velocity-driven motion blur — samples element position each frame and applies a one-sided SVG feGaussianBlur ghost trail proportional to speed"
 ---
 
-`effect` `motion-blur` `velocity` `animation` `physics`
-
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/components/motion-blur.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/components/motion-blur.png" autoPlay muted loop playsInline />
+
+## Install
+
+```bash Terminal
+npx hyperframes add motion-blur
+```
+
+That writes one file: `compositions/components/motion-blur.html`.
+
+## Paste it into your composition
+
+Open `compositions/components/motion-blur.html` and copy what is inside into your own composition.
+The file opens with a comment header that walks you through it.
+
+A component has no size or duration of its own. It takes both from the composition
+you paste it into.
 
 ## Add it to a project
 
@@ -22,18 +36,6 @@ Replace the demo content with mine and match the existing design and timing.
 npx hyperframes add motion-blur
 ```
 
-## Details
-
-| Property | Value |
-| --- | --- |
-| Type | Component |
-
-**Installed files**
-
-| File | Target | Type |
-| --- | --- | --- |
-| `motion-blur.html` | `compositions/components/motion-blur.html` | hyperframes:snippet |
-
 ## Use it
 
 Ask your agent to apply the component to the intended element and preserve the project’s existing timing.
@@ -45,3 +47,7 @@ Ask your agent to apply the component to the intended element and preserve the p
 - [Browse the complete Catalog](/catalog)
 - [Add assets and Catalog items in Studio](/studio/assets-and-blocks)
 - [Build a richer composition](/go-further)
+
+{/* hf:generated-footer */}
+
+Tagged `effect` `motion-blur` `velocity` `animation` `physics`.

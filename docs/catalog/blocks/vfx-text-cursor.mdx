@@ -3,13 +3,40 @@ title: "VFX Text Cursor"
 description: "Dramatic text reveal with cursor glow, chromatic shadow rays, and directional lighting on a black stage. Canvas-based shader post-processing with spectral color edges."
 ---
 
-`html-in-canvas` `text` `shader` `cursor` `chromatic`
+<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-text-cursor.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-text-cursor.png" autoPlay muted loop playsInline />
+
+## Install
+
+```bash Terminal
+npx hyperframes add vfx-text-cursor
+```
+
+That writes one file: `compositions/vfx-text-cursor.html`.
 
 <Warning>
-**Requires Chrome flag.** Enable `chrome://flags/#canvas-draw-element` for live preview. Rendering via CLI enables the flag automatically. [Learn more](/guides/html-in-canvas).
+  Live preview needs the `chrome://flags/#canvas-draw-element` flag switched on.
+  Rendering from the CLI switches it on for you. [How it
+  works](/guides/html-in-canvas)
 </Warning>
 
-<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-text-cursor.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-text-cursor.png" autoPlay muted loop playsInline />
+## Add it to your video
+
+It runs for 8 seconds at 1920×1080. Paste this into your composition:
+
+```html index.html
+<div
+  data-composition-id="vfx-text-cursor"
+  data-composition-src="compositions/vfx-text-cursor.html"
+  data-start="0"
+  data-duration="8"
+  data-track-index="1"
+  data-width="1920"
+  data-height="1080"
+></div>
+```
+
+Move it in time with `data-start`. Put it on a different timeline row with
+`data-track-index`. See [data attributes](/concepts/data-attributes) for the rest.
 
 ## Add it to a project
 
@@ -26,20 +53,6 @@ Replace the demo content with mine and match the existing design and timing.
 npx hyperframes add vfx-text-cursor
 ```
 
-## Details
-
-| Property | Value |
-| --- | --- |
-| Type | Block |
-| Dimensions | 1920×1080 |
-| Duration | 8s |
-
-**Installed files**
-
-| File | Target | Type |
-| --- | --- | --- |
-| `vfx-text-cursor.html` | `compositions/vfx-text-cursor.html` | hyperframes:composition |
-
 ## Use it
 
 Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
@@ -55,3 +68,7 @@ Ask your agent to replace the example content, match the project style, and plac
 - [Browse the complete Catalog](/catalog)
 - [Add assets and Catalog items in Studio](/studio/assets-and-blocks)
 - [Build a richer composition](/go-further)
+
+{/* hf:generated-footer */}
+
+Tagged `html-in-canvas` `text` `shader` `cursor` `chromatic`.

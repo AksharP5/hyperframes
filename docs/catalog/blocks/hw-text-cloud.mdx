@@ -3,9 +3,34 @@ title: "Speech Bubble"
 description: "Hand-drawn speech bubble with a positionable tail: outline draws on, paper fill fades in, handwritten text types per character; boils"
 ---
 
-`handwritten` `speech-bubble` `overlay`
-
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/hw-text-cloud.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/hw-text-cloud.png" autoPlay muted loop playsInline />
+
+## Install
+
+```bash Terminal
+npx hyperframes add hw-text-cloud
+```
+
+That writes `compositions/hw-text-cloud.html`, plus 1 supporting file under `assets/fonts/`.
+
+## Add it to your video
+
+It runs for 6 seconds at 1920×1080. Paste this into your composition:
+
+```html index.html
+<div
+  data-composition-id="hw-text-cloud"
+  data-composition-src="compositions/hw-text-cloud.html"
+  data-start="0"
+  data-duration="6"
+  data-track-index="1"
+  data-width="1920"
+  data-height="1080"
+></div>
+```
+
+Move it in time with `data-start`. Put it on a different timeline row with
+`data-track-index`. See [data attributes](/concepts/data-attributes) for the rest.
 
 ## Add it to a project
 
@@ -22,21 +47,6 @@ Replace the demo content with mine and match the existing design and timing.
 npx hyperframes add hw-text-cloud
 ```
 
-## Details
-
-| Property | Value |
-| --- | --- |
-| Type | Block |
-| Dimensions | 1920×1080 |
-| Duration | 6s |
-
-**Installed files**
-
-| File | Target | Type |
-| --- | --- | --- |
-| `hw-text-cloud.html` | `compositions/hw-text-cloud.html` | hyperframes:composition |
-| `assets/fonts/Caveat-700-latin.woff2` | `assets/fonts/Caveat-700-latin.woff2` | hyperframes:asset |
-
 ## Use it
 
 Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
@@ -52,3 +62,7 @@ Ask your agent to replace the example content, match the project style, and plac
 - [Browse the complete Catalog](/catalog)
 - [Add assets and Catalog items in Studio](/studio/assets-and-blocks)
 - [Build a richer composition](/go-further)
+
+{/* hf:generated-footer */}
+
+Tagged `handwritten` `speech-bubble` `overlay`.

@@ -3,9 +3,34 @@ title: "Flowchart Vertical"
 description: "Portrait animated decision tree with SVG connectors, sticky-note nodes, cursor interaction, and typing correction"
 ---
 
-`diagram` `flowchart` `interactive` `portrait`
-
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/flowchart-vertical.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/flowchart-vertical.png" autoPlay muted loop playsInline />
+
+## Install
+
+```bash Terminal
+npx hyperframes add flowchart-vertical
+```
+
+That writes one file: `compositions/flowchart-vertical.html`.
+
+## Add it to your video
+
+It runs for 12 seconds at 1440×2560. Paste this into your composition:
+
+```html index.html
+<div
+  data-composition-id="flowchart-vertical"
+  data-composition-src="compositions/flowchart-vertical.html"
+  data-start="0"
+  data-duration="12"
+  data-track-index="1"
+  data-width="1440"
+  data-height="2560"
+></div>
+```
+
+Move it in time with `data-start`. Put it on a different timeline row with
+`data-track-index`. See [data attributes](/concepts/data-attributes) for the rest.
 
 ## Add it to a project
 
@@ -22,20 +47,6 @@ Replace the demo content with mine and match the existing design and timing.
 npx hyperframes add flowchart-vertical
 ```
 
-## Details
-
-| Property | Value |
-| --- | --- |
-| Type | Block |
-| Dimensions | 1440×2560 |
-| Duration | 12s |
-
-**Installed files**
-
-| File | Target | Type |
-| --- | --- | --- |
-| `flowchart-vertical.html` | `compositions/flowchart-vertical.html` | hyperframes:composition |
-
 ## Use it
 
 Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
@@ -51,3 +62,7 @@ Ask your agent to replace the example content, match the project style, and plac
 - [Browse the complete Catalog](/catalog)
 - [Add assets and Catalog items in Studio](/studio/assets-and-blocks)
 - [Build a richer composition](/go-further)
+
+{/* hf:generated-footer */}
+
+Tagged `diagram` `flowchart` `interactive` `portrait`.
