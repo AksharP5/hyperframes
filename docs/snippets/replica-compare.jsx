@@ -6,9 +6,27 @@ export const ReplicaCompare = ({
   replicaSrc,
   replicaPoster,
 }) => {
+  const wrapRef = useRef(null);
   const refVideo = useRef(null);
   const repVideo = useRef(null);
   const [muted, setMuted] = useState(true);
+  const [inView, setInView] = useState(false);
+
+  // Only assign/decode the two films near the viewport, so the pair doesn't
+  // download offscreen. Falls back to eager if there's no observer.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof IntersectionObserver !== "function") {
+      setInView(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => setInView(entries[0]?.isIntersecting ?? false),
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Lazy initializer, not a post-mount effect: with useState(false) the first
   // committed render would emit `<video src autoPlay loop>` and only then pull the
@@ -28,22 +46,23 @@ export const ReplicaCompare = ({
 
   // React can drop src/autoPlay/loop from the DOM, but that neither pauses a
   // playing element nor aborts its resource: pause(), removeAttribute("src") and
-  // load() are all required when the preference flips to reduce mid-session.
+  // load() are all required — when the preference flips to reduce mid-session,
+  // and when the pair scrolls out of view.
   useEffect(() => {
-    if (!reduced) return;
+    if (inView && !reduced) return;
     for (const video of [refVideo.current, repVideo.current]) {
       if (!video) continue;
       video.pause();
       video.removeAttribute("src");
       video.load();
     }
-  }, [reduced]);
+  }, [reduced, inView]);
 
   // Keep the replica (right) locked to the reference (left) clock.
   useEffect(() => {
     const a = refVideo.current;
     const b = repVideo.current;
-    if (!a || !b || reduced) return;
+    if (!a || !b || reduced || !inView) return;
 
     const resync = () => {
       if (Number.isFinite(a.currentTime) && Math.abs((b.currentTime || 0) - a.currentTime) > 0.15) {
@@ -67,7 +86,7 @@ export const ReplicaCompare = ({
       a.removeEventListener("play", onPlay);
       a.removeEventListener("pause", onPause);
     };
-  }, [reduced]);
+  }, [reduced, inView]);
 
   const toggleSound = () => {
     const a = refVideo.current;
@@ -78,13 +97,15 @@ export const ReplicaCompare = ({
     if (!next) a.play().catch(() => {});
   };
 
+  const active = inView && !reduced;
+
   const card =
     "overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950";
   const video = "aspect-video w-full object-cover bg-zinc-100 dark:bg-zinc-900";
   const cap = "text-xs font-semibold uppercase tracking-wide";
 
   return (
-    <div>
+    <div ref={wrapRef}>
       <div className="mb-3 flex items-baseline justify-between">
         <strong className="text-sm">{title}</strong>
         <span className="text-xs text-zinc-500 dark:text-zinc-400">{meta}</span>
@@ -94,13 +115,13 @@ export const ReplicaCompare = ({
           <video
             ref={refVideo}
             className={video}
-            src={reduced ? undefined : refSrc}
+            src={active ? refSrc : undefined}
             poster={refPoster}
-            autoPlay={!reduced}
+            autoPlay={active}
             muted={muted}
-            loop={!reduced}
+            loop={active}
             playsInline
-            preload="metadata"
+            preload="none"
           />
           <button
             type="button"
@@ -123,13 +144,13 @@ export const ReplicaCompare = ({
           <video
             ref={repVideo}
             className={video}
-            src={reduced ? undefined : replicaSrc}
+            src={active ? replicaSrc : undefined}
             poster={replicaPoster}
-            autoPlay={!reduced}
+            autoPlay={active}
             muted
-            loop={!reduced}
+            loop={active}
             playsInline
-            preload="metadata"
+            preload="none"
           />
           <div className="p-3">
             <span className={`${cap} text-zinc-700 dark:text-zinc-300`}>HyperFrames replica</span>
