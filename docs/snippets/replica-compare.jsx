@@ -55,9 +55,13 @@ export const ReplicaCompare = ({
       for (const video of videos) {
         if (!video) continue;
         video.pause();
+        video.muted = true;
         video.removeAttribute("src");
         video.load();
       }
+      // Reset the control's state too, so a card unmuted before it scrolled away
+      // doesn't return reading "Sound on" over a paused, sourceless pair.
+      setMuted(true);
       return;
     }
     if (reduced) {
@@ -151,7 +155,15 @@ export const ReplicaCompare = ({
             type="button"
             onClick={toggleSound}
             aria-pressed={!muted}
-            aria-label={muted ? "Play the reference with sound" : "Mute the reference"}
+            aria-label={
+              muted
+                ? reduced
+                  ? "Play the comparison with sound"
+                  : "Unmute the reference"
+                : reduced
+                  ? "Pause the comparison"
+                  : "Mute the reference"
+            }
             className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur transition hover:bg-black/75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           >
             {muted ? (

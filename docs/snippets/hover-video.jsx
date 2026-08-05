@@ -110,7 +110,9 @@ export const HoverVideo = ({ src, poster, className, hasAudio = true }) => {
         aria-label={
           hasAudio
             ? muted
-              ? "Play this preview with sound"
+              ? reduced
+                ? "Play this preview with sound"
+                : "Unmute this preview"
               : "Mute this preview"
             : playing
               ? "Pause this preview"

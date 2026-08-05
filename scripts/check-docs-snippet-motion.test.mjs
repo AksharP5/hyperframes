@@ -134,12 +134,25 @@ test("every autoplaying component in docs/snippets currently satisfies the guard
 // reason).
 test("ReplicaCompare's control starts both films and does not gate sync on reduced motion", () => {
   const source = readFileSync(join(here, "../docs/snippets/replica-compare.jsx"), "utf8");
-  // The voluntary-play path starts both the reference and the replica.
-  assert.match(source, /refVideo\.current\?\.play\(\)/, "reference is started");
-  assert.match(source, /repVideo\.current\?\.play\(\)/, "replica is started too");
+  // startBoth must play both elements...
+  const startBoth = source.match(/const startBoth = \(\) => \{([\s\S]*?)\n {2}\};/);
+  assert.ok(startBoth, "found startBoth");
+  assert.match(startBoth[1], /refVideo\.current\?\.play\(\)/, "reference is started");
+  assert.match(startBoth[1], /repVideo\.current\?\.play\(\)/, "replica is started too");
+  // ...and the voluntary-play control must actually route through it, not play
+  // the reference alone (scoped to toggleSound so a helper left defined but
+  // unused can't satisfy the check — the exact regression this guards).
+  const toggle = source.match(/const toggleSound = \(\) => \{([\s\S]*?)\n {2}\};/);
+  assert.ok(toggle, "found toggleSound");
+  assert.match(toggle[1], /startBoth\(\)/, "voluntary play goes through startBoth");
   // The replica-sync effect attaches in view regardless of the preference, so a
   // voluntary play under reduced motion still pulls the replica along.
   const syncGate = source.match(/const b = repVideo\.current;\s*\n\s*if \(([^)]*)\) return;/);
   assert.ok(syncGate, "found the replica-sync guard");
   assert.doesNotMatch(syncGate[1], /reduced/, "sync must not early-return on reduced motion");
+  // Offscreen release must reset the control's state, or a card unmuted before it
+  // scrolled away returns reading "Sound on" over a paused, sourceless pair.
+  const teardown = source.match(/if \(!inView\) \{([\s\S]*?)return;\n {4}\}/);
+  assert.ok(teardown, "found the offscreen teardown");
+  assert.match(teardown[1], /setMuted\(true\)/, "offscreen release resets muted state");
 });
