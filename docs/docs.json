@@ -64,10 +64,10 @@
             "group": "Explore",
             "pages": [
               "examples",
+              "thirty-days",
               "product-updates",
               "weekly-updates",
-              "changelog",
-              "thirty-days"
+              "changelog"
             ]
           },
           {
