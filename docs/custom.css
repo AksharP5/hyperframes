@@ -1126,3 +1126,24 @@ samp {
 .eyebrow {
   display: none;
 }
+
+/* ── UX-pass tweaks (Ular): brand the Playground CTA, align the logo ── */
+@media (min-width: 1024px) {
+  /* Line the logo up with the sidebar text (was flush at the navbar padding, 16px further left). */
+  #navbar a[href*="/introduction"] {
+    margin-left: 16px;
+  }
+
+  /* Paint the Playground pill with the HyperFrames mark's own cyan→green gradient
+     (#06E3FA → #4FDB5E) instead of the muted primary-dark, with dark text for contrast. */
+  #navbar a.group > span.bg-primary-dark {
+    background: linear-gradient(100deg, #06e3fa 0%, #4fdb5e 100%) !important;
+  }
+  #navbar a.group:has(> span.bg-primary-dark) {
+    color: #0a2a20 !important;
+  }
+  #navbar a.group:has(> span.bg-primary-dark) span:not(.bg-primary-dark),
+  #navbar a.group:has(> span.bg-primary-dark) svg {
+    color: #0a2a20 !important;
+  }
+}
