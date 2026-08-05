@@ -167,5 +167,9 @@ test("HoverVideo's control does not bubble its click to a wrapping link", () => 
   const onClick = source.match(/onClick=\{\(e\) => \{([\s\S]*?)\n {8}\}\}/);
   assert.ok(onClick, "found the control's click handler");
   assert.match(onClick[1], /e\.preventDefault\(\)/, "default navigation is prevented");
-  assert.match(onClick[1], /e\.stopPropagation\(\)/, "the click does not bubble to a wrapping link");
+  assert.match(
+    onClick[1],
+    /e\.stopPropagation\(\)/,
+    "the click does not bubble to a wrapping link",
+  );
 });
