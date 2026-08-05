@@ -5,9 +5,8 @@ import {
   buildTimelineLogicalRows,
   resolveTimelineFocusFallback,
   resolveTimelineNavigationTarget,
-  timelineClipFocusId,
-  timelineTrackRowId,
 } from "./timelineKeyboardNavigation";
+import { timelineClipFocusId, timelineTrackRowId } from "./timelineNavigationIdentity";
 
 function clip(id: string, track: number, start: number, duration = 2): TimelineElement {
   return { id, track, start, duration, tag: "div" };
@@ -74,18 +73,31 @@ describe("buildTimelineLogicalRows", () => {
     const rows = model();
 
     expect(
-      rows.map(({ physicalTrackKey, logicalIndex, level, parentId }) => ({
+      rows.map(({ physicalTrackKey, logicalIndex, level, parentId, expandable }) => ({
         physicalTrackKey,
         logicalIndex,
         level,
         parentId,
+        expandable,
       })),
     ).toEqual([
-      { physicalTrackKey: 1, logicalIndex: 0, level: 1, parentId: null },
-      { physicalTrackKey: 1, logicalIndex: 1, level: 2, parentId: timelineTrackRowId(1) },
-      { physicalTrackKey: 1, logicalIndex: 2, level: 2, parentId: timelineTrackRowId(1) },
-      { physicalTrackKey: 2, logicalIndex: 3, level: 1, parentId: null },
-      { physicalTrackKey: 3, logicalIndex: 4, level: 1, parentId: null },
+      { physicalTrackKey: 1, logicalIndex: 0, level: 1, parentId: null, expandable: true },
+      {
+        physicalTrackKey: 1,
+        logicalIndex: 1,
+        level: 2,
+        parentId: timelineTrackRowId(1),
+        expandable: false,
+      },
+      {
+        physicalTrackKey: 1,
+        logicalIndex: 2,
+        level: 2,
+        parentId: timelineTrackRowId(1),
+        expandable: false,
+      },
+      { physicalTrackKey: 2, logicalIndex: 3, level: 1, parentId: null, expandable: false },
+      { physicalTrackKey: 3, logicalIndex: 4, level: 1, parentId: null, expandable: false },
     ]);
     expect(rows[0]?.expanded).toBe(true);
     expect(rows[3]?.items).toEqual([]);
@@ -156,6 +168,12 @@ describe("resolveTimelineNavigationTarget", () => {
     expect(
       resolveTimelineNavigationTarget(rows, timelineClipFocusId("late"), "ArrowRight")?.id,
     ).toBe(timelineClipFocusId("late"));
+    expect(resolveTimelineNavigationTarget(rows, timelineTrackRowId(1), "ArrowRight")?.id).toBe(
+      timelineClipFocusId("early"),
+    );
+    expect(
+      resolveTimelineNavigationTarget(rows, timelineClipFocusId("early"), "ArrowLeft")?.id,
+    ).toBe(timelineTrackRowId(1));
     expect(resolveTimelineNavigationTarget(rows, activeId, "Home")?.id).toBe(timelineTrackRowId(1));
     expect(resolveTimelineNavigationTarget(rows, timelineTrackRowId(1), "End")?.id).toBe(
       timelineClipFocusId("late"),
@@ -203,7 +221,16 @@ describe("resolveTimelineNavigationTarget", () => {
     ).toBe(timelineTrackRowId(1));
     expect(
       resolveTimelineNavigationTarget(rows, current, "End", { timelineBoundary: true })?.id,
-    ).toBe(timelineClipFocusId("right"));
+    ).toBe(timelineTrackRowId(3));
+  });
+
+  it("returns from a property row to its parent with ArrowLeft", () => {
+    const rows = model();
+    const property = rows.find((row) => row.propertyGroup === "position")!;
+
+    expect(resolveTimelineNavigationTarget(rows, property.id, "ArrowLeft")?.id).toBe(
+      timelineTrackRowId(1),
+    );
   });
 
   it("breaks equal-distance vertical ties by time then stable identity", () => {

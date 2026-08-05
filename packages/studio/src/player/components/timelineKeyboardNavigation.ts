@@ -5,6 +5,13 @@ import {
   timelineKeyframeSelectionKey,
   type TimelineKeyframeTarget,
 } from "./timelineKeyframeIdentity";
+import {
+  timelineClipFocusId,
+  timelineEaseFocusId,
+  timelineKeyframeFocusId,
+  timelinePropertyRowId,
+  timelineTrackRowId,
+} from "./timelineNavigationIdentity";
 import { resolveTrackKeyframeClip } from "./useTimelineTrackLayout";
 
 export type TimelineNavigationKey =
@@ -16,6 +23,21 @@ export type TimelineNavigationKey =
   | "End"
   | "PageUp"
   | "PageDown";
+
+const NAVIGATION_KEYS: ReadonlySet<string> = new Set<TimelineNavigationKey>([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
+
+export function isTimelineNavigationKey(key: string): key is TimelineNavigationKey {
+  return NAVIGATION_KEYS.has(key);
+}
 
 export interface TimelineLogicalItem {
   id: string;
@@ -34,6 +56,8 @@ export interface TimelineLogicalRow {
   logicalIndex: number;
   level: 1 | 2;
   parentId: string | null;
+  elementId: string | null;
+  expandable: boolean;
   expanded: boolean;
   propertyGroup?: PropertyGroupName;
   items: readonly TimelineLogicalItem[];
@@ -56,31 +80,6 @@ export interface TimelineNavigationOptions {
   pageSize?: number;
   /** Ctrl/Meta + Home/End moves to the first/last logical row. */
   timelineBoundary?: boolean;
-}
-
-function stableId(kind: string, ...parts: Array<string | number>): string {
-  // Attribute-safe by construction; callers embedding it in CSS selectors must use CSS.escape.
-  return JSON.stringify(["timeline", kind, ...parts]);
-}
-
-export function timelineTrackRowId(track: number): string {
-  return stableId("track", track);
-}
-
-function timelinePropertyRowId(elementId: string, group: PropertyGroupName): string {
-  return stableId("property", elementId, group);
-}
-
-export function timelineClipFocusId(elementId: string): string {
-  return stableId("clip", elementId);
-}
-
-function timelineKeyframeFocusId(elementId: string, target: TimelineKeyframeTarget): string {
-  return stableId("keyframe", timelineKeyframeSelectionKey(elementId, target));
-}
-
-function timelineEaseFocusId(elementId: string, target: TimelineKeyframeTarget): string {
-  return stableId("ease", timelineKeyframeSelectionKey(elementId, target));
 }
 
 function elementId(element: TimelineElement): string {
@@ -205,6 +204,8 @@ export function buildTimelineLogicalRows({
       logicalIndex: rows.length,
       level: 1,
       parentId: null,
+      elementId: activeId,
+      expandable: lanes.length > 0,
       expanded,
       items: clipItems(trackId, elements),
     });
@@ -218,6 +219,8 @@ export function buildTimelineLogicalRows({
         logicalIndex: rows.length,
         level: 2,
         parentId: trackId,
+        elementId: activeId,
+        expandable: false,
         expanded: false,
         propertyGroup: lane.group,
         items: propertyItems(rowId, activeClip, lane.keyframes),
@@ -227,7 +230,7 @@ export function buildTimelineLogicalRows({
   return rows;
 }
 
-function locateTarget(rows: readonly TimelineLogicalRow[], id: string) {
+export function locateTimelineLogicalTarget(rows: readonly TimelineLogicalRow[], id: string) {
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex]!;
     if (row.id === id) return { row, rowIndex, itemIndex: -1, target: row };
@@ -261,17 +264,21 @@ export function resolveTimelineNavigationTarget(
   key: TimelineNavigationKey,
   options: TimelineNavigationOptions = {},
 ): TimelineLogicalTarget | null {
-  const current = locateTarget(rows, currentId);
+  const current = locateTimelineLogicalTarget(rows, currentId);
   if (!current) return null;
   const { row, rowIndex, itemIndex, target } = current;
 
   if (key === "Home" || key === "End") {
     const boundaryRow = options.timelineBoundary ? (key === "Home" ? rows[0] : rows.at(-1)) : row;
     if (!boundaryRow) return target;
+    if (options.timelineBoundary) return boundaryRow;
     return key === "Home" ? boundaryRow : (boundaryRow.items.at(-1) ?? boundaryRow);
   }
   if (key === "ArrowLeft") {
-    if (itemIndex < 0) return row;
+    if (itemIndex < 0) {
+      if (!row.parentId) return row;
+      return locateTimelineLogicalTarget(rows, row.parentId)?.target ?? row;
+    }
     return itemIndex === 0 ? row : row.items[itemIndex - 1]!;
   }
   if (key === "ArrowRight") {
@@ -304,26 +311,26 @@ export function resolveTimelineFocusFallback(
   nextRows: readonly TimelineLogicalRow[],
   currentId: string,
 ): TimelineLogicalTarget | null {
-  const unchanged = locateTarget(nextRows, currentId);
+  const unchanged = locateTimelineLogicalTarget(nextRows, currentId);
   if (unchanged) return unchanged.target;
-  const previous = locateTarget(previousRows, currentId);
+  const previous = locateTimelineLogicalTarget(previousRows, currentId);
   if (!previous) return null;
 
   if (previous.itemIndex >= 0) {
     for (let index = previous.itemIndex - 1; index >= 0; index -= 1) {
-      const candidate = locateTarget(nextRows, previous.row.items[index]!.id);
+      const candidate = locateTimelineLogicalTarget(nextRows, previous.row.items[index]!.id);
       if (candidate) return candidate.target;
     }
     for (let index = previous.itemIndex + 1; index < previous.row.items.length; index += 1) {
-      const candidate = locateTarget(nextRows, previous.row.items[index]!.id);
+      const candidate = locateTimelineLogicalTarget(nextRows, previous.row.items[index]!.id);
       if (candidate) return candidate.target;
     }
   }
 
-  const survivingRow = locateTarget(nextRows, previous.row.id);
+  const survivingRow = locateTimelineLogicalTarget(nextRows, previous.row.id);
   if (survivingRow) return survivingRow.target;
   if (previous.row.parentId) {
-    const parent = locateTarget(nextRows, previous.row.parentId);
+    const parent = locateTimelineLogicalTarget(nextRows, previous.row.parentId);
     if (parent) return parent.target;
   }
   return nextRows[previous.rowIndex] ?? nextRows[previous.rowIndex - 1] ?? null;
