@@ -126,6 +126,8 @@ const GENERATED_HEADINGS = new Set([
   "agent usage",
   "animated texture",
   "texture examples",
+  // the required reader continuation the generator emits last (see RELATED_TOPICS)
+  "related topics",
 ]);
 
 /**
@@ -148,6 +150,21 @@ const GENERATED_USAGE_OPENERS = [
  * re-emit it on every run.
  */
 const FOOTER_MARKER = "{/* hf:generated-footer */}";
+
+/**
+ * Every Catalog page ends with this section — required by `docs/AGENTS.md`
+ * ("Task, guide, Studio, and Catalog pages end with a `## Related topics`
+ * section"). Emitted last so the page literally ends with it; listed in
+ * GENERATED_HEADINGS so a regeneration never carries it forward as hand-written.
+ */
+const RELATED_TOPICS: readonly string[] = [
+  "## Related topics",
+  "",
+  "- [Browse the complete Catalog](/catalog)",
+  "- [Add assets and Catalog items in Studio](/studio/assets-and-blocks)",
+  "- [Build a richer composition](/go-further)",
+  "",
+];
 
 /**
  * Pull the hand-written `## sections` out of an already-generated page.
@@ -190,7 +207,15 @@ function carriedSectionsFrom(pagePath: string): CarriedContent {
 
   let inFence = false;
   for (const line of text.split("\n")) {
-    if (line.trim() === FOOTER_MARKER) break;
+    // The footer marker begins the generated tail (provenance + Related topics).
+    // Don't stop here: close the current section and keep scanning, so a human
+    // `## section` appended *below* the generated tail is still carried forward
+    // rather than silently dropped. The generated headings themselves are named
+    // in GENERATED_HEADINGS, so the tail's own `## Related topics` is not carried.
+    if (line.trim() === FOOTER_MARKER) {
+      flush();
+      continue;
+    }
     if (line.trimStart().startsWith("```")) inFence = !inFence;
     const match = !inFence && /^## (.+)$/.exec(line);
     if (match) {
@@ -629,7 +654,9 @@ function generateItemMdx(
     lines.push(`<Tip>Related skill: \`/${manifest.relatedSkill}\`</Tip>`, "");
   }
 
-  // 5. Provenance last — it is the least of what a reader came for.
+  // 5. Generated tail: provenance (the least of what a reader came for) and
+  //    then the required `## Related topics` continuation, so the page ends with
+  //    it per docs/AGENTS.md. The marker delimits everything generated below it.
   const footer: string[] = [];
 
   if (tags.length > 0) {
@@ -654,7 +681,7 @@ function generateItemMdx(
     );
   }
 
-  if (footer.length > 0) lines.push(FOOTER_MARKER, "", ...footer);
+  lines.push(FOOTER_MARKER, "", ...footer, ...RELATED_TOPICS);
 
   return lines.join("\n");
 }
