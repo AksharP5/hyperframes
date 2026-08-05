@@ -13,6 +13,7 @@ import {
   type ParsedCommit,
   type RawCommit,
 } from "./draft-changelog.ts";
+import { CHANGELOG_STYLE_NOTE } from "./set-version.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const REPO_URL = "https://github.com/heygen-com/hyperframes";
@@ -20,12 +21,13 @@ const DOCS_MARKER =
   "{/* New weekly digest entries are prepended by `bun run changelog:weekly --from YYYY-MM-DD --to YYYY-MM-DD --write`. */}";
 /**
  * Weekly entries are rewritten by hand before publishing, so the generator's
- * only influence on the final prose is the bar it stamps into the draft. Keep
- * this in step with CHANGELOG_STYLE_NOTE in set-version.ts.
+ * only influence on the final prose is the bar it stamps into the draft. The
+ * style note is imported from set-version.ts rather than copied, so the two
+ * release-gate markers cannot drift apart.
  */
 const WEEKLY_REVIEW_TODO = [
   "<!-- TODO: review and rewrite before publishing. -->",
-  "<!-- Style bar: keep sentences under 25 words. Use everyday words. Avoid semicolons. Say what changed for the user, then why it matters. -->",
+  CHANGELOG_STYLE_NOTE,
 ].join("\n");
 
 const CATEGORY_ORDER = [
