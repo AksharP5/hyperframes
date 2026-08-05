@@ -10,7 +10,11 @@ import {
   StudioFileConflictError,
   StudioSaveNetworkError,
 } from "../utils/studioSaveDiagnostics";
-import { createStudioWriteToken, studioExpectedFileVersion } from "../utils/studioFileVersion";
+import {
+  createStudioWriteToken,
+  markStudioWriteToken,
+  studioExpectedFileVersion,
+} from "../utils/studioFileVersion";
 import { useFileTree } from "./useFileTree";
 import { useEditorSave } from "./useEditorSave";
 
@@ -117,8 +121,11 @@ export function useFileManager({
           throw await createStudioSaveHttpError(preflight, `Failed to read ${path} before save`);
         }
       }
-      const writeToken = createStudioWriteToken();
       await retryStudioSave(async () => {
+        // Each request gets its own receipt identity. If a committed request loses its response,
+        // the retry can produce a second filesystem receipt that must be suppressed independently.
+        const writeToken = createStudioWriteToken();
+        markStudioWriteToken(writeToken);
         let response: Response;
         try {
           response = await fetch(
@@ -191,7 +198,7 @@ export function useFileManager({
 
   // ── Editor save (debounced content change) ──
 
-  const { saveRafRef, handleContentChange } = useEditorSave({
+  const editorSave = useEditorSave({
     editingPathRef,
     projectIdRef,
     readProjectFile,
@@ -201,6 +208,24 @@ export function useFileManager({
     setRefreshKey,
     showToast,
   });
+  const { saveRafRef, handleContentChange } = editorSave;
+
+  const overwriteExternalConflict = useCallback(
+    async (conflict: StudioFileConflictError) => {
+      if (conflict.currentContent != null) {
+        await writeProjectFile(
+          conflict.filePath,
+          conflict.attemptedContent,
+          conflict.currentContent,
+        );
+      } else {
+        fileVersions.set(conflict.filePath, conflict.currentVersion);
+        await writeProjectFile(conflict.filePath, conflict.attemptedContent);
+      }
+      updateEditingFileContent(conflict.filePath, conflict.attemptedContent);
+    },
+    [fileVersions, updateEditingFileContent, writeProjectFile],
+  );
 
   // ── File select ──
 
@@ -491,11 +516,15 @@ export function useFileManager({
     editingPathRef,
     projectIdRef,
     saveRafRef,
+    flushPendingSourceSave: editorSave.flushPendingSave,
+    discardPendingSourceSave: editorSave.discardPendingSave,
+    getPendingSourceCandidate: editorSave.getPendingCandidate,
     importedFontAssetsRef,
 
     // Core I/O
     readProjectFile,
     writeProjectFile,
+    overwriteExternalConflict,
     readOptionalProjectFile,
     observeProjectFileVersion,
     updateEditingFileContent,
