@@ -97,7 +97,7 @@ export const ReplicaCompare = ({
             src={reduced ? undefined : refSrc}
             poster={refPoster}
             autoPlay={!reduced}
-            muted
+            muted={muted}
             loop={!reduced}
             playsInline
             preload="metadata"
