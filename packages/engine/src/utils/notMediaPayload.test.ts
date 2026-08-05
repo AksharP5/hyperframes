@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  assertNotMarkupPayload,
+  assertMediaPayload,
   fingerprintElementId,
-  isMarkupPayload,
-  MarkupNotMediaError,
-} from "./markupPayload.js";
+  isNotMediaPayload,
+  NotMediaPayloadError,
+} from "./notMediaPayload.js";
 
 function writeFixture(name: string, contents: string | Buffer): string {
   const dir = mkdtempSync(join(tmpdir(), "hf-markup-sniff-"));
@@ -16,7 +16,7 @@ function writeFixture(name: string, contents: string | Buffer): string {
   return filePath;
 }
 
-describe("isMarkupPayload", () => {
+describe("isNotMediaPayload", () => {
   it.each([
     ["doctype", "<!DOCTYPE html>\n<html><body></body></html>"],
     ["bare html tag, uppercase", "<HTML><body>hi</body></HTML>"],
@@ -31,11 +31,15 @@ describe("isMarkupPayload", () => {
     // signed URL or an ACL change, served as a 200 with an S3 error body.
     ["s3 error document", '<?xml version="1.0"?><Error><Code>AccessDenied</Code></Error>'],
     ["comment first", "<!-- generated -->\n<!DOCTYPE html>"],
+    // Replicate answers a dead asset this way, and a gateway in front of it can
+    // relay the body with a 200 — the shape a `<` -only check misses.
+    ["json object error body", '{"detail": "requested file not found"}'],
+    ["json array body", '[{"error": "gone"}]'],
   ])("detects %s", async (_label, contents) => {
-    expect(await isMarkupPayload(writeFixture("payload", contents))).toBe(true);
+    expect(await isNotMediaPayload(writeFixture("payload", contents))).toBe(true);
   });
 
-  it("detects markup behind a UTF-8 BOM and leading whitespace", async () => {
+  it("detects a document behind a UTF-8 BOM and leading whitespace", async () => {
     const filePath = writeFixture(
       "bom.html",
       Buffer.concat([
@@ -43,15 +47,15 @@ describe("isMarkupPayload", () => {
         Buffer.from("\n  \t<!doctype html><html></html>"),
       ]),
     );
-    expect(await isMarkupPayload(filePath)).toBe(true);
+    expect(await isNotMediaPayload(filePath)).toBe(true);
   });
 
-  it("detects markup behind a leading NUL run", async () => {
+  it("detects a document behind a leading NUL run", async () => {
     const filePath = writeFixture(
       "nul.html",
       Buffer.concat([Buffer.from([0x00, 0x00, 0x00]), Buffer.from("<html>x</html>")]),
     );
-    expect(await isMarkupPayload(filePath)).toBe(true);
+    expect(await isNotMediaPayload(filePath)).toBe(true);
   });
 
   it.each([
@@ -63,15 +67,15 @@ describe("isMarkupPayload", () => {
     const body = Buffer.from("<html>", "utf16le");
     const bytes = _label === "little-endian" ? body : body.swap16();
     const filePath = writeFixture("utf16.html", Buffer.concat([Buffer.from(bom), bytes]));
-    expect(await isMarkupPayload(filePath)).toBe(true);
+    expect(await isNotMediaPayload(filePath)).toBe(true);
   });
 
-  it("detects markup preceded by more whitespace than a short read would cover", async () => {
+  it("detects nothing when padding overruns the sniff window", async () => {
     const filePath = writeFixture("padded.html", `${" ".repeat(600)}<!doctype html>`);
     // 600 bytes of padding overruns the 512-byte sniff window, so the verdict
     // has to be "unknown" (false) rather than a misread — asserted here so the
     // window size is a deliberate, visible bound rather than an accident.
-    expect(await isMarkupPayload(filePath)).toBe(false);
+    expect(await isNotMediaPayload(filePath)).toBe(false);
   });
 
   it.each([
@@ -85,50 +89,50 @@ describe("isMarkupPayload", () => {
     ["adts aac", [0xff, 0xf1, 0x50, 0x80]],
     ["mpeg-ps", [0x00, 0x00, 0x01, 0xba]],
   ])("does not flag a %s container", async (_label, bytes) => {
-    expect(await isMarkupPayload(writeFixture("clip.bin", Buffer.from(bytes)))).toBe(false);
+    expect(await isNotMediaPayload(writeFixture("clip.bin", Buffer.from(bytes)))).toBe(false);
   });
 
-  it("does not flag a container that merely contains markup further in", async () => {
+  it("does not flag a container that merely contains a document byte further in", async () => {
     const filePath = writeFixture(
       "not-html.bin",
       Buffer.concat([Buffer.from([0x00, 0x00, 0x01, 0xba]), Buffer.from("<html later on")]),
     );
-    expect(await isMarkupPayload(filePath)).toBe(false);
+    expect(await isNotMediaPayload(filePath)).toBe(false);
   });
 
   it("does not flag an empty file", async () => {
-    expect(await isMarkupPayload(writeFixture("empty.bin", ""))).toBe(false);
+    expect(await isNotMediaPayload(writeFixture("empty.bin", ""))).toBe(false);
   });
 
-  it("reports not-markup instead of throwing when the path is a directory", async () => {
+  it("reports not-a-document instead of throwing when the path is a directory", async () => {
     // `existsSync` passes for a directory, so callers reach the sniff with one.
     // The read fails EISDIR; classifying rather than propagating keeps the real
     // probe's own error as the one the caller sees.
     const dir = mkdtempSync(join(tmpdir(), "hf-markup-sniff-dir-"));
     mkdirSync(join(dir, "assets"));
-    expect(await isMarkupPayload(join(dir, "assets"))).toBe(false);
+    expect(await isNotMediaPayload(join(dir, "assets"))).toBe(false);
   });
 
-  it("reports not-markup instead of throwing when the file is missing", async () => {
+  it("reports not-a-document instead of throwing when the file is missing", async () => {
     const dir = mkdtempSync(join(tmpdir(), "hf-markup-sniff-gone-"));
-    expect(await isMarkupPayload(join(dir, "evicted.mp4"))).toBe(false);
+    expect(await isNotMediaPayload(join(dir, "evicted.mp4"))).toBe(false);
   });
 });
 
-describe("assertNotMarkupPayload", () => {
-  it("throws MarkupNotMediaError carrying routing metadata and a hashed element key", async () => {
+describe("assertMediaPayload", () => {
+  it("throws NotMediaPayloadError carrying routing metadata and a hashed element key", async () => {
     const filePath = writeFixture("nested.html", "<!DOCTYPE html><html></html>");
 
     let caught: unknown;
     try {
-      await assertNotMarkupPayload(filePath, "aroll-scene-3");
+      await assertMediaPayload(filePath, "aroll-scene-3");
     } catch (error) {
       caught = error;
     }
 
-    expect(caught).toBeInstanceOf(MarkupNotMediaError);
-    const error = caught as MarkupNotMediaError;
-    expect(error.code).toBe("MARKUP_NOT_MEDIA");
+    expect(caught).toBeInstanceOf(NotMediaPayloadError);
+    const error = caught as NotMediaPayloadError;
+    expect(error.code).toBe("NOT_MEDIA_PAYLOAD");
     expect(error.owner).toBe("user");
     expect(error.retryable).toBe(false);
     expect(error.elementFingerprints).toEqual([fingerprintElementId("aroll-scene-3")]);
@@ -145,26 +149,26 @@ describe("assertNotMarkupPayload", () => {
       '<!DOCTYPE html><html data-request-token="tok_9fA3xQ7pLz">',
     );
 
-    const error = await assertNotMarkupPayload(
+    const error = await assertMediaPayload(
       filePath,
       "https://cdn.example.com/tenants/acme-corp/projects/secret-q4/streamed-preview.html",
-    ).catch((caught: unknown) => caught as MarkupNotMediaError);
+    ).catch((caught: unknown) => caught as NotMediaPayloadError);
 
     expect(error.message).not.toContain("acme-corp");
     expect(error.message).not.toContain("secret-q4");
     expect(error.message).not.toContain("cdn.example.com");
     expect(error.message).not.toContain("tok_9fA3xQ7pLz");
     expect(error.message).toContain("unresolved");
-    expect(error.message).toContain("403/404");
+    expect(error.message).toContain("success status");
   });
 
   it("resolves for a real container", async () => {
     const filePath = writeFixture("clip.mp4", Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74]));
-    await expect(assertNotMarkupPayload(filePath, "v1")).resolves.toBeUndefined();
+    await expect(assertMediaPayload(filePath, "v1")).resolves.toBeUndefined();
   });
 
   it("caps the fingerprint list so the message stays bounded", async () => {
-    const error = new MarkupNotMediaError(
+    const error = new NotMediaPayloadError(
       Array.from({ length: 12 }, (_unused, index) => fingerprintElementId(`el-${index}`)),
     );
     expect(error.message).toContain("+4");

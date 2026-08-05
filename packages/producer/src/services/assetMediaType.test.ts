@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MARKUP_NOT_MEDIA, MarkupNotMediaError } from "@hyperframes/engine";
+import { NOT_MEDIA_PAYLOAD, NotMediaPayloadError } from "@hyperframes/engine";
 import {
   ASSET_MEDIA_TYPE_MISMATCH,
   AssetMediaTypeMismatchError,
@@ -193,11 +193,11 @@ describe("preflightCompositionAssetMediaTypes", () => {
   });
 
   // STUDIO-5433. This preflight sees every local media src regardless of its
-  // authored timing, so it is the only place a markup payload behind a
+  // authored timing, so it is the only place a document payload behind a
   // `data-end` video or a `loop`ing audio is caught before frames are captured
   // — for those elements the compiler never resolves a duration, so its own
   // sniff never runs.
-  describe("markup payloads", () => {
+  describe("non-media payloads", () => {
     beforeAll(() => {
       writeFileSync(
         join(projectDir, "streamed-preview.html"),
@@ -216,9 +216,9 @@ describe("preflightCompositionAssetMediaTypes", () => {
       } catch (error) {
         caught = error;
       }
-      expect(caught).toBeInstanceOf(MarkupNotMediaError);
+      expect(caught).toBeInstanceOf(NotMediaPayloadError);
       expect(caught).toMatchObject({
-        code: MARKUP_NOT_MEDIA,
+        code: NOT_MEDIA_PAYLOAD,
         owner: "user",
         retryable: false,
       });
@@ -227,11 +227,11 @@ describe("preflightCompositionAssetMediaTypes", () => {
       expect(message).not.toContain(fixtureDir);
     });
 
-    it("reports markup ahead of the type mismatch the same file also produces", async () => {
+    it("reports the document verdict ahead of the type mismatch the same file also produces", async () => {
       // An HTML page under a <video> is both "not media" and "not video". The
-      // markup verdict is the actionable one; the mismatch is a symptom of it.
+      // document verdict is the actionable one; the mismatch is a symptom of it.
       await expect(run({ videoSrc: "streamed-preview.html" })).rejects.toBeInstanceOf(
-        MarkupNotMediaError,
+        NotMediaPayloadError,
       );
     });
 
@@ -244,7 +244,7 @@ describe("preflightCompositionAssetMediaTypes", () => {
     });
 
     it("leaves an SVG image source alone", async () => {
-      // ffprobe reads SVG through its svg_pipe demuxer, so markup is a
+      // ffprobe reads SVG through its svg_pipe demuxer, so an XML body is a
       // legitimate <img> payload and must not be swept up by the sniff.
       await expect(run({ imageSrc: "brand-mark.svg" })).resolves.toBeUndefined();
     });

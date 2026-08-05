@@ -274,12 +274,12 @@ export {
 } from "./utils/ffprobe.js";
 
 export {
-  MARKUP_NOT_MEDIA,
-  MarkupNotMediaError,
-  assertNotMarkupPayload,
+  NOT_MEDIA_PAYLOAD,
+  NotMediaPayloadError,
+  assertMediaPayload,
   fingerprintElementId,
-  isMarkupPayload,
-} from "./utils/markupPayload.js";
+  isNotMediaPayload,
+} from "./utils/notMediaPayload.js";
 
 export { assertPublicHttpsUrl, downloadToTemp, isHttpUrl } from "./utils/urlDownloader.js";
 export {

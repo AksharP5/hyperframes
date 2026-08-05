@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import {
   fingerprintElementId,
-  isMarkupPayload,
-  MarkupNotMediaError,
+  isNotMediaPayload,
+  NotMediaPayloadError,
   probeMediaProfile,
   resolveProjectRelativeSrc,
   type AudioElement,
@@ -131,13 +131,13 @@ export async function preflightCompositionAssetMediaTypes(input: {
   }
 
   const mismatches: AssetMediaTypeMismatch[] = [];
-  const markupFingerprints: string[] = [];
+  const notMediaFingerprints: string[] = [];
   const entries = [...byPath];
   await Promise.all(
     entries.map(([resolvedPath, pathReferences]) =>
       withMediaProbeSlot(async () => {
         // STUDIO-5433. This preflight is the only place every local media src is
-        // seen regardless of its authored timing, so it is where a markup
+        // seen regardless of its authored timing, so it is where a document
         // payload behind a `data-end` video gets caught — the compiler's own
         // sniff only runs for elements whose duration it has to resolve.
         //
@@ -146,9 +146,11 @@ export async function preflightCompositionAssetMediaTypes(input: {
         // source is non-fatal by existing policy (audioStage ships the render
         // without the track and reports `audioError`), so it is classified
         // per-element in audioMixer instead of aborted here.
-        const markupCandidates = pathReferences.filter((ref) => ref.expected === "video");
-        if (markupCandidates.length > 0 && (await isMarkupPayload(resolvedPath))) {
-          markupFingerprints.push(...markupCandidates.map((ref) => fingerprintElementId(ref.id)));
+        const sniffableReferences = pathReferences.filter((ref) => ref.expected === "video");
+        if (sniffableReferences.length > 0 && (await isNotMediaPayload(resolvedPath))) {
+          notMediaFingerprints.push(
+            ...sniffableReferences.map((ref) => fingerprintElementId(ref.id)),
+          );
           return;
         }
 
@@ -173,6 +175,6 @@ export async function preflightCompositionAssetMediaTypes(input: {
 
   // Thrown ahead of the mismatch aggregate: "this file is an HTML page" is the
   // actionable diagnosis, while the type mismatch it also produces is a symptom.
-  if (markupFingerprints.length > 0) throw new MarkupNotMediaError(markupFingerprints);
+  if (notMediaFingerprints.length > 0) throw new NotMediaPayloadError(notMediaFingerprints);
   if (mismatches.length > 0) throw new AssetMediaTypeMismatchError(mismatches);
 }

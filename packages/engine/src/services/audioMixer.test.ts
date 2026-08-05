@@ -120,7 +120,7 @@ describe("processCompositionAudio", () => {
   // probe entirely when the element carries an authored duration, and used to
   // surface as `prepare/ffmpeg_failed` with owner "system" — an authoring bug
   // paged as a platform fault, after every frame had already been captured.
-  it("classifies a markup audio source as a user-owned invalid media source", async () => {
+  it("classifies a document audio source as a user-owned invalid media source", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
     const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
     tempDirs.push(baseDir, workDir);

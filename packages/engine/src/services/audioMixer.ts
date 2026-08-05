@@ -9,7 +9,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeF
 import { join, dirname } from "path";
 import { parseHTML } from "linkedom";
 import { extractAudioMetadata } from "../utils/ffprobe.js";
-import { isMarkupPayload } from "../utils/markupPayload.js";
+import { isNotMediaPayload } from "../utils/notMediaPayload.js";
 import { downloadToTemp, isHttpUrl } from "../utils/urlDownloader.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { formatFfmpegError, runFfmpeg, type RunFfmpegResult } from "../utils/runFfmpeg.js";
@@ -734,13 +734,13 @@ export async function processCompositionAudio(
           return;
         }
 
-        // STUDIO-5433: an audio src that resolved to an HTML/XML document (an
+        // STUDIO-5433: an audio src that resolved to a text document (an
         // unresolved nested-composition preview URL, or a 403/404 body served
         // with a 200) never reaches the probe below when the element carries an
         // authored duration or `loop`. It then fails inside ffmpeg as
         // `prepare/ffmpeg_failed` with owner "system" — an authoring bug paged
         // as a platform fault, after every frame has already been captured.
-        if (await isMarkupPayload(srcPath)) {
+        if (await isNotMediaPayload(srcPath)) {
           failures.push({
             stage: "source",
             reason: "invalid_media",
@@ -748,7 +748,7 @@ export async function processCompositionAudio(
             retryable: false,
             elementId: element.id,
             detail: boundedDetail(
-              `Audio element ${element.id} source is a markup document (HTML/XML), not media`,
+              `Audio element ${element.id} source is a text document (HTML/XML/JSON), not media`,
             ),
           });
           return;

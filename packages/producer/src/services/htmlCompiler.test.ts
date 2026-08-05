@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { parseHTML } from "linkedom";
 import { interpolateVolumeGain } from "@hyperframes/core/media-volume-envelope";
 import { defaultLogger } from "../logger.js";
-import { MarkupNotMediaError } from "@hyperframes/engine";
+import { NotMediaPayloadError } from "@hyperframes/engine";
 import {
   collectExternalAssets,
   compileForRender,
@@ -2278,12 +2278,12 @@ describe("sub-composition variable injection (render path, #2064)", () => {
 // from ffprobe — the `mov,mp4,…` prefix is ffprobe's demuxer probe order, NOT
 // the file's true format, so every alert routed as a codec/ffmpeg bug. The
 // byte-level sniff itself is unit-tested in
-// `engine/src/utils/markupPayload.test.ts`; what is pinned here is the
+// `engine/src/utils/notMediaPayload.test.ts`; what is pinned here is the
 // compiler's handling of the verdict, which differs by element type.
 
-describe("compileForRender markup sniff (STUDIO-5433)", () => {
+describe("compileForRender non-media payload sniff (STUDIO-5433)", () => {
   function writeProject(mediaTag: string): string {
-    const projectDir = mkdtempSync(join(tmpdir(), "hf-markup-sniff-e2e-"));
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-payload-sniff-e2e-"));
     mkdirSync(join(projectDir, "assets"));
     writeFileSync(
       join(projectDir, "assets", "nested.html"),
@@ -2307,7 +2307,7 @@ describe("compileForRender markup sniff (STUDIO-5433)", () => {
     return projectDir;
   }
 
-  it("aborts with MarkupNotMediaError before ffprobe when a <video> src is an HTML payload", async () => {
+  it("aborts with NotMediaPayloadError before ffprobe when a <video> src is an HTML payload", async () => {
     // Mimics STUDIO-5433: an a-roll element whose src points at a legitimate
     // 6.5 KB `<!DOCTYPE html>` preview page instead of the rendered MP4.
     const projectDir = writeProject(
@@ -2320,11 +2320,11 @@ describe("compileForRender markup sniff (STUDIO-5433)", () => {
     } catch (err) {
       caught = err;
     }
-    expect(caught).toBeInstanceOf(MarkupNotMediaError);
-    const err = caught as MarkupNotMediaError;
+    expect(caught).toBeInstanceOf(NotMediaPayloadError);
+    const err = caught as NotMediaPayloadError;
     // Routing metadata, not just a readable string: these are what the server's
     // SAFE_RENDER_ERROR_CODES allowlist and the distributed retry sets key off.
-    expect(err.code).toBe("MARKUP_NOT_MEDIA");
+    expect(err.code).toBe("NOT_MEDIA_PAYLOAD");
     expect(err.owner).toBe("user");
     expect(err.retryable).toBe(false);
     // Correlation is the hashed element id — the authored src never reaches a
@@ -2336,7 +2336,7 @@ describe("compileForRender markup sniff (STUDIO-5433)", () => {
     // error and this assertion would fail.
   });
 
-  it("drops an <audio> markup payload to duration 0 and warns instead of failing the render", async () => {
+  it("drops an <audio> document payload to duration 0 and warns instead of failing the render", async () => {
     // The audio/video split is the compiler's contract: an unprobeable audio
     // src is excluded from the render, and only video surfaces its probe
     // failure. A hard abort here would take down renders that used to succeed
@@ -2355,7 +2355,7 @@ describe("compileForRender markup sniff (STUDIO-5433)", () => {
     );
 
     expect(compiled.html).not.toContain('id="a1" src="assets/nested.html" data-end');
-    expect(warnings.join("\n")).toContain("HTML/XML document");
+    expect(warnings.join("\n")).toContain("text document");
     expect(warnings.join("\n")).toContain("a1");
   });
 });

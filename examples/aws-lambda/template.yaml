@@ -265,8 +265,8 @@ Resources:
                   - PlanProtocolUnsupportedError
                   - VIDEO_SOURCE_UNRENDERABLE
                   - INVALID_VIDEO_METADATA
-                  - MARKUP_NOT_MEDIA
-                  - MarkupNotMediaError
+                  - NOT_MEDIA_PAYLOAD
+                  - NotMediaPayloadError
                   - PLAN_ARTIFACT_DIGEST_MISMATCH
                   - FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED
                 MaxAttempts: 0
@@ -311,8 +311,8 @@ Resources:
                   - PLAN_V2_INTEGRITY_UNRECOVERABLE
                   - VIDEO_SOURCE_UNRENDERABLE
                   - INVALID_VIDEO_METADATA
-                  - MARKUP_NOT_MEDIA
-                  - MarkupNotMediaError
+                  - NOT_MEDIA_PAYLOAD
+                  - NotMediaPayloadError
                   - PlanV2IntegrityError
                   - PLAN_ARTIFACT_DIGEST_MISMATCH
                   - FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED
