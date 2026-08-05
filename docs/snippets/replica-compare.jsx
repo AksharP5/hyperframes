@@ -44,17 +44,24 @@ export const ReplicaCompare = ({
     return () => query.removeEventListener("change", onChange);
   }, []);
 
-  // React can drop src/autoPlay/loop from the DOM, but that neither pauses a
-  // playing element nor aborts its resource: pause(), removeAttribute("src") and
-  // load() are all required — when the preference flips to reduce mid-session,
-  // and when the pair scrolls out of view.
+  // Off-screen: release both decoded resources — React props alone neither pause
+  // an element nor abort its download, so pause() + removeAttribute("src") +
+  // load() are all required. On the reduce edge, stop an autoplaying (muted) clip
+  // but keep a source assigned so the sound button can still start it: reduced
+  // motion disables autoplay, not voluntary playback.
   useEffect(() => {
-    if (inView && !reduced) return;
-    for (const video of [refVideo.current, repVideo.current]) {
-      if (!video) continue;
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
+    const videos = [refVideo.current, repVideo.current];
+    if (!inView) {
+      for (const video of videos) {
+        if (!video) continue;
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
+      return;
+    }
+    if (reduced) {
+      for (const video of videos) if (video && video.muted) video.pause();
     }
   }, [reduced, inView]);
 
@@ -115,7 +122,7 @@ export const ReplicaCompare = ({
           <video
             ref={refVideo}
             className={video}
-            src={active ? refSrc : undefined}
+            src={inView ? refSrc : undefined}
             poster={refPoster}
             autoPlay={active}
             muted={muted}
@@ -126,8 +133,9 @@ export const ReplicaCompare = ({
           <button
             type="button"
             onClick={toggleSound}
-            aria-label={muted ? "Unmute the reference" : "Mute the reference"}
-            className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur transition hover:bg-black/75"
+            aria-pressed={!muted}
+            aria-label={muted ? "Play the reference with sound" : "Mute the reference"}
+            className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur transition hover:bg-black/75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           >
             {muted ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
@@ -144,7 +152,7 @@ export const ReplicaCompare = ({
           <video
             ref={repVideo}
             className={video}
-            src={active ? replicaSrc : undefined}
+            src={inView ? replicaSrc : undefined}
             poster={replicaPoster}
             autoPlay={active}
             muted
