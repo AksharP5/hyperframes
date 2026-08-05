@@ -1,5 +1,8 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   auditSnippets,
@@ -7,6 +10,8 @@ import {
   findMotionGuardViolations,
   splitComponents,
 } from "./check-docs-snippet-motion.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 const GUARDED = `export const Grid = () => {
   const [reducedMotion, setReducedMotion] = useState(
@@ -120,4 +125,21 @@ test("forwarding a caller's autoPlay prop does not make a component owe the guar
 
 test("every autoplaying component in docs/snippets currently satisfies the guard", () => {
   assert.deepEqual(auditSnippets(), []);
+});
+
+// Reduced motion disables autoplay, but the visible control must still start the
+// whole comparison — not just the reference — or a reduced-motion visitor who
+// presses it sees half the pair. Source-level, since the repo has no React
+// runtime harness for docs snippets (this whole check is source-level for that
+// reason).
+test("ReplicaCompare's control starts both films and does not gate sync on reduced motion", () => {
+  const source = readFileSync(join(here, "../docs/snippets/replica-compare.jsx"), "utf8");
+  // The voluntary-play path starts both the reference and the replica.
+  assert.match(source, /refVideo\.current\?\.play\(\)/, "reference is started");
+  assert.match(source, /repVideo\.current\?\.play\(\)/, "replica is started too");
+  // The replica-sync effect attaches in view regardless of the preference, so a
+  // voluntary play under reduced motion still pulls the replica along.
+  const syncGate = source.match(/const b = repVideo\.current;\s*\n\s*if \(([^)]*)\) return;/);
+  assert.ok(syncGate, "found the replica-sync guard");
+  assert.doesNotMatch(syncGate[1], /reduced/, "sync must not early-return on reduced motion");
 });

@@ -122,7 +122,7 @@ Audio has no visual lifecycle.
 
 | Attribute | Applies to | Meaning |
 | --- | --- | --- |
-| `data-media-start` / `data-playback-start` | Video, audio, nested composition | Offset into the source file, used by trim and split. The two names are read by different layers with different precedence: the timing compiler and HTML parser read only `data-media-start`, while the runtime player, Studio, and the CLI read `data-playback-start` first and fall back to `data-media-start`. Studio writes `data-playback-start` for nested compositions and any element authored with it. Set **one**; authoring both is what causes the two layers to diverge. |
+| `data-media-start` / `data-playback-start` | Video, audio, nested composition | Offset into the source file, used by trim and split. The two names are read by different layers, and not all of them agree. **Read only `data-media-start`:** the timing compiler, the HTML parser, the producer's audio extraction, and `hyperframes validate`. **Read `data-playback-start` first, falling back to `data-media-start`:** the runtime player, Studio, and `hyperframes snapshot` — and Studio also writes `data-playback-start` for nested compositions and any element authored with it. Set **one** value; authoring both is what makes these two groups diverge. |
 | `data-playback-rate` | Video, audio, nested composition | Playback multiplier from `0.1` to `5` |
 | `data-volume` | Video and audio | Static volume from `0` to `1` |
 | `data-has-audio="true"` | Video | Declares that the video contributes audio |

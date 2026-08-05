@@ -65,11 +65,13 @@ export const ReplicaCompare = ({
     }
   }, [reduced, inView]);
 
-  // Keep the replica (right) locked to the reference (left) clock.
+  // Keep the replica (right) locked to the reference (left) clock. Attached
+  // whenever the pair is in view — including under reduced motion — so that once
+  // the reference starts (autoplay, or a voluntary press) the replica follows.
   useEffect(() => {
     const a = refVideo.current;
     const b = repVideo.current;
-    if (!a || !b || reduced || !inView) return;
+    if (!a || !b || !inView) return;
 
     const resync = () => {
       if (Number.isFinite(a.currentTime) && Math.abs((b.currentTime || 0) - a.currentTime) > 0.15) {
@@ -95,13 +97,28 @@ export const ReplicaCompare = ({
     };
   }, [reduced, inView]);
 
+  // Start/pause both films together — the sync effect keeps the replica locked to
+  // the reference clock once the reference is playing.
+  const startBoth = () => {
+    refVideo.current?.play().catch(() => {});
+    repVideo.current?.play().catch(() => {});
+  };
+  const pauseBoth = () => {
+    refVideo.current?.pause();
+    repVideo.current?.pause();
+  };
+
   const toggleSound = () => {
     const a = refVideo.current;
     if (!a) return;
     const next = !muted;
     setMuted(next);
     a.muted = next; // only the reference carries audio; replica stays silent
-    if (!next) a.play().catch(() => {});
+    if (!next) {
+      startBoth(); // voluntary play — starts the whole pair, incl. under reduced motion
+    } else if (reduced) {
+      pauseBoth(); // no autoplay to fall back to under reduced motion
+    }
   };
 
   const active = inView && !reduced;
