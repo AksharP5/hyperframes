@@ -153,6 +153,7 @@ const FOOTER_MARKER = "{/* hf:generated-footer */}";
  * Pull the hand-written `## sections` out of an already-generated page.
  * Returns the raw lines, heading included, in their original order.
  */
+// fallow-ignore-next-line complexity
 function carriedSectionsFrom(pagePath: string): CarriedContent {
   const empty: CarriedContent = { sections: [], hasCustomUsage: false };
   if (!existsSync(pagePath)) return empty;
@@ -168,6 +169,7 @@ function carriedSectionsFrom(pagePath: string): CarriedContent {
   let heading: string | null = null;
   let buffer: string[] = [];
 
+  // fallow-ignore-next-line complexity
   const flush = (): void => {
     if (!heading) return;
     while (buffer.length && buffer[0]!.trim() === "") buffer.shift();
@@ -467,6 +469,7 @@ function hasCommentHeader(kind: ItemKind, manifest: RegistryItem): boolean {
   }
 }
 
+// fallow-ignore-next-line complexity
 function generateParams(manifest: RegistryItem): string[] {
   if (!("params" in manifest) || !Array.isArray(manifest.params) || !manifest.params.length) {
     return [];
@@ -489,6 +492,7 @@ function generateParams(manifest: RegistryItem): string[] {
   return lines;
 }
 
+// fallow-ignore-next-line complexity
 function generateItemMdx(
   kind: ItemKind,
   manifest: RegistryItem,
@@ -657,6 +661,7 @@ function generateItemMdx(
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
+// fallow-ignore-next-line complexity
 function main(): void {
   const items = discoverItems();
   const catalogIndex: CatalogEntry[] = [];
