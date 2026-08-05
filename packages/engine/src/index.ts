@@ -273,6 +273,14 @@ export {
   type KeyframeAnalysis,
 } from "./utils/ffprobe.js";
 
+export {
+  MARKUP_NOT_MEDIA,
+  MarkupNotMediaError,
+  assertNotMarkupPayload,
+  fingerprintElementId,
+  isMarkupPayload,
+} from "./utils/markupPayload.js";
+
 export { assertPublicHttpsUrl, downloadToTemp, isHttpUrl } from "./utils/urlDownloader.js";
 export {
   runFfmpeg,

@@ -906,11 +906,13 @@ const NON_RETRYABLE_ERROR_NAMES = new Set([
   "PLAN_V2_INTEGRITY_UNRECOVERABLE",
   "VIDEO_SOURCE_UNRENDERABLE",
   "INVALID_VIDEO_METADATA",
+  "MARKUP_NOT_MEDIA",
   // Producer error class names (`.name`) + their string code aliases — the
   // class sets `.name` to the class name but wraps a `code`; cover both so a
   // raw-code throw is caught too. Mirrors the AWS state machine's
   // non-retryable list.
   "FormatNotSupportedInDistributedError",
+  "MarkupNotMediaError",
   "PlanTooLargeError",
   "PlanProtocolUnsupportedError",
   "PlanV2IntegrityError",

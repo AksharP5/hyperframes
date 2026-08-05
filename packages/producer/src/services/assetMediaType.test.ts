@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { MARKUP_NOT_MEDIA, MarkupNotMediaError } from "@hyperframes/engine";
 import {
   ASSET_MEDIA_TYPE_MISMATCH,
   AssetMediaTypeMismatchError,
@@ -189,6 +190,64 @@ describe("preflightCompositionAssetMediaTypes", () => {
     writeFileSync(join(projectDir, "corrupt-media"), "not a media container");
     await expect(run({ videoSrc: "missing-media" })).resolves.toBeUndefined();
     await expect(run({ imageSrc: "corrupt-media" })).resolves.toBeUndefined();
+  });
+
+  // STUDIO-5433. This preflight sees every local media src regardless of its
+  // authored timing, so it is the only place a markup payload behind a
+  // `data-end` video or a `loop`ing audio is caught before frames are captured
+  // — for those elements the compiler never resolves a duration, so its own
+  // sniff never runs.
+  describe("markup payloads", () => {
+    beforeAll(() => {
+      writeFileSync(
+        join(projectDir, "streamed-preview.html"),
+        "<!DOCTYPE html><html><body>not media</body></html>",
+      );
+      writeFileSync(
+        join(projectDir, "brand-mark.svg"),
+        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>',
+      );
+    });
+
+    it("rejects an HTML payload under a video element", async () => {
+      let caught: unknown;
+      try {
+        await run({ videoSrc: "streamed-preview.html" });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(MarkupNotMediaError);
+      expect(caught).toMatchObject({
+        code: MARKUP_NOT_MEDIA,
+        owner: "user",
+        retryable: false,
+      });
+      const message = (caught as Error).message;
+      expect(message).not.toContain("streamed-preview.html");
+      expect(message).not.toContain(fixtureDir);
+    });
+
+    it("reports markup ahead of the type mismatch the same file also produces", async () => {
+      // An HTML page under a <video> is both "not media" and "not video". The
+      // markup verdict is the actionable one; the mismatch is a symptom of it.
+      await expect(run({ videoSrc: "streamed-preview.html" })).rejects.toBeInstanceOf(
+        MarkupNotMediaError,
+      );
+    });
+
+    it("leaves an audio source to the mixer's per-element classification", async () => {
+      // A bad audio source is non-fatal by existing policy: the render ships
+      // without the track and reports `audioError`. Aborting the whole compile
+      // here would turn renders that used to succeed into hard failures, so
+      // audioMixer classifies it as source/invalid_media/owner:user instead.
+      await expect(run({ audioSrc: "streamed-preview.html" })).resolves.toBeUndefined();
+    });
+
+    it("leaves an SVG image source alone", async () => {
+      // ffprobe reads SVG through its svg_pipe demuxer, so markup is a
+      // legitimate <img> payload and must not be swept up by the sniff.
+      await expect(run({ imageSrc: "brand-mark.svg" })).resolves.toBeUndefined();
+    });
   });
 
   it("re-probes a path after its media contents are replaced", async () => {

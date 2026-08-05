@@ -11,7 +11,6 @@
  */
 
 import { createReadStream, existsSync, mkdirSync, readFileSync } from "fs";
-import { open as openFile } from "node:fs/promises";
 import { join, dirname, resolve, basename } from "path";
 import { parseHTML } from "linkedom";
 import {
@@ -22,7 +21,6 @@ import {
   shouldClampResolvedMediaDuration,
   CSS_URL_RE,
   isNonRelativeUrl,
-  redactTelemetryString,
   type ResolvedDuration,
   type UnresolvedElement,
 } from "@hyperframes/core";
@@ -53,6 +51,8 @@ import {
   type AudioVolumeKeyframe,
   type MediaProbeProfile,
   analyzeKeyframeIntervals,
+  assertNotMarkupPayload,
+  MarkupNotMediaError,
   probeMediaProfile,
 } from "@hyperframes/engine";
 import { assertPublicHttpsUrl, downloadToTemp, isHttpUrl } from "../utils/urlDownloader.js";
@@ -145,83 +145,6 @@ class EmptyCompositionError extends Error {
     );
     this.name = "EmptyCompositionError";
     this.problems = problems;
-  }
-}
-
-/**
- * Thrown when a media file handed to `resolveMediaDuration` is actually an
- * HTML (or generic XML) payload rather than a video/audio container.
- *
- * Motivating incident: STUDIO-5433 — an authoring bug produced an a-roll
- * element with `content.src` pointing at a `streamed-preview.html` URL that
- * downloaded to a legitimate 6.5 KB `<!DOCTYPE html>` page instead of the
- * expected MP4. ffprobe's opaque `[mov,mp4,m4a,3gp,3g2,mj2 @ ...] moov atom
- * not found` masked the actual cause (the `mov,mp4,…` prefix is just
- * ffprobe's default demuxer probe order, not the file's true format), and
- * every "moov atom not found" alert routed as an ffmpeg/codec bug instead of
- * an authoring bug.
- *
- * Sniffing 256 bytes off the front of the downloaded file is nearly free
- * (single small read via `fs.promises.open`), and converting this class of
- * failure into a domain-typed error means:
- *   1. Operators see `html-not-video: src=X` in logs, not `moov atom not found`.
- *   2. Follow-on telemetry / alerts can partition on this shape.
- *   3. The authoring-side root-cause fix (re-point nested a-roll src to a
- *      rendered MP4 before it reaches producer) can ship independently — this
- *      defense catches the class regardless of when authoring lands.
- *
- * Exported so callers that want `instanceof` narrowing (tests, upstream
- * telemetry classifiers) can discriminate this from other probe failures.
- */
-export class HtmlNotVideoError extends Error {
-  readonly code = "HTML_NOT_VIDEO" as const;
-  readonly src: string;
-  readonly headSample: string;
-
-  constructor(redactedSrc: string, headSample: string) {
-    super(
-      `Refusing to probe HTML payload as video: [src=${redactedSrc}]. ` +
-        `First 32 bytes: ${headSample}. ` +
-        "This usually means an unresolved nested composition URL was handed to ffprobe.",
-    );
-    this.name = "HtmlNotVideoError";
-    this.src = redactedSrc;
-    this.headSample = headSample;
-  }
-}
-
-// Matches `<!doctype`, `<html`, or `<?xml` at the very start (case-insensitive,
-// BOM- and leading-whitespace-tolerant handled at the caller). `<?xml` catches
-// SVG and generic XML documents — same class of "not a video container".
-const HTML_PAYLOAD_PREFIX_RE = /^(?:<!doctype|<html|<\?xml)/i;
-// UTF-8 BOM as a JS string code point (0xFEFF).
-const UTF8_BOM_CHAR = 0xfeff;
-
-/**
- * Sniff the first ~256 bytes of a downloaded media file. If it starts with an
- * HTML or generic XML prefix, throw `HtmlNotVideoError` naming the offending
- * `src` instead of letting ffprobe emit an opaque `moov atom not found`.
- *
- * Callers pass the caller-provided `src` (URL or path used in the composition
- * HTML), which is redacted via `redactTelemetryString` before it reaches the
- * error message — the `filePath` argument is the on-disk copy we actually
- * read from. Exported for direct unit-test coverage.
- */
-export async function assertNotHtmlPayload(filePath: string, src: string): Promise<void> {
-  const fh = await openFile(filePath, "r");
-  try {
-    const buf = Buffer.alloc(256);
-    const { bytesRead } = await fh.read(buf, 0, 256, 0);
-    if (bytesRead === 0) return;
-    let head = buf.subarray(0, bytesRead).toString("utf8");
-    if (head.charCodeAt(0) === UTF8_BOM_CHAR) head = head.slice(1);
-    const trimmed = head.replace(/^\s+/, "");
-    if (HTML_PAYLOAD_PREFIX_RE.test(trimmed)) {
-      const sample = trimmed.slice(0, 32).replace(/\s+/g, " ");
-      throw new HtmlNotVideoError(redactTelemetryString(src), sample);
-    }
-  } finally {
-    await fh.close();
   }
 }
 
@@ -492,6 +415,7 @@ async function resolveMediaDuration(
   downloadDir: string,
   tagName: string,
   elementIdentity: string,
+  log?: ProducerLogger,
 ): Promise<{ duration: number; resolvedPath: string }> {
   let filePath = src;
 
@@ -512,24 +436,33 @@ async function resolveMediaDuration(
     return { duration: 0, resolvedPath: filePath };
   }
 
-  // Defensive HTML sniff (STUDIO-5433). If an authoring bug hands us a
-  // `.html` payload (e.g. an unresolved nested-composition preview URL),
-  // refuse to probe and throw a typed HtmlNotVideoError. Without this,
-  // ffprobe emits an opaque `[mov,mp4,...] moov atom not found` that masks
-  // the actual cause and routes as a codec/ffmpeg bug. Runs before the
-  // media-probe slot so we don't consume concurrency budget on payloads
-  // that were never going to probe.
-  await assertNotHtmlPayload(filePath, src);
-
   return withMediaProbeSlot(async () => {
     let profile: MediaProbeProfile;
     try {
+      // Markup sniff (STUDIO-5433): if an authoring bug hands us an HTML/XML
+      // payload (e.g. an unresolved nested-composition preview URL), fail with
+      // a typed MarkupNotMediaError instead of letting ffprobe emit an opaque
+      // `[mov,mp4,...] moov atom not found` that routes as a codec bug.
+      // Deliberately inside this try: the audio/video split below is the
+      // contract, so a bad audio src must still degrade to duration 0 rather
+      // than take down the whole render.
+      await assertNotMarkupPayload(filePath, elementIdentity);
       profile = await probeMediaProfile(filePath);
     } catch (error) {
       // Preserve the historical split: invalid video sources surface their
       // probe failure, while invalid/unreadable audio sources resolve to zero
       // duration and are excluded by the compiler.
-      if (tagName !== "video") return { duration: 0, resolvedPath: filePath };
+      if (tagName !== "video") {
+        if (error instanceof MarkupNotMediaError) {
+          // Dropping it silently is what let STUDIO-5433 resurface downstream
+          // as `prepare/ffmpeg_failed` with owner "system".
+          log?.warn(
+            `[compile] Audio "${elementIdentity}" (${src}) is an HTML/XML document, not a media ` +
+              "file — the element is dropped from the render. Point it at a rendered media file.",
+          );
+        }
+        return { duration: 0, resolvedPath: filePath };
+      }
       throw error;
     }
     assertAssetMediaTypeProfile(tagName === "video" ? "video" : "audio", profile, elementIdentity);
@@ -577,9 +510,15 @@ async function compileHtmlFile(
   // Phase 1: Resolve missing durations (parallel ffprobe)
   const resolvedResults = await Promise.all(
     mediaUnresolved.map((el) =>
-      resolveMediaDuration(el.src!, el.mediaStart, baseDir, downloadDir, el.tagName, el.id).then(
-        ({ duration }) => ({ id: el.id, duration }),
-      ),
+      resolveMediaDuration(
+        el.src!,
+        el.mediaStart,
+        baseDir,
+        downloadDir,
+        el.tagName,
+        el.id,
+        log,
+      ).then(({ duration }) => ({ id: el.id, duration })),
     ),
   );
   const resolutions: ResolvedDuration[] = resolvedResults.filter((r) => r.duration > 0);
@@ -601,6 +540,7 @@ async function compileHtmlFile(
           downloadDir,
           el.tagName,
           el.id,
+          log,
         );
         return { id: el.id, tagName: el.tagName, duration: el.duration, maxDuration, src: el.src! };
       }),
