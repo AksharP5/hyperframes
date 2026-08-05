@@ -15,7 +15,7 @@
 
 import { readFileSync, existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 // Import from source — bun workspace linking doesn't resolve for scripts outside packages/.
 import {
   type FileTarget,
@@ -118,10 +118,12 @@ const GENERATED_HEADINGS = new Set([
   "ask an agent for it",
   "make the texture move",
   "every texture",
-  // headings earlier revisions emitted — dropped on purpose, never carried
+  // headings earlier revisions emitted — dropped on purpose, never carried.
+  // `usage` is deliberately NOT listed: the current template never emits it, and
+  // it is a heading a human might reasonably write, so ownership stays explicit
+  // (anything not in this set is hand-written) rather than sniffing the body.
   "details",
   "files",
-  "usage",
   "source prompt",
   "agent usage",
   "animated texture",
@@ -129,19 +131,6 @@ const GENERATED_HEADINGS = new Set([
   // the required reader continuation the generator emits last (see RELATED_TOPICS)
   "related topics",
 ]);
-
-/**
- * Openers of every "## Usage" body this generator has written. A Usage section
- * that starts with none of them was rewritten by hand, so it is kept and the
- * generated usage prose steps aside for it.
- */
-const GENERATED_USAGE_OPENERS = [
-  /^After installing, add the block/,
-  /^Open `[^`]+` and paste its contents/,
-  /^Open `[^`]+` and copy what is inside/,
-  /^After `npx hyperframes add/,
-  /^It runs for /,
-];
 
 /**
  * Marks the start of the generated provenance footer (tags, credit, prompt).
@@ -170,8 +159,10 @@ const RELATED_TOPICS: readonly string[] = [
  * Pull the hand-written `## sections` out of an already-generated page.
  * Returns the raw lines, heading included, in their original order.
  */
+// Exported for the preservation fixture in
+// packages/core/src/registry/catalogGeneratorInstructions.test.ts.
 // fallow-ignore-next-line complexity
-function carriedSectionsFrom(pagePath: string): CarriedContent {
+export function carriedSectionsFrom(pagePath: string): CarriedContent {
   const empty: CarriedContent = { sections: [], hasCustomUsage: false };
   if (!existsSync(pagePath)) return empty;
   let text: string;
@@ -192,12 +183,12 @@ function carriedSectionsFrom(pagePath: string): CarriedContent {
     while (buffer.length && buffer[0]!.trim() === "") buffer.shift();
     while (buffer.length && buffer.at(-1)!.trim() === "") buffer.pop();
 
+    // Ownership is explicit: a section is generated iff its heading is one the
+    // template emits (GENERATED_HEADINGS). Everything else is hand-written and
+    // carried verbatim — no content heuristic that could misread custom prose as
+    // generated and silently delete it on the next regeneration.
     const key = heading.toLowerCase();
-    const handWritten =
-      !GENERATED_HEADINGS.has(key) ||
-      (key === "usage" && !GENERATED_USAGE_OPENERS.some((re) => re.test(buffer[0] ?? "")));
-
-    if (handWritten && buffer.length) {
+    if (!GENERATED_HEADINGS.has(key) && buffer.length) {
       if (key === "usage") hasCustomUsage = true;
       sections.push(`## ${heading}`, "", ...buffer, "");
     }
@@ -844,4 +835,7 @@ function main(): void {
   console.log("\nDone.");
 }
 
-main();
+// Only regenerate when run directly, so the module can be imported by tests.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  main();
+}

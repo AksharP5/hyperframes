@@ -1,7 +1,9 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import { carriedSectionsFrom } from "../../../../scripts/generate-catalog-pages.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../../../..");
@@ -37,5 +39,79 @@ describe("catalog pages keep the required reader continuation", () => {
       .filter((l) => l.startsWith("## "))
       .at(-1);
     expect(lastHeading).toBe("## Related topics");
+  });
+});
+
+// The carry-forward path is the subtler half: a regeneration must preserve every
+// hand-written section, including one whose heading (## Usage) the generator once
+// emitted and whose first line looks like generated prose, and one appended below
+// the generated footer marker.
+describe("carriedSectionsFrom preserves hand-written sections", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hf-catalog-carry-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  const write = (name: string, body: string) => {
+    const p = join(dir, name);
+    writeFileSync(p, body, "utf-8");
+    return p;
+  };
+
+  it("keeps a custom Usage section that opens like generated prose", () => {
+    const page = write(
+      "usage.mdx",
+      [
+        "## Install",
+        "",
+        "```bash Terminal",
+        "npx hyperframes add sample",
+        "```",
+        "",
+        "## Usage",
+        "",
+        // deliberately opens with a phrase an old generated Usage used
+        "After installing, add the block — but here is our own hand-written guidance the author cares about.",
+        "",
+        "{/* hf:generated-footer */}",
+        "",
+        "Tagged `sample`.",
+        "",
+      ].join("\n"),
+    );
+    const carried = carriedSectionsFrom(page);
+    const joined = carried.sections.join("\n");
+    expect(joined).toContain("## Usage");
+    expect(joined).toContain("hand-written guidance the author cares about");
+    expect(carried.hasCustomUsage).toBe(true);
+    // The generated Install section is owned by the template and not carried.
+    expect(joined).not.toContain("## Install");
+  });
+
+  it("keeps a hand-written section appended below the generated footer", () => {
+    const page = write(
+      "below-footer.mdx",
+      [
+        "## Install",
+        "",
+        "text",
+        "",
+        "{/* hf:generated-footer */}",
+        "",
+        "Tagged `sample`.",
+        "",
+        "## Related topics",
+        "",
+        "- [Browse the complete Catalog](/catalog)",
+        "",
+        "## Field notes",
+        "",
+        "A section a human added after the generated tail.",
+        "",
+      ].join("\n"),
+    );
+    const joined = carriedSectionsFrom(page).sections.join("\n");
+    expect(joined).toContain("## Field notes");
+    expect(joined).toContain("A section a human added after the generated tail.");
+    // The generator's own Related topics is not carried (it re-emits it).
+    expect(joined).not.toContain("## Related topics");
   });
 });
