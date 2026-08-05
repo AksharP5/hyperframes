@@ -3,48 +3,38 @@ title: "Count-Up Stat Card"
 description: "Big-numeral statistic with count-up, label, thin progress track filling to value/max, and caption; light and dark schemes"
 ---
 
-`data-viz` `stat` `minimal`
-
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/mk-progress-stat.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/mk-progress-stat.png" autoPlay muted loop playsInline />
 
-## Add it to a project
+## Install
 
-### Ask your agent
-
-```text
-Add the Count-Up Stat Card block from the HyperFrames Catalog to this project.
-Replace the demo content with mine and match the existing design and timing.
-```
-
-### Install from the terminal
-
-```bash
+```bash Terminal
 npx hyperframes add mk-progress-stat
 ```
 
-## Details
+That writes one file: `compositions/mk-progress-stat.html`.
 
-| Property | Value |
-| --- | --- |
-| Type | Block |
-| Dimensions | 1920×1080 |
-| Duration | 7s |
+## Add it to your video
 
-**Installed files**
+It runs for 7 seconds at 1920×1080. Paste this into your composition:
 
-| File | Target | Type |
-| --- | --- | --- |
-| `mk-progress-stat.html` | `compositions/mk-progress-stat.html` | hyperframes:composition |
-
-## Use it
-
-Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
-
-**Wiring it by hand.** The installed block can be added to a host composition with:
-
-```html
-<div data-composition-id="mk-progress-stat" data-composition-src="compositions/mk-progress-stat.html" data-start="0" data-duration="7" data-track-index="1" data-width="1920" data-height="1080"></div>
+```html index.html
+<div
+  data-composition-id="mk-progress-stat"
+  data-composition-src="compositions/mk-progress-stat.html"
+  data-start="0"
+  data-duration="7"
+  data-track-index="1"
+  data-width="1920"
+  data-height="1080"
+></div>
 ```
+
+Move it in time with `data-start`. Put it on a different timeline row with
+`data-track-index`. See [data attributes](/concepts/data-attributes) for the rest.
+
+{/* hf:generated-footer */}
+
+Tagged `data-viz` `stat` `minimal`.
 
 ## Related topics
 

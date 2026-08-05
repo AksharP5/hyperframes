@@ -3,52 +3,51 @@ title: "Portal"
 description: "VFX composition block"
 ---
 
-`html-in-canvas` `webgl`
-
-<Warning>
-**Requires Chrome flag.** Enable `chrome://flags/#canvas-draw-element` for live preview. Rendering via CLI enables the flag automatically. [Learn more](/guides/html-in-canvas).
-</Warning>
-
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-portal.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/vfx-portal.png" autoPlay muted loop playsInline />
 
-## Add it to a project
+## Install
 
-### Ask your agent
-
-```text
-Add the Portal block from the HyperFrames Catalog to this project.
-Replace the demo content with mine and match the existing design and timing.
-```
-
-### Install from the terminal
-
-```bash
+```bash Terminal
 npx hyperframes add vfx-portal
 ```
 
-## Details
+That writes one file: `compositions/vfx-portal.html`.
 
-| Property | Value |
-| --- | --- |
-| Type | Block |
-| Dimensions | 1920×1080 |
-| Duration | 10s |
+<Warning>
+  Live preview needs the `chrome://flags/#canvas-draw-element` flag switched on.
+  Rendering from the CLI switches it on for you. [How it
+  works](/guides/html-in-canvas)
+</Warning>
 
-**Installed files**
+## Add it to your video
 
-| File | Target | Type |
-| --- | --- | --- |
-| `vfx-portal.html` | `compositions/vfx-portal.html` | hyperframes:composition |
+It runs for 10 seconds at 1920×1080. Paste this into your composition:
 
-## Use it
-
-Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
-
-**Wiring it by hand.** The installed block can be added to a host composition with:
-
-```html
-<div data-composition-id="vfx-portal" data-composition-src="compositions/vfx-portal.html" data-start="0" data-duration="10" data-track-index="1" data-width="1920" data-height="1080"></div>
+```html index.html
+<div
+  data-composition-id="vfx-portal"
+  data-composition-src="compositions/vfx-portal.html"
+  data-start="0"
+  data-duration="10"
+  data-track-index="1"
+  data-width="1920"
+  data-height="1080"
+></div>
 ```
+
+Move it in time with `data-start`. Put it on a different timeline row with
+`data-track-index`. See [data attributes](/concepts/data-attributes) for the rest.
+
+## Change the colors
+
+Set these CSS variables on the block:
+
+- `--bg-color` — Background. Defaults to `#000000`.
+- `--portal-color` — Portal color. Defaults to `#fafafa`.
+
+{/* hf:generated-footer */}
+
+Tagged `html-in-canvas` `webgl`.
 
 ## Related topics
 

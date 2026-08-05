@@ -3,48 +3,38 @@ title: "Code Typing"
 description: "Token-streamed typing reveal with a caret that tracks the frontier — deterministic, no CSS animation."
 ---
 
-`code` `code-animation` `typing` `developer`
-
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-typing.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/code-typing.png" autoPlay muted loop playsInline />
 
-## Add it to a project
+## Install
 
-### Ask your agent
-
-```text
-Add the Code Typing block from the HyperFrames Catalog to this project.
-Replace the demo content with mine and match the existing design and timing.
-```
-
-### Install from the terminal
-
-```bash
+```bash Terminal
 npx hyperframes add code-typing
 ```
 
-## Details
+That writes one file: `compositions/code-typing.html`.
 
-| Property | Value |
-| --- | --- |
-| Type | Block |
-| Dimensions | 1920×1080 |
-| Duration | 5s |
+## Add it to your video
 
-**Installed files**
+It runs for 5 seconds at 1920×1080. Paste this into your composition:
 
-| File | Target | Type |
-| --- | --- | --- |
-| `code-typing.html` | `compositions/code-typing.html` | hyperframes:composition |
-
-## Use it
-
-Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.
-
-**Wiring it by hand.** The installed block can be added to a host composition with:
-
-```html
-<div data-composition-id="code-typing" data-composition-src="compositions/code-typing.html" data-start="0" data-duration="5" data-track-index="1" data-width="1920" data-height="1080"></div>
+```html index.html
+<div
+  data-composition-id="code-typing"
+  data-composition-src="compositions/code-typing.html"
+  data-start="0"
+  data-duration="5"
+  data-track-index="1"
+  data-width="1920"
+  data-height="1080"
+></div>
 ```
+
+Move it in time with `data-start`. Put it on a different timeline row with
+`data-track-index`. See [data attributes](/concepts/data-attributes) for the rest.
+
+{/* hf:generated-footer */}
+
+Tagged `code` `code-animation` `typing` `developer`.
 
 ## Related topics
 
