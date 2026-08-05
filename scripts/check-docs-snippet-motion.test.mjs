@@ -156,3 +156,16 @@ test("ReplicaCompare's control starts both films and does not gate sync on reduc
   assert.ok(teardown, "found the offscreen teardown");
   assert.match(teardown[1], /setMuted\(true\)/, "offscreen release resets muted state");
 });
+
+// 40 of HoverVideo's 53 uses sit inside a link (11 of 23 examples cards are
+// <a href>, 29 of 30 thirty-days cards are <Card href>). Its control's click must
+// not bubble to that link, or pressing it — mouse or keyboard — navigates away
+// instead of toggling sound. This bug escaped static review and the gate; it only
+// surfaced by driving the live preview, so pin it.
+test("HoverVideo's control does not bubble its click to a wrapping link", () => {
+  const source = readFileSync(join(here, "../docs/snippets/hover-video.jsx"), "utf8");
+  const onClick = source.match(/onClick=\{\(e\) => \{([\s\S]*?)\n {8}\}\}/);
+  assert.ok(onClick, "found the control's click handler");
+  assert.match(onClick[1], /e\.preventDefault\(\)/, "default navigation is prevented");
+  assert.match(onClick[1], /e\.stopPropagation\(\)/, "the click does not bubble to a wrapping link");
+});

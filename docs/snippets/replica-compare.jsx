@@ -158,11 +158,11 @@ export const ReplicaCompare = ({
             aria-label={
               muted
                 ? reduced
-                  ? "Play the comparison with sound"
-                  : "Unmute the reference"
+                  ? "Sound off — play the comparison with sound"
+                  : "Sound off — unmute the reference"
                 : reduced
-                  ? "Pause the comparison"
-                  : "Mute the reference"
+                  ? "Sound on — pause the comparison"
+                  : "Sound on — mute the reference"
             }
             className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur transition hover:bg-black/75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           >
