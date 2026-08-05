@@ -588,7 +588,7 @@ function generateItemMdx(
     lines.push(
       "## Paste it into your composition",
       "",
-      `Open \`${primaryTarget}\`. Near the bottom is a real \`<style>\` element — copy it into`,
+      `Open \`${primaryTarget}\`. Paste the real \`<style>\` element near the bottom into`,
       "your composition once. It defines `hf-texture-text` and every `hf-texture-*` class.",
       "",
       `Leave the texture PNGs in \`assets/${manifest.name}/masks/\`. The CSS looks for them there.`,
