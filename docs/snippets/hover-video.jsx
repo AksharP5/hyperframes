@@ -105,7 +105,13 @@ export const HoverVideo = ({ src, poster, className, hasAudio = true }) => {
       />
       <button
         type="button"
-        onClick={hasAudio ? toggleSound : togglePlay}
+        onClick={(e) => {
+          // Cards can be wrapped in an <a> (source link) — keep the control's
+          // click (mouse or keyboard) from bubbling up and navigating away.
+          e.preventDefault();
+          e.stopPropagation();
+          (hasAudio ? toggleSound : togglePlay)();
+        }}
         aria-pressed={hasAudio ? !muted : playing}
         aria-label={
           hasAudio
