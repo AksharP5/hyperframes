@@ -9,6 +9,52 @@ export interface ThumbnailStripLayout {
 }
 
 /**
+ * Measure an image without mounting it in React's DOM. The scheduler owns the
+ * abort signal, so an unmounted clip cannot leave Blink retaining a pending
+ * image request and its former React tree.
+ */
+export function probeImageAspect(
+  imageSrc: string,
+  signal: AbortSignal,
+  tolerateSvgError = false,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const cleanup = () => {
+      image.onload = null;
+      image.onerror = null;
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      image.src = "";
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+
+    image.onload = () => {
+      cleanup();
+      resolve(
+        image.naturalWidth > 0 && image.naturalHeight > 0
+          ? image.naturalWidth / image.naturalHeight
+          : 16 / 9,
+      );
+    };
+    image.onerror = () => {
+      cleanup();
+      if (tolerateSvgError && /\.svg($|\?)/i.test(imageSrc)) resolve(16 / 9);
+      else reject(new Error("Image thumbnail failed to load"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    image.src = imageSrc;
+  });
+}
+
+/**
  * Compute the film-strip tile layout for a clip thumbnail: fixed-height tiles
  * sized by the media's aspect ratio, repeated to fill the clip width.
  * Degenerate aspects (0, negative, NaN, Infinity) fall back to 16:9.
@@ -17,9 +63,10 @@ export function computeThumbnailStrip(
   containerWidth: number,
   aspect: number,
   clipHeight: number = THUMBNAIL_CLIP_HEIGHT,
+  minFrameWidth = 1,
 ): ThumbnailStripLayout {
   const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 16 / 9;
-  const frameW = Math.max(1, Math.round(clipHeight * safeAspect));
+  const frameW = Math.max(minFrameWidth, Math.round(clipHeight * safeAspect));
   const frameCount = containerWidth > 0 ? Math.max(1, Math.ceil(containerWidth / frameW)) : 1;
   return { frameW, frameCount };
 }

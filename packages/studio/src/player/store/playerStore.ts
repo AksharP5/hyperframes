@@ -11,6 +11,7 @@ import {
 import { clampTimelineZoomPercent, computePinnedZoomPercent } from "../components/timelineZoom";
 import { createKeyframeSlice, type KeyframeCacheEntry, type KeyframeSlice } from "./keyframeSlice";
 import { createTimelineFocusRequest, type TimelineFocusRequest } from "./timelineFocusState";
+import { createThumbnailSlice, type ThumbnailSlice } from "./thumbnailSlice";
 
 export type { KeyframeCacheEntry } from "./keyframeSlice";
 export { liveTime } from "./liveTime";
@@ -103,7 +104,7 @@ function resolveElementSelection(
   };
 }
 
-interface PlayerState extends KeyframeSlice {
+interface PlayerState extends KeyframeSlice, ThumbnailSlice {
   isPlaying: boolean;
   currentTime: number;
   duration: number;
@@ -340,6 +341,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     timelineProjectId: get().timelineProjectId,
     timelineSessionEpoch: get().timelineSessionEpoch,
   })),
+  ...createThumbnailSlice(set),
 
   activeKeyframePct: null,
   setActiveKeyframePct: (pct) => set({ activeKeyframePct: pct }),

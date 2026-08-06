@@ -76,10 +76,14 @@ function renderLanes(options: RenderLanesOptions = {}): {
   host: HTMLDivElement;
   root: Root;
   rerender: (next: RenderLanesOptions) => void;
+  setSelectedElementId: ReturnType<typeof vi.fn>;
+  onSelectElement: ReturnType<typeof vi.fn>;
 } {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
+  const setSelectedElementId = vi.fn();
+  const onSelectElement = vi.fn();
   const render = (next: RenderLanesOptions) => {
     const elements = next.elements ?? [element("clip-a", TRACK_A)];
     const gsapAnimations = next.animations ?? new Map<string, GsapAnimation[]>();
@@ -118,6 +122,7 @@ function renderLanes(options: RenderLanesOptions = {}): {
           })}
           clipIndex={createTimelineClipIndex(tracks)}
           renderTimeRange={{ start: 0, end: Number.POSITIVE_INFINITY }}
+          visibleTimeRange={{ start: 0, end: Number.POSITIVE_INFINITY }}
           pinnedClipIdentities={new Set()}
           trackOrder={displayTrackOrder}
           tracks={tracks}
@@ -137,7 +142,7 @@ function renderLanes(options: RenderLanesOptions = {}): {
           setRangeSelection={vi.fn()}
           setResizingClip={vi.fn()}
           setDraggedClip={vi.fn()}
-          setSelectedElementId={vi.fn()}
+          setSelectedElementId={setSelectedElementId}
           shiftClickClipRef={createRef()}
           getPreviewElement={(el) => el}
           getTrackStyle={getTrackStyle}
@@ -149,6 +154,7 @@ function renderLanes(options: RenderLanesOptions = {}): {
           onTogglePropertyGroupKeyframe={vi.fn()}
           onResizeElement={vi.fn()}
           onMoveElement={vi.fn()}
+          onSelectElement={onSelectElement}
           onRazorSplit={vi.fn()}
           onRazorSplitAll={vi.fn()}
         />,
@@ -156,7 +162,7 @@ function renderLanes(options: RenderLanesOptions = {}): {
     });
   };
   render(options);
-  return { host, root, rerender: render };
+  return { host, root, rerender: render, setSelectedElementId, onSelectElement };
 }
 
 function visibilityLabels(host: HTMLElement): (string | null)[] {
@@ -344,6 +350,22 @@ describe("TimelineLanes disclosure target", () => {
     // Node identity, not just presence: a remount replaces these nodes.
     expect(ariaControlsTarget(view.host)).toBe(before);
     expect(before?.querySelector("[data-timeline-property-lane]")).toBe(beforeLane);
+    act(() => view.root.unmount());
+  });
+});
+
+describe("TimelineLanes selection", () => {
+  it("keeps a selected clip selected when it is clicked again", () => {
+    const selected = element("clip-a", TRACK_A);
+    const view = renderLanes({
+      elements: [selected],
+      selectedElementIds: new Set([selected.id]),
+    });
+
+    act(() => view.host.querySelector<HTMLButtonElement>('[data-el-id="clip-a"]')?.click());
+
+    expect(view.setSelectedElementId).toHaveBeenCalledWith(selected.id);
+    expect(view.onSelectElement).toHaveBeenCalledWith(selected);
     act(() => view.root.unmount());
   });
 });

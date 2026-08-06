@@ -22,7 +22,7 @@ import type { TimelineEditCallbacks } from "./timelineCallbacks";
 import { trackStudioKeyframeLaneExpand } from "../../telemetry/events";
 import { SPLIT_BOUNDARY_EPSILON_S } from "../../utils/timelineElementSplit";
 import { isAudioTimelineElement, isMusicTrack } from "../../utils/timelineInspector";
-import { renderClipChildren } from "./timelineClipChildren";
+import { renderClipChildren, resolveClipRenderContext } from "./timelineClipChildren";
 import { TimelineTrackRow } from "./TimelineTrackRow";
 import { isTimelineClipActive } from "./useTimelineActiveClips";
 import { queryTimelineClipIndex } from "../lib/timelineClipIndex";
@@ -57,6 +57,7 @@ export function TimelineLanes({
   rowsVirtualized,
   clipIndex,
   renderTimeRange,
+  visibleTimeRange,
   pinnedClipIdentities,
   trackOrder,
   tracks,
@@ -323,8 +324,7 @@ export function TimelineLanes({
                     const isSelected =
                       selectedElementId === elementKey || selectedElementIds.has(elementKey);
                     const isComposition = !!el.compositionSrc;
-                    // The element identity is already unique per clip. Never fold in the map
-                    // index, or a splice/reorder remounts every clip at/after the change.
+                    // Element identity stays stable across clip splices and reorders.
                     const clipKey = elementKey;
                     const isDraggingClip =
                       draggedClip?.started === true &&
@@ -332,6 +332,11 @@ export function TimelineLanes({
                       getTimelineElementIdentity(draggedElement) === elementKey;
                     if (isDraggingClip) return null;
                     const previewElement = getPreviewElement(el);
+                    const renderContext = resolveClipRenderContext(
+                      previewElement,
+                      visibleTimeRange,
+                      isSelected || hoveredClip === clipKey || pinnedClipIdentities.has(clipKey),
+                    );
                     // Passenger of a live multi-drag: preserve the formation without changing
                     // the passenger's timeline data until the owning drag commits.
                     const isPassenger =
@@ -475,15 +480,9 @@ export function TimelineLanes({
                               }
                               return;
                             }
-                            // Plain click single-selects: drop any marquee multi-selection.
-                            // Only a click on the PRIMARY selection toggles it off — a click
-                            // on a marquee-selected clip narrows the selection to that clip.
-                            const hadMultiSelection = selectedElementIds.size > 0;
-                            usePlayerStore.getState().clearSelectedElementIds();
-                            const nextElement =
-                              selectedElementId === elementKey && !hadMultiSelection ? null : el;
-                            setSelectedElementId(nextElement ? elementKey : null);
-                            onSelectElement?.(nextElement);
+                            // Clip selection is idempotent; empty timeline space owns deselection.
+                            setSelectedElementId(elementKey);
+                            onSelectElement?.(el);
                           }
                         }
                         onDoubleClick={(e) => {
@@ -497,6 +496,7 @@ export function TimelineLanes({
                           clipStyle,
                           renderClipContent,
                           renderClipOverlay,
+                          renderContext,
                         )}
                       </TimelineClip>
                     );

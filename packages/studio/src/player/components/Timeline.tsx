@@ -64,7 +64,6 @@ export {
   getTimelineScrollTopForGeometryChange,
   getTimelineVisibleTimeRange,
 } from "./timelineViewportGeometry";
-
 export const Timeline = memo(function Timeline({
   onSeek,
   onDrillDown,
@@ -317,24 +316,25 @@ export const Timeline = memo(function Timeline({
       toggleSelectedKeyframe,
     });
 
-  const { clipIndex, renderTimeRange, pinnedClipIdentities } = useTimelineClipRenderWindow({
-    tracks,
-    viewport,
-    pixelsPerSecond: pps,
-    contentOrigin,
-    duration: displayDuration,
-    selectedElementId: selectedElementId ?? undefined,
-    draggedElementId: draggedClip ? getTimelineElementIdentity(draggedClip.element) : undefined,
-    resizingElementIds,
-    focusedElementId: timelineFocus.pinnedElementId,
-    focusedEaseElementId: focusedEaseSegment?.elementId,
-    clipContextMenuElementId: clipContextMenu
-      ? getTimelineElementIdentity(clipContextMenu.element)
-      : undefined,
-    keyframeContextMenuElementId: kfContextMenu
-      ? getTimelineElementIdentity(kfContextMenu.element)
-      : undefined,
-  });
+  const { clipIndex, renderTimeRange, visibleTimeRange, pinnedClipIdentities } =
+    useTimelineClipRenderWindow({
+      tracks,
+      viewport,
+      pixelsPerSecond: pps,
+      contentOrigin,
+      duration: displayDuration,
+      selectedElementId: selectedElementId ?? undefined,
+      draggedElementId: draggedClip ? getTimelineElementIdentity(draggedClip.element) : undefined,
+      resizingElementIds,
+      focusedElementId: timelineFocus.pinnedElementId,
+      focusedEaseElementId: focusedEaseSegment?.elementId,
+      clipContextMenuElementId: clipContextMenu
+        ? getTimelineElementIdentity(clipContextMenu.element)
+        : undefined,
+      keyframeContextMenuElementId: kfContextMenu
+        ? getTimelineElementIdentity(kfContextMenu.element)
+        : undefined,
+    });
   useTimelineActiveClips({
     scrollRef,
     currentTime,
@@ -504,6 +504,7 @@ export const Timeline = memo(function Timeline({
           rowsVirtualized={timelineFocus.rowVirtualizationActive}
           clipIndex={clipIndex}
           renderTimeRange={renderTimeRange}
+          visibleTimeRange={visibleTimeRange}
           pinnedClipIdentities={pinnedClipIdentities}
           trackOrder={trackOrder}
           tracks={tracks}

@@ -41,6 +41,13 @@ describe("computeThumbnailStrip", () => {
   it("honors a custom clip height", () => {
     expect(computeThumbnailStrip(300, 2, 40).frameW).toBe(80);
   });
+
+  it("keeps narrow tiles above a caller-owned minimum", () => {
+    expect(computeThumbnailStrip(300, 0.25, 40, 48)).toEqual({
+      frameW: 48,
+      frameCount: 7,
+    });
+  });
 });
 
 describe("resolveMediaPreviewUrl", () => {
