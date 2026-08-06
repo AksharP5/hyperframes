@@ -700,7 +700,7 @@ describe("an unwritable config dir must not re-roll the seed", () => {
   });
 });
 
-describe("identity-persistence classification (sticky per process)", () => {
+describe("identity-persistence classification (sticky per anonymous id)", () => {
   let readConfig: typeof import("./config.js").readConfig;
   let readConfigFresh: typeof import("./config.js").readConfigFresh;
   let getIdentityPersistence: typeof import("./config.js").getIdentityPersistence;
@@ -755,6 +755,46 @@ describe("identity-persistence classification (sticky per process)", () => {
     // existing-file path — the ephemeral-HOME churn signature.
     readConfigFresh();
     expect(getIdentityPersistence()).toBe("unknown");
+    expect(getIdentityWriteOutcome()).toBe("ok");
+  });
+
+  it("reclassifies a new id after a durable install's config is deleted", () => {
+    fsState.files.set(
+      CONFIG_PATH,
+      JSON.stringify({ telemetryEnabled: true, anonymousId: "prior-id", bucketSeed: "seed" }),
+    );
+    const first = readConfig();
+    expect(getIdentityPersistence()).toBe("durable");
+
+    fsState.files.delete(CONFIG_PATH);
+    const replacement = readConfigFresh();
+
+    expect(replacement.anonymousId).not.toBe(first.anonymousId);
+    expect(getIdentityPersistence()).toBe("unknown");
+    expect(getIdentityWriteOutcome()).toBe("ok");
+  });
+
+  it("reclassifies a new id after process-only storage recovers", async () => {
+    const fs = await import("node:fs");
+    vi.mocked(fs.writeFileSync).mockImplementation(() => {
+      throw new Error("EACCES: permission denied");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const first = readConfig();
+    expect(getIdentityPersistence()).toBe("process_only");
+    expect(getIdentityWriteOutcome()).toBe("failed");
+
+    vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
+      fsState.files.set(String(path), String(content));
+    });
+    const replacement = readConfigFresh();
+
+    expect(replacement.anonymousId).not.toBe(first.anonymousId);
+    expect(getIdentityPersistence()).toBe("unknown");
+    expect(getIdentityWriteOutcome()).toBe("ok");
+
+    warn.mockRestore();
   });
 
   it("does not label a replacement id minted at read time as durable (seed present, no write)", () => {
