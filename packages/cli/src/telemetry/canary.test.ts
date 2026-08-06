@@ -267,6 +267,14 @@ describe("reason reaches the event properties", () => {
     expect(canaryEventProperties()["canary_reason_test_gamma"]).toBe("excluded");
   });
 
+  // The PR body advertises no_unit_id as one of two values that pay for
+  // themselves; the resolver exercises it but the emission layer did not.
+  it("reports no_unit_id at the emission layer when the install has no id", () => {
+    configState.anonymousId = "";
+    configState.bucketSeed = undefined;
+    expect(canaryEventProperties()["canary_reason_test_gamma"]).toBe("no_unit_id");
+  });
+
   it("reports telemetry_opt_out when the preference is off", () => {
     configState.telemetryEnabled = false;
     // Emitted for completeness; by construction such an install sends nothing,
