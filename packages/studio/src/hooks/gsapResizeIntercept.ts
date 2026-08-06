@@ -12,7 +12,7 @@ import {
   STUDIO_ORIGINAL_BOX_HEIGHT_ATTR,
   STUDIO_ORIGINAL_BOX_WIDTH_ATTR,
 } from "../components/editor/manualEditsTypes";
-import { setElementGsapPosition } from "../utils/elementGsap";
+import { setElementGsapPosition, setElementGsapScale } from "../utils/elementGsap";
 import { usePlayerStore } from "../player/store/playerStore";
 import { readAllAnimatedProperties, readGsapProperty } from "./gsapRuntimeReaders";
 import {
@@ -195,6 +195,8 @@ export async function tryGsapResizeIntercept(
   let resizeProps: Record<string, number>;
   let scaleDraftEl: HTMLElement | null = null;
   let scaleDraftDropPoint: { x: number; y: number } | null = null;
+  /** The scale this commit is putting on the element, for the finalize step. */
+  let committedScale: { x: number; y: number } | null = null;
   let nonUniformScale = false;
   /** Whether this commit writes scaleX/scaleY rather than the `scale` shorthand. */
   let useScaleLonghands = false;
@@ -251,6 +253,7 @@ export async function tryGsapResizeIntercept(
       nonUniformScale,
     });
     scaleDraftEl = el;
+    committedScale = { x: newScaleX, y: newScaleY };
     // Where the user DROPPED the box: the draft (anchor-pinned to the
     // gesture-start top-left) is still applied here, so this rect is exactly
     // what the preview showed at release. The committed scale renders around
@@ -293,12 +296,30 @@ export async function tryGsapResizeIntercept(
       logResize("scale-finalize", { skipped: "live-position-tween" });
       return;
     }
-    // The scale commit has rendered (instant patch or soft-reload seek) and the
-    // draft is cleared — this rect is where the element ACTUALLY sits now.
+    // Put the committed scale on the live element before measuring.
+    //
+    // This step reads where the commit lands the box and shifts the position
+    // hold by the difference. That only works if the commit has actually
+    // rendered, and whether it had was luck: on the FIRST resize of an element
+    // the timeline had not re-seeked yet, so this measured the element at its
+    // natural size, still sitting on the drop point, computed a residual of
+    // zero, and skipped the correction entirely. The scale then landed, GSAP
+    // rendered it around the element's centre, and the element jumped by the
+    // whole drag distance. Elements that had been resized before got a
+    // correction only because their PREVIOUS scale made the residual non-zero.
+    //
+    // Setting it here costs nothing when the commit has already rendered (same
+    // value) and makes the measurement below mean what it says either way.
+    if (committedScale) {
+      setElementGsapScale(scaleDraftEl, committedScale.x, committedScale.y);
+    }
     const post = scaleDraftEl.getBoundingClientRect();
     const residual = { x: scaleDraftDropPoint.x - post.x, y: scaleDraftDropPoint.y - post.y };
     if (!Number.isFinite(residual.x) || !Number.isFinite(residual.y)) return;
-    if (Math.abs(residual.x) < 0.5 && Math.abs(residual.y) < 0.5) return;
+    if (Math.abs(residual.x) < 0.5 && Math.abs(residual.y) < 0.5) {
+      logResize("scale-finalize", { skipped: "already-on-drop-point", residual });
+      return;
+    }
     const gsapPos = readGsapPositionFromIframe(iframe, selector) ?? { x: 0, y: 0 };
     // The ONE corrected position — rounded once so the live runtime and the
     // persisted file agree exactly (commitStaticGsapPosition composes the same
