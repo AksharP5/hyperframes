@@ -147,11 +147,12 @@ function warnSeedBackfillFailed(error: string | undefined): void {
  * is exactly when that happens, so it says so once rather than failing
  * invisibly.
  */
-function backfillBucketSeed(config: HyperframesConfig): void {
+function backfillBucketSeed(config: HyperframesConfig): ConfigWriteResult {
   const recorded = readInstallState();
   config.bucketSeed = (isInstallState(recorded) ? recorded.bucketSeed : undefined) ?? randomUUID();
   const write = writeConfigWithResult(config);
   if (!write.ok) warnSeedBackfillFailed(write.error);
+  return write;
 }
 
 // ONLY the positive is cached. The latch is monotonic across processes in one
@@ -350,6 +351,7 @@ function mintAndCacheConfig(): HyperframesConfig {
   const config = mintConfig();
   const write = writeConfigWithResult(config);
   if (!write.ok) warnSeedBackfillFailed(write.error);
+  classifyIdentity(write.ok ? "unknown" : "process_only", writeOutcomeOf(write));
   cachedConfig = { ...config };
   return { ...config };
 }
@@ -535,6 +537,60 @@ const DEFAULT_CONFIG: HyperframesConfig = {
 
 let cachedConfig: HyperframesConfig | null = null;
 
+// ---------------------------------------------------------------------------
+// Identity-persistence classification — one sticky verdict per process.
+//
+// Install-grain metrics need to know whether this process's anonymousId can
+// be trusted to survive to the next run. Three-way, because from inside a
+// single process durability is not always provable:
+//
+//   durable       — the id was LOADED from a preexisting config file: it has
+//                   already survived at least one process boundary.
+//   unknown       — the id was minted this run and the write landed. An
+//                   ephemeral/isolated HOME (the identity-churn workloads:
+//                   fresh id per run, install_predecessor_found=false every
+//                   time) looks IDENTICAL to a genuine first run from in
+//                   here, so this cannot be promoted to durable.
+//   process_only  — minted this run and the write failed (read-only mount,
+//                   full disk): the id dies with this process, guaranteed.
+//
+// The verdict is sticky: a fresh-install process that later re-reads its own
+// just-written file must not upgrade itself to durable.
+// ---------------------------------------------------------------------------
+
+export type IdentityPersistence = "durable" | "process_only" | "unknown";
+/** `ok_unmirrored`: config.json landed but the install-state mirror did not. */
+export type IdentityWriteOutcome = "ok" | "ok_unmirrored" | "failed";
+
+let identityPersistence: IdentityPersistence | undefined;
+let identityWriteOutcome: IdentityWriteOutcome | undefined;
+
+function classifyIdentity(persistence: IdentityPersistence, outcome?: IdentityWriteOutcome): void {
+  if (identityPersistence !== undefined) return;
+  identityPersistence = persistence;
+  identityWriteOutcome = outcome;
+}
+
+function writeOutcomeOf(write: ConfigWriteResult): IdentityWriteOutcome {
+  if (!write.ok) return "failed";
+  return write.mirrored === false ? "ok_unmirrored" : "ok";
+}
+
+/** The process's sticky identity-persistence verdict (classifies on demand). */
+export function getIdentityPersistence(): IdentityPersistence {
+  readConfig();
+  return identityPersistence ?? "unknown";
+}
+
+/**
+ * Outcome of the identity-establishing config write. Absent when the identity
+ * came from disk and nothing needed writing (the `durable` case).
+ */
+export function getIdentityWriteOutcome(): IdentityWriteOutcome | undefined {
+  readConfig();
+  return identityWriteOutcome;
+}
+
 /** A non-empty string, or undefined — hand-edited configs can carry anything. */
 function parseNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -637,17 +693,35 @@ export function readConfig(): HyperframesConfig {
 
     const config = materializeConfig(parsed);
 
+    // `durable` requires the id to have actually COME OFF DISK — a file that
+    // predates this process proves cross-run persistence. materializeConfig
+    // mints a REPLACEMENT id when the parsed file lacks one (hand-edited /
+    // image-baked configs), and that replacement only reaches disk if the
+    // bucket-seed backfill below happens to write; labelling it durable would
+    // dress the exact churn signature this field exists to catch in the one
+    // trustworthy label (review finding). Sticky either way, so a
+    // fresh-install process re-reading its own write cannot self-promote.
+    const idFromDisk = parseNonEmptyString(parsed.anonymousId) !== undefined;
+
     // One-time backfill for configs predating the bucket seed: prefer the
     // recorded seed if a previous install already wrote one, else mint.
     // Persisted immediately — an unpersisted seed would re-roll every process.
     if (config.bucketSeed === undefined) {
-      backfillBucketSeed(config);
+      const write = backfillBucketSeed(config);
+      // The backfill write carries any replacement id to disk, so a minted id
+      // classifies exactly like a fresh mint: by whether the write landed.
+      if (idFromDisk) classifyIdentity("durable");
+      else classifyIdentity(write.ok ? "unknown" : "process_only", writeOutcomeOf(write));
       // Cache even if the write failed, so the seed is at least stable for
       // the life of this process (a re-roll per readConfigFresh would flip
       // cohorts mid-session).
       cachedConfig = config;
       return { ...config };
     }
+
+    // No write happens on this path: a replacement id lives only in this
+    // process, guaranteed — the definition of process_only.
+    classifyIdentity(idFromDisk ? "durable" : "process_only");
 
     cachedConfig = config;
     return { ...config };
@@ -658,7 +732,8 @@ export function readConfig(): HyperframesConfig {
     // breaker survives config corruption too — but fail closed for the
     // privacy control: recovery must never silently turn telemetry back on.
     const config = { ...mintConfig(), telemetryEnabled: false };
-    writeConfig(config);
+    const write = writeConfigWithResult(config);
+    classifyIdentity(write.ok ? "unknown" : "process_only", writeOutcomeOf(write));
     return config;
   }
 }
