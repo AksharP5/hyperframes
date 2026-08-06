@@ -73,6 +73,22 @@ function originalBoxSize(
   return Number.isFinite(inline) && inline > 0 ? inline : null;
 }
 
+/**
+ * Whether this tween already states scale as `scaleX`/`scaleY`.
+ *
+ * Both forms are legal, and either alone is fine. A tween holding both is not:
+ * GSAP animates each property name independently, so the longhands run
+ * alongside the shorthand and win, which silently discards whatever the
+ * shorthand was set to.
+ */
+function tweenUsesScaleLonghands(anim: GsapAnimation | null): boolean {
+  const isLonghand = (name: string) => name === "scaleX" || name === "scaleY";
+  const inKeyframes = (anim?.keyframes?.keyframes ?? []).some((frame) =>
+    Object.keys(frame.properties ?? {}).some(isLonghand),
+  );
+  return inKeyframes || Object.keys(anim?.properties ?? {}).some(isLonghand);
+}
+
 // ── Resize intercept ──────────────────────────────────────────────────────
 
 // fallow-ignore-next-line complexity
@@ -180,6 +196,8 @@ export async function tryGsapResizeIntercept(
   let scaleDraftEl: HTMLElement | null = null;
   let scaleDraftDropPoint: { x: number; y: number } | null = null;
   let nonUniformScale = false;
+  /** Whether this commit writes scaleX/scaleY rather than the `scale` shorthand. */
+  let useScaleLonghands = false;
   if (resizeGroup === "scale") {
     // Iframe-realm element — instanceof HTMLElement fails across realms; the
     // selector targets composition elements, and every use below is duck-typed.
@@ -210,8 +228,18 @@ export async function tryGsapResizeIntercept(
     // can't represent it — committing width-derived scale used to snap the
     // height at drop. Commit scaleX/scaleY longhands instead; keep the uniform
     // shorthand when the two agree (aspect-true drags, shift-drags).
+    //
+    // Unless the tween already speaks longhands, in which case a uniform drag
+    // has to as well. GSAP animates each property name on its own, so a
+    // keyframe holding `{ scaleX: 1, scaleY: 1, scale: 0.61 }` runs all three
+    // and the longhands win: the resize commits correctly and then does
+    // nothing, and the element snaps back to its old size on release. The
+    // tween never mixes the two forms in either direction.
     nonUniformScale = Math.abs(newScaleX - newScaleY) > 0.01;
-    resizeProps = nonUniformScale ? { scaleX: newScaleX, scaleY: newScaleY } : { scale: newScaleX };
+    useScaleLonghands = nonUniformScale || tweenUsesScaleLonghands(anim);
+    resizeProps = useScaleLonghands
+      ? { scaleX: newScaleX, scaleY: newScaleY }
+      : { scale: newScaleX };
     logResize("intercept-route", {
       route: "scale-tween",
       cssW,
@@ -370,7 +398,7 @@ export async function tryGsapResizeIntercept(
   // normalizes every keyframe to the longhands. For an in-range resize the
   // min/max window math below degenerates to the tween's own start/duration,
   // so timing is unchanged.
-  if ((outsideRange || nonUniformScale) && ts !== null) {
+  if ((outsideRange || useScaleLonghands) && ts !== null) {
     // For flat tweens, synthesize the keyframes from the tween's properties
     const kfs =
       anim.keyframes?.keyframes ??
