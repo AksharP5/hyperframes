@@ -7,6 +7,8 @@ import { join } from "node:path";
 
 import type { Browser, PuppeteerNode } from "puppeteer-core";
 
+import type { CaptureMode } from "./browserLeasePool.js";
+
 import {
   _resetAutoBrowserGpuModeCacheForTests,
   _resetBrowserPoolForTests,
@@ -132,23 +134,22 @@ describe("buildChromeArgs browser GPU mode", () => {
     expect(args).not.toContain("--enable-gpu-rasterization");
   });
 
-  it("disables GPU compositing only for software BeginFrame capture", () => {
-    const softwareBeginFrame = buildChromeArgs(
-      { ...base, captureMode: "beginframe" },
-      { browserGpuMode: "software" },
-    );
-    const softwareScreenshot = buildChromeArgs(
-      { ...base, captureMode: "screenshot" },
-      { browserGpuMode: "software" },
-    );
-    const hardwareBeginFrame = buildChromeArgs(
-      { ...base, captureMode: "beginframe", platform: "linux" },
-      { browserGpuMode: "hardware" },
-    );
+  // HF#3049: the stale-raster accumulation lives in SwiftShader's compositor,
+  // which every capture mode reads from — so the gate is the GPU mode alone.
+  // Swept over the whole CaptureMode union so a future mode can't quietly opt
+  // out of the workaround the way `screenshot` did.
+  const captureModes: CaptureMode[] = ["beginframe", "screenshot", "drawelement"];
 
-    expect(softwareBeginFrame).toContain("--disable-gpu-compositing");
-    expect(softwareScreenshot).not.toContain("--disable-gpu-compositing");
-    expect(hardwareBeginFrame).not.toContain("--disable-gpu-compositing");
+  it.each(captureModes)("disables GPU compositing for software %s capture", (captureMode) => {
+    expect(
+      buildChromeArgs({ ...base, captureMode, platform: "linux" }, { browserGpuMode: "software" }),
+    ).toContain("--disable-gpu-compositing");
+  });
+
+  it.each(captureModes)("leaves hardware %s capture on the GPU compositor", (captureMode) => {
+    expect(
+      buildChromeArgs({ ...base, captureMode, platform: "linux" }, { browserGpuMode: "hardware" }),
+    ).not.toContain("--disable-gpu-compositing");
   });
 
   it("uses Metal-backed ANGLE for hardware browser GPU mode on macOS", () => {
