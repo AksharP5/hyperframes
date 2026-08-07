@@ -16,6 +16,7 @@ const PUBLISH_CONTENT_TYPE = "application/zip";
 const PUBLISH_METADATA_TIMEOUT_MS = 30_000;
 const PUBLISH_UPLOAD_MIN_TIMEOUT_MS = 120_000;
 const PUBLISH_TRANSPORT_ATTEMPTS = 2;
+const PUBLISH_RETRY_DELAY_MS = 200;
 // Conservative floor — most connections are faster, but this prevents
 // premature aborts on slow/unstable networks (hotel wifi, tethering).
 const PUBLISH_UPLOAD_BYTES_PER_SECOND = 500_000;
@@ -167,9 +168,15 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
   return text.trim() ? `${fallback}: ${text.trim().slice(0, 180)}` : fallback;
 }
 
-function errorCode(value: unknown): string | null {
-  if (!isRecord(value)) return null;
-  return typeof value["code"] === "string" ? value["code"] : null;
+function systemErrorMetadata(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  const metadata: string[] = [];
+  if (typeof value["code"] === "string") metadata.push(value["code"]);
+  if (typeof value["syscall"] === "string") metadata.push(`syscall=${value["syscall"]}`);
+  if (typeof value["errno"] === "string" || typeof value["errno"] === "number") {
+    metadata.push(`errno=${value["errno"]}`);
+  }
+  return metadata;
 }
 
 function redactUrlQuery(message: string): string {
@@ -186,7 +193,7 @@ function proxySupportHint(): string {
     process.env["NODE_OPTIONS"]?.split(/\s+/u).includes("--use-env-proxy") === true;
   if (!proxyConfigured || proxyEnabled) return "";
   return (
-    ". Proxy variables are set, but Node fetch proxy support is disabled; retry with " +
+    ". Proxy variables are set but ignored by Node fetch; if this network requires them, retry with " +
     "NODE_USE_ENV_PROXY=1 (Node 22.21+)"
   );
 }
@@ -195,11 +202,22 @@ function describeFetchFailure(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   const cause = error instanceof Error ? error.cause : undefined;
   const causeMessage = cause instanceof Error ? cause.message : "";
-  const code = errorCode(cause) ?? errorCode(error);
-  const detail = [code, causeMessage && causeMessage !== message ? causeMessage : ""]
-    .filter(Boolean)
-    .join(": ");
+  const metadata = [...systemErrorMetadata(cause), ...systemErrorMetadata(error)].filter(
+    (value, index, all) => all.indexOf(value) === index,
+  );
+  const distinctCauseMessage = causeMessage && causeMessage !== message ? causeMessage : "";
+  const detail = [metadata.join(", "), distinctCauseMessage].filter(Boolean).join(": ");
   return `${redactUrlQuery(message)}${detail ? ` (${redactUrlQuery(detail)})` : ""}${proxySupportHint()}`;
+}
+
+function isRequestTimeout(error: unknown): boolean {
+  return (
+    error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")
+  );
+}
+
+function waitBeforePublishRetry(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, PUBLISH_RETRY_DELAY_MS));
 }
 
 async function fetchForPublish(
@@ -208,19 +226,23 @@ async function fetchForPublish(
   failureStage: string,
   attempts = 1,
 ): Promise<Response> {
+  if (attempts < 1) throw new RangeError("Publish fetch attempts must be at least 1");
+  let lastError: unknown;
+  let attemptsMade = 0;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    attemptsMade = attempt;
     try {
       return await fetch(input, createInit());
     } catch (error) {
-      if (attempt === attempts) {
-        const attemptDetail = attempts > 1 ? ` after ${attempts} attempts` : "";
-        throw new Error(`${failureStage}${attemptDetail}: ${describeFetchFailure(error)}`, {
-          cause: error instanceof Error ? error : undefined,
-        });
-      }
+      lastError = error;
+      if (isRequestTimeout(error) || attempt === attempts) break;
+      await waitBeforePublishRetry();
     }
   }
-  throw new Error(failureStage);
+  const attemptDetail = attemptsMade > 1 ? ` after ${attemptsMade} attempts` : "";
+  throw new Error(`${failureStage}${attemptDetail}: ${describeFetchFailure(lastError)}`, {
+    cause: lastError instanceof Error ? lastError : undefined,
+  });
 }
 
 export function uploadTimeoutMs(byteLength: number): number {
