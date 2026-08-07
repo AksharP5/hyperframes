@@ -90,6 +90,43 @@ describe("loadExternalCompositions", () => {
     expect(injectedStyles.length).toBeGreaterThan(0);
   });
 
+  it("mounts <style>/<script> authored as siblings of the composition root", async () => {
+    // The canonical sub-composition shape puts <style> and <script> directly
+    // inside <template>, NEXT TO the root div rather than inside it. Collecting
+    // only from the root dropped the composition's whole stylesheet, so rules
+    // keyed on the root (`#root { container-type: size }`) never landed and every
+    // container-query unit in the composition resolved against the wrong basis.
+    const host = document.createElement("div");
+    host.setAttribute("data-composition-src", "https://example.com/scene.html");
+    host.setAttribute("data-composition-id", "scene");
+    document.body.appendChild(host);
+
+    const compositionHtml =
+      `
+      <html><body>
+        <template>
+          <style>#root { container-type: size; }</style>
+          <div id="root" data-composition-id="scene"><p>Scene</p></div>
+          <script>window.__sceneRan = true;</scr` +
+      `ipt>
+        </template>
+      </body></html>
+    `;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(compositionHtml, { status: 200 }));
+
+    const injectedStyles: HTMLStyleElement[] = [];
+    const injectedScripts: HTMLScriptElement[] = [];
+    await loadExternalCompositions({ ...defaultParams, injectedStyles, injectedScripts });
+
+    expect(injectedStyles.map((style) => style.textContent).join("")).toContain(
+      "container-type: size",
+    );
+    expect(injectedScripts.map((script) => script.textContent).join("")).toContain("__sceneRan");
+    // The extracted nodes are stripped from the mounted copy, not duplicated.
+    expect(host.querySelectorAll("style, script")).toHaveLength(0);
+    expect(host.querySelector("p")?.textContent).toBe("Scene");
+  });
+
   it("preserves head stylesheets when an external composition uses a template", async () => {
     const host = document.createElement("div");
     host.setAttribute("data-composition-src", "https://example.com/compositions/scene.html");

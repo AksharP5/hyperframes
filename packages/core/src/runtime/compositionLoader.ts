@@ -181,6 +181,20 @@ function resetCompositionHost(host: Element) {
   host.textContent = "";
 }
 
+/**
+ * A composition's `<style>`/`<script>` are extracted and re-injected into the
+ * host document (scoped), so strip them from the copy that gets mounted —
+ * otherwise the mount re-declares the same CSS unscoped and re-runs the script.
+ *
+ * Strips the CLONE, never the source: `sourceNode` is a live `<template>` on the
+ * inline-template path, and mutating it would leave a remount with no styles.
+ */
+function stripExtractedCompositionAssets(node: ParentNode): void {
+  for (const el of Array.from(node.querySelectorAll("style, script"))) {
+    el.remove();
+  }
+}
+
 function prepareFlattenedInnerRoot(innerRoot: HTMLElement): HTMLElement {
   const prepared = document.importNode(innerRoot, true) as HTMLElement;
   markFlattenedInnerRoot(prepared);
@@ -450,68 +464,37 @@ async function mountCompositionContent(params: {
   // element styles like backgrounds and positioning that the composition needs),
   // then the content styles.
   if (params.headStyles) injectScopedStyles(params.headStyles);
-  injectScopedStyles(Array.from(contentNode.querySelectorAll<HTMLStyleElement>("style")));
+  // Collect from `sourceNode`, not the composition root: the canonical authored
+  // shape puts <style>/<script> as SIBLINGS of the root inside <template>, so
+  // scanning only the root dropped a composition's entire stylesheet (and with
+  // it `#root { container-type: size }`, leaving every cq* unit unanchored).
+  // `sourceNode` is a superset of the root, so nothing is collected twice.
+  injectScopedStyles(Array.from(params.sourceNode.querySelectorAll<HTMLStyleElement>("style")));
 
-  // Collect head scripts first (e.g. GSAP CDN loaded in <head> of non-template sub-comps),
-  // then content scripts. Head scripts must execute before content scripts.
-  const headScriptPayloads: PendingScript[] = [];
-  if (params.headScripts) {
-    for (const script of params.headScripts) {
-      const scriptType = script.getAttribute("type")?.trim() ?? "";
-      const scriptSrc = script.getAttribute("src")?.trim() ?? "";
-      if (scriptSrc) {
-        const resolvedSrc = resolveScriptSourceUrl(scriptSrc, params.compositionUrl);
-        if (params.compositionUrl && isSameDocumentUrl(resolvedSrc, params.compositionUrl)) {
-          continue;
-        }
-        headScriptPayloads.push({ kind: "external", src: resolvedSrc, type: scriptType });
-      } else {
-        const scriptText = script.textContent?.trim() ?? "";
-        if (scriptText) {
-          headScriptPayloads.push({
-            kind: "inline",
-            content: scriptText,
-            type: scriptType,
-            scopeCompositionId: authoredScopeCompositionId,
-          });
-        }
-      }
-    }
-  }
-
-  const scripts = Array.from(contentNode.querySelectorAll<HTMLScriptElement>("script"));
-  const scriptPayloads: PendingScript[] = [...headScriptPayloads];
-  for (const script of scripts) {
-    const scriptType = script.getAttribute("type")?.trim() ?? "";
-    const scriptSrc = script.getAttribute("src")?.trim() ?? "";
-    if (scriptSrc) {
-      const resolvedSrc = resolveScriptSourceUrl(scriptSrc, params.compositionUrl);
+  const toPendingScript = (script: HTMLScriptElement): PendingScript | null => {
+    const type = script.getAttribute("type")?.trim() ?? "";
+    const src = script.getAttribute("src")?.trim() ?? "";
+    if (src) {
+      const resolvedSrc = resolveScriptSourceUrl(src, params.compositionUrl);
+      // A sub-comp that <script src>s itself would re-enter the mount; skip it.
       if (params.compositionUrl && isSameDocumentUrl(resolvedSrc, params.compositionUrl)) {
-        script.parentNode?.removeChild(script);
-        continue;
+        return null;
       }
-      scriptPayloads.push({
-        kind: "external",
-        src: resolvedSrc,
-        type: scriptType,
-      });
-    } else {
-      const scriptText = script.textContent?.trim() ?? "";
-      if (scriptText) {
-        scriptPayloads.push({
-          kind: "inline",
-          content: scriptText,
-          type: scriptType,
-          scopeCompositionId: authoredScopeCompositionId,
-        });
-      }
+      return { kind: "external", src: resolvedSrc, type };
     }
-    script.parentNode?.removeChild(script);
-  }
-  const remainingStyles = Array.from(contentNode.querySelectorAll<HTMLStyleElement>("style"));
-  for (const style of remainingStyles) {
-    style.parentNode?.removeChild(style);
-  }
+    const content = script.textContent?.trim() ?? "";
+    if (!content) return null;
+    return { kind: "inline", content, type, scopeCompositionId: authoredScopeCompositionId };
+  };
+
+  // <head> scripts first (e.g. a GSAP CDN tag in a non-template sub-comp): they
+  // must execute before the content scripts that call into them.
+  const scriptPayloads = [
+    ...(params.headScripts ?? []),
+    ...Array.from(params.sourceNode.querySelectorAll<HTMLScriptElement>("script")),
+  ]
+    .map(toPendingScript)
+    .filter((payload): payload is PendingScript => payload !== null);
 
   if (innerRoot) {
     const widthRaw = innerRoot.getAttribute("data-width");
@@ -525,9 +508,13 @@ async function mountCompositionContent(params: {
     if (innerRoot.hasAttribute("data-timeline-locked")) {
       params.host.setAttribute("data-timeline-locked", "");
     }
-    params.host.appendChild(prepareFlattenedInnerRoot(innerRoot));
+    const flattenedRoot = prepareFlattenedInnerRoot(innerRoot);
+    stripExtractedCompositionAssets(flattenedRoot);
+    params.host.appendChild(flattenedRoot);
   } else if (params.hasTemplate) {
-    params.host.appendChild(document.importNode(contentNode, true));
+    const mountedContent = document.importNode(contentNode, true);
+    stripExtractedCompositionAssets(mountedContent);
+    params.host.appendChild(mountedContent);
   } else {
     params.host.innerHTML = params.fallbackBodyInnerHtml;
   }
