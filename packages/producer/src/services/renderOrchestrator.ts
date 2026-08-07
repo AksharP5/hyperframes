@@ -3264,6 +3264,15 @@ async function executeRenderPipeline(input: {
       usePageSideCompositing: capturePlan.usePageSideCompositing,
       hasHdrContent: capturePlan.hasHdrContent,
       forceScreenshot: capturePlan.forceScreenshot,
+      // Re-recorded here because `syncCapturePlan` above is where routing is
+      // actually decided — including "reverted", which the earlier update
+      // could not know. Without this, capture observability keeps whatever
+      // was true before the plan resolved, so a render that failed while
+      // routed reports no routing state at all: `de_parallel_router` was
+      // present on 95% of render_complete events and 0.8% of render_error.
+      // The failure path is the one the rollout is watching.
+      deWorkerInversion,
+      deParallelRouter,
     });
     observability.checkpoint("capture_strategy", "resolved", {
       plan: capturePlan.kind,
