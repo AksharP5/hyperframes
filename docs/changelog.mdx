@@ -9,6 +9,23 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.7.98"
+  description="Released - 2026-08-07"
+  tags={["Release", "Producer"]}
+>
+Failed renders now record whether the parallel drawElement router was active.
+That state was on almost every successful render and almost no failed one, so a
+crash or hang looked the same as a render that never used the router. Nothing
+changes about how renders run.
+
+## Fixes
+
+- **Producer:** Record routing state on the failure path ([a3d13e267](https://github.com/heygen-com/hyperframes/commit/a3d13e2673405dee68643003574d5b260c4d5d18)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.7.97...v0.7.98).
+</Update>
+
+<Update
   label="HyperFrames v0.7.97"
   description="Released - 2026-08-07"
   tags={["Release", "Studio"]}
