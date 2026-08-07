@@ -149,7 +149,20 @@ export async function tryGsapResizeIntercept(
   if (!anim || isInstantHold(anim)) {
     const sel = selectorFromSelection(selection) ?? writeTargetSelector(selection);
     if (!sel) return { status: "blocked", reason: "no-selector" };
-    const sizeSet = anim ?? findSizeSetAnimation(workingAnimations, sel, selection.element);
+    // A scale hold is not a size hold.
+    //
+    // `anim` is the tween resolved for THIS resize's group, and for a
+    // scale-driven element that is the one carrying `scale`. Handing it to the
+    // size commit wrote `width` and `height` into it, leaving one tween that
+    // spans two property groups — which the parser then classifies as neither,
+    // so it loses its group suffix and its id along with it. Every later edit
+    // of that element looked for a scale tween and a size tween, found no
+    // group at all, and the element became uneditable: "animation not found".
+    // Size goes to a size hold of its own, and the scale hold is left alone.
+    const sizeSet =
+      resizeGroup === "size"
+        ? (anim ?? findSizeSetAnimation(workingAnimations, sel, selection.element))
+        : findSizeSetAnimation(workingAnimations, sel, selection.element);
 
     // If the element is animated (has a real tween, not just a static size
     // hold), keyframe the size at the playhead so other keyframes keep theirs —
@@ -239,7 +252,14 @@ export async function tryGsapResizeIntercept(
     // and the longhands win: the resize commits correctly and then does
     // nothing, and the element snaps back to its old size on release. The
     // tween never mixes the two forms in either direction.
-    nonUniformScale = Math.abs(newScaleX - newScaleY) > 0.01;
+    //
+    // "Agree" is measured in PIXELS, not in scale. A fixed 0.01 of scale is
+    // invisible on a 40px box and two pixels of height on a 408px one, so a
+    // free drag whose axes happened to land within it silently gave back a box
+    // shorter than the one dropped. The question is only ever whether using one
+    // value for both axes would move an edge, so ask that.
+    const uniformDrift = Math.abs(newScaleX - newScaleY) * cssH;
+    nonUniformScale = uniformDrift > 0.5;
     useScaleLonghands = nonUniformScale || tweenUsesScaleLonghands(anim);
     resizeProps = useScaleLonghands
       ? { scaleX: newScaleX, scaleY: newScaleY }
@@ -290,10 +310,13 @@ export async function tryGsapResizeIntercept(
   // ponytail: for a 3D-rotated element the rects are AABBs, so the anchor is
   // approximate rather than corner-exact.
   // fallow-ignore-next-line complexity
-  const finalizeScaleResizeCommit = async () => {
-    if (!scaleDraftEl) return;
+  const finalizeScaleResizeCommit = async (): Promise<boolean> => {
+    // Only the scale route captures the element, so a null draft means this
+    // resize took the size route and never moved anything: the drop point is
+    // the drag's to settle, not ours.
+    if (!scaleDraftEl) return false;
     clearStudioBoxSize(scaleDraftEl);
-    if (!scaleDraftDropPoint || !selector) return;
+    if (!scaleDraftDropPoint || !selector) return false;
     // Put the committed scale on the live element before measuring.
     //
     // This step reads where the commit lands the box and shifts the position
@@ -331,10 +354,12 @@ export async function tryGsapResizeIntercept(
     setElementGsapPosition(scaleDraftEl, base.x, base.y);
     const post = scaleDraftEl.getBoundingClientRect();
     const residual = { x: scaleDraftDropPoint.x - post.x, y: scaleDraftDropPoint.y - post.y };
-    if (!Number.isFinite(residual.x) || !Number.isFinite(residual.y)) return;
+    if (!Number.isFinite(residual.x) || !Number.isFinite(residual.y)) return false;
     if (Math.abs(residual.x) < 0.5 && Math.abs(residual.y) < 0.5) {
       logResize("scale-finalize", { skipped: "already-on-drop-point", residual, base });
-      return;
+      // Settled, with nothing to write. Still ours: forwarding the drag offset
+      // on top would move the box off the point it is already sitting on.
+      return true;
     }
     // The ONE corrected position — rounded once so the live runtime and the
     // persisted file agree exactly (commitStaticGsapPosition composes the same
@@ -385,13 +410,14 @@ export async function tryGsapResizeIntercept(
         commitMutation,
         fetchAnimations: fetchFallbackAnimations,
       });
-      return;
+      return true;
     }
     const existingSet = findExistingPositionWrite(currentAnimations, selector, selection.element);
     await commitStaticGsapPosition(selection, delta, base, selector, existingSet, {
       commitMutation,
       fetchAnimations: fetchFallbackAnimations,
     });
+    return true;
   };
 
   // With auto-keyframe off (#1808), `anim` is already a real (non-"set")
@@ -408,8 +434,7 @@ export async function tryGsapResizeIntercept(
       { commitMutation, fetchAnimations: fetchFallbackAnimations },
       "Resize animation",
     );
-    await finalizeScaleResizeCommit();
-    return { status: "persisted" };
+    return { status: "persisted", ownsDragOffset: await finalizeScaleResizeCommit() };
   }
 
   const ct = usePlayerStore.getState().currentTime;
@@ -520,8 +545,7 @@ export async function tryGsapResizeIntercept(
         softReload: true,
       },
     );
-    await finalizeScaleResizeCommit();
-    return { status: "persisted" };
+    return { status: "persisted", ownsDragOffset: await finalizeScaleResizeCommit() };
   }
 
   const SIZE_PROPS = new Set(["width", "height"]);
@@ -542,8 +566,7 @@ export async function tryGsapResizeIntercept(
     },
     { label: `Resize (keyframe ${pct}%)`, softReload: true },
   );
-  await finalizeScaleResizeCommit();
-  return { status: "persisted" };
+  return { status: "persisted", ownsDragOffset: await finalizeScaleResizeCommit() };
 }
 
 // ── Rotation intercept ────────────────────────────────────────────────────
