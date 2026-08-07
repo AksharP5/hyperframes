@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { TimelineElement } from "../player";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { resolveTimelineIdForSelection } from "../utils/studioHelpers";
@@ -18,6 +18,7 @@ interface UseTimelineSelectionPreviewSyncParams {
     options?: { revealPanel?: boolean; additive?: boolean; preserveGroup?: boolean },
   ) => void;
   applyMarqueeSelection: (selections: DomEditSelection[], additive: boolean) => void;
+  onSelectionNotFound: () => void;
 }
 
 function orderSelectedIds(ids: Set<string>, anchor: string | null): string[] {
@@ -56,34 +57,51 @@ export function useTimelineSelectionPreviewSync({
   buildDomSelectionForTimelineElement,
   applyDomSelection,
   applyMarqueeSelection,
+  onSelectionNotFound,
 }: UseTimelineSelectionPreviewSyncParams): void {
   const selectedIds = useMemo(
     () => orderSelectedIds(selectedElementIds, selectedElementId),
     [selectedElementId, selectedElementIds],
   );
   const selectedKey = selectedIds.join("\0");
+  const domEditSelectionRef = useRef(domEditSelection);
+  const domEditGroupSelectionsRef = useRef(domEditGroupSelections);
+  const lastSyncedSelectedKeyRef = useRef("");
+  const missingSelectionKeyRef = useRef("");
+  domEditSelectionRef.current = domEditSelection;
+  domEditGroupSelectionsRef.current = domEditGroupSelections;
 
   useEffect(() => {
+    const previousSelectedKey = lastSyncedSelectedKeyRef.current;
+    lastSyncedSelectedKeyRef.current = selectedKey;
+    const currentDomEditSelection = domEditSelectionRef.current;
+    const currentDomEditGroupSelections = domEditGroupSelectionsRef.current;
     const currentSelections =
-      domEditGroupSelections.length > 1
-        ? domEditGroupSelections
-        : domEditSelection
-          ? [domEditSelection]
+      currentDomEditGroupSelections.length > 1
+        ? currentDomEditGroupSelections
+        : currentDomEditSelection
+          ? [currentDomEditSelection]
           : [];
     const currentIds = currentSelections
       .map((selection) =>
         resolveTimelineIdForSelection(selection, timelineElements, activeCompPath),
       )
       .filter((id): id is string => Boolean(id));
-    const currentAnchor = domEditSelection
-      ? resolveTimelineIdForSelection(domEditSelection, timelineElements, activeCompPath)
+    const currentAnchor = currentDomEditSelection
+      ? resolveTimelineIdForSelection(currentDomEditSelection, timelineElements, activeCompPath)
       : null;
 
     if (selectedIds.length === 0) {
-      if (currentSelections.length > 0) applyDomSelection(null, { revealPanel: false });
+      missingSelectionKeyRef.current = "";
+      if (previousSelectedKey.length > 0 && currentIds.length > 0) {
+        applyDomSelection(null, { revealPanel: false });
+      }
       return;
     }
-    if (selectionIdsMatch(currentIds, selectedIds, currentAnchor, selectedElementId)) return;
+    if (selectionIdsMatch(currentIds, selectedIds, currentAnchor, selectedElementId)) {
+      missingSelectionKeyRef.current = "";
+      return;
+    }
 
     let cancelled = false;
     const syncSelection = async () => {
@@ -101,11 +119,18 @@ export function useTimelineSelectionPreviewSync({
       // shrunk set back and silently drop the members whose DOM node was not ready.
       // Bail instead; a later effect run (on timelineElements/DOM change) applies the
       // full set once every resolvable member has a live node.
-      if (selections.length < resolvableCount) return;
+      if (selections.length < resolvableCount) {
+        if (missingSelectionKeyRef.current !== selectedKey) {
+          missingSelectionKeyRef.current = selectedKey;
+          onSelectionNotFound();
+        }
+        return;
+      }
+      missingSelectionKeyRef.current = "";
       if (selections.length === 0) {
         applyDomSelection(null, { revealPanel: false });
       } else if (selections.length === 1) {
-        applyDomSelection(selections[0], { revealPanel: false });
+        applyDomSelection(selections[0]);
       } else {
         applyMarqueeSelection(selections, false);
       }
@@ -115,13 +140,15 @@ export function useTimelineSelectionPreviewSync({
     return () => {
       cancelled = true;
     };
+    // DOM selection changes are read through refs. Depending on them directly
+    // would let the preview-to-timeline echo cancel an in-flight timeline click.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeCompPath,
     applyDomSelection,
     applyMarqueeSelection,
     buildDomSelectionForTimelineElement,
-    domEditGroupSelections,
-    domEditSelection,
+    onSelectionNotFound,
     selectedElementId,
     selectedIds,
     selectedKey,

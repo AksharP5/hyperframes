@@ -27,7 +27,9 @@ import {
   cpSync,
   rmSync,
   writeFileSync,
+  statSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -311,13 +313,62 @@ async function generateVideo(item: CatalogItem, projectDir: string): Promise<voi
   mkdirSync(outDir, { recursive: true });
 
   const outMp4 = join(outDir, `${item.name}.mp4`);
+  const masterMp4 = join(outDir, `${item.name}.master.mp4`);
   const job = createRenderJob({
     fps: { num: 24, den: 1 },
     quality: "draft",
     format: "mp4",
   });
-  await executeRenderJob(job, projectDir, outMp4);
-  console.log(`  ✓ ${item.name}.mp4`);
+  await executeRenderJob(job, projectDir, masterMp4);
+  encodeForWeb(masterMp4, outMp4);
+  rmSync(masterMp4, { force: true });
+  console.log(`  ✓ ${item.name}.mp4 (${(statSync(outMp4).size / 1048576).toFixed(1)} MB)`);
+}
+
+/**
+ * The render output is a master, not a deliverable. Publishing it directly put
+ * 25 Mbps files on the docs CDN — one 20-second preview was 60 MB, which a
+ * reader on a phone pays for the moment they press play. This pass is the
+ * difference between a master and something you serve.
+ */
+function encodeForWeb(input: string, output: string): void {
+  execFileSync(
+    "ffmpeg",
+    [
+      "-v",
+      "error",
+      "-y",
+      "-i",
+      input,
+      // 1280 wide is twice the 590px docs column: sharp on retina, no pixels
+      // nobody sees.
+      "-vf",
+      "scale='min(1280,iw)':-2",
+      "-c:v",
+      "libx264",
+      "-profile:v",
+      "high",
+      "-crf",
+      "28",
+      "-preset",
+      "slow",
+      "-pix_fmt",
+      "yuv420p",
+      // faststart puts the index first so playback can begin before the whole
+      // file has arrived.
+      "-movflags",
+      "+faststart",
+      // ffmpeg ignores these when the input carries no audio stream.
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-ac",
+      "2",
+      output,
+    ],
+    { stdio: "inherit" },
+  );
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────────

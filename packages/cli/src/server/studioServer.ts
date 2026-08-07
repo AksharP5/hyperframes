@@ -32,6 +32,7 @@ import {
   consumeFileWriteReceipt,
   getMimeType,
   type PreviewApiAdapter,
+  thumbnailDeviceScaleFactor,
   type ResolvedProject,
   type RenderJobState,
   type BackgroundRemovalRender,
@@ -399,7 +400,8 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
         await import("../../../producer/src/services/deterministicFonts.js");
       const { prepareAnimatedGifInputs } =
         await import("../../../producer/src/services/animatedGifPrep.js");
-      const { downloadToTemp } = await import("../../../producer/src/utils/urlDownloader.js");
+      const { downloadToTemp, writeUrlDownloadTelemetry } =
+        await import("../../../producer/src/utils/urlDownloader.js");
       const gifOutputDir = join(project.dir, ".hyperframes", "prepared-assets", "gif");
       const gifDownloadDir = join(project.dir, ".hyperframes", "prepared-assets", "downloads");
       const prepared = await prepareAnimatedGifInputs(html, {
@@ -408,7 +410,11 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
         outputDir: gifOutputDir,
         outputSrcPrefix: ".hyperframes/prepared-assets/gif",
         cacheDir: gifOutputDir,
-        sourceAssets: await downloadRemoteGifImageSources(html, gifDownloadDir, downloadToTemp),
+        sourceAssets: await downloadRemoteGifImageSources(html, gifDownloadDir, (url, destDir) =>
+          downloadToTemp(url, destDir, undefined, undefined, undefined, {
+            onTelemetry: writeUrlDownloadTelemetry,
+          }),
+        ),
       });
       return injectDeterministicFontFaces(prepared.html);
     },
@@ -566,9 +572,18 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
         );
       }
       let page: import("puppeteer-core").Page | null = null;
+      const closePage = () => void page?.close().catch(() => {});
+      opts.signal.addEventListener("abort", closePage, { once: true });
       try {
         page = await session.browser.newPage();
-        await page.setViewport({ width: opts.width || 1920, height: opts.height || 1080 });
+        if (opts.signal.aborted) return null;
+        const width = opts.width || 1920;
+        const height = opts.height || 1080;
+        await page.setViewport({
+          width,
+          height,
+          deviceScaleFactor: thumbnailDeviceScaleFactor(opts),
+        });
         await page.goto(opts.previewUrl, { waitUntil: "domcontentloaded", timeout: 10000 });
         await page
           .waitForFunction(
@@ -616,12 +631,15 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
         )) as Buffer;
         return screenshot;
       } catch (err) {
-        console.warn(
-          "[Studio] Thumbnail generation failed:",
-          err instanceof Error ? err.message : err,
-        );
+        if (!opts.signal.aborted) {
+          console.warn(
+            "[Studio] Thumbnail generation failed:",
+            err instanceof Error ? err.message : err,
+          );
+        }
         return null;
       } finally {
+        opts.signal.removeEventListener("abort", closePage);
         await page?.close().catch(() => {});
       }
     },

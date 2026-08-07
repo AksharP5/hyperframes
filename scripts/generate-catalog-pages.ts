@@ -15,9 +15,10 @@
 
 import { readFileSync, existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 // Import from source — bun workspace linking doesn't resolve for scripts outside packages/.
 import {
+  type FileTarget,
   type RegistryItem,
   isBlockItem,
   ITEM_TYPE_DIRS,
@@ -41,6 +42,14 @@ interface SourceMetadata {
 interface TextureGroup {
   title: string;
   items: string[];
+}
+
+/** Hand-written prose rescued from a previously generated page. */
+interface CarriedContent {
+  /** Whole `## sections`, heading included, in their original order. */
+  sections: string[];
+  /** A human rewrote the usage prose — the generated version steps aside. */
+  hasCustomUsage: boolean;
 }
 
 interface CatalogEntry {
@@ -94,8 +103,122 @@ function discoverItems(): { kind: ItemKind; manifest: RegistryItem }[] {
 
 // ── MDX generation ─────────────────────────────────────────────────────────
 
-function typeLabel(kind: ItemKind): string {
-  return kind === "block" ? "Block" : "Component";
+/**
+ * Every `## Heading` this generator produces, now or in an earlier revision.
+ * Anything on a page outside this set was written by a human, and is carried
+ * across a regeneration rather than deleted. Lowercased for comparison.
+ */
+const GENERATED_HEADINGS = new Set([
+  // current template
+  "install",
+  "add it to your video",
+  "paste it into your composition",
+  "change the colors",
+  "change how it looks",
+  "ask an agent for it",
+  "make the texture move",
+  "every texture",
+  // headings earlier revisions emitted — dropped on purpose, never carried.
+  // `usage` is deliberately NOT listed: the current template never emits it, and
+  // it is a heading a human might reasonably write, so ownership stays explicit
+  // (anything not in this set is hand-written) rather than sniffing the body.
+  "details",
+  "files",
+  "source prompt",
+  "agent usage",
+  "animated texture",
+  "texture examples",
+  // the required reader continuation the generator emits last (see RELATED_TOPICS)
+  "related topics",
+]);
+
+/**
+ * Marks the start of the generated provenance footer (tags, credit, prompt).
+ * That footer carries no heading of its own, so without this marker the section
+ * parser below would swallow it into the preceding hand-written section and
+ * re-emit it on every run.
+ */
+const FOOTER_MARKER = "{/* hf:generated-footer */}";
+
+/**
+ * Every Catalog page ends with this section — required by `docs/AGENTS.md`
+ * ("Task, guide, Studio, and Catalog pages end with a `## Related topics`
+ * section"). Emitted last so the page literally ends with it; listed in
+ * GENERATED_HEADINGS so a regeneration never carries it forward as hand-written.
+ */
+const RELATED_TOPICS: readonly string[] = [
+  "## Related topics",
+  "",
+  "- [Browse the complete Catalog](/catalog)",
+  "- [Add assets and Catalog items in Studio](/studio/assets-and-blocks)",
+  "- [Build a richer composition](/go-further)",
+  "",
+];
+
+/**
+ * Pull the hand-written `## sections` out of an already-generated page.
+ * Returns the raw lines, heading included, in their original order.
+ */
+// Exported for the preservation fixture in
+// packages/core/src/registry/catalogGeneratorInstructions.test.ts.
+// fallow-ignore-next-line complexity
+export function carriedSectionsFrom(pagePath: string): CarriedContent {
+  const empty: CarriedContent = { sections: [], hasCustomUsage: false };
+  if (!existsSync(pagePath)) return empty;
+  let text: string;
+  try {
+    text = readFileSync(pagePath, "utf-8");
+  } catch {
+    return empty;
+  }
+
+  const sections: string[] = [];
+  let hasCustomUsage = false;
+  let heading: string | null = null;
+  let buffer: string[] = [];
+
+  // fallow-ignore-next-line complexity
+  const flush = (): void => {
+    if (!heading) return;
+    while (buffer.length && buffer[0]!.trim() === "") buffer.shift();
+    while (buffer.length && buffer.at(-1)!.trim() === "") buffer.pop();
+
+    // Ownership is explicit: a section is generated iff its heading is one the
+    // template emits (GENERATED_HEADINGS). Everything else is hand-written and
+    // carried verbatim — no content heuristic that could misread custom prose as
+    // generated and silently delete it on the next regeneration.
+    const key = heading.toLowerCase();
+    if (!GENERATED_HEADINGS.has(key) && buffer.length) {
+      if (key === "usage") hasCustomUsage = true;
+      sections.push(`## ${heading}`, "", ...buffer, "");
+    }
+    heading = null;
+    buffer = [];
+  };
+
+  let inFence = false;
+  for (const line of text.split("\n")) {
+    // The footer marker begins the generated tail (provenance + Related topics).
+    // Don't stop here: close the current section and keep scanning, so a human
+    // `## section` appended *below* the generated tail is still carried forward
+    // rather than silently dropped. The generated headings themselves are named
+    // in GENERATED_HEADINGS, so the tail's own `## Related topics` is not carried.
+    if (line.trim() === FOOTER_MARKER) {
+      flush();
+      continue;
+    }
+    if (line.trimStart().startsWith("```")) inFence = !inFence;
+    const match = !inFence && /^## (.+)$/.exec(line);
+    if (match) {
+      flush();
+      heading = match[1]!.trim();
+      continue;
+    }
+    if (heading) buffer.push(line);
+  }
+  flush();
+
+  return { sections, hasCustomUsage };
 }
 
 function typeDir(kind: ItemKind): string {
@@ -156,11 +279,7 @@ function textureMaskUrlFor(manifest: RegistryItem, texture: string): string {
 }
 
 function generateTextureExamples(manifest: RegistryItem, textureGroups: TextureGroup[]): string[] {
-  const lines: string[] = [
-    "## Texture Examples",
-    "",
-    '<div className="hf-texture-example-groups">',
-  ];
+  const lines: string[] = ["## Every texture", "", '<div className="hf-texture-example-groups">'];
 
   for (const group of textureGroups) {
     lines.push(
@@ -195,9 +314,9 @@ function generateTextureAgentUsage(
   const installedSnippet = `compositions/components/${manifest.name}/${manifest.name}.html`;
 
   return [
-    "## Agent Usage",
+    "## Ask an agent for it",
     "",
-    "Use this wording when asking an agent to apply a texture:",
+    "Paste this to your coding agent:",
     "",
     "```text",
     `Use the ${manifest.title} catalog component.`,
@@ -222,9 +341,7 @@ function generateTextureAgentUsage(
     "   </div>",
     "```",
     "",
-    `After install, the snippet lives at \`${installedSnippet}\` inside the project where you ran \`npx hyperframes add ${manifest.name}\`. The part to paste is the real \`<style>\` element near the bottom of that file; the texture PNGs install to \`assets/${manifest.name}/masks/\` and are referenced by project-root URLs in that CSS.`,
-    "",
-    `Swap \`${firstClass}\` for the class shown on any texture card below. The base class \`hf-texture-text\` is always required.`,
+    `Swap \`${firstClass}\` for the class on any texture card below. Every texture also needs the base class \`hf-texture-text\`.`,
     "",
   ];
 }
@@ -241,9 +358,9 @@ function generateTextureAnimationExample(
   const maskPath = textureMaskUrlFor(manifest, texture);
 
   return [
-    "## Animated Texture",
+    "## Make the texture move",
     "",
-    "Animate the texture by moving the mask position on the text element. Keep drop shadow on a wrapper so the shadow follows the textured contour.",
+    "Move the mask position on the text element. Keep the drop shadow on a wrapper so it follows the textured contour.",
     "",
     `<div className="hf-texture-animate-demo" style={{ "--mask-url": "url('${maskPath}')" }}>`,
     '  <div className="hf-texture-animate-meta">',
@@ -305,6 +422,9 @@ function generateTexturePreview(manifest: RegistryItem, textureGroups: TextureGr
 }
 
 function catalogPreviewFor(kind: ItemKind, manifest: RegistryItem): string | undefined {
+  // The manifest is the source of truth. Thirteen items declare a preview with
+  // a video and no poster, and that omission is deliberate — no .png was ever
+  // produced for them.
   if (manifest.preview) return manifest.preview.poster;
   const dir = typeDir(kind);
   return `${catalogImageBase}/${dir}/${manifest.name}.png`;
@@ -314,169 +434,266 @@ function yamlString(value: string): string {
   return JSON.stringify(value);
 }
 
-function generateItemMdx(kind: ItemKind, manifest: RegistryItem): string {
+/** "a", "a and b", "a, b, and c" */
+function sentenceList(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, and ${parts.at(-1)}`;
+}
+
+/** The file a reader actually opens — by type, not array position. */
+function primaryFileFor(manifest: RegistryItem): FileTarget | undefined {
+  return (
+    manifest.files.find((f) => f.type === "hyperframes:composition") ??
+    manifest.files.find((f) => f.type === "hyperframes:snippet") ??
+    manifest.files[0]
+  );
+}
+
+/**
+ * One sentence naming what lands in the project — replaces the old three-column
+ * File/Target/Type table. The `type` column was registry-internal jargon and the
+ * `path` column was the source path inside this repo, which a reader never sees.
+ */
+function installOutcome(manifest: RegistryItem, primaryTarget: string): string {
+  const primary = primaryFileFor(manifest);
+  const others = manifest.files.filter((f) => f !== primary);
+  if (others.length === 0) return `That writes one file: \`${primaryTarget}\`.`;
+
+  const dirs = [...new Set(others.map((f) => f.target.split("/").slice(0, -1).join("/")))]
+    .filter(Boolean)
+    .map((d) => `\`${d}/\``);
+  const noun = others.length === 1 ? "supporting file" : "supporting files";
+  if (dirs.length === 0) return `That writes \`${primaryTarget}\` plus ${others.length} ${noun}.`;
+  return `That writes \`${primaryTarget}\`, plus ${others.length} ${noun} under ${sentenceList(dirs)}.`;
+}
+
+/**
+ * True when the installed file opens with an HTML comment. Only 13 of 36
+ * component snippets do, so the old blanket "see the comment header in the
+ * file" line was simply false on the rest.
+ */
+function hasCommentHeader(kind: ItemKind, manifest: RegistryItem): boolean {
+  const primary = primaryFileFor(manifest);
+  if (!primary) return false;
+  const sourcePath = join(registryDir, typeDir(kind), manifest.name, primary.path);
+  if (!existsSync(sourcePath)) return false;
+  try {
+    return readFileSync(sourcePath, "utf-8").trimStart().startsWith("<!--");
+  } catch {
+    return false;
+  }
+}
+
+// fallow-ignore-next-line complexity
+function generateParams(manifest: RegistryItem): string[] {
+  if (!("params" in manifest) || !Array.isArray(manifest.params) || !manifest.params.length) {
+    return [];
+  }
+  const params = manifest.params;
+  const allColors = params.every((p) => p.type === "color");
+  const lines: string[] = [
+    allColors ? "## Change the colors" : "## Change how it looks",
+    "",
+    "Set these CSS variables on the block:",
+    "",
+  ];
+  for (const p of params) {
+    const opts = p.options?.length
+      ? ` Options: ${p.options.map((o) => `\`${o.value}\``).join(", ")}.`
+      : "";
+    lines.push(`- \`${p.key}\` — ${p.label}. Defaults to \`${p.default}\`.${opts}`);
+  }
+  lines.push("");
+  return lines;
+}
+
+// fallow-ignore-next-line complexity
+function generateItemMdx(
+  kind: ItemKind,
+  manifest: RegistryItem,
+  carried: CarriedContent = { sections: [], hasCustomUsage: false },
+): string {
   const tags = manifest.tags ?? [];
-  const tagBadges = tags.map((t) => `\`${t}\``).join(" ");
   const installCmd = `npx hyperframes add ${manifest.name}`;
   const source = manifest as RegistryItem & SourceMetadata;
   const textureGroups = textureGroupsFor(manifest);
+  const primaryTarget = primaryFileFor(manifest)?.target ?? `compositions/${manifest.name}.html`;
 
+  // Frontmatter only. Mintlify renders `title` as the H1 and `description` as
+  // the standfirst, so repeating both in the body (as this generator used to)
+  // printed each one twice on every page.
   const lines: string[] = [
     "---",
     `title: ${yamlString(manifest.title)}`,
     `description: ${yamlString(manifest.description)}`,
+    "---",
+    "",
   ];
-  lines.push("---", "");
 
-  if (tagBadges) {
-    lines.push(tagBadges, "");
-  }
-
-  if (tags.includes("html-in-canvas")) {
-    lines.push(
-      `<Warning>`,
-      `**Requires Chrome flag.** Enable \`chrome://flags/#canvas-draw-element\` for live preview. Rendering via CLI enables the flag automatically. [Learn more](/guides/html-in-canvas).`,
-      `</Warning>`,
-      "",
-    );
-  }
-
-  if (manifest.author) {
-    const author = source.authorUrl ? `[${manifest.author}](${source.authorUrl})` : manifest.author;
-    lines.push(`Created by ${author}.`, "");
-  }
-
-  if (source.sourcePrompt) {
-    lines.push("## Source Prompt", "", "```text", source.sourcePrompt, "```", "");
-  }
-
+  // 1. What it looks like, before anything else. Credits, tags and the source
+  //    prompt used to sit above this and pushed the preview below the fold.
   if (textureGroups.length > 0) {
     lines.push(...generateTexturePreview(manifest, textureGroups));
   } else {
     const previewPath = `${catalogImageBase}/${typeDir(kind)}/${manifest.name}`;
-    const previewVideo = manifest.preview?.video ?? `${previewPath}.mp4`;
-    const previewPoster = manifest.preview ? manifest.preview.poster : `${previewPath}.png`;
-    const posterAttribute = previewPoster ? ` poster="${previewPoster}"` : "";
+    // Same source of truth as the index: a manifest that declares a preview
+    // without a poster has no .png, and asking for one is a 403 the browser
+    // fetches before the video.
+    const posterUrl = catalogPreviewFor(kind, manifest);
+    const poster = posterUrl ? ` poster="${posterUrl}"` : "";
     lines.push(
-      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewVideo}"${posterAttribute} autoPlay muted loop playsInline />`,
+      `<video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="${previewPath}.mp4"${poster} autoPlay muted loop playsInline />`,
       "",
     );
   }
 
-  // Keep both paths visible. The agent path leads for the general audience;
-  // the terminal remains available without hiding it behind a control.
+  // 2. How to get it. A CodeGroup around a single block just drew an empty tab bar.
   lines.push(
-    "## Add it to a project",
+    "## Install",
     "",
-    "### Ask your agent",
-    "",
-    "```text",
-    `Add the ${manifest.title} ${kind} from the HyperFrames Catalog to this project.`,
-    "Replace the demo content with mine and match the existing design and timing.",
-    "```",
-    "",
-    "### Install from the terminal",
-    "",
-    "```bash",
+    "```bash Terminal",
     installCmd,
     "```",
     "",
+    installOutcome(manifest, primaryTarget),
+    "",
   );
 
-  // Registry metadata, visible. It is short — three rows and a file list — so
-  // hiding it behind a click bought nothing and cost Cmd+F and printing.
-  lines.push("## Details", "");
-  if (kind === "block" && manifest.dimensions && manifest.duration) {
+  // Prerequisite where it bites: you need the flag to preview what you just installed.
+  if (tags.includes("html-in-canvas")) {
     lines.push(
-      `| Property | Value |`,
-      `| --- | --- |`,
-      `| Type | ${typeLabel(kind)} |`,
-      `| Dimensions | ${manifest.dimensions.width}×${manifest.dimensions.height} |`,
-      `| Duration | ${manifest.duration}s |`,
+      "<Warning>",
+      "  Live preview needs the `chrome://flags/#canvas-draw-element` flag switched on.",
+      "  Rendering from the CLI switches it on for you. [How it",
+      "  works](/guides/html-in-canvas)",
+      "</Warning>",
+      "",
+    );
+  }
+
+  // 3. How to use it — unless a human already wrote that section, in which case
+  //    their version is carried through below instead of being overwritten.
+  if (carried.hasCustomUsage) {
+    // nothing: the carried "## Usage" section covers it
+  } else if (kind === "block" && isBlockItem(manifest)) {
+    const w = manifest.dimensions.width;
+    const h = manifest.dimensions.height;
+    lines.push(
+      "## Add it to your video",
+      "",
+      `It runs for ${manifest.duration} seconds at ${w}×${h}. Paste this into your composition:`,
+      "",
+      "```html index.html",
+      "<div",
+      `  data-composition-id="${manifest.name}"`,
+      `  data-composition-src="${primaryTarget}"`,
+      `  data-start="0"`,
+      `  data-duration="${manifest.duration}"`,
+      `  data-track-index="1"`,
+      `  data-width="${w}"`,
+      `  data-height="${h}"`,
+      "></div>",
+      "```",
+      "",
+      "Move it in time with `data-start`. Put it on a different timeline row with",
+      "`data-track-index`. See [data attributes](/concepts/data-attributes) for the rest.",
+      "",
+    );
+  } else if (textureGroups.length > 0) {
+    lines.push(
+      "## Paste it into your composition",
+      "",
+      `Open \`${primaryTarget}\`. Paste the real \`<style>\` element near the bottom into`,
+      "your composition once. It defines `hf-texture-text` and every `hf-texture-*` class.",
+      "",
+      `Leave the texture PNGs in \`assets/${manifest.name}/masks/\`. The CSS looks for them there.`,
       "",
     );
   } else {
-    lines.push(`| Property | Value |`, `| --- | --- |`, `| Type | ${typeLabel(kind)} |`, "");
+    lines.push(
+      "## Paste it into your composition",
+      "",
+      `Open \`${primaryTarget}\` and copy what is inside into your own composition.`,
+    );
+    if (hasCommentHeader(kind, manifest)) {
+      lines.push("The file opens with a comment header that walks you through it.");
+    }
+    lines.push(
+      "",
+      "A component has no size or duration of its own. It takes both from the composition",
+      "you paste it into.",
+      "",
+    );
   }
 
-  // Files
-  if (textureGroups.length === 0) {
-    lines.push("**Installed files**", "", "| File | Target | Type |", "| --- | --- | --- |");
-    for (const f of manifest.files) {
-      lines.push(`| \`${f.path}\` | \`${f.target}\` | ${f.type} |`);
-    }
-    lines.push("");
-  }
+  lines.push(...generateParams(manifest));
+
   if (textureGroups.length > 0) {
     lines.push(...generateTextureAgentUsage(manifest, textureGroups));
     lines.push(...generateTextureAnimationExample(manifest, textureGroups));
     lines.push(...generateTextureExamples(manifest, textureGroups));
   }
 
-  // Usage hint — find the primary file by type, not array position.
-  const primaryFile =
-    manifest.files.find((f) => f.type === "hyperframes:composition") ??
-    manifest.files.find((f) => f.type === "hyperframes:snippet") ??
-    manifest.files[0];
-  const primaryTarget = primaryFile?.target ?? `compositions/${manifest.name}.html`;
-
-  if (kind === "block" && isBlockItem(manifest)) {
-    const w = manifest.dimensions.width;
-    const h = manifest.dimensions.height;
-    lines.push(
-      "## Use it",
-      "",
-      "Ask your agent to replace the example content, match the project style, and place the block at the right moment in the video.",
-      "",
-      "**Wiring it by hand.** The installed block can be added to a host composition with:",
-      "",
-      "```html",
-      `<div data-composition-id="${manifest.name}" data-composition-src="${primaryTarget}" data-start="0" data-duration="${manifest.duration}" data-track-index="1" data-width="${w}" data-height="${h}"></div>`,
-      "```",
-      "",
-    );
-  } else {
-    if (textureGroups.length > 0) {
-      lines.push(
-        "## Use it",
-        "",
-        `After \`${installCmd}\`, the installed snippet lives at \`${primaryTarget}\` inside your current HyperFrames project. Open that file and paste the real \`<style>\` element near the bottom into your composition once; it defines \`hf-texture-text\` and every \`hf-texture-*\` class used by the examples above. Keep the installed texture PNGs in \`assets/${manifest.name}/masks/\`; the CSS references them with project-root URLs.`,
-        "",
-      );
-    } else {
-      lines.push(
-        "## Use it",
-        "",
-        "Ask your agent to apply the component to the intended element and preserve the project’s existing timing.",
-        "",
-        `**Wiring it by hand.** Open \`${primaryTarget}\` and paste its contents into your composition. The comment header in that file contains any item-specific instructions.`,
-        "",
-      );
-    }
+  // 4. Sections a human added to the previously generated page. Carried through
+  //    verbatim so regenerating never silently deletes hand-written docs.
+  if (carried.sections.length > 0) {
+    lines.push(...carried.sections);
   }
 
-  // Related skill
   if (manifest.relatedSkill) {
     lines.push(`<Tip>Related skill: \`/${manifest.relatedSkill}\`</Tip>`, "");
   }
 
-  lines.push(
-    "## Related topics",
-    "",
-    "- [Browse the complete Catalog](/catalog)",
-    "- [Add assets and Catalog items in Studio](/studio/assets-and-blocks)",
-    "- [Build a richer composition](/go-further)",
-    "",
-  );
+  // 5. Generated tail: provenance (the least of what a reader came for) and
+  //    then the required `## Related topics` continuation, so the page ends with
+  //    it per docs/AGENTS.md. The marker delimits everything generated below it.
+  const footer: string[] = [];
+
+  if (tags.length > 0) {
+    footer.push(`Tagged ${tags.map((t) => `\`${t}\``).join(" ")}.`, "");
+  }
+
+  if (manifest.author) {
+    const author = source.authorUrl ? `[${manifest.author}](${source.authorUrl})` : manifest.author;
+    footer.push(`Created by ${author}.`, "");
+  }
+
+  if (source.sourcePrompt) {
+    footer.push(
+      '<Accordion title="The prompt this was built from">',
+      "",
+      "```text",
+      source.sourcePrompt,
+      "```",
+      "",
+      "</Accordion>",
+      "",
+    );
+  }
+
+  lines.push(FOOTER_MARKER, "", ...footer, ...RELATED_TOPICS);
 
   return lines.join("\n");
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
+// fallow-ignore-next-line complexity
 function main(): void {
   const items = discoverItems();
   const catalogIndex: CatalogEntry[] = [];
+
+  // Read hand-written sections off the existing pages BEFORE deleting them, so
+  // a regeneration adds template improvements without destroying prose someone
+  // wrote by hand (e.g. the "Features" lists on the code-snippet pages).
+  const carried = new Map<string, CarriedContent>();
+  for (const { kind, manifest } of items) {
+    const content = carriedSectionsFrom(
+      join(docsDir, "catalog", typeDir(kind), `${manifest.name}.mdx`),
+    );
+    if (content.sections.length > 0) carried.set(manifest.name, content);
+  }
 
   // Clean previous generated output so deleted items don't leave stale pages.
   // Only remove the generated subdirectories, not the entire catalog/ dir
@@ -493,7 +710,7 @@ function main(): void {
     const outDir = join(docsDir, "catalog", dir);
     mkdirSync(outDir, { recursive: true });
 
-    const mdx = generateItemMdx(kind, manifest);
+    const mdx = generateItemMdx(kind, manifest, carried.get(manifest.name));
     const outPath = join(outDir, `${manifest.name}.mdx`);
     writeFileSync(outPath, mdx, "utf-8");
     console.log(`  ✓ catalog/${dir}/${manifest.name}.mdx`);
@@ -512,6 +729,10 @@ function main(): void {
   // Write catalog-index.json
   const publicDir = join(docsDir, "public");
   mkdirSync(publicDir, { recursive: true });
+  if (carried.size > 0) {
+    console.log(`\n  ↻ carried hand-written sections through on ${carried.size} page(s)`);
+  }
+
   const indexPath = join(publicDir, "catalog-index.json");
   writeFileSync(indexPath, JSON.stringify(catalogIndex, null, 2) + "\n", "utf-8");
   console.log(`\n  ✓ public/catalog-index.json (${catalogIndex.length} items)`);
@@ -532,49 +753,38 @@ function main(): void {
   const GROUP_ORDER: Record<string, number> = {
     "Code Animations": 0,
     Captions: 1,
-    "Interface & VFX": 2,
+    "HTML-in-Canvas": 2,
     "Social Overlays": 3,
     "Lower Thirds": 4,
-    Transitions: 5,
-    "Code Themes": 6,
-    "Complete Scenes": 7,
-    "Data & Diagrams": 8,
-    "Effects & Annotations": 9,
-    "Titles & Layouts": 10,
+    "Shader Transitions": 5,
+    "CSS Transitions": 6,
+    Showcases: 7,
+    Data: 8,
+    Effects: 9,
+    Blocks: 10,
   };
 
   // fallow-ignore-next-line complexity
   function groupForItem(entry: CatalogEntry): string {
     const tags = entry.tags;
     // Two-tag combos for specific grouping
-    if (tags.includes("transition")) return "Transitions";
+    if (tags.includes("transition") && tags.includes("shader")) return "Shader Transitions";
+    if (tags.includes("transition") && tags.includes("showcase")) return "CSS Transitions";
     if (tags.includes("captions")) return "Captions";
-    if (tags.includes("html-in-canvas")) return "Interface & VFX";
+    if (tags.includes("html-in-canvas")) return "HTML-in-Canvas";
     // Code animations (morph, flight, diff, …) — keyed on the code-animation tag so
     // they group separately from the static code-snippet themes.
     if (tags.includes("code-animation")) return "Code Animations";
     // Single-tag mapping
     if (tags.includes("lower-third")) return "Lower Thirds";
     if (tags.includes("social")) return "Social Overlays";
-    if (entry.name.startsWith("code-snippet-")) return "Code Themes";
-    if (tags.includes("showcase") || tags.includes("3d")) return "Complete Scenes";
-    if (
-      tags.includes("data") ||
-      tags.includes("chart") ||
-      tags.includes("ascii") ||
-      [
-        "flowchart",
-        "flowchart-vertical",
-        "hw-pipeline",
-        "hw-text-cloud",
-        "mk-progress-stat",
-        "mk-specs-list",
-      ].includes(entry.name)
-    )
-      return "Data & Diagrams";
-    if (entry.type === "component") return "Effects & Annotations";
+    if (tags.includes("transition"))
+      return entry.type === "component" ? "Effects" : "CSS Transitions";
+    if (tags.includes("showcase") || tags.includes("3d")) return "Showcases";
+    if (tags.includes("data") || tags.includes("chart") || tags.includes("ascii")) return "Data";
+    if (entry.type === "component") return "Effects";
     // Remaining blocks
-    return "Titles & Layouts";
+    return "Blocks";
   }
 
   const groupMap = new Map<string, string[]>();
@@ -591,54 +801,41 @@ function main(): void {
     .map(([group, pages]) => ({ group, pages }));
 
   if (catalogGroups.length > 0) {
-    // Update the existing Catalog tab in place. Rebuilding the object dropped
-    // everything except the groups — the tab lost its `icon` — and removing it
-    // before re-inserting moved it, because the anchor tab it looked for
-    // ("Documentation") no longer exists and the fallback index put Catalog
-    // ahead of Studio. Only `groups` is generated; every other property and the
-    // tab's position belong to whoever curates docs.json.
     const existingIdx = tabs.findIndex((t) => t.tab === "Catalog");
-    let navigationChanged = false;
-    if (existingIdx >= 0) {
-      const existingGroups = Array.isArray(tabs[existingIdx].groups)
-        ? tabs[existingIdx].groups
-        : [];
-      const isGeneratedCatalogGroup = (group: { pages?: unknown }): boolean => {
-        if (!Array.isArray(group.pages)) return true;
-        return group.pages.some(
-          (page) =>
-            typeof page === "string" &&
-            (page.startsWith("catalog/blocks/") || page.startsWith("catalog/components/")),
-        );
-      };
-      const generatedGroups = existingGroups.filter(isGeneratedCatalogGroup);
-      if (JSON.stringify(generatedGroups) !== JSON.stringify(catalogGroups)) {
-        const manualGroups = existingGroups.filter((group) => !isGeneratedCatalogGroup(group));
-        tabs[existingIdx] = {
-          ...tabs[existingIdx],
-          groups: [...manualGroups, ...catalogGroups],
-        };
-        navigationChanged = true;
-      }
-    } else {
-      const anchorIdx = tabs.findIndex((t) => t.tab === "Guides" || t.tab === "Documentation");
-      tabs.splice(anchorIdx >= 0 ? anchorIdx + 1 : 1, 0, {
-        tab: "Catalog",
-        icon: "grid-2",
-        groups: catalogGroups,
-      });
-      navigationChanged = true;
-    }
-    if (navigationChanged) {
-      writeFileSync(docsJsonPath, JSON.stringify(docsJson, null, 2) + "\n", "utf-8");
-    }
-    const totalPages = catalogGroups.reduce((n, g) => n + g.pages.length, 0);
-    console.log(
-      `  ✓ docs.json ${navigationChanged ? "updated" : "already current"} with ${catalogGroups.length} groups, ${totalPages} pages`,
+    const existing = existingIdx >= 0 ? tabs[existingIdx] : undefined;
+
+    // Groups nobody here generated — e.g. the hand-added "Overview" pointing at
+    // catalog/index. Rebuilding the tab used to drop them, which unlinked the
+    // catalog landing page from the sidebar entirely.
+    const isGeneratedPage = (p: unknown): boolean =>
+      typeof p === "string" && /^catalog\/(blocks|components)\//.test(p);
+    const handAddedGroups: unknown[] = (existing?.groups ?? []).filter(
+      (g: { pages?: unknown[] }) => !(g.pages ?? []).some(isGeneratedPage),
     );
+
+    const catalogTab = {
+      tab: "Catalog",
+      // Keep the icon a human chose for the tab.
+      ...(existing?.icon ? { icon: existing.icon } : {}),
+      groups: [...handAddedGroups, ...catalogGroups],
+    };
+
+    if (existingIdx >= 0) {
+      // Leave the tab where it already sits, rather than re-homing it.
+      tabs.splice(existingIdx, 1, catalogTab);
+    } else {
+      const docsIdx = tabs.findIndex((t) => t.tab === "Documentation");
+      tabs.splice(docsIdx >= 0 ? docsIdx + 1 : 1, 0, catalogTab);
+    }
+    writeFileSync(docsJsonPath, JSON.stringify(docsJson, null, 2) + "\n", "utf-8");
+    const totalPages = catalogGroups.reduce((n, g) => n + g.pages.length, 0);
+    console.log(`  ✓ docs.json updated with ${catalogGroups.length} groups, ${totalPages} pages`);
   }
 
   console.log("\nDone.");
 }
 
-main();
+// Only regenerate when run directly, so the module can be imported by tests.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  main();
+}

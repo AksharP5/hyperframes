@@ -41,6 +41,15 @@ const PLUGINS = [".claude-plugin", ".codex-plugin", ".cursor-plugin"];
 const ROOT = join(import.meta.dirname, "..");
 export const CHANGELOG_REVIEW_TODO = "<!-- TODO: write a 1-2 sentence release summary here. -->";
 
+/**
+ * Emitted directly under CHANGELOG_REVIEW_TODO by the draft generator. The
+ * generator cannot write the summary itself, so this carries the writing bar to
+ * whoever does. It is checked alongside the TODO so a half-finished review that
+ * drops one marker but not the other still fails the release gate.
+ */
+export const CHANGELOG_STYLE_NOTE =
+  "<!-- Style bar: keep sentences under 25 words. Use everyday words. Avoid semicolons. Say what changed for the user, then why it matters. -->";
+
 type ReleaseOptions = {
   version: string;
   skipTag: boolean;
@@ -278,7 +287,7 @@ function artifactHasGeneratedTodo(artifact: string) {
 }
 
 export function hasGeneratedChangelogTodo(content: string) {
-  return content.includes(CHANGELOG_REVIEW_TODO);
+  return content.includes(CHANGELOG_REVIEW_TODO) || content.includes(CHANGELOG_STYLE_NOTE);
 }
 
 export function docsChangelogEntryHasGeneratedTodo(content: string, marker: string) {

@@ -3,42 +3,27 @@ title: "Motion Blur"
 description: "Velocity-driven motion blur — samples element position each frame and applies a one-sided SVG feGaussianBlur ghost trail proportional to speed"
 ---
 
-`effect` `motion-blur` `velocity` `animation` `physics`
-
 <video className="w-full aspect-video rounded-xl object-cover bg-zinc-100 dark:bg-zinc-800" src="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/components/motion-blur.mp4" poster="https://static.heygen.ai/hyperframes-oss/docs/images/catalog/components/motion-blur.png" autoPlay muted loop playsInline />
 
-## Add it to a project
+## Install
 
-### Ask your agent
-
-```text
-Add the Motion Blur component from the HyperFrames Catalog to this project.
-Replace the demo content with mine and match the existing design and timing.
-```
-
-### Install from the terminal
-
-```bash
+```bash Terminal
 npx hyperframes add motion-blur
 ```
 
-## Details
+That writes one file: `compositions/components/motion-blur.html`.
 
-| Property | Value |
-| --- | --- |
-| Type | Component |
+## Paste it into your composition
 
-**Installed files**
+Open `compositions/components/motion-blur.html` and copy what is inside into your own composition.
+The file opens with a comment header that walks you through it.
 
-| File | Target | Type |
-| --- | --- | --- |
-| `motion-blur.html` | `compositions/components/motion-blur.html` | hyperframes:snippet |
+A component has no size or duration of its own. It takes both from the composition
+you paste it into.
 
-## Use it
+{/* hf:generated-footer */}
 
-Ask your agent to apply the component to the intended element and preserve the project’s existing timing.
-
-**Wiring it by hand.** Open `compositions/components/motion-blur.html` and paste its contents into your composition. The comment header in that file contains any item-specific instructions.
+Tagged `effect` `motion-blur` `velocity` `animation` `physics`.
 
 ## Related topics
 
