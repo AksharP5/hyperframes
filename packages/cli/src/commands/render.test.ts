@@ -42,6 +42,10 @@ const configState = vi.hoisted(
 );
 
 const trackingState = vi.hoisted(() => ({
+  // The rollout slice. Default-ON is gated on canary enrolment, so these
+  // tests control it directly rather than depending on where the test
+  // machine's bucketSeed happens to land.
+  canaryEnabled: true,
   // maybeEnableDeParallelRouterTrial gates on the real shouldTrack(), which
   // (via isDevMode()) always returns false when this file itself runs as
   // `.ts` source under vitest — mocked here so the CLI-trial tests can
@@ -172,6 +176,10 @@ vi.mock("../telemetry/client.js", () => ({
   shouldTrack: vi.fn(() => trackingState.shouldTrack),
 }));
 
+vi.mock("../telemetry/canary.js", () => ({
+  isCanaryEnabled: vi.fn(() => trackingState.canaryEnabled),
+}));
+
 vi.mock("../telemetry/events.js", () => ({
   trackRenderComplete: vi.fn(),
   trackRenderError: vi.fn(),
@@ -238,6 +246,7 @@ describe("renderLocal browser GPU config", () => {
     configState.failMirrors = 0;
     configState.writeConfigCalls = [];
     trackingState.shouldTrack = true;
+    trackingState.canaryEnabled = true;
     trackingState.renderObservations = [];
     ffmpegEncoderState.mode = "software";
     ffmpegEncoderState.error = null;
@@ -740,6 +749,7 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
     configState.failWrites = 0;
     configState.writeConfigCalls = [];
     trackingState.shouldTrack = true;
+    trackingState.canaryEnabled = true;
     // The "managed by us" flag lives at module scope in render.ts (real CLI
     // processes only ever run one --batch sequence, so it never needs
     // resetting there) — reset explicitly here so tests don't leak arm/
@@ -776,6 +786,55 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
     // call sites set it. These tests simulate those call sites.
     manageDeParallelRouterBreaker: true,
   };
+
+  // The rollout slice. Default-ON means every eligible render routes the
+  // moment this ships — a ~17x exposure jump. The canary is what makes that
+  // fraction chosen and revertible instead of emergent.
+  it("disarms for an install the canary did not enrol", async () => {
+    trackingState.canaryEnabled = false;
+    configState.disk = {
+      telemetryEnabled: true,
+      deParallelRouterTrialFired: false,
+      telemetryNoticeShown: true,
+    };
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    // Explicit "false", not delete: with default-ON polarity, deleting the
+    // var means ON — the same trap the breaker fix exists for.
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
+  });
+
+  // Setting the registry percentage to 0 must switch the router off fleet-wide
+  // without a release. That is the revert path, so it has to be pinned.
+  it("registry percentage is a full kill switch", async () => {
+    configState.disk = {
+      telemetryEnabled: true,
+      deParallelRouterTrialFired: false,
+      telemetryNoticeShown: true,
+    };
+
+    trackingState.canaryEnabled = false;
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
+
+    delete process.env.HF_DE_PARALLEL_ROUTER;
+    trackingState.canaryEnabled = true;
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+  });
+
+  // An explicit user choice outranks enrolment in both directions — the
+  // documented escalation path for anyone who wants the router regardless.
+  it("never overrides an explicit user value, enrolled or not", async () => {
+    trackingState.canaryEnabled = false;
+    configState.disk = {
+      telemetryEnabled: true,
+      deParallelRouterTrialFired: false,
+      telemetryNoticeShown: true,
+    };
+    process.env.HF_DE_PARALLEL_ROUTER = "true";
+    await renderLocal("/tmp/project", "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("true");
+  });
 
   it("leaves the env var untouched on a fresh install — the router is default-ON", async () => {
     // Under the old opt-in trial this armed HF_DE_PARALLEL_ROUTER="true".

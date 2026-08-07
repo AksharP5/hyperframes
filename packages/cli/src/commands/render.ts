@@ -1,4 +1,5 @@
 import { failCommand, requestCliExit } from "../utils/commandResult.js";
+import { isCanaryEnabled } from "../telemetry/canary.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
@@ -1222,6 +1223,25 @@ function applyDeParallelRouterCircuitBreaker(quiet: boolean): boolean {
         ),
       );
     }
+    return false;
+  }
+
+  // The rollout slice. Default-ON means every eligible render routes the
+  // moment this ships — a ~17x jump in exposure, onto profiles the opt-in
+  // trial never covered (<=4 CPUs, Docker: ~12% of eligible renders between
+  // them). 0.7.60-0.7.64 is why that matters: every unclamped render
+  // reverted for five consecutive releases and nobody saw it.
+  //
+  // Ramping through the registry makes the exposed fraction a number someone
+  // chose. Today's ~11% is emergent — the product of eligibility rules and a
+  // capped trial — so it drifts with fleet composition and cannot be reverted
+  // without a release. Setting the percentage to 0 turns the router off for
+  // everyone, immediately, with no code change.
+  //
+  // Disarm uses the same explicit "false" the breaker writes, for the same
+  // reason: with default-ON polarity, deleting the var means ON.
+  if (!isCanaryEnabled("de-parallel-router")) {
+    applyDeParallelRouterBreaker();
     return false;
   }
   return true;
