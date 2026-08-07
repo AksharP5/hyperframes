@@ -275,6 +275,14 @@ export {
 } from "./utils/ffprobe.js";
 
 export {
+  NOT_MEDIA_PAYLOAD,
+  NotMediaPayloadError,
+  assertMediaPayload,
+  fingerprintElementId,
+  isNotMediaPayload,
+} from "./utils/notMediaPayload.js";
+
+export {
   assertPublicHttpsUrl,
   downloadToTemp,
   fetchPublicHttpsText,

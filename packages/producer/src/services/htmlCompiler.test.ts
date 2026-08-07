@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { parseHTML } from "linkedom";
 import { interpolateVolumeGain } from "@hyperframes/core/media-volume-envelope";
 import { defaultLogger } from "../logger.js";
+import { NotMediaPayloadError } from "@hyperframes/engine";
 import {
   collectExternalAssets,
   compileForRender,
@@ -2362,5 +2363,96 @@ describe("sub-composition variable injection (render path, #2064)", () => {
     );
     const compiled = await compileForRender(projectDir, join(projectDir, "index.html"), projectDir);
     expect(compiled.html).not.toMatch(/window\.__hfVariablesByComp\s*=\s*Object\.assign/);
+  });
+});
+
+// ── Markup payload sniff (STUDIO-5433) ─────────────────────────────────────
+//
+// Producer's `resolveMediaDuration` is a two-step pipeline (download → probe)
+// that runs on every media element without an authored duration. Before this
+// defense, an authoring bug that handed a `.html` payload through as a video
+// src produced an opaque `[mov,mp4,m4a,3gp,3g2,mj2 @ ...] moov atom not found`
+// from ffprobe — the `mov,mp4,…` prefix is ffprobe's demuxer probe order, NOT
+// the file's true format, so every alert routed as a codec/ffmpeg bug. The
+// byte-level sniff itself is unit-tested in
+// `engine/src/utils/notMediaPayload.test.ts`; what is pinned here is the
+// compiler's handling of the verdict, which differs by element type.
+
+describe("compileForRender non-media payload sniff (STUDIO-5433)", () => {
+  function writeProject(mediaTag: string): string {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-payload-sniff-e2e-"));
+    mkdirSync(join(projectDir, "assets"));
+    writeFileSync(
+      join(projectDir, "assets", "nested.html"),
+      "<!DOCTYPE html>\n<html><head><title>streamed-preview</title></head><body></body></html>",
+    );
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!DOCTYPE html>
+<html>
+  <body>
+    <div data-composition-id="root" data-width="640" data-height="360" data-start="0" data-duration="4">
+      ${mediaTag}
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["root"] = { duration: () => 4 };
+    </script>
+  </body>
+</html>`,
+    );
+    return projectDir;
+  }
+
+  it("aborts with NotMediaPayloadError before ffprobe when a <video> src is an HTML payload", async () => {
+    // Mimics STUDIO-5433: an a-roll element whose src points at a legitimate
+    // 6.5 KB `<!DOCTYPE html>` preview page instead of the rendered MP4.
+    const projectDir = writeProject(
+      '<video id="v1" src="assets/nested.html" data-start="0" muted></video>',
+    );
+
+    let caught: unknown;
+    try {
+      await compileForRender(projectDir, join(projectDir, "index.html"), projectDir);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(NotMediaPayloadError);
+    const err = caught as NotMediaPayloadError;
+    // Routing metadata, not just a readable string: these are what the server's
+    // SAFE_RENDER_ERROR_CODES allowlist and the distributed retry sets key off.
+    expect(err.code).toBe("NOT_MEDIA_PAYLOAD");
+    expect(err.owner).toBe("user");
+    expect(err.retryable).toBe(false);
+    // Correlation is the hashed element id — the authored src never reaches a
+    // message that producer forwards to API clients.
+    expect(err.elementFingerprints).toHaveLength(1);
+    expect(err.message).not.toContain("assets/nested.html");
+    // Also the ordering pin: this fixture is an input ffprobe rejects, so if
+    // the sniff ran after the probe the rejection would be ffprobe's untyped
+    // error and this assertion would fail.
+  });
+
+  it("drops an <audio> document payload to duration 0 and warns instead of failing the render", async () => {
+    // The audio/video split is the compiler's contract: an unprobeable audio
+    // src is excluded from the render, and only video surfaces its probe
+    // failure. A hard abort here would take down renders that used to succeed
+    // without the offending audio.
+    const projectDir = writeProject(
+      '<audio id="a1" src="assets/nested.html" data-start="0"></audio>',
+    );
+    const warnings: string[] = [];
+    const log = { ...defaultLogger, warn: (message: string) => warnings.push(message) };
+
+    const compiled = await compileForRender(
+      projectDir,
+      join(projectDir, "index.html"),
+      projectDir,
+      { log },
+    );
+
+    expect(compiled.html).not.toContain('id="a1" src="assets/nested.html" data-end');
+    expect(warnings.join("\n")).toContain("text document");
+    expect(warnings.join("\n")).toContain("a1");
   });
 });

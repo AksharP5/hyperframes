@@ -51,6 +51,8 @@ import {
   type AudioVolumeKeyframe,
   type MediaProbeProfile,
   analyzeKeyframeIntervals,
+  assertMediaPayload,
+  NotMediaPayloadError,
   probeMediaProfile,
 } from "@hyperframes/engine";
 import {
@@ -423,6 +425,7 @@ async function resolveMediaDuration(
   downloadDir: string,
   tagName: string,
   elementIdentity: string,
+  log?: ProducerLogger,
 ): Promise<{ duration: number; resolvedPath: string }> {
   let filePath = src;
 
@@ -448,12 +451,30 @@ async function resolveMediaDuration(
   return withMediaProbeSlot(async () => {
     let profile: MediaProbeProfile;
     try {
+      // Payload sniff (STUDIO-5433): if an authoring bug hands us a text
+      // payload (e.g. an unresolved nested-composition preview URL), fail with
+      // a typed NotMediaPayloadError instead of letting ffprobe emit an opaque
+      // `[mov,mp4,...] moov atom not found` that routes as a codec bug.
+      // Deliberately inside this try: the audio/video split below is the
+      // contract, so a bad audio src must still degrade to duration 0 rather
+      // than take down the whole render.
+      await assertMediaPayload(filePath, elementIdentity);
       profile = await probeMediaProfile(filePath);
     } catch (error) {
       // Preserve the historical split: invalid video sources surface their
       // probe failure, while invalid/unreadable audio sources resolve to zero
       // duration and are excluded by the compiler.
-      if (tagName !== "video") return { duration: 0, resolvedPath: filePath };
+      if (tagName !== "video") {
+        if (error instanceof NotMediaPayloadError) {
+          // Dropping it silently is what let STUDIO-5433 resurface downstream
+          // as `prepare/ffmpeg_failed` with owner "system".
+          log?.warn(
+            `[compile] Audio "${elementIdentity}" (${src}) is a text document, not a media ` +
+              "file — the element is dropped from the render. Point it at a rendered media file.",
+          );
+        }
+        return { duration: 0, resolvedPath: filePath };
+      }
       throw error;
     }
     assertAssetMediaTypeProfile(tagName === "video" ? "video" : "audio", profile, elementIdentity);
@@ -501,9 +522,15 @@ async function compileHtmlFile(
   // Phase 1: Resolve missing durations (parallel ffprobe)
   const resolvedResults = await Promise.all(
     mediaUnresolved.map((el) =>
-      resolveMediaDuration(el.src!, el.mediaStart, baseDir, downloadDir, el.tagName, el.id).then(
-        ({ duration }) => ({ id: el.id, duration }),
-      ),
+      resolveMediaDuration(
+        el.src!,
+        el.mediaStart,
+        baseDir,
+        downloadDir,
+        el.tagName,
+        el.id,
+        log,
+      ).then(({ duration }) => ({ id: el.id, duration })),
     ),
   );
   const resolutions: ResolvedDuration[] = resolvedResults.filter((r) => r.duration > 0);
@@ -525,6 +552,7 @@ async function compileHtmlFile(
           downloadDir,
           el.tagName,
           el.id,
+          log,
         );
         return { id: el.id, tagName: el.tagName, duration: el.duration, maxDuration, src: el.src! };
       }),

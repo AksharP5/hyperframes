@@ -154,6 +154,50 @@ describe("processCompositionAudio", () => {
     ]);
   });
 
+  // STUDIO-5433: an audio src that resolved to an HTML/XML page (an unresolved
+  // nested-composition preview URL, or a 403/404 body served as a 200) skips the
+  // probe entirely when the element carries an authored duration, and used to
+  // surface as `prepare/ffmpeg_failed` with owner "system" — an authoring bug
+  // paged as a platform fault, after every frame had already been captured.
+  it("classifies a document audio source as a user-owned invalid media source", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
+    const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
+    tempDirs.push(baseDir, workDir);
+    writeFileSync(join(baseDir, "bgm.mp3"), "<!DOCTYPE html><html><body>not audio</body></html>");
+
+    const result = await processCompositionAudio(
+      [
+        {
+          id: "bgm",
+          src: "bgm.mp3",
+          // Authored duration + loop is the shape that bypasses every probe.
+          start: 0,
+          end: 30,
+          mediaStart: 0,
+          layer: 0,
+          volume: 1,
+          type: "audio",
+        },
+      ],
+      baseDir,
+      workDir,
+      join(baseDir, "out.m4a"),
+      30,
+    );
+
+    expect(result.failures).toEqual([
+      expect.objectContaining({
+        stage: "source",
+        reason: "invalid_media",
+        owner: "user",
+        retryable: false,
+        elementId: "bgm",
+      }),
+    ]);
+    // Never reached ffmpeg: the whole point is failing before the work.
+    expect(runFfmpegMock).not.toHaveBeenCalled();
+  });
+
   it("preserves muted tracks and uses unity master gain by default", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
     const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
