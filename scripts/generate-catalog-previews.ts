@@ -164,7 +164,15 @@ async function prepareProjectDir(item: CatalogItem): Promise<string> {
   // just rename it to index.html. Otherwise create a wrapper.
   if (!existsSync(join(tmpDir, "index.html")) && existsSync(join(tmpDir, item.entryFile))) {
     const entryContent = readFileSync(join(tmpDir, item.entryFile), "utf-8");
-    const hasTimeline = entryContent.includes("__timelines");
+    // A registration inside <template> does NOT make the file standalone: the
+    // template's markup and scripts stay inert until a host composition mounts
+    // it via data-composition-src. Rendering such a block as index.html paints
+    // a blank page and fails with "Composition has zero duration", so match on
+    // the document with template content removed and let those blocks fall
+    // through to the wrapper below.
+    const hasTimeline = entryContent
+      .replace(/<template\b[\s\S]*?<\/template>/gi, "")
+      .includes("__timelines");
     if (hasTimeline) {
       // Standalone block — copy to index.html and render directly.
       // For social overlays with transparent backgrounds, inject a dark bg
@@ -203,27 +211,40 @@ async function prepareProjectDir(item: CatalogItem): Promise<string> {
     }
   }
   if (!existsSync(join(tmpDir, "index.html"))) {
-    const manifestPath = join(tmpDir, "registry-item.json");
-    let width = 1920;
-    let height = 1080;
-    let duration = 5;
-    if (existsSync(manifestPath)) {
-      const m = JSON.parse(readFileSync(manifestPath, "utf-8"));
-      width = m.dimensions?.width ?? width;
-      height = m.dimensions?.height ?? height;
-      duration = m.duration ?? duration;
-    }
-
-    // Dark background for social overlays so transparent cards are visible.
-    const tags: string[] = (() => {
+    // One read for every field the wrapper needs. A malformed manifest cannot
+    // reach here — `discoverItems` parses the same file without a guard — so
+    // the only case this absorbs is the file being absent, which is what each
+    // `??` default below already stood for.
+    const manifest: {
+      dimensions?: { width?: number; height?: number };
+      duration?: number;
+      tags?: string[];
+      files?: { path?: string; target?: string }[];
+    } = (() => {
       try {
-        return JSON.parse(readFileSync(join(tmpDir, "registry-item.json"), "utf-8")).tags ?? [];
+        return JSON.parse(readFileSync(join(tmpDir, "registry-item.json"), "utf-8"));
       } catch {
-        return [];
+        return {};
       }
     })();
+
+    const width = manifest.dimensions?.width ?? 1920;
+    const height = manifest.dimensions?.height ?? 1080;
+    const duration = manifest.duration ?? 5;
+
+    // Dark background for social overlays so transparent cards are visible.
+    const tags = manifest.tags ?? [];
     const isSocialOverlay = tags.includes("social") || tags.includes("overlay");
     const bgColor = isSocialOverlay ? "#1a1a2e" : "#ffffff";
+
+    // Mount the mirrored install-layout copy when one exists. Blocks reference
+    // their own assets the way they will after `hyperframes add`
+    // (`../assets/background.jpeg` from `compositions/`), which only resolves
+    // from the target path — the flat source copy at the project root resolves
+    // it outside the project and silently renders without the asset.
+    const entryTarget = manifest.files?.find((f) => f.path === item.entryFile)?.target;
+    const entrySrc =
+      entryTarget && existsSync(join(tmpDir, entryTarget)) ? entryTarget : item.entryFile;
 
     const wrapper = `<!doctype html>
 <html lang="en">
@@ -235,7 +256,7 @@ async function prepareProjectDir(item: CatalogItem): Promise<string> {
 </head>
 <body>
   <div data-composition-id="preview-root" data-width="${width}" data-height="${height}" data-start="0" data-duration="${duration}">
-    <div data-composition-id="${item.name}" data-composition-src="${item.entryFile}" data-start="0" data-duration="${duration}" data-track-index="0" data-width="${width}" data-height="${height}"></div>
+    <div data-composition-id="${item.name}" data-composition-src="${entrySrc}" data-start="0" data-duration="${duration}" data-track-index="0" data-width="${width}" data-height="${height}"></div>
   </div>
   <script>
     window.__timelines = window.__timelines || {};
@@ -280,11 +301,18 @@ async function generateThumbnail(item: CatalogItem, projectDir: string): Promise
     fps: { num: 30, den: 1 },
   });
   try {
+    // `format: "png"` is the engine's TRANSPARENT capture mode: it forces
+    // `background-image: none !important` on every `[data-composition-id]`, so
+    // any block whose scene paints its own backdrop (the VS Code snippets sit
+    // on a desktop wallpaper) loses it and the poster comes out empty. These
+    // posters are opaque page images, never a compositing layer — capture
+    // opaque and transcode to the .png the catalog pages reference.
     const session = await createCaptureSession(fileServer.url, framesDir, {
       width,
       height,
       fps: { num: 30, den: 1 },
-      format: "png",
+      format: "jpeg",
+      quality: 95,
     });
     await initializeSession(session);
 
@@ -298,7 +326,13 @@ async function generateThumbnail(item: CatalogItem, projectDir: string): Promise
     // Capture after the treatment appears, capped for long compositions.
     const captureTime = Math.min(3.0, duration * 0.6);
     const result = await captureFrame(session, 0, captureTime);
-    cpSync(result.path, join(outDir, `${item.name}.png`));
+    execFileSync(
+      "ffmpeg",
+      ["-v", "error", "-y", "-i", result.path, join(outDir, `${item.name}.png`)],
+      {
+        stdio: "inherit",
+      },
+    );
     console.log(`  ✓ ${item.name}.png (${result.captureTimeMs}ms)`);
 
     await closeCaptureSession(session);
