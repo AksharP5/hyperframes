@@ -255,7 +255,13 @@ export async function tryGsapResizeIntercept(
       nonUniformScale,
     });
     scaleDraftEl = el;
-    committedScale = { x: newScaleX, y: newScaleY };
+    // What the commit ACTUALLY writes, which is what the finalize step below
+    // has to measure against. A near-uniform drag collapses to the shorthand,
+    // so taking the per-axis pair here measured the element at a scaleY the
+    // file never gets and tilted the correction by the difference.
+    committedScale = useScaleLonghands
+      ? { x: newScaleX, y: newScaleY }
+      : { x: newScaleX, y: newScaleX };
     // Where the user DROPPED the box: the draft (anchor-pinned to the
     // gesture-start top-left) is still applied here, so this rect is exactly
     // what the preview showed at release. The committed scale renders around
