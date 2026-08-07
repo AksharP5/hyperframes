@@ -351,7 +351,11 @@ function mintAndCacheConfig(): HyperframesConfig {
   const config = mintConfig();
   const write = writeConfigWithResult(config);
   if (!write.ok) warnSeedBackfillFailed(write.error);
-  classifyIdentity(write.ok ? "unknown" : "process_only", writeOutcomeOf(write));
+  classifyIdentity(
+    config.anonymousId,
+    write.ok ? "unknown" : "process_only",
+    writeOutcomeOf(write),
+  );
   cachedConfig = { ...config };
   return { ...config };
 }
@@ -538,7 +542,8 @@ const DEFAULT_CONFIG: HyperframesConfig = {
 let cachedConfig: HyperframesConfig | null = null;
 
 // ---------------------------------------------------------------------------
-// Identity-persistence classification — one sticky verdict per process.
+// Identity-persistence classification — one sticky verdict per anonymous id
+// within this process.
 //
 // Install-grain metrics need to know whether this process's anonymousId can
 // be trusted to survive to the next run. Three-way, because from inside a
@@ -551,24 +556,33 @@ let cachedConfig: HyperframesConfig | null = null;
 //                   fresh id per run, install_predecessor_found=false every
 //                   time) looks IDENTICAL to a genuine first run from in
 //                   here, so this cannot be promoted to durable.
-//   process_only  — minted this run and the write failed (read-only mount,
-//                   full disk): the id dies with this process, guaranteed.
+//   process_only  — minted this run but not persisted by the identity-
+//                   establishing path (the write failed or no write occurred).
 //
-// The verdict is sticky: a fresh-install process that later re-reads its own
-// just-written file must not upgrade itself to durable.
+// The verdict is sticky for the same id: a fresh-install process that later
+// re-reads its own just-written file must not upgrade itself to durable. If a
+// config refresh replaces the id, the replacement gets its own classification.
 // ---------------------------------------------------------------------------
 
 export type IdentityPersistence = "durable" | "process_only" | "unknown";
 /** `ok_unmirrored`: config.json landed but the install-state mirror did not. */
 export type IdentityWriteOutcome = "ok" | "ok_unmirrored" | "failed";
 
-let identityPersistence: IdentityPersistence | undefined;
-let identityWriteOutcome: IdentityWriteOutcome | undefined;
+interface IdentityClassification {
+  anonymousId: string;
+  persistence: IdentityPersistence;
+  writeOutcome: IdentityWriteOutcome | undefined;
+}
 
-function classifyIdentity(persistence: IdentityPersistence, outcome?: IdentityWriteOutcome): void {
-  if (identityPersistence !== undefined) return;
-  identityPersistence = persistence;
-  identityWriteOutcome = outcome;
+let identityClassification: IdentityClassification | undefined;
+
+function classifyIdentity(
+  anonymousId: string,
+  persistence: IdentityPersistence,
+  writeOutcome?: IdentityWriteOutcome,
+): void {
+  if (identityClassification?.anonymousId === anonymousId) return;
+  identityClassification = { anonymousId, persistence, writeOutcome };
 }
 
 function writeOutcomeOf(write: ConfigWriteResult): IdentityWriteOutcome {
@@ -576,19 +590,24 @@ function writeOutcomeOf(write: ConfigWriteResult): IdentityWriteOutcome {
   return write.mirrored === false ? "ok_unmirrored" : "ok";
 }
 
-/** The process's sticky identity-persistence verdict (classifies on demand). */
+/** The current anonymous id's sticky persistence verdict (classifies on demand). */
 export function getIdentityPersistence(): IdentityPersistence {
-  readConfig();
-  return identityPersistence ?? "unknown";
+  const config = readConfig();
+  return identityClassification?.anonymousId === config.anonymousId
+    ? identityClassification.persistence
+    : "unknown";
 }
 
 /**
- * Outcome of the identity-establishing config write. Absent when the identity
- * came from disk and nothing needed writing (the `durable` case).
+ * Outcome of the identity-establishing config write. Absent when that path did
+ * not write: either the id came from disk or a replacement was minted on a
+ * no-write path.
  */
 export function getIdentityWriteOutcome(): IdentityWriteOutcome | undefined {
-  readConfig();
-  return identityWriteOutcome;
+  const config = readConfig();
+  return identityClassification?.anonymousId === config.anonymousId
+    ? identityClassification.writeOutcome
+    : undefined;
 }
 
 /** A non-empty string, or undefined — hand-edited configs can carry anything. */
@@ -710,8 +729,13 @@ export function readConfig(): HyperframesConfig {
       const write = backfillBucketSeed(config);
       // The backfill write carries any replacement id to disk, so a minted id
       // classifies exactly like a fresh mint: by whether the write landed.
-      if (idFromDisk) classifyIdentity("durable");
-      else classifyIdentity(write.ok ? "unknown" : "process_only", writeOutcomeOf(write));
+      if (idFromDisk) classifyIdentity(config.anonymousId, "durable");
+      else
+        classifyIdentity(
+          config.anonymousId,
+          write.ok ? "unknown" : "process_only",
+          writeOutcomeOf(write),
+        );
       // Cache even if the write failed, so the seed is at least stable for
       // the life of this process (a re-roll per readConfigFresh would flip
       // cohorts mid-session).
@@ -721,7 +745,7 @@ export function readConfig(): HyperframesConfig {
 
     // No write happens on this path: a replacement id lives only in this
     // process, guaranteed — the definition of process_only.
-    classifyIdentity(idFromDisk ? "durable" : "process_only");
+    classifyIdentity(config.anonymousId, idFromDisk ? "durable" : "process_only");
 
     cachedConfig = config;
     return { ...config };
@@ -733,7 +757,11 @@ export function readConfig(): HyperframesConfig {
     // privacy control: recovery must never silently turn telemetry back on.
     const config = { ...mintConfig(), telemetryEnabled: false };
     const write = writeConfigWithResult(config);
-    classifyIdentity(write.ok ? "unknown" : "process_only", writeOutcomeOf(write));
+    classifyIdentity(
+      config.anonymousId,
+      write.ok ? "unknown" : "process_only",
+      writeOutcomeOf(write),
+    );
     return config;
   }
 }

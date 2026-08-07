@@ -110,12 +110,12 @@ export function trackEvent(
       // Whether this process's anonymousId can be trusted to survive to the
       // next run: `durable` (loaded from a preexisting config), `unknown`
       // (minted+persisted this run — an ephemeral HOME is indistinguishable
-      // from a genuine first run), `process_only` (persist failed). Install-
+      // from a genuine first run), `process_only` (not persisted). Install-
       // grain metrics should count only durable identities; the identity-
       // churn workloads (fresh id per run) are never durable.
       identity_persistence: getIdentityPersistence(),
-      // Outcome of the identity-establishing config write; absent when the
-      // identity came from disk and nothing needed writing.
+      // Outcome of the identity-establishing config write; absent when that
+      // path did not write (including a durable id loaded from disk).
       config_write_outcome: getIdentityWriteOutcome(),
       // Groups one invocation's events even when the install identity is
       // untrustworthy. Always present, unlike the orchestrator-set run_id.
