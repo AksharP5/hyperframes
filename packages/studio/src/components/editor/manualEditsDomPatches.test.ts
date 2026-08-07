@@ -267,6 +267,20 @@ describe("buildBoxSizePatches / buildClearBoxSizePatches", () => {
     expect(ops.every((op) => op.value === null)).toBe(true);
   });
 
+  it("backfills the measured box on a legacy element that already has the resize marker", () => {
+    const e = div();
+    e.setAttribute(STUDIO_BOX_SIZE_ATTR, "true");
+    Object.defineProperties(e, {
+      offsetWidth: { configurable: true, value: 630 },
+      offsetHeight: { configurable: true, value: 252 },
+    });
+
+    applyStudioBoxSize(e, { width: 320, height: 128 });
+
+    expect(e.getAttribute(STUDIO_ORIGINAL_BOX_WIDTH_ATTR)).toBe("630");
+    expect(e.getAttribute(STUDIO_ORIGINAL_BOX_HEIGHT_ATTR)).toBe("252");
+  });
+
   it("build/clear symmetry: clear addresses every {type,property} key that build emits", () => {
     const e = populatedBoxEl();
     assertClearCoversKeys(buildBoxSizePatches(e), buildClearBoxSizePatches(e));

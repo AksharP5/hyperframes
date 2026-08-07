@@ -293,6 +293,7 @@ it("non-uniform drag commits scaleX/scaleY longhands", async () => {
  * left it rendering at 7532px, over three times where it was dropped, and the
  * next drag compounded it.
  */
+// fallow-ignore-next-line code-duplication
 it("scales from the element's real box, not a hardcoded fallback", async () => {
   const el = document.createElement("div");
   el.id = "clip";
@@ -339,6 +340,7 @@ it("scales from the element's real box, not a hardcoded fallback", async () => {
  * and the longhands won. The resize computed the right number, wrote it, and
  * the element snapped straight back to its old size on release.
  */
+// fallow-ignore-next-line code-duplication
 it("does not mix the scale shorthand into a tween that speaks longhands", async () => {
   const el = document.createElement("div");
   el.id = "clip";

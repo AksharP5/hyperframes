@@ -360,15 +360,21 @@ function writeStudioBoxSizeVars(
   element: HTMLElement,
   size: { width: number; height: number },
 ): void {
+  // Keep the measurement on its own migration-safe guard. Elements drafted by
+  // an older Studio can already carry the box-size marker without these newer
+  // attributes; the next resize still reaches this function before its width
+  // and height are overwritten, so this is the last honest layout box to save.
+  // Offset sizes are layout values, so a running scale animation does not
+  // distort them.
+  if (!element.hasAttribute(STUDIO_ORIGINAL_BOX_WIDTH_ATTR)) {
+    element.setAttribute(STUDIO_ORIGINAL_BOX_WIDTH_ATTR, String(element.offsetWidth));
+  }
+  if (!element.hasAttribute(STUDIO_ORIGINAL_BOX_HEIGHT_ATTR)) {
+    element.setAttribute(STUDIO_ORIGINAL_BOX_HEIGHT_ATTR, String(element.offsetHeight));
+  }
   if (!element.hasAttribute(STUDIO_BOX_SIZE_ATTR)) {
     element.setAttribute(STUDIO_ORIGINAL_WIDTH_ATTR, element.style.getPropertyValue("width"));
     element.setAttribute(STUDIO_ORIGINAL_HEIGHT_ATTR, element.style.getPropertyValue("height"));
-    // Measured here and only here: this branch runs once, before the draft
-    // writes a width, so it is the last moment the element still has the box
-    // the user started with. Offset sizes are layout, so a scale animation
-    // running on the element does not distort them.
-    element.setAttribute(STUDIO_ORIGINAL_BOX_WIDTH_ATTR, String(element.offsetWidth));
-    element.setAttribute(STUDIO_ORIGINAL_BOX_HEIGHT_ATTR, String(element.offsetHeight));
     element.setAttribute(
       STUDIO_ORIGINAL_MIN_WIDTH_ATTR,
       element.style.getPropertyValue("min-width"),

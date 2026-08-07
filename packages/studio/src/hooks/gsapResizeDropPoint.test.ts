@@ -77,6 +77,21 @@ interface ResizeCase {
   positionWrite?: "static-set" | "keyframed-tween" | "none";
 }
 
+function createResizeElement(testCase: ResizeCase): HTMLElement {
+  const el = document.createElement("div");
+  el.id = "clip";
+  if (testCase.inlineSized) {
+    el.setAttribute("data-hf-studio-original-width", `${testCase.box.w}px`);
+    el.setAttribute("data-hf-studio-original-height", `${testCase.box.h}px`);
+  } else {
+    el.setAttribute("data-hf-studio-original-box-width", `${testCase.box.w}`);
+    el.setAttribute("data-hf-studio-original-box-height", `${testCase.box.h}`);
+    el.setAttribute("data-hf-studio-original-width", "");
+    el.setAttribute("data-hf-studio-original-height", "");
+  }
+  return el;
+}
+
 function scaleTween(longhand: boolean): GsapAnimation {
   const at = (v: number) => (longhand ? { scaleX: v, scaleY: v } : { scale: v });
   return {
@@ -180,17 +195,7 @@ function persistedScale(calls: unknown[][]): { x: number; y: number } | null {
 
 async function runCase(testCase: ResizeCase) {
   const rotation = testCase.rotation ?? 0;
-  const el = document.createElement("div");
-  el.id = "clip";
-  if (testCase.inlineSized) {
-    el.setAttribute("data-hf-studio-original-width", `${testCase.box.w}px`);
-    el.setAttribute("data-hf-studio-original-height", `${testCase.box.h}px`);
-  } else {
-    el.setAttribute("data-hf-studio-original-box-width", `${testCase.box.w}`);
-    el.setAttribute("data-hf-studio-original-box-height", `${testCase.box.h}`);
-    el.setAttribute("data-hf-studio-original-width", "");
-    el.setAttribute("data-hf-studio-original-height", "");
-  }
+  const el = createResizeElement(testCase);
   // What the gesture stamps at drag start, and the draft it leaves applied.
   el.setAttribute("data-hf-drag-gsap-base-x", `${testCase.base.x}`);
   el.setAttribute("data-hf-drag-gsap-base-y", `${testCase.base.y}`);
