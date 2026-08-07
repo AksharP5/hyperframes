@@ -173,8 +173,18 @@ function discoverCallers(): { found: string[]; unclassified: string[]; shell: st
     for (const entry of readdirSync(dir)) {
       if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
       const abs = join(dir, entry);
-      if (statSync(abs).isDirectory()) walk(abs);
-      else if (isSourceFile(entry)) classify(abs);
+      // Per-entry, because a single unreadable one used to abort the whole
+      // traversal: a dangling symlink under packages/studio/data/projects
+      // threw ENOENT on stat, so every package sorting after `studio` —
+      // including both studio-server callers — silently stopped being
+      // checked. Skipping the entry keeps the sweep complete; the manifest
+      // assertion is what caught the truncation.
+      try {
+        if (statSync(abs).isDirectory()) walk(abs);
+        else if (isSourceFile(entry)) classify(abs);
+      } catch {
+        /* unreadable entry (dangling symlink, permissions) — not a caller */
+      }
     }
   };
   for (const root of SWEEP_ROOTS) {
