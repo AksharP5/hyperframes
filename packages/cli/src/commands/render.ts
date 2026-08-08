@@ -1,5 +1,4 @@
 import { failCommand, requestCliExit } from "../utils/commandResult.js";
-import { isCanaryEnabled } from "../telemetry/canary.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
@@ -1226,29 +1225,25 @@ function applyDeParallelRouterCircuitBreaker(quiet: boolean): boolean {
     return false;
   }
 
-  // The rollout slice. Default-ON means every eligible render routes the
-  // moment this ships — a ~17x jump in exposure, onto profiles today's trial
-  // population never covered (<=4 CPUs, Docker: ~12% of eligible renders
-  // between them). Note "trial" is not a user opt-in: it arms automatically on
-  // the CLI render path, so ~11% of installs already route without anyone
-  // choosing it. The opt-in is at the CALL SITE — the flag excludes
-  // programmatic renderLocal consumers, not users.
+  // Nothing left to gate: the router is a shipped default for every install,
+  // so leave the var unset and let the producer's default-ON apply. The
+  // breaker above is the only thing that turns it off, per install, and only
+  // after a real fallback. `HF_DE_PARALLEL_ROUTER=false` remains the user-
+  // facing kill switch.
   //
-  // 0.7.60-0.7.64 is why that matters: every unclamped render reverted for
-  // five consecutive releases and nobody saw it.
+  // The `de-parallel-router` canary that used to sit here was removed with its
+  // registry entry (they had to go together — at >=100 the evaluator
+  // short-circuits ahead of the CI/seedless exclusions, so deleting only the
+  // entry would have flipped whatever still resolved false at deletion time).
   //
-  // Ramping through the registry makes the exposed fraction a number someone
-  // chose. Today's ~11% is emergent — the product of eligibility rules and a
-  // capped trial — so it drifts with fleet composition and cannot be reverted
-  // without a release. Setting the percentage to 0 turns the router off for
-  // everyone, immediately, with no code change.
-  //
-  // Disarm uses the same explicit "false" the breaker writes, for the same
-  // reason: with default-ON polarity, deleting the var means ON.
-  if (!isCanaryEnabled("de-parallel-router")) {
-    applyDeParallelRouterBreaker();
-    return false;
-  }
+  // Two claims from the ramp's rationale were wrong, recorded so they are not
+  // reintroduced: "~17x jump in exposure onto <=4 CPUs / Docker" overstated
+  // the reach — Docker renders never use drawElement at all (0 of 4,281
+  // measured) and the router requires it, so no percentage ever exposed
+  // Docker. And "~11% of installs already route" was an OUTCOME (the share
+  // clearing eligibility and the old 25-render cap), not an exposure setting;
+  // read as a rollout knob it inverted the arithmetic, which is how gating at
+  // 5% came to CUT fleet exposure ~25x rather than ramp it.
   return true;
 }
 

@@ -9,7 +9,7 @@
  *
  * ```ts
  * import { isCanaryEnabled } from "../telemetry/canary.js";
- * if (isCanaryEnabled("de-parallel-router")) { ...ramped path... }
+ * if (isCanaryEnabled("your-feature")) { ...ramped path... }
  * ```
  *
  * That is the whole API. Percentage lives in the registry, not at the call
