@@ -1564,11 +1564,12 @@ export function resolveInversionRetryPlan(args: {
  * clear 1.25x (3,600f, 39% static/dedup-heavy) still didn't LOSE to single-
  * worker (1.16x) — dedup already skips the capture work parallelism would
  * split, so there's mechanically less headroom, not a regression. No comp
- * anywhere showed par3 < single. Default-off (HF_DE_PARALLEL_ROUTER): this
- * promotes the opt-in mechanism from #2056 into the auto-routing decision,
- * but the decision itself stays gated behind its own flag pending the
- * telemetry soak (revert rate, de_verify_min_db distribution) on real wild
- * traffic — there is currently none, since nothing routes here by default.
+ * anywhere showed par3 < single. Default ON since 2026-07-27
+ * (HF_DE_PARALLEL_ROUTER=false is the kill switch): the default-off soak
+ * proved the safety half (zero shipped damage, 100% revert recovery), so the
+ * flip trades an accepted ~2.3% revert rate for parallelizing the ≥700f
+ * band. This promotes the opt-in mechanism from #2056 into the auto-routing
+ * decision.
  * Takes priority over the single-worker inversion when both would fire.
  * Re-calibrated 2026-07-27: a controlled crossover sweep (three content
  * profiles including a genuinely init-expensive 24-sub-composition comp;
@@ -1578,6 +1579,29 @@ export function resolveInversionRetryPlan(args: {
  * dropped below the inversion's threshold (700 vs 900): where both fire,
  * parallel wins over the inversion's single-worker pick (+17–21% at 700f).
  */
+/**
+ * Is the DE parallel router enabled for this process?
+ *
+ * Default ON since 2026-07-27; `HF_DE_PARALLEL_ROUTER` is the kill switch.
+ * Every conventional spelling of "off" disables it — a naive
+ * `!== "false"` would silently ignore `0`, `off`, `no`, `FALSE`, and an
+ * exported-but-empty var, i.e. an opt-out that FAILS OPEN and hands the user
+ * 3-worker parallel DE anyway (review finding). A set-but-empty value means
+ * "unset" here, matching how the sibling HF_DE_* numeric knobs treat it.
+ *
+ * The CLI's circuit breaker relies on this accepting an explicit "false":
+ * once an install trips the breaker it writes that value rather than
+ * unsetting the var, because under a default-ON flag unsetting means ON.
+ * Pure; exported for tests.
+ */
+export function isDeParallelRouterEnabled(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const raw = env.HF_DE_PARALLEL_ROUTER?.trim().toLowerCase();
+  if (raw === undefined || raw === "") return true;
+  return !(raw === "false" || raw === "0" || raw === "off" || raw === "no");
+}
+
 export function shouldPreferParallelDrawElement(args: {
   workerCount: number;
   /** job.config.workers — a number means the user explicitly chose. */
@@ -1593,7 +1617,7 @@ export function shouldPreferParallelDrawElement(args: {
   supersampling: boolean;
   probeDeGated: boolean;
   experimentalParallelDeOptIn: boolean;
-  /** HF_DE_PARALLEL_ROUTER === "true" — the router's own kill switch, default off. */
+  /** HF_DE_PARALLEL_ROUTER !== "false" — default ON since 2026-07-27; env var is the kill switch. */
   routerEnabled: boolean;
   /**
    * Whether verified parallel DE STREAMING can actually run for this render
@@ -2732,7 +2756,17 @@ async function executeRenderPipeline(input: {
         ? Math.min(deSingleMinFrames, deShortBandMinFrames)
         : deSingleMinFrames;
     // DE parallel-router eligibility — see shouldPreferParallelDrawElement.
-    // Default-off (HF_DE_PARALLEL_ROUTER); HF_DE_PARALLEL_MIN_FRAMES default
+    // Default ON since 2026-07-27 (kill switch: HF_DE_PARALLEL_ROUTER=false).
+    // The soak that gated this flip answered the safety question: zero
+    // damaged frames shipped across the entire default-off window — every
+    // revert was the self-verify net catching a bad frame and recovering via
+    // screenshot. The residual metric (revert rate ~2.3% vs the 2% goal) is
+    // an efficiency cost (a revert forfeits the speedup, never correctness),
+    // accepted in exchange for parallelizing the ≥700-frame band (~80% of
+    // all DE capture wall-clock). Post-flip tripwire on dashboard 1807532:
+    // sustained revert >10% or any verify-missed damage rolls this back —
+    // one env default, decoupled from the floor change one release earlier.
+    // HF_DE_PARALLEL_MIN_FRAMES default
     // 700, re-calibrated 2026-07-27 from the original safe-high 2000. A
     // controlled frame-count sweep (fixed content-per-frame, three synthetic
     // profiles × {350..3000f} × {single,par2,par3} × 3 reps, worker counts +
@@ -2744,7 +2778,7 @@ async function executeRenderPipeline(input: {
     // duplicated init costs CPU, not wall-clock. Below ~700f the win thins
     // toward ~+10% while still paying 3 hardware-GPU browsers, so the floor
     // stays. Harness: plans/drawelement-fast-capture/de-crossover-bench.sh.
-    const deParallelRouterEnabled = process.env.HF_DE_PARALLEL_ROUTER === "true";
+    const deParallelRouterEnabled = isDeParallelRouterEnabled(process.env);
     const deParallelMinFramesRaw = process.env.HF_DE_PARALLEL_MIN_FRAMES;
     const deParallelMinFramesNum =
       deParallelMinFramesRaw === undefined || deParallelMinFramesRaw.trim() === ""
