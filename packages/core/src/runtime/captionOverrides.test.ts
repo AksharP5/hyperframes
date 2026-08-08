@@ -34,6 +34,19 @@ function installGsapMock() {
   return { setCalls };
 }
 
+/** A gsap mock whose `getTweensOf` returns the supplied colour tweens, so classification is testable. */
+function installGsapMockWithTweens(tweens: Array<Record<string, unknown>>) {
+  const gsap = {
+    set() {},
+    killTweensOf() {},
+    getTweensOf() {
+      return tweens.map((vars, i) => ({ vars, startTime: () => i }));
+    },
+  };
+  Object.defineProperty(window, "gsap", { configurable: true, value: gsap });
+  return tweens;
+}
+
 async function flushCaptionOverrides() {
   for (let i = 0; i < 4; i++) {
     await Promise.resolve();
@@ -120,5 +133,54 @@ describe("applyCaptionOverrides", () => {
     expect(setCalls).toHaveLength(1);
     expect(setCalls[0]?.target).toBe(wrapper);
     expect(setCalls[0]?.vars).toEqual({ x: 16 });
+  });
+});
+
+describe("caption state declaration", () => {
+  it("honours a declared state when dim and active colours are IDENTICAL", async () => {
+    // The failure the declaration exists for. Classification by colour equality takes the first
+    // tween's colour as the dim baseline, so a composition whose two states share a colour has
+    // every tween classified dim — and `activeColor` is silently dropped.
+    const tweens = installGsapMockWithTweens([
+      { color: "#888", data: { captionState: "dim" } },
+      { color: "#888", data: { captionState: "active" } },
+    ]);
+    installCaptionOverrideFetch([{ wordIndex: 0, dimColor: "#111", activeColor: "#eee" }]);
+    document.body.innerHTML = `<div class="caption-group"><span id="w0">Hi</span></div>`;
+
+    applyCaptionOverrides();
+    await flushCaptionOverrides();
+
+    expect(tweens[0].color).toBe("#111");
+    expect(tweens[1].color).toBe("#eee");
+  });
+
+  it("falls back to colour classification when nothing is declared", async () => {
+    // Undeclared compositions must keep working exactly as before — the declaration is additive.
+    const tweens = installGsapMockWithTweens([{ color: "#222" }, { color: "#fff" }]);
+    installCaptionOverrideFetch([{ wordIndex: 0, dimColor: "#111", activeColor: "#eee" }]);
+    document.body.innerHTML = `<div class="caption-group"><span id="w0">Hi</span></div>`;
+
+    applyCaptionOverrides();
+    await flushCaptionOverrides();
+
+    expect(tweens[0].color).toBe("#111");
+    expect(tweens[1].color).toBe("#eee");
+  });
+
+  it("prefers the declaration over the colour heuristic when they disagree", async () => {
+    // Declared order is deliberately the reverse of what colour-equality would infer.
+    const tweens = installGsapMockWithTweens([
+      { color: "#222", data: { captionState: "active" } },
+      { color: "#fff", data: { captionState: "dim" } },
+    ]);
+    installCaptionOverrideFetch([{ wordIndex: 0, dimColor: "#111", activeColor: "#eee" }]);
+    document.body.innerHTML = `<div class="caption-group"><span id="w0">Hi</span></div>`;
+
+    applyCaptionOverrides();
+    await flushCaptionOverrides();
+
+    expect(tweens[0].color).toBe("#eee");
+    expect(tweens[1].color).toBe("#111");
   });
 });
