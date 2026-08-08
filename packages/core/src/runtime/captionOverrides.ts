@@ -138,21 +138,26 @@ export function applyCaptionOverrides(): void {
         if (override.fontWeight !== undefined) styleProps.fontWeight = override.fontWeight;
         if (override.fontFamily !== undefined) styleProps.fontFamily = override.fontFamily;
 
-        // Replace color values in existing GSAP tweens.
-        // Instead of relying on timeline position order (fragile if custom
-        // color tweens exist), we classify each tween by comparing its
-        // target color to the current computed color of the element.
-        // Tweens that match the current color are "dim" tweens; tweens
-        // with a different color are "active" tweens.
+        // Replace color values in existing GSAP tweens, classified in two layers.
+        //
+        // A tween that DECLARES its state is taken at its word. Anything undeclared falls back to
+        // colour equality against a dim reference — a guess, and the reason the declaration exists:
+        // two states sharing a colour make every tween look dim.
+        //
+        // The reference is drawn only from tweens the guess still applies to (a declared "dim" one
+        // if present, else the first undeclared one). Deriving it from a tween declared "active"
+        // would compare undeclared siblings against a colour that has explicitly said it is not the
+        // dim reference.
         if (override.activeColor || override.dimColor) {
           const allTweens = gsap.getTweensOf(el);
           const colorTweens = allTweens
             .filter((tw) => tw.vars.color !== undefined)
             .sort((a, b) => a.startTime() - b.startTime());
 
-          // Use the first tween's color as the dim baseline — if no tweens,
-          // fall back to computed style.
-          const dimBaseline = colorTweens[0] ? String(colorTweens[0].vars.color) : "";
+          const dimReference =
+            colorTweens.find((tw) => declaredCaptionState(tw) === "dim") ??
+            colorTweens.find((tw) => declaredCaptionState(tw) === undefined);
+          const dimBaseline = dimReference ? String(dimReference.vars.color) : "";
 
           for (const tw of colorTweens) {
             // A declaration wins over the colour guess, per tween, so a composition can declare
