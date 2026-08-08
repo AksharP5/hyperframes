@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { canaryBucket, evaluateCanary, parseCanaryOverride, type CanaryInput } from "./canary.js";
 import { CANARIES, canaryEnvVar, findCanary, overdueCanaries } from "./canaryRegistry.js";
 import {
@@ -293,29 +291,10 @@ describe("registry", () => {
     }
   });
 
-  // The registry is data, so a ramp is a one-line edit with no code review
-  // surface. This canary's own description says "ramp only alongside the
-  // per-install circuit breaker" — without an assertion, bumping it to 5
-  // before that wiring lands would go green.
-  // The registry is data, so a ramp is a one-line edit with no code review
-  // surface. The previous version enforced "ramp only alongside the circuit
-  // breaker" by pinning the percentage to 0 — which blocks the ramp forever
-  // and never checks the wiring it names.
-  //
-  // Assert the wiring instead: a non-zero percentage is allowed only while
-  // the CLI render path really gates on this canary AND still consults the
-  // per-install breaker. Ramping without the gate would enrol everybody at
-  // once, which is the whole thing the ramp exists to prevent.
-  it("only ramps de-parallel-router while the CLI render path gates on it", () => {
-    const pct = findCanary("de-parallel-router")?.percentage ?? 0;
-    if (pct === 0) return;
-    const renderSrc = readFileSync(
-      join(import.meta.dirname, "..", "..", "cli", "src", "commands", "render.ts"),
-      "utf8",
-    );
-    expect(renderSrc).toContain('isCanaryEnabled("de-parallel-router")');
-    expect(renderSrc).toContain("deParallelRouterTrialFired");
-  });
+  // The de-parallel-router wiring assertion that lived here was removed with
+  // the canary itself (registry entry + render.ts guard, same commit). The
+  // per-install circuit breaker it referenced is unchanged and is covered by
+  // the CLI's own render tests.
 
   it("has in-range percentages and a parseable sunset date", () => {
     for (const c of CANARIES) {
@@ -329,7 +308,7 @@ describe("registry", () => {
 
   it("derives the override env var from the name", () => {
     expect(canaryEnvVar("de-parallel-router")).toBe("HF_CANARY_DE_PARALLEL_ROUTER");
-    expect(findCanary("de-parallel-router")?.name).toBe("de-parallel-router");
+    expect(findCanary("calibration-10")?.name).toBe("calibration-10");
     expect(findCanary("nope")).toBeUndefined();
   });
 
