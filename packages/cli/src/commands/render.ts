@@ -1227,10 +1227,15 @@ function applyDeParallelRouterCircuitBreaker(quiet: boolean): boolean {
   }
 
   // The rollout slice. Default-ON means every eligible render routes the
-  // moment this ships — a ~17x jump in exposure, onto profiles the opt-in
-  // trial never covered (<=4 CPUs, Docker: ~12% of eligible renders between
-  // them). 0.7.60-0.7.64 is why that matters: every unclamped render
-  // reverted for five consecutive releases and nobody saw it.
+  // moment this ships — a ~17x jump in exposure, onto profiles today's trial
+  // population never covered (<=4 CPUs, Docker: ~12% of eligible renders
+  // between them). Note "trial" is not a user opt-in: it arms automatically on
+  // the CLI render path, so ~11% of installs already route without anyone
+  // choosing it. The opt-in is at the CALL SITE — the flag excludes
+  // programmatic renderLocal consumers, not users.
+  //
+  // 0.7.60-0.7.64 is why that matters: every unclamped render reverted for
+  // five consecutive releases and nobody saw it.
   //
   // Ramping through the registry makes the exposed fraction a number someone
   // chose. Today's ~11% is emergent — the product of eligibility rules and a
