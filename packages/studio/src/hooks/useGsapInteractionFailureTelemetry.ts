@@ -8,16 +8,16 @@ export function useGsapInteractionFailureTelemetry(
   showToast: (message: string, tone?: "error" | "info") => void,
 ) {
   return useCallback(
-    (error: unknown, selection: DomEditSelection, mutationType: string, label: string) => {
+    (error: unknown, selection: DomEditSelection | null, mutationType: string, label: string) => {
       trackStudioSaveFailure({
         source: "gsap_commit",
         error,
-        filePath: selection.sourceFile ?? activeCompPath ?? "index.html",
+        filePath: selection?.sourceFile ?? activeCompPath ?? "index.html",
         mutationType,
         label,
-        targetId: selection.id,
-        targetSelector: selection.selector,
-        targetSourceFile: selection.sourceFile,
+        targetId: selection?.id,
+        targetSelector: selection?.selector,
+        targetSourceFile: selection?.sourceFile,
       });
       showToast(
         isGsapEditBlockedError(error) ? error.message : "Failed to save animated edit.",

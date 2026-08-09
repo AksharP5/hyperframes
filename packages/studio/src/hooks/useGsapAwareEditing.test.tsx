@@ -301,6 +301,42 @@ describe("useGsapAwareEditing anchored resize", () => {
     act(() => root.unmount());
   });
 
+  it("reports only the first group preflight failure in input order", async () => {
+    const failures = [new Error("first blocked"), new Error("second blocked")];
+    const trackGsapInteractionFailure = vi.fn();
+    const priorDragImplementation = mocks.drag.getMockImplementation();
+    mocks.drag.mockImplementation(async (selection) => {
+      throw selection.id === "a" ? failures[0] : failures[1];
+    });
+    const { groupCommit, root } = mountGroupHandler({
+      gsapCommitMutation: vi.fn().mockResolvedValue(undefined),
+      makeFetchFallback: () => vi.fn().mockResolvedValue([]),
+      trackGsapInteractionFailure,
+    });
+    const updates = [
+      {
+        selection: { element: document.createElement("div"), id: "a", selector: "#a" },
+        next: { x: 10, y: 10 },
+      },
+      {
+        selection: { element: document.createElement("div"), id: "b", selector: "#b" },
+        next: { x: 20, y: 20 },
+      },
+    ] as unknown as DomEditGroupPathOffsetCommit[];
+
+    await expect(groupCommit(updates)).rejects.toBe(failures[0]);
+    expect(trackGsapInteractionFailure).toHaveBeenCalledOnce();
+    expect(trackGsapInteractionFailure).toHaveBeenCalledWith(
+      failures[0],
+      updates[0]?.selection,
+      "drag",
+      "Move animated layer (group)",
+    );
+    mocks.drag.mockReset();
+    if (priorDragImplementation) mocks.drag.mockImplementation(priorDragImplementation);
+    act(() => root.unmount());
+  });
+
   it("restores once when resize persistence fails", async () => {
     const error = new Error("resize failed");
     const restore = vi.fn();

@@ -13,6 +13,7 @@ import {
   type GestureState,
   type GroupGestureState,
   focusDomEditOverlayElement,
+  resolveShiftClickCandidate,
 } from "./domEditOverlayGestures";
 import { useDomEditOverlayRects } from "./useDomEditOverlayRects";
 import { OffCanvasIndicators, type OffCanvasRect } from "./OffCanvasIndicators";
@@ -31,6 +32,7 @@ import { startOffCanvasIndicatorRefresh } from "./offCanvasIndicatorRefresh";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import type { ZOrderAction, ZOrderPatch } from "./canvasContextMenuZOrder";
 import { getPreviewTargetFromPointer } from "../../utils/studioPreviewHelpers";
+import { logSelect } from "../../utils/selectDebug";
 
 // Re-exports for external consumers — preserving existing import paths.
 export {
@@ -318,6 +320,7 @@ export const DomEditOverlay = memo(function DomEditOverlay({
   const handleOverlayMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!allowCanvasMovement) return;
     if (suppressNextOverlayMouseDownRef.current) {
+      logSelect("mousedown-suppressed", { shift: event.shiftKey });
       suppressNextOverlayMouseDownRef.current = false;
       suppressNextBoxMouseDownRef.current = false;
       suppressNextBoxClickRef.current = false;
@@ -326,7 +329,9 @@ export const DomEditOverlay = memo(function DomEditOverlay({
       return;
     }
     const target = event.target as HTMLElement | null;
-    if (target?.closest('[data-dom-edit-selection-box="true"]')) return;
+    const onBox = Boolean(target?.closest('[data-dom-edit-selection-box="true"]'));
+    logSelect("mousedown", { shift: event.shiftKey, onBox });
+    if (onBox) return;
     // Allow clicks anywhere on the overlay — GSAP-translated elements can
     // extend beyond the composition rect into the gray zone, and users need
     // to select/deselect them by clicking there.
@@ -341,8 +346,20 @@ export const DomEditOverlay = memo(function DomEditOverlay({
   const handleOverlayPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!allowCanvasMovement || event.button !== 0) return;
     if (event.shiftKey) {
-      // Use the already-updated hover selection rather than re-resolving async
-      const candidate = hoverSelectionRef.current;
+      const shiftIframe = iframeRef.current;
+      const candidate = resolveShiftClickCandidate({
+        cached: hoverSelectionRef.current,
+        elementAtPoint: shiftIframe
+          ? getPreviewTargetFromPointer(
+              shiftIframe,
+              event.clientX,
+              event.clientY,
+              activeCompositionPathRef.current,
+            )
+          : null,
+      });
+      // Not confident: fall through untouched — no preventDefault, no suppression —
+      // so the mousedown path resolves this point instead of guessing here.
       if (!candidate) return;
       event.preventDefault();
       event.stopPropagation();
@@ -376,28 +393,27 @@ export const DomEditOverlay = memo(function DomEditOverlay({
       const overlayEl = overlayRef.current;
       if (overlayEl) {
         const oRect = overlayEl.getBoundingClientRect();
+        // Anywhere empty on the overlay starts one, not just inside the frame.
+        // An element dragged past the edge sits OUT there in the grey, and a
+        // rubber band that refuses to start there cannot reach it — which left
+        // the timeline as the only way to select something you can plainly see.
+        // The hit test collects in overlay space and never clipped to the frame,
+        // so those elements were always selectable once the band could begin.
+        event.preventDefault();
+        event.stopPropagation();
+        suppressNextOverlayMouseDownRef.current = true;
+        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
         const cx = event.clientX - oRect.left;
         const cy = event.clientY - oRect.top;
-        const inComp =
-          cx >= compRect.left &&
-          cx <= compRect.left + compRect.width &&
-          cy >= compRect.top &&
-          cy <= compRect.top + compRect.height;
-        if (inComp) {
-          event.preventDefault();
-          event.stopPropagation();
-          suppressNextOverlayMouseDownRef.current = true;
-          (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-          marquee.marqueeRef.current = {
-            startX: cx,
-            startY: cy,
-            currentX: cx,
-            currentY: cy,
-            pointerId: event.pointerId,
-            pastThreshold: false,
-          };
-          return;
-        }
+        marquee.marqueeRef.current = {
+          startX: cx,
+          startY: cy,
+          currentX: cx,
+          currentY: cy,
+          pointerId: event.pointerId,
+          pastThreshold: false,
+        };
+        return;
       }
     }
   };
@@ -503,6 +519,7 @@ export const DomEditOverlay = memo(function DomEditOverlay({
               top: cr.top,
               width: cr.width,
               height: cr.height,
+              transform: cr.angle ? `rotate(${cr.angle}deg)` : undefined,
             }}
           />
         ))}

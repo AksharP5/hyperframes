@@ -5,26 +5,6 @@
 // ask for reads as a flash. These lines answer the only question that matters
 // when one appears: who asked for it, and why the write that triggered it was
 // not recognised as Studio's own.
-let enabled: boolean | null = null;
+import { makeStudioDebugLogger } from "./studioDebug";
 
-function isEnabled(): boolean {
-  if (enabled === null) {
-    try {
-      enabled = localStorage.getItem("hf-reload-debug") === "1";
-    } catch {
-      enabled = false;
-    }
-  }
-  return enabled;
-}
-
-export function logReload(
-  stage: string,
-  data: Record<string, unknown> | (() => Record<string, unknown>) = {},
-): void {
-  if (!isEnabled()) return;
-  const details = typeof data === "function" ? data() : data;
-  console.log(
-    `[hf-reload] ${JSON.stringify({ stage, t: Math.round(performance.now()), ...details })}`,
-  );
-}
+export const logReload = makeStudioDebugLogger("reload");

@@ -33,6 +33,8 @@ export type ElementAnimationsOutcome =
 export interface GsapAnimationFetchOptions {
   /** Refuse the edit when the parse endpoint is unavailable instead of treating it as no motion. */
   failOnFetchError?: boolean;
+  /** Ignore an overlapping pre-write parse and read the source after a durable write. */
+  fresh?: boolean;
 }
 
 /**
@@ -56,11 +58,13 @@ async function fetchElementAnimationsWithRetry(
   gsapSourceFile: string,
   target: { id: string | null; selector: string | null },
   failOnFetchError: boolean,
+  fresh: boolean,
 ): Promise<GsapAnimation[]> {
   let coldAttempts = 0;
   let errorAttempts = 0;
   for (;;) {
-    const parsed = await fetchParsedAnimations(projectId, gsapSourceFile);
+    const parsed = await fetchParsedAnimations(projectId, gsapSourceFile, { fresh });
+    fresh = false;
     const outcome = selectElementAnimationsOrRetry(parsed, target);
     if (outcome.kind === "resolved") return outcome.animations;
     if (outcome.kind === "fetch-error") {
@@ -89,6 +93,7 @@ export function useGsapAnimationFetchFallback(projectId: string | null, gsapSour
           gsapSourceFile,
           target,
           options?.failOnFetchError === true,
+          options?.fresh === true,
         );
       },
     [projectId, gsapSourceFile],
