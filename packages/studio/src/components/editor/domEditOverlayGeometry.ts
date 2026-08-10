@@ -1,6 +1,7 @@
 import { type DomEditSelection, findElementForSelection } from "./domEditing";
 import { isElementVisibleThroughAncestors } from "./domEditingDom";
 import { hugRectForElement } from "./domEditOverlayCrop";
+import { composeElementTransform, type PlanarTransformOps } from "./domEditOverlayTransform";
 
 export interface OverlayRect {
   left: number;
@@ -146,17 +147,19 @@ function readElementTransformSnapshot(
   const DOMMatrixCtor = (win as Window & typeof globalThis).DOMMatrix;
   if (!DOMMatrixCtor) return null;
   const cs = win.getComputedStyle(element);
+  // The corner math transforms points, so this algebra keeps the full matrix,
+  // translation included, where the crop frame's keeps only 2D components.
+  const ops: PlanarTransformOps<DOMMatrix> = {
+    identity: () => new DOMMatrixCtor(),
+    fromTransform: (value) => new DOMMatrixCtor(value),
+    fromRotate: (degrees) => new DOMMatrixCtor().rotateSelf(degrees),
+    compose: (outer, inner) => outer.multiply(inner),
+  };
   try {
-    let matrix = new DOMMatrixCtor();
-    for (let node: HTMLElement | null = element; node; node = node.parentElement) {
-      const transform = node === element ? cs.transform : win.getComputedStyle(node).transform;
-      if (transform && transform !== "none") {
-        // An ancestor applies outside, so it multiplies on the left.
-        matrix = new DOMMatrixCtor(transform).multiply(matrix);
-      }
-      if (node.hasAttribute("data-composition-id")) break;
-    }
-    return { matrix, cs };
+    const matrix = composeElementTransform(element, ops, (node) =>
+      node === element ? cs : win.getComputedStyle(node),
+    );
+    return matrix ? { matrix, cs } : null;
   } catch {
     return null;
   }
