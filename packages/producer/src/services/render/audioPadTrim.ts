@@ -1,6 +1,6 @@
 // fallow-ignore-file complexity
 /**
- * audioPadTrim — pad-or-trim an `audio.aac` file so its exact duration
+ * audioPadTrim — pad-or-trim the mixed-audio file so its exact duration
  * matches the assembled video's frame count divided by fps.
  *
  * Distributed render assemble step needs this because:
@@ -62,7 +62,7 @@ export interface AudioProbeInfo {
 export interface PadTrimAudioInput {
   /** Path to the assembled video. Used to derive `frameCount / fps`. */
   videoPath: string;
-  /** Path to the pre-mixed audio (typically `<planDir>/audio.aac`). */
+  /** Path to the pre-mixed audio (typically `<planDir>/audio.m4a`). */
   audioPath: string;
   /** Path the helper writes the duration-corrected audio to. */
   outputPath: string;
@@ -109,10 +109,10 @@ export interface PadTrimAudioPlan {
  * sequence that materializes it. Exported separately so unit tests can pin
  * every branch without spawning ffmpeg.
  *
- *   - `sourceDuration < targetDuration` → generate only the missing silence
- *     tail, then concat-copy the source AAC plus that tail. This avoids
- *     re-encoding the already mixed `audio.aac`; the pad branch remains the
- *     inverse of trim instead of becoming a second full-source AAC encode.
+ *   - `sourceDuration < targetDuration` → pad with `apad` to the exact target
+ *     and re-encode AAC. This decodes and re-encodes the already mixed audio;
+ *     an earlier concat-copy shape avoided that but could not produce a
+ *     portable result on the bundled Windows FFmpeg builds.
  *   - `sourceDuration > targetDuration` → filter to the exact target and
  *     re-encode AAC so packet padding cannot outlast the video.
  *   - `|Δ| < AUDIO_DURATION_TOLERANCE_SECONDS` → no-op `copy`, but we still
@@ -241,7 +241,7 @@ function sanitizeProbeFailure(reason: unknown, paths: readonly string[]): string
 }
 
 /**
- * Pad or trim `audio.aac` so its exact duration matches `frameCount / fps`
+ * Pad or trim the mixed audio so its exact duration matches `frameCount / fps`
  * for the assembled video.
  */
 export async function padOrTrimAudioToVideoFrameCount(
