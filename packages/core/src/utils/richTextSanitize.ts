@@ -98,6 +98,20 @@ export function isRichTextFormattingTag(tagName: string): boolean {
   return FORMATTING_TAGS.has(tagName.toUpperCase());
 }
 
+/** Whether an attribute survives the rich-text persistence boundary. */
+export function isRichTextFormattingAttribute(name: string, value: string): boolean {
+  return FORMATTING_ATTRS.has(name.toLowerCase()) && SAFE_ATTR_VALUE.test(value);
+}
+
+/** Whether a declaration survives the rich-text persistence boundary. */
+export function isRichTextFormattingStyle(property: string, value: string): boolean {
+  return (
+    FORMATTING_STYLE_PROPS.has(property.toLowerCase()) &&
+    value.length > 0 &&
+    !UNSAFE_VALUE.test(value)
+  );
+}
+
 function isElementNode(node: Node): node is Element {
   return node.nodeType === ELEMENT_NODE;
 }
@@ -165,7 +179,7 @@ function stripAttributes(element: Element): void {
   const style = element.getAttribute("style");
   for (const name of Array.from(element.getAttributeNames())) {
     const value = element.getAttribute(name) ?? "";
-    if (FORMATTING_ATTRS.has(name.toLowerCase()) && SAFE_ATTR_VALUE.test(value)) continue;
+    if (isRichTextFormattingAttribute(name, value)) continue;
     element.removeAttribute(name);
   }
   if (style === null) return;
@@ -182,8 +196,7 @@ function filterStyle(style: string): string {
       if (colon === -1) return null;
       const property = declaration.slice(0, colon).trim().toLowerCase();
       const value = declaration.slice(colon + 1).trim();
-      if (!FORMATTING_STYLE_PROPS.has(property)) return null;
-      if (!value || UNSAFE_VALUE.test(value)) return null;
+      if (!isRichTextFormattingStyle(property, value)) return null;
       return `${property}: ${value}`;
     })
     .filter((declaration): declaration is string => declaration !== null)
