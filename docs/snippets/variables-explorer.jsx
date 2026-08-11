@@ -478,18 +478,49 @@ export const VariablesExplorer = ({
   display: grid;
   gap: 8px;
 }
-.hf-ve-drop[data-over="true"] .hf-ve-field {
+.hf-ve-drop[data-over="true"] .hf-ve-dropzone {
   border-color: var(--ve-on-bg);
+  border-style: solid;
 }
-.hf-ve-import {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+
+/* The import is the action almost everyone wants: a reader arrives with a
+   shape, not with path data. A dashed target reads as "put a file here" on
+   sight, where a button beneath a field of coordinates read as an afterthought
+   to the coordinates. */
+.hf-ve-dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 18px 12px;
+  border: 1px dashed var(--ve-line);
+  border-radius: 10px;
+  background: var(--ve-surface);
+  text-align: center;
 }
-.hf-ve-import .hf-ve-btn {
-  flex: 0 0 auto;
+.hf-ve-dropzone .hf-ve-btn {
+  padding: 7px 16px;
+  font-size: 13px;
+  color: var(--ve-fg);
   border-color: var(--ve-line);
+  background: var(--ve-bg);
 }
+.hf-ve-dropzone .hf-ve-btn:hover:not(:disabled) { background: var(--ve-hover); }
+
+/* Path data stays reachable, but a reader has to ask for it. A native details
+   element rather than our own toggle, so it opens with the keyboard and is
+   announced as expandable without any wiring. */
+.hf-ve-advanced > summary {
+  font-size: 12px;
+  color: var(--ve-muted);
+  cursor: pointer;
+  list-style: none;
+  padding: 2px 0;
+}
+.hf-ve-advanced > summary::-webkit-details-marker { display: none; }
+.hf-ve-advanced > summary::before { content: "▸ "; }
+.hf-ve-advanced[open] > summary::before { content: "▾ "; }
+.hf-ve-advanced > summary:hover { color: var(--ve-fg); }
+.hf-ve-advanced .hf-ve-field { margin-top: 6px; }
 .hf-ve-file {
   position: absolute;
   width: 1px;
@@ -1190,7 +1221,7 @@ export const VariablesExplorer = ({
    * state of its own: `useState` here would be a hook called outside a
    * component, and the panel keeps one note per variable instead.
    */
-  const control = (variable, value, onChange, note, onNote) => {
+  const control = (variable, value, onChange, note, onNote, onTyping) => {
     const options = variable.options ?? [];
 
     // Up to four options fit a segmented row at docs width. Past that the
@@ -1405,6 +1436,11 @@ export const VariablesExplorer = ({
             className="hf-ve-field hf-ve-mono hf-ve-tint"
             value={value}
             onChange={(e) => onChange(e.target.value)}
+            onFocus={() => onTyping(variable.id)}
+            onBlur={() => onTyping(null)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
           />
         </div>
       );
@@ -1446,18 +1482,10 @@ export const VariablesExplorer = ({
             receive(event.dataTransfer.files[0]);
           }}
         >
-          <input
-            type="text"
-            className="hf-ve-field hf-ve-mono hf-ve-tint"
-            value={value}
-            aria-label={variable.label ?? variable.id}
-            aria-describedby={noteId}
-            onChange={(e) => onChange(e.target.value)}
-          />
-          <div className="hf-ve-import">
-            {/* The button is the trigger, so the picker is reachable by tab and
-                Enter and carries the focus ring every other control here has.
-                Dropping a file does the same thing and is never the only way. */}
+          {/* The button is the trigger, so the picker is reachable by tab and
+              Enter and carries the focus ring every other control here has.
+              Dropping a file does the same thing and is never the only way. */}
+          <div className="hf-ve-dropzone">
             <button
               type="button"
               className="hf-ve-btn hf-ve-tint"
@@ -1478,14 +1506,27 @@ export const VariablesExplorer = ({
                 event.target.value = "";
               }}
             />
+            {/* Always present, so the region is one a screen reader is
+                already watching when a message arrives. */}
+            <p id={noteId} role="status" className="hf-ve-note" data-tone={note ? note.tone : ""}>
+              {note ? note.message : "Or drop one here. Scaled to fit and centred."}
+            </p>
           </div>
-          {/* Its own row rather than a column beside the button: the panel is
-              two columns wide at docs width, and a sentence sharing that with a
-              button breaks to five lines. Always present, so the region is one
-              a screen reader is already watching when a message arrives. */}
-          <p id={noteId} role="status" className="hf-ve-note" data-tone={note ? note.tone : ""}>
-            {note ? note.message : "Or drop one here. Scaled to fit and centred."}
-          </p>
+          <details className="hf-ve-advanced">
+            <summary>Path data</summary>
+            <input
+              type="text"
+              className="hf-ve-field hf-ve-mono hf-ve-tint"
+              value={value}
+              aria-label={variable.label ?? variable.id}
+              onChange={(e) => onChange(e.target.value)}
+              onFocus={() => onTyping(variable.id)}
+              onBlur={() => onTyping(null)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+            />
+          </details>
         </div>
       );
     }
@@ -1497,32 +1538,218 @@ export const VariablesExplorer = ({
         value={value}
         aria-label={variable.label ?? variable.id}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={() => onTyping(variable.id)}
+        onBlur={() => onTyping(null)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
       />
     );
   };
 
-  const defaults = {};
-  for (const v of variables) if (v.default !== undefined) defaults[v.id] = v.default;
+  // Keyed on the declarations' content, not their identity: MDX hands this
+  // component a fresh `variables` array on every render, so memoising on the
+  // array itself would rebuild the defaults every time and defeat the point.
+  const variablesKey = JSON.stringify(variables);
+  const defaults = useMemo(() => {
+    const built = {};
+    for (const v of variables) if (v.default !== undefined) built[v.id] = v.default;
+    return built;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variablesKey]);
 
-  const [values, setValues] = useState(defaults);
+  /**
+   * Values survive a reload by living in the query string.
+   *
+   * Scoped by composition id, so two links to different items never read each
+   * other's settings, and only the values that differ from the defaults are
+   * written — a reader who changed one knob gets a short, obvious URL rather
+   * than every variable spelled out.
+   *
+   * Anything unreadable is ignored rather than thrown: a truncated or
+   * hand-edited URL should open the piece at its defaults, not break the page.
+   */
+  const urlKey = `vars-${compositionId}`;
+
+  const readFromUrl = () => {
+    if (typeof window === "undefined") return {};
+    try {
+      const raw = new URLSearchParams(window.location.search).get(urlKey);
+      if (!raw) return {};
+      // `URLSearchParams` has already decoded this once. Decoding again turned
+      // a path full of percent-escapes into something that no longer parsed,
+      // and doubled the length of every link.
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      // Only ids this item declares; a stale link must not inject stray keys.
+      const declared = new Set(variables.map((v) => v.id));
+      return Object.fromEntries(Object.entries(parsed).filter(([id]) => declared.has(id)));
+    } catch {
+      return {};
+    }
+  };
+
+  const [values, setValues] = useState(() => ({ ...defaults, ...readFromUrl() }));
+
+  /**
+   * Read the URL again once the component is actually in a browser.
+   *
+   * The first render happens on the server, where there is no `window`, so the
+   * state above can only be the declared defaults. React then hydrates against
+   * that markup and never revisits it — which is why a shared link opened at
+   * its defaults and only looked right if you touched a control. Applying the
+   * values after mount is what makes a reload land where it left off.
+   *
+   * Runs once. Later edits own the state from then on, and the effect below
+   * keeps the URL in step with them.
+   */
+  useEffect(() => {
+    const fromUrl = readFromUrl();
+    if (Object.keys(fromUrl).length > 0) setValues((current) => ({ ...current, ...fromUrl }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // `replaceState` rather than `pushState`: dragging a slider should not stack
+  // up history entries the back button has to walk through.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const changed = Object.fromEntries(
+      Object.entries(values).filter(([id, value]) => JSON.stringify(value) !== JSON.stringify(defaults[id])),
+    );
+    const url = new URL(window.location.href);
+    if (Object.keys(changed).length === 0) url.searchParams.delete(urlKey);
+    else url.searchParams.set(urlKey, JSON.stringify(changed));
+
+    // `defaults` is rebuilt every render, so this effect runs every render too.
+    // Comparing first keeps it to an actual change rather than touching the
+    // history API on each one.
+    const next = url.toString();
+    if (next !== window.location.href) {
+      window.history.replaceState(null, "", next);
+      // `replaceState` fires no event, and the install command on the same page
+      // needs to follow these values.
+      window.dispatchEvent(new CustomEvent("hf-vars-changed"));
+    }
+  }, [values, defaults, urlKey]);
   // What the SVG import last had to say, per variable. Held here because
   // `control` is a function rather than a component and cannot hold it itself.
   const [notes, setNotes] = useState({});
+
+  /**
+   * The id of the text field being typed into, if any.
+   *
+   * Every other control reports a whole value on every event: a slider at any
+   * position is a position, a swatch is a colour. A text field is not. While
+   * someone types `v3`, `v` is a prefix, and the preview remounted on it and
+   * showed them a composition built from half a word.
+   *
+   * So the post below waits while a text field has focus, and goes out when the
+   * edit is committed — Enter, or clicking away. The field itself never lags;
+   * only the mount waits, and it never sees a state nobody asked for.
+   */
+  const [typing, setTyping] = useState(null);
+
+  /** What was last posted, so ending an edit that changed nothing is free. */
+  const posted = useRef(null);
   const [tab, setTab] = useState("preview");
   const frame = useRef(null);
 
-  // The first load carries the defaults in its own URL, so the frame never
-  // waits on a message to show the right thing. Recomputed every render, but it
-  // is the same string every time, so React never touches the iframe again.
-  const initialSrc = `${previewSrc}?hfv=${encodeURIComponent(JSON.stringify(defaults))}`;
+  // The frame is a document we write, not a file we fetch.
+  //
+  // The preview used to be an `.html` sitting in `docs/public`, which the docs
+  // host does not publish — it 404'd in production and showed an empty panel.
+  // The composition now arrives as JSON and is mounted here, so the only thing
+  // that has to survive the deploy is the payload, which is a servable type.
+  //
+  // Values are injected as `window.__hfVariables` into the composition's own
+  // head before any of its scripts run. That is where the runtime reads render
+  // overrides from, and doing it in the markup rather than after load is what
+  // guarantees the composition never initialises with the wrong values first.
+  const bootstrap = [
+    "<!doctype html><html><head><meta charset='utf-8'>",
+    "<style>html,body{margin:0;height:100%;overflow:hidden;background:transparent}",
+    "hyperframes-player{display:block;width:100%;height:100%}</style>",
+    '<script src="https://cdn.jsdelivr.net/npm/@hyperframes/player@0.7/dist/hyperframes-player.global.js"></' +
+      "script>",
+    "</head><body><script>",
+    "(function(){",
+    `  var PAYLOAD = ${JSON.stringify(previewSrc)};`,
+    // The frame mounts with whatever a shared link asked for, not the bare
+    // defaults. Posting the values afterwards is too late for anything the
+    // composition reads once at init — a path arrives, the mark is already
+    // drawn from the default one, and only a later edit corrects it.
+    `  var INITIAL = ${JSON.stringify({ ...defaults, ...readFromUrl() })};`,
+    "  var html = null, player = null, poll = null;",
+    // Two ways in, because a composition can be either shape. A top-level one
+    // reads overrides off `window.__hfVariables`; one mounted through
+    // `data-composition-src` is fed from its host's `data-variable-values`,
+    // which the loader reads before the sub-composition runs — so that has to
+    // be in the markup, not assigned afterwards.
+    "  function withValues(source, values) {",
+    "    var json = JSON.stringify(values);",
+    "    var attr = json.replace(/'/g, '&#39;');",
+    "    var out = source.replace(/\\sdata-variable-values=(?:\"[^\"]*\"|'[^']*')/gi, '');",
+    "    out = out.replace(/(data-composition-src=)/gi, \"data-variable-values='\" + attr + \"' $1\");",
+    "    var tag = '<' + 'script>window.__hfVariables=' + json + ';<' + '/script>';",
+    "    return /<head[^>]*>/i.test(out)",
+    "      ? out.replace(/<head([^>]*)>/i, '<head$1>' + tag)",
+    "      : tag + out;",
+    "  }",
+    // The composition reads its variables once, at init, so a new value can
+    // only arrive by mounting it again. The playhead is carried across so a
+    // change mid-shot does not throw the reader back to frame zero.
+    "  function arm(resumeAt) {",
+    "    clearInterval(poll);",
+    "    var last = -1, tries = 0, seeked = false;",
+    "    poll = setInterval(function () {",
+    "      if (player.ready) {",
+    "        if (!seeked) { seeked = true; if (resumeAt > 0) player.seek(resumeAt); }",
+    "        player.play();",
+    "      }",
+    "      if (seeked && player.currentTime > 0 && player.currentTime !== last) {",
+    "        clearInterval(poll); return;",
+    "      }",
+    "      last = player.currentTime;",
+    "      if (++tries > 150) clearInterval(poll);",
+    "    }, 100);",
+    "  }",
+    "  function mount(values, resumeAt) {",
+    "    if (html === null) return;",
+    "    player.setAttribute('srcdoc', withValues(html, values));",
+    "    arm(resumeAt || 0);",
+    "  }",
+    "  player = document.createElement('hyperframes-player');",
+    "  player.setAttribute('controls', ''); player.setAttribute('muted', '');",
+    "  document.body.appendChild(player);",
+    "  player.addEventListener('ended', function () { player.seek(0); player.play(); });",
+    "  fetch(PAYLOAD).then(function (r) { return r.json(); }).then(function (d) {",
+    "    html = d.html; mount(INITIAL, 0);",
+    "  }).catch(function (e) {",
+    "    document.body.innerHTML = '<pre style=\"color:#f66;font:12px monospace;padding:12px\">preview unavailable: ' + e + '</pre>';",
+    "  });",
+    "  addEventListener('message', function (event) {",
+    "    var values = event.data && event.data.hfVariables;",
+    "    if (!values) return;",
+    "    mount(values, player.currentTime || 0);",
+    "  });",
+    "})();",
+    "</" + "script></body></html>",
+  ].join("");
 
   useEffect(() => {
+    if (typing !== null) return;
+    const payload = JSON.stringify(values);
+    // Focusing a field and leaving it alone still ends an edit, and remounting
+    // on that would restart the composition for nothing.
+    if (payload === posted.current) return;
     const timer = setTimeout(() => {
       const target = frame.current && frame.current.contentWindow;
-      if (target) target.postMessage({ hfVariables: values }, window.location.origin);
+      if (!target) return;
+      posted.current = payload;
+      target.postMessage({ hfVariables: values }, window.location.origin);
     }, 150);
     return () => clearTimeout(timer);
-  }, [values]);
+  }, [values, typing]);
 
   // The mount element, as coloured tokens.
   //
@@ -1550,6 +1777,19 @@ export const VariablesExplorer = ({
   snippetLines.push([[SHIKI.punct, "></"], [SHIKI.tag, "div"], [SHIKI.punct, ">"]]);
 
   const dirty = variables.some((v) => values[v.id] !== defaults[v.id]);
+
+  // Only the values that differ, so an untouched piece offers the same short
+  // command the Install block does, and a tuned one carries exactly what
+  // changed rather than every variable restated.
+  const installCommand = (() => {
+    const base = `npx hyperframes add ${compositionId}`;
+    if (!dirty) return base;
+    const changed = {};
+    for (const v of variables) {
+      if (JSON.stringify(values[v.id]) !== JSON.stringify(defaults[v.id])) changed[v.id] = values[v.id];
+    }
+    return `${base} --vars '${JSON.stringify(changed)}'`;
+  })();
 
   // "Code" is the composition's own source, handed in as a fenced block by the
   // generator and highlighted by shiki at build time — the source never changes
@@ -1589,7 +1829,7 @@ export const VariablesExplorer = ({
         <div className="hf-ve-cell" data-on={tab === "preview"}>
           <iframe
             ref={frame}
-            src={initialSrc}
+            srcDoc={bootstrap}
             className="hf-ve-preview block aspect-video w-full"
             title={`${compositionId} preview`}
           />
@@ -1600,6 +1840,28 @@ export const VariablesExplorer = ({
           </div>
         )}
         <div className="hf-ve-cell hf-ve-snippet" data-on={tab === "snippet"}>
+          {/* The Install block further down the page is generated before anyone
+              touches a knob, so it can only ever offer the plain command. This
+              one is the panel's, and it carries what the reader actually chose:
+              copying it installs the piece already tuned. */}
+          <CodeBlock filename="Terminal">
+            <pre
+              className="shiki shiki-themes github-light-default dark-plus"
+              style={{
+                backgroundColor: "rgb(255, 255, 255)",
+                "--shiki-dark-bg": "#0B0C0E",
+                color: "rgb(31, 35, 40)",
+                "--shiki-dark": "#D4D4D4",
+              }}
+            >
+              <code>
+                <span className="line">
+                  <span style={SHIKI.value}>{installCommand}</span>
+                  {"\n"}
+                </span>
+              </code>
+            </pre>
+          </CodeBlock>
           {/* Each line carries its own trailing newline rather than sitting
               next to a bare one: MDX resolves a dotted JSX tag through the
               page, so `<React.Fragment>` throws where a keyed element does
@@ -1659,6 +1921,7 @@ export const VariablesExplorer = ({
                 (next) => setValues((prev) => ({ ...prev, [v.id]: next })),
                 notes[v.id],
                 (note) => setNotes((prev) => ({ ...prev, [v.id]: note })),
+                setTyping,
               )}
               {v.description && <p className="hf-ve-desc">{v.description}</p>}
             </div>
