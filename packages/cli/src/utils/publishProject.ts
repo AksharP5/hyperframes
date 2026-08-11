@@ -5,7 +5,6 @@ import AdmZip from "adm-zip";
 import ignore, { type Ignore } from "ignore";
 import { CSS_URL_RE, isNonRelativeUrl, isPathInside } from "@hyperframes/core";
 import { buildAuthHeaders } from "../auth/client.js";
-import { withHeygenCanaryRoute } from "./heygenRoute.js";
 import { tryResolveCredential } from "../auth/index.js";
 import { writeProjectLink } from "./projectLink.js";
 
@@ -558,7 +557,7 @@ async function publishProjectArchiveDirect(
     "file",
     new File([archiveArrayBuffer(archive)], `${title}.zip`, { type: PUBLISH_CONTENT_TYPE }),
   );
-  const headers = withHeygenCanaryRoute(authHeaders);
+  const headers: Record<string, string> = { ...authHeaders };
 
   const response = await fetchForPublish(
     `${apiBaseUrl}/v1/hyperframes/projects/publish`,
@@ -621,10 +620,10 @@ async function publishProjectArchiveStaged(
         content_type: PUBLISH_CONTENT_TYPE,
         content_length: archive.buffer.byteLength,
       }),
-      headers: withHeygenCanaryRoute({
+      headers: {
         ...authHeaders,
         "content-type": "application/json",
-      }),
+      },
       signal: AbortSignal.timeout(PUBLISH_METADATA_TIMEOUT_MS),
     }),
     "Failed to prepare project upload",
@@ -654,10 +653,10 @@ async function publishProjectArchiveStaged(
         ...(isPublic ? { is_public: true } : {}),
         ...(projectId ? { project_id: projectId } : {}),
       }),
-      headers: withHeygenCanaryRoute({
+      headers: {
         ...authHeaders,
         "content-type": "application/json",
-      }),
+      },
       signal: AbortSignal.timeout(uploadTimeoutMs(archive.buffer.byteLength)),
     }),
     "Failed to finalize project publish",
