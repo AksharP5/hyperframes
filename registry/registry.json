@@ -40,6 +40,10 @@
       "type": "hyperframes:example"
     },
     {
+      "name": "ai-chat-reveal",
+      "type": "hyperframes:block"
+    },
+    {
       "name": "app-showcase",
       "type": "hyperframes:block"
     },
@@ -372,6 +376,10 @@
       "type": "hyperframes:block"
     },
     {
+      "name": "message-thread-reveal",
+      "type": "hyperframes:block"
+    },
+    {
       "name": "mk-background",
       "type": "hyperframes:block"
     },
@@ -408,6 +416,14 @@
       "type": "hyperframes:block"
     },
     {
+      "name": "notes-reveal",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "notification-cascade",
+      "type": "hyperframes:block"
+    },
+    {
       "name": "nyc-paris-flight",
       "type": "hyperframes:block"
     },
@@ -437,6 +453,10 @@
     },
     {
       "name": "sdf-iris",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "share-sheet-carousel",
       "type": "hyperframes:block"
     },
     {
@@ -784,6 +804,14 @@
       "type": "hyperframes:component"
     },
     {
+      "name": "chat-message",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "chat-thread",
+      "type": "hyperframes:component"
+    },
+    {
       "name": "checkout-flow",
       "type": "hyperframes:component"
     },
@@ -992,6 +1020,10 @@
       "type": "hyperframes:component"
     },
     {
+      "name": "marker-checklist-card",
+      "type": "hyperframes:component"
+    },
+    {
       "name": "marker-highlight",
       "type": "hyperframes:component"
     },
@@ -1049,6 +1081,10 @@
     },
     {
       "name": "native-notification-pop",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "notes-typing",
       "type": "hyperframes:component"
     },
     {
@@ -1208,6 +1244,10 @@
       "type": "hyperframes:component"
     },
     {
+      "name": "sheet-spring-up",
+      "type": "hyperframes:component"
+    },
+    {
       "name": "shimmer-sweep",
       "type": "hyperframes:component"
     },
@@ -1229,6 +1269,10 @@
     },
     {
       "name": "slot-machine-roll",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "social-proof-card",
       "type": "hyperframes:component"
     },
     {
@@ -1289,6 +1333,10 @@
     },
     {
       "name": "store-badge-lockup",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "streaming-text",
       "type": "hyperframes:component"
     },
     {
@@ -1408,6 +1456,10 @@
       "type": "hyperframes:component"
     },
     {
+      "name": "typing-indicator",
+      "type": "hyperframes:component"
+    },
+    {
       "name": "ui-focus-zoom",
       "type": "hyperframes:component"
     },
@@ -1473,6 +1525,6 @@
     }
   ],
   "catalogArtifact": {
-    "revision": "a823e13eb98937e709ea70bbdc5f9e6dc0be1feed6346fb1d8746069fea6796b"
+    "revision": "f5cb199165f8e7faec1f52713596613af0ef6b5495938341233a63167ee43d3a"
   }
 }
