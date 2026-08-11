@@ -182,31 +182,23 @@ function holdsBothEnds(host: Element, range: Range): boolean {
   return host.contains(range.startContainer) && host.contains(range.endContainer);
 }
 
-/**
- * What the range is styled with, for a toolbar that has to open showing the
- * truth rather than a default. Reports a property only when the whole range
- * agrees about it, which is what a control can honestly display.
- */
-export function readInlineStyle(range: Range, properties: string[]): Record<string, string> {
+export interface InlineStyleChar {
+  char: string;
+  style: Readonly<Record<string, string>>;
+}
+
+/** Every character the range covers with its style, or null when it covers none. */
+export function readCoveredInlineStyleChars(range: Range): readonly InlineStyleChar[] | null {
   const host = editingHost(range.startContainer);
-  if (!host || !holdsBothEnds(host, range)) return {};
+  if (!host || !holdsBothEnds(host, range)) return null;
   const start = offsetOf(host, range.startContainer, range.startOffset);
   const end = offsetOf(host, range.endContainer, range.endOffset);
-  if (start === null || end === null) return {};
-
+  if (start === null || end === null) return null;
   const collapsed = start === end;
   const covered = charRuns(readRuns(host))
     .slice(collapsed ? Math.max(0, start - 1) : start, collapsed ? Math.max(1, start) : end)
-    .map((entry) => entry.style);
-  if (covered.length === 0) return {};
-
-  const styles: Record<string, string> = {};
-  for (const property of properties) {
-    const first = covered[0]?.[property];
-    if (first === undefined) continue;
-    if (covered.every((style) => style[property] === first)) styles[property] = first;
-  }
-  return styles;
+    .map((entry) => ({ char: entry.char, style: entry.style }));
+  return covered.length > 0 ? covered : null;
 }
 
 /**
@@ -309,11 +301,18 @@ function ownStyle(element: HTMLElement): Record<string, string> {
 }
 
 /** One entry per character, which is the easiest thing to slice and compare. */
-function charRuns(runs: StyledRun[]): Array<Omit<StyledRun, "text">> {
-  const perChar: Array<Omit<StyledRun, "text">> = [];
+function charRuns(runs: StyledRun[]): Array<Omit<StyledRun, "text"> & { char: string }> {
+  const perChar: Array<Omit<StyledRun, "text"> & { char: string }> = [];
   for (const run of runs) {
+    // By UTF-16 unit, not code point: `restyle` indexes this list with selection
+    // offsets, which count units, so an emoji has to stay two entries long.
     for (let index = 0; index < run.text.length; index += 1) {
-      perChar.push({ style: run.style, origin: run.origin, identity: run.identity });
+      perChar.push({
+        char: run.text[index] ?? "",
+        style: run.style,
+        origin: run.origin,
+        identity: run.identity,
+      });
     }
   }
   return perChar;

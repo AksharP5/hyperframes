@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyInlineStyle, readInlineStyle } from "./inlineTextStyleRange";
+import { applyInlineStyle } from "./inlineTextStyleRange";
+import { readInlineStyle, readInlineStyleSpread } from "./inlineTextStyleRead";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -695,5 +696,48 @@ describe("applyInlineStyle when something else is painting the glyphs", () => {
     if (live) applyInlineStyle(live, { "font-weight": "700" });
 
     expect(host.innerHTML).not.toContain("-webkit-text-fill-color");
+  });
+});
+
+describe("readInlineStyleSpread", () => {
+  it("reports every distinct colour in the selection, in order", () => {
+    const host = mount(
+      '<span style="color: red">Hello</span><span style="color: lime">world</span>',
+    );
+
+    expect(readInlineStyleSpread(rangeOver(host, 0, 10), "color")).toEqual(["red", "lime"]);
+  });
+
+  it("reports a colour once, however many characters carry it", () => {
+    const host = mount('<span style="color: red">He</span><span style="color: red">llo</span>');
+
+    expect(readInlineStyleSpread(rangeOver(host, 0, 5), "color")).toEqual(["red"]);
+  });
+
+  it("reports only what the selection covers", () => {
+    const host = mount(
+      '<span style="color: red">Hello</span><span style="color: lime">world</span>',
+    );
+
+    expect(readInlineStyleSpread(rangeOver(host, 6, 10), "color")).toEqual(["lime"]);
+  });
+
+  it("ignores whitespace, which shows no colour at all", () => {
+    // Colour the whole element, then recolour one word: the whitespace around it
+    // keeps the first colour. It paints no glyph, so counting it puts a band of a
+    // colour nothing on screen is painted in at the edge of the swatch.
+    const host = mount(
+      '<span style="color: lime"> </span>' +
+        '<span style="color: red">Hello</span>' +
+        '<span style="color: lime"> world</span>',
+    );
+
+    expect(readInlineStyleSpread(rangeOver(host, 0, 12), "color")).toEqual(["red", "lime"]);
+  });
+
+  it("is empty when the characters carry no colour of their own", () => {
+    const host = mount("Hello world");
+
+    expect(readInlineStyleSpread(rangeOver(host, 0, 5), "color")).toEqual([]);
   });
 });

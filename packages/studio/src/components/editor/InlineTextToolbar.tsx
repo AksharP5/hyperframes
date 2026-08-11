@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { applyInlineStyle, readInlineStyle } from "./inlineTextStyleRange";
+import { applyInlineStyle } from "./inlineTextStyleRange";
+import { readInlineStyle, readInlineStyleSpread } from "./inlineTextStyleRead";
+import { parseCssColor, toHexColor } from "./colorValue";
 import type { InlineTextEditSession } from "../../hooks/useInlineTextEdit";
 
 /**
@@ -27,6 +29,8 @@ interface ToolbarPlacement {
   top: number;
   placeBelow: boolean;
   styles: Record<string, string>;
+  colours: string[];
+  pickerColour: string;
 }
 
 export function InlineTextToolbar({
@@ -94,13 +98,21 @@ export function InlineTextToolbar({
       onClick={(event) => event.stopPropagation()}
     >
       <label
-        className="relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md hover:bg-white/10"
+        className="group relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md hover:bg-white/10"
         title="Text colour"
       >
         <span
           aria-hidden="true"
-          className="h-3.5 w-3.5 rounded-full border border-white/25"
-          style={{ background: styles.color || DEFAULT_COLOR }}
+          className="h-4 w-4 rounded-full border-2 border-white/25 transition-transform duration-150 group-hover:scale-110 group-active:scale-95"
+          // `background` maps a gradient to the PADDING box and then repeats it
+          // to fill the border box, so the 1px border shows the strip either
+          // side of the tile: the end colour on the left, the start colour on
+          // the right. A red-to-green swatch grew a green edge and a red one.
+          // Set after the shorthand, which resets it.
+          style={{
+            background: swatchBackground(placement.colours, styles.color),
+            backgroundOrigin: "border-box",
+          }}
         />
         {/* `inset-0` is not enough on its own: a colour input carries a
             user-agent minimum width, which wins over the right edge and lets
@@ -110,7 +122,7 @@ export function InlineTextToolbar({
           type="color"
           aria-label="Text colour"
           className="absolute inset-0 h-full w-full min-w-0 cursor-pointer opacity-0"
-          value={toHexColor(styles.color)}
+          value={placement.pickerColour}
           onChange={(event) => apply({ color: event.target.value })}
         />
       </label>
@@ -137,6 +149,28 @@ export function InlineTextToolbar({
       />
     </div>
   );
+}
+
+/**
+ * The selection's colours as one swatch: a diagonal sweep through each distinct
+ * colour, evenly spaced. A selection with one colour is a plain swatch.
+ *
+ * Distinct rather than weighted, and evenly spaced rather than proportional,
+ * matching the mixed-colour swatch in the design tool this sits alongside. The
+ * swatch answers "which colours are in here", and at 16px a colour used by one
+ * character has to be as visible as one used by thirty or it may as well not be
+ * drawn.
+ */
+export function swatchBackground(
+  distinctColours: readonly string[],
+  agreed: string | undefined,
+): string {
+  if (distinctColours.length === 0) return agreed || DEFAULT_COLOR;
+  if (distinctColours.length === 1) return distinctColours[0]!;
+  const stops = distinctColours.map(
+    (colour, index) => `${colour} ${((index / (distinctColours.length - 1)) * 100).toFixed(2)}%`,
+  );
+  return `linear-gradient(135deg, ${stops.join(", ")})`;
 }
 
 function swallow(event: { preventDefault: () => void; stopPropagation: () => void }): void {
@@ -204,11 +238,15 @@ function placeOverSelection(
   const above = box.top + rect.top * scale - GAP_PX;
   const placeBelow = above < TOOLBAR_HEIGHT_PX;
 
+  const styles = readInlineStyle(range, READ_PROPERTIES);
+  const colours = readInlineStyleSpread(range, "color");
   return {
     left: box.left + (rect.left + rect.width / 2) * scale,
     top: placeBelow ? box.top + (rect.top + rect.height) * scale + GAP_PX : above,
     placeBelow,
-    styles: readInlineStyle(range, READ_PROPERTIES),
+    styles,
+    colours,
+    pickerColour: toPickerColour(styles.color ?? colours[0], doc),
   };
 }
 
@@ -218,18 +256,26 @@ function isBold(weight: string | undefined): boolean {
   return Number.parseInt(weight, 10) >= 600;
 }
 
-/**
- * A colour input only accepts `#rrggbb`, and what the page reports is whatever
- * the stylesheet said. An unreadable value opens the picker on white rather
- * than refusing to open.
- */
-function toHexColor(value: string | undefined): string {
+/** A colour input accepts only `#rrggbb`; normalise any valid CSS colour to it. */
+function toPickerColour(value: string | undefined, doc: Document): string {
   if (!value) return DEFAULT_COLOR;
-  if (/^#[0-9a-f]{6}$/i.test(value)) return value;
-  const channels = value.match(/\d+(\.\d+)?/g);
-  if (!channels || channels.length < 3) return DEFAULT_COLOR;
-  return `#${channels
-    .slice(0, 3)
-    .map((channel) => Number(channel).toString(16).padStart(2, "0"))
-    .join("")}`;
+  const parsed = parseCssColor(value);
+  if (parsed) return toHexColor(parsed);
+
+  // Canvas delegates the full CSS colour grammar to the browser, including
+  // named colours that the small serialisation parser intentionally omits.
+  // DOM-only test environments can lack a canvas implementation, in which
+  // case the picker degrades to its explicit default while the swatch remains
+  // truthful because CSS still paints the original value.
+  try {
+    const context = doc.createElement("canvas").getContext("2d");
+    if (!context) return DEFAULT_COLOR;
+    context.fillStyle = DEFAULT_COLOR;
+    context.fillStyle = value;
+    const normalised =
+      typeof context.fillStyle === "string" ? parseCssColor(context.fillStyle) : null;
+    return normalised ? toHexColor(normalised) : DEFAULT_COLOR;
+  } catch {
+    return DEFAULT_COLOR;
+  }
 }

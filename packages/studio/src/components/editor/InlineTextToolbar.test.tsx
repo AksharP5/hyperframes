@@ -3,7 +3,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { InlineTextToolbar } from "./InlineTextToolbar";
+import { InlineTextToolbar, swatchBackground } from "./InlineTextToolbar";
 import type { InlineTextEditSession } from "../../hooks/useInlineTextEdit";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -219,7 +219,6 @@ describe("InlineTextToolbar", () => {
     expect(toolbar.style.left).toBe(`${100 + (20 + 50) * scale}px`);
     expect(toolbar.style.top).toBe(`${50 + 40 * scale - 10}px`);
   });
-
   it("moves below a selection that leaves no room above the viewport", () => {
     const { element, session, iframe } = scene("hello world");
     iframe.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400 }) as DOMRect;
@@ -239,5 +238,59 @@ describe("InlineTextToolbar", () => {
     const scale = 400 / window.innerWidth;
     expect(toolbar.style.top).toBe(`${10 * scale + 10}px`);
     expect(toolbar.style.transform).toBe("translate(-50%, 0)");
+  });
+
+  it("shows the selection's colours in the swatch when they differ", () => {
+    const { element, session, iframe } = scene(
+      '<span style="color: red">Hello</span><span style="color: lime">world</span>',
+    );
+    const { host } = render(session, iframe);
+
+    selectAll(element);
+
+    const swatch = toolbarIn(host)!.querySelector<HTMLElement>("span[aria-hidden]")!;
+    expect(swatch.style.backgroundImage).toBe("linear-gradient(135deg, red 0.00%, lime 100.00%)");
+    // Without this the gradient repeats under the border, painting the end
+    // colour along the leading edge and the start colour along the trailing one.
+    expect(swatch.style.backgroundOrigin).toBe("border-box");
+  });
+
+  it("shows a plain swatch when the whole selection is one colour", () => {
+    const { element, session, iframe } = scene('<span style="color: red">Hello world</span>');
+    const { host } = render(session, iframe);
+
+    selectAll(element);
+
+    const swatch = toolbarIn(host)!.querySelector<HTMLElement>("span[aria-hidden]")!;
+    expect(swatch.style.backgroundColor).toBe("red");
+  });
+
+  it("opens the colour input on a shorthand hex selection", () => {
+    const { element, session, iframe } = scene('<span style="color: #f00">Hello world</span>');
+    const { host } = render(session, iframe);
+
+    selectAll(element);
+
+    expect(host.querySelector<HTMLInputElement>('input[type="color"]')?.value).toBe("#ff0000");
+  });
+});
+
+describe("swatchBackground", () => {
+  it("sweeps through each distinct colour, evenly spaced", () => {
+    expect(swatchBackground(["red", "lime"], undefined)).toBe(
+      "linear-gradient(135deg, red 0.00%, lime 100.00%)",
+    );
+    expect(swatchBackground(["red", "lime", "cyan"], undefined)).toBe(
+      "linear-gradient(135deg, red 0.00%, lime 50.00%, cyan 100.00%)",
+    );
+  });
+
+  it("stays a plain swatch when the selection is one colour", () => {
+    expect(swatchBackground(["red"], "red")).toBe("red");
+  });
+
+  it("falls back to the agreed colour when the characters carry none", () => {
+    expect(swatchBackground([], "rgb(1, 2, 3)")).toBe("rgb(1, 2, 3)");
+    expect(swatchBackground([], undefined)).toBe("#ffffff");
   });
 });
