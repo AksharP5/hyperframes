@@ -13,7 +13,22 @@ import { FlatTextSection } from "./propertyPanelFlatTextSection";
 import { FlatStyleSection } from "./propertyPanelFlatStyleSections";
 import { FlatLayoutSection } from "./propertyPanelFlatLayoutSection";
 import { FlatMotionSection } from "./propertyPanelFlatMotionSection";
+import {
+  HF_AUDIO_FX_ATTR,
+  parseAudioFxChain,
+  serializeAudioFxChain,
+  type HfAudioFxChain,
+} from "@hyperframes/core/audio-fx";
+import {
+  HF_AUDIO_CARVE_ATTR,
+  normalizeCarveSettings,
+  type HfCarveSettings,
+} from "@hyperframes/core/audio-carve";
+import { isCanaryEnabled } from "../../telemetry/canary";
+import { audioFxSummary } from "./audioFxSummary";
 import { FlatMediaSection } from "./propertyPanelFlatMediaSection";
+import type { DomEditSelection } from "./domEditing";
+import { FxSection, type AudioTrackOption } from "./propertyPanelFxSection";
 import { deriveElementTiming } from "./propertyPanelFlatTimingDerivation";
 import { createGsapLivePreview } from "./gsapLivePreview";
 import { formatTextFieldPreview } from "./propertyPanelSections";
@@ -420,6 +435,17 @@ export function PropertyPanelFlat({
       });
     }
   }
+  // Behind `audio-fx-rack`, at 0%. Gates the AUTHORING surface only: the runtime
+  // and render still honour a `data-fx-chain` already on an element, so a
+  // composition written through the skill does not go silently dry off-cohort.
+  if (sections.audioFx && isCanaryEnabled("audio-fx-rack")) {
+    groups.push({
+      id: "audio-fx",
+      title: "Audio FX",
+      summary: audioFxSummary(element),
+      content: <AudioFxGroup element={element} onSetAttribute={onSetAttribute} />,
+    });
+  }
   if (sections.media) {
     groups.push({
       id: "media",
@@ -512,5 +538,62 @@ export function PropertyPanelFlat({
         </DesignPanelInputProvider>
       </div>
     </DesignPanelInputProvider>
+  );
+}
+
+/**
+ * Bridges the FX panel to the element/attribute world. Chain and carve are
+ * serialised onto the element the way colour grading carries its config, so
+ * persistence is an ordinary attribute write with no new server route.
+ */
+function AudioFxGroup({
+  element,
+  onSetAttribute,
+}: {
+  element: DomEditSelection;
+  onSetAttribute: (attr: string, value: string) => void | Promise<void>;
+}) {
+  const chain = ((): HfAudioFxChain => {
+    const raw = element.dataAttributes?.["fx-chain"];
+    if (!raw) return { version: 1, nodes: [] };
+    try {
+      return parseAudioFxChain(raw);
+    } catch {
+      // Show an unreadable chain as empty rather than breaking the panel; the
+      // attribute is left untouched until the user changes something.
+      return { version: 1, nodes: [] };
+    }
+  })();
+
+  const carve = ((): HfCarveSettings | null => {
+    const raw = element.dataAttributes?.["fx-carve"];
+    if (!raw) return null;
+    try {
+      return normalizeCarveSettings(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  })();
+
+  const sourceOptions: AudioTrackOption[] = (() => {
+    const doc = element.element?.ownerDocument;
+    if (!doc) return [];
+    return Array.from(doc.querySelectorAll<HTMLAudioElement>("audio[id]"))
+      .filter((a) => a.id !== element.id)
+      .map((a) => ({ id: a.id, label: a.id }));
+  })();
+
+  return (
+    <FxSection
+      chain={chain}
+      onChainChange={(next) =>
+        onSetAttribute(HF_AUDIO_FX_ATTR, next.nodes.length ? serializeAudioFxChain(next) : "")
+      }
+      carve={carve}
+      onCarveChange={(next) =>
+        onSetAttribute(HF_AUDIO_CARVE_ATTR, next ? JSON.stringify(next) : "")
+      }
+      sourceOptions={sourceOptions}
+    />
   );
 }

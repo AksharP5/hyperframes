@@ -654,6 +654,28 @@
       // inherited clone; consistent with the norm above of leaving parallel
       // command-test cases unabstracted.
       "packages/cli/src/commands/check.test.ts",
+      // canary.test.ts: rawFnv is a deliberate independent re-implementation of
+      // canary.ts's fnv1a32, not copy-paste — its own docstring explains why:
+      // the test re-derives the hash so it can cross-check canaryBucket against
+      // a copy that owes it nothing, rather than importing the function under
+      // test. Importing fnv1a32 here would defeat the point of the assertion.
+      "packages/core/src/canary.test.ts",
+      // The audio FX property-panel test files (and the two siblings outside
+      // this stack, propertyPanelFlatMotionSection.test.tsx and
+      // propertyPanelFlatEffectsSection.test.tsx) share a `renderInto` React
+      // mount helper — pre-existing across nine files, not introduced here.
+      // The FxSection/FlatTextSection `mount()` wrappers additionally look
+      // alike because both build a props-with-overrides harness for their own
+      // component; the prop shapes differ per component, so a shared mount
+      // abstraction would obscure more than it dedupes (same rationale as
+      // slideshowPanelHelpers.ts above).
+      "packages/studio/src/components/editor/PropertyPanelEmptyState.test.tsx",
+      "packages/studio/src/components/editor/propertyPanelFlatColorGradingSection.test.tsx",
+      "packages/studio/src/components/editor/propertyPanelFlatLayoutSection.test.tsx",
+      "packages/studio/src/components/editor/propertyPanelFlatPrimitives.test.tsx",
+      "packages/studio/src/components/editor/propertyPanelFlatTextSection.test.tsx",
+      "packages/studio/src/components/editor/propertyPanelFlatToggle.test.tsx",
+      "packages/studio/src/components/editor/propertyPanelFxSection.test.tsx",
     ],
   },
   "health": {
