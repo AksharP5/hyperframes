@@ -34,25 +34,52 @@ export interface AudioTrackOption {
   label: string;
 }
 
-export interface FxSectionProps {
-  chain: HfAudioFxChain;
-  onChainChange(chain: HfAudioFxChain): void;
-  carve: HfCarveSettings | null;
-  onCarveChange(carve: HfCarveSettings | null): void;
-  /** Other audio elements that could act as the carve source. */
-  sourceOptions: AudioTrackOption[];
-  /** Re-run analysis against the current source audio. */
-  onAnalyseCarve?(): void;
-  analysing?: boolean;
+interface FxNodeRowProps {
+  node: HfAudioFxNode;
+  index: number;
+  open: boolean;
+  /** Last in the chain, so it cannot move further down. */
+  last: boolean;
   disabled?: boolean;
+  onToggleOpen(): void;
+  onUpdate(index: number, patch: Partial<HfAudioFxNode>): void;
+  onMove(index: number, delta: number): void;
+  onRemove(index: number): void;
+  onPreview(index: number, params: HfAudioFxParamValues): void;
 }
 
-function FxNodeControls({
+/** Reorder arrow. Disabled at the end of the chain it would move past. */
+function FxMoveButton({
   label,
-  index,
-  total,
+  glyph,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  glyph: string;
+  disabled: boolean;
+  onClick(): void;
+}) {
+  return (
+    <button
+      type="button"
+      className="hf-fx-move px-1 font-mono text-[10px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-25"
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {glyph}
+    </button>
+  );
+}
+
+/** Name, bypass, reorder and remove for one effect. */
+function FxNodeHeader({
+  label,
   open,
   bypassed,
+  first,
+  last,
   disabled,
   onToggleOpen,
   onToggleBypass,
@@ -60,10 +87,10 @@ function FxNodeControls({
   onRemove,
 }: {
   label: string;
-  index: number;
-  total: number;
   open: boolean;
   bypassed: boolean;
+  first: boolean;
+  last: boolean;
   disabled?: boolean;
   onToggleOpen(): void;
   onToggleBypass(): void;
@@ -90,24 +117,18 @@ function FxNodeControls({
       >
         {bypassed ? "Off" : "On"}
       </button>
-      <button
-        type="button"
-        className="hf-fx-move px-1 font-mono text-[10px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-25"
-        title="Move up"
-        disabled={disabled || index === 0}
+      <FxMoveButton
+        label="Move up"
+        glyph="&uarr;"
+        disabled={Boolean(disabled) || first}
         onClick={() => onMove(-1)}
-      >
-        &uarr;
-      </button>
-      <button
-        type="button"
-        className="hf-fx-move px-1 font-mono text-[10px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-25"
-        title="Move down"
-        disabled={disabled || index === total - 1}
+      />
+      <FxMoveButton
+        label="Move down"
+        glyph="&darr;"
+        disabled={Boolean(disabled) || last}
         onClick={() => onMove(1)}
-      >
-        &darr;
-      </button>
+      />
       <button
         type="button"
         className="hf-fx-remove px-1 font-mono text-[11px] text-panel-text-4 hover:text-red-400 disabled:opacity-40"
@@ -121,27 +142,19 @@ function FxNodeControls({
   );
 }
 
+/** One effect in the chain: its header controls, and its knobs when open. */
 function FxNodeRow({
   node,
   index,
-  total,
   open,
+  last,
   disabled,
   onToggleOpen,
   onUpdate,
   onMove,
   onRemove,
-}: {
-  node: HfAudioFxNode;
-  index: number;
-  total: number;
-  open: boolean;
-  disabled?: boolean;
-  onToggleOpen(): void;
-  onUpdate(index: number, patch: Partial<HfAudioFxNode>): void;
-  onMove(index: number, delta: number): void;
-  onRemove(index: number): void;
-}) {
+  onPreview,
+}: FxNodeRowProps) {
   const def = getAudioFxDef(node.type);
   if (!def) return null;
   const bypassed = node.enabled === false;
@@ -150,12 +163,12 @@ function FxNodeRow({
       className={`hf-fx-node rounded-[4px] border border-panel-border-input${bypassed ? " opacity-50" : ""}`}
       data-fx-node={node.type}
     >
-      <FxNodeControls
+      <FxNodeHeader
         label={def.label}
-        index={index}
-        total={total}
         open={open}
         bypassed={bypassed}
+        first={index === 0}
+        last={last}
         disabled={disabled}
         onToggleOpen={onToggleOpen}
         onToggleBypass={() => onUpdate(index, { enabled: bypassed })}
@@ -167,16 +180,34 @@ function FxNodeRow({
           def={def}
           params={node.params ?? defaultAudioFxParams(node.type)}
           disabled={disabled || bypassed}
-          onChange={(params: HfAudioFxParamValues) => onUpdate(index, { params })}
+          onChange={(params: HfAudioFxParamValues) => onPreview(index, params)}
+          onCommit={(params: HfAudioFxParamValues) => onUpdate(index, { params })}
         />
       ) : null}
     </div>
   );
 }
 
+export interface FxSectionProps {
+  chain: HfAudioFxChain;
+  /** Structural edits and gesture-end writes; this is the one that persists. */
+  onChainChange(chain: HfAudioFxChain): void;
+  /** Continuous updates while a control is being dragged. */
+  onChainPreview?(chain: HfAudioFxChain): void;
+  carve: HfCarveSettings | null;
+  onCarveChange(carve: HfCarveSettings | null): void;
+  /** Other audio elements that could act as the carve source. */
+  sourceOptions: AudioTrackOption[];
+  /** Re-run analysis against the current source audio. */
+  onAnalyseCarve?(): void;
+  analysing?: boolean;
+  disabled?: boolean;
+}
+
 export function FxSection({
   chain,
   onChainChange,
+  onChainPreview,
   carve,
   onCarveChange,
   sourceOptions,
@@ -195,6 +226,16 @@ export function FxSection({
   const mutate = useCallback(
     (nodes: HfAudioFxNode[]) => onChainChange({ ...chain, nodes }),
     [chain, onChainChange],
+  );
+
+  // Dragging a knob previews without persisting; releasing it commits once.
+  const previewNode = useCallback(
+    (index: number, params: HfAudioFxParamValues) =>
+      onChainPreview?.({
+        ...chain,
+        nodes: chain.nodes.map((n, i) => (i === index ? { ...n, params } : n)),
+      }),
+    [chain, onChainPreview],
   );
 
   const addEffect = useCallback(
@@ -246,13 +287,14 @@ export function FxSection({
               key={`${node.type}-${i}`}
               node={node}
               index={i}
-              total={chain.nodes.length}
               open={openNode === i}
+              last={i === chain.nodes.length - 1}
               disabled={disabled}
               onToggleOpen={() => setOpenNode(openNode === i ? null : i)}
               onUpdate={updateNode}
               onMove={moveNode}
               onRemove={removeNode}
+              onPreview={previewNode}
             />
           ))
         )}

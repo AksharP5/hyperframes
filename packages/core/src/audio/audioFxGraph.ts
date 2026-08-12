@@ -14,7 +14,7 @@ import {
   type HfAudioFxChain,
   type HfAudioFxParamValues,
 } from "../audioFx.js";
-import { ensureAudioFxWorklets } from "./audioFxWorklets.js";
+import { audioFxWorkletsReady, ensureAudioFxWorklets } from "./audioFxWorklets.js";
 
 /**
  * Deterministic reverb impulse, shared by both engines so the browser and the
@@ -68,6 +68,12 @@ export interface FxNodeHandle {
 type Builder = (ctx: BaseAudioContext, p: HfAudioFxParamValues) => FxNodeHandle;
 
 const n = (v: number | string | undefined): number => (typeof v === "number" ? v : Number(v ?? 0));
+
+/** Linear crossfade: dry falls as wet rises, in lockstep. */
+function setWetDryMix(wet: GainNode, dry: GainNode, mix: number): void {
+  wet.gain.value = mix;
+  dry.gain.value = 1 - mix;
+}
 
 /** A node that is its own input and output and has nothing to tear down. */
 function simple(node: AudioNode, update: (p: HfAudioFxParamValues) => void): FxNodeHandle {
@@ -177,8 +183,7 @@ const delayFeedback: Builder = (ctx, p) => {
   const apply = (v: HfAudioFxParamValues): void => {
     dl.delayTime.value = Math.min(5, n(v.time) / 1000);
     fb.gain.value = n(v.feedback);
-    wet.gain.value = n(v.mix);
-    dry.gain.value = 1 - n(v.mix);
+    setWetDryMix(wet, dry, n(v.mix));
   };
   apply(p);
   return {
@@ -205,8 +210,7 @@ const chorusLfo: Builder = (ctx, p) => {
     dl.delayTime.value = n(v.delay) / 1000;
     depth.gain.value = n(v.depth) / 1000;
     lfo.frequency.value = n(v.speed);
-    wet.gain.value = n(v.mix);
-    dry.gain.value = 1 - n(v.mix);
+    setWetDryMix(wet, dry, n(v.mix));
   };
   apply(p);
   return {
@@ -432,4 +436,4 @@ export function buildFxChain(ctx: BaseAudioContext, chain: HfAudioFxChain): FxCh
   };
 }
 
-export { ensureAudioFxWorklets };
+export { audioFxWorkletsReady, ensureAudioFxWorklets };
