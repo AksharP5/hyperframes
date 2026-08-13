@@ -222,7 +222,10 @@ function dispatchModifierKey(event: KeyboardEvent, key: string, cb: HotkeyCallba
 }
 
 // fallow-ignore-next-line complexity
-function dispatchPlainKey(event: KeyboardEvent, key: string, cb: HotkeyCallbacks): void {
+/** Exported for tests: the unmodified-key half of the dispatcher, so the
+ *  Delete arbitration between keyframes, an automation range and the clip can
+ *  be asserted without standing up the whole hook. */
+export function dispatchPlainKey(event: KeyboardEvent, key: string, cb: HotkeyCallbacks): void {
   if (key === "f" && !event.shiftKey && !event.altKey) {
     event.preventDefault();
     if (document.fullscreenElement) void document.exitFullscreen();
@@ -288,6 +291,13 @@ function dispatchPlainKey(event: KeyboardEvent, key: string, cb: HotkeyCallbacks
       event.preventDefault();
       return;
     }
+    // An active automation range owns Delete: useAutomationSelectionKeyboard
+    // empties the range in place, pinning the anchors. Fall through WITHOUT
+    // preventDefault so that document-level handler still sees the key — this
+    // listener is on window/capture, so it runs first and everything below
+    // would otherwise win. Without this the press reaches the clip delete
+    // below and destroys the whole clip the lane belongs to.
+    if (usePlayerStore.getState().automationSelection) return;
     if (event.key === "Backspace") {
       const { selectedElementId, keyframeCache } = usePlayerStore.getState();
       if (selectedElementId && keyframeCache.has(selectedElementId) && cb.onResetKeyframes()) {
