@@ -17,7 +17,11 @@ import {
   type HfAudioFxParam,
   type HfAudioFxParamValues,
 } from "@hyperframes/core/audio-fx";
-import { DEFAULT_CARVE, type HfCarveSettings } from "@hyperframes/core/audio-carve";
+import {
+  DEFAULT_CARVE,
+  type HfAudioNameKind,
+  type HfCarveSettings,
+} from "@hyperframes/core/audio-carve";
 import { applyAudioFxPreset, getAudioFxPreset } from "@hyperframes/core/audio-fx-presets";
 import {
   addAudioEq,
@@ -35,6 +39,7 @@ import {
   type HfAudioFxJob,
 } from "@hyperframes/core/audio-fx-jobs";
 import { FxParamRow } from "./propertyPanelFxControls.js";
+import { fxPresetBackground, fxPresetStyle } from "./propertyPanelFxPresetStyle.js";
 import { FxPresetMenu } from "./propertyPanelFxPresetMenu.js";
 import { FxEqModule } from "./propertyPanelFxEqModule.js";
 import { FxCarveModule, type AudioTrackOption } from "./propertyPanelFxCarveModule.js";
@@ -88,6 +93,12 @@ export interface FxSectionProps {
   onRemoveParamAutomation?(nodeId: string, paramKey: string): void;
   /** Delete every lane belonging to a node that is being removed. */
   onRemoveNodeAutomation?(nodeId: string): void;
+  /**
+   * Delete the lanes of SEVERAL nodes at once, plus the whole-preset lane when
+   * a preset id is given. One call, because each write is computed from the same
+   * snapshot and replaces the whole attribute — a loop keeps only its last write.
+   */
+  onRemoveNodesAutomation?(nodeIds: readonly string[], presetId?: string): void;
   /** Add a lane for a whole preset's amount, seeded where it sits now. */
   onAutomatePreset?(presetId: string, amount: number): void;
   /** Delete that lane. */
@@ -136,6 +147,12 @@ export interface FxSectionProps {
   carvedAgainstBy?: string | null;
   /** Other audio elements that could act as the carve source. */
   sourceOptions: AudioTrackOption[];
+  /**
+   * What this track reads as, from its id and filename. Passed through to the
+   * preset shelf, which hides the Voice family on a track that is plainly music
+   * or an effect. Absent means unknown, and unknown keeps everything.
+   */
+  trackKind?: HfAudioNameKind;
   analysing?: boolean;
   disabled?: boolean;
 }
@@ -147,6 +164,7 @@ export function FxSection({
   onAutomateParam,
   onRemoveParamAutomation,
   onRemoveNodeAutomation,
+  onRemoveNodesAutomation,
   onChainChange,
   onChainPreview,
   carve,
@@ -154,6 +172,7 @@ export function FxSection({
   onCarveChange,
   onCarvePreview,
   sourceOptions,
+  trackKind,
   analysing,
   disabled,
   onLevel,
@@ -401,15 +420,20 @@ export function FxSection({
    * the next effect added inherits it.
    */
   const removeRun = useCallback(
-    (items: { node: HfAudioFxNode; i: number }[]) => {
-      for (const { node } of items) {
-        if (node.id) onRemoveNodeAutomation?.(node.id);
-      }
+    (items: { node: HfAudioFxNode; i: number }[], presetId?: string) => {
+      // One call, not a loop: every write is computed from the same snapshot and
+      // replaces the whole attribute, so a loop kept only its last write and left
+      // the other nodes' lanes behind as orphans. The preset id goes with it —
+      // the `fx.preset.<id>` amount lane belongs to the preset, not to any node,
+      // so nothing else would ever collect it, and re-applying the preset later
+      // resurrected the old ramp.
+      const ids = items.map(({ node }) => node.id).filter((id): id is string => Boolean(id));
+      if (ids.length > 0 || presetId) onRemoveNodesAutomation?.(ids, presetId);
       const slots = new Set(items.map((item) => item.i));
       mutate(chain.nodes.filter((_, i) => !slots.has(i)));
       setOpenNode(null);
     },
-    [chain.nodes, mutate, onRemoveNodeAutomation],
+    [chain.nodes, mutate, onRemoveNodesAutomation],
   );
 
   const removeNode = useCallback(
@@ -462,6 +486,17 @@ export function FxSection({
     return out;
   }, [handBuilt]);
 
+  /**
+   * Preset runs the author has folded shut.
+   *
+   * A preset is one thing they added, and once it is set the seven modules
+   * inside are detail — a rack with two presets in it was thirteen cards deep
+   * before anything hand-built appeared. Collapsed by id rather than by index so
+   * it survives a reorder, and open by default: a preset that arrives already
+   * hidden is one nobody learns is a chain they can edit.
+   */
+  const [collapsedRuns, setCollapsedRuns] = useState<ReadonlySet<string>>(new Set());
+
   const eqIds = useMemo(() => audioEqIds(chain), [chain]);
 
   /**
@@ -502,12 +537,17 @@ export function FxSection({
   );
   const removeEq = useCallback(
     (eqId: string) => {
-      for (const node of chain.nodes) {
-        if (node.fromEq === eqId && node.id) onRemoveNodeAutomation?.(node.id);
-      }
+      // Batched for the same reason as `removeRun` — this loop had the identical
+      // last-write-wins bug and was only unreachable because an EQ band row
+      // offers no automation toggle today.
+      const ids = chain.nodes
+        .filter((node) => node.fromEq === eqId)
+        .map((node) => node.id)
+        .filter((id): id is string => Boolean(id));
+      if (ids.length > 0) onRemoveNodesAutomation?.(ids);
       mutate(removeAudioEq(chain, eqId).nodes);
     },
-    [chain, mutate, onRemoveNodeAutomation],
+    [chain, mutate, onRemoveNodesAutomation],
   );
 
   const moveNode = useCallback(
@@ -555,7 +595,7 @@ export function FxSection({
         {/* The rack IS the signal path, and saying so costs two lines. Without
             them the order reads as a list, which is the one reading that makes
             "move up" look cosmetic — it is the most consequential control here. */}
-        <p className="hf-fx-term flex items-baseline gap-1.5 px-1.5 font-mono text-[9px] uppercase tracking-wide text-panel-text-4">
+        <p className="hf-fx-term flex items-baseline gap-1.5 px-1.5 font-mono text-[9px] uppercase tracking-wide text-panel-text-2">
           <span className="hf-fx-term-cap text-panel-text-1">In</span>
           <span>this track</span>
         </p>
@@ -593,7 +633,7 @@ export function FxSection({
           />
         ))}
         {handBuilt.length === 0 && eqIds.length === 0 ? (
-          <p className="hf-fx-empty py-1 text-[11px] text-panel-text-4">
+          <p className="hf-fx-empty py-1 text-[11px] text-panel-text-2">
             {showCarve ? "No other effects on this track." : "No effects on this track."}
           </p>
         ) : (
@@ -634,23 +674,74 @@ export function FxSection({
             const amount = run.items[0]?.node.presetAmount;
             const runAmount = typeof amount === "number" ? amount : 1;
             const runOn = runAmount > 0;
+            const runKey = `${run.preset}-${run.items[0]?.i ?? 0}`;
+            const collapsed = collapsedRuns.has(runKey);
+            const style = fxPresetStyle(run.preset ?? "");
+            const background = fxPresetBackground(run.preset ?? "");
             return (
               <div
                 key={`preset-${run.preset}-${run.items[0]?.i}`}
-                className="hf-fx-preset-run space-y-1 rounded-[4px] border border-dashed border-panel-border-input p-1"
+                className="hf-fx-preset-run space-y-1 rounded-[4px] border border-l-2 border-dashed border-panel-border-input p-1"
                 data-fx-preset={run.preset}
+                data-collapsed={collapsed ? "" : undefined}
+                // The bracket's edge carries the preset's own colour, the way a
+                // module's carries its family's — and the wash behind it is the
+                // same hue taken to near-black, so a rack with three presets in
+                // it reads as three regions rather than one long list.
+                style={{
+                  borderLeftColor: style.color,
+                  ...(background ? { backgroundColor: background } : {}),
+                }}
               >
                 <div className="hf-fx-preset-run-head flex min-h-6 items-center gap-1 px-0.5">
-                  <span className="hf-fx-preset-run-label min-w-0 flex-1 truncate font-mono text-[9px] uppercase tracking-wide text-panel-text-4">
+                  <button
+                    type="button"
+                    className={`hf-fx-preset-run-label min-w-0 flex-1 truncate text-left leading-tight hover:opacity-80 ${style.type}`}
+                    // The face and the colour are data, not classes: a Tailwind
+                    // class cannot name a font stack the config does not know,
+                    // and adding eight to the config to style one panel would
+                    // put them in every autocomplete in the studio.
+                    style={{
+                      color: style.color,
+                      ...(style.family ? { fontFamily: style.family } : {}),
+                    }}
+                    aria-expanded={!collapsed}
+                    title={
+                      collapsed
+                        ? `Show what ${preset.label} contains`
+                        : `Hide ${preset.label}'s effects`
+                    }
+                    onClick={() =>
+                      setCollapsedRuns((was) => {
+                        const next = new Set(was);
+                        if (collapsed) next.delete(runKey);
+                        else next.add(runKey);
+                        return next;
+                      })
+                    }
+                  >
+                    <span
+                      className="hf-fx-preset-run-caret pr-1 font-mono opacity-60"
+                      aria-hidden="true"
+                    >
+                      {collapsed ? "\u25B8" : "\u25BE"}
+                    </span>
                     {preset.label}
-                  </span>
+                    {/* Collapsed, the count is what says the preset is still a
+                        chain rather than one opaque effect. */}
+                    {collapsed ? (
+                      <span className="hf-fx-preset-run-count pl-1.5 font-mono text-[9px] opacity-60">
+                        {run.items.length}
+                      </span>
+                    ) : null}
+                  </button>
                   {/* The whole preset, on or off. Partly-bypassed reads as off,
                       because "some of it is running" is not a state an author
                       set — it is one they arrived at, and the switch is how they
                       get back out of it. */}
                   <button
                     type="button"
-                    className="hf-fx-preset-run-toggle rounded-[3px] border border-panel-border-input px-1.5 py-0.5 font-mono text-[9px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
+                    className="hf-fx-preset-run-toggle rounded-[3px] border border-panel-border-input px-1.5 py-0.5 font-mono text-[9px] text-panel-text-2 hover:text-panel-text-0 disabled:opacity-40"
                     aria-pressed={runOn}
                     title={runOn ? `Switch ${preset.label} off` : `Switch ${preset.label} back on`}
                     disabled={disabled}
@@ -660,10 +751,10 @@ export function FxSection({
                   </button>
                   <button
                     type="button"
-                    className="hf-fx-preset-run-remove px-1 font-mono text-[11px] text-panel-text-4 hover:text-red-400 disabled:opacity-40"
+                    className="hf-fx-preset-run-remove px-1 font-mono text-[11px] text-panel-text-2 hover:text-red-400 disabled:opacity-40"
                     title={`Remove ${preset.label}`}
                     disabled={disabled}
-                    onClick={() => removeRun(run.items)}
+                    onClick={() => removeRun(run.items, run.preset)}
                   >
                     &times;
                   </button>
@@ -688,12 +779,12 @@ export function FxSection({
                       : undefined
                   }
                 />
-                {rows}
+                {collapsed ? null : rows}
               </div>
             );
           })
         )}
-        <p className="hf-fx-term hf-fx-term-out flex items-baseline gap-1.5 px-1.5 font-mono text-[9px] uppercase tracking-wide text-panel-text-4">
+        <p className="hf-fx-term hf-fx-term-out flex items-baseline gap-1.5 px-1.5 font-mono text-[9px] uppercase tracking-wide text-panel-text-2">
           <span className="hf-fx-term-cap text-panel-text-1">Out</span>
           <span>to mix</span>
         </p>
@@ -716,7 +807,7 @@ export function FxSection({
           }}
         >
           <div className="hf-fx-add-group flex flex-wrap items-center gap-1">
-            <span className="hf-fx-add-group-label w-full font-mono text-[9px] uppercase tracking-wide text-panel-text-4">
+            <span className="hf-fx-add-group-label w-full font-mono text-[9px] uppercase tracking-wide text-panel-text-2">
               Tone
             </span>
             {onLevel ? (
@@ -771,7 +862,7 @@ export function FxSection({
           </div>
           {grouped.map(({ group, defs, jobs }) => (
             <div key={group} className="hf-fx-add-group flex flex-wrap items-center gap-1">
-              <span className="hf-fx-add-group-label w-full font-mono text-[9px] uppercase tracking-wide text-panel-text-4">
+              <span className="hf-fx-add-group-label w-full font-mono text-[9px] uppercase tracking-wide text-panel-text-2">
                 {GROUP_LABEL[group]}
               </span>
               {jobs.map((job) => (
@@ -829,6 +920,7 @@ export function FxSection({
 
       {picking ? (
         <FxPresetMenu
+          trackKind={trackKind}
           onPick={applyPreset}
           onAudition={
             onChainPreview
@@ -848,7 +940,7 @@ export function FxSection({
       <div className="flex gap-1">
         <button
           type="button"
-          className="hf-fx-preset w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
+          className="hf-fx-preset w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-2 hover:text-panel-text-0 disabled:opacity-40"
           aria-expanded={picking}
           disabled={disabled}
           onClick={() => {
@@ -864,7 +956,7 @@ export function FxSection({
         </button>
         <button
           type="button"
-          className="hf-fx-add w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
+          className="hf-fx-add w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-2 hover:text-panel-text-0 disabled:opacity-40"
           aria-expanded={adding}
           disabled={disabled}
           onClick={() => {

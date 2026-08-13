@@ -87,12 +87,30 @@ describe("derived one-knob profiles", () => {
     // so it has to be authoritative. Reopening a project has to put the knob
     // back where it was.
     for (const [id, profile] of Object.entries(HF_AUDIO_FX_PROFILES)) {
+      // Tight, because the failure this guards against is small and cumulative:
+      // a piecewise curve read back with a straight line put the reverb's Space
+      // knob at 0.46 when the author set 0.5, and every reopen moved it again.
+      // One knob step is 0.01, so anything beyond that is a value the author
+      // did not choose.
       for (const s of [0, 0.25, 0.5, 0.75, 1]) {
         const params = applyAudioFxProfile(id, s, defaultAudioFxParams(id));
-        expect(audioFxProfileStrength(id, params), `${id} at ${s}`).toBeCloseTo(s, 1);
+        expect(
+          Math.abs(audioFxProfileStrength(id, params) - s),
+          `${id} at ${s} read back as ${audioFxProfileStrength(id, params)}`,
+        ).toBeLessThanOrEqual(0.01);
       }
       void profile;
     }
+  });
+
+  it("reads a piecewise curve back at the value that produced it", () => {
+    // The reverb's `size` is piecewise — the design's anchors 0.25/0.55/0.90 are
+    // not evenly spaced — so a linear inverse is wrong by construction, and it
+    // was: 0.5 in, 0.46 out. This is the case the general round-trip above
+    // cannot isolate.
+    const params = applyAudioFxProfile("reverb", 0.5, defaultAudioFxParams("reverb"));
+    expect(params.size).toBe(0.55);
+    expect(audioFxProfileStrength("reverb", params)).toBe(0.5);
   });
 
   it("passes through the figures the design proposed", () => {
@@ -118,5 +136,29 @@ describe("derived one-knob profiles", () => {
     );
     expect(audioFxProfileStrength("reverb", {})).toBe(0.5);
     expect(audioFxProfileStrength("not-an-effect", {})).toBe(0.5);
+  });
+});
+
+/**
+ * A profile's knob name and its two ends are read on every track that carries
+ * the effect, so they fall under the same rule as the rest of the copy: say what
+ * changes in the sound, not what it does to a voice. See the matching audit in
+ * `audioFxCopy.test.ts`.
+ */
+describe("no profile assumes the track is a voice", () => {
+  const SPEECH =
+    /\b(voice|vocal|speech|spoken|word|words|sentence|syllable|narration|talking|chest)\b/i;
+  it("labels the knob and both ends without assuming speech", () => {
+    const bad: string[] = [];
+    for (const [type, p] of Object.entries(HF_AUDIO_FX_PROFILES)) {
+      for (const [where, text] of [
+        ["label", p.label],
+        ["ends.low", p.ends.low],
+        ["ends.high", p.ends.high],
+      ] as const) {
+        if (SPEECH.test(text)) bad.push(`${type}.${where}: "${text}"`);
+      }
+    }
+    expect(bad).toEqual([]);
   });
 });

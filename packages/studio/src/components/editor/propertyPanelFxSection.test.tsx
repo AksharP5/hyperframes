@@ -11,6 +11,7 @@ import { DEFAULT_CARVE } from "@hyperframes/core/audio-carve";
 import { BANDS, EFFECT_COPY, PRESET_PROBLEM } from "@hyperframes/core/audio-fx-copy";
 import { HF_AUDIO_FX_JOBS, HF_AUDIO_FX_JOB_TYPES } from "@hyperframes/core/audio-fx-jobs";
 import { audioFxProfileStrength } from "@hyperframes/core/audio-fx-profiles";
+import { fxPresetStyle } from "./propertyPanelFxPresetStyle.js";
 import { applyAudioFxPreset, getAudioFxPreset } from "@hyperframes/core/audio-fx-presets";
 
 /**
@@ -88,6 +89,7 @@ function mount(overrides: Partial<Parameters<typeof FxSection>[0]> = {}) {
       onAutomateParam={overrides.onAutomateParam}
       onRemoveParamAutomation={overrides.onRemoveParamAutomation}
       onRemoveNodeAutomation={overrides.onRemoveNodeAutomation}
+      onRemoveNodesAutomation={overrides.onRemoveNodesAutomation}
       onAutomatePreset={overrides.onAutomatePreset}
       onRemovePresetAutomation={overrides.onRemovePresetAutomation}
       onAuditionTransport={overrides.onAuditionTransport}
@@ -97,6 +99,7 @@ function mount(overrides: Partial<Parameters<typeof FxSection>[0]> = {}) {
       levelled={overrides.levelled}
       onAuditionLevel={overrides.onAuditionLevel}
       auditioningLevel={overrides.auditioningLevel}
+      trackKind={overrides.trackKind}
     />,
   );
   return { host, root, onChainChange, onChainPreview, onCarveChange };
@@ -336,6 +339,42 @@ describe("FxSection chain", () => {
     expect(openFrequency().value).toBe("1600");
   });
 
+  /**
+   * The shelf leads with the complaint a preset answers, so offering the voice
+   * family on a music bed offers the author a problem they cannot have. The
+   * hiding is deliberately timid: only a name that plainly reads as music or as
+   * an effect loses anything, because a name is a hint and hiding what somebody
+   * came for costs more than one extra shelf to scroll past.
+   */
+  const shelfFamilies = (host: HTMLElement): string[] =>
+    Array.from(host.querySelectorAll(".hf-fx-preset-group-label")).map((e) =>
+      (e.textContent ?? "").trim(),
+    );
+
+  it("keeps the voice presets on a track whose name says nothing", () => {
+    const { host } = mount({ trackKind: "unknown" });
+    click(byText(host, "button", "Presets"));
+    expect(shelfFamilies(host)).toEqual(["Voice", "Fix", "Character", "Space"]);
+  });
+
+  it("keeps them when nothing classified the track at all", () => {
+    const { host } = mount({});
+    click(byText(host, "button", "Presets"));
+    expect(shelfFamilies(host)).toContain("Voice");
+  });
+
+  it("drops the voice shelf on a music bed, and on an effect", () => {
+    for (const kind of ["music", "sfx"] as const) {
+      const { host } = mount({ trackKind: kind });
+      click(byText(host, "button", "Presets"));
+      expect(shelfFamilies(host)).toEqual(["Fix", "Character", "Space"]);
+      // The rest of the shelf is untouched — this hides one family, it does not
+      // narrow the panel down to "repair".
+      expect(presetButton(host, "telephone")).toBeTruthy();
+      expect(presetButton(host, "voice-clean")).toBeUndefined();
+    }
+  });
+
   it("applies a preset as ordinary nodes, tagged with where they came from", () => {
     const { host, onChainChange } = mount({ chain: { version: 1, nodes: [] } });
     click(byText(host, "button", "Presets"));
@@ -415,7 +454,8 @@ describe("FxSection chain", () => {
 
     const run = after.querySelector("[data-fx-preset='telephone']");
     expect(run).toBeTruthy();
-    expect(run?.querySelector(".hf-fx-preset-run-label")?.textContent).toBe("Telephone");
+    // The label carries a disclosure caret, so match the name inside it.
+    expect(run?.querySelector(".hf-fx-preset-run-label")?.textContent).toContain("Telephone");
     expect(run?.querySelectorAll(".hf-fx-node")).toHaveLength(written.length);
   });
 
@@ -548,8 +588,8 @@ describe("FxSection chain", () => {
     });
 
     it("takes the preset back out whole, with its lanes", () => {
-      const onRemoveNodeAutomation = vi.fn();
-      const { host, onChainChange } = mount({ chain: applied(), onRemoveNodeAutomation });
+      const onRemoveNodesAutomation = vi.fn();
+      const { host, onChainChange } = mount({ chain: applied(), onRemoveNodesAutomation });
       click(
         host
           .querySelector("[data-fx-preset='telephone']")
@@ -559,9 +599,16 @@ describe("FxSection chain", () => {
       const next = onChainChange.mock.calls[0]?.[0] as HfAudioFxChain;
       expect(next.nodes.filter((n) => n.fromPreset === "telephone")).toEqual([]);
       expect(next.nodes.map((n) => n.id)).toEqual(["own"]);
-      // An orphaned lane keeps driving a parameter that is no longer in the
-      // graph, and the next effect added inherits it with the id.
-      expect(onRemoveNodeAutomation).toHaveBeenCalled();
+      // ONE call carrying every node id, not one call per node: each write is
+      // computed from the same snapshot and replaces the whole attribute, so a
+      // loop kept only its last write and left the rest as orphans — which the
+      // next effect added would inherit along with the id.
+      expect(onRemoveNodesAutomation).toHaveBeenCalledTimes(1);
+      const [ids, presetId] = onRemoveNodesAutomation.mock.calls[0] ?? [];
+      expect((ids as string[]).length).toBeGreaterThan(1);
+      // And the whole-preset amount lane, which belongs to no node and would
+      // otherwise survive to be resurrected by re-applying the preset.
+      expect(presetId).toBe("telephone");
     });
   });
 
@@ -696,6 +743,61 @@ describe("FxSection chain", () => {
     );
     // The name is still there, under it — which is how it gets learned.
     expect(item?.querySelector(".hf-fx-preset-name")?.textContent).toBe("Telephone");
+  });
+
+  describe("folding a preset shut", () => {
+    const applied = (): HfAudioFxChain => {
+      const preset = getAudioFxPreset("telephone");
+      if (!preset) throw new Error("no telephone preset");
+      return applyAudioFxPreset({ version: 1, nodes: [] }, preset);
+    };
+    const bracket = (host: HTMLElement) => host.querySelector("[data-fx-preset='telephone']");
+
+    it("hides what it contains, and says how much is in there", () => {
+      // A preset is one thing the author added; once it is set, the seven
+      // modules inside are detail. Two presets in a rack was thirteen cards
+      // deep before anything hand-built appeared.
+      const { host } = mount({ chain: applied() });
+      const nodes = bracket(host)?.querySelectorAll(".hf-fx-node").length ?? 0;
+      expect(nodes).toBeGreaterThan(1);
+
+      click(bracket(host)?.querySelector(".hf-fx-preset-run-label"));
+      expect(bracket(host)?.querySelectorAll(".hf-fx-node")).toHaveLength(0);
+      // The count is what says it is still a chain rather than one opaque effect.
+      expect(bracket(host)?.querySelector(".hf-fx-preset-run-count")?.textContent).toBe(
+        String(nodes),
+      );
+    });
+
+    it("arrives open, so nobody has to discover it is a chain", () => {
+      const { host } = mount({ chain: applied() });
+      expect(bracket(host)?.hasAttribute("data-collapsed")).toBe(false);
+      expect(
+        bracket(host)?.querySelector(".hf-fx-preset-run-label")?.getAttribute("aria-expanded"),
+      ).toBe("true");
+    });
+
+    it("keeps the whole-preset controls reachable while folded", () => {
+      // Collapsing hides the detail, not the preset — switching it off or
+      // taking it out has to stay possible without unfolding first.
+      const { host } = mount({ chain: applied() });
+      click(bracket(host)?.querySelector(".hf-fx-preset-run-label"));
+      expect(bracket(host)?.querySelector(".hf-fx-preset-run-toggle")).toBeTruthy();
+      expect(bracket(host)?.querySelector(".hf-fx-preset-run-remove")).toBeTruthy();
+    });
+
+    it("gives each preset its own title treatment", () => {
+      // A preset is a character, and the point of Telephone or Megaphone is
+      // that you know what it sounds like before you play it. Type carries that.
+      const { host } = mount({ chain: applied() });
+      const label = bracket(host)?.querySelector<HTMLElement>(".hf-fx-preset-run-label");
+      const styled = fxPresetStyle("telephone");
+      expect(label?.className).toContain("tracking-[0.3em]");
+      expect(label?.style.color).toBeTruthy();
+      // And it differs from another preset's, or it is not a treatment.
+      expect(styled.type).not.toBe(fxPresetStyle("megaphone").type);
+      expect(styled.color).not.toBe(fxPresetStyle("megaphone").color);
+    });
   });
 
   describe("auditioning while the transport is paused", () => {
