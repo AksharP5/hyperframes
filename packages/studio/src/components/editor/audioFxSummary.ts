@@ -7,11 +7,11 @@
  * grouping exists to prevent — that they are seven things to manage.
  */
 
-import { parseAudioFxChain } from "@hyperframes/core/audio-fx";
+import { HF_AUDIO_FX_DATA_KEY, parseAudioFxChain } from "@hyperframes/core/audio-fx";
 import type { DomEditSelection } from "./domEditingTypes";
 
 export function audioFxSummary(element: DomEditSelection): string {
-  const raw = element.dataAttributes?.["fx-chain"];
+  const raw = element.dataAttributes?.[HF_AUDIO_FX_DATA_KEY];
   const carveAttr = element.dataAttributes?.["fx-carve"];
   let handBuilt = 0;
   let carveNodes = 0;

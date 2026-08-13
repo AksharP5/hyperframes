@@ -216,6 +216,39 @@ describe("buildFxChain", () => {
     expect(c.created.find((x) => x.kind === "biquad")!.frequency.value).toBe(2000);
   });
 
+  it("lines new values up against the built nodes, skipping a bypassed one", () => {
+    // A bypassed node is not in the graph, so the update has to walk the
+    // ENABLED nodes to stay aligned with what was built. Walking `next.nodes`
+    // instead shifts everything after the bypass by one and pushes each node's
+    // parameters into its neighbour — and the shape is unchanged either way,
+    // so nothing forces a rebuild that would hide it.
+    const c = ctx();
+    const withBypass = (frequency: number): HfAudioFxChain => ({
+      version: 1,
+      nodes: [
+        {
+          type: "highpass",
+          enabled: true,
+          params: { ...defaultAudioFxParams("highpass"), frequency: 100 },
+        },
+        { type: "peaking", enabled: false, params: defaultAudioFxParams("peaking") },
+        {
+          type: "lowpass",
+          enabled: true,
+          params: { ...defaultAudioFxParams("lowpass"), frequency },
+        },
+      ],
+    });
+    const h = buildFxChain(asCtx(c), withBypass(8000));
+    const biquads = c.created.filter((n) => n.kind === "biquad");
+    expect(biquads).toHaveLength(2);
+
+    expect(h.update(withBypass(3000))).toBe(true);
+    // The lowpass took the new cutoff; the highpass was left where it was.
+    expect(biquads[0]!.frequency.value).toBe(100);
+    expect(biquads[1]!.frequency.value).toBe(3000);
+  });
+
   it("reports that a rebuild is needed when the chain shape changes", () => {
     const c = ctx();
     const h = buildFxChain(asCtx(c), chain("peaking"));

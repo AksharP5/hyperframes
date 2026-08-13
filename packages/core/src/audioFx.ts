@@ -16,6 +16,16 @@
 
 export const HF_AUDIO_FX_ATTR = "data-fx-chain";
 
+/**
+ * The same attribute as a `dataset` / `dataAttributes` key — the `data-` prefix
+ * is not part of that spelling.
+ *
+ * Derived rather than restated: the studio writes through
+ * `HF_AUDIO_FX_ATTR` and reads through the key, so a hardcoded `"fx-chain"`
+ * on the read side is a rename waiting to half-land.
+ */
+export const HF_AUDIO_FX_DATA_KEY = HF_AUDIO_FX_ATTR.slice("data-".length);
+
 /** Chain files are versioned; a reader must refuse a version it doesn't know. */
 export const HF_AUDIO_FX_CHAIN_VERSION = 1;
 

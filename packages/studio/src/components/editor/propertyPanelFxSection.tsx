@@ -795,7 +795,13 @@ export function FxSection({
           handBuilt.map(({ node, i }) => {
             return (
               <FxNodeRow
-                key={`${node.type}-${i}`}
+                // Keyed by id, as the carve module's list above already is.
+                // On `${type}-${index}` two effects of the same type keep their
+                // keys through a reorder, so React reuses each row where it
+                // stands — and the controls hold real state (a half-typed
+                // number, an in-flight drag), which then lands on whichever
+                // effect moved into that slot.
+                key={node.id ?? `${node.type}-${i}`}
                 node={node}
                 index={i}
                 automatedTargets={automatedTargets}

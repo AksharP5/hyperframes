@@ -8,6 +8,7 @@
 
 import {
   HF_AUDIO_AUTOMATION_ATTR,
+  HF_AUDIO_AUTOMATION_DATA_KEY,
   parseAutomation,
   resolveAutomation,
   resolveAutomationRange,
@@ -77,4 +78,4 @@ export function automationAttrValue(automation: HfAutomation): string {
   return automation.lanes.length > 0 ? serializeAutomation(automation) : "";
 }
 
-export { HF_AUDIO_AUTOMATION_ATTR, resolveAutomationRange };
+export { HF_AUDIO_AUTOMATION_ATTR, HF_AUDIO_AUTOMATION_DATA_KEY, resolveAutomationRange };

@@ -3,6 +3,8 @@ import {
   applyCurve,
   shapeProgress,
   fxAutomationTarget,
+  HF_AUDIO_AUTOMATION_ATTR,
+  HF_AUDIO_AUTOMATION_DATA_KEY,
   isConstantLane,
   parseAutomation,
   parseAutomationTarget,
@@ -28,6 +30,14 @@ const chain: HfAudioFxChain = {
 const lane = (points: HfAutomationLane["points"], target = "volume"): HfAutomationLane => ({
   target,
   points,
+});
+
+describe("the automation attribute's two spellings", () => {
+  it("names the same attribute either way", () => {
+    // Same split as the FX chain: written as an attribute, read as a dataset
+    // key. Derived, so a rename cannot half-land.
+    expect(HF_AUDIO_AUTOMATION_ATTR).toBe(`data-${HF_AUDIO_AUTOMATION_DATA_KEY}`);
+  });
 });
 
 describe("targets", () => {

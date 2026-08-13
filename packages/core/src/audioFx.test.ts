@@ -5,7 +5,9 @@ import {
   enabledAudioFxNodes,
   getAudioFxDef,
   HF_AUDIO_FX,
+  HF_AUDIO_FX_ATTR,
   HF_AUDIO_FX_CHAIN_VERSION,
+  HF_AUDIO_FX_DATA_KEY,
   HF_AUDIO_FX_IDS,
   normalizeAudioFxParams,
   parseAudioFxChain,
@@ -44,6 +46,15 @@ describe("effect registry", () => {
     for (const def of HF_AUDIO_FX) {
       expect(def.params.length, `${def.id} exposes no parameters`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("the chain attribute's two spellings", () => {
+  it("names the same attribute either way", () => {
+    // The studio WRITES through the attribute and READS through the dataset
+    // key, so the read side used to carry its own `"fx-chain"` literal and a
+    // rename would only half-land. Derived now; this is what keeps it derived.
+    expect(HF_AUDIO_FX_ATTR).toBe(`data-${HF_AUDIO_FX_DATA_KEY}`);
   });
 });
 

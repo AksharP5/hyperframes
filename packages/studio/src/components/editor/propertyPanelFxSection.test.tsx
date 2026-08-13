@@ -165,6 +165,55 @@ describe("FxSection chain", () => {
     expect(next.nodes.map((n) => n.type)).toEqual(["reverb", "peaking"]);
   });
 
+  it("keeps a half-typed value with its own effect across a reorder", () => {
+    // Rows used to be keyed `${type}-${index}`, so two effects of the same type
+    // kept their keys through a reorder and React reused each row where it
+    // stood. The controls hold real state — a number field mid-edit is held as
+    // text — so the buffer stayed at the position and landed on whichever
+    // effect moved into it.
+    const peaking = (id: string, frequency: number) => ({
+      type: "peaking",
+      id,
+      enabled: true,
+      params: { ...defaultAudioFxParams("peaking"), frequency },
+    });
+    const a = peaking("pa", 400);
+    const b = peaking("pb", 1600);
+    const chainOfNodes = (...nodes: unknown[]): HfAudioFxChain =>
+      ({ version: 1, nodes }) as HfAudioFxChain;
+
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const render = (chain: HfAudioFxChain) =>
+      act(() => {
+        root.render(
+          <FxSection
+            chain={chain}
+            onChainChange={vi.fn()}
+            onChainPreview={vi.fn()}
+            carve={null}
+            onCarveChange={vi.fn()}
+            sourceOptions={[]}
+          />,
+        );
+      });
+
+    render(chainOfNodes(a, b));
+    // Only the first card is open, which is the one being edited.
+    const openFrequency = (): HTMLInputElement =>
+      host.querySelector<HTMLInputElement>(".hf-fx-node .hf-fx-number")!;
+
+    expect(openFrequency().value).toBe("400");
+    typeInto(openFrequency(), "123");
+    expect(openFrequency().value).toBe("123");
+
+    // The author moves that effect down; the other one takes the open slot.
+    render(chainOfNodes(b, a));
+
+    expect(openFrequency().value).toBe("1600");
+  });
+
   it("cannot move the ends past themselves", () => {
     const { host } = mount({ chain: chainOf("peaking", "reverb") });
     const ups = host.querySelectorAll('.hf-fx-move[title="Move up"]');
