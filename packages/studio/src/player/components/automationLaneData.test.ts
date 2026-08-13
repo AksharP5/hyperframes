@@ -4,6 +4,8 @@ import {
   automationLaneLabel,
   automationLaneLabelParts,
   elementAutomation,
+  groupAutomationLanes,
+  laneGroupKey,
   elementFxChain,
 } from "./automationLaneData";
 import type { TimelineElement } from "../store/timelineElement";
@@ -157,5 +159,112 @@ describe("automationLaneData", () => {
       // Volume is one word with no effect behind it, so there is no second line.
       expect(automationLaneLabelParts("volume", chain)).toEqual({ name: "Volume", param: "" });
     });
+  });
+});
+
+describe("laneGroupKey", () => {
+  // Two clips, each with their OWN chain, both automating a 1 kHz peaking Q. Node
+  // ids are minted per chain, so the ids collide across clips while meaning
+  // different things — and match across clips while meaning the same thing.
+  const clipA = parseChain({
+    version: 1,
+    nodes: [
+      { type: "lowpass", id: "n1", params: { frequency: 8000, q: 0.7, poles: "2" } },
+      { type: "peaking", id: "n2", params: { frequency: 1000, gain: -3, q: 1.4 } },
+    ],
+  });
+  const clipB = parseChain({
+    version: 1,
+    nodes: [{ type: "peaking", id: "n1", params: { frequency: 1000, gain: -6, q: 1.4 } }],
+  });
+
+  it("groups the same property of the same effect across clips", () => {
+    // The whole point: one row for "Peaking EQ 1 kHz · Q", whichever clip it is on.
+    expect(laneGroupKey("fx.n2.q", clipA)).toBe(laneGroupKey("fx.n1.q", clipB));
+  });
+
+  it("does not group by lane target, which collides across chains", () => {
+    // `fx.n1.q` is a low-pass on one clip and a peaking EQ on the other. Grouping by
+    // target would put those two envelopes in one row.
+    expect(laneGroupKey("fx.n1.q", clipA)).not.toBe(laneGroupKey("fx.n1.q", clipB));
+  });
+
+  it("separates parameters, and the same parameter on different bands", () => {
+    expect(laneGroupKey("fx.n2.q", clipA)).not.toBe(laneGroupKey("fx.n2.gain", clipA));
+    const twoBands = parseChain({
+      version: 1,
+      nodes: [
+        { type: "peaking", id: "n1", params: { frequency: 400, gain: -6, q: 1.4 } },
+        { type: "peaking", id: "n2", params: { frequency: 1600, gain: -6, q: 1.4 } },
+      ],
+    });
+    expect(laneGroupKey("fx.n1.gain", twoBands)).not.toBe(laneGroupKey("fx.n2.gain", twoBands));
+  });
+
+  it("groups volume with volume, and nothing with an unresolvable target", () => {
+    expect(laneGroupKey("volume", clipA)).toBe(laneGroupKey("volume", clipB));
+    expect(laneGroupKey("fx.gone.gain", clipA)).toBeNull();
+  });
+});
+
+describe("groupAutomationLanes", () => {
+  const chainOf = (nodes: unknown[]) => JSON.stringify({ version: 1, nodes });
+  const lanesOf = (...targets: string[]) =>
+    JSON.stringify({
+      version: 1,
+      lanes: targets.map((target) => ({ target, points: [{ t: 0, v: 1 }] })),
+    });
+
+  // Two narration slices sharing a row. Each mints its own chain, so the node ids
+  // collide across them while meaning different things.
+  const narration1 = el({
+    id: "narration-1",
+    key: "narration-1",
+    fxChain: chainOf([
+      { type: "lowpass", id: "n1", params: { frequency: 8000, q: 0.7, poles: "2" } },
+      { type: "peaking", id: "n2", params: { frequency: 1000, gain: -3, q: 1.4 } },
+    ]),
+    automation: lanesOf("fx.n2.q"),
+  });
+  const narration2 = el({
+    id: "narration-2",
+    key: "narration-2",
+    fxChain: chainOf([
+      { type: "peaking", id: "n1", params: { frequency: 1000, gain: -6, q: 1.4 } },
+    ]),
+    automation: lanesOf("fx.n1.q", "volume"),
+  });
+
+  it("puts the same property of the same effect in one row, one entry per clip", () => {
+    const groups = groupAutomationLanes([narration1, narration2]);
+    expect(groups.map((g) => g.key)).toEqual(["Peaking EQ 1 kHz · Q", "Volume"]);
+    expect(groups[0]?.entries.map((e) => e.element.id)).toEqual(["narration-1", "narration-2"]);
+    expect(groups[0]).toMatchObject({ name: "Peaking EQ 1 kHz", param: "Q" });
+  });
+
+  it("leaves a clip out of a row it does not automate", () => {
+    // The empty stretch is the point: narration-1 has no volume envelope, so it
+    // contributes nothing to that row rather than a flat line claiming one exists.
+    const groups = groupAutomationLanes([narration1, narration2]);
+    expect(groups[1]?.entries.map((e) => e.element.id)).toEqual(["narration-2"]);
+  });
+
+  it("does not merge lanes whose targets collide across chains", () => {
+    // `fx.n1.*` is a low-pass on one clip and a peaking EQ on the other.
+    const lowpass = el({ ...narration1, automation: lanesOf("fx.n1.q") });
+    const peaking = el({ ...narration2, automation: lanesOf("fx.n1.q") });
+    const groups = groupAutomationLanes([lowpass, peaking]);
+    expect(groups.map((g) => g.key)).toEqual(["Low-pass 8 kHz · Q", "Peaking EQ 1 kHz · Q"]);
+    expect(groups.map((g) => g.entries.length)).toEqual([1, 1]);
+  });
+
+  it("ignores clips that are not audio, the way the reserved height does", () => {
+    const video = el({ id: "titles", key: "titles", tag: "div", automation: lanesOf("volume") });
+    expect(groupAutomationLanes([video])).toEqual([]);
+  });
+
+  it("skips a target that does not resolve against its clip's chain", () => {
+    const stale = el({ ...narration2, automation: lanesOf("fx.gone.q", "volume") });
+    expect(groupAutomationLanes([stale]).map((g) => g.key)).toEqual(["Volume"]);
   });
 });

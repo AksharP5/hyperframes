@@ -62,6 +62,8 @@ const OPACITY = animation("opacity-tween", "visual", [
 
 interface RenderHeaderOptions {
   keyframeClip?: TimelineElement;
+  /** Every clip on the track; defaults to just the keyframe clip. */
+  trackElements?: readonly TimelineElement[];
   animations?: GsapAnimation[];
   clipCount?: number;
   currentTime?: number;
@@ -92,6 +94,7 @@ function renderHeader(options: RenderHeaderOptions = {}): {
           lanesId="timeline-lanes-track-0"
           contentOrigin={LABEL_COL_W}
           keyframeClip={next.keyframeClip ?? ELEMENT}
+          trackElements={next.trackElements ?? [next.keyframeClip ?? ELEMENT]}
           clipCount={next.clipCount ?? 1}
           isExpanded={next.expanded !== false}
           animations={next.animations ?? [POSITION, OPACITY]}
@@ -459,9 +462,11 @@ describe("TimelineTrackHeader", () => {
     it("names every envelope in the label column", () => {
       const { host, root } = renderHeader({ keyframeClip: BED, animations: [] });
       const rows = Array.from(host.querySelectorAll<HTMLElement>("[data-automation-lane-label]"));
+      // The attribute is the ROW's identity, which is the label: a row can hold
+      // several clips' envelopes, whose lane targets differ from each other.
       expect(rows.map((r) => r.getAttribute("data-automation-lane-label"))).toEqual([
-        "fx.n1.gain",
-        "volume",
+        "Peaking EQ 1.6 kHz · Gain",
+        "Volume",
       ]);
       // A band is named by its frequency: with several of them, "Peaking EQ" says
       // nothing about which is which. Bands sit above the level lanes.
@@ -526,6 +531,98 @@ describe("TimelineTrackHeader", () => {
       const base = getTimelineLaneTop(1);
       expect(tops).toEqual([`${base}px`, `${base + AUTOMATION_LANE_H}px`]);
       act(() => root.unmount());
+    });
+  });
+
+  /**
+   * Several clips on one row share a lane row per property, so the label column
+   * has to name the row for the property and the header for the track — not for
+   * whichever clip happens to be selected.
+   */
+  describe("a track several clips share", () => {
+    const clip = (id: string, over: Partial<TimelineElement>): TimelineElement =>
+      ({
+        id,
+        key: id,
+        label: id,
+        tag: "audio",
+        start: 0,
+        duration: 4,
+        track: 0,
+        ...over,
+      }) as TimelineElement;
+    const PEAKING = (gain: number) =>
+      JSON.stringify({
+        version: 1,
+        nodes: [{ type: "peaking", id: "n1", params: { frequency: 1000, gain, q: 1.4 } }],
+      });
+    const NARRATION_1 = clip("narration-1", {
+      fxChain: PEAKING(-3),
+      automation: JSON.stringify({
+        version: 1,
+        lanes: [{ target: "fx.n1.gain", points: [{ t: 0, v: -3 }] }],
+      }),
+    });
+    const NARRATION_2 = clip("narration-2", {
+      start: 4,
+      fxChain: PEAKING(-6),
+      automation: JSON.stringify({
+        version: 1,
+        lanes: [
+          { target: "fx.n1.gain", points: [{ t: 0, v: -6 }] },
+          { target: "volume", points: [{ t: 0, v: 1 }] },
+        ],
+      }),
+    });
+    const ROW = { trackElements: [NARRATION_1, NARRATION_2], clipCount: 2, animations: [] };
+
+    it("lists every clip's envelopes, whichever clip is selected", () => {
+      const labels = (host: HTMLElement) =>
+        Array.from(host.querySelectorAll("[data-automation-lane-label]")).map((r) =>
+          r.getAttribute("data-automation-lane-label"),
+        );
+      const first = renderHeader({ ...ROW, keyframeClip: NARRATION_1 });
+      const second = renderHeader({ ...ROW, keyframeClip: NARRATION_2 });
+      // narration-1 has no volume envelope, but the row is still there — it is
+      // the track's, and it was its sibling's before the selection moved.
+      expect(labels(first.host)).toEqual(["Peaking EQ 1 kHz · Gain", "Volume"]);
+      expect(labels(second.host)).toEqual(labels(first.host));
+      act(() => first.root.unmount());
+      act(() => second.root.unmount());
+    });
+
+    it("removes only from the clip it is showing, and offers nothing where it has no lane", () => {
+      // A write can only reach the selected clip, so a button on a row that clip
+      // is absent from could only remove nothing, or somebody else's envelope.
+      const onRemoveAutomationLane = vi.fn();
+      const { host, root } = renderHeader({
+        ...ROW,
+        keyframeClip: NARRATION_1,
+        onRemoveAutomationLane,
+      });
+      expect(
+        Array.from(host.querySelectorAll('button[aria-label$="automation"]')).map((b) =>
+          b.getAttribute("aria-label"),
+        ),
+      ).toEqual(["Remove Peaking EQ 1 kHz · Gain automation"]);
+      act(() => host.querySelector<HTMLButtonElement>('button[aria-label$="automation"]')?.click());
+      expect(onRemoveAutomationLane).toHaveBeenCalledWith("fx.n1.gain");
+      act(() => root.unmount());
+    });
+
+    it("names the header for the track, not for one of the clips on it", () => {
+      const view = renderHeader({ ...ROW, keyframeClip: NARRATION_2 });
+      expect(view.host.textContent).not.toContain("narration-2");
+      expect(view.host.querySelector('[title="Track 1"]')?.textContent).toBe("Track 1");
+      // Alone on the track it is still named for itself.
+      view.rerender({
+        ...ROW,
+        keyframeClip: NARRATION_2,
+        trackElements: [NARRATION_2],
+        clipCount: 1,
+      });
+      expect(view.host.querySelector('[title="narration-2"]')?.textContent).toBe("narration-2");
+      act(() => view.root.unmount());
     });
   });
 });

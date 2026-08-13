@@ -4,13 +4,7 @@ import { Music } from "../../icons/SystemIcons";
 import type { TimelineElement } from "../store/playerStore";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
 import { getTimelinePropertyLanes } from "./TimelinePropertyLanes";
-import { automationLaneCountOf } from "./useTimelineTrackLayout";
-import {
-  automationLaneLabel,
-  automationLaneLabelParts,
-  elementAutomationLanes,
-  elementFxChain,
-} from "./automationLaneData";
+import { groupAutomationLanes } from "./automationLaneData";
 import { AUTOMATION_LANE_H } from "./automationLaneHeight";
 import { clipTimingStart } from "../../hooks/gsapShared";
 import { LayerDisclosureRow } from "./LayerDisclosureRow";
@@ -25,32 +19,6 @@ import {
 import { valueReadout } from "./trackHeaderLaneValues";
 import { trackDisplaySuffix } from "./timelineTrackDisplay";
 import { timelineLogicalRowCellId, timelinePropertyRowId } from "./timelineNavigationIdentity";
-
-/** One envelope's label-column row content, resolved against the FX chain. */
-interface AutomationRowInfo {
-  target: string;
-  label: string;
-  name: string;
-  param: string;
-}
-
-/**
- * Each envelope's name, resolved against the chain the same way the lane
- * resolves its axis — a band is named by its frequency, not by its effect. The
- * lane list is already in drawing order, which is the order these rows have to
- * follow: a name beside the wrong envelope is worse than an awkward order.
- */
-function resolveAutomationRows(keyframeClip: TimelineElement | null): AutomationRowInfo[] {
-  if (!keyframeClip) return [];
-  const chain = elementFxChain(keyframeClip);
-  return elementAutomationLanes(keyframeClip).flatMap((lane) => {
-    const parts = automationLaneLabelParts(lane.target, chain);
-    const label = automationLaneLabel(lane.target, chain);
-    return parts && label
-      ? [{ target: lane.target, label, name: parts.name, param: parts.param }]
-      : [];
-  });
-}
 
 interface TimelineTrackHeaderProps {
   /** The track's real key: a FRACTIONAL z-order sort value. Routes callbacks;
@@ -69,6 +37,9 @@ interface TimelineTrackHeaderProps {
   /** The track's active keyframe clip (selected, else primary) — the one whose
    *  disclosure + property rows this header shows, whether expanded or not. */
   keyframeClip: TimelineElement | null;
+  /** Every clip on this track. Automation rows are the track's, unioned over
+   *  these, so they stop changing with the selection. */
+  trackElements: readonly TimelineElement[];
   /** Clips on this track, so the header can say how many the row holds. */
   clipCount: number;
   isExpanded: boolean;
@@ -347,8 +318,11 @@ function AutomationLaneHeaderRow({
   columnWidth,
   onRemove,
 }: {
-  target: string;
-  /** The whole thing on one line, for the tooltip and the remove button's name. */
+  /** The lane the ACTIVE clip draws in this row, or null when it draws none —
+   *  the row belongs to the property, and a clip may be absent from it. */
+  target: string | null;
+  /** The whole thing on one line: the row's identity, its tooltip, and the
+   *  remove button's name. */
   label: string;
   /** What the effect is — "Peaking EQ 1.6 kHz". */
   name: string;
@@ -362,7 +336,7 @@ function AutomationLaneHeaderRow({
 }) {
   return (
     <div
-      data-automation-lane-label={target}
+      data-automation-lane-label={label}
       data-timeline-lane-top={top}
       className="absolute left-0 flex items-center gap-1 overflow-hidden px-1.5 text-[10px] text-white/65"
       style={{
@@ -401,8 +375,13 @@ function AutomationLaneHeaderRow({
       {/* Beside the name it labels, because that is the only place an envelope is
           named at all: a carve writes its own lanes, and the FX panel's automate
           toggle can only reach a parameter it still lists — so without this an
-          envelope could be created and never removed. */}
-      {onRemove && (
+          envelope could be created and never removed.
+
+          Only for the clip the header is showing, since that is the only one a
+          write can reach: a shared row's other envelopes belong to clips that
+          are not selected, and a button that silently removed one of them (or
+          none) would be worse than no button. */}
+      {onRemove && target !== null && (
         <button
           type="button"
           aria-label={`Remove ${label} automation`}
@@ -431,6 +410,7 @@ export function TimelineTrackHeader({
   lanesId,
   contentOrigin,
   keyframeClip,
+  trackElements,
   clipCount,
   isExpanded,
   animations,
@@ -456,11 +436,23 @@ export function TimelineTrackHeader({
   // Label mode = keyframe view; the label column stays LABEL_COL_W (Timeline.tsx
   // owns the gutter past it, so a 0% diamond isn't clipped by this panel).
   const showTrackLabel = contentOrigin >= LABEL_COL_W;
+  // One row per automated property across the whole track, in the order the
+  // canvas draws them — a name beside the wrong envelope is worse than an awkward
+  // order. `target` is the ACTIVE clip's lane in that row, which is the only one
+  // the remove button can write to; null when the row belongs to its siblings.
+  const activeKey = keyframeClip ? (keyframeClip.key ?? keyframeClip.id) : null;
+  const automationRows = groupAutomationLanes(trackElements).map((group) => ({
+    key: group.key,
+    label: group.key,
+    name: group.name,
+    param: group.param,
+    target:
+      group.entries.find((entry) => (entry.element.key ?? entry.element.id) === activeKey)?.lane
+        .target ?? null,
+  }));
   // Automation counts as something to disclose: gating the caret on tweens alone
   // left an audio clip's envelopes unreachable, since the track could not expand.
-  const disclosable =
-    lanes.length > 0 || (keyframeClip ? automationLaneCountOf(keyframeClip) : 0) > 0;
-  const automationRows = resolveAutomationRows(keyframeClip);
+  const disclosable = lanes.length > 0 || automationRows.length > 0;
   const isKeyframeLayer = !!keyframeClip && disclosable;
 
   return (
@@ -494,7 +486,15 @@ export function TimelineTrackHeader({
       ) : (
         <>
           <LayerDisclosureRow
-            keyframeClip={keyframeClip}
+            name={
+              // A row holding several clips is named for the track, not for
+              // whichever of them is selected — the lanes below it are the
+              // track's, shared per property, and naming it "Narration 2" read
+              // as if they all belonged to that one slice.
+              clipCount > 1
+                ? `Track${trackDisplaySuffix(trackDisplayNumber)}`
+                : (keyframeClip.label ?? keyframeClip.domId ?? keyframeClip.id)
+            }
             clipCount={clipCount}
             isExpanded={isExpanded}
             gutterBackground={theme.gutterBackground}
@@ -547,7 +547,7 @@ export function TimelineTrackHeader({
           {isExpanded &&
             automationRows.map((row, index) => (
               <AutomationLaneHeaderRow
-                key={row.target}
+                key={row.key}
                 target={row.target}
                 label={row.label}
                 name={row.name}

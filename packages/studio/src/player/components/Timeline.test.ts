@@ -37,6 +37,7 @@ import {
   getTimelineLaneTop,
   createTimelineRowGeometry,
 } from "./timelineLayout";
+import { AUTOMATION_LANE_H } from "./automationLaneHeight";
 import { formatTime } from "../lib/time";
 import { usePlayerStore } from "../store/playerStore";
 import { TimelineEditProvider } from "../../contexts/TimelineEditContext";
@@ -575,6 +576,42 @@ describe("Timeline provider boundary", () => {
     expect(expandButton).not.toBeNull();
     act(() => expandButton?.click());
     expectTrackExpansion(row, ["clip-1"], TRACK_H + 2 * LANE_H);
+    act(() => root.unmount());
+  });
+
+  // The caret belongs to the row, not to whichever clip on it is selected: the
+  // automation lanes below it are the track's, shared per property. Toggling one
+  // clip left the row's state depending on the selection, and a collapse that
+  // only dropped the active clip left the row stuck open.
+  it("expands and collapses every clip on a shared track together", () => {
+    const host = createSizedTimelineHost(720);
+    const automation = JSON.stringify({
+      version: 1,
+      lanes: [{ target: "volume", points: [{ t: 0, v: 1 }] }],
+    });
+    usePlayerStore.setState({
+      duration: 8,
+      timelineReady: true,
+      elements: [
+        { id: "narration-1", tag: "audio", start: 0, duration: 4, track: 0, automation },
+        { id: "narration-2", tag: "audio", start: 4, duration: 4, track: 0, automation },
+      ],
+    });
+    const root = createRoot(host);
+    act(() => root.render(React.createElement(Timeline)));
+
+    const row = host.querySelector<HTMLElement>('[data-el-id="narration-1"]')?.parentElement
+      ?.parentElement;
+    // A row of several clips is named for the track, so the caret is too.
+    const caret = () => host.querySelector<HTMLButtonElement>('button[aria-label$=" keyframes"]');
+    expect(caret()?.getAttribute("aria-label")).toBe("Expand Track 1 keyframes");
+
+    act(() => caret()?.click());
+    // One shared volume row, and BOTH clips hold it open.
+    expectTrackExpansion(row, ["narration-1", "narration-2"], TRACK_H + AUTOMATION_LANE_H);
+
+    act(() => caret()?.click());
+    expectTrackExpansion(row, [], TRACK_H);
     act(() => root.unmount());
   });
 

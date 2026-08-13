@@ -6,6 +6,7 @@ import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import { afterEach, describe, expect, it } from "vitest";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import { LANE_H, TRACK_H } from "./timelineLayout";
+import { AUTOMATION_LANE_H } from "./automationLaneHeight";
 import { getTimelinePropertyLanes } from "./TimelinePropertyLanes";
 import { resolveTrackKeyframeClip, useTimelineTrackLayout } from "./useTimelineTrackLayout";
 
@@ -100,6 +101,61 @@ const audioClip = (id: string, over: Partial<TimelineElement> = {}): TimelineEle
   duration: 10,
   track: 10,
   ...over,
+});
+
+/**
+ * Clips sharing a row share a lane row per property, so the height they reserve
+ * is the track's grouped count — and the row is open when ANY of them is
+ * expanded, or clicking a sibling collapsed it.
+ */
+describe("a track several clips share", () => {
+  const peaking = (gain: number) =>
+    JSON.stringify({
+      version: 1,
+      nodes: [{ type: "peaking", id: "n1", params: { frequency: 1000, gain, q: 1.4 } }],
+    });
+  const lanes = (...targets: string[]) =>
+    JSON.stringify({
+      version: 1,
+      lanes: targets.map((target) => ({ target, points: [{ t: 0, v: 1 }] })),
+    });
+  const narration1 = audioClip("narration-1", {
+    fxChain: peaking(-3),
+    automation: lanes("fx.n1.gain"),
+  });
+  const narration2 = audioClip("narration-2", {
+    start: 10,
+    fxChain: peaking(-6),
+    automation: lanes("fx.n1.gain", "volume"),
+  });
+
+  /** Reserved height for the row, with only narration-1 ever expanded. */
+  function rowHeight(selectedElementId: string | null): number {
+    usePlayerStore.setState({ expandedClipIds: new Set(["narration-1"]) });
+    let height = 0;
+    function Probe() {
+      height =
+        useTimelineTrackLayout([narration1, narration2], new Map(), selectedElementId, new Set())
+          .rowHeights[0] ?? 0;
+      return null;
+    }
+    const root = createRoot(document.createElement("div"));
+    act(() => root.render(React.createElement(Probe)));
+    act(() => root.unmount());
+    return height;
+  }
+
+  it("reserves one row per property, not per clip's lane", () => {
+    // Two properties across the two clips — a shared 1 kHz peaking gain and a
+    // volume envelope on one of them — so two rows, not three.
+    expect(rowHeight("narration-1")).toBe(TRACK_H + 2 * AUTOMATION_LANE_H);
+  });
+
+  it("stays open at the same height when the selection moves to a sibling", () => {
+    // Expansion is stored per clip but reads as the row's: asking only about the
+    // active clip collapsed the row the moment another was clicked.
+    expect(rowHeight("narration-2")).toBe(rowHeight("narration-1"));
+  });
 });
 
 describe("resolveTrackKeyframeClip", () => {
