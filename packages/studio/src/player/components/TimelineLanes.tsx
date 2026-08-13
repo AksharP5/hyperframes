@@ -6,7 +6,7 @@ import { TimelinePropertyLanes } from "./TimelinePropertyLanes";
 import { TimelineAutomationLaneSlot } from "./TimelineAutomationLane";
 import { useAutomationLanes } from "./useAutomationLanes";
 import { TimelineTrackHeader } from "./TimelineTrackHeader";
-import { resolveTrackKeyframeClip } from "./useTimelineTrackLayout";
+import { resolveTrackKeyframeClip, trackShowsBeatStrip } from "./useTimelineTrackLayout";
 import { trackDisplayNumber, trackDisplaySuffix } from "./timelineTrackDisplay";
 import { clipTimingStart } from "../../hooks/gsapShared";
 import { getTimelineEditCapabilities } from "./timelineEditing";
@@ -187,12 +187,13 @@ export function TimelineLanes({
             draggedClip?.started === true && !trackOrder.includes(trackNum) && els.length === 0;
           // All lanes use the same uniform color — no alternating stripes.
           const rowBackground = theme.rowBackground;
-          // Keep diamonds below the beat strip on the active/music track.
-          const beatStripOnTrack =
-            (beatAnalysis?.beatTimes?.length ?? 0) >= 2 &&
-            (selectedElementId
-              ? els.some((e) => (e.key ?? e.id) === selectedElementId)
-              : els.some(isMusicTrack));
+          // The beat-dot strip occupies the top of this track's lane (active track,
+          // or the music track when nothing is selected). When shown, keyframe
+          // diamonds shrink + drop to the bottom half so they don't collide with it.
+          const beatStripOnTrack = trackShowsBeatStrip(els, beatAnalysis?.beatTimes, {
+            selectedElementId,
+            isMusicTrack,
+          });
           const isTrackHidden = els.length > 0 && els.every((element) => element.hidden === true);
           const isAudioTrack = els.length > 0 && els.some(isAudioTimelineElement);
           // Only the selected/most-keyframed clip owns expanded lanes on a shared track.
@@ -482,6 +483,7 @@ export function TimelineLanes({
                               laneCount={laneCounts.get(elementKey) ?? 0}
                               accentColor={clipStyle.accent}
                               currentTime={currentTime}
+                              beatTimes={beatAnalysis?.beatTimes}
                             />
                           ) : null
                         }
