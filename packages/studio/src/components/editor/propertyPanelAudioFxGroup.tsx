@@ -7,7 +7,7 @@
  * budget, and self-contained enough to test on its own.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   defaultAudioFxParams,
   HF_AUDIO_FX_ATTR,
@@ -20,8 +20,13 @@ import {
 import {
   analyseCarveBands,
   analyseCarveDuck,
+  analyseCarveDynamics,
   carveBandsToChain,
   carveProfile,
+  classifyAudioName,
+  clipsOverlap,
+  DEFAULT_CARVE,
+  mixCarveSources,
   HF_AUDIO_CARVE_ATTR,
   normalizeCarveSettings,
   type HfCarveSettings,
@@ -30,6 +35,7 @@ import {
   fxAutomationTarget,
   sampleAutomationLane,
   type HfAutomation,
+  type HfAutomationLane,
 } from "@hyperframes/core/audio-automation";
 import {
   automatedTargetsOf,
@@ -49,6 +55,16 @@ import { useLivePlayheadTime } from "../../hooks/useLivePlayheadTime";
  */
 const DECODE_SAMPLE_RATE = 48000;
 import { FxSection, type AudioTrackOption } from "./propertyPanelFxSection.js";
+
+/** A clip's span, with an unwritten duration left unbounded rather than zero. */
+function spanOf(
+  start: string | null | undefined,
+  duration: string | null | undefined,
+): { start: number; duration: number | null } {
+  const n =
+    duration === null || duration === undefined || duration === "" ? Number.NaN : Number(duration);
+  return { start: clipStart(start), duration: Number.isFinite(n) ? n : null };
+}
 
 /** Where a clip starts on the timeline, in seconds. */
 function clipStart(value: string | null | undefined): number {
@@ -183,7 +199,10 @@ export function AudioFxGroup({
    * commit, which does not exist yet.
    */
   const setCarve = async (next: HfCarveSettings | null): Promise<void> => {
-    if (!next) {
+    // Envelopes the carve wrote outlive it otherwise, and an automated gain
+    // ignores the panel's own depth — so switching dynamic off would leave the
+    // filters still following the voice with nothing saying they do.
+    if (!next?.enabled) {
       const carriedOver = withoutCarveLanes(automation, chain);
       if (carriedOver.lanes.length !== automation.lanes.length) {
         await onSetAttributeQuiet(
@@ -192,7 +211,7 @@ export function AudioFxGroup({
         );
       }
     }
-    if (!next) {
+    if (!next?.enabled) {
       const kept = chain.nodes.filter((n) => !n.fromCarve);
       if (kept.length !== chain.nodes.length) {
         await onSetAttributeQuiet(
@@ -210,9 +229,14 @@ export function AudioFxGroup({
     // is already there. A carve with no source yet has nothing to analyse.
     const changed =
       next &&
+      next.enabled &&
       next.sources.length > 0 &&
       (!carve ||
-        next.sources.join(" ") !== carve.sources.join(" ") ||
+        // Switching it back on is a change like any other: the filters went with
+        // the switch, so there is nothing left to hear until they are rebuilt.
+        // Without this, On restored the setting and left the bed uncarved.
+        !carve.enabled ||
+        next.sources.join("\u0000") !== carve.sources.join("\u0000") ||
         next.strength !== carve.strength);
     if (next && changed) await analyse(next);
   };
@@ -252,7 +276,7 @@ export function AudioFxGroup({
       if (other.id === element.id) continue;
       try {
         const raw = other.getAttribute(HF_AUDIO_CARVE_ATTR);
-        if (raw && normalizeCarveSettings(JSON.parse(raw)).sources.includes(element.id)) {
+        if (raw && normalizeCarveSettings(JSON.parse(raw)).sources.includes(element.id ?? "")) {
           return other.id || "another track";
         }
       } catch {
@@ -262,13 +286,125 @@ export function AudioFxGroup({
     return null;
   })();
 
+  /**
+   * The tracks worth offering as the voice.
+   *
+   * Not every audio element is a plausible answer: a music bed is the thing being
+   * carved, and a 200 ms whoosh has no speech to make room for. Offering them made
+   * the picker a list of everything and the "exactly one candidate" rule — which is
+   * what lets an obvious pairing carve itself — almost never true, because a
+   * composition with a voice, a bed and two stings looked like four options.
+   *
+   * Classified by name, which is a hint and not a fact, so the rule is loose in the
+   * safe direction: a name that says nothing stays in, voice-shaped names sort
+   * first, and if filtering would leave nothing at all every track comes back. A
+   * picker that hides the track somebody needs is worse than a long one.
+   */
   const sourceOptions: AudioTrackOption[] = (() => {
     const doc = element.element?.ownerDocument;
     if (!doc) return [];
-    return Array.from(doc.querySelectorAll<HTMLAudioElement>("audio[id]"))
-      .filter((a) => a.id !== element.id)
-      .map((a) => ({ id: a.id, label: a.id }));
+    const others = Array.from(doc.querySelectorAll<HTMLAudioElement>("audio[id]")).filter(
+      (a) => a.id !== element.id,
+    );
+    // Only tracks that are actually playing while this bed is. A voice somewhere
+    // else on the timeline cannot mask it, so including it would contribute silence
+    // to the analysis and leave the author wondering why it changed nothing.
+    const bedSpan = spanOf(element.dataAttributes?.["start"], element.dataAttributes?.["duration"]);
+    const described = others
+      .filter((a) =>
+        clipsOverlap(
+          bedSpan,
+          spanOf(a.getAttribute("data-start"), a.getAttribute("data-duration")),
+        ),
+      )
+      .map((a) => ({
+        id: a.id,
+        label: a.id,
+        kind: classifyAudioName(a.id, a.getAttribute("src")),
+      }));
+    const plausible = described.filter((t) => t.kind === "voice" || t.kind === "unknown");
+    const offered = plausible.length > 0 ? plausible : described;
+    return offered
+      .sort((a, b) => (a.kind === "voice" ? 0 : 1) - (b.kind === "voice" ? 0 : 1))
+      .map(({ id, label }) => ({ id, label }));
   })();
+
+  /**
+   * A bed with voices above it carves itself.
+   *
+   * Carving is what a bed under speech wants, and making the author find the
+   * control, name the voices and set a strength before hearing the thing they
+   * already wanted is ceremony.
+   *
+   * Every candidate, not one of them. This used to refuse when there were several,
+   * because picking one of three was a guess — but they are analysed together now,
+   * so "all of them" is the answer rather than a guess: a bed running under a
+   * narrator, an answer and a second presenter should make room for all three.
+   *
+   * Runs once per state. The write lands in `data-fx-carve`, which is what `carve`
+   * is read from, so the condition is false on every later render — and switching it
+   * off stores `enabled: false`, which is also a configured carve. That is the whole
+   * reason the flag exists rather than "off" being an absent attribute.
+   */
+  const candidateIds = sourceOptions.map((o) => o.id).join("\u0000");
+  useEffect(() => {
+    // Exactly one candidate is the sibling effect's case below, not this one's:
+    // both guards passing for a single candidate fired two setCarve calls with
+    // the same result — two decodes, two FFT runs, two concurrent attribute
+    // writes.
+    if (carvedAgainstBy || sourceOptions.length <= 1) return;
+    const all = sourceOptions.map((o) => o.id);
+    // Nothing configured: the default carve, pointed at everything it could hear.
+    if (carve === null) {
+      void setCarve({ ...DEFAULT_CARVE, sources: all });
+      return;
+    }
+    // Configured but naming no voice — switched on before there was anything to
+    // listen to, or a source list emptied. The card reads the candidates out, so
+    // they have to be the stored ones too.
+    if (carve.enabled && carve.sources.length === 0) void setCarve({ ...carve, sources: all });
+    // Keyed on the identity of the decision, not on setCarve — which is rebuilt
+    // every render and would re-fire this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carve, carvedAgainstBy, candidateIds]);
+
+  /**
+   * A bed with one obvious voice above it carves itself.
+   *
+   * Carving is what a bed under narration wants, and making the author find the
+   * control, pick the voice and set a strength before hearing the thing they
+   * already wanted is ceremony. So an unconfigured track with exactly ONE
+   * candidate voice gets the default carve applied for it.
+   *
+   * Exactly one, not the first of several: picking for the author when the answer
+   * is ambiguous is how the wrong track gets carved, and a carve against the wrong
+   * voice is silent and confusing. With several candidates the module still appears,
+   * with the picker waiting.
+   *
+   * Runs once. The write lands in `data-fx-carve`, which is what `carve` is read
+   * from, so the condition is false on every later render — and switching it off
+   * stores `enabled: false`, which is also a configured carve. That is the whole
+   * reason the flag exists rather than "off" being an absent attribute.
+   */
+  useEffect(() => {
+    if (carvedAgainstBy || sourceOptions.length !== 1) return;
+    const only = sourceOptions[0];
+    if (!only) return;
+    // Nothing configured: the default carve, pointed at the one candidate.
+    if (carve === null) {
+      void setCarve({ ...DEFAULT_CARVE, sources: [only.id] });
+      return;
+    }
+    // Configured but with no voice yet — a carve switched on before there was
+    // anything to listen to, or one whose source was cleared. The panel reads the
+    // sole candidate out as the source, so it has to be the stored one too;
+    // otherwise the card claims a relationship the attribute does not record.
+    if (carve.enabled && carve.sources.length === 0)
+      void setCarve({ ...carve, sources: [only.id] });
+    // Deliberately keyed on the identity of the decision, not on setCarve — which
+    // is rebuilt every render and would re-fire this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carve, carvedAgainstBy, sourceOptions.length, sourceOptions[0]?.id]);
 
   const [analysing, setAnalysing] = useState(false);
 
@@ -278,12 +414,14 @@ export function AudioFxGroup({
    * hand-added effects alone, so re-analysing does not discard other work.
    */
   const analyse = async (active: HfCarveSettings | null = carve): Promise<void> => {
-    const activeSource = active?.sources[0];
-    if (!activeSource) return;
+    if (!active?.sources.length) return;
     const doc = element.element?.ownerDocument;
-    const voice = doc?.getElementById(activeSource) as HTMLAudioElement | null;
-    const src = voice?.getAttribute("src");
-    if (!src) return;
+    // Every named voice that is actually there with something to decode. A source
+    // naming a deleted track is skipped rather than failing the whole analysis.
+    const voices = active.sources
+      .map((id) => doc?.getElementById(id) as HTMLAudioElement | null)
+      .filter((el): el is HTMLAudioElement => Boolean(el?.getAttribute("src")));
+    if (voices.length === 0) return;
     setAnalysing(true);
     try {
       // Decoded in an OfflineAudioContext, not a live one. Opening a second
@@ -298,7 +436,20 @@ export function AudioFxGroup({
         const res = await fetch(new URL(relative, doc!.baseURI).href);
         return new Ctor(1, 1, DECODE_SAMPLE_RATE).decodeAudioData(await res.arrayBuffer());
       };
-      const buffer = await decode(src);
+      const bedStart = clipStart(element.dataAttributes?.["start"]);
+      // Every voice, summed onto the bed's own clock. One question — where and when
+      // is speech masking this bed — with one answer, even when the answer comes
+      // from three people talking at different times. Doing this before the analysis
+      // is also what lets the bands and the envelopes stay a single set: the chain is
+      // fixed, so there is no per-voice filter to switch between.
+      const decoded = await Promise.all(
+        voices.map(async (el) => ({
+          samples: (await decode(el.getAttribute("src")!)).getChannelData(0),
+          offsetSeconds: clipStart(el.getAttribute("data-start")) - bedStart,
+        })),
+      );
+      const voiceMix = mixCarveSources(decoded, DECODE_SAMPLE_RATE);
+      if (voiceMix.length === 0) return;
       // Strength is what the author set; these are the numbers it means.
       const profile = carveProfile(active.strength);
       // The bed as well as the voice, when the carve is asked to match levels:
@@ -306,30 +457,14 @@ export function AudioFxGroup({
       // one of them.
       const bedSrc = profile.duckDb > 0 ? element.element?.getAttribute("src") : null;
       const bedBuffer = bedSrc ? await decode(bedSrc).catch(() => null) : null;
-      const bands = analyseCarveBands(buffer.getChannelData(0), buffer.sampleRate, profile);
+      const bands = analyseCarveBands(voiceMix, DECODE_SAMPLE_RATE, profile);
       const carved = carveBandsToChain(bands);
 
-      // The level half of the carve, measured against the voice it has to sit
-      // under. Times come back relative to the voice clip; the gap between the
-      // two clips' starts is what aligns them.
-      const offset =
-        clipStart(voice?.getAttribute("data-start")) - clipStart(element.dataAttributes?.["start"]);
+      // The level half of the carve, measured against the speech it has to sit
+      // under. No offset to apply: the mix is already on the bed's clock.
       const duck = bedBuffer
-        ? analyseCarveDuck(
-            buffer.getChannelData(0),
-            bedBuffer.getChannelData(0),
-            buffer.sampleRate,
-            profile,
-            offset,
-          )
+        ? analyseCarveDuck(voiceMix, bedBuffer.getChannelData(0), DECODE_SAMPLE_RATE, profile, 0)
         : [];
-      // Static carve holds one value, so the level match becomes the duck the
-      // voice needs while it is actually speaking — the median of it, which
-      // ignores both the pauses and any single loudest bar.
-      const speaking = duck.filter((p) => p.v < 0).map((p) => p.v);
-      const staticDuckDb = speaking.length
-        ? (speaking.sort((a, b) => a - b)[Math.floor(speaking.length / 2)] ?? 0)
-        : 0;
 
       // Carve output is tagged so a re-run replaces it instead of stacking.
       const kept = chain.nodes.filter((n) => !n.fromCarve);
@@ -343,13 +478,13 @@ export function AudioFxGroup({
       };
       const carvedNodes: HfAudioFxNode[] = carved.nodes.map(mint);
       // The gain stage sits after the filters, and only exists when the carve was
-      // asked to make level room, holding the one value computed above.
+      // asked to make level room. It sits at 0 and is driven by the envelope below.
       const duckNode =
         duck.length > 0
           ? mint({
               type: "gain",
               enabled: true,
-              params: { ...defaultAudioFxParams("gain"), gain: staticDuckDb },
+              params: { ...defaultAudioFxParams("gain"), gain: 0 },
             })
           : null;
       const next = {
@@ -366,11 +501,39 @@ export function AudioFxGroup({
       // pruned when it is read back.
       await onSetAttributeQuiet(HF_AUDIO_FX_ATTR, serializeAudioFxChain(next));
 
-      // A carve written before dynamic mode was removed may still carry the
-      // envelope lanes it automated; a re-run is static now, so they are stale.
+      /**
+       * One carve envelope as a lane on this bed's clock.
+       *
+       * No shifting: the voices were summed onto the bed's clock before the analysis
+       * ran, so what comes back is already in the bed's own time. A lane does hold
+       * its first value backwards to the start of its clip, so an envelope that
+       * begins later needs an explicit "no cut" at zero or the bed starts out ducked.
+       */
+      const laneFor = (id: string, points: { t: number; v: number }[]): HfAutomationLane[] => {
+        const timed = points
+          .map((p) => ({ t: Number(p.t.toFixed(3)), v: p.v }))
+          .filter((p) => p.t >= 0);
+        if ((timed[0]?.t ?? 0) > 0) timed.unshift({ t: 0, v: 0 });
+        return timed.length > 1 ? [{ target: fxAutomationTarget(id, "gain"), points: timed }] : [];
+      };
+
+      // Each filter's depth becomes an envelope of the speech's level in that band,
+      // so pauses leave the bed alone and whoever is talking sets the depth.
+      const lanes: HfAutomationLane[] = analyseCarveDynamics(
+        voiceMix,
+        DECODE_SAMPLE_RATE,
+        bands,
+      ).flatMap((dyn, i) => {
+        const id = carvedNodes[i]?.id;
+        return id ? laneFor(id, dyn.points) : [];
+      });
+      // The level envelope rides the gain stage, on the same clock as the bands.
+      if (duckNode?.id && duck.length > 0) {
+        lanes.push(...laneFor(duckNode.id, duck));
+      }
       const carriedOver = withoutCarveLanes(automation, chain);
-      if (carriedOver.lanes.length !== automation.lanes.length) {
-        writeAutomation(carriedOver);
+      if (lanes.length > 0 || carriedOver.lanes.length !== automation.lanes.length) {
+        writeAutomation({ version: 1, lanes: [...carriedOver.lanes, ...lanes] });
       }
     } catch {
       // Leave the chain as it was; the button simply re-enables.

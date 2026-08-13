@@ -92,13 +92,18 @@ worklet effects (`compressor`, `limiter`, `gate`, `bitcrush`) have none at all.
 ## `data-fx-carve` — the carve's settings
 
 ```json
-{ "source": "narration", "strength": 0.35, "dynamic": true }
+{ "enabled": true, "sources": ["narration", "interview-guest"], "strength": 0.35 }
 ```
 
-- `source` is the **element id of the voice track to listen to**. It lives on the
-  bed being processed, not on the voice.
+- `sources` are the **element ids of every voice this bed makes room for**. They live
+  on the bed being processed, not on the voices. Summed onto the bed's clock before
+  the analysis, so one set of filters and envelopes covers all of them.
 - `strength` 0..1 derives the whole mechanism (see `carveProfile`).
-- `dynamic` follows the voice moment to moment instead of holding one depth.
+- There is no `dynamic`: a carve always follows the speech.
+- `enabled` is whether the carve applies. It exists because a bed with exactly one
+  candidate voice is carved by default: with "off" represented by an absent
+  attribute, switching it off would read as never-configured and the default would
+  put it back. `enabled: false` keeps the settings and stops the carve.
 
 This attribute is not read at playback — the chain and lanes it produced are what
 play. It exists so the settings can be read back and re-derived rather than
@@ -107,4 +112,6 @@ carve possible.
 
 Older projects may carry the six mechanism numbers (`maxCutDb`, `bands`, `q`,
 `intelligibilityBias`, `duckDb`, `headroomDb`) instead of `strength`. They still
-load: the depth maps back onto a strength and everything else is re-derived.
+load: the depth maps back onto a strength and everything else is re-derived. A
+stored carve with no `enabled` reads as on, and a single `source` reads as a one-voice
+`sources` list. A stored `dynamic` is ignored — every carve follows the speech now.

@@ -11,11 +11,12 @@
  *
  *   node carve.mjs --comp index.html
  *   node carve.mjs --comp index.html --bed music-bed --voice narration \
- *        --strength 0.45
+ *        --voice interview-guest --strength 0.45
  *
- * With no --bed/--voice it works out the pair itself, and refuses rather than
- * guessing when it cannot tell them apart. Dynamic by default, because a bed
- * thinned through every pause is worse than one that follows the voice.
+ * With no --bed/--voice it works out the tracks itself: the bed, and every voice
+ * playing over it. `--voice` may be repeated to name them instead. Every named
+ * voice is analysed together, so a bed running under a narrator and an answer makes
+ * room for both.
  *
  * Needs `ffmpeg` on PATH (to decode the audio) and `@hyperframes/core` resolvable
  * from the composition's project (`npm i -D @hyperframes/core`) — the CLI bundles
@@ -33,20 +34,17 @@ import { pathToFileURL } from "node:url";
  *  bands and envelopes come out the same either way. */
 const SAMPLE_RATE = 48000;
 
-const usage = `carve.mjs --comp <file.html> [--bed <elementId>] [--voice <elementId>]
-              [--strength 0..1] [--static] [--dry-run] [--core <dir>]
+const usage = `carve.mjs --comp <file.html> [--bed <elementId>] [--voice <elementId> ...]
+              [--strength 0..1] [--dry-run] [--core <dir>]
 
   --bed       id of the music track that gets carved   (detected if omitted)
-  --voice     id of the voice track to listen to       (detected if omitted)
+  --voice     id of a voice to make room for; repeatable (detected if omitted)
   --strength  how hard to carve, 0..1 (default 0.25)
-  --static    hold one depth instead of following the voice (default: follow)
   --dry-run   report what it would write, touch nothing
   --core      directory to resolve @hyperframes/core from (default: the comp's)`;
 
 function parseArgs(argv) {
-  // Dynamic unless told otherwise: a static carve thins the bed through every
-  // pause, which is the wrong default for anything with gaps in the narration.
-  const args = { strength: 0.25, dynamic: true, dryRun: false };
+  const args = { strength: 0.25, dryRun: false, voices: [] };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     const next = () => {
@@ -57,11 +55,9 @@ function parseArgs(argv) {
     };
     if (flag === "--comp") args.comp = next();
     else if (flag === "--bed") args.bed = next();
-    else if (flag === "--voice") args.voice = next();
+    else if (flag === "--voice") args.voices.push(next());
     else if (flag === "--strength") args.strength = Number(next());
     else if (flag === "--core") args.core = next();
-    else if (flag === "--dynamic") args.dynamic = true;
-    else if (flag === "--static") args.dynamic = false;
     else if (flag === "--dry-run") args.dryRun = true;
     else if (flag === "-h" || flag === "--help") fail(usage, 0);
     else fail(`unknown flag: ${flag}\n\n${usage}`);
@@ -158,114 +154,87 @@ function mediaElements(html) {
   return found;
 }
 
-const MUSIC_NAME = /music|bgm|\bbed\b|soundtrack|score|song|theme/i;
-const VOICE_NAME = /voice|\bvo\b|narrat|speech|dialog|vocal|\btts\b|announce/i;
-const NOT_A_BED = /sfx|foley|whoosh|impact|riser|stinger|swoosh|click|ding|boom/i;
-
 /**
- * Fraction of the track that is more than 25 dB below its own peak.
- *
- * The one cheap thing that tells speech from music without recognising either:
- * a voice stops between phrases and a music bed does not. Measured in 50 ms
- * frames, which is short enough to see the gap between words and long enough not
- * to see the gap between two cycles of a low note.
- */
-function silenceFraction(samples) {
-  const frame = Math.floor(SAMPLE_RATE * 0.05);
-  const levels = [];
-  for (let i = 0; i + frame <= samples.length; i += frame) {
-    let sum = 0;
-    for (let k = i; k < i + frame; k += 1) sum += samples[k] * samples[k];
-    levels.push(Math.sqrt(sum / frame));
-  }
-  if (levels.length === 0) return 0;
-  const floor = Math.max(...levels) * 10 ** (-25 / 20);
-  return levels.filter((level) => level < floor).length / levels.length;
-}
-
-/**
- * Work out which track is the bed and which is the voice.
+ * Work out which track is the bed and which tracks are its voices.
  *
  * Names first, because they are what the author already told us and the answer is
- * explainable. Only when a name does not decide does it listen to the audio, and
- * it refuses rather than picking when the measurement is close — carving the wrong
- * track is a silent, confusing failure, and asking is cheap.
+ * explainable: a track whose id or filename looks like music is the bed, ones that
+ * look like speech are voices, SFX-shaped names are neither. `classifyAudioName`
+ * comes from core so Studio's own picker and this cannot disagree.
+ *
+ * EVERY voice over the bed, not one of them. A bed usually runs under a whole
+ * sequence, and they are analysed together — so there is nothing to disambiguate,
+ * which is why this no longer refuses when several tracks look like speech.
+ *
+ * Only tracks that actually play while the bed does: one somewhere else on the
+ * timeline cannot mask it. It still refuses when it cannot find a bed at all, or
+ * finds no voice to make room for.
  */
-function detectPair(html, compDir, given) {
+function detectTracks(html, given, classify, overlaps) {
   const all = mediaElements(html);
+  const kindOf = (el) => classify(el.id, unescapeAttr(attrOf(el.tag, "src") ?? ""));
+  const spanOf = (el) => {
+    const raw = attrOf(el.tag, "data-duration");
+    const n = raw === null ? Number.NaN : Number(raw);
+    return {
+      start: startOf(el.tag),
+      duration: Number.isFinite(n) ? n : null,
+    };
+  };
   const pick = (id, what) => {
     const found = all.find((el) => el.id === id);
     if (!found) fail(`no <audio>/<video> with id="${id}" in the composition`);
     return { ...found, why: `--${what}` };
   };
-  let bed = given.bed ? pick(given.bed, "bed") : null;
-  let voice = given.voice ? pick(given.voice, "voice") : null;
-  if (bed && voice) return { bed, voice };
 
-  // A voiceover and a bed are both normally <audio>; a <video> is only considered
-  // when there is no audio element left to be the voice, which is what a talking
-  // head recut looks like.
-  const free = all.filter((el) => el.id !== bed?.id && el.id !== voice?.id);
-  const candidates = free.filter((el) => !NOT_A_BED.test(`${el.id} ${attrOf(el.tag, "src")}`));
-  const named = (re) => candidates.filter((el) => re.test(`${el.id} ${attrOf(el.tag, "src")}`));
+  let bed = given.bed ? pick(given.bed, "bed") : null;
+  const named = given.voices.map((id) => pick(id, "voice"));
 
   if (!bed) {
-    const byName = named(MUSIC_NAME).filter((el) => el.id !== voice?.id);
-    if (byName.length === 1) bed = { ...byName[0], why: "name looks like music" };
-    else if (byName.length > 1) {
+    const others = all.filter((el) => !named.some((v) => v.id === el.id));
+    const music = others.filter((el) => kindOf(el) === "music");
+    if (music.length === 1) bed = { ...music[0], why: "name looks like music" };
+    else if (music.length > 1) {
       fail(
-        `several tracks look like music (${byName.map((el) => el.id).join(", ")}) — name one with --bed`,
+        `several tracks look like music (${music.map((el) => el.id).join(", ")}) — name one with --bed`,
       );
-    }
-  }
-  if (!voice) {
-    const byName = named(VOICE_NAME).filter((el) => el.id !== bed?.id);
-    if (byName.length === 1) voice = { ...byName[0], why: "name looks like a voice" };
-    else if (byName.length > 1) {
+    } else if (others.length === 1) {
+      bed = { ...others[0], why: "only track left" };
+    } else {
       fail(
-        `several tracks look like a voice (${byName.map((el) => el.id).join(", ")}) — name one with --voice`,
-      );
-    }
-  }
-
-  const left = candidates.filter((el) => el.id !== bed?.id && el.id !== voice?.id);
-  const audioLeft = left.filter((el) => el.kind === "audio");
-  const pool = audioLeft.length > 0 ? audioLeft : left;
-
-  // One track left and one role open: no measurement can be more certain than
-  // that, and decoding to confirm it would only cost time.
-  if (!voice && bed && pool.length === 1) voice = { ...pool[0], why: "only track left" };
-  if (!bed && voice && pool.length === 1) bed = { ...pool[0], why: "only track left" };
-
-  if (!voice || !bed) {
-    if (pool.length < 2) {
-      fail(
-        `cannot find a voice and a music track to carve\n` +
+        `cannot tell which track is the music bed\n` +
           `  media in the composition: ${all.map((el) => el.id).join(", ") || "none"}\n` +
-          `  name them with --bed and --voice`,
+          `  name it with --bed`,
       );
     }
-    // Listen: the one that stops between phrases is the voice.
-    const scored = pool
-      .map((el) => ({
-        el,
-        pauses: silenceFraction(decode(resolve(compDir, unescapeAttr(attrOf(el.tag, "src"))))),
-      }))
-      .sort((a, b) => b.pauses - a.pauses);
-    const [first, second] = scored;
-    if (first.pauses - second.pauses < 0.08) {
-      fail(
-        `cannot tell the voice from the music by ear either — ` +
-          `${scored.map((s) => `${s.el.id} ${(s.pauses * 100).toFixed(0)}% quiet`).join(", ")}\n` +
-          `  name them with --bed and --voice`,
-      );
-    }
-    const why = (s) => `${(s.pauses * 100).toFixed(0)}% of it is quiet`;
-    if (!voice) voice = { ...first.el, why: why(first) };
-    if (!bed) bed = { ...second.el, why: why(second) };
   }
-  if (bed.id === voice.id) fail(`--bed and --voice are the same track ("${bed.id}")`);
-  return { bed, voice };
+
+  const bedSpan = spanOf(bed);
+  const overlapping = (el) => overlaps(bedSpan, spanOf(el));
+  const plausible = all
+    .filter((el) => el.id !== bed.id && kindOf(el) !== "music" && kindOf(el) !== "sfx")
+    .filter(overlapping);
+  // A voiceover is normally its own <audio>. Video counts only when no audio track
+  // is left to be the voice — a talking-head recut — because otherwise every B-roll
+  // clip in the composition reads as somebody talking.
+  const spoken = plausible.filter((el) => el.kind === "audio");
+  const pool = spoken.length > 0 ? spoken : plausible;
+  const voices = named.length
+    ? named
+    : pool.map((el) => ({
+        ...el,
+        why: kindOf(el) === "voice" ? "name looks like a voice" : "plays over the bed",
+      }));
+
+  const usable = voices.filter((el) => attrOf(el.tag, "src"));
+  if (usable.length === 0) {
+    fail(
+      `no voice to make room for on ${bed.id}\n` +
+        `  media in the composition: ${all.map((el) => el.id).join(", ") || "none"}\n` +
+        `  name one with --voice`,
+    );
+  }
+  return { bed, voices: usable };
 }
 
 const startOf = (tag) => {
@@ -280,25 +249,39 @@ async function main() {
   const { carve: carveApi, fx: fxApi } = await loadCore(args.core ? resolve(args.core) : compDir);
 
   const html = readFileSync(compPath, "utf-8");
-  const { bed: bedEl, voice: voiceEl } = detectPair(html, compDir, args);
+  const { bed: bedEl, voices } = detectTracks(
+    html,
+    args,
+    carveApi.classifyAudioName,
+    carveApi.clipsOverlap,
+  );
   const bedTag = bedEl.tag;
-  const voiceTag = voiceEl.tag;
   const bedSrc = attrOf(bedTag, "src");
-  const voiceSrc = attrOf(voiceTag, "src");
   process.stdout.write(
-    `bed    ${bedEl.id} (${bedEl.why})\nvoice  ${voiceEl.id} (${voiceEl.why})\n`,
+    `bed    ${bedEl.id} (${bedEl.why})\n` +
+      voices.map((v) => `voice  ${v.id} (${v.why})`).join("\n") +
+      "\n",
   );
 
   const profile = carveApi.carveProfile(args.strength);
-  const voice = decode(resolve(compDir, unescapeAttr(voiceSrc)));
+  // Every voice summed onto the BED's clock before anything is measured. One
+  // question — where and when is speech masking this bed — with one answer, even
+  // when the answer comes from several people at different times.
+  const voice = carveApi.mixCarveSources(
+    voices.map((v) => ({
+      samples: decode(resolve(compDir, unescapeAttr(attrOf(v.tag, "src")))),
+      offsetSeconds: startOf(v.tag) - startOf(bedTag),
+    })),
+    SAMPLE_RATE,
+  );
+  if (voice.length === 0) fail("the voices do not overlap the bed, so there is nothing to carve");
   const bands = carveApi.analyseCarveBands(voice, SAMPLE_RATE, profile);
 
-  // The level half of the carve needs both tracks: "how far over the voice is
-  // this bed" cannot be answered by listening to one of them. Times come back on
-  // the voice's clock, so the gap between the two clips' starts aligns them.
-  const offset = startOf(voiceTag) - startOf(bedTag);
+  // The level half of the carve needs both sides: "how far over the speech is this
+  // bed" cannot be answered by listening to one of them. No offset — the mix is
+  // already on the bed's clock.
   const bed = profile.duckDb > 0 ? decode(resolve(compDir, unescapeAttr(bedSrc))) : null;
-  const duck = bed ? carveApi.analyseCarveDuck(voice, bed, SAMPLE_RATE, profile, offset) : [];
+  const duck = bed ? carveApi.analyseCarveDuck(voice, bed, SAMPLE_RATE, profile, 0) : [];
 
   // Anything the author built by hand survives a carve; only the previous
   // carve's own nodes are replaced. That is what `fromCarve` is for.
@@ -321,13 +304,6 @@ async function main() {
   };
   const bandNodes = bands.map((band) => mint(carveApi.carveBandsToChain([band]).nodes[0]));
 
-  // A static carve holds one value, so its level match is the duck the voice
-  // needs while it is actually speaking — the median, which ignores both the
-  // pauses and the single loudest bar.
-  const speaking = duck.filter((p) => p.v < 0).map((p) => p.v);
-  const staticDuckDb = speaking.length
-    ? (speaking.sort((a, b) => a - b)[Math.floor(speaking.length / 2)] ?? 0)
-    : 0;
   const duckNode =
     duck.length > 0
       ? mint({
@@ -335,7 +311,7 @@ async function main() {
           enabled: true,
           params: {
             ...fxApi.defaultAudioFxParams("gain"),
-            gain: args.dynamic ? 0 : staticDuckDb,
+            gain: 0,
           },
         })
       : null;
@@ -347,26 +323,26 @@ async function main() {
   /**
    * One carve envelope as a lane on the BED's clock.
    *
-   * A lane holds its first value backwards to the start of its own clip, so a bed
-   * that begins before the voice needs an explicit "no cut" at zero or it starts
+   * Nothing to shift: the voices were summed onto that clock before the analysis
+   * ran. A lane does hold its first value backwards to the start of its clip, so an
+   * envelope that begins later needs an explicit "no cut" at zero or the bed starts
    * out ducked.
    */
   const laneFor = (id, points) => {
-    const shifted = points
-      .map((p) => ({ t: Number((p.t + offset).toFixed(3)), v: p.v }))
+    const timed = points
+      .map((p) => ({ t: Number(p.t.toFixed(3)), v: p.v }))
       .filter((p) => p.t >= 0);
-    if ((shifted[0]?.t ?? 0) > 0) shifted.unshift({ t: 0, v: 0 });
-    return shifted.length > 1 ? [{ target: `fx.${id}.gain`, points: shifted }] : [];
+    if ((timed[0]?.t ?? 0) > 0) timed.unshift({ t: 0, v: 0 });
+    return timed.length > 1 ? [{ target: `fx.${id}.gain`, points: timed }] : [];
   };
 
-  const carvedLanes = args.dynamic
-    ? [
-        ...carveApi
-          .analyseCarveDynamics(voice, SAMPLE_RATE, bands)
-          .flatMap((dyn, i) => (bandNodes[i]?.id ? laneFor(bandNodes[i].id, dyn.points) : [])),
-        ...(duckNode?.id && duck.length > 0 ? laneFor(duckNode.id, duck) : []),
-      ]
-    : [];
+  // Every carve follows the speech: a fixed depth thins the bed through every pause.
+  const carvedLanes = [
+    ...carveApi
+      .analyseCarveDynamics(voice, SAMPLE_RATE, bands)
+      .flatMap((dyn, i) => (bandNodes[i]?.id ? laneFor(bandNodes[i].id, dyn.points) : [])),
+    ...(duckNode?.id && duck.length > 0 ? laneFor(duckNode.id, duck) : []),
+  ];
 
   // Hand-drawn lanes are kept the same way hand-built nodes are: by dropping only
   // the ones that addressed the previous carve's nodes.
@@ -378,7 +354,7 @@ async function main() {
     : [];
   const lanes = [...carriedLanes, ...carvedLanes];
 
-  const settings = { source: voiceEl.id, strength: args.strength, dynamic: args.dynamic };
+  const settings = { enabled: true, sources: voices.map((v) => v.id), strength: args.strength };
   const written =
     ` data-fx-carve="${escapeAttr(JSON.stringify(settings))}"` +
     ` data-fx-chain="${escapeAttr(fxApi.serializeAudioFxChain(chain))}"` +
@@ -387,13 +363,11 @@ async function main() {
       : "");
 
   process.stdout.write(
-    `carve  strength ${args.strength}${args.dynamic ? " dynamic" : " static"}\n` +
+    `carve  strength ${args.strength}, ${voices.length} voice${voices.length === 1 ? "" : "s"}\n` +
       `bands  ${bands.map((b) => `${b.freq}Hz ${b.gainDb}dB q${b.q}`).join(", ")}\n` +
       `level  ${
         duckNode
-          ? args.dynamic
-            ? `${duck.length}-point envelope, floor ${Math.min(...duck.map((p) => p.v))} dB`
-            : `${staticDuckDb.toFixed(1)} dB held`
+          ? `${duck.length}-point envelope, floor ${Math.min(...duck.map((p) => p.v))} dB`
           : "no level match at this strength"
       }\n` +
       `lanes  ${carvedLanes.length} carve${carriedLanes.length ? ` + ${carriedLanes.length} kept` : ""}\n`,

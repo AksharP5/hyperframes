@@ -120,9 +120,26 @@ export function FxParamRow({
   const [dragging, setDragging] = useState(false);
   const [local, setLocal] = useState(value);
   const latest = useRef(value);
+  /**
+   * What the gesture last asked for, held until the world agrees.
+   *
+   * Releasing ends the drag, but the value only comes back after the attribute is
+   * written and the selection resynced — and for a carve, after the analysis it
+   * kicks off. In that gap the prop still holds the pre-drag number, so dropping
+   * straight back to it made the control snap to where it started and then jump to
+   * where it was dropped. Keeping the gesture's own number until a NEW one arrives
+   * is honest either way: it is what the audio is already doing, since the live
+   * write applied on the way down.
+   */
+  const [pending, setPending] = useState<number | null>(null);
   useEffect(() => {
     if (!dragging) setLocal(value);
   }, [value, dragging]);
+  // Any inbound value is newer information than the gesture's guess — including a
+  // value that came back different from what was asked for, or an undo.
+  useEffect(() => {
+    setPending(null);
+  }, [value]);
 
   const handleNumber = useCallback(
     (raw: number) => {
@@ -137,6 +154,7 @@ export function FxParamRow({
 
   const commit = useCallback(() => {
     setDragging(false);
+    if (typeof latest.current === "number") setPending(latest.current);
     onCommit?.(param.key, latest.current);
   }, [onCommit, param.key]);
 
@@ -170,7 +188,7 @@ export function FxParamRow({
   // because it is the one the audio is using — the stored number is only the seed
   // the lane replaced. Safe against the pointer: an automated control is locked
   // (see `locked` below), so there is no drag for this to fight.
-  const shown = dragging ? local : (liveValue ?? value);
+  const shown = dragging ? local : (liveValue ?? pending ?? value);
   const numeric = typeof shown === "number" ? shown : Number(shown);
   const current = Number.isFinite(numeric) ? numeric : param.default;
 

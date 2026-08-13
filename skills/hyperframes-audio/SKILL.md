@@ -150,10 +150,17 @@ takes only those, and the bed keeps its low end and its top, so it is still musi
 while the voice is still intelligible.
 
 **It is a relationship, not an effect.** The settings live on the _bed_ — the
-track that gets processed — and they name the voice to listen to, exactly as a
+track that gets processed — and they name the voices to listen to, exactly as a
 sidechain compressor does: you select the track that gets quieter and pick what
-makes it quieter. **Never put a carve on the voice track.** A voice carved
-against itself is a bug, not a subtle mix choice.
+makes it quieter. **Never put a carve on a voice track.** A voice carved against
+itself is a bug, not a subtle mix choice.
+
+**Every voice, not one of them.** `sources` is a list, because a bed usually runs
+under a whole sequence — a narrator, an interview answer, a second presenter. They
+are summed onto the bed's own clock before anything is measured (`mixCarveSources`),
+so one analysis covers all of them: the bands come from all the speech there is, and
+the envelopes rise wherever any of it is happening. Voices that never play while the
+bed does are left out; they cannot mask it.
 
 **One knob.** `strength` is 0..1 and derives everything: how deep to cut, how
 many bands, how wide, how far to favour intelligibility over raw voice energy,
@@ -172,13 +179,11 @@ polish step to get to if there is time. Place both tracks, run the command below
 listen. Skip it only when there is no narration for the music to sit under — a
 music video, a title card, a montage cut to the track.
 
-**Static or dynamic — dynamic unless you know otherwise.** A static carve holds
-its cuts for the whole clip, including every pause, so the bed is thinned where
-there is nothing to make room for. Dynamic turns every value into an envelope of
-the voice's own level: silence leaves the bed alone, a loud passage pushes the
-carve to full depth. That is what almost every voiceover wants, so it is the
-default. Reach for `--static` only for wall-to-wall narration with no real gaps,
-where an envelope is hundreds of breakpoints describing a constant.
+**It always follows the voice.** There is no static mode: a fixed depth thins the
+bed through every pause, and once you have heard both there is no reason to want it.
+Every value becomes an envelope of the speech's own level — silence leaves the bed
+alone, a loud passage pushes the carve to full depth — written as ordinary automation,
+which is why the lanes show up in the timeline and can be edited afterwards.
 
 **Level matching is part of it.** Spectral carving cannot fix a bed that is
 simply louder than the voice. So the carve also measures how far over the voice
@@ -187,8 +192,13 @@ driven by an envelope for a dynamic one. That envelope releases slowly on
 purpose — music that snaps back to full the instant a word ends sounds like a
 machine doing it.
 
-**Running it.** In Studio: pick the voice in the bed's Voiceover carve control;
-turning it on adds the modules and strength adjusts what is there. Headless —
+**Running it.** In Studio the carve is one module at the top of a track's effect
+rack — voice, strength, dynamic, and the analysis it produced, in one card. It is
+there whenever another track could be the voice, and a bed with exactly **one**
+candidate above it is carved by default, dynamically, at the default strength:
+that is what a bed under narration wants, and the module is where you change or
+switch it off. Several candidates leaves the picker waiting rather than guessing.
+Headless —
 which is the path when you are authoring a composition rather than editing one:
 
 ```bash
@@ -206,20 +216,17 @@ bands  400Hz -6dB q1.4, 1000Hz -3dB q1.4, 1600Hz -3.17dB q1.4
 level  216-point envelope, floor -6 dB
 ```
 
-Name the pair with `--bed` / `--voice` when the composition has several plausible
-tracks, `--strength` to push it, `--static` to hold one depth, `--dry-run` to see
-that report and write nothing.
+Name the tracks with `--bed` / `--voice` (repeatable) when the automatic choice is
+wrong, `--strength` to push it, `--dry-run` to see that report and write nothing.
 
-**How it picks the pair.** Names first, because that is what you already told it
-and the answer is explainable: a track whose id or filename looks like music
-(`music`, `bgm`, `bed`, `score`…) is the bed, one that looks like a voice
-(`voice`, `vo`, `narration`, `speech`…) is the voice, and SFX-shaped names are not
-candidates for either. If one role is filled and a single track is left, that
-track takes the other role. Only when names decide nothing does it listen: it
-measures how much of each track is quiet, and the one that stops between phrases
-is the voice. **When two tracks are too close to call it refuses and asks you to
-name them** rather than carving the wrong one — a bed carved against a bed is
-silent and confusing, and typing two ids is cheap.
+**How it picks the tracks.** Names first, because that is what you already told it
+and the answer is explainable — `classifyAudioName` in core, the same classifier
+Studio's own picker uses, so the two cannot disagree. A track whose id or filename
+looks like music (`music`, `bgm`, `bed`, `score`…) is the bed; everything else that
+plays over it and is not SFX-shaped is a voice. Audio elements are preferred: video
+counts only when no audio track is left to be the voice, or every B-roll clip in the
+composition would read as somebody talking. **It refuses when it cannot tell which
+track is the bed** rather than carving the wrong one — typing one id is cheap.
 
 Same analysis functions as the panel, so the result is identical. Needs `ffmpeg`
 on PATH and `@hyperframes/core` installed in the project (`npm i -D

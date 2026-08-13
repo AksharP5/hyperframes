@@ -153,16 +153,6 @@ function FxNodeHeader({
   );
 }
 
-/**
- * The carve's own effects, as one module.
- *
- * A carve is one thing the author switched on; the peaking filters and the level
- * stage are how it is built. Listed individually they read as hand-built effects
- * — removable one at a time, reorderable, each with knobs the next strength
- * change silently overwrites. So the rack shows the unit, says what is inside it,
- * and offers the two actions that mean anything for a whole module: bypass it,
- * or remove it.
- */
 /** What one effect inside the module is called: its own name, plus the band. */
 function carveMemberName(node: HfAudioFxNode): string {
   const def = getAudioFxDef(node.type);
@@ -256,51 +246,93 @@ function FxCarveMember({
 }
 
 /**
- * The carve's own effects, as one module.
+ * The carve, as one module in the rack.
  *
  * A carve is one thing the author switched on; the peaking filters and the level
- * stage are how it is built. Listed individually in the rack they read as
- * hand-built effects — removable one at a time, reorderable, each with knobs the
- * next strength change silently overwrites. So the rack shows the unit, and the
- * unit owns the actions that mean anything for a whole module: bypass, remove.
+ * stage are how it is built. Listed individually they read as hand-built effects —
+ * removable one at a time, reorderable, each with knobs the next strength change
+ * silently overwrites. So the rack shows the unit, and the unit owns everything
+ * that means anything for it: which voice it listens to, how hard it works,
+ * whether it follows that voice, and what the analysis made of it.
+ *
+ * The controls used to sit in their own block under the rack, which read as a
+ * second, unrelated feature that happened to produce effects somewhere else. One
+ * card, controls above the analysis they drive, is the same thing said once.
  *
  * Grouped is not hidden. Opening it lists every effect inside with all of its
- * settings, because an author has to be able to see where the analysis landed —
- * as readouts rather than controls, since strength is what sets them and a knob
- * here would be overwritten by the next adjustment. A value the timeline drives
- * says so, and points at the lane that owns it.
+ * settings, because an author has to be able to see where the analysis landed — as
+ * readouts rather than controls, since strength is what sets them and a knob here
+ * would be overwritten by the next adjustment.
  */
 function FxCarveModule({
   nodes,
+  carve,
+  sourceOptions,
   automatedTargets,
   liveAutomationValues,
   open,
   disabled,
+  analysing,
   onToggleOpen,
-  onToggleBypass,
-  onRemove,
+  onCarveChange,
+  onCarvePreview,
 }: {
   nodes: HfAudioFxNode[];
+  carve: HfCarveSettings;
+  sourceOptions: AudioTrackOption[];
   automatedTargets?: ReadonlySet<string>;
   liveAutomationValues?: ReadonlyMap<string, number>;
   open: boolean;
   disabled?: boolean;
+  analysing?: boolean;
   onToggleOpen(): void;
-  onToggleBypass(): void;
-  onRemove(): void;
+  onCarveChange(carve: HfCarveSettings): void;
+  onCarvePreview(carve: HfCarveSettings): void;
 }) {
   const bands = nodes.filter((n) => n.type === "peaking").length;
   const hasLevel = nodes.some((n) => n.type === "gain");
-  const bypassed = nodes.every((n) => n.enabled === false);
-  const summary = [`${bands} band${bands === 1 ? "" : "s"}`, ...(hasLevel ? ["level"] : [])].join(
-    " + ",
-  );
+  const on = carve.enabled;
+  /**
+   * The only track this bed could be listening to, when there is exactly one.
+   *
+   * A picker with one entry is a question with one answer: it asks the author to
+   * confirm something already decided. So the voice reads out instead.
+   *
+   * Not when the stored source is some OTHER track, though — a name that no longer
+   * classifies as a voice, or a track since renamed. Reading out the one remaining
+   * candidate there would quietly claim the carve listens to something it does not,
+   * so the picker comes back and shows the mismatch.
+   */
+  const soleVoice =
+    sourceOptions.length === 1 &&
+    (carve.sources.length === 0 ||
+      (carve.sources.length === 1 && carve.sources[0] === sourceOptions[0]?.id))
+      ? sourceOptions[0]
+      : null;
+  // What the module is worth right now, in the head, so a collapsed card still
+  // says whether it is doing anything: the analysis it produced, or why not.
+  const summary = !on
+    ? "off"
+    : analysing
+      ? "analysing…"
+      : bands > 0
+        ? [
+            `${bands} band${bands === 1 ? "" : "s"}`,
+            ...(hasLevel ? ["level"] : []),
+            // Worth saying when it is more than one: the cuts follow whoever is
+            // speaking, and that is not obvious from a band count.
+            ...(carve.sources.length > 1 ? [`${carve.sources.length} voices`] : []),
+          ].join(" + ")
+        : carve.sources.length > 0
+          ? "no analysis yet"
+          : "pick a voice";
   return (
     <div
-      className={`hf-fx-node hf-fx-carve-module rounded-[4px] border border-panel-border-input${
-        bypassed ? " opacity-50" : ""
+      className={`hf-fx-node hf-fx-carve-module hf-fx-carve rounded-[4px] border border-panel-border-input${
+        on ? "" : " opacity-50"
       }`}
       data-fx-node="carve"
+      data-carve-enabled={on ? "" : undefined}
     >
       <div className="hf-fx-node-head flex min-h-7 items-center gap-1 px-1.5">
         <button
@@ -314,38 +346,143 @@ function FxCarveModule({
         <span className="hf-fx-carve-summary shrink-0 font-mono text-[9px] text-panel-text-4">
           {summary}
         </span>
+        {/* One switch, not a bypass and a delete. Off drops the effects and the
+            envelopes it wrote, and is remembered — otherwise the default would
+            re-apply the carve the next time this clip was selected. */}
         <button
           type="button"
-          className="hf-fx-bypass rounded-[3px] border border-panel-border-input px-1.5 py-0.5 font-mono text-[9px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
-          aria-pressed={bypassed}
-          title={bypassed ? "Enable carve" : "Bypass carve"}
+          className="hf-fx-bypass hf-fx-carve-toggle rounded-[3px] border border-panel-border-input px-1.5 py-0.5 font-mono text-[9px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
+          aria-pressed={on}
+          title={on ? "Switch the carve off" : "Switch the carve on"}
           disabled={disabled}
-          onClick={onToggleBypass}
+          onClick={() => onCarveChange({ ...carve, enabled: !on })}
         >
-          {bypassed ? "Off" : "On"}
-        </button>
-        <button
-          type="button"
-          className="hf-fx-remove px-1 font-mono text-[11px] text-panel-text-4 hover:text-red-400 disabled:opacity-40"
-          title="Remove carve"
-          disabled={disabled}
-          onClick={onRemove}
-        >
-          &times;
+          {on ? "On" : "Off"}
         </button>
       </div>
-      {open ? (
-        // Divided rows rather than boxes: these are parts of one module, and a
-        // border around each would read as the separate effects this replaced.
-        <div className="hf-fx-carve-members divide-y divide-panel-border-input/60 border-t border-panel-border-input">
-          {nodes.map((node, i) => (
-            <FxCarveMember
-              key={node.id ?? `${node.type}-${i}`}
-              node={node}
-              automatedTargets={automatedTargets}
-              liveAutomationValues={liveAutomationValues}
+      {open && on ? (
+        <div className="hf-fx-carve-body border-t border-panel-border-input">
+          <div className="hf-fx-carve-controls space-y-0.5 px-1.5 py-1.5">
+            <div className="hf-fx-row flex min-h-6 items-center gap-2">
+              <span className="hf-fx-label w-[86px] flex-shrink-0 truncate text-[10px] text-panel-text-4">
+                Listen to
+              </span>
+              {soleVoice ? (
+                <span
+                  className="hf-fx-carve-source min-w-0 flex-1 truncate font-mono text-[10px] text-panel-text-1"
+                  data-carve-source={soleVoice.id}
+                >
+                  {soleVoice.label}
+                </span>
+              ) : (
+                /* Every voice, not one of them. A bed usually runs under a whole
+                   sequence — a narrator, an answer, a second presenter — and they are
+                   analysed together, so the cuts follow whoever is speaking. Which
+                   makes this a set of things to include, not a choice between them. */
+                <div className="hf-fx-carve-sources flex min-w-0 flex-1 flex-wrap gap-x-2.5 gap-y-0.5">
+                  {sourceOptions.map((o) => (
+                    <label
+                      key={o.id}
+                      className="flex min-w-0 items-center gap-1 font-mono text-[9px] text-panel-text-1"
+                      title={`Make room for ${o.label}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="hf-fx-carve-source h-2.5 w-2.5 accent-panel-accent"
+                        data-carve-source={o.id}
+                        checked={carve.sources.includes(o.id)}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          onCarveChange({
+                            ...carve,
+                            sources: e.target.checked
+                              ? [...carve.sources, o.id]
+                              : carve.sources.filter((id) => id !== o.id),
+                          })
+                        }
+                      />
+                      <span className="truncate">{o.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* One knob for the whole effect. Depth, band count, width, the
+                intelligibility weighting and both level-match numbers move together
+                anyway — a gentle carve is shallow in few bands with little ducking, a
+                hard one is deeper in more with more — so the panel sets the strength
+                and `carveProfile` derives the six numbers the analysis works in. */}
+            <FxParamRow
+              param={{
+                kind: "number",
+                key: "strength",
+                label: "Strength",
+                unit: "",
+                min: 0,
+                max: 1,
+                step: 0.05,
+                default: DEFAULT_CARVE.strength,
+                hint: "How hard to carve: deeper cuts, in more bands, and more room made by dropping the bed's level under the voice. At 0 it carves frequencies only. Moving this re-runs the analysis on what is already here.",
+              }}
+              value={carve.strength}
+              disabled={disabled || carve.sources.length === 0}
+              onChange={(_k, v) => onCarvePreview({ ...carve, strength: Number(v) })}
+              onCommit={(_k, v) => onCarveChange({ ...carve, strength: Number(v) })}
             />
-          ))}
+          </div>
+          {/* What the analysis made of all that. Divided rather than boxed: these
+              are parts of one module, and a border around each would read as the
+              separate effects this replaced. */}
+          {/* While the analysis runs, the previous filters are gone rather than
+              stale. Every number in that list is about to be replaced — a strength
+              change re-derives all of them — so leaving them up reads as the
+              settings that are in force when they are already history, and the one
+              honest thing to say is that the work is happening. */}
+          {analysing ? (
+            <p className="hf-fx-carve-working flex items-center justify-center gap-1.5 border-t border-panel-border-input py-2 text-[10px] text-panel-text-4">
+              <svg
+                className="hf-fx-carve-spinner h-3 w-3 animate-spin motion-reduce:animate-none"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+              Analysing…
+            </p>
+          ) : nodes.length > 0 ? (
+            <div className="hf-fx-carve-members divide-y divide-panel-border-input/60 border-t border-panel-border-input">
+              <div className="hf-fx-carve-members-label px-1.5 pt-1 font-mono text-[9px] uppercase tracking-wide text-panel-text-4">
+                analysed
+              </div>
+              {nodes.map((node, i) => (
+                <FxCarveMember
+                  key={node.id ?? `${node.type}-${i}`}
+                  node={node}
+                  automatedTargets={automatedTargets}
+                  liveAutomationValues={liveAutomationValues}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="hf-fx-carve-working border-t border-panel-border-input py-1.5 text-center text-[10px] text-panel-text-4">
+              {carve.sources.length > 0
+                ? "Nothing analysed yet."
+                : "Pick the voices this bed should make room for."}
+            </p>
+          )}
         </div>
       ) : null}
     </div>
@@ -604,23 +741,15 @@ export function FxSection({
     [chain.nodes, mutate, onRemoveNodeAutomation],
   );
 
-  const [carveOpen, setCarveOpen] = useState(false);
+  // Open by default: the module is the carve's whole control surface now, and a
+  // collapsed card would hide the knob the author came here for.
+  const [carveOpen, setCarveOpen] = useState(true);
   const carveNodes = useMemo(() => chain.nodes.filter((n) => n.fromCarve), [chain.nodes]);
-
-  /** Remove the carve's effects together, with the envelopes they carried. */
-  const removeCarve = useCallback(() => {
-    for (const node of carveNodes) {
-      if (node.id) onRemoveNodeAutomation?.(node.id);
-    }
-    mutate(chain.nodes.filter((n) => !n.fromCarve));
-    setOpenNode(null);
-  }, [carveNodes, chain.nodes, mutate, onRemoveNodeAutomation]);
-
-  /** Bypass or enable every carve effect at once — the module is the unit. */
-  const toggleCarveBypass = useCallback(() => {
-    const bypassed = carveNodes.every((n) => n.enabled === false);
-    mutate(chain.nodes.map((n) => (n.fromCarve ? { ...n, enabled: bypassed } : n)));
-  }, [carveNodes, chain.nodes, mutate]);
+  /** Everything the author added, with the chain index every edit addresses. */
+  const handBuilt = useMemo(
+    () => chain.nodes.map((node, i) => ({ node, i })).filter(({ node }) => !node.fromCarve),
+    [chain.nodes],
+  );
 
   const moveNode = useCallback(
     (index: number, delta: number) => {
@@ -638,31 +767,32 @@ export function FxSection({
   return (
     <div className="hf-fx-section space-y-2">
       <div className="hf-fx-chain space-y-1">
-        {chain.nodes.length === 0 ? (
+        {/* Carve leads the rack, which is also where its effects sit in the signal
+            path — corrective work before anything the author added. Present
+            whenever there is a voice for it to listen to, rather than appearing
+            only once it has already produced something: a control that materialises
+            after the fact cannot be the thing you reach for to start. */}
+        {showCarve ? (
+          <FxCarveModule
+            nodes={carveNodes}
+            carve={carve ?? { ...DEFAULT_CARVE }}
+            sourceOptions={sourceOptions}
+            automatedTargets={automatedTargets}
+            liveAutomationValues={liveAutomationValues}
+            open={carveOpen}
+            disabled={disabled}
+            analysing={analysing}
+            onToggleOpen={() => setCarveOpen((was) => !was)}
+            onCarveChange={onCarveChange}
+            onCarvePreview={previewCarve}
+          />
+        ) : null}
+        {handBuilt.length === 0 ? (
           <p className="hf-fx-empty py-1 text-[11px] text-panel-text-4">
-            No effects on this track.
+            {showCarve ? "No other effects on this track." : "No effects on this track."}
           </p>
         ) : (
-          chain.nodes.map((node, i) => {
-            if (node.fromCarve) {
-              // The module stands in for the whole run of carve nodes, drawn once
-              // at the first of them.
-              const first = chain.nodes.findIndex((n) => n.fromCarve);
-              if (i !== first) return null;
-              return (
-                <FxCarveModule
-                  key="carve-module"
-                  nodes={carveNodes}
-                  automatedTargets={automatedTargets}
-                  liveAutomationValues={liveAutomationValues}
-                  open={carveOpen}
-                  disabled={disabled}
-                  onToggleOpen={() => setCarveOpen((was) => !was)}
-                  onToggleBypass={toggleCarveBypass}
-                  onRemove={removeCarve}
-                />
-              );
-            }
+          handBuilt.map(({ node, i }) => {
             return (
               <FxNodeRow
                 key={`${node.type}-${i}`}
@@ -717,81 +847,6 @@ export function FxSection({
           Add effect
         </button>
       )}
-
-      {/* Carve is a relationship between two tracks: it dips this bed where
-          another track's voice sits. With no other audio track in the
-          composition there is nothing to listen to, so the control would only
-          offer an empty picker. Still shown when carve is already configured,
-          so an existing setting cannot be stranded out of sight after its voice
-          track is removed. */}
-      {showCarve ? (
-        <div className="hf-fx-carve space-y-1 rounded-[4px] border border-panel-border-input p-1.5">
-          <div className="hf-fx-carve-head flex min-h-6 items-center justify-between">
-            <span className="hf-fx-carve-title text-[11px] font-semibold text-panel-text-1">
-              Voiceover carve
-            </span>
-            <button
-              type="button"
-              className="hf-fx-bypass rounded-[3px] border border-panel-border-input px-1.5 py-0.5 font-mono text-[9px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
-              aria-pressed={carve !== null}
-              disabled={disabled}
-              onClick={() => onCarveChange(carve ? null : { ...DEFAULT_CARVE })}
-            >
-              {carve ? "On" : "Off"}
-            </button>
-          </div>
-          {carve ? (
-            <>
-              <label className="hf-fx-row flex min-h-6 items-center gap-2">
-                <span className="hf-fx-label w-[86px] flex-shrink-0 truncate text-[10px] text-panel-text-4">
-                  Listen to
-                </span>
-                <select
-                  className="hf-fx-select min-w-0 flex-1 rounded-[3px] bg-panel-surface px-1 py-0.5 font-mono text-[10px] text-panel-text-0"
-                  value={carve.sources[0] ?? ""}
-                  disabled={disabled}
-                  onChange={(e) => onCarveChange({ ...carve, sources: [e.target.value] })}
-                >
-                  <option value="">Select a voice track…</option>
-                  {sourceOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {/* One knob for the whole effect. Depth, band count, width, the
-                  intelligibility weighting and both level-match numbers move
-                  together anyway — a gentle carve is shallow in few bands with
-                  little ducking, a hard one is deeper in more with more — so the
-                  panel sets the strength and `carveProfile` derives the six
-                  numbers the analysis works in. */}
-              <FxParamRow
-                param={{
-                  kind: "number",
-                  key: "strength",
-                  label: "Strength",
-                  unit: "",
-                  min: 0,
-                  max: 1,
-                  step: 0.05,
-                  default: DEFAULT_CARVE.strength,
-                  hint: "How hard to carve: deeper cuts, in more bands, and more room made by dropping the bed's level under the voice. At 0 it carves frequencies only. Moving this re-applies an existing carve; the button is for the first one, or after changing the voice track.",
-                }}
-                value={carve.strength}
-                disabled={disabled}
-                onChange={(_k, v) => previewCarve({ ...carve, strength: Number(v) })}
-                onCommit={(_k, v) => onCarveChange({ ...carve, strength: Number(v) })}
-              />
-              {analysing ? (
-                <p className="hf-fx-carve-working py-1 text-center text-[10px] text-panel-text-4">
-                  Analysing…
-                </p>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
