@@ -10,6 +10,7 @@ import {
 import { DEFAULT_CARVE } from "@hyperframes/core/audio-carve";
 import { BANDS, EFFECT_COPY, PRESET_PROBLEM } from "@hyperframes/core/audio-fx-copy";
 import { HF_AUDIO_FX_JOBS, HF_AUDIO_FX_JOB_TYPES } from "@hyperframes/core/audio-fx-jobs";
+import { audioFxProfileStrength } from "@hyperframes/core/audio-fx-profiles";
 import { getAudioFxPreset } from "@hyperframes/core/audio-fx-presets";
 
 /**
@@ -220,14 +221,17 @@ describe("FxSection chain", () => {
   });
 
   it("adds an effect seeded with its declared defaults", () => {
+    // An effect with no derived knob arrives exactly as the registry declares
+    // it. The five that DO have one are seeded on their curve instead — see
+    // "adds a profiled effect on its curve" below.
     const { host, onChainChange } = mount();
     click(host.querySelector(".hf-fx-add"));
-    click(byText(host, ".hf-fx-add-item", EFFECT_COPY.compressor?.title ?? ""));
+    click(byText(host, ".hf-fx-add-item", EFFECT_COPY.delay?.title ?? ""));
     expect(onChainChange).toHaveBeenCalledTimes(1);
     const next = onChainChange.mock.calls[0]![0] as HfAudioFxChain;
     expect(next.nodes).toHaveLength(1);
-    expect(next.nodes[0]!.type).toBe("compressor");
-    expect(next.nodes[0]!.params).toEqual(defaultAudioFxParams("compressor"));
+    expect(next.nodes[0]!.type).toBe("delay");
+    expect(next.nodes[0]!.params).toEqual(defaultAudioFxParams("delay"));
   });
 
   it("renders a control for every parameter the effect declares", () => {
@@ -236,11 +240,21 @@ describe("FxSection chain", () => {
     const labels = Array.from(host.querySelectorAll(".hf-fx-label")).map((e) =>
       e.textContent?.trim(),
     );
-    for (const p of def.params) expect(labels).toContain(plainLabel("compressor", p.key));
+    // Under Details: a compressor's face is one derived knob, and its seven real
+    // controls are one click in.
+    openDetails(host);
+    const opened = Array.from(host.querySelectorAll(".hf-fx-label")).map((e) =>
+      e.textContent?.trim(),
+    );
+    for (const p of def.params) expect(opened).toContain(plainLabel("compressor", p.key));
+    void labels;
   });
 
   it("uses a select for an enum parameter and a slider for a number", () => {
     const { host } = mount({ chain: chainOf("saturate") });
+    // Its curve type is an enum and lives under Details, since saturation's one
+    // knob is derived rather than being any single parameter.
+    openDetails(host);
     expect(host.querySelector(".hf-fx-select")).toBeTruthy();
     expect(host.querySelector(".hf-fx-slider")).toBeTruthy();
   });
@@ -476,18 +490,50 @@ describe("FxSection chain", () => {
     expect(fxCard(host).querySelector(".hf-fx-ruler")).toBeNull();
   });
 
-  it("opens a module on all of its controls when its one knob does not exist yet", () => {
-    // Five effects want a single DERIVED control over several parameters — the
-    // `PROFILES` idea, whose figures are proposed rather than measured. Until it
-    // ships they open on everything, which is honest: inventing one knob for
-    // them now would be a knob that lies about what it sets.
-    const { host } = mount({ chain: chainOf("compressor") });
+  it("adds a profiled effect on its curve, not at registry defaults", () => {
+    // The registry's defaults are not a point on the profile's curve, so an
+    // effect seeded with them opened reading a strength it was not set to: a
+    // compressor arrived showing Evenness 0.67 with its make-up gain at 0 dB —
+    // the "quieter as you turn it up" bug the profiles exist to prevent, on the
+    // very first frame. Caught in a running studio, not by these tests.
+    const { host, onChainChange } = mount({ chain: { version: 1, nodes: [] } });
+    click(host.querySelector(".hf-fx-add"));
+    click(byText(host, ".hf-fx-add-item", EFFECT_COPY.compressor?.title ?? ""));
+
+    const written = onChainChange.mock.calls[0]?.[0] as HfAudioFxChain | undefined;
+    const added = written?.nodes[0]?.params ?? {};
+    expect(audioFxProfileStrength("compressor", added)).toBeCloseTo(0.5, 2);
+    // And the mechanism agrees with the knob rather than sitting at its default.
+    expect(added.makeup).not.toBe(defaultAudioFxParams("compressor").makeup);
+  });
+
+  it("gives a module with no single real control a derived one", () => {
+    // A compressor has seven controls and an author wants one, but no single one
+    // of them can be its face: threshold means nothing without ratio. So the
+    // knob is derived, and it sets all five at once.
+    const { host, onChainChange } = mount({ chain: chainOf("compressor") });
     const node = fxCard(host);
     expect(EFFECT_COPY.compressor?.primary).toBe("strength");
-    expect(node.querySelector(".hf-fx-node-details")).toBeNull();
-    expect(node.querySelectorAll(".hf-fx-row").length).toBe(
-      getAudioFxDef("compressor")?.params.length,
+    // One control on the open face, named for the outcome.
+    const rows = Array.from(node.querySelectorAll(".hf-fx-row"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.querySelector(".hf-fx-label")?.textContent).toBe("Evenness");
+    expect(node.querySelector(".hf-fx-node-details")).toBeTruthy();
+
+    // Moving it moves the mechanism underneath.
+    const before = defaultAudioFxParams("compressor");
+    typeInto(node.querySelector<HTMLInputElement>(".hf-fx-number")!, "0.9");
+    act(() =>
+      node
+        .querySelector(".hf-fx-number")
+        ?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })),
     );
+    const next = onChainChange.mock.calls.at(-1)?.[0] as HfAudioFxChain;
+    const params = next.nodes[0]?.params ?? {};
+    expect(params.ratio).not.toBe(before.ratio);
+    expect(params.threshold).not.toBe(before.threshold);
+    // And leaves alone what the author set under Details.
+    expect(params.knee).toBe(before.knee);
   });
 
   it("offers presets as the complaint they answer", () => {
@@ -893,6 +939,7 @@ describe("FxSection chain", () => {
 
   it("commits an enum immediately, since a select has no drag", () => {
     const { host, onChainChange } = mount({ chain: chainOf("saturate") });
+    openDetails(host);
     const select = fxCard(host).querySelector<HTMLSelectElement>(".hf-fx-select")!;
     const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
     act(() => {
@@ -1147,6 +1194,9 @@ describe("automation in the panel", () => {
     // Saturate: `output` is a make-up gain, but the curve's type and threshold
     // are rebuilt wholesale and cannot be scheduled.
     const { host } = automatable(idChain("saturate"));
+    // Under Details, where the real parameters are: the derived knob on the open
+    // face has no AudioParam behind it and nothing to automate.
+    openDetails(host);
     expect(
       rowFor(host, plainLabel("saturate", "output"))?.querySelector(".hf-fx-automate"),
     ).toBeTruthy();
