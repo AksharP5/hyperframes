@@ -23,9 +23,17 @@ import {
 } from "@hyperframes/core/audio-fx";
 import { DEFAULT_CARVE, type HfCarveSettings } from "@hyperframes/core/audio-carve";
 import { applyAudioFxPreset, getAudioFxPreset } from "@hyperframes/core/audio-fx-presets";
+import {
+  addAudioEq,
+  audioEqIds,
+  readAudioEqBands,
+  removeAudioEq,
+  setAudioEqBandGain,
+} from "@hyperframes/core/audio-fx-eq";
 import { fxAutomationTarget } from "@hyperframes/core/audio-automation";
 import { FxParams, FxParamRow } from "./propertyPanelFxControls.js";
 import { FxPresetMenu } from "./propertyPanelFxPresetMenu.js";
+import { FxEqModule } from "./propertyPanelFxEqModule.js";
 // Shared with the timeline's lane labels: a band is named by its frequency in
 // both places, and two formatters would drift.
 import { formatHz } from "../../player/components/automationLaneData";
@@ -769,8 +777,45 @@ export function FxSection({
   const carveNodes = useMemo(() => chain.nodes.filter((n) => n.fromCarve), [chain.nodes]);
   /** Everything the author added, with the chain index every edit addresses. */
   const handBuilt = useMemo(
-    () => chain.nodes.map((node, i) => ({ node, i })).filter(({ node }) => !node.fromCarve),
+    () =>
+      chain.nodes
+        .map((node, i) => ({ node, i }))
+        // Carve and EQ bands belong to their own modules; showing them here too
+        // would put the same filter on screen twice with two ways to edit it.
+        .filter(({ node }) => !node.fromCarve && !node.fromEq),
     [chain.nodes],
+  );
+
+  const eqIds = useMemo(() => audioEqIds(chain), [chain]);
+  const [openEq, setOpenEq] = useState<string | null>(null);
+
+  const addEq = useCallback(() => {
+    const { chain: next, eqId } = addAudioEq(chain);
+    mutate(next.nodes);
+    setOpenEq(eqId);
+    setAdding(false);
+  }, [chain, mutate]);
+
+  // Dragging a fader is heard immediately and written once on release, the same
+  // split every other control in the rack uses.
+  const previewEqBand = useCallback(
+    (eqId: string, band: string, gain: number) =>
+      onChainPreview?.(setAudioEqBandGain(chain, eqId, band, gain)),
+    [chain, onChainPreview],
+  );
+  const commitEqBand = useCallback(
+    (eqId: string, band: string, gain: number) =>
+      mutate(setAudioEqBandGain(chain, eqId, band, gain).nodes),
+    [chain, mutate],
+  );
+  const removeEq = useCallback(
+    (eqId: string) => {
+      for (const node of chain.nodes) {
+        if (node.fromEq === eqId && node.id) onRemoveNodeAutomation?.(node.id);
+      }
+      mutate(removeAudioEq(chain, eqId).nodes);
+    },
+    [chain, mutate, onRemoveNodeAutomation],
   );
 
   const moveNode = useCallback(
@@ -809,7 +854,20 @@ export function FxSection({
             onCarvePreview={previewCarve}
           />
         ) : null}
-        {handBuilt.length === 0 ? (
+        {eqIds.map((eqId) => (
+          <FxEqModule
+            key={eqId}
+            eqId={eqId}
+            bands={readAudioEqBands(chain, eqId)}
+            open={openEq === eqId}
+            disabled={disabled}
+            onToggleOpen={() => setOpenEq((was) => (was === eqId ? null : eqId))}
+            onPreview={(band, gain) => previewEqBand(eqId, band, gain)}
+            onCommit={(band, gain) => commitEqBand(eqId, band, gain)}
+            onRemove={() => removeEq(eqId)}
+          />
+        ))}
+        {handBuilt.length === 0 && eqIds.length === 0 ? (
           <p className="hf-fx-empty py-1 text-[11px] text-panel-text-4">
             {showCarve ? "No other effects on this track." : "No effects on this track."}
           </p>
@@ -846,6 +904,22 @@ export function FxSection({
 
       {adding ? (
         <div className="hf-fx-add-menu space-y-1.5 rounded-[4px] border border-panel-border-input p-1.5">
+          <div className="hf-fx-add-group flex flex-wrap items-center gap-1">
+            <span className="hf-fx-add-group-label w-full font-mono text-[9px] uppercase tracking-wide text-panel-text-4">
+              Tone
+            </span>
+            <button
+              type="button"
+              // Not hf-fx-add-item: Tone is a composite over several filters,
+              // not an entry in the effect registry, and a count of the registry
+              // must not include it.
+              className="hf-fx-add-composite rounded-[3px] bg-panel-surface px-1.5 py-0.5 text-[10px] text-panel-text-1 hover:text-panel-text-0"
+              title="Bass, middle and treble on one set of faders."
+              onClick={addEq}
+            >
+              Tone (EQ)
+            </button>
+          </div>
           {grouped.map(({ group, defs }) => (
             <div key={group} className="hf-fx-add-group flex flex-wrap items-center gap-1">
               <span className="hf-fx-add-group-label w-full font-mono text-[9px] uppercase tracking-wide text-panel-text-4">

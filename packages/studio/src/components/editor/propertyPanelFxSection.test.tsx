@@ -284,6 +284,110 @@ describe("FxSection chain", () => {
     expect(names).not.toContain("Peaking EQ");
   });
 
+  it("adds a Tone EQ as three ordinary filters on one control surface", () => {
+    const { host, onChainChange } = mount({ chain: { version: 1, nodes: [] } });
+    click(host.querySelector(".hf-fx-add"));
+    click(byText(host, ".hf-fx-add-composite", "Tone (EQ)"));
+
+    const next = onChainChange.mock.calls[0]![0] as HfAudioFxChain;
+    expect(next.nodes.map((n) => n.type)).toEqual(["lowshelf", "peaking", "highshelf"]);
+    expect(next.nodes.map((n) => n.label)).toEqual(["Bass", "Middle", "Treble"]);
+    expect(next.nodes.every((n) => n.fromEq === "eq1")).toBe(true);
+  });
+
+  it("shows the EQ as one module, not as its individual bands", () => {
+    // The bands belong to the Tone module. Listing them again in the rack would
+    // put the same filter on screen twice with two ways to edit it.
+    const { host } = mount({
+      chain: {
+        version: 1,
+        nodes: [
+          {
+            type: "lowshelf",
+            id: "a",
+            fromEq: "eq1",
+            label: "Bass",
+            enabled: true,
+            params: defaultAudioFxParams("lowshelf"),
+          },
+          {
+            type: "peaking",
+            id: "b",
+            fromEq: "eq1",
+            label: "Middle",
+            enabled: true,
+            params: defaultAudioFxParams("peaking"),
+          },
+          {
+            type: "highshelf",
+            id: "c",
+            fromEq: "eq1",
+            label: "Treble",
+            enabled: true,
+            params: defaultAudioFxParams("highshelf"),
+          },
+        ],
+      } as HfAudioFxChain,
+    });
+    expect(host.querySelectorAll(".hf-fx-eq-module")).toHaveLength(1);
+    const names = Array.from(host.querySelectorAll(".hf-fx-node-name")).map((e) =>
+      e.textContent?.trim(),
+    );
+    expect(names).toContain("Tone");
+    expect(names).not.toContain("Bass");
+    // Closed, it says what it is doing rather than listing three zeroes.
+    expect(host.querySelector(".hf-fx-eq-summary")?.textContent).toMatch(/^Flat/);
+  });
+
+  it("moves one band without persisting until the fader is released", () => {
+    const { host, onChainChange, onChainPreview } = mount({
+      chain: {
+        version: 1,
+        nodes: [
+          {
+            type: "lowshelf",
+            id: "a",
+            fromEq: "eq1",
+            label: "Bass",
+            enabled: true,
+            params: defaultAudioFxParams("lowshelf"),
+          },
+          {
+            type: "peaking",
+            id: "b",
+            fromEq: "eq1",
+            label: "Middle",
+            enabled: true,
+            params: defaultAudioFxParams("peaking"),
+          },
+          {
+            type: "highshelf",
+            id: "c",
+            fromEq: "eq1",
+            label: "Treble",
+            enabled: true,
+            params: defaultAudioFxParams("highshelf"),
+          },
+        ],
+      } as HfAudioFxChain,
+    });
+    // The carve module leads the rack, so its header is the first one — open
+    // the EQ's own.
+    click(host.querySelector(".hf-fx-eq-module .hf-fx-node-name"));
+    const fader = host.querySelectorAll<HTMLInputElement>(".hf-fx-eq-fader")[0]!;
+    expect(fader, "the EQ did not open").toBeTruthy();
+    typeInto(fader, "4");
+    // Heard, not written — a persisting write per drag event reloads the
+    // composition and restarts the audio.
+    expect(onChainPreview).toHaveBeenCalled();
+    expect(onChainChange).not.toHaveBeenCalled();
+
+    act(() => fader.dispatchEvent(new Event("pointerup", { bubbles: true })));
+    const next = onChainChange.mock.calls[0]![0] as HfAudioFxChain;
+    expect(next.nodes.find((n) => n.label === "Bass")!.params!.gain).toBe(4);
+    expect(next.nodes.find((n) => n.label === "Middle")!.params!.gain).toBe(0);
+  });
+
   it("cannot move the ends past themselves", () => {
     const { host } = mount({ chain: chainOf("peaking", "reverb") });
     const ups = host.querySelectorAll('.hf-fx-move[title="Move up"]');
