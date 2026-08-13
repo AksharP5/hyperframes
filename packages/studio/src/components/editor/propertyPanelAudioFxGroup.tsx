@@ -20,7 +20,6 @@ import {
 import {
   analyseCarveBands,
   analyseCarveDuck,
-  analyseCarveDynamics,
   carveBandsToChain,
   carveProfile,
   HF_AUDIO_CARVE_ATTR,
@@ -31,7 +30,6 @@ import {
   fxAutomationTarget,
   sampleAutomationLane,
   type HfAutomation,
-  type HfAutomationLane,
 } from "@hyperframes/core/audio-automation";
 import {
   automatedTargetsOf,
@@ -185,10 +183,7 @@ export function AudioFxGroup({
    * commit, which does not exist yet.
    */
   const setCarve = async (next: HfCarveSettings | null): Promise<void> => {
-    // Envelopes the carve wrote outlive it otherwise, and an automated gain
-    // ignores the panel's own depth — so switching dynamic off would leave the
-    // filters still following the voice with nothing saying they do.
-    if (!next || (carve?.dynamic && !next.dynamic)) {
+    if (!next) {
       const carriedOver = withoutCarveLanes(automation, chain);
       if (carriedOver.lanes.length !== automation.lanes.length) {
         await onSetAttributeQuiet(
@@ -215,11 +210,10 @@ export function AudioFxGroup({
     // is already there. A carve with no source yet has nothing to analyse.
     const changed =
       next &&
-      next.source &&
+      next.sources.length > 0 &&
       (!carve ||
-        next.source !== carve.source ||
-        next.strength !== carve.strength ||
-        next.dynamic !== carve.dynamic);
+        next.sources.join(" ") !== carve.sources.join(" ") ||
+        next.strength !== carve.strength);
     if (next && changed) await analyse(next);
   };
 
@@ -258,7 +252,7 @@ export function AudioFxGroup({
       if (other.id === element.id) continue;
       try {
         const raw = other.getAttribute(HF_AUDIO_CARVE_ATTR);
-        if (raw && normalizeCarveSettings(JSON.parse(raw)).source === element.id) {
+        if (raw && normalizeCarveSettings(JSON.parse(raw)).sources.includes(element.id)) {
           return other.id || "another track";
         }
       } catch {
@@ -284,9 +278,10 @@ export function AudioFxGroup({
    * hand-added effects alone, so re-analysing does not discard other work.
    */
   const analyse = async (active: HfCarveSettings | null = carve): Promise<void> => {
-    if (!active?.source) return;
+    const activeSource = active?.sources[0];
+    if (!activeSource) return;
     const doc = element.element?.ownerDocument;
-    const voice = doc?.getElementById(active.source) as HTMLAudioElement | null;
+    const voice = doc?.getElementById(activeSource) as HTMLAudioElement | null;
     const src = voice?.getAttribute("src");
     if (!src) return;
     setAnalysing(true);
@@ -348,14 +343,13 @@ export function AudioFxGroup({
       };
       const carvedNodes: HfAudioFxNode[] = carved.nodes.map(mint);
       // The gain stage sits after the filters, and only exists when the carve was
-      // asked to make level room. Dynamic drives it from the envelope; static
-      // holds the one value above.
+      // asked to make level room, holding the one value computed above.
       const duckNode =
         duck.length > 0
           ? mint({
               type: "gain",
               enabled: true,
-              params: { ...defaultAudioFxParams("gain"), gain: active.dynamic ? 0 : staticDuckDb },
+              params: { ...defaultAudioFxParams("gain"), gain: staticDuckDb },
             })
           : null;
       const next = {
@@ -372,42 +366,11 @@ export function AudioFxGroup({
       // pruned when it is read back.
       await onSetAttributeQuiet(HF_AUDIO_FX_ATTR, serializeAudioFxChain(next));
 
-      /**
-       * One carve envelope as a lane on this bed's clock.
-       *
-       * Everything the analysis returns is timed from the start of the voice, so
-       * it shifts by the gap between the two clips; and a lane holds its first
-       * value backwards to the start of its own clip, so a bed that begins before
-       * the voice needs an explicit "no cut" at zero or it starts out ducked.
-       */
-      const laneFor = (id: string, points: { t: number; v: number }[]): HfAutomationLane[] => {
-        const shifted = points
-          .map((p) => ({ t: Number((p.t + offset).toFixed(3)), v: p.v }))
-          .filter((p) => p.t >= 0);
-        if ((shifted[0]?.t ?? 0) > 0) shifted.unshift({ t: 0, v: 0 });
-        return shifted.length > 1
-          ? [{ target: fxAutomationTarget(id, "gain"), points: shifted }]
-          : [];
-      };
-
-      // Dynamic carve: each filter's depth becomes an envelope of the voice's
-      // level in that band, so pauses leave the bed alone.
-      const lanes: HfAutomationLane[] = active.dynamic
-        ? analyseCarveDynamics(buffer.getChannelData(0), buffer.sampleRate, bands).flatMap(
-            (dyn, i) => {
-              const id = carvedNodes[i]?.id;
-              if (!id) return [];
-              return laneFor(id, dyn.points);
-            },
-          )
-        : [];
-      // The level envelope rides the gain stage, on the same clock as the bands.
-      if (active.dynamic && duckNode?.id && duck.length > 0) {
-        lanes.push(...laneFor(duckNode.id, duck));
-      }
+      // A carve written before dynamic mode was removed may still carry the
+      // envelope lanes it automated; a re-run is static now, so they are stale.
       const carriedOver = withoutCarveLanes(automation, chain);
-      if (lanes.length > 0 || carriedOver.lanes.length !== automation.lanes.length) {
-        writeAutomation({ version: 1, lanes: [...carriedOver.lanes, ...lanes] });
+      if (carriedOver.lanes.length !== automation.lanes.length) {
+        writeAutomation(carriedOver);
       }
     } catch {
       // Leave the chain as it was; the button simply re-enables.

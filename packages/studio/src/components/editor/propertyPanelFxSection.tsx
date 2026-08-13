@@ -748,9 +748,9 @@ export function FxSection({
                 </span>
                 <select
                   className="hf-fx-select min-w-0 flex-1 rounded-[3px] bg-panel-surface px-1 py-0.5 font-mono text-[10px] text-panel-text-0"
-                  value={carve.source}
+                  value={carve.sources[0] ?? ""}
                   disabled={disabled}
-                  onChange={(e) => onCarveChange({ ...carve, source: e.target.value })}
+                  onChange={(e) => onCarveChange({ ...carve, sources: [e.target.value] })}
                 >
                   <option value="">Select a voice track…</option>
                   {sourceOptions.map((o) => (
@@ -783,26 +783,6 @@ export function FxSection({
                 onChange={(_k, v) => previewCarve({ ...carve, strength: Number(v) })}
                 onCommit={(_k, v) => onCarveChange({ ...carve, strength: Number(v) })}
               />
-              {/* A static carve holds its cuts for the whole clip, pauses
-                  included. Dynamic hands every value to an envelope of the voice's
-                  own level, so the bed is only worked on while there is something
-                  to make room for. Written as ordinary automation, which is why the
-                  lanes show up in the timeline and can be edited afterwards. */}
-              <label className="hf-fx-row flex min-h-6 items-center gap-2">
-                <span className="hf-fx-label w-[86px] flex-shrink-0 truncate text-[10px] text-panel-text-4">
-                  Dynamic
-                </span>
-                <input
-                  type="checkbox"
-                  className="hf-fx-carve-dynamic h-3 w-3 accent-panel-accent"
-                  checked={carve.dynamic}
-                  disabled={disabled}
-                  onChange={(e) => onCarveChange({ ...carve, dynamic: e.target.checked })}
-                />
-                <span className="min-w-0 flex-1 truncate text-[9px] text-panel-text-4">
-                  follows the voice, flat where it is silent
-                </span>
-              </label>
               {analysing ? (
                 <p className="hf-fx-carve-working py-1 text-center text-[10px] text-panel-text-4">
                   Analysing…

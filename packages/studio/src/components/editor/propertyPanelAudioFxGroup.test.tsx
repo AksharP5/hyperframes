@@ -246,15 +246,15 @@ describe("AudioFxGroup carve", () => {
   });
 });
 
-describe("AudioFxGroup dynamic carve", () => {
+describe("AudioFxGroup carve analysis", () => {
   const carvedChain = JSON.stringify({
     version: 1,
     nodes: [{ type: "lowpass", id: "n1", params: { frequency: 400, q: 0.9, poles: "2" } }],
   });
   // Strength 0 carves frequencies only — no level ducking — so the spectral
   // cases measure just the spectral half. A case that wants the duck raises it.
-  const settings = (dynamic: boolean, over: Record<string, unknown> = {}) =>
-    JSON.stringify({ source: "vo", strength: 0, dynamic, ...over });
+  const settings = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({ sources: ["vo"], strength: 0, ...over });
 
   /** The value written for one attribute, whatever order the writes landed in. */
   const writeFor = (calls: unknown[][], attr: string) =>
@@ -266,9 +266,6 @@ describe("AudioFxGroup dynamic carve", () => {
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(select, id);
     select.dispatchEvent(new Event("change", { bubbles: true }));
   };
-
-  const dynamicBox = (host: HTMLElement) =>
-    host.querySelector<HTMLInputElement>(".hf-fx-carve-dynamic")!;
 
   /** A voice with a pause in it, decoded through a stubbed offline context. */
   function stubDecode(): void {
@@ -292,114 +289,11 @@ describe("AudioFxGroup dynamic carve", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("records the choice in the carve settings", () => {
-    const { host, onSetAttributeQuiet } = mount({
-      "fx-chain": carvedChain,
-      "fx-carve": settings(false),
-    });
-    act(() => dynamicBox(host).click());
-    const write = onSetAttributeQuiet.mock.calls.find((c) => c[0] === "data-fx-carve");
-    expect(JSON.parse(String(write![1])).dynamic).toBe(true);
-  });
-
-  it("automates the carve filters' gain from the voice, in the bed's own time", async () => {
-    stubDecode();
-    // Voice starts 10s into the composition, bed at 0: the envelope is measured
-    // against the voice but read from the start of the bed, so it has to shift.
-    const { host, onSetAttributeQuiet } = mount({
-      "fx-chain": carvedChain,
-      // No source yet: picking one is what applies the carve.
-      "fx-carve": settings(true, { source: "" }),
-      start: "0",
-    });
-    const vo = document.getElementById("vo")!;
-    vo.setAttribute("data-start", "10");
-    vo.setAttribute("src", "voice.wav");
-    await act(async () => {
-      pickSource(host, "vo");
-    });
-
-    // Chain first, then automation: a lane naming a node the chain does not
-    // carry yet is dropped when it is read back.
-    const order = onSetAttributeQuiet.mock.calls.map((c) => c[0]);
-    // The settings land first, then the filters they imply, then the envelopes.
-    expect(order.indexOf("data-fx-chain")).toBeLessThan(order.indexOf("data-automation"));
-
-    const carved = writeFor(onSetAttributeQuiet.mock.calls, "data-fx-chain").nodes;
-    const carveNode = carved.find((n: { fromCarve?: boolean }) => n.fromCarve);
-    expect(carveNode.id).toBeTruthy();
-
-    const lanes = writeFor(onSetAttributeQuiet.mock.calls, "data-automation").lanes;
-    const lane = lanes.find((l: { target: string }) => l.target === `fx.${carveNode.id}.gain`) as {
-      points: { t: number; v: number }[];
-    };
-    expect(lane).toBeTruthy();
-    // Flat at the bed's own start, before the voice exists at all.
-    expect(lane.points[0]).toMatchObject({ t: 0, v: 0 });
-    // The voice's pause is at 0-1s of its own clip, so 10-11s of the bed's.
-    expect(lane.points.find((p) => p.t > 10.5 && p.t < 11)?.v ?? 0).toBe(0);
-    // And it cuts once the voice speaks, a second later. Depth is per band and
-    // relative to that band's own peak in the voice, so the invariant is that the
-    // envelope gets most of the way to what the analysis put on the node — not a
-    // fixed number of dB, which changes with the band the analysis chose.
-    const bandGain = Number(carveNode.params?.gain ?? 0);
-    // At least half the depth the analysis put on the node; the exact floor
-    // depends on which band it chose and how the envelope was thinned.
-    expect(Math.min(...lane.points.map((p) => p.v))).toBeLessThanOrEqual(bandGain * 0.5);
-    // Ends back at no cut, so the bed is not left dipped for the rest of the clip.
-    expect(lane.points.at(-1)!.v).toBe(0);
-  });
-
-  it("adds a gain stage that ducks the bed under the voice, automated when dynamic", async () => {
-    // Carving frequencies cannot beat a bed that is simply louder than the
-    // voice. The level half rides a gain node the carve owns, so the track's own
-    // volume lane is left alone.
+  it("holds one measured value from the voice and bed", async () => {
     stubDecode();
     const { host, onSetAttributeQuiet } = mount({
       "fx-chain": carvedChain,
-      "fx-carve": settings(true, { strength: 1, source: "" }),
-      start: "0",
-    });
-    const vo = document.getElementById("vo")!;
-    vo.setAttribute("data-start", "0");
-    vo.setAttribute("src", "voice.wav");
-    // The bed is measured too — "how far over the voice is it" needs both.
-    document.getElementById("bed")!.setAttribute("src", "bed.m4a");
-    await act(async () => {
-      pickSource(host, "vo");
-    });
-
-    const nodes = writeFor(onSetAttributeQuiet.mock.calls, "data-fx-chain").nodes;
-    const gain = nodes.find((n: { type: string }) => n.type === "gain");
-    expect(gain).toBeTruthy();
-    expect(gain.fromCarve).toBe(true);
-    // Dynamic hands the value to the envelope, so the static one stays at unity.
-    expect(gain.params.gain).toBe(0);
-
-    const lanes = writeFor(onSetAttributeQuiet.mock.calls, "data-automation").lanes;
-    const duckLane = lanes.find((l: { target: string }) => l.target === `fx.${gain.id}.gain`);
-    expect(duckLane).toBeTruthy();
-    expect(Math.min(...duckLane.points.map((p: { v: number }) => p.v))).toBeLessThan(0);
-    // Every carved band gets an envelope reaching that band's own analysed depth.
-    for (const node of nodes.filter((n: { type: string }) => n.type === "peaking")) {
-      const lane = lanes.find((l: { target: string }) => l.target === `fx.${node.id}.gain`) as
-        | { points: { v: number }[] }
-        | undefined;
-      expect(lane, `band ${node.id} has no envelope`).toBeTruthy();
-      const deepest = Math.min(...lane!.points.map((p) => p.v));
-      expect(deepest).toBeLessThanOrEqual(0);
-      expect(deepest).toBeGreaterThanOrEqual(node.params.gain - 0.2);
-      expect(deepest).toBeLessThanOrEqual(node.params.gain * 0.5);
-    }
-    // The author's own volume lane is not something a carve gets to touch.
-    expect(lanes.some((l: { target: string }) => l.target === "volume")).toBe(false);
-  });
-
-  it("holds one measured value when the carve is not dynamic", async () => {
-    stubDecode();
-    const { host, onSetAttributeQuiet } = mount({
-      "fx-chain": carvedChain,
-      "fx-carve": settings(false, { strength: 1, source: "" }),
+      "fx-carve": settings({ strength: 1, sources: [] }),
       start: "0",
     });
     const vo = document.getElementById("vo")!;
@@ -413,7 +307,7 @@ describe("AudioFxGroup dynamic carve", () => {
     const nodes = writeFor(onSetAttributeQuiet.mock.calls, "data-fx-chain").nodes;
     const gain = nodes.find((n: { type: string }) => n.type === "gain");
     expect(gain.params.gain).toBeLessThan(0);
-    // Nothing to schedule: a static carve is a value, not an envelope.
+    // Nothing to schedule: a carve is a value, not an envelope.
     expect(onSetAttributeQuiet.mock.calls.some((c) => c[0] === "data-automation")).toBe(false);
   });
 
@@ -421,7 +315,7 @@ describe("AudioFxGroup dynamic carve", () => {
     stubDecode();
     const { host, onSetAttributeQuiet } = mount({
       "fx-chain": carvedChain,
-      "fx-carve": settings(true, { strength: 0, source: "" }),
+      "fx-carve": settings({ strength: 0, sources: [] }),
       start: "0",
     });
     document.getElementById("vo")!.setAttribute("src", "voice.wav");
@@ -439,7 +333,7 @@ describe("AudioFxGroup dynamic carve", () => {
     stubDecode();
     const { host, onSetAttributeQuiet } = mount({
       "fx-chain": JSON.stringify({ version: 1, nodes: [] }),
-      "fx-carve": JSON.stringify({ source: "", strength: 0.25, dynamic: true }),
+      "fx-carve": JSON.stringify({ sources: [], strength: 0.25 }),
       start: "0",
     });
     document.getElementById("vo")!.setAttribute("src", "voice.wav");
@@ -448,44 +342,17 @@ describe("AudioFxGroup dynamic carve", () => {
       pickSource(host, "vo");
     });
     const written = onSetAttributeQuiet.mock.calls.map((c) => c[0]);
-    expect(written).toEqual(["data-fx-carve", "data-fx-chain", "data-automation"]);
+    expect(written).toEqual(["data-fx-carve", "data-fx-chain"]);
     const nodes = JSON.parse(
       String(onSetAttributeQuiet.mock.calls.find((c) => c[0] === "data-fx-chain")![1]),
     ).nodes;
     expect(nodes.every((n: { fromCarve?: boolean }) => n.fromCarve)).toBe(true);
   });
 
-  it("re-applies when dynamic is switched on, not just when strength moves", async () => {
-    stubDecode();
-    const carvedAlready = JSON.stringify({
-      version: 1,
-      nodes: [
-        {
-          type: "peaking",
-          id: "n1",
-          fromCarve: true,
-          params: { frequency: 1000, gain: -6, q: 1.4 },
-        },
-      ],
-    });
-    const { host, onSetAttributeQuiet } = mount({
-      "fx-chain": carvedAlready,
-      "fx-carve": settings(false, { strength: 0.25 }),
-      start: "0",
-    });
-    document.getElementById("vo")!.setAttribute("src", "voice.wav");
-    document.getElementById("bed")!.setAttribute("src", "bed.m4a");
-    await act(async () => {
-      host.querySelector<HTMLInputElement>(".hf-fx-carve-dynamic")!.click();
-    });
-    // Static and dynamic are different chains, so the switch has to rebuild them.
-    expect(onSetAttributeQuiet.mock.calls.some((c) => c[0] === "data-fx-chain")).toBe(true);
-  });
-
   it("re-applies an existing carve when strength moves", async () => {
     // Strength is the whole control surface, so it has to act on what is already
-    // applied. Left to the button alone, a carve kept the filters and envelopes
-    // its old strength produced and the knob silently described nothing.
+    // applied. Left to the button alone, a carve kept the filters its old
+    // strength produced and the knob silently described nothing.
     stubDecode();
     const carvedAlready = JSON.stringify({
       version: 1,
@@ -501,7 +368,7 @@ describe("AudioFxGroup dynamic carve", () => {
     });
     const { host, onSetAttributeQuiet } = mount({
       "fx-chain": carvedAlready,
-      "fx-carve": settings(true, { strength: 0.25 }),
+      "fx-carve": settings({ strength: 0.25 }),
       start: "0",
     });
     document.getElementById("vo")!.setAttribute("src", "voice.wav");
@@ -516,9 +383,8 @@ describe("AudioFxGroup dynamic carve", () => {
 
     const written = onSetAttributeQuiet.mock.calls.map((c) => c[0]);
     expect(written).toContain("data-fx-carve");
-    // The settings land first, then the filters they imply, then the envelopes.
+    // The settings land first, then the filters they imply.
     expect(written.indexOf("data-fx-carve")).toBeLessThan(written.indexOf("data-fx-chain"));
-    expect(written.indexOf("data-fx-chain")).toBeLessThan(written.indexOf("data-automation"));
 
     const chainWrite = onSetAttributeQuiet.mock.calls.find((c) => c[0] === "data-fx-chain");
     const nodes = JSON.parse(String(chainWrite![1])).nodes;
@@ -537,7 +403,7 @@ describe("AudioFxGroup dynamic carve", () => {
     stubDecode();
     const { host, onSetAttributeQuiet } = mount({
       "fx-chain": JSON.stringify({ version: 1, nodes: [] }),
-      "fx-carve": settings(true, { strength: 0.25, source: "" }),
+      "fx-carve": settings({ strength: 0.25, sources: [] }),
       start: "0",
     });
     const dial = host.querySelector<HTMLInputElement>(".hf-fx-carve input[type=range]")!;
@@ -566,7 +432,7 @@ describe("AudioFxGroup dynamic carve", () => {
     });
     const { host, onSetAttributeQuiet, onSetAttributeLive } = mount({
       "fx-chain": carvedAlready,
-      "fx-carve": settings(true, { strength: 0.25 }),
+      "fx-carve": settings({ strength: 0.25 }),
       start: "0",
     });
     document.getElementById("vo")!.setAttribute("src", "voice.wav");
@@ -579,36 +445,6 @@ describe("AudioFxGroup dynamic carve", () => {
     });
     expect(onSetAttributeLive.mock.calls.every((c) => c[0] === "data-fx-carve")).toBe(true);
     expect(onSetAttributeQuiet.mock.calls.some((c) => c[0] === "data-fx-chain")).toBe(false);
-  });
-
-  it("drops the envelopes when dynamic is switched back off", async () => {
-    // An automated gain ignores the panel's depth, so leaving the lanes behind
-    // would keep the filters following a voice with nothing saying they do.
-    const automation = JSON.stringify({
-      version: 1,
-      lanes: [
-        { target: "fx.n2.gain", points: [{ t: 0, v: 0 }] },
-        { target: "volume", points: [{ t: 0, v: 1 }] },
-      ],
-    });
-    const withCarveNode = JSON.stringify({
-      version: 1,
-      nodes: [
-        { type: "peaking", id: "n2", fromCarve: true, params: { frequency: 1000, gain: -6 } },
-      ],
-    });
-    const { host, onSetAttributeQuiet } = mount({
-      "fx-chain": withCarveNode,
-      "fx-carve": settings(true),
-      automation,
-    });
-    await act(async () => {
-      dynamicBox(host).click();
-    });
-    const write = onSetAttributeQuiet.mock.calls.find((c) => c[0] === "data-automation");
-    expect(write).toBeTruthy();
-    const lanes = JSON.parse(String(write![1])).lanes;
-    expect(lanes.map((l: { target: string }) => l.target)).toEqual(["volume"]);
   });
 });
 

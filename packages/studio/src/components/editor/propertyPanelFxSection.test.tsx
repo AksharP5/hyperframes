@@ -346,13 +346,13 @@ describe("FxSection carve", () => {
   it("offers no analyse button — picking a voice is the whole gesture", () => {
     // A carve with a source and no filters is a setting nobody applied; the
     // button was a second step for something the panel already knew to do.
-    const { host } = mount({ carve: { ...DEFAULT_CARVE, source: "vo" } });
+    const { host } = mount({ carve: { ...DEFAULT_CARVE, sources: ["vo"] } });
     expect(host.querySelector(".hf-fx-analyse")).toBeNull();
     expect(host.textContent).not.toMatch(/Analyse/i);
   });
 
   it("says when it is working, since there is no button to grey out", () => {
-    const { host } = mount({ carve: { ...DEFAULT_CARVE, source: "vo" }, analysing: true });
+    const { host } = mount({ carve: { ...DEFAULT_CARVE, sources: ["vo"] }, analysing: true });
     expect(host.querySelector(".hf-fx-carve-working")?.textContent).toMatch(/Analysing/i);
   });
 
@@ -516,7 +516,7 @@ describe("voiceover carve visibility", () => {
     const { host } = mount({
       chain: chainOf("lowpass"),
       sourceOptions: [],
-      carve: { ...DEFAULT_CARVE, source: "vo" },
+      carve: { ...DEFAULT_CARVE, sources: ["vo"] },
     });
     expect(carveBlock(host)).toBeTruthy();
   });

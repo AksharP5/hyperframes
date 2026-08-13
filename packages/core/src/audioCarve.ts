@@ -46,19 +46,28 @@ export interface HfCarveBand {
  * once.
  */
 export interface HfCarveSettings {
-  /** Element id of the voice track to analyse. */
-  source: string;
+  /**
+   * Element ids of every voice track this bed makes room for.
+   *
+   * More than one because a bed usually runs under a whole sequence: a narrator, an
+   * interview answer, a second presenter. Each occupies its own stretch of the bed,
+   * and carving against only one of them leaves the others fighting it. They are
+   * analysed together — see `mixCarveSources` — so the cuts follow whoever is
+   * speaking rather than averaging strangers.
+   */
+  sources: string[];
   /** How hard to carve, 0..1. */
   strength: number;
   /**
-   * Follow the voice rather than sitting at a fixed depth.
+   * Whether the carve is applied at all.
    *
-   * A static carve holds its cuts for the whole clip, including every pause — the
-   * bed is thinned where there is nothing to make room for. Dynamic turns every
-   * value into an envelope of the voice's own level, so silence leaves the bed
-   * alone and a loud passage pushes the carve to full depth.
+   * A bed under a voice wants carving, so a track that has never been configured
+   * is treated as on and carved without being asked. That default needs an off
+   * switch that survives: with "off" represented by having no settings at all,
+   * selecting the clip again would read it as never-configured and re-apply. So
+   * switching it off writes `enabled: false` and the default stops applying.
    */
-  dynamic: boolean;
+  enabled: boolean;
 }
 
 /** The numbers the analysis actually works in, all derived from `strength`. */
@@ -82,13 +91,110 @@ export interface HfCarveProfile {
   headroomDb: number;
 }
 
+/**
+ * What a track's name suggests it holds.
+ *
+ * Only ever a hint — a name is what the author called something, not what is in the
+ * file — so this is used to order and to filter a list of candidates, never to
+ * decide alone. `unknown` is deliberately common: a track called `a1` could be
+ * anything, and treating an unrecognised name as "not a voice" would hide the one
+ * track somebody needs to pick.
+ */
+export type HfAudioNameKind = "voice" | "music" | "sfx" | "unknown";
+
+/** Short, deliberately dull effects. Nothing here is ever a voiceover. */
+const SFX_NAME =
+  /sfx|foley|whoosh|impact|riser|stinger|swoosh|thud|boom|click|ding|beep|ambien|room[-_ ]?tone/i;
+// `\b` treats `_` as a word character, so `\bbed\b` does not match `bed_01`
+// or `music_bed_loop` — exactly the separator an asset name is likely to use.
+// These short words need a boundary that actually excludes letters and
+// digits on both sides; everything else here is long enough that a
+// substring match is already the intent (`music` inside `bgmusic` is fine).
+const NOT_WORD = "(?<![a-z0-9])";
+const NOT_WORD_END = "(?![a-z0-9])";
+const wordish = (term: string): string => `${NOT_WORD}${term}${NOT_WORD_END}`;
+
+/** A bed, which is the thing being carved rather than the thing carving it. */
+const MUSIC_NAME = new RegExp(
+  `music|bgm|${wordish("bed")}|soundtrack|score|${wordish("song")}|theme|instrumental|track\\d`,
+  "i",
+);
+/** Speech. */
+const VOICE_NAME = new RegExp(
+  `voice|${wordish("vo")}|${wordish("vox")}|narrat|speech|dialog|monolog|announce|` +
+    `${wordish("tts")}|talk|interview|podcast|recap|script`,
+  "i",
+);
+
+/**
+ * Classify a track from its id and filename together.
+ *
+ * Both, because either can be the informative one: an author naming elements `a1`
+ * and `a2` may still have `narration.mp3` and `bgm.mp3` as their sources, and one
+ * naming them `voice` and `music` may have opaque hashes for filenames.
+ *
+ * Voice is tested first: a file called `voiceover-music-bed.wav` is more likely the
+ * voiceover than the bed, and a track matching both hints is better offered than
+ * hidden.
+ */
+export function classifyAudioName(
+  ...parts: readonly (string | null | undefined)[]
+): HfAudioNameKind {
+  const text = parts.filter(Boolean).join(" ");
+  if (VOICE_NAME.test(text)) return "voice";
+  if (SFX_NAME.test(text)) return "sfx";
+  if (MUSIC_NAME.test(text)) return "music";
+  return "unknown";
+}
+
+/** A clip's place on the timeline. A duration that is not a number is unbounded. */
+export interface HfClipSpan {
+  start: number;
+  duration?: number | null;
+}
+
+/**
+ * Do these two clips share any time at all?
+ *
+ * A voice that never plays while the bed does cannot mask it, so it has no business
+ * in the carve: it would contribute silence to the analysis and, worse, invite the
+ * author to wonder why including it changed nothing.
+ *
+ * An unknown duration counts as unbounded rather than as zero. Refusing a track
+ * because its length is not written down would drop the commonest case there is — a
+ * clip whose duration the composition leaves to the media itself.
+ */
+export function clipsOverlap(a: HfClipSpan, b: HfClipSpan): boolean {
+  const end = (clip: HfClipSpan): number =>
+    typeof clip.duration === "number" && Number.isFinite(clip.duration)
+      ? // Negative is clamped to zero-length rather than passed through: a
+        // clip cannot un-play time, and letting it through inverts the
+        // interval (end before start), which reads as overlapping everything
+        // it is nowhere near.
+        clip.start + Math.max(0, clip.duration)
+      : Number.POSITIVE_INFINITY;
+  return a.start < end(b) && b.start < end(a);
+}
+
+/**
+ * Could this track be the voice a carve listens to?
+ *
+ * Music and SFX are out: a bed is the thing being carved, and a 200 ms whoosh has
+ * no speech to make room for. Everything else stays in, including names that say
+ * nothing — see `HfAudioNameKind`.
+ */
+export function couldBeCarveSource(...parts: readonly (string | null | undefined)[]): boolean {
+  const kind = classifyAudioName(...parts);
+  return kind === "voice" || kind === "unknown";
+}
+
 export const DEFAULT_CARVE: HfCarveSettings = {
-  source: "",
+  enabled: true,
+  sources: [],
   // A quarter, because the knob's range was doubled and this is the point on the
   // new scale that produces what the panel has always defaulted to. Switching
   // carve on sounds the same as it did; the extra range is above, not under.
   strength: 0.25,
-  dynamic: false,
 };
 
 /**
@@ -133,10 +239,16 @@ export function carveProfile(strength: number): HfCarveProfile {
 export function normalizeCarveSettings(
   raw: Partial<HfCarveSettings & HfCarveProfile> | undefined,
 ): HfCarveSettings {
+  // `source` and `dynamic` are gone from the type but still out there in files.
+  const legacy = raw as (Partial<HfCarveSettings> & { source?: unknown }) | undefined;
   const num = (v: unknown): number | null => {
     const n = typeof v === "number" ? v : Number(v);
     return Number.isFinite(n) ? n : null;
   };
+  // No attribute at all is not a carve to read, it is the absence of one — so the
+  // defaults apply whole, dynamic included. Only a stored object gets the reading
+  // below, where a missing `dynamic` means the static carve it was written as.
+  if (raw === undefined || raw === null) return { ...DEFAULT_CARVE };
   const strength = num(raw?.strength);
   const legacyDepth = num(raw?.maxCutDb);
   const resolved =
@@ -147,11 +259,57 @@ export function normalizeCarveSettings(
           // reads back as the strength that produces 6 dB.
           (legacyDepth - 2) / 16
         : DEFAULT_CARVE.strength;
+  // A carve written before this took a list names its one voice in `source`.
+  const stored = Array.isArray(raw?.sources)
+    ? raw.sources
+    : typeof legacy?.source === "string"
+      ? [legacy.source]
+      : [];
   return {
-    source: typeof raw?.source === "string" ? raw.source : "",
+    // Absent means on: every carve written before the flag existed was applied.
+    enabled: raw?.enabled !== false,
+    sources: stored.filter((id): id is string => typeof id === "string" && id !== ""),
     strength: Math.min(1, Math.max(0, resolved)),
-    dynamic: raw?.dynamic === true,
   };
+}
+
+/**
+ * Every voice as one signal on the BED's clock.
+ *
+ * The analysis asks one question — where and when is speech masking this bed — and
+ * that question has one answer even when three people are talking at different
+ * times. Summing them onto the bed's timeline first means the existing analysis
+ * needs no notion of "which voice": bands come out of all the speech there is, and
+ * the envelopes rise wherever any of it is happening.
+ *
+ * `offsetSeconds` is where each voice starts relative to the bed. Audio before the
+ * bed begins is dropped rather than folded in at zero: it plays over nothing and
+ * cannot mask anything, and shifting it would put a cut where there is no voice.
+ *
+ * Summed, not averaged. Two people speaking at once mask more than either alone,
+ * which is exactly what the carve should answer to.
+ */
+export function mixCarveSources(
+  parts: readonly { samples: Float32Array; offsetSeconds: number }[],
+  sampleRate: number,
+): Float32Array {
+  const placed = parts.map((part) => ({
+    samples: part.samples,
+    at: Math.round(part.offsetSeconds * sampleRate),
+  }));
+  const length = placed.reduce((max, p) => Math.max(max, p.at + p.samples.length), 0);
+  if (length <= 0) return new Float32Array(0);
+  const mixed = new Float32Array(length);
+  for (const { samples, at } of placed) {
+    // A voice starting before the bed contributes only the part that overlaps it.
+    const from = at < 0 ? -at : 0;
+    for (let i = from; i < samples.length; i += 1) {
+      const target = at + i;
+      if (target < 0 || target >= length) continue;
+      mixed[target] = (mixed[target] ?? 0) + (samples[i] ?? 0);
+    }
+  }
+  return mixed;
 }
 
 /** Averaged power spectrum, Welch-style. */
