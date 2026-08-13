@@ -649,6 +649,12 @@ export interface FxSectionProps {
   onRemoveParamAutomation?(nodeId: string, paramKey: string): void;
   /** Delete every lane belonging to a node that is being removed. */
   onRemoveNodeAutomation?(nodeId: string): void;
+  /** Measure this track and write the levelling lane. Absent when unavailable. */
+  onLevel?(): void;
+  /** Take the levelling stage and its lane back out. */
+  onRemoveLevel?(): void;
+  /** Whether a levelling stage is already on the track. */
+  levelled?: boolean;
   /** Structural edits and gesture-end writes; this is the one that persists. */
   onChainChange(chain: HfAudioFxChain): void;
   /** Continuous updates while a control is being dragged. */
@@ -686,6 +692,9 @@ export function FxSection({
   sourceOptions,
   analysing,
   disabled,
+  onLevel,
+  onRemoveLevel,
+  levelled,
 }: FxSectionProps) {
   // Falls back to the persisting write when no preview handler is supplied, which
   // keeps the control working rather than going dead.
@@ -908,6 +917,21 @@ export function FxSection({
             <span className="hf-fx-add-group-label w-full font-mono text-[9px] uppercase tracking-wide text-panel-text-4">
               Tone
             </span>
+            {onLevel ? (
+              <button
+                type="button"
+                className="hf-fx-add-composite rounded-[3px] bg-panel-surface px-1.5 py-0.5 text-[10px] text-panel-text-1 hover:text-panel-text-0"
+                title="Listen to this track and even out its loud and quiet parts."
+                disabled={disabled || analysing}
+                onClick={() => {
+                  if (levelled) onRemoveLevel?.();
+                  else onLevel();
+                  setAdding(false);
+                }}
+              >
+                {levelled ? "Remove levelling" : "Even Out Levels"}
+              </button>
+            ) : null}
             <button
               type="button"
               // Not hf-fx-add-item: Tone is a composite over several filters,

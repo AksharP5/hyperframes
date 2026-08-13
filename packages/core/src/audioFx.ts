@@ -832,6 +832,11 @@ export interface HfAudioFxNode {
    * effect type and its bands stay ordinary filters underneath.
    */
   fromEq?: string;
+  /**
+   * Set on the gain stage the leveller writes, so re-running replaces it rather
+   * than stacking a second one — the same contract `fromCarve` has.
+   */
+  fromLeveller?: boolean;
   /** Absent means enabled — chain files written before the field existed still load. */
   enabled?: boolean;
   params?: HfAudioFxParamValues;
@@ -884,6 +889,7 @@ export function parseAudioFxChain(json: string): HfAudioFxChain {
       fromPreset?: unknown;
       label?: unknown;
       fromEq?: unknown;
+      fromLeveller?: unknown;
     };
     if (typeof node.type !== "string" || !BY_ID.has(node.type)) {
       throw new AudioFxChainError(`Node ${i} has unknown effect type: ${String(node.type)}`);
@@ -900,6 +906,7 @@ export function parseAudioFxChain(json: string): HfAudioFxChain {
         : {}),
       ...(typeof node.label === "string" && node.label ? { label: node.label } : {}),
       ...(typeof node.fromEq === "string" && node.fromEq ? { fromEq: node.fromEq } : {}),
+      ...(node.fromLeveller === true ? { fromLeveller: true as const } : {}),
       enabled: node.enabled !== false,
       params: normalizeAudioFxParams(
         node.type,
@@ -926,6 +933,7 @@ export function serializeAudioFxChain(chain: HfAudioFxChain): string {
       ...(node.fromPreset ? { fromPreset: node.fromPreset } : {}),
       ...(node.label ? { label: node.label } : {}),
       ...(node.fromEq ? { fromEq: node.fromEq } : {}),
+      ...(node.fromLeveller === true ? { fromLeveller: true } : {}),
       ...(node.enabled === false ? { enabled: false } : {}),
       params: normalizeAudioFxParams(node.type, node.params),
     })),

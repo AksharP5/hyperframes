@@ -69,6 +69,9 @@ function mount(overrides: Partial<Parameters<typeof FxSection>[0]> = {}) {
       automatedTargets={overrides.automatedTargets}
       onAutomateParam={overrides.onAutomateParam}
       onRemoveParamAutomation={overrides.onRemoveParamAutomation}
+      onLevel={overrides.onLevel}
+      onRemoveLevel={overrides.onRemoveLevel}
+      levelled={overrides.levelled}
     />,
   );
   return { host, onChainChange, onChainPreview, onCarveChange };
@@ -386,6 +389,22 @@ describe("FxSection chain", () => {
     const next = onChainChange.mock.calls[0]![0] as HfAudioFxChain;
     expect(next.nodes.find((n) => n.label === "Bass")!.params!.gain).toBe(4);
     expect(next.nodes.find((n) => n.label === "Middle")!.params!.gain).toBe(0);
+  });
+
+  it("offers levelling, and offers to take it away once it is there", () => {
+    const onLevel = vi.fn();
+    const onRemoveLevel = vi.fn();
+    const { host } = mount({ onLevel, onRemoveLevel });
+    click(host.querySelector(".hf-fx-add"));
+    click(byText(host, ".hf-fx-add-composite", "Even Out Levels"));
+    expect(onLevel).toHaveBeenCalledTimes(1);
+
+    const already = mount({ onLevel, onRemoveLevel, levelled: true });
+    click(already.host.querySelector(".hf-fx-add"));
+    // The same control, because adding a second levelling stage is never what
+    // an author means by pressing it twice.
+    click(byText(already.host, ".hf-fx-add-composite", "Remove levelling"));
+    expect(onRemoveLevel).toHaveBeenCalledTimes(1);
   });
 
   it("cannot move the ends past themselves", () => {

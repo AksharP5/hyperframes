@@ -104,6 +104,12 @@
       "types": "./dist/audioFxEq.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./audio-leveller": {
+      "source": "./src/audioLeveller.ts",
+      "runtime": "./dist/audioLeveller.js",
+      "types": "./dist/audioLeveller.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./audio-fx-presets": {
       "source": "./src/audioFxPresets.ts",
       "runtime": "./dist/audioFxPresets.js",

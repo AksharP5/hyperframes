@@ -6,6 +6,7 @@
  * attribute the same way.
  */
 
+import type { HfAutomationLane } from "@hyperframes/core/audio-automation";
 import {
   HF_AUDIO_AUTOMATION_ATTR,
   HF_AUDIO_AUTOMATION_DATA_KEY,
@@ -71,6 +72,21 @@ export function withSeededLane(
 /** Drop one lane, handing its value back to the panel control. */
 export function withoutLane(automation: HfAutomation, target: string): HfAutomation {
   return { version: 1, lanes: automation.lanes.filter((lane) => lane.target !== target) };
+}
+
+/**
+ * Replace one lane, leaving every other lane alone.
+ *
+ * A script that hands back a whole `HfAutomation` describes only its OWN lane.
+ * Writing that wholesale would take the carve's lanes and the volume lane with
+ * it, so what the script produces has to be merged in by target rather than
+ * swapped for what is already there.
+ */
+export function withLane(automation: HfAutomation, lane: HfAutomationLane): HfAutomation {
+  return {
+    version: 1,
+    lanes: [...automation.lanes.filter((l) => l.target !== lane.target), lane],
+  };
 }
 
 /** The attribute value for an automation set; empty when nothing is automated. */

@@ -118,6 +118,12 @@
       "import": "./src/audioFxEq.ts",
       "types": "./src/audioFxEq.ts"
     },
+    "./audio-leveller": {
+      "bun": "./src/audioLeveller.ts",
+      "node": "./dist/audioLeveller.js",
+      "import": "./src/audioLeveller.ts",
+      "types": "./src/audioLeveller.ts"
+    },
     "./audio-fx-presets": {
       "bun": "./src/audioFxPresets.ts",
       "node": "./dist/audioFxPresets.js",
@@ -417,6 +423,10 @@
       "./audio-fx-eq": {
         "import": "./dist/audioFxEq.js",
         "types": "./dist/audioFxEq.d.ts"
+      },
+      "./audio-leveller": {
+        "import": "./dist/audioLeveller.js",
+        "types": "./dist/audioLeveller.d.ts"
       },
       "./audio-fx-presets": {
         "import": "./dist/audioFxPresets.js",

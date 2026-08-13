@@ -41,6 +41,7 @@ import {
 import {
   automatedTargetsOf,
   automationAttrValue,
+  withLane,
   HF_AUDIO_AUTOMATION_ATTR,
   HF_AUDIO_AUTOMATION_DATA_KEY,
   readPanelAutomation,
@@ -48,6 +49,7 @@ import {
   withoutLane,
   withSeededLane,
 } from "./propertyPanelAutomation";
+import { levellingResult, removeLevelling } from "@hyperframes/core/audio-leveller";
 import type { DomEditSelection } from "./domEditingTypes";
 import { useLivePlayheadTime } from "../../hooks/useLivePlayheadTime";
 import { usePlayerStore } from "../../player";
@@ -487,6 +489,63 @@ export function AudioFxGroup({
    * on this one. The bands replace any previous carve output but leave
    * hand-added effects alone, so re-analysing does not discard other work.
    */
+  /**
+   * Measure THIS track and write the levelling lane.
+   *
+   * Same shape as the carve below it — decode offline, lock the rack while it
+   * works, write once — but it listens to the track it is on rather than to a
+   * voice above it, so it needs no source picker.
+   */
+  const runLeveller = async (): Promise<void> => {
+    const el = element.element;
+    const src = el?.getAttribute("src");
+    const doc = el?.ownerDocument;
+    if (!src || !doc) return;
+    setAnalysing(true);
+    try {
+      const Ctor =
+        window.OfflineAudioContext ??
+        (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext })
+          .webkitOfflineAudioContext;
+      if (!Ctor) return;
+      const res = await fetch(new URL(src, doc.baseURI).href);
+      const buffer = await new Ctor(1, 1, DECODE_SAMPLE_RATE).decodeAudioData(
+        await res.arrayBuffer(),
+      );
+      const result = levellingResult(chain, buffer.getChannelData(0), buffer.sampleRate);
+      if (!result) return;
+      await onSetAttributeQuiet(HF_AUDIO_FX_ATTR, serializeAudioFxChain(result.chain));
+      // Merged by target, never written wholesale: the script describes its own
+      // lane only, and replacing the attribute would take the carve's lanes and
+      // the volume lane with it.
+      const lane = result.automation.lanes[0];
+      if (lane) {
+        void onSetAttributeQuiet(
+          HF_AUDIO_AUTOMATION_ATTR,
+          automationAttrValue(withLane(automation, lane)) || null,
+        );
+      }
+    } catch {
+      // A track whose audio cannot be fetched or decoded simply gets no
+      // levelling, the same way an unreadable carve source is skipped.
+    } finally {
+      setAnalysing(false);
+    }
+  };
+
+  const removeLeveller = (): void => {
+    const { chain: next, removedTarget } = removeLevelling(chain);
+    void onSetAttributeQuiet(HF_AUDIO_FX_ATTR, serializeAudioFxChain(next));
+    // The lane goes with the node. An orphan keeps driving a parameter that is
+    // no longer in the graph.
+    if (removedTarget) {
+      void onSetAttributeQuiet(
+        HF_AUDIO_AUTOMATION_ATTR,
+        automationAttrValue(withoutLane(automation, removedTarget)) || null,
+      );
+    }
+  };
+
   const analyse = async (active: HfCarveSettings | null = carve): Promise<void> => {
     if (!active?.sources.length) return;
     const doc = element.element?.ownerDocument;
@@ -664,6 +723,9 @@ export function AudioFxGroup({
       onCarveChange={(next) => void setCarve(next)}
       onCarvePreview={(next) => onSetAttributeLive(HF_AUDIO_CARVE_ATTR, JSON.stringify(next))}
       sourceOptions={sourceOptions}
+      onLevel={() => void runLeveller()}
+      onRemoveLevel={removeLeveller}
+      levelled={chain.nodes.some((n) => n.fromLeveller)}
       carvedAgainstBy={carvedAgainstBy}
       analysing={analysing}
     />
