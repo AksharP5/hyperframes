@@ -315,6 +315,124 @@ describe("attachElementFxChain", () => {
     });
   });
 
+  /**
+   * Lanes are committed to absolute context times, so the schedule is only
+   * right for the rate it was booked at. Bumping `playbackRate` alone left a
+   * lowpass sweeping over its original 10 wall-clock seconds while the audio
+   * underneath ran through 20 clip-seconds of material — and the runtime's
+   * stopAll()+reschedule recovery never fired for an unbounded source.
+   */
+  describe("a rate change mid-playback", () => {
+    /** Records what was booked and when, without the browser's overlap rules. */
+    class TimedParam {
+      curves: { time: number; duration: number }[] = [];
+      ramps: number[] = [];
+      value = 0;
+      setValueAtTime(v: number): void {
+        this.value = v;
+      }
+      linearRampToValueAtTime(v: number, t: number): void {
+        this.ramps.push(t);
+        this.value = v;
+      }
+      setValueCurveAtTime(_v: Float32Array, time: number, duration: number): void {
+        this.curves.push({ time, duration });
+      }
+      cancelScheduledValues(): void {}
+      cancelAndHoldAtTime(): void {}
+      /** The last span booked, however the scheduler chose to express it. */
+      last(): { time: number; duration: number } | undefined {
+        return this.curves.at(-1);
+      }
+    }
+
+    const sweep = {
+      version: 1,
+      nodes: [{ type: "lowpass", id: "n1", params: { frequency: 300, q: 0.707 } }],
+    };
+    const lane = JSON.stringify({
+      version: 1,
+      lanes: [
+        {
+          target: "fx.n1.frequency",
+          points: [
+            { t: 0, v: 300 },
+            { t: 8, v: 3000 },
+          ],
+        },
+      ],
+    });
+
+    const build = () => {
+      const clock = { currentTime: 0 };
+      const made: { frequency: TimedParam }[] = [];
+      class TimedNode extends Node {
+        override frequency = new TimedParam() as unknown as { value: number };
+      }
+      class TimedCtx extends Ctx {
+        get currentTime(): number {
+          return clock.currentTime;
+        }
+        override createBiquadFilter(): Node {
+          const n = new TimedNode();
+          made.push(n as unknown as { frequency: TimedParam });
+          return n;
+        }
+      }
+      const node = document.createElement("audio");
+      node.setAttribute("data-fx-chain", JSON.stringify(sweep));
+      node.setAttribute("data-automation", lane);
+      document.body.append(node);
+      const handle = attachElementFxChain(
+        new TimedCtx() as unknown as BaseAudioContext,
+        node,
+        new Node() as never,
+        new Node() as never,
+        { scheduledAt: 0, elapsed: 0, rate: 1 },
+      );
+      return { clock, node, handle, param: () => made[0]?.frequency as unknown as TimedParam };
+    };
+
+    it("re-aims the envelope so the sweep still ends with the material", () => {
+      const { clock, handle, param } = build();
+      // Booked at 1x: the whole 8 s lane spans 8 s of context time.
+      expect(param().last()).toEqual({ time: 0, duration: 8 });
+
+      clock.currentTime = 2;
+      handle?.setRate(2);
+
+      // 6 clip-seconds are left, and at 2x they take 3 wall-clock seconds.
+      // Without this the sweep kept its original plan to t=8 while the audio
+      // ran out at t=5.
+      expect(param().last()).toEqual({ time: 2, duration: 3 });
+    });
+
+    it("measures later edits from the new rate, not the one it started at", async () => {
+      // `elapsed` advances at whatever rate the reference frame holds, so a
+      // frame left at 1x re-aims every subsequent edit at the wrong clip
+      // position for as long as the track plays.
+      const { clock, node, handle, param } = build();
+      clock.currentTime = 2;
+      handle?.setRate(2);
+
+      clock.currentTime = 4;
+      // 2 wall-clock seconds at 2x is 4 clip-seconds, so the playhead is at 6
+      // and 2 clip-seconds remain: 1 second of wall clock.
+      node.setAttribute("data-automation", lane);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(param().last()).toEqual({ time: 4, duration: 1 });
+    });
+
+    it("ignores a rate that is not a rate", () => {
+      const { clock, handle, param } = build();
+      clock.currentTime = 2;
+      handle?.setRate(0);
+      handle?.setRate(Number.NaN);
+      handle?.setRate(1);
+      expect(param().last()).toEqual({ time: 0, duration: 8 });
+    });
+  });
+
   it("tears the chain down on dispose", () => {
     const src = new Node();
     const dst = new Node();

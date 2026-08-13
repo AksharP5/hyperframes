@@ -289,6 +289,23 @@ describe("WebAudioTransport", () => {
       expect(mock.sourceNode.playbackRate.value).toBe(2);
     });
 
+    it("setRate re-aims each source's FX automation, not just its playback rate", async () => {
+      // The lanes are committed to absolute context times when the source is
+      // scheduled, so bumping playbackRate alone left every automated parameter
+      // running its original plan over audio moving at a different speed.
+      const { transport, mock, gen } = setupTransport(100);
+      await transport.schedulePlayback(mockEl, mockBuffer, 5, 0, 8, 1, gen, 1);
+      const active = (transport as unknown as { _activeSources: { fx?: unknown }[] })
+        ._activeSources;
+      const setRate = vi.fn();
+      active[0]!.fx = { dispose: vi.fn(), setRate };
+
+      transport.setRate(2);
+
+      expect(setRate).toHaveBeenCalledWith(2);
+      expect(mock.sourceNode.playbackRate.value).toBe(2);
+    });
+
     it("setRate before any sources are scheduled does not throw", () => {
       const transport = new WebAudioTransport();
       expect(() => transport.setRate(2)).not.toThrow();

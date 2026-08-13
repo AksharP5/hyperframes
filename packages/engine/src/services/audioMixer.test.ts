@@ -44,11 +44,15 @@ vi.mock("../utils/runFfmpeg.js", async (importOriginal) => {
 // The FX render drives a headless browser; the mix only needs to know the
 // processed file exists and how long a tail the chain asked for.
 const { applyAudioFxChainMock } = vi.hoisted(() => ({
-  applyAudioFxChainMock: vi.fn(async (_src: string, _chain: unknown, outPath: string) => {
-    const { writeFileSync } = await import("node:fs");
-    writeFileSync(outPath, "stub");
-    return outPath;
-  }),
+  applyAudioFxChainMock: vi.fn(
+    async (_src: string, _chain: unknown, outPath: string, options?: { envelope?: unknown }) => {
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(outPath, "stub");
+      // The real one bakes the volume envelope into its float output, so the
+      // mixer must not run its own pass afterwards.
+      return { path: outPath, envelopeBaked: Boolean(options?.envelope) };
+    },
+  ),
 }));
 
 vi.mock("./audioFxRender.js", async (importOriginal) => {
@@ -293,6 +297,62 @@ describe("processCompositionAudio", () => {
     expect(filter).toContain("atrim=0:3.9,");
     // And still cut at the composition's end, so a tail cannot extend the video.
     expect(filter).toContain("apad,atrim=0:8");
+  });
+
+  it("hands the volume envelope to the FX pass instead of ducking the file after it", async () => {
+    // The FX pass writes 16-bit PCM, so a chain that overshoots full scale is
+    // clipped there. Ducking afterwards bakes that distortion in even though
+    // the lane pulls the track well down; the envelope has to travel into the
+    // FX pass and land on its float output.
+    const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
+    const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
+    tempDirs.push(baseDir, workDir);
+    writeFileSync(join(baseDir, "voice.wav"), "stub");
+
+    const result = await processCompositionAudio(
+      [
+        {
+          id: "voice",
+          src: "voice.wav",
+          start: 2,
+          end: 5,
+          mediaStart: 0,
+          layer: 0,
+          volume: 0.4,
+          volumeKeyframes: [
+            { time: 2, volume: 1 },
+            { time: 5, volume: 0.25 },
+          ],
+          type: "audio",
+          fxChain: JSON.stringify({
+            version: 1,
+            nodes: [{ type: "peaking", id: "p", params: { frequency: 440, gain: 12, q: 1 } }],
+          }),
+        },
+      ],
+      baseDir,
+      workDir,
+      join(baseDir, "out.m4a"),
+      5,
+    );
+
+    expect(result.success).toBe(true);
+    expect(applyAudioFxChainMock).toHaveBeenCalledTimes(1);
+    expect(applyAudioFxChainMock.mock.calls[0]?.[3]).toMatchObject({
+      envelope: {
+        keyframes: [
+          { time: 2, volume: 1 },
+          { time: 5, volume: 0.25 },
+        ],
+        trackStart: 2,
+        baseVolume: 0.4,
+      },
+    });
+
+    // And the mixer trusts that bake: unity gain, no second pass, no ffmpeg
+    // volume expression re-applying the same envelope on top of it.
+    const filter = capturedFilterScripts[capturedFilterScripts.length - 1];
+    expect(filter).not.toContain(":eval=frame");
   });
 
   it("cuts at the clip boundary when the chain has no tail", async () => {

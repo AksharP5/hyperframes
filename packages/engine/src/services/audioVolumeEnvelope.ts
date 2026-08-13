@@ -75,6 +75,40 @@ function parseWavLayout(buffer: Buffer): WavLayout | null {
 }
 
 /**
+ * A gain lookup that walks forward through the envelope with a segment cursor,
+ * so a whole track costs O(N+M) rather than O(N×M). `interpolateVolumeGain`
+ * restarts from segment 0 on every call — fine for the preview path (once per
+ * RAF tick), not for a per-sample walk over 48k×duration frames.
+ *
+ * The cursor only ever advances, so callers must pass non-decreasing times.
+ * Returns null when the keyframes normalise to nothing, which the callers read
+ * as "no automation here".
+ */
+export function createEnvelopeWalker(
+  keyframes: AudioVolumeKeyframe[],
+  trackStart: number,
+  baseVolume: number,
+): ((time: number) => number) | null {
+  const envelope = normaliseEnvelope(keyframes, trackStart, baseVolume);
+  const first = envelope[0];
+  if (!first) return null;
+
+  let segment = 0;
+  return (time: number): number => {
+    for (;;) {
+      const next = envelope[segment + 1];
+      if (segment >= envelope.length - 2 || !next || time < next.time) break;
+      segment += 1;
+    }
+    const a = envelope[segment] ?? first;
+    const b = envelope[segment + 1] ?? a;
+    const span = b.time - a.time;
+    const progress = span <= 0 ? 0 : Math.min(1, Math.max(0, (time - a.time) / span));
+    return a.volume + (b.volume - a.volume) * progress;
+  };
+}
+
+/**
  * Multiply a prepared WAV's samples by a time-varying gain envelope in place.
  *
  * @returns `true` if the envelope was applied; `false` if the file isn't the
@@ -86,8 +120,8 @@ export function applyVolumeEnvelopeToWav(
   trackStart: number,
   baseVolume: number,
 ): boolean {
-  const envelope = normaliseEnvelope(keyframes, trackStart, baseVolume);
-  if (envelope.length === 0) return false;
+  const gainAt = createEnvelopeWalker(keyframes, trackStart, baseVolume);
+  if (!gainAt) return false;
 
   try {
     const buffer = readFileSync(wavPath);
@@ -99,21 +133,8 @@ export function applyVolumeEnvelopeToWav(
     const frameBytes = numChannels * bytesPerSample;
     const frameCount = Math.floor(dataSize / frameBytes);
 
-    // Maintain an incremental segment cursor so the per-frame envelope lookup
-    // is O(N+M) overall, not O(N×M). interpolateVolumeGain restarts from 0 on
-    // each call — fine for the preview path (one call per RAF tick) but not for
-    // the PCM path (one call per sample, 48k×duration frames total).
-    let segment = 0;
     for (let frame = 0; frame < frameCount; frame += 1) {
-      const time = frame / sampleRate;
-      while (segment < envelope.length - 2 && time >= envelope[segment + 1]!.time) segment += 1;
-
-      const a = envelope[segment]!;
-      const b = envelope[segment + 1] ?? a;
-      const span = b.time - a.time;
-      const progress = span <= 0 ? 0 : Math.min(1, Math.max(0, (time - a.time) / span));
-      const gain = a.volume + (b.volume - a.volume) * progress;
-
+      const gain = gainAt(frame / sampleRate);
       const base = dataOffset + frame * frameBytes;
       for (let channel = 0; channel < numChannels; channel += 1) {
         const at = base + channel * bytesPerSample;

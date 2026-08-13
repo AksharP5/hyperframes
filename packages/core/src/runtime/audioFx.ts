@@ -93,15 +93,29 @@ export function readElementAutomation(el: {
  * first effect is then heard without rescheduling the source.
  *
  * With `timing`, the element's automation lanes are scheduled onto the built
- * effects as AudioParam ramps, and rescheduled when the attribute is edited.
+ * effects as AudioParam ramps, and rescheduled when the attribute is edited or
+ * `setRate` reports the transport changed speed.
  */
+export interface ElementFxHandle {
+  dispose(): void;
+  /**
+   * Re-aim every booked envelope at a new playback rate.
+   *
+   * Lanes are committed to absolute context times, so a param scheduled at 1×
+   * keeps its original wall-clock plan while the audio underneath runs at the
+   * new speed: a lowpass sweeping over 10 clip-seconds, switched to 2×, eats
+   * 20 s of material in 10 s of wall clock with the sweep unchanged.
+   */
+  setRate(rate: number): void;
+}
+
 export function attachElementFxChain(
   ctx: BaseAudioContext,
   el: { getAttribute?(name: string): string | null },
   source: AudioNode,
   destination: AudioNode,
   timing?: AutomationTiming,
-): { dispose(): void } | null {
+): ElementFxHandle | null {
   const { chain } = readChain(el);
 
   // Null means the source runs straight into its gain: an empty chain, or one
@@ -178,20 +192,26 @@ export function attachElementFxChain(
       at && handle ? scheduleChainAutomation(readAutomation(el, next), next, handle.nodes, at) : [];
   };
 
+  // The reference frame every later reschedule measures from. Mutable because a
+  // rate change rebases it: `elapsed` has to stop advancing at the old rate the
+  // instant the new one takes effect, or every subsequent edit re-aims the
+  // envelope at the wrong clip position.
+  let frame: AutomationTiming | null = timing ? { ...timing } : null;
+
   attach(chain);
-  scheduleFor(chain, timing ?? null);
+  scheduleFor(chain, frame);
 
   /**
    * Re-aim the envelope at the live playhead. An edit lands mid-playback, so
    * the clip has advanced past the offset the source was scheduled with.
    */
   const timingNow = (): AutomationTiming | null => {
-    if (!timing) return null;
-    const now = typeof ctx.currentTime === "number" ? ctx.currentTime : timing.scheduledAt;
+    if (!frame) return null;
+    const now = typeof ctx.currentTime === "number" ? ctx.currentTime : frame.scheduledAt;
     return {
       scheduledAt: now,
-      elapsed: timing.elapsed + (now - timing.scheduledAt) * timing.rate,
-      rate: timing.rate,
+      elapsed: frame.elapsed + (now - frame.scheduledAt) * frame.rate,
+      rate: frame.rate,
     };
   };
 
@@ -251,6 +271,15 @@ export function attachElementFxChain(
   }
 
   return {
+    setRate: (rate: number) => {
+      const at = timingNow();
+      if (disposed || !at || !Number.isFinite(rate) || rate <= 0 || rate === at.rate) return;
+      // Rebased at the playhead the OLD rate carried us to, then replayed from
+      // there at the new one.
+      frame = { ...at, rate };
+      cancelParamLane(automated, at.scheduledAt);
+      scheduleFor(readChain(el).chain, frame);
+    },
     dispose: () => {
       disposed = true;
       observer?.disconnect();
