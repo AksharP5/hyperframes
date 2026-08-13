@@ -39,19 +39,34 @@ describe("automation clipboard", () => {
   });
 
   it("maps values through unit space onto a different parameter", () => {
-    const wet = resolveAutomationRange("fx.r.wet", {
+    // fx.n1.frequency (lowpass cutoff) is log-scaled (min:20, max:20000):
+    // linear unit math and a literal copy of the source value would both
+    // read as a passing test on a range that happens to be numerically
+    // identical to VOLUME_RANGE (e.g. fx.r.wet), so this target has to be
+    // genuinely log for the test to discriminate real unit-space mapping.
+    const frequency = resolveAutomationRange("fx.n1.frequency", {
       version: 1,
-      nodes: [{ type: "reverb", id: "r", params: {} }],
+      nodes: [{ type: "lowpass", id: "n1", params: {} }],
     });
-    expect(wet).toBeTruthy();
-    if (!wet) return;
+    expect(frequency).toBeTruthy();
+    if (!frequency) return;
+    expect(frequency.scale).toBe("log");
     copyRange("project-a", duck, VOLUME_RANGE, 2, 4);
     const entry = readClipboard("project-a");
     if (!entry) return;
-    const pts = pastePoints(entry, wet, 0);
-    // volume 1 (unit 1) → wet max; volume 0.25 (unit 0.25) → a quarter up wet's axis
-    expect(pts[0]?.v).toBeCloseTo(wet.max, 5);
-    expect(pts[1]?.v).toBeCloseTo(wet.min + 0.25 * (wet.max - wet.min), 5);
+    const pts = pastePoints(entry, frequency, 0);
+    // volume 1 (unit 1) → frequency max; volume 0.25 (unit 0.25) → a quarter
+    // up frequency's LOG axis, i.e. exp(ln(min) + 0.25*(ln(max)-ln(min))) —
+    // NOT the naive linear guess (min + 0.25*(max-min)) and nowhere near a
+    // literal copy of 0.25.
+    expect(pts[0]?.v).toBeCloseTo(frequency.max, 5);
+    const expectedLog = Math.exp(
+      Math.log(frequency.min) + 0.25 * (Math.log(frequency.max) - Math.log(frequency.min)),
+    );
+    const naiveLinear = frequency.min + 0.25 * (frequency.max - frequency.min);
+    expect(pts[1]?.v).toBeCloseTo(expectedLog, 5);
+    expect(pts[1]?.v).not.toBeCloseTo(naiveLinear, 0);
+    expect(pts[1]?.v).not.toBeCloseTo(0.25, 0);
   });
 
   it("reads null when nothing was copied", () => {

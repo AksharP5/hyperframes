@@ -30,11 +30,19 @@ export const AutomationSelectionMenu = memo(function AutomationSelectionMenu({
   const menuRef = useContextMenuDismiss(onClose);
   const row =
     "block w-full px-2 py-1 text-left text-[11px] text-panel-text-1 hover:bg-panel-bg-3 disabled:opacity-40";
+  // Same edge-clamping precedent as TrackGapContextMenu: without it a
+  // right-click near the bottom/right of the timeline renders this menu
+  // partially off-screen.
+  const menuWidth = 140;
+  const menuHeight = AUTOMATION_SHAPES.length * 24 + 32;
+  const overflowY = y + menuHeight - window.innerHeight;
+  const adjustedX = x + menuWidth > window.innerWidth ? x - menuWidth : x;
+  const adjustedY = overflowY > 0 ? y - overflowY - 8 : y;
   return createPortal(
     <div
       ref={menuRef}
       className="hf-automation-menu fixed z-50 min-w-[140px] rounded border border-panel-border-input bg-panel-bg-2 py-1 shadow-lg"
-      style={{ left: x, top: y }}
+      style={{ left: adjustedX, top: adjustedY }}
     >
       {AUTOMATION_SHAPES.map((shape) => (
         <button

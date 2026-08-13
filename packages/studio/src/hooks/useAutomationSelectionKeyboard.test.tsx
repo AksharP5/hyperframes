@@ -221,6 +221,40 @@ describe("useAutomationSelectionKeyboard", () => {
     });
   });
 
+  it("Cmd+V at a selection near the clip's end clamps the paste inside its duration", () => {
+    // The playhead branch already clamps to duration - span; the
+    // selection-start branch didn't, so pasting a 2s clip at a selection
+    // sitting at t0=5.5 on a 6s clip used to write points out to t=7.5 —
+    // past element.duration — and leave the selection itself out of bounds.
+    clearAutomationClipboard();
+    usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
+    usePlayerStore
+      .getState()
+      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+    const { onCommit } = setup({});
+    combo("c");
+    expect(readClipboard(null)?.span).toBe(2);
+
+    // A 0.1s-wide selection right near the clip's 6s end.
+    usePlayerStore
+      .getState()
+      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 5.5, t1: 5.6 });
+    combo("v");
+    const written = onCommit.mock.calls.at(-1)?.[0];
+    const times = (written?.lanes?.[0]?.points ?? []).map((p: { t: number }) => p.t);
+    for (const t of times) {
+      expect(t).toBeGreaterThanOrEqual(0);
+      expect(t).toBeLessThanOrEqual(bgmElement.duration);
+    }
+    // Clamped to duration (6) - span (2) = 4, not the unclamped 5.5.
+    expect(usePlayerStore.getState().automationSelection).toEqual({
+      elementKey: "bgm",
+      target: "volume",
+      t0: 4,
+      t1: 6,
+    });
+  });
+
   it("refuses to paste when the dom-edit layer would write to a different clip", () => {
     // selectedElementId says "bgm" but the commit channel is still on the
     // previously selected clip — writing here would serialize bgm's automation
