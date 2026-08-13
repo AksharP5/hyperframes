@@ -56,8 +56,11 @@ export interface UseAutomationEdgeStretchInput {
   duration: number;
   readOnly?: boolean | undefined;
   /** Active selection on this lane, so its edges have something to grab. */
-  rangeSelection?: { t0: number; t1: number } | null | undefined;
-  onRangeSelect?: ((t0: number, t1: number) => void) | undefined;
+  rangeSelection?: { t0: number; t1: number; v0: number; v1: number } | null | undefined;
+  /** Whether the pointer is over a point the current selection contains. Such a
+   *  press is a group drag, not a stretch — see `arm`. */
+  pointInSelectionAt?: ((clientX: number, clientY: number) => boolean) | undefined;
+  onRangeSelect?: ((t0: number, t1: number, v0: number, v1: number) => void) | undefined;
   onRangeClear?: (() => void) | undefined;
   /** Value readout owned by the lane's gesture hook. */
   onHint(text: string | null): void;
@@ -89,7 +92,7 @@ export interface UseAutomationEdgeStretchResult {
 export function clampEdge(
   edge: "t0" | "t1",
   raw: number,
-  origin: { t0: number; t1: number },
+  origin: { t0: number; t1: number; v0: number; v1: number },
   duration: number,
 ): number {
   if (edge === "t0") {
@@ -108,6 +111,7 @@ export function useAutomationEdgeStretch({
   duration,
   readOnly,
   rangeSelection,
+  pointInSelectionAt,
   onRangeSelect,
   onRangeClear,
   onHint,
@@ -117,7 +121,7 @@ export function useAutomationEdgeStretch({
    *  points as they stood at arm time. */
   const [drag, setDrag] = useState<{
     edge: "t0" | "t1";
-    origin: { t0: number; t1: number };
+    origin: { t0: number; t1: number; v0: number; v1: number };
     current: number;
     points: HfAutomationPoint[];
   } | null>(null);
@@ -158,6 +162,18 @@ export function useAutomationEdgeStretch({
       if (readOnly || !rangeSelection) return false;
       const edge = edgeAt(e.clientX);
       if (!edge) return false;
+      // Selected CONTENT outranks the edge it sits on.
+      //
+      // #3207 had the opposite rule, and it was right for a time-only selection:
+      // every range operation leaves a breakpoint exactly on the edge it created,
+      // so a point-first rule made the second stretch of an edge resolve to a
+      // point-drag. A box selection changes the question — a point on the edge is
+      // now visibly INSIDE the selection, with the value axis saying so, and
+      // dragging selected content has to move it or the box means nothing.
+      //
+      // So the edge still stretches everywhere it is not also selected content,
+      // which is most of its length.
+      if (pointInSelectionAt?.(e.clientX, e.clientY)) return false;
       e.preventDefault();
       capturePointer(e);
       setHover(false);
@@ -170,7 +186,7 @@ export function useAutomationEdgeStretch({
       });
       return true;
     },
-    [readOnly, rangeSelection, edgeAt, lane],
+    [readOnly, rangeSelection, edgeAt, lane, pointInSelectionAt],
   );
 
   /** Preview the stretch: the partner edge stays put as the retime's anchor, and
@@ -190,7 +206,7 @@ export function useAutomationEdgeStretch({
       const newT0 = edge === "t0" ? current : origin.t0;
       const newT1 = edge === "t1" ? current : origin.t1;
       onHint(`${newT0.toFixed(2)}s → ${newT1.toFixed(2)}s`);
-      onRangeSelect?.(newT0, newT1);
+      onRangeSelect?.(newT0, newT1, origin.v0, origin.v1);
       commitPoints(
         retimeRange({
           lane: { target: lane.target, points },
@@ -221,7 +237,12 @@ export function useAutomationEdgeStretch({
     }
     crossed.current = false;
     commitPoints(lane.points, true);
-    onRangeSelect?.(edge === "t0" ? current : origin.t0, edge === "t1" ? current : origin.t1);
+    onRangeSelect?.(
+      edge === "t0" ? current : origin.t0,
+      edge === "t1" ? current : origin.t1,
+      origin.v0,
+      origin.v1,
+    );
   }, [drag, onHint, onRangeClear, commitPoints, lane, onRangeSelect]);
 
   const cancel = useCallback((): void => {
@@ -234,7 +255,7 @@ export function useAutomationEdgeStretch({
     // A live write is a preview, so putting the snapshot back through the same
     // channel is the whole revert — there is nothing persisted to undo.
     commitPoints(points, false);
-    onRangeSelect?.(origin.t0, origin.t1);
+    onRangeSelect?.(origin.t0, origin.t1, origin.v0, origin.v1);
   }, [drag, onHint, commitPoints, onRangeSelect]);
 
   const updateHover = useCallback(

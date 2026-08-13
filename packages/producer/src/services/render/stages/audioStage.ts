@@ -24,6 +24,7 @@ import {
   type AudioProcessingFailure,
 } from "@hyperframes/engine";
 import type { CompositionMetadata } from "../shared.js";
+import type { ProducerLogger } from "../../../logger.js";
 
 export interface AudioStageInput {
   projectDir: string;
@@ -36,6 +37,8 @@ export interface AudioStageInput {
   audios: CompositionMetadata["audios"];
   abortSignal: AbortSignal | undefined;
   assertNotAborted: () => void;
+  /** Where a per-track failure's detail goes. Optional so tests need not pass one. */
+  log?: ProducerLogger;
 }
 
 export interface AudioStageResult {
@@ -56,7 +59,7 @@ export interface AudioStageResult {
 }
 
 export async function runAudioStage(input: AudioStageInput): Promise<AudioStageResult> {
-  const { projectDir, workDir, compiledDir, duration, audios, abortSignal, assertNotAborted } =
+  const { projectDir, workDir, compiledDir, duration, audios, abortSignal, assertNotAborted, log } =
     input;
 
   const stage3Start = Date.now();
@@ -103,7 +106,23 @@ export async function runAudioStage(input: AudioStageInput): Promise<AudioStageR
     // error) used to be discarded here — the caller only saw hasAudio flip to
     // false with no explanation, so a real audio failure looked identical to
     // "no audio was authored" and shipped a silent video-only render.
-    if (!hasAudio) audioError = audioResult.error ?? "audio mix failed for an unknown reason";
+    if (!hasAudio) {
+      audioError = audioResult.error ?? "audio mix failed for an unknown reason";
+      // Each failure's `detail` names the element and what went wrong with it,
+      // and it was going nowhere: the render printed the warning code and
+      // dropped everything that said why, so an audio failure could only be
+      // diagnosed by re-running the mixer by hand outside the pipeline.
+      for (const failure of audioResult.failures ?? []) {
+        log?.warn("Audio track failed", {
+          elementId: failure.elementId,
+          stage: failure.stage,
+          reason: failure.reason,
+          owner: failure.owner,
+          retryable: failure.retryable,
+          detail: failure.detail,
+        });
+      }
+    }
   }
   const audioProcessMs = Date.now() - stage3Start;
 

@@ -17,6 +17,7 @@ import {
 import {
   analyseCarveBands,
   carveBandsToChain,
+  carveProfile,
   HF_AUDIO_CARVE_ATTR,
   normalizeCarveSettings,
   type HfCarveSettings,
@@ -192,7 +193,11 @@ export function AudioFxGroup({
       if (!Ctor) return;
       const decoder = new Ctor(1, 1, DECODE_SAMPLE_RATE);
       const buffer = await decoder.decodeAudioData(bytes);
-      const bands = analyseCarveBands(buffer.getChannelData(0), buffer.sampleRate, carve);
+      const bands = analyseCarveBands(
+        buffer.getChannelData(0),
+        buffer.sampleRate,
+        carveProfile(carve.strength),
+      );
       const carved = carveBandsToChain(bands);
       // Carve output is tagged so a re-run replaces it instead of stacking.
       const kept = chain.nodes.filter((n) => !n.fromCarve);

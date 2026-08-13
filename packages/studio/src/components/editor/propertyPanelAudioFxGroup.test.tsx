@@ -246,7 +246,7 @@ describe("AudioFxGroup carve", () => {
     act(() => carveToggle(host).click());
     const write = onSetAttributeQuiet.mock.calls.find((c) => c[0] === "data-fx-carve");
     expect(write).toBeTruthy();
-    expect(JSON.parse(String(write![1])).bands).toBeGreaterThan(0);
+    expect(JSON.parse(String(write![1])).strength).toBeGreaterThan(0);
   });
 });
 

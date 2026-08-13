@@ -342,6 +342,39 @@ describe("levels and per-channel state", () => {
   });
 });
 
+describe("gain stage", () => {
+  /**
+   * A level control the chain owns, so a carve can make broadband room for a
+   * voice without touching the track's own volume lane — which belongs to the
+   * author, and which a carve re-run would otherwise have to overwrite.
+   */
+  it("sets a GainNode from a value in dB", () => {
+    const c = ctx();
+    buildFxNode(c as unknown as BaseAudioContext, "gain", { gain: -6 });
+    const node = c.created.find((x) => x.kind === "gain");
+    expect(node).toBeTruthy();
+    expect(node!.gain.value).toBeCloseTo(0.501, 3);
+  });
+
+  it("passes unity through at 0 dB", () => {
+    const c = ctx();
+    buildFxNode(c as unknown as BaseAudioContext, "gain", { gain: 0 });
+    expect(c.created.find((x) => x.kind === "gain")!.gain.value).toBeCloseTo(1, 6);
+  });
+
+  it("maps an automation lane's dB into the AudioParam's linear units", () => {
+    // The lane is authored in the knob's own unit — dB, like every other gain in
+    // the registry — but a GainNode's param is a linear multiplier. Without the
+    // mapping, a lane point of -12 would schedule a gain of -12: a phase flip
+    // twelve times too loud, not a cut.
+    const handle = buildFxNode(ctx() as unknown as BaseAudioContext, "gain", { gain: 0 });
+    const target = handle.automation?.gain?.[0];
+    expect(target?.map).toBeTypeOf("function");
+    expect(target!.map!(-12)).toBeCloseTo(0.251, 3);
+    expect(target!.map!(0)).toBeCloseTo(1, 6);
+  });
+});
+
 describe("automatable parameters", () => {
   /**
    * The registry's `automatable` flag is what the panel and the scheduler both

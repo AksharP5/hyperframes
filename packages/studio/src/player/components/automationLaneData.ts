@@ -15,7 +15,9 @@
 
 import {
   parseAutomation,
+  parseAutomationTarget,
   resolveAutomation,
+  resolveAutomationRange,
   type HfAutomation,
   type HfAutomationLane,
 } from "@hyperframes/core/audio-automation";
@@ -79,7 +81,8 @@ export function elementAutomation(element: TimelineElement): HfAutomation {
   // through a separator no attribute can contain.
   return cached(automationCache, `${raw}\u0000${element.fxChain ?? ""}`, () => {
     try {
-      return resolveAutomation(parseAutomation(raw), chain ?? undefined);
+      const resolved = resolveAutomation(parseAutomation(raw), chain ?? undefined);
+      return { ...resolved, lanes: orderLanes(resolved.lanes, chain) };
     } catch {
       // Unreadable automation draws no lanes rather than breaking the row.
       return EMPTY;
@@ -90,4 +93,84 @@ export function elementAutomation(element: TimelineElement): HfAutomation {
 /** Lanes in the order they are drawn, one row each. */
 export function elementAutomationLanes(element: TimelineElement): HfAutomationLane[] {
   return elementAutomation(element).lanes;
+}
+
+/** The frequency the lane's effect sits at, when it has one. */
+function laneFrequency(target: string, chain: HfAudioFxChain | null): number | null {
+  const parsed = parseAutomationTarget(target);
+  if (!parsed || parsed.kind !== "fx") return null;
+  const node = chain?.nodes.find((n) => n.id === parsed.nodeId);
+  const freq = node?.params?.["frequency"];
+  return typeof freq === "number" ? freq : null;
+}
+
+/**
+ * Lane order: the audible spectrum, top down, then everything else.
+ *
+ * A stack of EQ bands is read as a spectrum, so it has to be laid out like one —
+ * high at the top, the way every analyser and every EQ curve is drawn. Attribute
+ * order is whatever minted the nodes, which for a carve is ascending: exactly
+ * upside down. Lanes with no frequency to place them — a level stage, the track's
+ * own volume — keep their written order and sit under the bands, like a fader
+ * below the EQ section of a channel strip.
+ *
+ * Sorted here, in the one function both the canvas lanes and the label column
+ * read, because a label whose row disagrees with the envelope it names is worse
+ * than either order.
+ */
+function orderLanes(lanes: HfAutomationLane[], chain: HfAudioFxChain | null): HfAutomationLane[] {
+  const withFreq: { lane: HfAutomationLane; freq: number }[] = [];
+  const rest: HfAutomationLane[] = [];
+  for (const lane of lanes) {
+    const freq = laneFrequency(lane.target, chain);
+    if (freq === null) rest.push(lane);
+    else withFreq.push({ lane, freq });
+  }
+  withFreq.sort((a, b) => b.freq - a.freq);
+  return [...withFreq.map((e) => e.lane), ...rest];
+}
+
+/** A frequency as an author reads it: 400 Hz, 1.6 kHz, 10 kHz. */
+function formatHz(freq: number): string {
+  if (freq < 1000) return `${Math.round(freq)} Hz`;
+  const k = freq / 1000;
+  return `${k >= 10 ? Math.round(k) : Number(k.toFixed(1))} kHz`;
+}
+
+/**
+ * What a lane is called in the timeline, as its two lines.
+ *
+ * `name` is the effect and, when it has one, the frequency it sits at: "Peaking
+ * EQ 1.6 kHz". The frequency is what tells two bands apart — three lanes all
+ * reading "Peaking EQ" say nothing about which is which — and the effect still
+ * has to be named, since a chain mixes filter types and a bare frequency does not
+ * say whether it is a bell or a shelf.
+ *
+ * `param` is which knob the envelope drives, on its own line: a band can carry a
+ * gain lane and a Q lane, and stacking the two lines is what keeps a name legible
+ * in a column this narrow instead of truncating mid-word.
+ *
+ * Null when the target does not resolve against the chain — the same condition
+ * that stops the lane being drawn at all.
+ */
+export function automationLaneLabelParts(
+  target: string,
+  chain: HfAudioFxChain | null,
+): { name: string; param: string } | null {
+  const range = resolveAutomationRange(target, chain ?? undefined);
+  if (!range) return null;
+  // The registry's label is "<effect> · <param>", or just "<param>" for volume.
+  const parts = range.label.split(" · ");
+  const param = parts.at(-1) ?? range.label;
+  const effect = parts.length > 1 ? parts.slice(0, -1).join(" · ") : null;
+  const freq = laneFrequency(target, chain);
+  const name = [effect, freq === null ? null : formatHz(freq)].filter(Boolean).join(" ");
+  return { name: name || param, param: name ? param : "" };
+}
+
+/** The whole label on one line, for a tooltip or an accessible name. */
+export function automationLaneLabel(target: string, chain: HfAudioFxChain | null): string | null {
+  const parts = automationLaneLabelParts(target, chain);
+  if (!parts) return null;
+  return parts.param ? `${parts.name} · ${parts.param}` : parts.name;
 }

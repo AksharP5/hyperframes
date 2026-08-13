@@ -137,6 +137,16 @@ const poles: HfAudioFxEnumParam = {
  */
 export const HF_AUDIO_FX: readonly HfAudioFxDef[] = [
   {
+    id: "gain",
+    label: "Gain",
+    group: "dynamics",
+    description: "Raise or lower the whole signal. Automate it to duck under something else.",
+    // Cuts go deep, boosts stay modest: this is a level stage for making room,
+    // and a chain that can add 40 dB clips long before it is useful.
+    params: [gainDb(-60, 12, 0)],
+    web: "gain-node",
+  },
+  {
     id: "peaking",
     label: "Peaking EQ",
     group: "filter",

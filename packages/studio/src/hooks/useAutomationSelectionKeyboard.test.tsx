@@ -16,6 +16,17 @@ import type {
 } from "../player/components/useAutomationLanes";
 import type { TimelineElement } from "../player/store/timelineElement";
 
+/**
+ * A selection box spanning the lane's whole value axis.
+ *
+ * What almost every test here is about is the time span — which breakpoints a
+ * Delete or a copy covers. Giving these an unbounded axis keeps the fixture
+ * out of the way of that.
+ */
+function wholeAxis<T extends { t0: number; t1: number }>(sel: T): T & { v0: number; v1: number } {
+  return { ...sel, v0: Number.NEGATIVE_INFINITY, v1: Number.POSITIVE_INFINITY };
+}
+
 /** Minimal valid fixture — TimelineElement only requires these five fields. */
 const bgmElement: TimelineElement = {
   id: "bgm",
@@ -110,7 +121,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 }));
     const { onCommit } = setup({});
     key("Delete");
     const written = onCommit.mock.calls.at(-1)?.[0];
@@ -121,7 +132,7 @@ describe("useAutomationSelectionKeyboard", () => {
   it("Escape clears the selection", () => {
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 }));
     setup({});
     key("Escape");
     expect(usePlayerStore.getState().automationSelection).toBeNull();
@@ -130,7 +141,7 @@ describe("useAutomationSelectionKeyboard", () => {
   it("is inert while a text input has focus", () => {
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 }));
     const { onCommit } = setup({});
     const input = document.createElement("input");
     document.body.append(input);
@@ -145,7 +156,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     setup({});
     combo("c");
     const entry = readClipboard(null);
@@ -165,7 +176,7 @@ describe("useAutomationSelectionKeyboard", () => {
     });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("c");
     expect(readClipboard(null)?.span).toBe(2);
@@ -183,6 +194,8 @@ describe("useAutomationSelectionKeyboard", () => {
       target: "volume",
       t0: 5,
       t1: 7,
+      v0: VOLUME_RANGE.min,
+      v1: VOLUME_RANGE.max,
     });
   });
 
@@ -196,7 +209,7 @@ describe("useAutomationSelectionKeyboard", () => {
     });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("c");
 
@@ -218,6 +231,8 @@ describe("useAutomationSelectionKeyboard", () => {
       target: "volume",
       t0: 4,
       t1: 6,
+      v0: VOLUME_RANGE.min,
+      v1: VOLUME_RANGE.max,
     });
   });
 
@@ -230,7 +245,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("c");
     expect(readClipboard(null)?.span).toBe(2);
@@ -238,7 +253,7 @@ describe("useAutomationSelectionKeyboard", () => {
     // A 0.1s-wide selection right near the clip's 6s end.
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 5.5, t1: 5.6 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 5.5, t1: 5.6 }));
     combo("v");
     const written = onCommit.mock.calls.at(-1)?.[0];
     const times = (written?.lanes?.[0]?.points ?? []).map((p: { t: number }) => p.t);
@@ -252,6 +267,8 @@ describe("useAutomationSelectionKeyboard", () => {
       target: "volume",
       t0: 4,
       t1: 6,
+      v0: VOLUME_RANGE.min,
+      v1: VOLUME_RANGE.max,
     });
   });
 
@@ -264,7 +281,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({ commitTargetKey: "some-other-clip" });
     const e = combo("v");
     expect(e.defaultPrevented).toBe(false);
@@ -282,7 +299,7 @@ describe("useAutomationSelectionKeyboard", () => {
     });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("c");
     usePlayerStore.getState().clearAutomationSelection();
@@ -302,7 +319,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 1, t1: 2 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 1, t1: 2 }));
     setup({ automation: { version: 1, lanes: [{ target: "volume", points: [] }] } });
 
     const e = combo("c");
@@ -315,7 +332,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("C");
     expect(readClipboard(null)?.span).toBe(2);

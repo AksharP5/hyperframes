@@ -487,51 +487,19 @@ export function FxSection({
               <FxParamRow
                 param={{
                   kind: "number",
-                  key: "maxCutDb",
-                  label: "Depth",
-                  unit: "dB",
-                  min: 0,
-                  max: 24,
-                  step: 0.5,
-                  default: DEFAULT_CARVE.maxCutDb,
-                }}
-                value={carve.maxCutDb}
-                disabled={disabled}
-                onChange={(_k, v) => previewCarve({ ...carve, maxCutDb: Number(v) })}
-                onCommit={(_k, v) => onCarveChange({ ...carve, maxCutDb: Number(v) })}
-              />
-              <FxParamRow
-                param={{
-                  kind: "number",
-                  key: "bands",
-                  label: "Bands",
-                  unit: "",
-                  min: 1,
-                  max: 6,
-                  step: 1,
-                  default: DEFAULT_CARVE.bands,
-                }}
-                value={carve.bands}
-                disabled={disabled}
-                onChange={(_k, v) => previewCarve({ ...carve, bands: Number(v) })}
-                onCommit={(_k, v) => onCarveChange({ ...carve, bands: Number(v) })}
-              />
-              <FxParamRow
-                param={{
-                  kind: "number",
-                  key: "intelligibilityBias",
-                  label: "Speech bias",
+                  key: "strength",
+                  label: "Strength",
                   unit: "",
                   min: 0,
                   max: 1,
-                  step: 0.05,
-                  default: DEFAULT_CARVE.intelligibilityBias,
-                  hint: "At 0 the deepest cuts follow raw voice energy, which lands on the fundamental. Higher weights selection toward 1-3 kHz, where a bed actually masks a voice.",
+                  step: 0.01,
+                  default: DEFAULT_CARVE.strength,
+                  hint: "How hard to carve. The six numbers the analysis actually uses — depth, band count, width and the rest — all move together from this one control.",
                 }}
-                value={carve.intelligibilityBias}
+                value={carve.strength}
                 disabled={disabled}
-                onChange={(_k, v) => previewCarve({ ...carve, intelligibilityBias: Number(v) })}
-                onCommit={(_k, v) => onCarveChange({ ...carve, intelligibilityBias: Number(v) })}
+                onChange={(_k, v) => previewCarve({ ...carve, strength: Number(v) })}
+                onCommit={(_k, v) => onCarveChange({ ...carve, strength: Number(v) })}
               />
               <button
                 type="button"

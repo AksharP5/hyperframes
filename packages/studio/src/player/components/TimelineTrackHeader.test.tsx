@@ -9,7 +9,8 @@ import { TimelineTrackHeader } from "./TimelineTrackHeader";
 import { defaultTimelineTheme } from "./timelineTheme";
 import type { TimelineElement } from "../store/playerStore";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
-import { LABEL_COL_W } from "./timelineLayout";
+import { getTimelineLaneTop, LABEL_COL_W } from "./timelineLayout";
+import { AUTOMATION_LANE_H } from "./automationLaneHeight";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -68,6 +69,7 @@ interface RenderHeaderOptions {
   onSeek?: (time: number) => void;
   onTogglePropertyGroupKeyframe?: TimelineEditCallbacks["onTogglePropertyGroupKeyframe"];
   onToggleTrackHidden?: TimelineEditCallbacks["onToggleTrackHidden"];
+  onRemoveAutomationLane?: (target: string) => void;
 }
 
 function renderHeader(options: RenderHeaderOptions = {}): {
@@ -100,6 +102,7 @@ function renderHeader(options: RenderHeaderOptions = {}): {
           onToggleClipExpanded={vi.fn()}
           onToggleTrackHidden={next.onToggleTrackHidden ?? vi.fn()}
           onTogglePropertyGroupKeyframe={next.onTogglePropertyGroupKeyframe}
+          onRemoveAutomationLane={next.onRemoveAutomationLane}
           onSeek={next.onSeek}
         />,
       );
@@ -413,5 +416,116 @@ describe("TimelineTrackHeader", () => {
     assertAligned([POSITION]);
     assertAligned([POSITION, OPACITY]);
     act(() => view.root.unmount());
+  });
+
+  /**
+   * Automation lanes are named in the label column, on the same tree as the
+   * keyframe rows — not painted inside the lane, where the name sat on top of
+   * the envelope it belonged to and scrolled away from its own row.
+   */
+  describe("audio automation rows", () => {
+    const BED: TimelineElement = {
+      id: "bed",
+      label: "Music Bed",
+      tag: "audio",
+      start: 0,
+      duration: 10,
+      track: 0,
+      fxChain: JSON.stringify({
+        version: 1,
+        nodes: [{ type: "peaking", id: "n1", params: { frequency: 1600, gain: -6, q: 1.4 } }],
+      }),
+      automation: JSON.stringify({
+        version: 1,
+        lanes: [
+          {
+            target: "volume",
+            points: [
+              { t: 0, v: 1 },
+              { t: 5, v: 0.4 },
+            ],
+          },
+          {
+            target: "fx.n1.gain",
+            points: [
+              { t: 0, v: 0 },
+              { t: 5, v: -6 },
+            ],
+          },
+        ],
+      }),
+    } as TimelineElement;
+
+    it("names every envelope in the label column", () => {
+      const { host, root } = renderHeader({ keyframeClip: BED, animations: [] });
+      const rows = Array.from(host.querySelectorAll<HTMLElement>("[data-automation-lane-label]"));
+      expect(rows.map((r) => r.getAttribute("data-automation-lane-label"))).toEqual([
+        "fx.n1.gain",
+        "volume",
+      ]);
+      // A band is named by its frequency: with several of them, "Peaking EQ" says
+      // nothing about which is which. Bands sit above the level lanes.
+      // Two lines per row: what the effect is, then which knob the envelope
+      // drives. One line truncated mid-word in a column this narrow.
+      expect(rows.map((r) => r.querySelector("[data-automation-lane-name]")?.textContent)).toEqual([
+        "Peaking EQ 1.6 kHz",
+        "Volume",
+      ]);
+      expect(rows.map((r) => r.querySelector("[data-automation-lane-param]")?.textContent)).toEqual(
+        [
+          "Gain",
+          // Volume has no effect behind it, so it has no second line at all.
+          undefined,
+        ],
+      );
+      act(() => root.unmount());
+    });
+
+    it("hides them when the track is collapsed", () => {
+      const { host, root } = renderHeader({
+        keyframeClip: BED,
+        animations: [],
+        expanded: false,
+      });
+      expect(host.querySelectorAll("[data-automation-lane-label]")).toHaveLength(0);
+      act(() => root.unmount());
+    });
+
+    it("removes just that envelope from the label column", () => {
+      // The panel's automate toggle can only reach a parameter it still shows; a
+      // carve's own lanes are not in it at all, so without this an envelope could
+      // be created and never deleted.
+      const onRemoveAutomationLane = vi.fn();
+      const { host, root } = renderHeader({
+        keyframeClip: BED,
+        animations: [],
+        onRemoveAutomationLane,
+      });
+      const button = host.querySelector<HTMLButtonElement>(
+        'button[aria-label="Remove Peaking EQ 1.6 kHz · Gain automation"]',
+      );
+      expect(button).not.toBeNull();
+      act(() => button?.click());
+      expect(onRemoveAutomationLane).toHaveBeenCalledWith("fx.n1.gain");
+      act(() => root.unmount());
+    });
+
+    it("offers no remove button when the lanes are read-only", () => {
+      const { host, root } = renderHeader({ keyframeClip: BED, animations: [] });
+      expect(host.querySelectorAll('button[aria-label$="automation"]')).toHaveLength(0);
+      act(() => root.unmount());
+    });
+
+    it("stacks each envelope's row where its lane is drawn", () => {
+      // Same rhythm the canvas uses: automation begins below the keyframe lanes
+      // and steps by its own taller row height.
+      const { host, root } = renderHeader({ keyframeClip: BED, animations: [OPACITY] });
+      const tops = Array.from(
+        host.querySelectorAll<HTMLElement>("[data-automation-lane-label]"),
+      ).map((r) => r.style.top);
+      const base = getTimelineLaneTop(1);
+      expect(tops).toEqual([`${base}px`, `${base + AUTOMATION_LANE_H}px`]);
+      act(() => root.unmount());
+    });
   });
 });

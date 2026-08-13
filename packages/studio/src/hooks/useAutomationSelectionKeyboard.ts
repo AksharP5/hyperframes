@@ -246,8 +246,17 @@ function handlePaste(
   paste.binding.onCommit(withLane(paste.binding.automation, { target: paste.target, points }));
   // Select the pasted span — the only feedback that it landed — and mark it, so
   // an immediate second Cmd+V recognises this selection as the paste's own and
-  // chains right after it instead of overwriting it.
-  const mark = { elementKey: paste.elementKey, target: paste.target, t0: atT, t1 };
+  // chains right after it instead of overwriting it. Full-height box over the
+  // pasted span: this path only ever reads t0/t1, so the box's value bounds are
+  // cosmetic — but the parameter's own range keeps it a sensible box to draw.
+  const mark = {
+    elementKey: paste.elementKey,
+    target: paste.target,
+    t0: atT,
+    t1,
+    v0: paste.range.min,
+    v1: paste.range.max,
+  };
   state.setAutomationSelection(mark);
   markLastPaste(mark);
   return true;

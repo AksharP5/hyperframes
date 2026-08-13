@@ -19,6 +19,7 @@ import {
 } from "../audioAutomation.js";
 import {
   cancelParamLane,
+  clearParamLane,
   scheduleChainAutomation,
   type AutomationTiming,
 } from "../audio/audioFxAutomation.js";
@@ -103,41 +104,15 @@ export function attachElementFxChain(
 ): { dispose(): void } | null {
   const { chain } = readChain(el);
 
-  // An AudioWorkletNode cannot be constructed before its processor is
-  // registered — it throws, and the whole chain is lost. So when the chain
-  // needs worklets and the module has not landed yet, play dry and swap the
-  // graph in once registration resolves.
-  if (chainNeedsWorklets(chain) && !audioFxWorkletsReady(ctx)) {
-    source.connect(destination);
-    let cancelled = false;
-    let pending: FxChainHandle | null = null;
-    void ensureAudioFxWorklets(ctx)
-      .then(() => {
-        if (cancelled) return;
-        try {
-          const late = buildFxChain(ctx, chain);
-          source.disconnect(destination);
-          source.connect(late.input);
-          late.output.connect(destination);
-          pending = late;
-        } catch {
-          // Still unbuildable; the dry connection already stands.
-        }
-      })
-      .catch(() => undefined);
-    return {
-      dispose: () => {
-        cancelled = true;
-        pending?.dispose();
-      },
-    };
-  }
-
   // Null means the source runs straight into its gain: an empty chain, or one
   // that could not be realised. Mutable because a structural edit swaps the
   // whole graph rather than re-parameterising it.
   let handle: FxChainHandle | null = null;
   let automated: FxParamTarget[] = [];
+  let disposed = false;
+  /** Bumped per attach, so a worklet wait that resolves late cannot revive a
+   *  chain the element has since moved on from. */
+  let workletGeneration = 0;
 
   /** Take the current graph out of the path, leaving the source connected dry. */
   const detach = (): void => {
@@ -164,6 +139,28 @@ export function attachElementFxChain(
   const attach = (next: HfAudioFxChain): void => {
     if (next.nodes.length === 0) {
       source.connect(destination);
+      return;
+    }
+    // An AudioWorkletNode cannot be constructed before its processor is
+    // registered — it throws, and the whole chain is lost. So a chain holding a
+    // limiter, compressor, gate or bitcrush plays dry until the module lands and
+    // then takes the ordinary rebuild path.
+    //
+    // That wait used to return early from the whole function, which left the
+    // track with no automation scheduled and no observer on the attribute: adding
+    // a compressor to a carved bed killed the carve's envelopes and froze every
+    // later edit until the composition reloaded. Rebuilding through the same path
+    // an edit uses is what keeps those two working.
+    if (chainNeedsWorklets(next) && !audioFxWorkletsReady(ctx)) {
+      source.connect(destination);
+      const generation = ++workletGeneration;
+      void ensureAudioFxWorklets(ctx)
+        .then(() => {
+          // Stale if the element was disposed or the chain changed while waiting.
+          if (disposed || generation !== workletGeneration) return;
+          rebuild(readChain(el).chain);
+        })
+        .catch(() => undefined);
       return;
     }
     try {
@@ -235,6 +232,13 @@ export function attachElementFxChain(
   ) {
     observer = new MutationObserver(() => {
       const next = readChain(el);
+      // Clear the booked envelopes before touching the graph. `update` writes each
+      // knob straight onto its AudioParam, and a write landing inside a running
+      // curve is refused with NotSupportedError unless the param is cancelled
+      // first — so an edit made while one was playing threw instead of applying,
+      // and the console filled with uncaught errors. The reschedule below puts the
+      // envelope back from the current playhead.
+      if (automated.length > 0) clearParamLane(automated);
       // `update` reports false when the change is structural rather than a new
       // set of values, which is the signal to swap the graph.
       if (!handle || !handle.update(next.chain)) rebuild(next.chain);
@@ -248,6 +252,7 @@ export function attachElementFxChain(
 
   return {
     dispose: () => {
+      disposed = true;
       observer?.disconnect();
       if (automated.length > 0) {
         cancelParamLane(automated, typeof ctx.currentTime === "number" ? ctx.currentTime : 0);

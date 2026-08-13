@@ -1,12 +1,16 @@
 /**
  * Breakpoint automation over an audio clip, edited the way a DAW edits it:
- * double-click the line to add a point, drag one to shape it, right-click a
- * point to remove it, Alt-drag the line between two points to bend it, and
- * double-click a point to type an exact value.
+ * double-click the line to add a point, drag one to shape it, right-click or
+ * Shift+click a point to remove it, Alt-drag the line between two points to bend
+ * it, and double-click a point to type an exact value.
  *
  * Modifiers follow Ableton's, because that is the muscle memory an automation
  * lane inherits: Shift locks a drag to one axis and fines the value down, Alt
  * over a segment curves it, and Alt during a point drag ignores the grid.
+ *
+ * Drag the background to draw a selection box around a set of breakpoints, then
+ * Delete to remove them, drag any one of them to move the whole set, or
+ * right-click inside the box for shapes over its span.
  *
  * The lane knows nothing about any particular effect. Which parameters it can
  * offer, their ranges, units and whether they read logarithmically all come
@@ -30,29 +34,66 @@ import {
   type HfAutomationLane,
   type HfAutomationPoint,
 } from "@hyperframes/core/audio-automation";
-import {
-  envelopePath,
-  fromUnit,
-  GRAB_PX,
-  laneFor,
-  PAD_X,
-  toUnit,
-  withLane,
-} from "./automationLaneGeometry";
+import { envelopePath, fromUnit, laneFor, PAD_X, toUnit, withLane } from "./automationLaneGeometry";
 import { useAutomationLaneGestures } from "./useAutomationLaneGestures";
 import { AutomationValueInput } from "./AutomationValueInput";
 import { AutomationSelectionMenu } from "./AutomationSelectionMenu";
 import { AUTOMATION_LANE_H } from "./automationLaneHeight";
 import { generateShape, type AutomationShapeId } from "./automationShapes";
 import { simplifyPoints } from "./automationSimplify";
-import { pointsIn, replaceRange } from "./automationLaneSelection";
+import { pointInSelection, pointsIn, replaceRange } from "./automationLaneSelection";
 import { getTimelineLaneTop } from "./timelineLayout";
+import { defaultTimelineTheme } from "./timelineTheme";
 import type { TimelineElement } from "../store/playerStore";
 import type { UseAutomationLanesResult } from "./useAutomationLanes";
 
-/** Pointer shape: a stretch handle wins over everything else it might also
- *  sit above, a read-only lane can only be selected, a live one edited. */
+/**
+ * Drawn radius of a breakpoint.
+ *
+ * Independent of the grab radius, which is how close a pointer has to be to catch
+ * one: the two were the same number scaled, and tying them meant a dot could not be
+ * made easier to see without also changing what it caught. A touch over half the
+ * grab radius reads clearly at lane height without swallowing a dense run.
+ */
+const POINT_R = 4.9;
+
+/** Separator between stacked lanes — the same token a track row divides with. Read
+ *  off the default theme rather than threaded as a prop: nothing overrides the
+ *  timeline theme for lanes today, and a prop for one colour is plumbing to nowhere. */
+const LANE_BORDER = defaultTimelineTheme.rowBorder;
+
+/** Selection box on one lane. Value bounds included: a point at the right time
+ *  but the wrong value is not in it. */
+type SelectionBox = { t0: number; t1: number; v0: number; v1: number };
+
+/** Is this breakpoint inside the selection box? The rule itself is shared with
+ *  Delete and with the group drag, so what is drawn as caught is exactly what
+ *  those act on; this only adds tolerance for there being no selection at all. */
+function pointInBox(point: HfAutomationPoint, box: SelectionBox | null | undefined): boolean {
+  return !!box && pointInSelection(point, box);
+}
+
+/** A breakpoint's drawn radius and stroke, pulled out of the render loop so the
+ *  map callback stays a single JSX return — the ternaries below are what pushed
+ *  it over the complexity budget when they lived inline. */
+function pointCircleStyle(
+  inRange: boolean,
+  dragging: boolean,
+): { radius: number; stroke: string; strokeWidth: number } {
+  return {
+    radius: POINT_R * (dragging ? 1.3 : inRange ? 1.15 : 1),
+    // A white ring rather than a different fill: the fill is the parameter's
+    // own colour, and a lane with two envelopes on it is read by colour first.
+    stroke: inRange ? "#fff" : "rgba(0,0,0,0.5)",
+    strokeWidth: inRange ? 1.5 : 1,
+  };
+}
+
+/** Pointer shape: a read-only lane can only be selected, a live one edited. */
 function laneCursor(readOnly: boolean | undefined, dragging: boolean, stretching: boolean): string {
+  // A stretch handle wins over everything it might also sit above: the handle is
+  // a few px wide and always overlaps whatever is under the selection edge, so
+  // any other cursor there would advertise a gesture the press will not start.
   if (stretching) return "col-resize";
   if (readOnly) return "pointer";
   return dragging ? "grabbing" : "crosshair";
@@ -85,9 +126,9 @@ export interface TimelineAutomationLaneProps {
   readOnly?: boolean;
   /** Called when a read-only lane is pressed: selects the clip so it goes live. */
   onSelect?(): void;
-  /** Active selection on THIS lane, or null. */
-  rangeSelection?: { t0: number; t1: number } | null | undefined;
-  onRangeSelect?: ((t0: number, t1: number) => void) | undefined;
+  /** Active selection box on THIS lane, or null. */
+  rangeSelection?: SelectionBox | null | undefined;
+  onRangeSelect?: ((t0: number, t1: number, v0: number, v1: number) => void) | undefined;
   onRangeClear?: (() => void) | undefined;
 }
 
@@ -223,6 +264,16 @@ export function TimelineAutomationLane({
 
   /** Client-coordinate position of an open selection menu, or null when closed. */
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  /**
+   * Whether the pointer is over this lane, which is what decides if the
+   * breakpoints are drawn.
+   *
+   * A stack of envelopes across a long clip is hundreds of discs, and at rest the
+   * shape of each is the thing worth reading — the handles matter only to someone
+   * about to grab one. The line stays visible either way; this hides just the
+   * points.
+   */
+  const [hovered, setHovered] = useState(false);
 
   const insertShape = useCallback(
     (shape: AutomationShapeId): void => {
@@ -234,7 +285,10 @@ export function TimelineAutomationLane({
         t0: rangeSelection.t0,
         t1: rangeSelection.t1,
       });
-      commitPoints(replaceRange({ lane, range, ...rangeSelection, inner }), true);
+      commitPoints(
+        replaceRange({ lane, range, t0: rangeSelection.t0, t1: rangeSelection.t1, inner }),
+        true,
+      );
     },
     [rangeSelection, lane, range, commitPoints],
   );
@@ -242,7 +296,10 @@ export function TimelineAutomationLane({
   const simplifySelection = useCallback((): void => {
     if (!rangeSelection) return;
     const inner = simplifyPoints(pointsIn(lane, rangeSelection.t0, rangeSelection.t1), range);
-    commitPoints(replaceRange({ lane, range, ...rangeSelection, inner }), true);
+    commitPoints(
+      replaceRange({ lane, range, t0: rangeSelection.t0, t1: rangeSelection.t1, inner }),
+      true,
+    );
   }, [rangeSelection, lane, range, commitPoints]);
 
   // A point's own right-click already stops propagation and still deletes;
@@ -251,8 +308,10 @@ export function TimelineAutomationLane({
   const onSvgContextMenu = useCallback(
     (e: ReactMouseEvent<SVGSVGElement>): void => {
       if (readOnly || !rangeSelection) return;
-      const { t } = pointAt(e.clientX, e.clientY);
-      if (t < rangeSelection.t0 || t > rangeSelection.t1) return;
+      // Inside the drawn box, not merely inside its span: the menu's own actions
+      // read the span, but a right-click well above or below the box is a press
+      // on empty lane as far as the author can see.
+      if (!pointInSelection(pointAt(e.clientX, e.clientY), rangeSelection)) return;
       e.preventDefault();
       setMenuAt({ x: e.clientX, y: e.clientY });
     },
@@ -270,16 +329,19 @@ export function TimelineAutomationLane({
       style={{ top: topPx, left: 0, right: 0, height: h }}
       data-automation-lane={target}
     >
-      {/* Name at the lane's top-left, like a DAW's lane header. Shown in full —
-          a clip starting at zero leaves no gutter to clamp it into — and
-          click-through, so it can sit over the envelope without blocking it. */}
+      {/* Separator above each lane, in the same colour a track row divides with, so
+          a stack of envelopes reads as rows rather than as one tall field. Drawn as
+          an overlay rather than a CSS border: the lane's height is fixed and its svg
+          is positioned against the same box, so a border would shift the drawing a
+          pixel off the geometry every hit test is computed from. */}
       <div
-        className="hf-automation-name pointer-events-none absolute whitespace-nowrap font-mono text-[9px] text-panel-text-4"
-        style={{ left: 4, top: 2, zIndex: 2 }}
-      >
-        {range.label}
-      </div>
-
+        data-automation-lane-border=""
+        className="hf-automation-lane-border pointer-events-none absolute"
+        style={{ top: 0, left: 0, right: 0, height: 1, background: LANE_BORDER, zIndex: 1 }}
+      />
+      {/* No name drawn here: the label column carries it, on the same tree
+          connector as the keyframe rows. Painted in the lane it sat on top of the
+          envelope it described and scrolled horizontally away from its own row. */}
       <svg
         ref={svgRef}
         className="hf-automation-svg absolute"
@@ -298,6 +360,8 @@ export function TimelineAutomationLane({
         }}
         width={widthPx + PAD_X * 2}
         height={h}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
         onPointerDown={gestures.onPointerDown}
         onPointerMove={gestures.onPointerMove}
         onPointerUp={gestures.endDrag}
@@ -309,10 +373,13 @@ export function TimelineAutomationLane({
       >
         <title>
           {readOnly
-            ? "Click to select this clip, then double-click to add a point"
-            : "Double-click to add a point, drag to shape, double-click a point to type a value, right-click to remove. Alt-drag the line to curve it. Shift locks an axis; Alt ignores the grid."}
+            ? "Drag a box to select points, which also selects this clip; then double-click to add a point"
+            : "Double-click to add a point, drag to shape, double-click a point to type a value, right-click or Shift+click to remove it. Drag the background to draw a box around points, then Delete to remove them or drag one to move them all. Alt-drag the line to curve it. Shift locks an axis mid-drag; Alt ignores the grid."}
         </title>
-        <rect x={PAD_X} y={0} width={widthPx} height={h} fill="rgba(0,0,0,0.18)" rx={3} />
+        {/* No plate behind the envelope: the lane used to darken its clip's width,
+            which drew a box inside the row and made a stack of lanes read as tiles
+            rather than as rows of one timeline. The row background shows through, and
+            the separator above each lane is what divides them now. */}
         {/* Mid rail, so a value reads against something. */}
         <line
           x1={PAD_X}
@@ -323,29 +390,23 @@ export function TimelineAutomationLane({
           strokeDasharray="3 4"
         />
         {rangeSelection ? (
-          <>
-            <rect
-              data-automation-selection=""
-              x={xOf(rangeSelection.t0)}
-              y={0}
-              width={Math.max(0, xOf(rangeSelection.t1) - xOf(rangeSelection.t0))}
-              height={h}
-              fill={accentColor}
-              opacity={0.15}
-              pointerEvents="none"
-            />
-            {[rangeSelection.t0, rangeSelection.t1].map((t) => (
-              <line
-                key={t}
-                x1={xOf(t)}
-                x2={xOf(t)}
-                y1={0}
-                y2={h}
-                stroke={accentColor}
-                opacity={0.5}
-              />
-            ))}
-          </>
+          <rect
+            data-automation-selection=""
+            x={xOf(rangeSelection.t0)}
+            // v1 is the upper bound, which is the SMALLER y: the value axis runs
+            // up the lane and the screen axis runs down it.
+            y={yOf(rangeSelection.v1)}
+            width={Math.max(0, xOf(rangeSelection.t1) - xOf(rangeSelection.t0))}
+            height={Math.max(0, yOf(rangeSelection.v0) - yOf(rangeSelection.v1))}
+            fill={accentColor}
+            opacity={0.15}
+            // Outlined as well as tinted. A box dragged thin along either axis is
+            // nearly invisible as a fill, and the author still has to be able to
+            // see what they drew before pressing Delete.
+            stroke={accentColor}
+            strokeOpacity={0.6}
+            pointerEvents="none"
+          />
         ) : null}
         <path
           d={path}
@@ -354,24 +415,41 @@ export function TimelineAutomationLane({
           strokeWidth={1.5}
           opacity={lane.points.length === 0 ? 0.35 : 0.95}
         />
-        {lane.points.map((p, i) => (
-          <circle
-            key={`${i}-${p.t}`}
-            data-automation-point={i}
-            cx={xOf(p.t)}
-            cy={yOf(p.v)}
-            r={i === dragIndex ? GRAB_PX * 0.8 : GRAB_PX * 0.55}
-            fill={accentColor}
-            stroke="rgba(0,0,0,0.5)"
-            strokeWidth={1}
-            style={{ cursor: readOnly ? "default" : "grab" }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              removeAt(i);
-            }}
-          />
-        ))}
+        {lane.points.map((p, i) => {
+          // Endpoint-inclusive, the same rule Delete uses, so what looks caught by
+          // the range is exactly what the range will remove. The tinted rectangle
+          // says where the selection is; this says which points it has.
+          const inRange = pointInBox(p, rangeSelection);
+          const { radius, stroke, strokeWidth } = pointCircleStyle(inRange, i === dragIndex);
+          return (
+            <circle
+              key={`${i}-${p.t}`}
+              data-automation-point={i}
+              {...(inRange ? { "data-automation-point-in-range": "" } : {})}
+              cx={xOf(p.t)}
+              cy={yOf(p.v)}
+              r={radius}
+              fill={accentColor}
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              // Hidden rather than unmounted, so the hit area survives: a point
+              // dragged past the lane's edge fires pointerleave mid-gesture, and a
+              // handle that vanishes then would drop the drag. A drag in progress
+              // and a selected range both keep them up for the same reason — the
+              // range is the subject of a pending Delete, and which points it
+              // caught cannot depend on where the mouse is.
+              style={{
+                cursor: readOnly ? "default" : "grab",
+                opacity: hovered || dragIndex !== null || rangeSelection ? 1 : 0,
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                removeAt(i);
+              }}
+            />
+          );
+        })}
         {playheadSec !== null && currentValue !== null ? (
           <circle
             data-automation-playhead=""
@@ -497,10 +575,15 @@ export function TimelineAutomationLaneSlot({
             readOnly={bound.readOnly}
             rangeSelection={
               bound.selection?.target === lane.target
-                ? { t0: bound.selection.t0, t1: bound.selection.t1 }
+                ? {
+                    t0: bound.selection.t0,
+                    t1: bound.selection.t1,
+                    v0: bound.selection.v0,
+                    v1: bound.selection.v1,
+                  }
                 : null
             }
-            onRangeSelect={(t0, t1) => bound.onRangeSelect(lane.target, t0, t1)}
+            onRangeSelect={(t0, t1, v0, v1) => bound.onRangeSelect(lane.target, t0, t1, v0, v1)}
             onRangeClear={bound.onRangeClear}
           />
         );

@@ -10,7 +10,7 @@
  * read only, which is also what stops a stray drag from editing the wrong track.
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import {
   HF_AUDIO_AUTOMATION_ATTR,
   serializeAutomation,
@@ -27,6 +27,7 @@ import { getTimelineElementIdentity } from "../lib/timelineElementHelpers";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import type { AutomationSelection } from "../store/automationSelectionSlice";
 import { elementAutomation, elementFxChain } from "./automationLaneData";
+import { createAutomationGestureKeys } from "./automationGestureKeys";
 
 export interface AutomationLaneBinding {
   automation: HfAutomation;
@@ -54,12 +55,13 @@ export interface AutomationLaneBinding {
    * element's key; it lags only in the window a non-gesture caller can hit.
    */
   commitTargetKey: string | null;
-  /** This element's active time selection, or null if none / it belongs to a
+  /** This element's active selection box, or null if none / it belongs to a
    *  different element. */
   selection: AutomationSelection | null;
-  /** Live write while dragging a range on the given lane; does not persist —
-   *  the selection is ephemeral store state, not part of the composition. */
-  onRangeSelect(target: string, t0: number, t1: number): void;
+  /** Live write while dragging a selection box on the given lane; does not
+   *  persist — the selection is ephemeral store state, not part of the
+   *  composition. */
+  onRangeSelect(target: string, t0: number, t1: number, v0: number, v1: number): void;
   onRangeClear(): void;
 }
 
@@ -68,6 +70,9 @@ export interface UseAutomationLanesResult {
 }
 
 export function useAutomationLanes(): UseAutomationLanesResult {
+  // One per hook instance, held across renders: a gesture spans many commits and
+  // they all have to record under the same key for undo to take the whole drag.
+  const gestureKeys = useRef(createAutomationGestureKeys());
   // Optional: the player also runs outside Studio, where there is no edit
   // session. There the lanes render read-only, which is the right fallback.
   const domEdit = useDomEditActionsContextOptional();
@@ -97,14 +102,32 @@ export function useAutomationLanes(): UseAutomationLanesResult {
       const write = (next: HfAutomation, persist: boolean): void => {
         if (!domEdit || !isSelected) return;
         const value = next.lanes.length > 0 ? serializeAutomation(next) : "";
+        // Every write of one gesture under one key, so undo takes back the whole
+        // drag rather than the last fragment history happened to keep.
+        const coalesce = persist ? gestureKeys.current.commit() : gestureKeys.current.live();
         // Quiet, not the refreshing commit: releasing a dragged point used to
         // reload the preview, which restarts every playing track — the same chop
         // the live write during the drag exists to avoid. Quiet still persists
         // and still resyncs the selection, so the next edit sees this one.
-        if (persist) void domEdit.handleDomAttributeQuietCommit(HF_AUDIO_AUTOMATION_ATTR, value);
+        if (persist) {
+          void domEdit.handleDomAttributeQuietCommit(HF_AUDIO_AUTOMATION_ATTR, value, coalesce);
+        }
         // Dragging a point writes live: no preview refresh, so the composition
         // does not reload and restart playback on every pixel.
-        else void domEdit.handleDomAttributeLiveCommit(HF_AUDIO_AUTOMATION_ATTR, value || null);
+        else {
+          // Preview only, because a gesture writes on every pointermove: the
+          // preview and the running audio follow the pointer, and the release
+          // below is the one write that reaches the file and the undo stack.
+          void domEdit.handleDomAttributeLiveCommit(
+            HF_AUDIO_AUTOMATION_ATTR,
+            value || null,
+            undefined,
+            {
+              coalesce,
+              previewOnly: true,
+            },
+          );
+        }
       };
 
       return {
@@ -121,9 +144,15 @@ export function useAutomationLanes(): UseAutomationLanesResult {
         readOnly: !domEdit || !isSelected,
         commitTargetKey: domEdit ? commitTargetKey : null,
         selection: automationSelection?.elementKey === elementKey ? automationSelection : null,
-        onRangeSelect: (target, t0, t1) => {
-          if (!domEdit || !isSelected) return;
-          setAutomationSelection({ elementKey, target, t0, t1 });
+        // Not gated on `isSelected`, unlike the writes above. A selection is
+        // ephemeral store state, and the drag that draws one on a read-only lane is
+        // the same press that selects the clip — refusing it here meant the first
+        // drag on a lane silently did nothing and the author had to drag again.
+        // Nothing can be written through it while the lane is read-only: every
+        // consumer resolves the binding again and finds `readOnly`.
+        onRangeSelect: (target, t0, t1, v0, v1) => {
+          if (!domEdit) return;
+          setAutomationSelection({ elementKey, target, t0, t1, v0, v1 });
         },
         onRangeClear: () => clearAutomationSelection(),
       };

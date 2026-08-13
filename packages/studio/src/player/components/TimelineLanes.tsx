@@ -196,6 +196,26 @@ export function TimelineLanes({
             keyframeClipKey != null && expandedClipIds.has(keyframeClipKey);
           // Link the sticky caret to the canvas lanes with a stable display-row id.
           const lanesId = `${lanesIdPrefix}-track-${row}`;
+          // The header's remove buttons write through the same binding the lanes
+          // themselves edit through, so a deletion persists exactly like dragging
+          // a point does — and the binding reports read-only for an unselected
+          // clip, which is what leaves the buttons off rather than offering one
+          // that cannot act.
+          const headerLanes =
+            keyframeClip && keyframeClipKey
+              ? automationLanes.bind(
+                  keyframeClip,
+                  selectedElementId === keyframeClipKey || selectedElementIds.has(keyframeClipKey),
+                )
+              : null;
+          const removeAutomationLane =
+            headerLanes && !headerLanes.readOnly
+              ? (target: string) =>
+                  headerLanes.onCommit({
+                    version: 1,
+                    lanes: headerLanes.lanes.filter((lane) => lane.target !== target),
+                  })
+              : undefined;
           return (
             <TimelineTrackRow
               key={rowKey}
@@ -239,6 +259,7 @@ export function TimelineLanes({
                 }}
                 onToggleTrackHidden={onToggleTrackHidden}
                 onTogglePropertyGroupKeyframe={onTogglePropertyGroupKeyframe}
+                onRemoveAutomationLane={removeAutomationLane}
                 onSeek={onSeek}
                 rovingTargetId={keyboard.rovingTargetId}
               />

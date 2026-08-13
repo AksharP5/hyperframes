@@ -117,6 +117,26 @@ function simple(
  */
 const USES_Q: ReadonlySet<BiquadFilterType> = new Set(["peaking", "highpass", "lowpass"]);
 
+/** dB on the knob, a linear multiplier on the AudioParam. */
+const dbToLinear = (db: number): number => Math.pow(10, db / 20);
+
+/**
+ * A plain level stage.
+ *
+ * Every other gain in the registry sits on a BiquadFilterNode, whose `gain`
+ * param is already in dB. A GainNode's is a linear multiplier, so both the
+ * initial value and anything an automation lane schedules have to be converted —
+ * which is what `FxParamTarget.map` is for.
+ */
+const gainStage: Builder = (ctx, p) => {
+  const g = ctx.createGain();
+  const apply = (v: HfAudioFxParamValues): void => {
+    g.gain.value = dbToLinear(n(v.gain));
+  };
+  apply(p);
+  return simple(g, apply, { gain: [{ param: g.gain, map: dbToLinear }] });
+};
+
 function biquad(type: BiquadFilterType, useGain: boolean): Builder {
   return (ctx, p) => {
     const f = ctx.createBiquadFilter();
@@ -394,6 +414,7 @@ const convolver: Builder = (ctx, p) => {
 };
 
 const BUILDERS: Record<string, Builder> = {
+  "gain-node": gainStage,
   "biquad-peaking": biquad("peaking", true),
   "biquad-lowshelf": biquad("lowshelf", true),
   "biquad-highshelf": biquad("highshelf", true),

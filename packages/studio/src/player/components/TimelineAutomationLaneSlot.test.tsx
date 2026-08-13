@@ -56,14 +56,14 @@ function mountSlot(binding: Partial<AutomationLaneBinding>) {
 describe("TimelineAutomationLaneSlot stale-selection guard", () => {
   it("clears the selection when its lane's target no longer exists", () => {
     const { onRangeClear } = mountSlot({
-      selection: { elementKey: "bgm", target: "fx.gone.wet", t0: 1, t1: 2 },
+      selection: { elementKey: "bgm", target: "fx.gone.wet", t0: 1, t1: 2, v0: 0, v1: 1 },
     });
     expect(onRangeClear).toHaveBeenCalledTimes(1);
   });
 
   it("leaves an in-scope selection alone", () => {
     const { onRangeClear } = mountSlot({
-      selection: { elementKey: "bgm", target: "volume", t0: 1, t1: 2 },
+      selection: { elementKey: "bgm", target: "volume", t0: 1, t1: 2, v0: 0, v1: 1 },
     });
     expect(onRangeClear).not.toHaveBeenCalled();
   });
