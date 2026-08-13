@@ -5,7 +5,7 @@
  * is not an entry in the chain.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   defaultAudioFxParams,
   getAudioFxDef,
@@ -68,6 +68,7 @@ const PRESET_AMOUNT_PARAM: HfAudioFxParam = {
   default: 1,
   hint: "How much of this preset is applied. Automate it to bring the whole preset in or out over time.",
 };
+
 export interface FxSectionProps {
   chain: HfAudioFxChain;
   /** Targets this track already automates, as `fx.<nodeId>.<param>` strings. */
@@ -110,6 +111,14 @@ export interface FxSectionProps {
   onAuditionLevel?(on: boolean): void;
   /** Whether that measurement is running, so the button can say so. */
   auditioningLevel?: boolean;
+  /**
+   * Start the transport for an audition, and stop it on the way out.
+   *
+   * An audition is written to the running graph, which is silent while the
+   * transport is paused — so without this, hovering a preset does nothing at all
+   * for a paused author.
+   */
+  onAuditionTransport?(on: boolean): void;
   /** Structural edits and gesture-end writes; this is the one that persists. */
   onChainChange(chain: HfAudioFxChain): void;
   /** Continuous updates while a control is being dragged. */
@@ -155,6 +164,7 @@ export function FxSection({
   onAutomatePreset,
   onRemovePresetAutomation,
   automatedPresets,
+  onAuditionTransport,
 }: FxSectionProps) {
   const presetAutomated = automatedPresets ?? new Set<string>();
   // Falls back to the persisting write when no preview handler is supplied, which
@@ -227,12 +237,18 @@ export function FxSection({
       if (make) {
         auditionBase.current ??= chain;
         onChainPreview(make(auditionBase.current));
+        // After the chain is in the graph, not before: starting the transport
+        // first plays a moment of the un-auditioned mix.
+        onAuditionTransport?.(true);
       } else if (auditionBase.current) {
+        // Stop before reverting, for the mirror of that reason — the last thing
+        // heard should be the preset, not a frame of the chain coming back.
+        onAuditionTransport?.(false);
         onChainPreview(auditionBase.current);
         auditionBase.current = null;
       }
     },
-    [chain, onChainPreview],
+    [chain, onChainPreview, onAuditionTransport],
   );
 
   /**
@@ -252,9 +268,14 @@ export function FxSection({
   // Leaving by any route other than the pointer — the element deselected, the
   // panel closed — would otherwise leave the audition playing over a chain the
   // document does not have.
+  const transportRef = useRef(onAuditionTransport);
+  transportRef.current = onAuditionTransport;
   useEffect(
     () => () => {
-      if (auditionBase.current) previewRef.current?.(auditionBase.current);
+      if (auditionBase.current) {
+        transportRef.current?.(false);
+        previewRef.current?.(auditionBase.current);
+      }
     },
     [],
   );
@@ -271,13 +292,14 @@ export function FxSection({
       // old chain back over the write that just landed is a race the author
       // hears as the preset arriving and then leaving again.
       auditionBase.current = null;
+      onAuditionTransport?.(false);
       mutate(next.nodes);
       // Land on the first node the preset wrote, so the author can hear what
       // arrived and immediately see what it is made of.
       setOpenNode(next.nodes.findIndex((n) => n.fromPreset === preset.id));
       setPicking(false);
     },
-    [chain, mutate],
+    [chain, mutate, onAuditionTransport],
   );
 
   /**
@@ -321,21 +343,23 @@ export function FxSection({
   const addJob = useCallback(
     (job: HfAudioFxJob) => {
       auditionBase.current = null;
+      onAuditionTransport?.(false);
       mutate(withJob(chain, job).nodes);
       setOpenNode(chain.nodes.length);
       setAdding(false);
     },
-    [chain, mutate, withJob],
+    [chain, mutate, withJob, onAuditionTransport],
   );
 
   const addEffect = useCallback(
     (type: string) => {
       auditionBase.current = null;
+      onAuditionTransport?.(false);
       mutate(withEffect(chain, type).nodes);
       setOpenNode(chain.nodes.length);
       setAdding(false);
     },
-    [chain, mutate, withEffect],
+    [chain, mutate, withEffect, onAuditionTransport],
   );
 
   const updateNode = useCallback(
@@ -457,11 +481,12 @@ export function FxSection({
 
   const addEq = useCallback(() => {
     auditionBase.current = null;
+    onAuditionTransport?.(false);
     const { chain: next, eqId } = addAudioEq(chain);
     mutate(next.nodes);
     setOpenEq(eqId);
     setAdding(false);
-  }, [chain, mutate]);
+  }, [chain, mutate, onAuditionTransport]);
 
   // Dragging a fader is heard immediately and written once on release, the same
   // split every other control in the rack uses.
@@ -498,8 +523,34 @@ export function FxSection({
     [chain.nodes, mutate],
   );
 
+  /**
+   * Escape closes whichever menu is open.
+   *
+   * The first thing anyone reaches for, and on a surface that covers the rack it
+   * is the one that needs no discovering. Bound on the section rather than the
+   * window: a keystroke aimed at the timeline is not aimed at this.
+   */
+  const closeMenus = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || (!adding && !picking)) return;
+      // Stops the panel's own Escape handling from also firing — closing a menu
+      // and deselecting the clip on one keystroke loses the author their place.
+      event.stopPropagation();
+      audition(null);
+      onAuditionLevel?.(false);
+      setAdding(false);
+      setPicking(false);
+    },
+    [adding, picking, audition, onAuditionLevel],
+  );
+
   return (
-    <div className="hf-fx-section space-y-2">
+    <div
+      className="hf-fx-section space-y-2"
+      // Focus lives on the buttons and menu items inside, so the keystroke
+      // bubbles to here without the section needing focus of its own.
+      onKeyDown={closeMenus}
+    >
       <div className="hf-fx-chain space-y-1">
         {/* The rack IS the signal path, and saying so costs two lines. Without
             them the order reads as a list, which is the one reading that makes
@@ -790,26 +841,44 @@ export function FxSection({
         />
       ) : null}
 
-      {adding || picking ? null : (
-        <div className="flex gap-1">
-          <button
-            type="button"
-            className="hf-fx-preset w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
-            disabled={disabled}
-            onClick={() => setPicking(true)}
-          >
-            Presets
-          </button>
-          <button
-            type="button"
-            className="hf-fx-add w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
-            disabled={disabled}
-            onClick={() => setAdding(true)}
-          >
-            Add effect
-          </button>
-        </div>
-      )}
+      {/* The buttons stay while their menu is open, and close it — an author who
+          opened one and changed their mind had no way back: picking something
+          was the only thing that set these false, so the only exits were adding
+          an effect they did not want or deselecting the clip. */}
+      <div className="flex gap-1">
+        <button
+          type="button"
+          className="hf-fx-preset w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
+          aria-expanded={picking}
+          disabled={disabled}
+          onClick={() => {
+            // Leaving the shelf by closing it is still leaving it, and an
+            // audition left playing is audible over a chain the document does
+            // not have.
+            if (picking) audition(null);
+            setPicking(!picking);
+            setAdding(false);
+          }}
+        >
+          {picking ? "Close" : "Presets"}
+        </button>
+        <button
+          type="button"
+          className="hf-fx-add w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
+          aria-expanded={adding}
+          disabled={disabled}
+          onClick={() => {
+            if (adding) {
+              audition(null);
+              onAuditionLevel?.(false);
+            }
+            setAdding(!adding);
+            setPicking(false);
+          }}
+        >
+          {adding ? "Close" : "Add effect"}
+        </button>
+      </div>
     </div>
   );
 }

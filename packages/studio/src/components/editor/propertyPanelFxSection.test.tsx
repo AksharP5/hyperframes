@@ -90,6 +90,7 @@ function mount(overrides: Partial<Parameters<typeof FxSection>[0]> = {}) {
       onRemoveNodeAutomation={overrides.onRemoveNodeAutomation}
       onAutomatePreset={overrides.onAutomatePreset}
       onRemovePresetAutomation={overrides.onRemovePresetAutomation}
+      onAuditionTransport={overrides.onAuditionTransport}
       automatedPresets={overrides.automatedPresets}
       onLevel={overrides.onLevel}
       onRemoveLevel={overrides.onRemoveLevel}
@@ -563,6 +564,7 @@ describe("FxSection chain", () => {
       expect(onRemoveNodeAutomation).toHaveBeenCalled();
     });
   });
+
   it("brackets only nodes a preset still sits next to", () => {
     // Pulled apart by a reorder, they are no longer a unit — and a bracket
     // around the gap would claim an adjacency the signal path does not have.
@@ -694,6 +696,158 @@ describe("FxSection chain", () => {
     );
     // The name is still there, under it — which is how it gets learned.
     expect(item?.querySelector(".hf-fx-preset-name")?.textContent).toBe("Telephone");
+  });
+
+  describe("auditioning while the transport is paused", () => {
+    it("starts playback so a paused author can hear the preset at all", () => {
+      // The audition is written to the running graph, which is silent while the
+      // transport is paused — so without this, hovering a preset did nothing
+      // whatsoever unless the author happened to be mid-playback.
+      const onAuditionTransport = vi.fn();
+      const { host } = mount({ chain: chainOf("peaking"), onAuditionTransport });
+      click(byText(host, "button", "Presets"));
+      act(() => (presetButton(host, "telephone") as HTMLElement | null)?.focus());
+      expect(onAuditionTransport).toHaveBeenLastCalledWith(true);
+    });
+
+    it("stops it again on the way out", () => {
+      const onAuditionTransport = vi.fn();
+      const { host } = mount({ chain: chainOf("peaking"), onAuditionTransport });
+      click(byText(host, "button", "Presets"));
+      act(() => (presetButton(host, "telephone") as HTMLElement | null)?.focus());
+      act(() => {
+        host
+          .querySelector(".hf-fx-preset-menu")
+          ?.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      });
+      expect(onAuditionTransport).toHaveBeenLastCalledWith(false);
+    });
+
+    it("stops it when the preset is applied, rather than playing on", () => {
+      // The click means "keep this", not "and carry on playing from wherever
+      // the audition reached".
+      const onAuditionTransport = vi.fn();
+      const { host } = mount({ chain: { version: 1, nodes: [] }, onAuditionTransport });
+      click(byText(host, "button", "Presets"));
+      act(() => (presetButton(host, "telephone") as HTMLElement | null)?.focus());
+      click(presetButton(host, "telephone"));
+      expect(onAuditionTransport).toHaveBeenLastCalledWith(false);
+    });
+
+    it("stops it if the panel goes away mid-audition", () => {
+      const onAuditionTransport = vi.fn();
+      const { host, root } = mount({ chain: chainOf("peaking"), onAuditionTransport });
+      click(byText(host, "button", "Presets"));
+      act(() => (presetButton(host, "telephone") as HTMLElement | null)?.focus());
+      act(() => root.unmount());
+      expect(onAuditionTransport).toHaveBeenLastCalledWith(false);
+    });
+  });
+
+  describe("getting back out of a menu", () => {
+    /** Escape, from inside the section, the way a keystroke really arrives. */
+    const escape = (host: HTMLElement) =>
+      act(() => {
+        host
+          .querySelector(".hf-fx-section")
+          ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      });
+
+    it("closes the preset shelf with the button that opened it", () => {
+      // Opening a menu used to hide both buttons, and picking something was the
+      // only thing that set them back — so an author who changed their mind had
+      // to add an effect they did not want, or deselect the clip.
+      const { host } = mount();
+      click(byText(host, "button", "Presets"));
+      expect(host.querySelector(".hf-fx-preset-menu")).toBeTruthy();
+
+      click(byText(host, "button", "Close"));
+      expect(host.querySelector(".hf-fx-preset-menu")).toBeNull();
+      expect(byText(host, "button", "Presets")).toBeTruthy();
+    });
+
+    it("closes the add menu the same way", () => {
+      const { host } = mount();
+      click(host.querySelector(".hf-fx-add"));
+      expect(host.querySelector(".hf-fx-add-menu")).toBeTruthy();
+
+      click(host.querySelector(".hf-fx-add"));
+      expect(host.querySelector(".hf-fx-add-menu")).toBeNull();
+      expect(byText(host, "button", "Add effect")).toBeTruthy();
+    });
+
+    it("opens one menu in place of the other", () => {
+      // Two open at once is two surfaces covering the rack, and neither says
+      // which one the next click belongs to.
+      const { host } = mount();
+      click(byText(host, "button", "Presets"));
+      click(host.querySelector(".hf-fx-add"));
+      expect(host.querySelector(".hf-fx-add-menu")).toBeTruthy();
+      expect(host.querySelector(".hf-fx-preset-menu")).toBeNull();
+
+      // And back the other way, which is a separate handler.
+      click(byText(host, "button", "Presets"));
+      expect(host.querySelector(".hf-fx-preset-menu")).toBeTruthy();
+      expect(host.querySelector(".hf-fx-add-menu")).toBeNull();
+    });
+
+    it("closes on Escape, which is what anyone reaches for first", () => {
+      const { host } = mount();
+      click(byText(host, "button", "Presets"));
+      escape(host);
+      expect(host.querySelector(".hf-fx-preset-menu")).toBeNull();
+
+      click(host.querySelector(".hf-fx-add"));
+      escape(host);
+      expect(host.querySelector(".hf-fx-add-menu")).toBeNull();
+    });
+
+    it("puts the chain back when a closing menu was auditioning", () => {
+      // Leaving the shelf by closing it is still leaving it, and an audition
+      // left playing is audible over a chain the document does not have.
+      const { host, onChainPreview } = mount({ chain: chainOf("peaking") });
+      click(byText(host, "button", "Presets"));
+      act(() => (presetButton(host, "telephone") as HTMLElement | null)?.focus());
+      click(byText(host, "button", "Close"));
+
+      const back = onChainPreview.mock.calls.at(-1)?.[0] as HfAudioFxChain;
+      expect(back.nodes.map((n) => n.type)).toEqual(["peaking"]);
+    });
+
+    it("leaves Escape alone when no menu is open", () => {
+      // The panel has its own Escape handling; swallowing the key when this has
+      // nothing to close would break it.
+      const { host } = mount();
+      let reached = false;
+      host.addEventListener("keydown", () => {
+        reached = true;
+      });
+      escape(host);
+      expect(reached).toBe(true);
+    });
+  });
+
+  it("shows a wave on a preset only when hovering it can be heard", () => {
+    // Hovering plays the preset, and playing is otherwise invisible — the panel
+    // looks identical whether the audition is sounding or the pointer is just
+    // resting there. Without an audition channel there is no audio to claim.
+    const { host } = mount({ chain: { version: 1, nodes: [] } });
+    click(byText(host, "button", "Presets"));
+    expect(presetButton(host, "telephone")?.querySelector(".hf-fx-preset-wave")).toBeTruthy();
+
+    // Rendered directly rather than through `mount`, which supplies a preview
+    // handler by default — the case being covered is a section that has none.
+    const { host: dry } = renderInto(
+      <FxSection
+        chain={{ version: 1, nodes: [] }}
+        onChainChange={vi.fn()}
+        carve={null}
+        onCarveChange={vi.fn()}
+        sourceOptions={[]}
+      />,
+    );
+    click(byText(dry, "button", "Presets"));
+    expect(presetButton(dry, "telephone")?.querySelector(".hf-fx-preset-wave")).toBeNull();
   });
 
   describe("hover-audition", () => {

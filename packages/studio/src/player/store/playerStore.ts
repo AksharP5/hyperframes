@@ -166,6 +166,32 @@ interface PlayerState extends KeyframeSlice, AutomationSelectionSlice, Thumbnail
   requestSeek: (time: number) => void;
   clearSeekRequest: () => void;
 
+  /**
+   * Request the transport start or stop from outside the player loop.
+   *
+   * The FX rack auditions a preset by writing it to the running graph, which is
+   * silent while the transport is paused — so hovering one has to start
+   * playback, and leaving has to put the playhead back where it was. Hovering is
+   * not an edit and must not cost the author their place.
+   *
+   * A nonce rather than a bare boolean: two hovers in a row both want play, and
+   * without it the second request is indistinguishable from the first having
+   * already been served.
+   */
+  playbackRequest: { playing: boolean; returnTo: number | null; nonce: number } | null;
+  requestPlayback: (playing: boolean, returnTo?: number | null) => void;
+  clearPlaybackRequest: () => void;
+
+  /**
+   * Request the timeline to scroll a clip into view (e.g. clicking an
+   * already-added asset card in the sidebar). Consumed and cleared by
+   * useTimelineRevealClip. The nonce makes repeat requests for the same
+   * clip observable so a second click re-reveals after the user scrolls away.
+   */
+  clipRevealRequest: { elementId: string; nonce: number } | null;
+  requestClipReveal: (elementId: string) => void;
+  clearClipRevealRequest: () => void;
+
   timelineFocus: TimelineFocusRequest | null;
   timelineFocusNonce: number;
   requestTimelineFocus: (id: string) => void;
@@ -321,6 +347,20 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   requestedSeekTime: null,
   requestSeek: (time) => set({ requestedSeekTime: time }),
   clearSeekRequest: () => set({ requestedSeekTime: null }),
+
+  playbackRequest: null,
+  requestPlayback: (playing, returnTo = null) =>
+    set((s) => ({
+      playbackRequest: { playing, returnTo, nonce: (s.playbackRequest?.nonce ?? 0) + 1 },
+    })),
+  clearPlaybackRequest: () => set({ playbackRequest: null }),
+
+  clipRevealRequest: null,
+  requestClipReveal: (elementId) =>
+    set((s) => ({
+      clipRevealRequest: { elementId, nonce: (s.clipRevealRequest?.nonce ?? 0) + 1 },
+    })),
+  clearClipRevealRequest: () => set({ clipRevealRequest: null }),
 
   timelineFocus: null,
   timelineFocusNonce: 0,
