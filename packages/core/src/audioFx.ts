@@ -761,7 +761,20 @@ export function normalizeAudioFxParams(
       out[p.key] = ok ? (raw as string) : p.default;
       continue;
     }
-    const n = typeof raw === "number" ? raw : Number(raw);
+    // Only a number, or a string that actually spells one. `Number(null)`,
+    // `Number("")`, `Number(false)` and `Number([])` are all 0 and all pass
+    // Number.isFinite, so a missing or blanked value used to clamp to 0 rather
+    // than fall back to the declared default — and 0 is a legal value for most
+    // of these knobs, so nothing downstream could tell. A compressor whose
+    // threshold arrived as null sat at 0 dB and never engaged, silently,
+    // instead of at its -24 dB default. `numberOrNull` in audioAutomation.ts
+    // already guards exactly this.
+    const n =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim() !== ""
+          ? Number(raw)
+          : Number.NaN;
     out[p.key] = Number.isFinite(n) ? Math.min(p.max, Math.max(p.min, n)) : p.default;
   }
   return out;

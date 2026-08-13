@@ -155,6 +155,16 @@ describe("buildFxNode", () => {
     expect(workletNodes[0]!.messages[0]).toMatchObject({ threshold: -30 });
   });
 
+  it("tells a worklet processor to retire on dispose, not just disconnect it", () => {
+    // Disconnecting leaves the processor alive — it lives until `process()`
+    // returns false — so every rebuild that dropped a worklet effect left one
+    // running on the audio thread for the rest of the session.
+    workletNodes.length = 0;
+    const h = buildFxNode(asCtx(ctx()), "compressor", defaultAudioFxParams("compressor"));
+    h.dispose();
+    expect(workletNodes[0]!.messages).toEqual([{ __hfDispose: true }]);
+  });
+
   it("rebuilds the saturation curve for the selected shape", () => {
     const c = ctx();
     buildFxNode(asCtx(c), "saturate", { ...defaultAudioFxParams("saturate"), type: "hard" });

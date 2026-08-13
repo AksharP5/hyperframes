@@ -250,6 +250,48 @@ describe("analyseCarveBands", () => {
   });
 });
 
+/**
+ * Both analysis loops reuse one pair of FFT scratch arrays across every window
+ * rather than allocating a pair per hop — a 5-minute 48 kHz voiceover is ~7000
+ * hops, so ~460 MB of transient Float64Array used to churn through the main
+ * thread for one carve. `re` is fully overwritten each window, but `im` is only
+ * ever added to, so it has to be cleared; missing that, the imaginary part
+ * accumulates across windows and every spectrum after the first is wrong by a
+ * growing amount.
+ */
+describe("reused FFT scratch across windows", () => {
+  /** A steady tone on an exact bin centre (48000/4096 x 128), so every window is identical. */
+  const steady = (seconds: number): Float32Array => {
+    const n = Math.floor(SR * seconds);
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) out[i] = 0.5 * Math.sin((2 * Math.PI * 1500 * i) / SR);
+    return out;
+  };
+
+  it("measures the same bands however many windows the clip has", () => {
+    // Every window carries the same spectrum, so the Welch average cannot
+    // depend on how many were averaged — unless one window is contaminating
+    // the next.
+    const short = analyseCarveBands(steady(0.5), SR, PROFILE);
+    const long = analyseCarveBands(steady(12), SR, PROFILE);
+    expect(short.length).toBeGreaterThan(0);
+    expect(long).toEqual(short);
+  });
+
+  it("keeps a steady tone's dynamics envelope flat instead of drifting", () => {
+    const [lane] = analyseCarveDynamics(steady(12), SR, [{ freq: 1600, gainDb: -8, q: 1.4 }]);
+    const value = (t: number): number =>
+      sampleAutomationLane({ target: "fx.n1.gain", points: lane!.points }, t);
+    // Past the attack the cut has to sit still, because the signal does. A
+    // window contaminated by the one before it grows the measured power over
+    // the clip, and the envelope — which is relative to the band's own peak —
+    // slides with it.
+    expect(value(4)).toBeLessThan(-1);
+    expect(value(8)).toBeCloseTo(value(4), 0);
+    expect(value(11)).toBeCloseTo(value(4), 0);
+  });
+});
+
 describe("carveBandsToChain", () => {
   it("turns bands into peaking nodes carrying the analysed values", () => {
     const chain = carveBandsToChain([{ freq: 1000, gainDb: -6, q: 1.4 }]);

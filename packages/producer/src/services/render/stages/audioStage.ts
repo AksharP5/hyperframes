@@ -90,12 +90,28 @@ export async function runAudioStage(input: AudioStageInput): Promise<AudioStageR
     } catch (err) {
       // An abort is the caller's own signal and must keep its own shape.
       assertNotAborted();
+      const detail = err instanceof Error ? err.message : String(err);
       return {
         audioOutputPath,
         hasAudio: false,
         audioProcessMs: Date.now() - stage3Start,
-        audioError: err instanceof Error ? err.message : String(err),
-        audioFailures: undefined,
+        audioError: detail,
+        // Synthesised rather than left undefined. The warning policy reads
+        // owner, retryability, reason and stage off this list, so reporting the
+        // FATAL failure — the one that took the whole mix down — with an empty
+        // one gave it strictly less classification than a single dropped track
+        // gets, which is the opposite of what this stage exists to do.
+        // "internal" is the honest bucket: the stages enumerate ffmpeg steps
+        // and this is the FX render, which is none of them.
+        audioFailures: [
+          {
+            stage: "internal",
+            reason: "internal",
+            owner: "system",
+            retryable: false,
+            detail: detail.slice(0, 2_000),
+          },
+        ],
       };
     }
     assertNotAborted();

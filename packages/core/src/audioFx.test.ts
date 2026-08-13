@@ -69,6 +69,27 @@ describe("normalizeAudioFxParams", () => {
     expect(v.gain).toBe(0);
   });
 
+  it("treats a blank or missing value as absent rather than as zero", () => {
+    // `Number(null)`, `Number("")`, `Number(false)` and `Number([])` are all 0
+    // and all finite, so these used to clamp to 0 instead of falling back. Zero
+    // is a legal setting for most of these knobs, so nothing downstream could
+    // tell: a compressor whose threshold arrived as null sat at 0 dB and never
+    // engaged, silently, rather than at its declared -24 dB.
+    const def = defaultAudioFxParams("compressor").threshold;
+    expect(def).not.toBe(0);
+    for (const blank of [null, undefined, "", "   ", false, [], {}]) {
+      expect(
+        normalizeAudioFxParams("compressor", { threshold: blank as unknown as number }).threshold,
+        `${JSON.stringify(blank)} was read as a number`,
+      ).toBe(def);
+    }
+    // A string that really does spell a number still counts — that is how the
+    // panel's inputs arrive.
+    expect(
+      normalizeAudioFxParams("compressor", { threshold: "-30" as unknown as number }).threshold,
+    ).toBe(-30);
+  });
+
   it("falls back to the default for an unrecognised enum value", () => {
     expect(normalizeAudioFxParams("saturate", { type: "sawtooth" }).type).toBe("tanh");
     expect(normalizeAudioFxParams("saturate", { type: "atan" }).type).toBe("atan");

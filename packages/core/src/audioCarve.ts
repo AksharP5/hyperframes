@@ -332,12 +332,23 @@ function powerSpectrum(
 
   const bins = FRAME / 2 + 1;
   const acc = new Float64Array(bins);
+  // Reused across hops. These used to be allocated inside the loop: a 5-minute
+  // 48 kHz voiceover is ~7000 hops, so ~460 MB of transient Float64Array
+  // churned through the main thread for a single carve. `re` is fully
+  // overwritten below; only `im` has to be cleared.
+  const re = new Float64Array(FRAME);
+  const im = new Float64Array(FRAME);
+  //
+  // Every hop is still read. Striding them — Welch's average is supposed to
+  // settle long before 7000 windows — was measured on a 5-minute voiceover and
+  // moves the result: at strength 0.9 the chosen band set changed (630 Hz for
+  // 160 Hz), and it did not converge back to the full read even at 2048
+  // windows. 27x faster is not worth silently redrawing the author's carve.
   let frames = 0;
   for (let start = 0; start + FRAME <= n; start += HOP) {
     // Goertzel-free naive DFT would be O(n^2); use a real FFT via recursion on
     // a copied frame. FRAME is a power of two so the radix-2 split is exact.
-    const re = new Float64Array(FRAME);
-    const im = new Float64Array(FRAME);
+    im.fill(0);
     for (let i = 0; i < FRAME; i++) re[i] = (padded[start + i] ?? 0) * window[i]!;
     fft(re, im);
     for (let k = 0; k < bins; k++) acc[k]! += re[k]! * re[k]! + im[k]! * im[k]!;
@@ -601,9 +612,13 @@ export function analyseCarveDynamics(
 
   const times: number[] = [];
   const perBand = bands.map(() => [] as number[]);
+  // Reused across windows, as in powerSpectrum. `re` is fully overwritten
+  // below; only `im` has to be cleared. The hop here is already bounded by
+  // POINT_BUDGET, so there is nothing to stride.
+  const re = new Float64Array(FRAME);
+  const im = new Float64Array(FRAME);
   for (let start = 0; start < voice.length; start += hop) {
-    const re = new Float64Array(FRAME);
-    const im = new Float64Array(FRAME);
+    im.fill(0);
     for (let i = 0; i < FRAME; i++) re[i] = (voice[start + i] ?? 0) * window[i]!;
     fft(re, im);
     const power: number[] = [];

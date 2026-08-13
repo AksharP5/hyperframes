@@ -60,11 +60,13 @@ class HfCompressor extends AudioWorkletProcessor {
     this.p = o.processorOptions || {};
     this.env = new EnvBank(this.p.attack ?? 20, this.p.release ?? 250);
     this.port.onmessage = (e) => {
+      if (e.data && e.data.__hfDispose) { this.dead = true; return; }
       this.p = { ...this.p, ...e.data };
       this.env.set(this.p.attack ?? 20, this.p.release ?? 250);
     };
   }
   process(inputs, outputs) {
+    if (this.dead) return false;
     const i = inputs[0], o = outputs[0];
     if (!i || !i.length) return true;
     const p = this.p;
@@ -105,11 +107,13 @@ class HfLimiter extends AudioWorkletProcessor {
     this.p = o.processorOptions || {};
     this.env = new EnvBank(this.p.attack ?? 5, this.p.release ?? 50);
     this.port.onmessage = (e) => {
+      if (e.data && e.data.__hfDispose) { this.dead = true; return; }
       this.p = { ...this.p, ...e.data };
       this.env.set(this.p.attack ?? 5, this.p.release ?? 50);
     };
   }
   process(inputs, outputs) {
+    if (this.dead) return false;
     const i = inputs[0], o = outputs[0];
     if (!i || !i.length) return true;
     const ceiling = dbToLin(this.p.limit ?? -1);
@@ -136,11 +140,13 @@ class HfGate extends AudioWorkletProcessor {
     this.env = new EnvBank(this.p.attack ?? 1, this.p.release ?? 100);
     this.gains = [];
     this.port.onmessage = (e) => {
+      if (e.data && e.data.__hfDispose) { this.dead = true; return; }
       this.p = { ...this.p, ...e.data };
       this.env.set(this.p.attack ?? 1, this.p.release ?? 100);
     };
   }
   process(inputs, outputs) {
+    if (this.dead) return false;
     const i = inputs[0], o = outputs[0];
     if (!i || !i.length) return true;
     const p = this.p;
@@ -183,9 +189,13 @@ class HfBitcrush extends AudioWorkletProcessor {
     this.p = o.processorOptions || {};
     this.holds = [];
     this.held = [];
-    this.port.onmessage = (e) => { this.p = { ...this.p, ...e.data }; };
+    this.port.onmessage = (e) => {
+      if (e.data && e.data.__hfDispose) { this.dead = true; return; }
+      this.p = { ...this.p, ...e.data };
+    };
   }
   process(inputs, outputs) {
+    if (this.dead) return false;
     const i = inputs[0], o = outputs[0];
     if (!i || !i.length) return true;
     const p = this.p;
@@ -243,7 +253,16 @@ export function ensureAudioFxWorklets(ctx: BaseAudioContext): Promise<void> {
       )}`;
       await ctx.audioWorklet.addModule(url);
       readyContexts.add(ctx);
-    })();
+    })().catch((err: unknown) => {
+      // A failed registration must not be remembered. `readyContexts` is only
+      // written on success, so callers correctly keep asking — and every ask
+      // replayed this same rejected promise, leaving the limiter, compressor,
+      // gate and bitcrush silent for the life of the context with no way back.
+      // One transient failure (a slow module load, a context still warming up)
+      // permanently disabled half the rack.
+      registered.delete(ctx);
+      throw err;
+    });
     registered.set(ctx, modulePromise);
   }
   return modulePromise;

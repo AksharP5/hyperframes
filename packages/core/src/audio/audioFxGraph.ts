@@ -182,7 +182,17 @@ function workletBuilder(processor: string): Builder {
       input: node,
       output: node,
       update: (v) => node.port.postMessage({ ...v }),
-      dispose: () => node.disconnect(),
+      dispose: () => {
+        // Disconnecting is not enough to retire an AudioWorkletProcessor: it
+        // lives until its `process()` returns false, and these all returned
+        // true unconditionally. So every chain rebuild that dropped a limiter,
+        // compressor, gate or bitcrush left it running on the audio thread for
+        // the rest of the session, and a few edits to a carved bed accumulated
+        // a stack of them. The processors treat this message as their cue to
+        // stop.
+        node.port.postMessage({ __hfDispose: true });
+        node.disconnect();
+      },
     };
   };
 }

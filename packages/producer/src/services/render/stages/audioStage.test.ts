@@ -122,7 +122,27 @@ describe("runAudioStage", () => {
     const result = await runAudioStage(makeInput());
     expect(result.hasAudio).toBe(false);
     expect(result.audioError).toMatch(/Audio FX failed for track bgm/);
-    expect(result.audioFailures).toBeUndefined();
+    // And it is classified. This used to come back undefined, so the warning
+    // policy — which reads owner, retryability, reason and stage off this list
+    // — described the FATAL failure with strictly less detail than a single
+    // dropped track gets.
+    expect(result.audioFailures).toEqual([
+      {
+        stage: "internal",
+        reason: "internal",
+        owner: "system",
+        retryable: false,
+        detail: "Audio FX failed for track bgm: browser launch failed",
+      },
+    ]);
+  });
+
+  it("bounds the synthesised failure's detail", async () => {
+    // `detail` is contractually bounded diagnostic text; an ffmpeg-flavoured
+    // message can run to tens of kilobytes.
+    processCompositionAudioMock.mockRejectedValue(new Error("x".repeat(5_000)));
+    const result = await runAudioStage(makeInput());
+    expect(result.audioFailures?.[0]?.detail.length).toBe(2_000);
   });
 
   it("lets an abort keep its own shape rather than becoming an audio error", async () => {
