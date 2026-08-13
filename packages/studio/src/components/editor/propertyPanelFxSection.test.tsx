@@ -11,7 +11,7 @@ import { DEFAULT_CARVE } from "@hyperframes/core/audio-carve";
 import { BANDS, EFFECT_COPY, PRESET_PROBLEM } from "@hyperframes/core/audio-fx-copy";
 import { HF_AUDIO_FX_JOBS, HF_AUDIO_FX_JOB_TYPES } from "@hyperframes/core/audio-fx-jobs";
 import { audioFxProfileStrength } from "@hyperframes/core/audio-fx-profiles";
-import { getAudioFxPreset } from "@hyperframes/core/audio-fx-presets";
+import { applyAudioFxPreset, getAudioFxPreset } from "@hyperframes/core/audio-fx-presets";
 
 /**
  * What a knob is CALLED in the panel, looked up rather than spelled out.
@@ -87,6 +87,10 @@ function mount(overrides: Partial<Parameters<typeof FxSection>[0]> = {}) {
       automatedTargets={overrides.automatedTargets}
       onAutomateParam={overrides.onAutomateParam}
       onRemoveParamAutomation={overrides.onRemoveParamAutomation}
+      onRemoveNodeAutomation={overrides.onRemoveNodeAutomation}
+      onAutomatePreset={overrides.onAutomatePreset}
+      onRemovePresetAutomation={overrides.onRemovePresetAutomation}
+      automatedPresets={overrides.automatedPresets}
       onLevel={overrides.onLevel}
       onRemoveLevel={overrides.onRemoveLevel}
       levelled={overrides.levelled}
@@ -414,6 +418,151 @@ describe("FxSection chain", () => {
     expect(run?.querySelectorAll(".hf-fx-node")).toHaveLength(written.length);
   });
 
+  describe("a preset is one thing to switch off or take away", () => {
+    /**
+     * The run's own Amount row — not a member module's.
+     *
+     * It is a direct child of the bracket; a member's rows are nested inside its
+     * own card, which is what makes the distinction structural rather than
+     * positional.
+     */
+    const amountRow = (host: HTMLElement): HTMLElement | null => {
+      const bracket = host.querySelector("[data-fx-preset='telephone']");
+      // A direct-child walk rather than `:scope >`, which happy-dom's matcher
+      // does not support — it returns nothing rather than erroring, which reads
+      // as "the control is missing".
+      return (Array.from(bracket?.children ?? []).find((c) => c.classList.contains("hf-fx-row")) ??
+        null) as HTMLElement | null;
+    };
+
+    /** A telephone preset applied, plus one hand-built effect beside it. */
+    const applied = (): HfAudioFxChain => {
+      const preset = getAudioFxPreset("telephone");
+      if (!preset) throw new Error("no telephone preset");
+      // Through the real applier: `fromPreset` is stamped there, not carried in
+      // the catalogue, and the tag is the whole basis of the bracket.
+      const withPreset = applyAudioFxPreset({ version: 1, nodes: [] }, preset);
+      return {
+        ...withPreset,
+        nodes: [
+          ...withPreset.nodes,
+          { type: "reverb", id: "own", enabled: true, params: defaultAudioFxParams("reverb") },
+        ],
+      };
+    };
+
+    it("switches the whole preset off in one gesture", () => {
+      // Reaching into five modules and toggling each is exactly the bookkeeping
+      // the bracket exists to remove.
+      const { host, onChainChange } = mount({ chain: applied() });
+      const run = host.querySelector("[data-fx-preset='telephone']");
+      click(run?.querySelector(".hf-fx-preset-run-toggle"));
+
+      const next = onChainChange.mock.calls[0]?.[0] as HfAudioFxChain;
+      // Amount, not `enabled`: the switch and the lane are the same value, so
+      // Off is one end of the control a ramp moves along rather than a second
+      // way of silencing the preset. Writing `enabled` would take the nodes out
+      // of the graph, which a lane cannot do part-way.
+      const members = next.nodes.filter((n) => n.fromPreset === "telephone");
+      expect(members.every((n) => n.presetAmount === 0)).toBe(true);
+      // Still in the graph, so the settings survive and it can come back.
+      expect(members.every((n) => n.enabled !== false)).toBe(true);
+      // And leaves what the author added themselves alone.
+      expect(next.nodes.find((n) => n.id === "own")?.presetAmount).toBeUndefined();
+    });
+
+    it("puts the whole preset half in", () => {
+      // The point of the blend: a preset is not only on or off, and the same
+      // value a lane ramps is one an author can just set.
+      const { host, onChainChange } = mount({ chain: applied() });
+      const input = amountRow(host)?.querySelector<HTMLInputElement>(".hf-fx-number");
+      if (!input) throw new Error("no amount control");
+      typeInto(input, "0.4");
+      act(() => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+
+      const next = onChainChange.mock.calls.at(-1)?.[0] as HfAudioFxChain;
+      expect(
+        next.nodes.filter((n) => n.fromPreset === "telephone").every((n) => n.presetAmount === 0.4),
+      ).toBe(true);
+    });
+
+    it("switches back on rather than deleting, so the settings survive", () => {
+      const off = applied();
+      off.nodes = off.nodes.map((n) =>
+        n.fromPreset === "telephone" ? { ...n, presetAmount: 0 } : n,
+      );
+      const { host, onChainChange } = mount({ chain: off });
+      const toggle = host
+        .querySelector("[data-fx-preset='telephone']")
+        ?.querySelector(".hf-fx-preset-run-toggle");
+      expect(toggle?.getAttribute("aria-pressed")).toBe("false");
+      click(toggle);
+
+      const next = onChainChange.mock.calls[0]?.[0] as HfAudioFxChain;
+      const back = next.nodes.filter((n) => n.fromPreset === "telephone");
+      expect(back.every((n) => n.presetAmount === 1)).toBe(true);
+      // Nothing was thrown away.
+      expect(back).toHaveLength(off.nodes.filter((n) => n.fromPreset === "telephone").length);
+    });
+
+    it("reads as on while any of it is still applied", () => {
+      // Anything above zero is a preset that is doing something, and the switch
+      // has to offer to stop it rather than claim it has already stopped.
+      const partial = applied();
+      partial.nodes = partial.nodes.map((n) =>
+        n.fromPreset === "telephone" ? { ...n, presetAmount: 0.2 } : n,
+      );
+      const { host } = mount({ chain: partial });
+      expect(
+        host
+          .querySelector("[data-fx-preset='telephone']")
+          ?.querySelector(".hf-fx-preset-run-toggle")
+          ?.getAttribute("aria-pressed"),
+      ).toBe("true");
+    });
+
+    it("hands the whole preset to a lane, seeded where it already sits", () => {
+      // The reason a preset needs its own target at all: its nodes share no
+      // automatable parameter, and its worklet effects expose none. One lane on
+      // the blend is what lets a preset ramp in over time.
+      const onAutomatePreset = vi.fn();
+      const half = applied();
+      half.nodes = half.nodes.map((n) =>
+        n.fromPreset === "telephone" ? { ...n, presetAmount: 0.6 } : n,
+      );
+      const { host } = mount({ chain: half, onAutomatePreset });
+      click(amountRow(host)?.querySelector(".hf-fx-automate"));
+      // Seeded where it sits, so switching to a lane never changes the sound.
+      expect(onAutomatePreset).toHaveBeenCalledWith("telephone", 0.6);
+    });
+
+    it("shows an automated preset as driven rather than offering a slider", () => {
+      const { host } = mount({
+        chain: applied(),
+        automatedPresets: new Set(["telephone"]),
+      });
+      const row = amountRow(host);
+      expect(row?.hasAttribute("data-automated")).toBe(true);
+      expect(row?.querySelector<HTMLInputElement>('input[type="range"]')?.disabled).toBe(true);
+    });
+
+    it("takes the preset back out whole, with its lanes", () => {
+      const onRemoveNodeAutomation = vi.fn();
+      const { host, onChainChange } = mount({ chain: applied(), onRemoveNodeAutomation });
+      click(
+        host
+          .querySelector("[data-fx-preset='telephone']")
+          ?.querySelector(".hf-fx-preset-run-remove"),
+      );
+
+      const next = onChainChange.mock.calls[0]?.[0] as HfAudioFxChain;
+      expect(next.nodes.filter((n) => n.fromPreset === "telephone")).toEqual([]);
+      expect(next.nodes.map((n) => n.id)).toEqual(["own"]);
+      // An orphaned lane keeps driving a parameter that is no longer in the
+      // graph, and the next effect added inherits it with the id.
+      expect(onRemoveNodeAutomation).toHaveBeenCalled();
+    });
+  });
   it("brackets only nodes a preset still sits next to", () => {
     // Pulled apart by a reorder, they are no longer a unit — and a bracket
     // around the gap would claim an adjacency the signal path does not have.
