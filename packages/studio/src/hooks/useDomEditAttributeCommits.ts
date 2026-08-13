@@ -394,7 +394,19 @@ export function useDomEditAttributeCommits({
         },
         onError: (error) => reportDomEditPersistFailure(domEditSelection, [op], error, showToast),
         shouldResync: () => isLatestCommit(),
-        resync: () => refreshDomEditSelectionFromPreview(domEditSelection),
+        resync: () => {
+          refreshDomEditSelectionFromPreview(domEditSelection);
+          // The player store keeps its own copy of each element's attributes, and
+          // that copy is what the timeline's automation lanes draw from. Nothing
+          // else refreshes it: a commit patches the preview document and the file,
+          // and resyncs the dom-edit SELECTION for the panel. So every writer that
+          // did not also update the store by hand — the FX panel's automate and
+          // un-automate buttons, the keyboard Delete, a paste — changed the file and
+          // the audio while the lane went on drawing what it had, until a reload.
+          // One sink here rather than a sync in each writer, because three of them
+          // shipped without one.
+          syncStoredAutomationFromPreview(previewIframeRef.current?.contentDocument ?? null);
+        },
       });
     },
     [

@@ -131,7 +131,7 @@ function orderLanes(lanes: HfAutomationLane[], chain: HfAudioFxChain | null): Hf
 }
 
 /** A frequency as an author reads it: 400 Hz, 1.6 kHz, 10 kHz. */
-function formatHz(freq: number): string {
+export function formatHz(freq: number): string {
   if (freq < 1000) return `${Math.round(freq)} Hz`;
   const k = freq / 1000;
   return `${k >= 10 ? Math.round(k) : Number(k.toFixed(1))} kHz`;

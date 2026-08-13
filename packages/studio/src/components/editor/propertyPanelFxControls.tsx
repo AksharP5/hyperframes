@@ -42,6 +42,12 @@ function display(p: HfAudioFxNumberParam, value: number): string {
 interface ParamRowProps {
   param: HfAudioFxParam;
   value: number | string;
+  /**
+   * The envelope's value at the playhead, when a lane drives this parameter and
+   * the playhead is over the clip. Shown in place of `value`, which by then is
+   * only the seed the lane replaced.
+   */
+  liveValue?: number;
   /** Fires continuously while dragging — cheap, not persisted. */
   onChange(key: string, value: number | string): void;
   /** Fires once when the gesture ends — this is the write that persists. */
@@ -100,6 +106,7 @@ export function AutomationToggle({
 export function FxParamRow({
   param,
   value,
+  liveValue,
   onChange,
   onCommit,
   disabled,
@@ -159,7 +166,11 @@ export function FxParamRow({
     );
   }
 
-  const shown = dragging ? local : value;
+  // An envelope's value at the playhead outranks the one stored in the chain,
+  // because it is the one the audio is using — the stored number is only the seed
+  // the lane replaced. Safe against the pointer: an automated control is locked
+  // (see `locked` below), so there is no drag for this to fight.
+  const shown = dragging ? local : (liveValue ?? value);
   const numeric = typeof shown === "number" ? shown : Number(shown);
   const current = Number.isFinite(numeric) ? numeric : param.default;
 
@@ -229,6 +240,8 @@ export function FxParamRow({
 interface FxParamsProps {
   def: HfAudioFxDef;
   params: HfAudioFxParamValues;
+  /** What automated knobs are worth at the playhead, by parameter key. */
+  liveValues?: ReadonlyMap<string, number>;
   onChange(params: HfAudioFxParamValues): void;
   onCommit?(params: HfAudioFxParamValues): void;
   disabled?: boolean;
@@ -243,6 +256,7 @@ interface FxParamsProps {
 export function FxParams({
   def,
   params,
+  liveValues,
   onChange,
   onCommit,
   disabled,
@@ -270,6 +284,7 @@ export function FxParams({
             key={p.key}
             param={p}
             value={params[p.key] ?? p.default}
+            liveValue={liveValues?.get(p.key)}
             onChange={set}
             onCommit={commit}
             disabled={disabled}

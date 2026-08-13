@@ -18,11 +18,15 @@ import {
   type HfAudioFxDef,
   type HfAudioFxGroup,
   type HfAudioFxNode,
+  type HfAudioFxParam,
   type HfAudioFxParamValues,
 } from "@hyperframes/core/audio-fx";
 import { DEFAULT_CARVE, type HfCarveSettings } from "@hyperframes/core/audio-carve";
 import { fxAutomationTarget } from "@hyperframes/core/audio-automation";
 import { FxParams, FxParamRow } from "./propertyPanelFxControls.js";
+// Shared with the timeline's lane labels: a band is named by its frequency in
+// both places, and two formatters would drift.
+import { formatHz } from "../../player/components/automationLaneData";
 
 const GROUP_ORDER: HfAudioFxGroup[] = ["filter", "dynamics", "nonlinear", "time"];
 const GROUP_LABEL: Record<HfAudioFxGroup, string> = {
@@ -41,6 +45,7 @@ interface FxNodeRowProps {
   node: HfAudioFxNode;
   index: number;
   automatedTargets?: ReadonlySet<string>;
+  liveAutomationValues?: ReadonlyMap<string, number>;
   onAutomateParam?(nodeId: string, paramKey: string): void;
   onRemoveParamAutomation?(nodeId: string, paramKey: string): void;
   open: boolean;
@@ -149,6 +154,205 @@ function FxNodeHeader({
 }
 
 /**
+ * The carve's own effects, as one module.
+ *
+ * A carve is one thing the author switched on; the peaking filters and the level
+ * stage are how it is built. Listed individually they read as hand-built effects
+ * — removable one at a time, reorderable, each with knobs the next strength
+ * change silently overwrites. So the rack shows the unit, says what is inside it,
+ * and offers the two actions that mean anything for a whole module: bypass it,
+ * or remove it.
+ */
+/** What one effect inside the module is called: its own name, plus the band. */
+function carveMemberName(node: HfAudioFxNode): string {
+  const def = getAudioFxDef(node.type);
+  const freq = node.params?.["frequency"];
+  const label = def?.label ?? node.type;
+  return typeof freq === "number" ? `${label} ${formatHz(freq)}` : label;
+}
+
+/** A parameter's value as the rack shows it: rounded to the step, with its unit. */
+function formatParamValue(param: HfAudioFxParam, raw: number | string | undefined): string {
+  if (param.kind !== "number" || typeof raw !== "number") return String(raw ?? "");
+  const places = param.step >= 1 ? 0 : param.step >= 0.1 ? 1 : 2;
+  return `${Number(raw.toFixed(places))}${param.unit ? ` ${param.unit}` : ""}`;
+}
+
+/**
+ * Width to reserve for a parameter's value, in characters.
+ *
+ * Derived from what the parameter CAN read rather than what it currently reads, so
+ * the column never moves: an automated value updates 30 times a second, and
+ * `-1 dB` is two characters narrower than `-3.2 dB`, which was enough to shunt
+ * everything after it sideways on every frame. `ch` is exact here because the
+ * readouts are monospace and already `tabular-nums`.
+ */
+function paramValueWidthCh(param: HfAudioFxParam): number {
+  if (param.kind === "enum") {
+    return Math.max(1, ...param.options.map((option) => option.value.length));
+  }
+  const places = param.step >= 1 ? 0 : param.step >= 0.1 ? 1 : 2;
+  const digits = Math.max(
+    String(Math.floor(Math.abs(param.min))).length,
+    String(Math.floor(Math.abs(param.max))).length,
+  );
+  const sign = param.min < 0 ? 1 : 0;
+  const decimals = places > 0 ? places + 1 : 0;
+  const unit = param.unit ? param.unit.length + 1 : 0;
+  return sign + digits + decimals + unit;
+}
+
+/** One member of the module: what it is, and what every knob is set to. */
+function FxCarveMember({
+  node,
+  automatedTargets,
+  liveAutomationValues,
+}: {
+  node: HfAudioFxNode;
+  automatedTargets?: ReadonlySet<string>;
+  liveAutomationValues?: ReadonlyMap<string, number>;
+}) {
+  const def = getAudioFxDef(node.type);
+  if (!def) return null;
+  const params = node.params ?? defaultAudioFxParams(node.type);
+  return (
+    <div className="hf-fx-carve-member flex flex-col gap-0.5 py-1 pl-3 pr-1.5">
+      <span className="hf-fx-carve-member-name truncate font-mono text-[9px] text-panel-text-1">
+        {carveMemberName(node)}
+      </span>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+        {def.params.map((param) => {
+          const target = node.id ? fxAutomationTarget(node.id, param.key) : null;
+          const automated = Boolean(target && automatedTargets?.has(target));
+          // The envelope's value at the playhead when there is one, which is what
+          // the audio is using; the stored number is only the seed behind it.
+          const live = target ? liveAutomationValues?.get(target) : undefined;
+          const driven = automated && live !== undefined;
+          const value = formatParamValue(param, driven ? live : params[param.key]);
+          return (
+            <span
+              key={param.key}
+              className="flex items-baseline gap-1 font-mono text-[9px] text-panel-text-4"
+              {...(automated ? { "data-automated": "" } : {})}
+              {...(driven ? { "data-automation-live": "" } : {})}
+            >
+              <span className="text-panel-text-4">{param.label}</span>
+              <span
+                className="tabular-nums text-panel-text-1"
+                style={{ minWidth: `${paramValueWidthCh(param)}ch` }}
+              >
+                {value}
+              </span>
+              {/* The lane is where an automated value comes from, and where it is
+                  edited — saying so is the difference between a stale readout and
+                  a pointer to the thing that owns it. */}
+              {automated ? <span className="text-[#3CE6AC]">A</span> : null}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The carve's own effects, as one module.
+ *
+ * A carve is one thing the author switched on; the peaking filters and the level
+ * stage are how it is built. Listed individually in the rack they read as
+ * hand-built effects — removable one at a time, reorderable, each with knobs the
+ * next strength change silently overwrites. So the rack shows the unit, and the
+ * unit owns the actions that mean anything for a whole module: bypass, remove.
+ *
+ * Grouped is not hidden. Opening it lists every effect inside with all of its
+ * settings, because an author has to be able to see where the analysis landed —
+ * as readouts rather than controls, since strength is what sets them and a knob
+ * here would be overwritten by the next adjustment. A value the timeline drives
+ * says so, and points at the lane that owns it.
+ */
+function FxCarveModule({
+  nodes,
+  automatedTargets,
+  liveAutomationValues,
+  open,
+  disabled,
+  onToggleOpen,
+  onToggleBypass,
+  onRemove,
+}: {
+  nodes: HfAudioFxNode[];
+  automatedTargets?: ReadonlySet<string>;
+  liveAutomationValues?: ReadonlyMap<string, number>;
+  open: boolean;
+  disabled?: boolean;
+  onToggleOpen(): void;
+  onToggleBypass(): void;
+  onRemove(): void;
+}) {
+  const bands = nodes.filter((n) => n.type === "peaking").length;
+  const hasLevel = nodes.some((n) => n.type === "gain");
+  const bypassed = nodes.every((n) => n.enabled === false);
+  const summary = [`${bands} band${bands === 1 ? "" : "s"}`, ...(hasLevel ? ["level"] : [])].join(
+    " + ",
+  );
+  return (
+    <div
+      className={`hf-fx-node hf-fx-carve-module rounded-[4px] border border-panel-border-input${
+        bypassed ? " opacity-50" : ""
+      }`}
+      data-fx-node="carve"
+    >
+      <div className="hf-fx-node-head flex min-h-7 items-center gap-1 px-1.5">
+        <button
+          type="button"
+          className="hf-fx-node-name min-w-0 flex-1 truncate text-left text-[11px] font-semibold text-panel-text-1 hover:text-panel-text-0"
+          aria-expanded={open}
+          onClick={onToggleOpen}
+        >
+          Voiceover carve
+        </button>
+        <span className="hf-fx-carve-summary shrink-0 font-mono text-[9px] text-panel-text-4">
+          {summary}
+        </span>
+        <button
+          type="button"
+          className="hf-fx-bypass rounded-[3px] border border-panel-border-input px-1.5 py-0.5 font-mono text-[9px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
+          aria-pressed={bypassed}
+          title={bypassed ? "Enable carve" : "Bypass carve"}
+          disabled={disabled}
+          onClick={onToggleBypass}
+        >
+          {bypassed ? "Off" : "On"}
+        </button>
+        <button
+          type="button"
+          className="hf-fx-remove px-1 font-mono text-[11px] text-panel-text-4 hover:text-red-400 disabled:opacity-40"
+          title="Remove carve"
+          disabled={disabled}
+          onClick={onRemove}
+        >
+          &times;
+        </button>
+      </div>
+      {open ? (
+        // Divided rows rather than boxes: these are parts of one module, and a
+        // border around each would read as the separate effects this replaced.
+        <div className="hf-fx-carve-members divide-y divide-panel-border-input/60 border-t border-panel-border-input">
+          {nodes.map((node, i) => (
+            <FxCarveMember
+              key={node.id ?? `${node.type}-${i}`}
+              node={node}
+              automatedTargets={automatedTargets}
+              liveAutomationValues={liveAutomationValues}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Which of an effect's knobs already have a lane.
  *
  * A lane addresses a node by id, so a node the panel has not yet given one
@@ -174,6 +378,7 @@ function FxNodeParams({
   index,
   disabled,
   automatedTargets,
+  liveAutomationValues,
   onUpdate,
   onPreview,
   onAutomateParam,
@@ -184,16 +389,29 @@ function FxNodeParams({
   index: number;
   disabled: boolean;
   automatedTargets?: ReadonlySet<string>;
+  liveAutomationValues?: ReadonlyMap<string, number>;
   onUpdate(index: number, patch: Partial<HfAudioFxNode>): void;
   onPreview(index: number, params: HfAudioFxParamValues): void;
   onAutomateParam?(nodeId: string, paramKey: string): void;
   onRemoveParamAutomation?(nodeId: string, paramKey: string): void;
 }) {
   const nodeId = node.id;
+  // Lanes address a node by id; the controls know their own parameter keys. This
+  // is the one place that translation belongs.
+  const liveValues = ((): Map<string, number> | undefined => {
+    if (!nodeId || !liveAutomationValues?.size) return undefined;
+    const byKey = new Map<string, number>();
+    for (const param of def.params) {
+      const live = liveAutomationValues.get(fxAutomationTarget(nodeId, param.key));
+      if (live !== undefined) byKey.set(param.key, live);
+    }
+    return byKey;
+  })();
   return (
     <FxParams
       def={def}
       params={node.params ?? defaultAudioFxParams(node.type)}
+      liveValues={liveValues}
       disabled={disabled}
       onChange={(params: HfAudioFxParamValues) => onPreview(index, params)}
       onCommit={(params: HfAudioFxParamValues) => onUpdate(index, { params })}
@@ -213,6 +431,7 @@ function FxNodeRow({
   node,
   index,
   automatedTargets,
+  liveAutomationValues,
   onAutomateParam,
   onRemoveParamAutomation,
   open,
@@ -251,6 +470,7 @@ function FxNodeRow({
           index={index}
           disabled={Boolean(disabled) || bypassed}
           automatedTargets={automatedTargets}
+          liveAutomationValues={liveAutomationValues}
           onUpdate={onUpdate}
           onPreview={onPreview}
           onAutomateParam={onAutomateParam}
@@ -265,6 +485,15 @@ export interface FxSectionProps {
   chain: HfAudioFxChain;
   /** Targets this track already automates, as `fx.<nodeId>.<param>` strings. */
   automatedTargets?: ReadonlySet<string>;
+  /**
+   * What each automated target is worth at the playhead, by the same key.
+   *
+   * An automated parameter's stored number is only the seed the lane replaced, so
+   * a rack that shows it stands still while the carve is audibly working. Absent,
+   * or missing a key, means there is no playhead over this clip and the stored
+   * value is the honest one.
+   */
+  liveAutomationValues?: ReadonlyMap<string, number>;
   /** Add a lane for one effect parameter, seeded at its current value. */
   onAutomateParam?(nodeId: string, paramKey: string): void;
   /** Delete one effect parameter's lane. */
@@ -281,10 +510,13 @@ export interface FxSectionProps {
   /** Continuous updates while a carve slider is dragged. Without this every
    *  pointermove patched the source file and resynced the selection. */
   onCarvePreview?(carve: HfCarveSettings): void;
+  /**
+   * Set when another track's carve listens to this one, naming it. The carve block
+   * is then not offered here at all: this track is the voice, not the bed.
+   */
+  carvedAgainstBy?: string | null;
   /** Other audio elements that could act as the carve source. */
   sourceOptions: AudioTrackOption[];
-  /** Re-run analysis against the current source audio. */
-  onAnalyseCarve?(): void;
   analysing?: boolean;
   disabled?: boolean;
 }
@@ -292,16 +524,17 @@ export interface FxSectionProps {
 export function FxSection({
   chain,
   automatedTargets,
+  liveAutomationValues,
   onAutomateParam,
   onRemoveParamAutomation,
   onRemoveNodeAutomation,
   onChainChange,
   onChainPreview,
   carve,
+  carvedAgainstBy,
   onCarveChange,
   onCarvePreview,
   sourceOptions,
-  onAnalyseCarve,
   analysing,
   disabled,
 }: FxSectionProps) {
@@ -310,7 +543,10 @@ export function FxSection({
   const previewCarve = onCarvePreview ?? onCarveChange;
 
   // Nothing to carve against means nothing to show — see the block below.
-  const showCarve = sourceOptions.length > 0 || carve !== null;
+  // Not offered on the voice another track is already carving against — that
+  // track is the far end of someone else's relationship, and a carve of its own
+  // could only name a source it must not.
+  const showCarve = !carvedAgainstBy && (sourceOptions.length > 0 || carve !== null);
 
   const [adding, setAdding] = useState(false);
   const [openNode, setOpenNode] = useState<number | null>(0);
@@ -368,6 +604,24 @@ export function FxSection({
     [chain.nodes, mutate, onRemoveNodeAutomation],
   );
 
+  const [carveOpen, setCarveOpen] = useState(false);
+  const carveNodes = useMemo(() => chain.nodes.filter((n) => n.fromCarve), [chain.nodes]);
+
+  /** Remove the carve's effects together, with the envelopes they carried. */
+  const removeCarve = useCallback(() => {
+    for (const node of carveNodes) {
+      if (node.id) onRemoveNodeAutomation?.(node.id);
+    }
+    mutate(chain.nodes.filter((n) => !n.fromCarve));
+    setOpenNode(null);
+  }, [carveNodes, chain.nodes, mutate, onRemoveNodeAutomation]);
+
+  /** Bypass or enable every carve effect at once — the module is the unit. */
+  const toggleCarveBypass = useCallback(() => {
+    const bypassed = carveNodes.every((n) => n.enabled === false);
+    mutate(chain.nodes.map((n) => (n.fromCarve ? { ...n, enabled: bypassed } : n)));
+  }, [carveNodes, chain.nodes, mutate]);
+
   const moveNode = useCallback(
     (index: number, delta: number) => {
       const target = index + delta;
@@ -389,24 +643,46 @@ export function FxSection({
             No effects on this track.
           </p>
         ) : (
-          chain.nodes.map((node, i) => (
-            <FxNodeRow
-              key={`${node.type}-${i}`}
-              node={node}
-              index={i}
-              automatedTargets={automatedTargets}
-              onAutomateParam={onAutomateParam}
-              onRemoveParamAutomation={onRemoveParamAutomation}
-              open={openNode === i}
-              last={i === chain.nodes.length - 1}
-              disabled={disabled}
-              onToggleOpen={() => setOpenNode(openNode === i ? null : i)}
-              onUpdate={updateNode}
-              onMove={moveNode}
-              onRemove={removeNode}
-              onPreview={previewNode}
-            />
-          ))
+          chain.nodes.map((node, i) => {
+            if (node.fromCarve) {
+              // The module stands in for the whole run of carve nodes, drawn once
+              // at the first of them.
+              const first = chain.nodes.findIndex((n) => n.fromCarve);
+              if (i !== first) return null;
+              return (
+                <FxCarveModule
+                  key="carve-module"
+                  nodes={carveNodes}
+                  automatedTargets={automatedTargets}
+                  liveAutomationValues={liveAutomationValues}
+                  open={carveOpen}
+                  disabled={disabled}
+                  onToggleOpen={() => setCarveOpen((was) => !was)}
+                  onToggleBypass={toggleCarveBypass}
+                  onRemove={removeCarve}
+                />
+              );
+            }
+            return (
+              <FxNodeRow
+                key={`${node.type}-${i}`}
+                node={node}
+                index={i}
+                automatedTargets={automatedTargets}
+                liveAutomationValues={liveAutomationValues}
+                onAutomateParam={onAutomateParam}
+                onRemoveParamAutomation={onRemoveParamAutomation}
+                open={openNode === i}
+                last={i === chain.nodes.length - 1}
+                disabled={disabled}
+                onToggleOpen={() => setOpenNode(openNode === i ? null : i)}
+                onUpdate={updateNode}
+                onMove={moveNode}
+                onRemove={removeNode}
+                onPreview={previewNode}
+              />
+            );
+          })
         )}
       </div>
 
@@ -484,6 +760,12 @@ export function FxSection({
                   ))}
                 </select>
               </label>
+              {/* One knob for the whole effect. Depth, band count, width, the
+                  intelligibility weighting and both level-match numbers move
+                  together anyway — a gentle carve is shallow in few bands with
+                  little ducking, a hard one is deeper in more with more — so the
+                  panel sets the strength and `carveProfile` derives the six
+                  numbers the analysis works in. */}
               <FxParamRow
                 param={{
                   kind: "number",
@@ -492,23 +774,40 @@ export function FxSection({
                   unit: "",
                   min: 0,
                   max: 1,
-                  step: 0.01,
+                  step: 0.05,
                   default: DEFAULT_CARVE.strength,
-                  hint: "How hard to carve. The six numbers the analysis actually uses — depth, band count, width and the rest — all move together from this one control.",
+                  hint: "How hard to carve: deeper cuts, in more bands, and more room made by dropping the bed's level under the voice. At 0 it carves frequencies only. Moving this re-applies an existing carve; the button is for the first one, or after changing the voice track.",
                 }}
                 value={carve.strength}
                 disabled={disabled}
                 onChange={(_k, v) => previewCarve({ ...carve, strength: Number(v) })}
                 onCommit={(_k, v) => onCarveChange({ ...carve, strength: Number(v) })}
               />
-              <button
-                type="button"
-                className="hf-fx-analyse mt-1 w-full rounded-[3px] bg-panel-surface py-1 text-[10px] text-panel-text-1 hover:text-panel-text-0 disabled:opacity-40"
-                disabled={disabled || analysing || !carve.source || !onAnalyseCarve}
-                onClick={() => onAnalyseCarve?.()}
-              >
-                {analysing ? "Analysing…" : "Analyse and apply"}
-              </button>
+              {/* A static carve holds its cuts for the whole clip, pauses
+                  included. Dynamic hands every value to an envelope of the voice's
+                  own level, so the bed is only worked on while there is something
+                  to make room for. Written as ordinary automation, which is why the
+                  lanes show up in the timeline and can be edited afterwards. */}
+              <label className="hf-fx-row flex min-h-6 items-center gap-2">
+                <span className="hf-fx-label w-[86px] flex-shrink-0 truncate text-[10px] text-panel-text-4">
+                  Dynamic
+                </span>
+                <input
+                  type="checkbox"
+                  className="hf-fx-carve-dynamic h-3 w-3 accent-panel-accent"
+                  checked={carve.dynamic}
+                  disabled={disabled}
+                  onChange={(e) => onCarveChange({ ...carve, dynamic: e.target.checked })}
+                />
+                <span className="min-w-0 flex-1 truncate text-[9px] text-panel-text-4">
+                  follows the voice, flat where it is silent
+                </span>
+              </label>
+              {analysing ? (
+                <p className="hf-fx-carve-working py-1 text-center text-[10px] text-panel-text-4">
+                  Analysing…
+                </p>
+              ) : null}
             </>
           ) : null}
         </div>

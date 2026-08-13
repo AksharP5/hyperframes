@@ -28,8 +28,6 @@ const chainOf = (...types: string[]): HfAudioFxChain => ({
   nodes: types.map((t) => ({ type: t, enabled: true, params: defaultAudioFxParams(t) })),
 });
 
-const noop = () => {};
-
 function mount(overrides: Partial<Parameters<typeof FxSection>[0]> = {}) {
   const onChainChange = vi.fn();
   const onChainPreview = vi.fn();
@@ -42,7 +40,6 @@ function mount(overrides: Partial<Parameters<typeof FxSection>[0]> = {}) {
       carve={overrides.carve ?? null}
       onCarveChange={overrides.onCarveChange ?? onCarveChange}
       sourceOptions={overrides.sourceOptions ?? [{ id: "vo", label: "Voiceover" }]}
-      onAnalyseCarve={overrides.onAnalyseCarve ?? noop}
       analysing={overrides.analysing}
       disabled={overrides.disabled}
       automatedTargets={overrides.automatedTargets}
@@ -200,6 +197,123 @@ describe("FxSection chain", () => {
   });
 });
 
+describe("FxSection carve module", () => {
+  /**
+   * A carve is one thing an author turned on, not the six filters it happens to
+   * compile to. Listed individually they read as hand-built effects: removable
+   * one at a time, reorderable, each with knobs that the next strength change
+   * overwrites without warning.
+   */
+  const carved = {
+    version: 1,
+    nodes: [
+      { type: "peaking", id: "n1", fromCarve: true, params: { frequency: 400, gain: -6, q: 1.4 } },
+      { type: "peaking", id: "n2", fromCarve: true, params: { frequency: 1600, gain: -9, q: 1.4 } },
+      { type: "gain", id: "n3", fromCarve: true, params: { gain: -6 } },
+      { type: "lowpass", id: "n4", params: { frequency: 8000, q: 0.7, poles: "2" } },
+    ],
+  } as unknown as HfAudioFxChain;
+
+  it("shows the carve's effects as one module, alongside hand-built ones", () => {
+    const { host } = mount({ chain: carved });
+    const rows = Array.from(host.querySelectorAll<HTMLElement>(".hf-fx-node"));
+    // One row for the carve, one for the low-pass the author added.
+    expect(rows).toHaveLength(2);
+    expect(host.querySelector(".hf-fx-carve-module")).not.toBeNull();
+    expect(host.querySelector(".hf-fx-carve-module")?.textContent).toContain("Voiceover carve");
+  });
+
+  it("says what the module contains, since its parts are not listed", () => {
+    const { host } = mount({ chain: carved });
+    const text = host.querySelector(".hf-fx-carve-module")?.textContent ?? "";
+    expect(text).toMatch(/2 bands/);
+    expect(text).toMatch(/level/);
+  });
+
+  it("removes every carve effect together, never one of them", () => {
+    const onChainChange = vi.fn();
+    const { host } = mount({ chain: carved, onChainChange });
+    const removes = Array.from(
+      host.querySelectorAll<HTMLButtonElement>(".hf-fx-carve-module .hf-fx-remove"),
+    );
+    expect(removes).toHaveLength(1);
+    act(() => removes[0]!.click());
+    const nodes = onChainChange.mock.calls[0]![0].nodes as { id: string }[];
+    expect(nodes.map((n) => n.id)).toEqual(["n4"]);
+  });
+
+  it("bypasses the whole module at once", () => {
+    const onChainChange = vi.fn();
+    const { host } = mount({ chain: carved, onChainChange });
+    const bypass = host.querySelector<HTMLButtonElement>(".hf-fx-carve-module .hf-fx-bypass")!;
+    act(() => bypass.click());
+    const nodes = onChainChange.mock.calls[0]![0].nodes as { id: string; enabled?: boolean }[];
+    expect(nodes.filter((n) => n.id !== "n4").every((n) => n.enabled === false)).toBe(true);
+    // The author's own effect is not touched.
+    expect(nodes.find((n) => n.id === "n4")?.enabled).not.toBe(false);
+  });
+
+  it("lists what each effect inside it is set to", () => {
+    // Grouped is not hidden: the carve compiles to real filters and an author has
+    // to be able to see where they landed. What they cannot do is edit them by
+    // hand — strength owns those numbers — so the settings read out rather than
+    // offering controls that the next adjustment would overwrite.
+    const { host } = mount({ chain: carved });
+    const module = host.querySelector<HTMLElement>(".hf-fx-carve-module")!;
+    act(() => module.querySelector<HTMLButtonElement>(".hf-fx-node-name")!.click());
+    const members = Array.from(module.querySelectorAll<HTMLElement>(".hf-fx-carve-member"));
+    expect(members).toHaveLength(3);
+    // Named by what tells them apart, the way the timeline lanes name them.
+    expect(members.map((m) => m.querySelector(".hf-fx-carve-member-name")?.textContent)).toEqual([
+      "Peaking EQ 400 Hz",
+      "Peaking EQ 1.6 kHz",
+      "Gain",
+    ]);
+    // And every one of its settings is visible.
+    const first = members[0]!.textContent ?? "";
+    expect(first).toContain("Gain");
+    expect(first).toMatch(/-6(\.0)? dB/);
+    expect(first).toMatch(/1\.4/); // Q
+  });
+
+  it("reads its settings out rather than offering controls", () => {
+    const { host } = mount({ chain: carved });
+    const module = host.querySelector<HTMLElement>(".hf-fx-carve-module")!;
+    act(() => module.querySelector<HTMLButtonElement>(".hf-fx-node-name")!.click());
+    expect(module.querySelectorAll("input")).toHaveLength(0);
+  });
+
+  it("says which of them the timeline is driving", () => {
+    // A carve in dynamic mode automates every one of these, and that is where the
+    // values come from — so the module has to point at the lane rather than look
+    // like a static setting.
+    const { host } = mount({
+      chain: carved,
+      automatedTargets: new Set(["fx.n1.gain", "fx.n3.gain"]),
+    });
+    const module = host.querySelector<HTMLElement>(".hf-fx-carve-module")!;
+    act(() => module.querySelector<HTMLButtonElement>(".hf-fx-node-name")!.click());
+    const automated = Array.from(module.querySelectorAll("[data-automated]"));
+    expect(automated).toHaveLength(2);
+  });
+
+  it("keeps the summary readable while collapsed", () => {
+    const { host } = mount({ chain: carved });
+    const module = host.querySelector<HTMLElement>(".hf-fx-carve-module")!;
+    expect(module.querySelectorAll(".hf-fx-carve-member")).toHaveLength(0);
+    expect(module.textContent).toContain("2 bands + level");
+  });
+
+  it("offers no per-effect controls inside the module", () => {
+    // Reordering or editing one band is meaningless: the next strength change
+    // rewrites every one of them.
+    const { host } = mount({ chain: carved });
+    const module = host.querySelector(".hf-fx-carve-module")!;
+    expect(module.querySelectorAll(".hf-fx-move")).toHaveLength(0);
+    expect(module.querySelectorAll("input[type=range]")).toHaveLength(0);
+  });
+});
+
 describe("FxSection carve", () => {
   it("is off by default and is not an entry in the chain", () => {
     const { host } = mount();
@@ -229,16 +343,17 @@ describe("FxSection carve", () => {
     expect(options).toContain("Narration");
   });
 
-  it("will not analyse until a source is chosen", () => {
-    const { host } = mount({ carve: { ...DEFAULT_CARVE, source: "" } });
-    expect(host.querySelector<HTMLButtonElement>(".hf-fx-analyse")!.disabled).toBe(true);
+  it("offers no analyse button — picking a voice is the whole gesture", () => {
+    // A carve with a source and no filters is a setting nobody applied; the
+    // button was a second step for something the panel already knew to do.
+    const { host } = mount({ carve: { ...DEFAULT_CARVE, source: "vo" } });
+    expect(host.querySelector(".hf-fx-analyse")).toBeNull();
+    expect(host.textContent).not.toMatch(/Analyse/i);
   });
 
-  it("analyses once a source is chosen", () => {
-    const onAnalyseCarve = vi.fn();
-    const { host } = mount({ carve: { ...DEFAULT_CARVE, source: "vo" }, onAnalyseCarve });
-    click(host.querySelector(".hf-fx-analyse"));
-    expect(onAnalyseCarve).toHaveBeenCalledTimes(1);
+  it("says when it is working, since there is no button to grey out", () => {
+    const { host } = mount({ carve: { ...DEFAULT_CARVE, source: "vo" }, analysing: true });
+    expect(host.querySelector(".hf-fx-carve-working")?.textContent).toMatch(/Analysing/i);
   });
 
   it("disables everything when the panel is read-only", () => {
