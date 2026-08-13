@@ -94,14 +94,58 @@ describe("the catalogue is internally valid", () => {
     }
   });
 
-  it("survives being written to an attribute and read back", () => {
+  it("survives being written to an attribute and read back, TAGS AND ALL", () => {
+    // Comparing only types is what let `fromPreset` be silently dropped by the
+    // parser: every preset round-tripped its effects while losing the tag that
+    // lets it find its own nodes again. Compare what the rack actually needs.
     for (const p of HF_AUDIO_FX_PRESETS) {
       const chain = applyAudioFxPreset(empty(), p);
       const back = parseAudioFxChain(serializeAudioFxChain(chain));
       expect(
-        back.nodes.map((n) => n.type),
+        back.nodes.map((x) => ({
+          type: x.type,
+          id: x.id,
+          fromPreset: x.fromPreset,
+          label: x.label,
+        })),
         `${p.id} did not round-trip`,
-      ).toEqual(chain.nodes.map((n) => n.type));
+      ).toEqual(
+        chain.nodes.map((x) => ({
+          type: x.type,
+          id: x.id,
+          fromPreset: x.fromPreset,
+          label: x.label,
+        })),
+      );
+    }
+  });
+
+  it("names every node for the job it is doing", () => {
+    for (const p of HF_AUDIO_FX_PRESETS) {
+      for (const node of p.nodes) {
+        expect(node.label, `${p.id}: a ${node.type} node has no job name`).toBeTruthy();
+      }
+    }
+  });
+
+  it("never shows the same name twice in one chain", () => {
+    // The failure this exists to prevent: a rack reading "Shape One Range"
+    // twice, once cutting mud and once adding clarity, with nothing to tell
+    // them apart. Identical CONSECUTIVE nodes are exempt — a stacked pair is
+    // one stage built from two biquads, not two jobs.
+    for (const p of HF_AUDIO_FX_PRESETS) {
+      const seen = new Map<string, number>();
+      p.nodes.forEach((node, i) => {
+        const key = node.label ?? node.type;
+        const prev = seen.get(key);
+        const stackedPair =
+          prev === i - 1 && JSON.stringify(p.nodes[prev]?.params) === JSON.stringify(node.params);
+        expect(
+          prev === undefined || stackedPair,
+          `${p.id} shows "${key}" twice — an author cannot tell the two apart`,
+        ).toBe(true);
+        seen.set(key, i);
+      });
     }
   });
 
@@ -156,6 +200,7 @@ describe("applying a preset", () => {
     // complete node rather than a partial one the graph has to guess at.
     expect(node.params).toEqual({ ...normalizeAudioFxParams("highpass", {}), frequency: 100 });
     expect(node.fromPreset).toBe("rumble-cut");
+    expect(node.label).toBe("Cut Rumble");
     expect(node.enabled).toBe(true);
   });
 

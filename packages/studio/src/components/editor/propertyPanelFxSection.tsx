@@ -591,7 +591,9 @@ function FxNodeRow({
       data-fx-node={node.type}
     >
       <FxNodeHeader
-        label={def.label}
+        // The node's own job name when a preset gave it one: a chain that cuts
+        // mud and then lifts clarity must not show "Peaking EQ" twice.
+        label={node.label ?? def.label}
         open={open}
         bypassed={bypassed}
         first={index === 0}

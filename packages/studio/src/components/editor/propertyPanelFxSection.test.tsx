@@ -252,6 +252,38 @@ describe("FxSection chain", () => {
     expect(next.nodes.map((n) => n.type)).toEqual(["reverb", "highpass"]);
   });
 
+  it("shows a preset node by the job it is doing, not its filter type", () => {
+    const { host } = mount({
+      chain: {
+        version: 1,
+        nodes: [
+          {
+            type: "peaking",
+            id: "a",
+            label: "Reduce Mud",
+            enabled: true,
+            params: defaultAudioFxParams("peaking"),
+          },
+          {
+            type: "peaking",
+            id: "b",
+            label: "Add Clarity",
+            enabled: true,
+            params: defaultAudioFxParams("peaking"),
+          },
+        ],
+      } as HfAudioFxChain,
+    });
+    const names = Array.from(host.querySelectorAll(".hf-fx-node-name")).map((e) =>
+      e.textContent?.trim(),
+    );
+    // Without the label both rows read "Peaking EQ" and an author cannot tell
+    // which one is cutting and which is lifting.
+    expect(names).toContain("Reduce Mud");
+    expect(names).toContain("Add Clarity");
+    expect(names).not.toContain("Peaking EQ");
+  });
+
   it("cannot move the ends past themselves", () => {
     const { host } = mount({ chain: chainOf("peaking", "reverb") });
     const ups = host.querySelectorAll('.hf-fx-move[title="Move up"]');

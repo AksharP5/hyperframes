@@ -44,6 +44,15 @@ export type HfAudioFxPresetFamily = "voice" | "repair" | "character" | "space";
 export interface HfAudioFxPresetNode {
   /** Effect id from HF_AUDIO_FX. */
   type: string;
+  /**
+   * What the rack calls this node — the JOB it is doing, not its filter type.
+   *
+   * A peaking filter is "Shape One Range" wherever it appears, so a chain that
+   * cuts mud and then lifts clarity shows the same words twice and an author
+   * cannot follow it. Naming each node for its job is what lets a preset read
+   * as a list of things that were done.
+   */
+  label?: string;
   /** Only what this preset means to set; the rest come from the effect's defaults. */
   params?: HfAudioFxParamValues;
 }
@@ -70,9 +79,13 @@ const preset = (
  * because a BiquadFilterNode is two-pole and that is the honest maximum for one
  * node. The telephone band wants the steeper slope, so it pays for two.
  */
-const steep = (type: "highpass" | "lowpass", frequency: number): HfAudioFxPresetNode[] => [
-  { type, params: { frequency, q: 0.707, poles: "2" } },
-  { type, params: { frequency, q: 0.707, poles: "2" } },
+const steep = (
+  type: "highpass" | "lowpass",
+  frequency: number,
+  label: string,
+): HfAudioFxPresetNode[] => [
+  { type, label, params: { frequency, q: 0.707, poles: "2" } },
+  { type, label, params: { frequency, q: 0.707, poles: "2" } },
 ];
 
 export const HF_AUDIO_FX_PRESETS: readonly HfAudioFxPreset[] = [
@@ -83,14 +96,15 @@ export const HF_AUDIO_FX_PRESETS: readonly HfAudioFxPreset[] = [
     "Clean Voice",
     "Cuts rumble and mud, evens out the level, adds a little clarity.",
     [
-      { type: "highpass", params: { frequency: 80, q: 0.707, poles: "2" } },
-      { type: "peaking", params: { frequency: 250, gain: -3, q: 1.2 } },
+      { type: "highpass", label: "Remove Rumble", params: { frequency: 80, q: 0.707, poles: "2" } },
+      { type: "peaking", label: "Reduce Mud", params: { frequency: 250, gain: -3, q: 1.2 } },
       {
         type: "compressor",
+        label: "Even Out Loudness",
         params: { threshold: -20, ratio: 3, attack: 12, release: 180, makeup: 3 },
       },
-      { type: "peaking", params: { frequency: 3000, gain: 2.5, q: 1 } },
-      { type: "limiter", params: { limit: -1, attack: 5, release: 50 } },
+      { type: "peaking", label: "Add Clarity", params: { frequency: 3000, gain: 2.5, q: 1 } },
+      { type: "limiter", label: "Peak Ceiling", params: { limit: -1, attack: 5, release: 50 } },
     ],
   ),
   preset(
@@ -99,16 +113,17 @@ export const HF_AUDIO_FX_PRESETS: readonly HfAudioFxPreset[] = [
     "Broadcast",
     "Denser and more forward — a radio-presenter sound.",
     [
-      { type: "highpass", params: { frequency: 90, q: 0.707, poles: "2" } },
-      { type: "peaking", params: { frequency: 400, gain: -3, q: 1.4 } },
+      { type: "highpass", label: "Remove Rumble", params: { frequency: 90, q: 0.707, poles: "2" } },
+      { type: "peaking", label: "Reduce Boxiness", params: { frequency: 400, gain: -3, q: 1.4 } },
       {
         type: "compressor",
+        label: "Even Out Loudness",
         params: { threshold: -24, ratio: 4, attack: 8, release: 150, makeup: 5 },
       },
-      { type: "peaking", params: { frequency: 2500, gain: 3, q: 0.9 } },
-      { type: "highshelf", params: { frequency: 8000, gain: 2 } },
-      { type: "saturate", params: { type: "tanh", threshold: -12, output: 0 } },
-      { type: "limiter", params: { limit: -1, attack: 5, release: 60 } },
+      { type: "peaking", label: "Add Clarity", params: { frequency: 2500, gain: 3, q: 0.9 } },
+      { type: "highshelf", label: "Add Air", params: { frequency: 8000, gain: 2 } },
+      { type: "saturate", label: "Warmth", params: { type: "tanh", threshold: -12, output: 0 } },
+      { type: "limiter", label: "Peak Ceiling", params: { limit: -1, attack: 5, release: 60 } },
     ],
   ),
   preset(
@@ -117,14 +132,15 @@ export const HF_AUDIO_FX_PRESETS: readonly HfAudioFxPreset[] = [
     "Close & Warm",
     "Intimate and lightly handled, for a voice close to the mic.",
     [
-      { type: "highpass", params: { frequency: 70, q: 0.707, poles: "2" } },
-      { type: "lowshelf", params: { frequency: 180, gain: 2 } },
+      { type: "highpass", label: "Remove Rumble", params: { frequency: 70, q: 0.707, poles: "2" } },
+      { type: "lowshelf", label: "Add Weight", params: { frequency: 180, gain: 2 } },
       {
         type: "compressor",
+        label: "Even Out Loudness",
         params: { threshold: -18, ratio: 2.5, attack: 20, release: 250, makeup: 2 },
       },
-      { type: "peaking", params: { frequency: 3000, gain: 1.5, q: 0.8 } },
-      { type: "limiter", params: { limit: -1.5 } },
+      { type: "peaking", label: "Add Clarity", params: { frequency: 3000, gain: 1.5, q: 0.8 } },
+      { type: "limiter", label: "Peak Ceiling", params: { limit: -1.5 } },
     ],
   ),
 
@@ -137,28 +153,34 @@ export const HF_AUDIO_FX_PRESETS: readonly HfAudioFxPreset[] = [
     "repair",
     "Cut Rumble",
     "Removes traffic, handling and air-conditioning from under a voice.",
-    [{ type: "highpass", params: { frequency: 100, q: 0.707, poles: "2" } }],
+    [{ type: "highpass", label: "Cut Rumble", params: { frequency: 100, q: 0.707, poles: "2" } }],
   ),
   preset(
     "room-gate",
     "repair",
     "Quiet Between Phrases",
     "Silences the gaps between words. Room tone under speech stays — this closes the pauses, it does not remove noise.",
-    [{ type: "gate", params: { threshold: -45, range: -18, ratio: 10, attack: 2, release: 180 } }],
+    [
+      {
+        type: "gate",
+        label: "Silence the Gaps",
+        params: { threshold: -45, range: -18, ratio: 10, attack: 2, release: 180 },
+      },
+    ],
   ),
   preset(
     "boom-tame",
     "repair",
     "Tame Boominess",
     "Takes out the chestiness of a voice too close to the mic.",
-    [{ type: "peaking", params: { frequency: 200, gain: -4, q: 1.4 } }],
+    [{ type: "peaking", label: "Tame Boominess", params: { frequency: 200, gain: -4, q: 1.4 } }],
   ),
   preset(
     "harsh-tame",
     "repair",
     "Soften Harshness",
     "Rounds off a brittle upper-mid. Broad and always-on; sibilance proper wants the measuring version.",
-    [{ type: "peaking", params: { frequency: 3200, gain: -3, q: 1.6 } }],
+    [{ type: "peaking", label: "Soften Harshness", params: { frequency: 3200, gain: -3, q: 1.6 } }],
   ),
 
   // ------------------------------------------------------------ character --
@@ -168,18 +190,26 @@ export const HF_AUDIO_FX_PRESETS: readonly HfAudioFxPreset[] = [
     "Telephone",
     "Down the line — the narrow band of a phone call.",
     [
-      ...steep("highpass", 300),
-      ...steep("lowpass", 3400),
-      { type: "peaking", params: { frequency: 1200, gain: 6, q: 1.2 } },
-      { type: "peaking", params: { frequency: 550, gain: -4, q: 1 } },
-      { type: "saturate", params: { type: "tanh", threshold: -18, output: -2 } },
+      ...steep("highpass", 300, "Strip the Bass"),
+      ...steep("lowpass", 3400, "Strip the Treble"),
+      { type: "peaking", label: "Phone Honk", params: { frequency: 1200, gain: 6, q: 1.2 } },
+      { type: "peaking", label: "De-mud", params: { frequency: 550, gain: -4, q: 1 } },
+      {
+        type: "saturate",
+        label: "Circuit Grit",
+        params: { type: "tanh", threshold: -18, output: -2 },
+      },
     ],
   ),
   preset("radio-am", "character", "AM Radio", "Narrow, gritty and a little crushed.", [
-    { type: "highpass", params: { frequency: 400, q: 0.707, poles: "2" } },
-    { type: "lowpass", params: { frequency: 3000, q: 0.707, poles: "2" } },
-    { type: "saturate", params: { type: "tanh", threshold: -15, output: -2 } },
-    { type: "bitcrush", params: { bits: 10, samples: 1, mix: 0.25 } },
+    { type: "highpass", label: "Strip the Bass", params: { frequency: 400, q: 0.707, poles: "2" } },
+    {
+      type: "lowpass",
+      label: "Strip the Treble",
+      params: { frequency: 3000, q: 0.707, poles: "2" },
+    },
+    { type: "saturate", label: "Radio Grit", params: { type: "tanh", threshold: -15, output: -2 } },
+    { type: "bitcrush", label: "Crunch", params: { bits: 10, samples: 1, mix: 0.25 } },
   ]),
   preset(
     "megaphone",
@@ -187,11 +217,23 @@ export const HF_AUDIO_FX_PRESETS: readonly HfAudioFxPreset[] = [
     "Megaphone",
     "Shouted through a horn, with the slap that comes with it.",
     [
-      { type: "highpass", params: { frequency: 500, q: 0.707, poles: "2" } },
-      { type: "lowpass", params: { frequency: 4000, q: 0.707, poles: "2" } },
-      { type: "peaking", params: { frequency: 1800, gain: 8, q: 1.5 } },
-      { type: "saturate", params: { type: "hard", threshold: -12, output: -3 } },
-      { type: "delay", params: { time: 40, feedback: 0.15, mix: 0.15 } },
+      {
+        type: "highpass",
+        label: "Strip the Bass",
+        params: { frequency: 500, q: 0.707, poles: "2" },
+      },
+      {
+        type: "lowpass",
+        label: "Strip the Treble",
+        params: { frequency: 4000, q: 0.707, poles: "2" },
+      },
+      { type: "peaking", label: "Horn Honk", params: { frequency: 1800, gain: 8, q: 1.5 } },
+      {
+        type: "saturate",
+        label: "Overdrive",
+        params: { type: "hard", threshold: -12, output: -3 },
+      },
+      { type: "delay", label: "Horn Slap", params: { time: 40, feedback: 0.15, mix: 0.15 } },
     ],
   ),
   preset(
@@ -200,48 +242,86 @@ export const HF_AUDIO_FX_PRESETS: readonly HfAudioFxPreset[] = [
     "Tape",
     "Worn, warm and slightly unsteady, like a played-out cassette.",
     [
-      { type: "lowpass", params: { frequency: 6500, q: 0.707, poles: "2" } },
-      { type: "lowshelf", params: { frequency: 120, gain: 2 } },
-      { type: "saturate", params: { type: "tanh", threshold: -14, output: 0 } },
-      { type: "bitcrush", params: { bits: 12, samples: 2, mix: 0.35 } },
+      { type: "lowpass", label: "Tape Rolloff", params: { frequency: 6500, q: 0.707, poles: "2" } },
+      { type: "lowshelf", label: "Add Weight", params: { frequency: 120, gain: 2 } },
+      {
+        type: "saturate",
+        label: "Tape Warmth",
+        params: { type: "tanh", threshold: -14, output: 0 },
+      },
+      { type: "bitcrush", label: "Tape Noise", params: { bits: 12, samples: 2, mix: 0.35 } },
       // A slow, shallow chorus is what wow and flutter actually are.
-      { type: "chorus", params: { delay: 6, depth: 0.6, speed: 0.4, mix: 0.15 } },
+      {
+        type: "chorus",
+        label: "Wow & Flutter",
+        params: { delay: 6, depth: 0.6, speed: 0.4, mix: 0.15 },
+      },
     ],
   ),
   preset("pa-system", "character", "Tannoy", "Announced across a concourse.", [
-    { type: "highpass", params: { frequency: 350, q: 0.707, poles: "2" } },
-    { type: "lowpass", params: { frequency: 3500, q: 0.707, poles: "2" } },
-    { type: "peaking", params: { frequency: 1500, gain: 5, q: 1.2 } },
-    { type: "saturate", params: { type: "tanh", threshold: -16, output: -1 } },
-    { type: "reverb", params: { size: 0.5, damping: 0.7, wet: 0.25, dry: 0.8 } },
+    { type: "highpass", label: "Strip the Bass", params: { frequency: 350, q: 0.707, poles: "2" } },
+    {
+      type: "lowpass",
+      label: "Strip the Treble",
+      params: { frequency: 3500, q: 0.707, poles: "2" },
+    },
+    { type: "peaking", label: "Tannoy Honk", params: { frequency: 1500, gain: 5, q: 1.2 } },
+    {
+      type: "saturate",
+      label: "Driver Grit",
+      params: { type: "tanh", threshold: -16, output: -1 },
+    },
+    {
+      type: "reverb",
+      label: "Concourse",
+      params: { size: 0.5, damping: 0.7, wet: 0.25, dry: 0.8 },
+    },
   ]),
   preset("intercom", "character", "Intercom", "Buzzed through a door panel, squelch and all.", [
-    { type: "gate", params: { threshold: -40, range: -30, ratio: 10, attack: 1, release: 120 } },
-    { type: "highpass", params: { frequency: 500, q: 0.707, poles: "2" } },
-    { type: "lowpass", params: { frequency: 3000, q: 0.707, poles: "2" } },
-    { type: "peaking", params: { frequency: 2000, gain: 6, q: 2 } },
-    { type: "bitcrush", params: { bits: 11, samples: 1, mix: 0.3 } },
+    {
+      type: "gate",
+      label: "Squelch",
+      params: { threshold: -40, range: -30, ratio: 10, attack: 1, release: 120 },
+    },
+    { type: "highpass", label: "Strip the Bass", params: { frequency: 500, q: 0.707, poles: "2" } },
+    {
+      type: "lowpass",
+      label: "Strip the Treble",
+      params: { frequency: 3000, q: 0.707, poles: "2" },
+    },
+    { type: "peaking", label: "Panel Honk", params: { frequency: 2000, gain: 6, q: 2 } },
+    { type: "bitcrush", label: "Crunch", params: { bits: 11, samples: 1, mix: 0.3 } },
   ]),
 
   // ---------------------------------------------------------------- space --
   preset("room-tight", "space", "Tight Room", "A small hard room — presence without wash.", [
-    { type: "reverb", params: { size: 0.25, damping: 0.6, wet: 0.18, dry: 0.9 } },
+    {
+      type: "reverb",
+      label: "Tight Room",
+      params: { size: 0.25, damping: 0.6, wet: 0.18, dry: 0.9 },
+    },
   ]),
   preset(
     "room-natural",
     "space",
     "Natural Room",
     "Sounds recorded somewhere rather than nowhere.",
-    [{ type: "reverb", params: { size: 0.5, damping: 0.5, wet: 0.25, dry: 0.85 } }],
+    [
+      {
+        type: "reverb",
+        label: "Natural Room",
+        params: { size: 0.5, damping: 0.5, wet: 0.25, dry: 0.85 },
+      },
+    ],
   ),
   preset("hall", "space", "Hall", "Long and open, for something that should sit far back.", [
-    { type: "reverb", params: { size: 0.9, damping: 0.3, wet: 0.4, dry: 0.75 } },
+    { type: "reverb", label: "Hall", params: { size: 0.9, damping: 0.3, wet: 0.4, dry: 0.75 } },
   ]),
   preset("slap-echo", "space", "Slap Echo", "One quick repeat — rockabilly vocal, not a wash.", [
-    { type: "delay", params: { time: 110, feedback: 0.12, mix: 0.22 } },
+    { type: "delay", label: "Slap Echo", params: { time: 110, feedback: 0.12, mix: 0.22 } },
   ]),
   preset("dub-throw", "space", "Dub Throw", "Repeats that trail off well behind the beat.", [
-    { type: "delay", params: { time: 375, feedback: 0.55, mix: 0.3 } },
+    { type: "delay", label: "Dub Throw", params: { time: 375, feedback: 0.55, mix: 0.3 } },
   ]),
 ];
 
@@ -289,6 +369,7 @@ export function audioFxPresetNodes(
       type: node.type,
       id: mintAudioFxNodeId(running),
       fromPreset: preset.id,
+      ...(node.label ? { label: node.label } : {}),
       enabled: true,
       params: normalizeAudioFxParams(node.type, node.params),
     };
