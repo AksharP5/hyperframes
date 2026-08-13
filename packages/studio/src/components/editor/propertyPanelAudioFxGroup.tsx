@@ -48,6 +48,7 @@ import {
 } from "./propertyPanelAutomation";
 import type { DomEditSelection } from "./domEditingTypes";
 import { useLivePlayheadTime } from "../../hooks/useLivePlayheadTime";
+import { usePlayerStore } from "../../player";
 
 /**
  * Rate the carve source is decoded at. Analysis is self-consistent because it
@@ -199,10 +200,12 @@ export function AudioFxGroup({
    * commit, which does not exist yet.
    */
   const setCarve = async (next: HfCarveSettings | null): Promise<void> => {
-    // Envelopes the carve wrote outlive it otherwise, and an automated gain
-    // ignores the panel's own depth — so switching dynamic off would leave the
-    // filters still following the voice with nothing saying they do.
-    if (!next?.enabled) {
+    // What the carve generated is only justified by the voices it was measured
+    // from: switched off, or left naming none — every source deleted, say —
+    // there is nothing those filters are making room for. Left behind they keep
+    // dipping the bed with nothing in the panel to explain them.
+    const generatedOutputStands = Boolean(next?.enabled) && (next?.sources.length ?? 0) > 0;
+    if (!generatedOutputStands) {
       const carriedOver = withoutCarveLanes(automation, chain);
       if (carriedOver.lanes.length !== automation.lanes.length) {
         await onSetAttributeQuiet(
@@ -211,7 +214,7 @@ export function AudioFxGroup({
         );
       }
     }
-    if (!next?.enabled) {
+    if (!generatedOutputStands) {
       const kept = chain.nodes.filter((n) => !n.fromCarve);
       if (kept.length !== chain.nodes.length) {
         await onSetAttributeQuiet(
@@ -300,9 +303,12 @@ export function AudioFxGroup({
    * first, and if filtering would leave nothing at all every track comes back. A
    * picker that hides the track somebody needs is worse than a long one.
    */
-  const sourceOptions: AudioTrackOption[] = (() => {
+  const { sourceOptions, autoSourceIds } = ((): {
+    sourceOptions: AudioTrackOption[];
+    autoSourceIds: string[];
+  } => {
     const doc = element.element?.ownerDocument;
-    if (!doc) return [];
+    if (!doc) return { sourceOptions: [], autoSourceIds: [] };
     const others = Array.from(doc.querySelectorAll<HTMLAudioElement>("audio[id]")).filter(
       (a) => a.id !== element.id,
     );
@@ -324,10 +330,74 @@ export function AudioFxGroup({
       }));
     const plausible = described.filter((t) => t.kind === "voice" || t.kind === "unknown");
     const offered = plausible.length > 0 ? plausible : described;
-    return offered
-      .sort((a, b) => (a.kind === "voice" ? 0 : 1) - (b.kind === "voice" ? 0 : 1))
-      .map(({ id, label }) => ({ id, label }));
+    const byVoiceFirst = (list: typeof described) =>
+      [...list].sort((a, b) => (a.kind === "voice" ? 0 : 1) - (b.kind === "voice" ? 0 : 1));
+    return {
+      sourceOptions: byVoiceFirst(offered).map(({ id, label }) => ({ id, label })),
+      // What the panel may pick WITHOUT being asked — never the fallback. The
+      // fallback exists so the picker can still show a track whose name reads as
+      // music or as an effect, because a name is a hint and the author may know
+      // better. Choosing off that list is a different act: it is the panel
+      // deciding, and "the only audio left is a 200 ms explosion" is not a voice
+      // to make room for. A bed surrounded by nothing plausible waits instead.
+      autoSourceIds: byVoiceFirst(plausible).map((t) => t.id),
+    };
   })();
+
+  /**
+   * The voices this carve names that are still in the composition.
+   *
+   * Existence, not the candidate list: a voice can stop being offered without
+   * being gone (it stopped overlapping the bed), and dropping it then would
+   * quietly rewrite a relationship the author set. Deleted is the case that has
+   * to be noticed, because what the carve produced was measured from that track.
+   *
+   * Asked of the timeline rather than of `element.element.ownerDocument`, which
+   * is the preview's DOM and outlives a delete: measured in the studio, a bed
+   * selected right after its voice was deleted still found that voice through
+   * the document, so the carve sat on a measurement of a track the timeline had
+   * already dropped. The store is what the delete actually edited.
+   */
+  const timelineElements = usePlayerStore((s) => s.elements);
+  const survivingSources = ((): string[] => {
+    if (!carve) return [];
+    const present = new Set(timelineElements.map((el) => el.domId ?? el.id));
+    // Absence only means deletion once the timeline is known to describe THIS
+    // composition, and the bed being in it is the proof. Without that check a
+    // store that is empty — not loaded yet, or a panel mounted outside the
+    // player — reads as "every voice was deleted" and throws away a carve that
+    // is perfectly fine. Unchanged sources are what the prune treats as nothing
+    // to do.
+    if (!element.id || !present.has(element.id)) return carve.sources;
+    return carve.sources.filter((id) => present.has(id));
+  })();
+
+  /**
+   * A deleted voice re-analyses the bed.
+   *
+   * The filters and envelopes are a measurement of specific tracks, so losing one
+   * makes them a measurement of something that is no longer there — the bed keeps
+   * ducking for a voice nobody can hear. `analyse` already skips a source it
+   * cannot find, but nothing asked it to run again.
+   *
+   * Pruning is the whole trigger: `setCarve` re-analyses when the source list
+   * changes, so the surviving voices are re-measured together. Losing the LAST
+   * one leaves an empty list, which the effects below repoint at whatever
+   * candidates remain — and if there are none, `setCarve` drops what the carve
+   * generated, since there is nothing left it could be making room for.
+   *
+   * Keyed on the survivors rather than on the candidates: a voice that had
+   * stopped overlapping was never in the candidate list, so its deletion would
+   * not change that identity and this would never fire.
+   */
+  useEffect(() => {
+    if (carvedAgainstBy || !carve?.enabled) return;
+    if (survivingSources.length === carve.sources.length) return;
+    void setCarve({ ...carve, sources: survivingSources });
+    // Keyed on the identity of the decision, not on setCarve — which is rebuilt
+    // every render and would re-fire this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carve, carvedAgainstBy, survivingSources.join(" ")]);
 
   /**
    * A bed with voices above it carves itself.
@@ -346,14 +416,14 @@ export function AudioFxGroup({
    * off stores `enabled: false`, which is also a configured carve. That is the whole
    * reason the flag exists rather than "off" being an absent attribute.
    */
-  const candidateIds = sourceOptions.map((o) => o.id).join("\u0000");
+  const candidateIds = autoSourceIds.join("\u0000");
   useEffect(() => {
     // Exactly one candidate is the sibling effect's case below, not this one's:
     // both guards passing for a single candidate fired two setCarve calls with
     // the same result — two decodes, two FFT runs, two concurrent attribute
     // writes.
-    if (carvedAgainstBy || sourceOptions.length <= 1) return;
-    const all = sourceOptions.map((o) => o.id);
+    if (carvedAgainstBy || autoSourceIds.length <= 1) return;
+    const all = autoSourceIds;
     // Nothing configured: the default carve, pointed at everything it could hear.
     if (carve === null) {
       void setCarve({ ...DEFAULT_CARVE, sources: all });
@@ -387,24 +457,23 @@ export function AudioFxGroup({
    * reason the flag exists rather than "off" being an absent attribute.
    */
   useEffect(() => {
-    if (carvedAgainstBy || sourceOptions.length !== 1) return;
-    const only = sourceOptions[0];
+    if (carvedAgainstBy || autoSourceIds.length !== 1) return;
+    const only = autoSourceIds[0];
     if (!only) return;
     // Nothing configured: the default carve, pointed at the one candidate.
     if (carve === null) {
-      void setCarve({ ...DEFAULT_CARVE, sources: [only.id] });
+      void setCarve({ ...DEFAULT_CARVE, sources: [only] });
       return;
     }
     // Configured but with no voice yet — a carve switched on before there was
     // anything to listen to, or one whose source was cleared. The panel reads the
     // sole candidate out as the source, so it has to be the stored one too;
     // otherwise the card claims a relationship the attribute does not record.
-    if (carve.enabled && carve.sources.length === 0)
-      void setCarve({ ...carve, sources: [only.id] });
+    if (carve.enabled && carve.sources.length === 0) void setCarve({ ...carve, sources: [only] });
     // Deliberately keyed on the identity of the decision, not on setCarve — which
     // is rebuilt every render and would re-fire this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [carve, carvedAgainstBy, sourceOptions.length, sourceOptions[0]?.id]);
+  }, [carve, carvedAgainstBy, autoSourceIds.length, autoSourceIds[0]]);
 
   const [analysing, setAnalysing] = useState(false);
 

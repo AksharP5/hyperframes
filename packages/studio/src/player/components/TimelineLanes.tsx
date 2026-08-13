@@ -209,6 +209,12 @@ export function TimelineLanes({
           );
           const keyframeClipKey = keyframeClip?.key ?? keyframeClip?.id;
           const rowExpanded = isTrackRowExpanded(els, expandedClipIds);
+          // How tall a clip BAR is drawn. An expanded row is mostly lanes, and a
+          // clip left to fill it painted its waveform straight over them — so the
+          // bar is capped for every clip on the row, not just the one whose
+          // property lanes are showing. Undefined means "fill the row", which is
+          // right only while it is collapsed and the row is nothing but bar.
+          const clipBarHeight = rowExpanded ? TRACK_H - 2 * CLIP_Y : undefined;
           // The clips whose envelopes this row draws, at their dragged positions.
           // Once per row, not once per clip in the map below.
           const automationElements = els.map(getPreviewElement);
@@ -217,6 +223,10 @@ export function TimelineLanes({
           // on the canvas. Keyed by display row, not by `trackNum`, which is a
           // fractional sort key and would mint ids like `...-0.16666666666666666`.
           const lanesId = `${lanesIdPrefix}-track-${row}`;
+          // The caret reveals two canvas regions now: the active clip's keyframe
+          // lanes and the track's automation lanes. They cannot be one element —
+          // one belongs to a clip, the other to the row — so the caret names both.
+          const automationLanesId = `${lanesId}-automation`;
           // The header's remove buttons write through the same binding the lanes
           // themselves edit through, so a deletion persists exactly like dragging
           // a point does — and the binding reports read-only for an unselected
@@ -245,6 +255,7 @@ export function TimelineLanes({
               logicalRow={logicalRow}
               propertyRows={trackLogicalRows.slice(1)}
               lanesId={lanesId}
+              headerLanesId={`${lanesId} ${automationLanesId}`}
               top={rowGeometry.getRowTop(row)}
               height={rowHeight}
               virtualized={rowsVirtualized}
@@ -263,7 +274,7 @@ export function TimelineLanes({
                   els[0]?.id ??
                   `Track${trackDisplaySuffix(displayNumber)}`
                 }
-                lanesId={lanesId}
+                lanesId={`${lanesId} ${automationLanesId}`}
                 contentOrigin={contentOrigin}
                 keyframeClip={keyframeClip}
                 trackElements={els}
@@ -411,7 +422,7 @@ export function TimelineLanes({
                         el={previewElement}
                         pps={pps}
                         clipY={CLIP_Y}
-                        clipHeight={showsLanes ? TRACK_H - 2 * CLIP_Y : undefined}
+                        clipHeight={clipBarHeight}
                         isSelected={isSelected}
                         isHovered={hoveredClip === clipKey}
                         isDragging={false}
@@ -503,25 +514,6 @@ export function TimelineLanes({
                           Promise.resolve(false)
                         }
                         suppressClickRef={suppressClickRef}
-                        footer={
-                          showsLanes ? (
-                            // Every clip on the row, not this one: the lanes are
-                            // the TRACK's, one row per automated property.
-                            <TimelineAutomationLaneSlot
-                              elements={automationElements}
-                              isSelected={(element) => {
-                                const key = getTimelineElementIdentity(element);
-                                return selectedElementId === key || selectedElementIds.has(key);
-                              }}
-                              lanes={automationLanes}
-                              pps={pps}
-                              laneCount={laneCounts.get(elementKey) ?? 0}
-                              accentColor={clipStyle.accent}
-                              currentTime={currentTime}
-                              beatTimes={beatAnalysis?.beatTimes}
-                            />
-                          ) : null
-                        }
                       />
                     );
 
@@ -556,6 +548,36 @@ export function TimelineLanes({
                     );
                   })
                 }
+                {/* The automation lanes belong to the ROW, so they are mounted
+                    here rather than under the active clip's property lanes.
+                    Hanging off that clip meant selecting a sibling moved the
+                    whole subtree into a different clip's element and remounted
+                    every lane — which threw away each lane's hover state (and
+                    any gesture mid-flight), so pressing a lane to select its
+                    clip made the handles you were reaching for disappear.
+
+                    Mounted in BOTH disclosure states, empty while collapsed, so
+                    the caret's aria-controls resolves either way — same reason
+                    the keyframe lanes are. Absolute positions inside resolve
+                    against this same relative row, so the geometry is unchanged
+                    by the move. */}
+                <div id={automationLanesId}>
+                  {rowExpanded ? (
+                    <TimelineAutomationLaneSlot
+                      elements={automationElements}
+                      isSelected={(element) => {
+                        const key = getTimelineElementIdentity(element);
+                        return selectedElementId === key || selectedElementIds.has(key);
+                      }}
+                      lanes={automationLanes}
+                      pps={pps}
+                      laneCount={keyframeClipKey ? (laneCounts.get(keyframeClipKey) ?? 0) : 0}
+                      accentColor={getTrackStyle(keyframeClip?.tag ?? "").accent}
+                      currentTime={currentTime}
+                      beatTimes={beatAnalysis?.beatTimes}
+                    />
+                  ) : null}
+                </div>
               </div>
             </TimelineTrackRow>
           );

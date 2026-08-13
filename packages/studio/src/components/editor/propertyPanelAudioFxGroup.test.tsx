@@ -1114,15 +1114,21 @@ describe("AudioFxGroup carve source list", () => {
   });
 
   it("keeps the picker when the stored voice is not among the candidates", () => {
-    // The stored track was renamed, or classifies as music now. Reading the one
-    // remaining candidate out would quietly claim the carve listens to it.
+    // The stored track is still there but no longer classifies as a voice.
+    // Reading the one remaining candidate out would quietly claim the carve
+    // listens to it. (A stored track that is GONE is a different case — see the
+    // deleted-voice tests, which re-analyse rather than sit on a measurement of
+    // something that is not there.)
     const bed = document.createElement("audio");
     bed.id = "bed";
     bed.setAttribute(
       "data-fx-carve",
-      JSON.stringify({ enabled: true, sources: ["gone"], strength: 0.25 }),
+      JSON.stringify({ enabled: true, sources: ["backing-music"], strength: 0.25 }),
     );
     document.body.append(bed);
+    const stored = document.createElement("audio");
+    stored.id = "backing-music";
+    document.body.append(stored);
     const voice = document.createElement("audio");
     voice.id = "narration";
     document.body.append(voice);
@@ -1136,7 +1142,7 @@ describe("AudioFxGroup carve source list", () => {
               dataAttributes: {
                 "fx-carve": JSON.stringify({
                   enabled: true,
-                  sources: ["gone"],
+                  sources: ["backing-music"],
                   strength: 0.25,
                 }),
               },
@@ -1308,5 +1314,156 @@ describe("AudioFxGroup carve across tracks", () => {
       "narration-3",
       "narration-4",
     ]);
+  });
+});
+
+/**
+ * The filters and envelopes a carve produces are a MEASUREMENT of specific
+ * tracks. Delete one and they describe something nobody can hear any more — the
+ * bed keeps ducking for a voice that is gone.
+ */
+describe("AudioFxGroup carve against a deleted voice", () => {
+  const CARVED_CHAIN = JSON.stringify({
+    version: 1,
+    nodes: [
+      { type: "peaking", id: "c1", enabled: true, fromCarve: true, params: { frequency: 1000 } },
+      { type: "lowpass", id: "k1", enabled: true, params: { frequency: 8000 } },
+    ],
+  });
+  const CARVED_AUTOMATION = JSON.stringify({
+    version: 1,
+    lanes: [
+      { target: "fx.c1.gain", points: [{ t: 0, v: -6 }] },
+      { target: "fx.k1.frequency", points: [{ t: 0, v: 8000 }] },
+    ],
+  });
+
+  /**
+   * A bed carving against `sources`, with only `present` still in the composition.
+   *
+   * The timeline is what says a track is gone — not the preview DOM, which keeps
+   * a deleted element around — so the store is seeded and the document is left
+   * holding every track, which is exactly the mismatch the studio produces.
+   */
+  function mountCarved(sources: string[], present: string[]) {
+    const carve = JSON.stringify({ enabled: true, sources, strength: 0.25 });
+    const bed = document.createElement("audio");
+    bed.id = "bed";
+    document.body.append(bed);
+    for (const id of new Set([...sources, ...present])) {
+      const el = document.createElement("audio");
+      el.id = id;
+      document.body.append(el);
+    }
+    usePlayerStore.setState({
+      elements: [
+        { id: "bed", tag: "audio", start: 0, duration: 10, track: 0 },
+        ...present.map((id) => ({ id, tag: "audio", start: 0, duration: 10, track: 1 })),
+      ] as never,
+    });
+    const onSetAttributeQuiet = vi.fn();
+    const host = document.createElement("div");
+    document.body.append(host);
+    act(() => {
+      createRoot(host).render(
+        <AudioFxGroup
+          element={
+            {
+              dataAttributes: {
+                "fx-carve": carve,
+                "fx-chain": CARVED_CHAIN,
+                automation: CARVED_AUTOMATION,
+              },
+              id: "bed",
+              element: bed,
+            } as unknown as DomEditSelection
+          }
+          onSetAttributeQuiet={onSetAttributeQuiet}
+          onSetAttributeLive={vi.fn()}
+        />,
+      );
+    });
+    return { host, onSetAttributeQuiet };
+  }
+
+  it("re-analyses against the voices that are left", () => {
+    // Two voices were measured together into one set of bands. With one gone that
+    // set answers a question nobody asked; the survivor has to be measured again.
+    const { onSetAttributeQuiet } = mountCarved(["narration", "guest"], ["narration"]);
+    const write = writeTo(onSetAttributeQuiet.mock.calls, "data-fx-carve");
+    expect(JSON.parse(String(write![1]))).toMatchObject({
+      enabled: true,
+      sources: ["narration"],
+    });
+  });
+
+  it("leaves a carve alone while every voice it names is still there", () => {
+    const { onSetAttributeQuiet } = mountCarved(["narration", "guest"], ["narration", "guest"]);
+    expect(onSetAttributeQuiet.mock.calls.some((c) => c[0] === "data-fx-carve")).toBe(false);
+  });
+
+  it("does not fall back to carving against an effect when no voice is left", async () => {
+    // Found in the studio, not here: deleting the narration emptied the source
+    // list, and the panel filled it again with the only audio in the composition
+    // — a 200 ms explosion. The picker's fallback (offer everything rather than
+    // hide the track somebody needs) is for the AUTHOR to choose from. The panel
+    // choosing off it is the panel deciding, and that is never the answer.
+    const carve = JSON.stringify({ enabled: true, sources: [], strength: 0.25 });
+    const bed = document.createElement("audio");
+    bed.id = "bed";
+    bed.setAttribute("data-fx-carve", carve);
+    document.body.append(bed);
+    const sfx = document.createElement("audio");
+    sfx.id = "sfx-explosion";
+    document.body.append(sfx);
+    const onSetAttributeQuiet = vi.fn();
+    const host = document.createElement("div");
+    document.body.append(host);
+    act(() => {
+      createRoot(host).render(
+        <AudioFxGroup
+          element={
+            {
+              dataAttributes: { "fx-carve": carve },
+              id: "bed",
+              element: bed,
+            } as unknown as DomEditSelection
+          }
+          onSetAttributeQuiet={onSetAttributeQuiet}
+          onSetAttributeLive={vi.fn()}
+        />,
+      );
+    });
+    await act(async () => {});
+    // Nothing written: the carve waits rather than picking the explosion.
+    expect(onSetAttributeQuiet.mock.calls.some((c) => c[0] === "data-fx-carve")).toBe(false);
+    // Still offered, so the author can say "actually, listen to that one".
+    expect(
+      Array.from(host.querySelectorAll("[data-carve-source]")).map((e) =>
+        e.getAttribute("data-carve-source"),
+      ),
+    ).toEqual(["sfx-explosion"]);
+  });
+
+  it("drops what it generated when the last voice goes and none is left to pick", async () => {
+    // Staying on with nothing to listen to is honest — a voice may come back, and
+    // "off" is a different thing the author chose. What cannot stay is the output:
+    // those filters and that envelope are making room for nobody.
+    const { onSetAttributeQuiet } = mountCarved(["narration"], []);
+    // The three writes are sequenced, not fired together: each is a
+    // read-modify-write against the same file, so the carve write lands only
+    // after the two that strip its output.
+    await act(async () => {});
+    const carve = writeTo(onSetAttributeQuiet.mock.calls, "data-fx-carve");
+    expect(JSON.parse(String(carve![1]))).toMatchObject({ enabled: true, sources: [] });
+
+    const chain = writeTo(onSetAttributeQuiet.mock.calls, "data-fx-chain");
+    // The hand-added low-pass survives; only what the carve minted goes.
+    expect(JSON.parse(String(chain![1])).nodes.map((n: { id: string }) => n.id)).toEqual(["k1"]);
+
+    const automation = writeTo(onSetAttributeQuiet.mock.calls, "data-automation");
+    expect(
+      JSON.parse(String(automation![1])).lanes.map((l: { target: string }) => l.target),
+    ).toEqual(["fx.k1.frequency"]);
   });
 });

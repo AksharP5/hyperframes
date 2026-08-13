@@ -28,7 +28,9 @@ export function AutomationValueInput({
 }: AutomationValueInputProps) {
   return (
     <input
-      className="hf-automation-value absolute rounded-[3px] border border-panel-border-input bg-panel-bg-2 px-1 font-mono text-[9px] text-panel-text-1"
+      // pointer-events-auto: the lane band around it takes none, so that clips
+      // sharing the row do not cover each other's envelopes (see the lane).
+      className="hf-automation-value pointer-events-auto absolute rounded-[3px] border border-panel-border-input bg-panel-bg-2 px-1 font-mono text-[9px] text-panel-text-1"
       style={{ left: leftPx, top: 1, width: 44, zIndex: 4 }}
       // The lane is a pointer surface, and the timeline above it owns single-key
       // shortcuts. Without stopping both, a press lands on the lane instead of

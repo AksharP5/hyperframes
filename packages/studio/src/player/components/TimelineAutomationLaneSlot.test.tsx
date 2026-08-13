@@ -102,8 +102,7 @@ const readingBind = (element: TimelineElement, isSelected: boolean): AutomationL
   onRangeClear: vi.fn(),
 });
 
-/** Every drawn envelope as `row @ left`, which is the whole claim under test. */
-function mountRow(elements: readonly TimelineElement[], selectedKey?: string) {
+function renderRow(elements: readonly TimelineElement[], selectedKey?: string): HTMLElement {
   const host = document.createElement("div");
   document.body.append(host);
   act(() => {
@@ -119,7 +118,12 @@ function mountRow(elements: readonly TimelineElement[], selectedKey?: string) {
       />,
     );
   });
-  return [...host.querySelectorAll<HTMLElement>(".hf-automation-lane")]
+  return host;
+}
+
+/** Every drawn envelope as `row @ left`, which is the whole claim under test. */
+function mountRow(elements: readonly TimelineElement[], selectedKey?: string) {
+  return [...renderRow(elements, selectedKey).querySelectorAll<HTMLElement>(".hf-automation-lane")]
     .map((lane) => `${lane.style.top} @ ${lane.querySelector("svg")?.style.left}`)
     .sort();
 }
@@ -146,6 +150,21 @@ describe("TimelineAutomationLaneSlot shared rows", () => {
     expect(mountRow([narration1, narration2]).filter((row) => row.startsWith(ROW_1))).toEqual([
       `${ROW_1} @ ${400 - PAD_X}px`,
     ]);
+  });
+
+  it("lets each clip's envelope be reached, not just the one drawn last", () => {
+    // Every clip mounts a band spanning the WHOLE row (the row separator needs
+    // the full width), so three bands sit on top of each other here. If a band
+    // took the pointer, the last one rendered would swallow hover and drag over
+    // its siblings' envelopes — handles appeared only on the final clip, and
+    // only on rows that a single clip happened to own.
+    const host = renderRow([narration1, narration2]);
+    const bands = [...host.querySelectorAll<HTMLElement>(".hf-automation-lane")];
+    expect(bands.length).toBeGreaterThan(1);
+    for (const band of bands) {
+      expect(band.className).toContain("pointer-events-none");
+      expect(band.querySelector("svg")?.getAttribute("class")).toContain("pointer-events-auto");
+    }
   });
 
   it("keeps the same rows whichever clip is selected", () => {

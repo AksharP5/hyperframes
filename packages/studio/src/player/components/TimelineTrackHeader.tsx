@@ -30,8 +30,11 @@ interface TimelineTrackHeaderProps {
    *  from the label rather than inventing one (see trackDisplayNumber). */
   trackDisplayNumber: number | null;
   trackLabel: string;
-  /** Id of the canvas-side lanes element the disclosure caret expands. Minted by
-   *  TimelineLanes, which is the one place that sees both subtrees. */
+  /** Ids of the canvas-side lane regions the disclosure caret expands, space
+   *  separated as `aria-controls` takes them: the active clip's keyframe lanes
+   *  and the track's automation lanes are separate elements, one owned by a
+   *  clip and one by the row. Minted by TimelineLanes, the one place that sees
+   *  every subtree. */
   lanesId: string;
   contentOrigin: number;
   /** The track's active keyframe clip (selected, else primary) — the one whose
