@@ -117,6 +117,13 @@ export function useDomEditSelectionContext(): DomEditSelectionValue {
   return ctx;
 }
 
+/** Optional counterpart to useDomEditActionsContextOptional — same reason: the
+ *  player package's own components mount outside a provider in standalone and
+ *  test trees, where "no dom-edit selection" is the correct answer. */
+export function useDomEditSelectionContextOptional(): DomEditSelectionValue | null {
+  return useContext(DomEditSelectionContext);
+}
+
 /** @deprecated Prefer useDomEditActionsContext or useDomEditSelectionContext. */
 export function useDomEditContext(): DomEditValue {
   return { ...useDomEditActionsContext(), ...useDomEditSelectionContext() };

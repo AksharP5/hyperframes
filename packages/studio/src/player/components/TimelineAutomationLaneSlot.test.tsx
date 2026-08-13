@@ -28,6 +28,7 @@ function mountSlot(binding: Partial<AutomationLaneBinding>) {
       onCommit: vi.fn(),
       onSelect: vi.fn(),
       readOnly: false,
+      commitTargetKey: "bgm",
       selection: null,
       onRangeSelect: vi.fn(),
       onRangeClear,

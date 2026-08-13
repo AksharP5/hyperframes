@@ -237,6 +237,10 @@ export function createTimelineResetState() {
     motionPathArmed: false,
     motionPathCreateAvailable: false,
     selectedKeyframes: new Set<string>(),
+    // Ephemeral like every other selection here. A range surviving a project
+    // switch can match a same-keyed clip in the new project and redirect a
+    // paste through `sel.elementKey === paste.elementKey` to a stale t0.
+    automationSelection: null,
     expandedClipIds: new Set<string>(),
     focusedEaseSegment: null,
     selectedElementIds: new Set<string>(),

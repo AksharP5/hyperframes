@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef } from "react";
+import { automationOwnsKey } from "./useAutomationSelectionKeyboard";
 import { usePlayerStore } from "../player";
 import type { TimelineElement } from "../player";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import type { LeftSidebarHandle } from "../components/sidebar/LeftSidebar";
 import { STUDIO_MOTION_PATH } from "../components/editor/studioMotion";
 import { isTypingTarget } from "../utils/typingTarget";
+import { isEditableTarget } from "../utils/timelineDiscovery";
 import { shouldIgnoreHistoryShortcut } from "../utils/studioHelpers";
 import { canSplitElement } from "../utils/timelineElementSplit";
 import { trackStudioEvent } from "../utils/studioTelemetry";
@@ -158,7 +160,14 @@ interface HotkeyCallbacks {
   showToast: (message: string, tone?: "error" | "info") => void;
 }
 
-function dispatchModifierKey(event: KeyboardEvent, key: string, cb: HotkeyCallbacks): boolean {
+/** Exported for tests, like dispatchPlainKey below: lets the Cmd+C/Cmd+V
+ *  arbitration between an automation range and the clip clipboard be asserted
+ *  without standing up the whole hook. */
+export function dispatchModifierKey(
+  event: KeyboardEvent,
+  key: string,
+  cb: HotkeyCallbacks,
+): boolean {
   if (
     !shouldIgnoreHistoryShortcut(event.target) &&
     handleUndoRedoKey(
@@ -195,7 +204,15 @@ function dispatchModifierKey(event: KeyboardEvent, key: string, cb: HotkeyCallba
     return true;
   }
 
-  if (!event.shiftKey && !event.altKey && !isTypingTarget(event.target)) {
+  if (!event.shiftKey && !event.altKey && !isEditableTarget(event.target)) {
+    // An active automation range owns Cmd+C/Cmd+V, the same way it owns Delete
+    // below. This listener is on window/capture and runs before
+    // useAutomationSelectionKeyboard's document/capture handler, so without
+    // this the clip clipboard also claimed the key: Cmd+V duplicated the clip
+    // while the automation paste wrote the same file, and Cmd+C armed both
+    // clipboards and toasted "Copied clip". Return without preventDefault so
+    // the downstream handler still sees the key.
+    if (automationOwnsKey(event)) return true;
     if (key === "c") {
       if (cb.handleCopy()) {
         event.preventDefault();

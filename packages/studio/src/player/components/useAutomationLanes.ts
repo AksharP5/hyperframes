@@ -18,7 +18,11 @@ import {
   type HfAutomationLane,
 } from "@hyperframes/core/audio-automation";
 import type { HfAudioFxChain } from "@hyperframes/core/audio-fx";
-import { useDomEditActionsContextOptional } from "../../contexts/DomEditContext";
+import {
+  useDomEditActionsContextOptional,
+  useDomEditSelectionContextOptional,
+} from "../../contexts/DomEditContext";
+import { resolveTimelineIdForSelection } from "../../utils/studioHelpers";
 import { getTimelineElementIdentity } from "../lib/timelineElementHelpers";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import type { AutomationSelection } from "../store/automationSelectionSlice";
@@ -41,6 +45,15 @@ export interface AutomationLaneBinding {
    */
   onSelect(): void;
   readOnly: boolean;
+  /**
+   * The timeline clip `onCommit`/`onPreview` will ACTUALLY persist to, which is
+   * whatever the dom-edit layer has selected — not necessarily the element this
+   * binding was made for (see `onSelect` below). Null outside an edit session or
+   * when the dom-edit selection maps to no clip. Resolved exactly the way
+   * applyDomSelection resolves it, so in a settled selection it equals the bound
+   * element's key; it lags only in the window a non-gesture caller can hit.
+   */
+  commitTargetKey: string | null;
   /** This element's active time selection, or null if none / it belongs to a
    *  different element. */
   selection: AutomationSelection | null;
@@ -58,9 +71,22 @@ export function useAutomationLanes(): UseAutomationLanesResult {
   // Optional: the player also runs outside Studio, where there is no edit
   // session. There the lanes render read-only, which is the right fallback.
   const domEdit = useDomEditActionsContextOptional();
+  const domEditSelection = useDomEditSelectionContextOptional()?.domEditSelection ?? null;
+  const elements = usePlayerStore((s) => s.elements);
   const automationSelection = usePlayerStore((s) => s.automationSelection);
   const setAutomationSelection = usePlayerStore((s) => s.setAutomationSelection);
   const clearAutomationSelection = usePlayerStore((s) => s.clearAutomationSelection);
+
+  // Read from the SAME render as the commit handlers below: both contexts update
+  // in one commit, so a handler and this key can never describe different
+  // moments. activeCompPath is not needed — resolveTimelineIdForSelection only
+  // uses it as a fallback for a selection with no sourceFile of its own, and
+  // DomEditSelection always carries one.
+  const commitTargetKey = useMemo(
+    () =>
+      domEditSelection ? resolveTimelineIdForSelection(domEditSelection, elements, null) : null,
+    [domEditSelection, elements],
+  );
 
   const bind = useCallback(
     (element: TimelineElement, isSelected: boolean): AutomationLaneBinding => {
@@ -93,6 +119,7 @@ export function useAutomationLanes(): UseAutomationLanesResult {
         // Selecting is its own gesture; the lane goes live after it.
         onSelect: () => void domEdit?.handleTimelineElementSelect(element),
         readOnly: !domEdit || !isSelected,
+        commitTargetKey: domEdit ? commitTargetKey : null,
         selection: automationSelection?.elementKey === elementKey ? automationSelection : null,
         onRangeSelect: (target, t0, t1) => {
           if (!domEdit || !isSelected) return;
@@ -101,7 +128,13 @@ export function useAutomationLanes(): UseAutomationLanesResult {
         onRangeClear: () => clearAutomationSelection(),
       };
     },
-    [domEdit, automationSelection, setAutomationSelection, clearAutomationSelection],
+    [
+      domEdit,
+      commitTargetKey,
+      automationSelection,
+      setAutomationSelection,
+      clearAutomationSelection,
+    ],
   );
 
   return useMemo(() => ({ bind }), [bind]);
