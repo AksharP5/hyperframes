@@ -150,7 +150,7 @@ export function attachElementFxChain(
    * A chain that cannot be realised — an unregistered worklet, an unknown
    * effect — plays dry rather than silencing the track.
    */
-  const attach = (next: HfAudioFxChain): void => {
+  const attach = (next: HfAudioFxChain, elapsed: number): void => {
     if (next.nodes.length === 0) {
       source.connect(destination);
       return;
@@ -178,7 +178,9 @@ export function attachElementFxChain(
       return;
     }
     try {
-      const built = buildFxChain(ctx, next);
+      // Where the clip has got to, so a modulated effect resumes at the phase the
+      // render would be at rather than restarting its LFO from zero.
+      const built = buildFxChain(ctx, next, elapsed);
       source.connect(built.input);
       built.output.connect(destination);
       handle = built;
@@ -198,7 +200,9 @@ export function attachElementFxChain(
   // envelope at the wrong clip position.
   let frame: AutomationTiming | null = timing ? { ...timing } : null;
 
-  attach(chain);
+  // `timingNow` is not in scope yet, and does not need to be: nothing has played
+  // between the frame being taken and this line.
+  attach(chain, frame?.elapsed ?? 0);
   scheduleFor(chain, frame);
 
   /**
@@ -235,7 +239,7 @@ export function attachElementFxChain(
     const at = timingNow();
     cancelParamLane(automated, at?.scheduledAt ?? 0);
     detach();
-    attach(next);
+    attach(next, at?.elapsed ?? 0);
     scheduleFor(next, at);
   };
 
