@@ -214,6 +214,44 @@ describe("FxSection chain", () => {
     expect(openFrequency().value).toBe("1600");
   });
 
+  it("applies a preset as ordinary nodes, tagged with where they came from", () => {
+    const { host, onChainChange } = mount({ chain: { version: 1, nodes: [] } });
+    click(byText(host, "button", "Presets"));
+    click(byText(host, "button", "Telephone"));
+
+    const next = onChainChange.mock.calls[0]![0] as HfAudioFxChain;
+    // The band, its honk and de-mud shaping, and the soft clip — a chain the
+    // author can now see and edit, not an opaque "telephone" setting.
+    expect(next.nodes.map((n) => n.type)).toEqual([
+      "highpass",
+      "highpass",
+      "lowpass",
+      "lowpass",
+      "peaking",
+      "peaking",
+      "saturate",
+    ]);
+    expect(next.nodes.every((n) => n.fromPreset === "telephone")).toBe(true);
+    // Every node needs an id or its parameters can never be automated.
+    expect(new Set(next.nodes.map((n) => n.id)).size).toBe(next.nodes.length);
+  });
+
+  it("adds a preset to what is already there rather than replacing it", () => {
+    const existing: HfAudioFxChain = {
+      version: 1,
+      nodes: [
+        { type: "reverb", id: "mine", enabled: true, params: defaultAudioFxParams("reverb") },
+      ],
+    };
+    const { host, onChainChange } = mount({ chain: existing });
+    click(byText(host, "button", "Presets"));
+    click(byText(host, "button", "Cut Rumble"));
+
+    const next = onChainChange.mock.calls[0]![0] as HfAudioFxChain;
+    expect(next.nodes.map((n) => n.id)).toContain("mine");
+    expect(next.nodes.map((n) => n.type)).toEqual(["reverb", "highpass"]);
+  });
+
   it("cannot move the ends past themselves", () => {
     const { host } = mount({ chain: chainOf("peaking", "reverb") });
     const ups = host.querySelectorAll('.hf-fx-move[title="Move up"]');

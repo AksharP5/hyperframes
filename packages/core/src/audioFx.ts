@@ -804,6 +804,15 @@ export interface HfAudioFxNode {
   /** Set on nodes the carve analysis generated, so re-running replaces them
    *  instead of stacking another set on top of hand-added effects. */
   fromCarve?: boolean;
+  /**
+   * Id of the preset that wrote this node, for the same reason `fromCarve`
+   * exists: re-applying a preset replaces its own nodes rather than adding a
+   * second copy, and the rack can brace them together under the preset's name.
+   *
+   * The id rather than a flag, because a chain can carry more than one preset
+   * and each has to be able to find its own.
+   */
+  fromPreset?: string;
   /** Absent means enabled — chain files written before the field existed still load. */
   enabled?: boolean;
   params?: HfAudioFxParamValues;

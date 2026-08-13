@@ -98,6 +98,12 @@
       "types": "./dist/audioFx.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./audio-fx-presets": {
+      "source": "./src/audioFxPresets.ts",
+      "runtime": "./dist/audioFxPresets.js",
+      "types": "./dist/audioFxPresets.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./audio-fx-tail": {
       "source": "./src/audio/audioFxTail.ts",
       "runtime": "./dist/audio/audioFxTail.js",

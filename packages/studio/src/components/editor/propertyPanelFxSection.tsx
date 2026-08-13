@@ -22,8 +22,10 @@ import {
   type HfAudioFxParamValues,
 } from "@hyperframes/core/audio-fx";
 import { DEFAULT_CARVE, type HfCarveSettings } from "@hyperframes/core/audio-carve";
+import { applyAudioFxPreset, getAudioFxPreset } from "@hyperframes/core/audio-fx-presets";
 import { fxAutomationTarget } from "@hyperframes/core/audio-automation";
 import { FxParams, FxParamRow } from "./propertyPanelFxControls.js";
+import { FxPresetMenu } from "./propertyPanelFxPresetMenu.js";
 // Shared with the timeline's lane labels: a band is named by its frequency in
 // both places, and two formatters would drift.
 import { formatHz } from "../../player/components/automationLaneData";
@@ -686,6 +688,7 @@ export function FxSection({
   const showCarve = !carvedAgainstBy && (sourceOptions.length > 0 || carve !== null);
 
   const [adding, setAdding] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [openNode, setOpenNode] = useState<number | null>(0);
 
   const grouped = useMemo(
@@ -706,6 +709,23 @@ export function FxSection({
         nodes: chain.nodes.map((n, i) => (i === index ? { ...n, params } : n)),
       }),
     [chain, onChainPreview],
+  );
+
+  const applyPreset = useCallback(
+    (id: string) => {
+      const preset = getAudioFxPreset(id);
+      if (!preset) return;
+      // Appends. Stacking a character preset onto an already-cleaned voice is a
+      // real thing to want, and replacing silently would throw work away — so
+      // the destructive option is a separate gesture, not the default one.
+      const next = applyAudioFxPreset(chain, preset);
+      mutate(next.nodes);
+      // Land on the first node the preset wrote, so the author can hear what
+      // arrived and immediately see what it is made of.
+      setOpenNode(next.nodes.findIndex((n) => n.fromPreset === preset.id));
+      setPicking(false);
+    },
+    [chain, mutate],
   );
 
   const addEffect = useCallback(
@@ -843,15 +863,29 @@ export function FxSection({
             </div>
           ))}
         </div>
-      ) : (
-        <button
-          type="button"
-          className="hf-fx-add w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
-          disabled={disabled}
-          onClick={() => setAdding(true)}
-        >
-          Add effect
-        </button>
+      ) : null}
+
+      {picking ? <FxPresetMenu onPick={applyPreset} /> : null}
+
+      {adding || picking ? null : (
+        <div className="flex gap-1">
+          <button
+            type="button"
+            className="hf-fx-preset w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
+            disabled={disabled}
+            onClick={() => setPicking(true)}
+          >
+            Presets
+          </button>
+          <button
+            type="button"
+            className="hf-fx-add w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-4 hover:text-panel-text-0 disabled:opacity-40"
+            disabled={disabled}
+            onClick={() => setAdding(true)}
+          >
+            Add effect
+          </button>
+        </div>
       )}
     </div>
   );
