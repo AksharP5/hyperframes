@@ -793,6 +793,12 @@ export async function processCompositionAudio(
   // be able to abort the in-flight ffmpeg runs before the finally-block removes
   // workDir out from under them. Chained off the caller's signal so external
   // cancellation still behaves as before.
+  //
+  // Every child that can outlive a sibling's failure has to be given THIS
+  // signal, not the caller's: the trim, the video extract and the download all
+  // took `signal`, so `internalController.abort()` cancelled nothing and the
+  // `rmSync(workDir)` on the next line ran while their ffmpeg children were
+  // still writing into it.
   const internalController = new AbortController();
   const effectiveSignal = internalController.signal;
   if (signal) {
@@ -823,9 +829,16 @@ export async function processCompositionAudio(
 
         if (isHttpUrl(srcPath)) {
           try {
-            srcPath = await downloadToTemp(srcPath, workDir, undefined, signal, undefined, {
-              onTelemetry: writeUrlDownloadTelemetry,
-            });
+            srcPath = await downloadToTemp(
+              srcPath,
+              workDir,
+              undefined,
+              effectiveSignal,
+              undefined,
+              {
+                onTelemetry: writeUrlDownloadTelemetry,
+              },
+            );
           } catch (err: unknown) {
             failures.push(downloadFailure(err, element.id));
             return;
@@ -890,7 +903,7 @@ export async function processCompositionAudio(
               startTime: element.mediaStart,
               duration: element.end - element.start,
             },
-            signal,
+            effectiveSignal,
             config,
           );
           if (!extractResult.success) {
@@ -916,7 +929,7 @@ export async function processCompositionAudio(
             trimmedPath,
             element.mediaStart,
             element.end - element.start,
-            signal,
+            effectiveSignal,
             config,
           );
           if (!prepResult.success) {

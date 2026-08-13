@@ -132,6 +132,26 @@ export function FxParamRow({
    * write applied on the way down.
    */
   const [pending, setPending] = useState<number | null>(null);
+  /**
+   * What the number field is showing while it has focus.
+   *
+   * The field cannot be bound to the committed value: every keystroke is
+   * clamped into range and written live, and the live write does not refresh
+   * the prop — so React put the old number straight back and typing `5000` into
+   * a 20..20000 knob wrote 20 on the first keystroke and never got further. Held
+   * as TEXT, so a half-typed "-" or "" is a state the field can be in rather
+   * than a number to clamp and persist.
+   */
+  const [typing, setTyping] = useState<string | null>(null);
+  /**
+   * Did this gesture actually change anything?
+   *
+   * `commit()` hangs off pointerup, keyup and blur, all of which fire without
+   * an edit — clicking a slider thumb without moving it, or tabbing through the
+   * field. Committing then re-persisted whatever `latest` happened to hold and
+   * silently reverted any change that had arrived meanwhile.
+   */
+  const edited = useRef(false);
   useEffect(() => {
     if (!dragging) setLocal(value);
   }, [value, dragging]);
@@ -146,6 +166,7 @@ export function FxParamRow({
       const p = param as HfAudioFxNumberParam;
       const next = Math.min(p.max, Math.max(p.min, raw));
       latest.current = next;
+      edited.current = true;
       setLocal(next);
       onChange(param.key, next);
     },
@@ -154,6 +175,12 @@ export function FxParamRow({
 
   const commit = useCallback(() => {
     setDragging(false);
+    // Nothing was edited, so there is nothing to persist. Without this a bare
+    // focus/blur — or a click on the slider thumb that never moved — fired a
+    // full persisting write: source patch, selection resync, preview reload and
+    // an audio restart, for a gesture that changed no value.
+    if (!edited.current) return;
+    edited.current = false;
     if (typeof latest.current === "number") setPending(latest.current);
     onCommit?.(param.key, latest.current);
   }, [onCommit, param.key]);
@@ -228,13 +255,25 @@ export function FxParamRow({
         min={param.min}
         max={param.max}
         step={param.step}
-        value={display(param, current)}
+        value={typing ?? display(param, current)}
         disabled={locked}
+        onFocus={() => setTyping(display(param, current))}
         onChange={(e) => {
-          const next = Number(e.target.value);
+          const text = e.target.value;
+          setTyping(text);
+          // An empty field, a lone "-", or a trailing "." are all states on the
+          // way to a number, not numbers. `Number("")` is 0, which passes
+          // Number.isFinite — so clearing the field to retype used to clamp to
+          // the parameter MINIMUM and write it live: 20 Hz on a cutoff, -40 dB
+          // on a gain.
+          if (text.trim() === "") return;
+          const next = Number(text);
           if (Number.isFinite(next)) handleNumber(next);
         }}
-        onBlur={commit}
+        onBlur={() => {
+          commit();
+          setTyping(null);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") commit();
         }}

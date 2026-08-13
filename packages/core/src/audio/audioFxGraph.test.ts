@@ -438,3 +438,54 @@ describe("automatable parameters", () => {
     expect(onePole.automation?.frequency).toBeUndefined();
   });
 });
+
+describe("phaser automation targets", () => {
+  /**
+   * `in_gain` and `out_gain` trim the signal entering and leaving the effect,
+   * which the builder drives through inTrim/outTrim while pinning wet and dry
+   * to 1. The automation map used to aim both lanes at wet/dry — so an envelope
+   * modulated a constant, the trim it was supposed to move stayed frozen, and
+   * "fade the phaser out" left the dry leg playing at full level.
+   *
+   * Asserted by VALUE rather than by node identity: the trims are internal, and
+   * the only honest question is whether the param a lane would drive is the one
+   * the knob sets.
+   */
+  it("drives the trims a lane is named for, not the pinned wet/dry pair", () => {
+    const handle = buildFxNode(ctx() as unknown as BaseAudioContext, "phaser", {
+      ...defaultAudioFxParams("phaser"),
+      in_gain: 0.25,
+      out_gain: 0.5,
+    });
+    expect(handle.automation?.in_gain?.[0]?.param.value).toBeCloseTo(0.25, 6);
+    expect(handle.automation?.out_gain?.[0]?.param.value).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe("chain update keeps ids with their effects", () => {
+  const band = (id: string, frequency: number) => ({
+    type: "peaking",
+    id,
+    enabled: true,
+    params: { ...defaultAudioFxParams("peaking"), frequency },
+  });
+
+  /**
+   * Reordering two effects of the same type leaves the shape string identical,
+   * so the chain updates in place rather than rebuilding — correct for the
+   * audio, since the params move with the position. The ids have to move too:
+   * a lane addresses its effect by id, and an id captured at build time names
+   * whichever effect used to occupy that slot. The scheduler would then drive
+   * `fx.n2.frequency` into the band that is now n1 — the exact swap that
+   * HfAudioFxNode.id documents itself as preventing, and the one the voiceover
+   * carve's all-peaking chains make easy to hit.
+   */
+  it("moves an id with its slot when same-type effects are reordered", () => {
+    const chain: HfAudioFxChain = { version: 1, nodes: [band("n1", 200), band("n2", 4000)] };
+    const handle = buildFxChain(ctx() as unknown as BaseAudioContext, chain);
+
+    const swapped: HfAudioFxChain = { version: 1, nodes: [band("n2", 4000), band("n1", 200)] };
+    expect(handle.update(swapped)).toBe(true);
+    expect(handle.nodes.map((n) => n.id)).toEqual(["n2", "n1"]);
+  });
+});

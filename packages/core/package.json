@@ -559,7 +559,7 @@
   },
   "scripts": {
     "build": "bun run build:hyperframes-runtime && bun run build:position-edits-render && bun run build:audio-fx-runtime && tsc && tsx scripts/rewrite-esm-extensions.ts",
-    "test": "bun run check:position-edits-render && vitest run",
+    "test": "bun run check:position-edits-render && bun run build:audio-fx-runtime && vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:runtime-coverage": "vitest run --coverage src/runtime",

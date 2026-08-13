@@ -457,6 +457,27 @@ describe("audio_volume_double_automation", () => {
     }
   });
 
+  it("does not blame the wrong element in a chained timeline", async () => {
+    // A chain has no semicolon until its very end, so a run that could cross `)`
+    // reached the `volume` in a LATER call and reported the element from an
+    // earlier one. Acting on the fixHint would have deleted #bgm's only real
+    // automation to fix a tween that is on #vo.
+    const res = await lintHyperframeHtml(
+      withScript(
+        LANE,
+        `gsap.timeline().to("#bgm", { duration: 0.6, x: 10 }).to("#vo", { volume: 1 });`,
+      ),
+    );
+    expect(res.findings.some((f) => f.code === "audio_volume_double_automation")).toBe(false);
+  });
+
+  it("still catches a real tween further down the same call", async () => {
+    const res = await lintHyperframeHtml(
+      withScript(LANE, `gsap.timeline().to("#bgm", { duration: 0.6, ease: "none", volume: 0 });`),
+    );
+    expect(res.findings.some((f) => f.code === "audio_volume_double_automation")).toBe(true);
+  });
+
   it("ignores a lane that automates something other than volume", async () => {
     const res = await lintHyperframeHtml(
       withScript(

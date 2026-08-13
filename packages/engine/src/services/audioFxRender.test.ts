@@ -293,3 +293,25 @@ describe.skipIf(!HAS_BROWSER)("browser render", () => {
     expect(readWav(outPath).samples.length).toBeGreaterThan(0);
   }, 180_000);
 });
+
+/**
+ * ffmpeg exits 0 and writes a structurally valid but EMPTY wav whenever a
+ * clip's trim starts past the end of its source (`-ss 10 -t 5` on a 2 s file).
+ * That track used to reach `new OfflineAudioContext(ch, 0, rate)`, which throws
+ * — and the error travels past the mixer's per-track failure collector, so one
+ * mis-set `data-media-start` took the whole render down.
+ */
+describe("an empty track", () => {
+  it("is handed back untouched rather than failing the render", async () => {
+    const input = join(dir, "empty.wav");
+    writeWav(input, new Float32Array(0), SR);
+    const output = join(dir, "out.wav");
+
+    // Returns the input path, the same contract as a chain with nothing enabled
+    // — and without paying for a browser to decide it.
+    await expect(
+      applyAudioFxChain(input, chainOf("peaking"), output, { trackId: "t" }),
+    ).resolves.toBe(input);
+    expect(existsSync(output)).toBe(false);
+  });
+});

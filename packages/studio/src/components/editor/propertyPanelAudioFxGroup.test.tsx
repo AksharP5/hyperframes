@@ -1467,3 +1467,66 @@ describe("AudioFxGroup carve against a deleted voice", () => {
     ).toEqual(["fx.k1.frequency"]);
   });
 });
+
+describe("AudioFxGroup while the carve is measuring", () => {
+  /**
+   * `analyse` captures the chain and the automation before its fetch and decode,
+   * then rewrites the whole `data-fx-chain` from that snapshot. An effect added
+   * — or a knob committed — during those seconds landed first and was silently
+   * discarded when the analysis returned. Only the Analyse control was gated;
+   * every other control in the rack stayed live throughout.
+   */
+  it("locks the rack, so an edit cannot be made against a snapshot that is moving", async () => {
+    // A fetch that never settles holds the panel in its analysing state, which
+    // is exactly the window the race lives in.
+    const hang = vi.fn(() => new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", hang);
+    // happy-dom has no Web Audio, and without a constructor `analyse` returns
+    // before it ever reaches the decode — closing the window under test.
+    vi.stubGlobal(
+      "OfflineAudioContext",
+      class {
+        decodeAudioData() {
+          return new Promise(() => {});
+        }
+      },
+    );
+    try {
+      const bed = document.createElement("audio");
+      bed.id = "bed";
+      bed.setAttribute("src", "bed.wav");
+      document.body.append(bed);
+      const voice = document.createElement("audio");
+      voice.id = "narration";
+      voice.setAttribute("src", "vo.wav");
+      document.body.append(voice);
+
+      const host = document.createElement("div");
+      document.body.append(host);
+      await act(async () => {
+        createRoot(host).render(
+          <AudioFxGroup
+            element={
+              {
+                dataAttributes: { "fx-chain": CHAIN },
+                id: "bed",
+                element: bed,
+              } as unknown as DomEditSelection
+            }
+            onSetAttributeQuiet={vi.fn()}
+            onSetAttributeLive={vi.fn()}
+          />,
+        );
+      });
+
+      // The bed carves itself against its one candidate, which starts the
+      // decode — and the whole rack goes read-only until it lands.
+      expect(hang).toHaveBeenCalled();
+      const controls = Array.from(host.querySelectorAll<HTMLInputElement>(".hf-fx-slider"));
+      expect(controls.length).toBeGreaterThan(0);
+      expect(controls.every((c) => c.disabled)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

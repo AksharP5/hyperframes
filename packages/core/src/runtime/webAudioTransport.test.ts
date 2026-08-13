@@ -388,6 +388,19 @@ describe("WebAudioTransport", () => {
       expect(transport.isActive()).toBe(false);
     });
 
+    it("disposes the FX graph when a clip ends naturally", async () => {
+      // stopAll() disposes by walking _activeSources, and the splice above had
+      // already removed this entry — so the handle, its MutationObserver and any
+      // running LFO survived the clip for the rest of the session.
+      const { transport, mock, gen } = setupTransport(100);
+      await transport.schedulePlayback(mockEl, mockBuffer, 0, 0, 0, 1, gen);
+
+      mock.sourceNode._fireEnded();
+
+      expect(mock.sourceNode.disconnect).toHaveBeenCalled();
+      expect(mock.gainNode.disconnect).toHaveBeenCalled();
+    });
+
     it("registers onended listener on the sourceNode", async () => {
       const { transport, mock, gen } = setupTransport(100);
 

@@ -613,6 +613,14 @@ export function AudioFxGroup({
 
   return (
     <FxSection
+      // Locked while the carve is measuring. `analyse` captures the chain and
+      // the automation BEFORE its fetch and decode, then rewrites the whole
+      // attribute from that snapshot — so an effect added, or a knob committed,
+      // during those seconds was silently discarded when the analysis landed.
+      // Only the Analyse button was disabled, so every other control in the rack
+      // stayed live throughout. Refusing the edit is honest; merging it into a
+      // measurement that did not account for it would not be.
+      disabled={analysing}
       chain={chain}
       automatedTargets={automatedTargets}
       liveAutomationValues={liveAutomationValues}

@@ -364,8 +364,13 @@ const allpassPhaser: Builder = (ctx, p) => {
     // frequency at once — not one knob, one param — so they stay unautomated.
     automation: {
       speed: [{ param: lfo.frequency }],
-      in_gain: [{ param: dry.gain }],
-      out_gain: [{ param: wet.gain }],
+      // The trims, not wet/dry. apply() drives inTrim/outTrim from these knobs
+      // and pins wet and dry to 1 — so a lane aimed at wet/dry modulated a
+      // constant and left the trim frozen, and the next values-only edit slammed
+      // it back over the running envelope. The comment above records that this
+      // wiring was already moved once; the automation map was missed.
+      in_gain: [{ param: inTrim.gain }],
+      out_gain: [{ param: outTrim.gain }],
     },
     dispose: () => {
       try {
@@ -514,7 +519,17 @@ export function buildFxChain(ctx: BaseAudioContext, chain: HfAudioFxChain): FxCh
       if (shapeOf(next) !== shape) return false;
       const active = next.nodes.filter((node) => node.enabled !== false);
       active.forEach((node, i) => {
-        handles[i]?.handle.update(normalizeAudioFxParams(node.type, node.params));
+        const held = handles[i];
+        if (!held) return;
+        held.handle.update(normalizeAudioFxParams(node.type, node.params));
+        // The id follows the position, because the params just did. Reordering
+        // two effects of the same type leaves the shape identical, so the graph
+        // is updated in place — but a lane addresses its effect BY id, and an id
+        // captured at build time then names whichever effect used to be here.
+        // The scheduler would drive `fx.n2.frequency` into the band that is now
+        // n1: exactly what HfAudioFxNode.id documents itself as preventing.
+        if (node.id === undefined) delete held.id;
+        else held.id = node.id;
       });
       shape = shapeOf(next);
       return true;

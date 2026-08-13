@@ -264,6 +264,21 @@ export class WebAudioTransport {
         if (idx !== -1) {
           this._activeSources.splice(idx, 1);
           el.muted = priorMuted;
+          // The graph goes with it. Splicing alone left the FX handle alive and
+          // then UNREACHABLE — stopAll() disposes by walking this array, which
+          // the splice just emptied of this entry. Every clip that finished
+          // naturally leaked its MutationObserver for the session, and each one
+          // still answered later `data-fx-chain` edits by rebuilding a whole
+          // graph (impulse response, chorus/phaser oscillators started and never
+          // stopped) around a dead source. Not disposed when idx is -1: stopAll()
+          // has already done it, and `stop()` is what fired this event.
+          try {
+            sourceNode.disconnect();
+            fx?.dispose();
+            gainNode.disconnect();
+          } catch {
+            // Already torn down.
+          }
           if (this._activeSources.length === 0) this._paused = true;
         }
       });

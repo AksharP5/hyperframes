@@ -625,7 +625,14 @@ function findVolumeDoubleAutomationFindings(ctx: LintContext): HyperframeLintFin
     // the same call the runtime's own probe would pick up, and the rule only
     // warns, so a miss costs nothing.
     const escaped = escapeRegExp(id);
-    const tweened = new RegExp(`#${escaped}(?![\\w-])[^;]{0,200}?\\bvolume\\s*:`, "s").test(script);
+    // `[^;)]`, not `[^;]`: a chained timeline has no semicolon until the end of
+    // the whole chain, so a run that could cross `)` matched `volume` in a LATER
+    // `.to()` call and named the wrong element — and this rule's fixHint tells
+    // the author to delete their lane. Refusing to cross the closing paren keeps
+    // the match inside the call the selector belongs to. It costs a false
+    // negative when some other value in the same object is a call result, which
+    // is the safe direction for a warning that already only guesses.
+    const tweened = new RegExp(`#${escaped}(?![\\w-])[^;)]{0,200}?\\bvolume\\s*:`).test(script);
     if (!tweened) continue;
     findings.push({
       code: "audio_volume_double_automation",

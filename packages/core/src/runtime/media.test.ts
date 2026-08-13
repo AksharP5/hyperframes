@@ -365,6 +365,37 @@ describe("syncRuntimeMedia", () => {
       expect(only).toBeCloseTo(0.55, 5);
     });
 
+    /**
+     * The render bakes the lane at CLIP-LOCAL time: prepareAudioTrack already
+     * cut the wav with `-ss mediaStart`, so its t=0 is the clip's start, and
+     * normaliseEnvelope subtracts trackStart. Preview used to sample at MEDIA
+     * time — mediaStart included, scaled by playbackRate, wrapped on a loop — so
+     * the same envelope played somewhere else than it rendered.
+     */
+    it("samples the lane at clip-local time, the way the render bakes it", () => {
+      const trimmed = (t: number) => {
+        const clip = createMockClip({ start: 0, end: 10, volume: 0.55, mediaStart: 30 });
+        Object.defineProperty(clip.el, "readyState", { value: 4, writable: true });
+        clip.el.setAttribute("data-automation", DUCK);
+        let seen = -1;
+        syncRuntimeMedia({
+          clips: [clip],
+          timeSeconds: t,
+          playing: true,
+          playbackRate: 1,
+          onElementVolume: (_el, v) => {
+            seen = v;
+          },
+        });
+        return seen;
+      };
+      // `data-media-start="30"` on a clip whose lane holds 0.8 until t=2 then
+      // ducks to 0.1 by t=3. At media time the playhead is already 30 s past the
+      // last point, so preview held 0.1 from the first frame and never ducked.
+      expect(trimmed(1)).toBeCloseTo(0.8, 5);
+      expect(trimmed(5)).toBeCloseTo(0.1, 5);
+    });
+
     it("supersedes keyframes probed from the timeline", () => {
       // Both present: the lane is the explicit one, and `lint` warns about it.
       const clip = createMockClip({ start: 0, end: 10, volume: 0.55 });

@@ -274,7 +274,15 @@ export function syncRuntimeMedia(params: {
       // An explicit volume lane owns the fader. It is checked before the probed
       // keyframes because the two would otherwise fight, and it is the one the
       // author drew — `lint` warns when a track carries both.
-      const laneGain = elementVolumeLaneGain(el, relTime);
+      // Clip-local, NOT `relTime`. A lane's `t` is "seconds from the start of
+      // the clip" (see HfAutomationPoint), and the render honours that: the wav
+      // is already cut with `-ss mediaStart`, so its t=0 IS the clip's start.
+      // `relTime` is MEDIA time — it carries mediaStart, scales by playbackRate
+      // and wraps on a loop — so feeding it here played the envelope at a
+      // different position than it renders, or ran it off the end entirely on a
+      // trimmed clip. The FX lanes on this same feature use clip-local elapsed;
+      // there is one time base, and this is it.
+      const laneGain = elementVolumeLaneGain(el, params.timeSeconds - clip.start);
       if (laneGain !== null) {
         authorVolume = clampVolume(laneGain);
       } else if (clip.volumeKeyframes && clip.volumeKeyframes.length > 0) {
