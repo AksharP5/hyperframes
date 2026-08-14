@@ -31,8 +31,8 @@ import {
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, resolve, dirname } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { createCatalogPreviewTempDir } from "./catalog-preview-temp.js";
 // Import from source — bun workspace linking doesn't resolve for scripts outside packages/.
 import {
   captureFrame,
@@ -170,8 +170,7 @@ export async function prepareProjectDir(
   item: CatalogItem,
   options: PrepareOptions = {},
 ): Promise<string> {
-  const tmpDir = join(tmpdir(), `hf-catalog-${item.name}-${Date.now()}`);
-  mkdirSync(tmpDir, { recursive: true });
+  const tmpDir = createCatalogPreviewTempDir(item.name);
   cpSync(item.sourceDir, tmpDir, { recursive: true });
   mirrorRegistryTargets(tmpDir);
 
