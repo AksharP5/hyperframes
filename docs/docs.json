@@ -476,6 +476,7 @@
                   "catalog/blocks/claude-exchange",
                   "catalog/blocks/cosmic-orb",
                   "catalog/blocks/gallery-tunnel",
+                  "catalog/blocks/heygen-avatar-promo-card",
                   "catalog/blocks/message-thread-reveal",
                   "catalog/blocks/north-korea-locked-down",
                   "catalog/blocks/notes-reveal",
@@ -484,6 +485,7 @@
                   "catalog/blocks/oscilloscope-trace",
                   "catalog/blocks/rack-focus",
                   "catalog/blocks/share-sheet-carousel",
+                  "catalog/blocks/slack-notification-ad",
                   "catalog/blocks/ui-3d-reveal",
                   "catalog/blocks/vfx-anamorphic-flare",
                   "catalog/blocks/vpn-youtube-spot"

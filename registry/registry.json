@@ -272,6 +272,10 @@
       "type": "hyperframes:block"
     },
     {
+      "name": "heygen-avatar-promo-card",
+      "type": "hyperframes:block"
+    },
+    {
       "name": "hw-frame",
       "type": "hyperframes:block"
     },
@@ -465,6 +469,10 @@
     },
     {
       "name": "share-sheet-carousel",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "slack-notification-ad",
       "type": "hyperframes:block"
     },
     {
@@ -1533,6 +1541,6 @@
     }
   ],
   "catalogArtifact": {
-    "revision": "6e83353888f7e2114f5195215d8b0cdf8794f925232ff8811428ac4d3979a7ba"
+    "revision": "192d7e2178533342f6242faf4556f7d8d3c23e106b8dbf79170da2aa5ff45adc"
   }
 }
