@@ -66,7 +66,7 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
     <template>
       <link
         rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Geist:wght@600&amp;display=block"
+        href="https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700;800&amp;display=block"
       />
 
       <style>
@@ -95,7 +95,6 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
         }
 
         .kcb-stage {
-          color: var(--color, #171717);
           letter-spacing: -0.03em;
           white-space: nowrap;
         }
@@ -158,7 +157,6 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
                 : "600";
 
             stage.style.fontWeight = fontWeight;
-            stage.style.color = typeof vars.color === "string" ? vars.color : "#171717";
             stage.setAttribute("aria-label", text);
 
             var canvas = document.createElement("canvas");
@@ -322,13 +320,13 @@ you paste it into.
 Every one of these has a default, so the piece works untouched. Set the ones you
 want to change on the element:
 
-| Variable | Default | Accepts | What it does |
-| --- | --- | --- | --- |
-| `text` | `Words push left.` | string | Short phrase that builds one word at a time. |
-| `font_size` | `72` | 36px to 160px, step 2px | Maximum text size in pixels. Longer phrases shrink to stay inside the frame. |
-| `entry_offset` | `88` | 20px to 160px, step 4px | Horizontal distance each new word travels before it lands. |
-| `color` | `#171717` | color | Text color for the full phrase. |
-| `font_weight` | `600` | `500`, `600`, `700`, `800` | Weight used by every word in the phrase. |
+| Variable       | Default            | Accepts                    | What it does                                                                 |
+| -------------- | ------------------ | -------------------------- | ---------------------------------------------------------------------------- |
+| `text`         | `Words push left.` | string                     | Short phrase that builds one word at a time.                                 |
+| `font_size`    | `72`               | 36px to 160px, step 2px    | Maximum text size in pixels. Longer phrases shrink to stay inside the frame. |
+| `entry_offset` | `88`               | 20px to 160px, step 4px    | Horizontal distance each new word travels before it lands.                   |
+| `color`        | `#171717`          | color                      | Text color for the full phrase.                                              |
+| `font_weight`  | `600`              | `500`, `600`, `700`, `800` | Weight used by every word in the phrase.                                     |
 
 Set them with `data-variable-values` on the element that mounts it. These are the
 defaults, so this behaves exactly like the preview above until you change one:
@@ -398,7 +396,7 @@ defaults, so this behaves exactly like the preview above until you change one:
     <template>
       <link
         rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Geist:wght@600&amp;display=block"
+        href="https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700;800&amp;display=block"
       />
 
       <style>
@@ -427,7 +425,6 @@ defaults, so this behaves exactly like the preview above until you change one:
         }
 
         .kcb-stage {
-          color: var(--color, #171717);
           letter-spacing: -0.03em;
           white-space: nowrap;
         }
@@ -490,7 +487,6 @@ defaults, so this behaves exactly like the preview above until you change one:
                 : "600";
 
             stage.style.fontWeight = fontWeight;
-            stage.style.color = typeof vars.color === "string" ? vars.color : "#171717";
             stage.setAttribute("aria-label", text);
 
             var canvas = document.createElement("canvas");

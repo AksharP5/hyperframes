@@ -50,7 +50,7 @@
     <template>
       <link
         rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Geist:wght@600&amp;display=block"
+        href="https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700;800&amp;display=block"
       />
 
       <style>
@@ -79,7 +79,6 @@
         }
 
         .kcb-stage {
-          color: var(--color, #171717);
           letter-spacing: -0.03em;
           white-space: nowrap;
         }
@@ -142,7 +141,6 @@
                 : "600";
 
             stage.style.fontWeight = fontWeight;
-            stage.style.color = typeof vars.color === "string" ? vars.color : "#171717";
             stage.setAttribute("aria-label", text);
 
             var canvas = document.createElement("canvas");

@@ -11,7 +11,14 @@
   "author": "Remocn",
   "authorUrl": "https://github.com/Remocn/remocn",
   "license": "MIT",
-  "syncPoints": [{ "id": "phrase-locked", "phase": "in", "offset": 1.2 }],
+  "syncPoints": [
+    {
+      "id": "phrase-locked",
+      "phase": "in",
+      "offset": 1.2,
+      "description": "Calibrated to the default three-word text; custom word counts change the lock time."
+    }
+  ],
   "files": [
     {
       "path": "kinetic-center-build.html",
