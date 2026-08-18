@@ -14,11 +14,11 @@
       "files": 2
     },
     "general-video": {
-      "hash": "49f5216832cb8e91",
+      "hash": "16898c02677d09bc",
       "files": 4
     },
     "hyperframes": {
-      "hash": "756a72f58fa3739b",
+      "hash": "d64583e4aa8011f7",
       "files": 17
     },
     "hyperframes-animation": {
@@ -26,23 +26,23 @@
       "files": 121
     },
     "hyperframes-audio": {
-      "hash": "534cea75fe0f2bc6",
+      "hash": "c96ccac4b1127b8c",
       "files": 6
     },
     "hyperframes-cli": {
-      "hash": "dc900e2ef0aa16b2",
+      "hash": "d124991b0a27f02d",
       "files": 11
     },
     "hyperframes-core": {
-      "hash": "4ca81d4092effc62",
-      "files": 19
+      "hash": "ec542db377d8b213",
+      "files": 20
     },
     "hyperframes-creative": {
       "hash": "0068574ecd376e60",
       "files": 78
     },
     "hyperframes-keyframes": {
-      "hash": "d00744ff0e669624",
+      "hash": "6bc62531ecea9a52",
       "files": 3
     },
     "hyperframes-registry": {

@@ -1,24 +1,11 @@
 import { swallow } from "./diagnostics";
 import { interpolateVolumeGain, type VolumeKeyframe } from "./mediaVolumeEnvelope.js";
 import { elementVolumeLaneGain } from "./audioAutomationVolume.js";
-import { normalizePlaybackRate } from "./playbackRate.js";
-
-export function readElementPlaybackRate(el: Element): number {
-  const authored = Number.parseFloat(el.getAttribute("data-playback-rate") ?? "");
-  const raw =
-    Number.isFinite(authored) && authored > 0
-      ? authored
-      : el instanceof HTMLMediaElement
-        ? el.defaultPlaybackRate
-        : 1;
-  return normalizePlaybackRate(raw);
-}
+import { readElementPlaybackRate, readMediaStart } from "./playbackRate.js";
+export { readElementPlaybackRate, resolveNaturalMediaTimelineDuration } from "./playbackRate.js";
 
 export function readElementPlaybackStart(el: Element): number {
-  const raw = Number.parseFloat(
-    el.getAttribute("data-playback-start") ?? el.getAttribute("data-media-start") ?? "",
-  );
-  return Number.isFinite(raw) && raw >= 0 ? raw : 0;
+  return readMediaStart(el);
 }
 
 /**
@@ -41,7 +28,7 @@ export function resolveRuntimeMediaClipDuration(params: {
     params.isVideo
       ? [mediaDuration, params.hostRemaining]
       : [mediaDuration, params.hostRemaining, params.explicitDuration]
-  ).filter((value): value is number => value != null && Number.isFinite(value) && value > 0);
+  ).filter((value): value is number => value != null && Number.isFinite(value) && value >= 0);
   return candidates.length > 0 ? Math.min(...candidates) : null;
 }
 
@@ -89,26 +76,25 @@ export function refreshRuntimeMediaCache(params?: {
       ? params.resolveStartSeconds(el)
       : Number.parseFloat(el.dataset.start ?? "0");
     if (!Number.isFinite(start)) continue;
-    const mediaStart =
-      Number.parseFloat(el.dataset.playbackStart ?? el.dataset.mediaStart ?? "0") || 0;
+    const mediaStart = readElementPlaybackStart(el);
     const playbackRate = readElementPlaybackRate(el);
     const loop = el.loop;
     const sourceDuration = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : null;
     let duration =
       params?.resolveDurationSeconds?.(el) ?? Number.parseFloat(el.dataset.duration ?? "");
-    if ((!Number.isFinite(duration) || duration <= 0) && sourceDuration != null) {
+    if ((!Number.isFinite(duration) || duration < 0) && sourceDuration != null) {
       // Effective duration accounts for playback rate:
       // at 0.5x, a 10s source plays for 20s on the timeline
       duration = Math.max(0, (sourceDuration - mediaStart) / playbackRate);
     }
-    const end =
-      Number.isFinite(duration) && duration > 0 ? start + duration : Number.POSITIVE_INFINITY;
+    const hasKnownDuration = Number.isFinite(duration) && duration >= 0;
+    const end = hasKnownDuration ? start + duration : Number.POSITIVE_INFINITY;
     const volumeRaw = Number.parseFloat(el.dataset.volume ?? "");
     const clip: RuntimeMediaClip = {
       el,
       start,
       mediaStart,
-      duration: Number.isFinite(duration) && duration > 0 ? duration : Number.POSITIVE_INFINITY,
+      duration: hasKnownDuration ? duration : Number.POSITIVE_INFINITY,
       end,
       volume: Number.isFinite(volumeRaw) ? volumeRaw : null,
       playbackRate,

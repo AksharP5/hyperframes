@@ -110,6 +110,30 @@ describe("initSandboxRuntimeModular", () => {
     window.cancelAnimationFrame = (() => {}) as typeof window.cancelAnimationFrame;
   });
 
+  it.each([
+    ["2x", 5],
+    ["0x2", 10],
+  ])("derives a native-parsed natural media window for rate %s", (rate, expected) => {
+    document.body.innerHTML = `<div data-composition-id="main" data-root="true"><video data-start="0" data-playback-rate="${rate}"></video></div>`;
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "duration", { value: 10, configurable: true });
+    window.__timelines = {};
+    initSandboxRuntimeModular();
+    expect(window.__player?.getDuration()).toBe(expected);
+  });
+
+  it.each([10, 11])(
+    "preserves a known zero natural media window at source EOF (start=%s)",
+    (start) => {
+      document.body.innerHTML = `<div data-composition-id="main" data-root="true"><video data-start="0" data-media-start="${start}"></video></div>`;
+      const video = document.querySelector("video")!;
+      Object.defineProperty(video, "duration", { value: 10, configurable: true });
+      window.__timelines = {};
+      initSandboxRuntimeModular();
+      expect(window.__player?.getDuration()).toBe(0);
+    },
+  );
+
   afterEach(() => {
     window.__hfRuntimeTeardown?.();
     document.body.innerHTML = "";
