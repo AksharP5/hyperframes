@@ -12,8 +12,13 @@ vi.mock("node:os", async (importOriginal) => ({
   homedir: () => scratchHome,
 }));
 
-const { fetchItemManifest, fetchRegistryManifest, DEFAULT_REGISTRY_URL } =
-  await import("./remote.js");
+const {
+  describeCauseChain,
+  fetchItemFile,
+  fetchItemManifest,
+  fetchRegistryManifest,
+  DEFAULT_REGISTRY_URL,
+} = await import("./remote.js");
 
 const MANIFEST = { name: "hyperframes", items: [{ name: "count-up" }] };
 const ITEM = { name: "count-up", type: "hyperframes:component", files: [] };
@@ -158,5 +163,105 @@ describe("fetchItemManifest", () => {
     await expect(
       fetchItemManifest("no-such-move", "hyperframes:component", DEFAULT_REGISTRY_URL),
     ).rejects.toThrow("HTTP 404");
+  });
+});
+
+describe("describeCauseChain", () => {
+  it("surfaces the reason undici hides under cause", () => {
+    // The reported failure. `fetch failed` alone describes every network
+    // problem equally badly; the sentence that tells you what to do is one
+    // level down, and it was being dropped.
+    const err = new Error("fetch failed", {
+      cause: new Error("self-signed certificate in certificate chain"),
+    });
+
+    expect(describeCauseChain(err)).toBe(
+      "fetch failed (self-signed certificate in certificate chain)",
+    );
+  });
+
+  it("includes an errno code when the message does not already carry it", () => {
+    const inner = Object.assign(new Error("getaddrinfo ENOTFOUND example.invalid"), {
+      code: "ENOTFOUND",
+    });
+
+    // The code is already in the text, so repeating it would be noise.
+    expect(describeCauseChain(new Error("fetch failed", { cause: inner }))).toBe(
+      "fetch failed (getaddrinfo ENOTFOUND example.invalid)",
+    );
+  });
+
+  it("walks more than one level", () => {
+    const deep = new Error("a", { cause: new Error("b", { cause: new Error("c") }) });
+
+    expect(describeCauseChain(deep)).toBe("a (b; c)");
+  });
+
+  it("survives a cause cycle rather than hanging", () => {
+    const a = new Error("a");
+    const b = new Error("b", { cause: a });
+    (a as { cause?: unknown }).cause = b;
+
+    expect(describeCauseChain(a)).toBe("a (b)");
+  });
+
+  it("returns the plain message when there is no cause", () => {
+    expect(describeCauseChain(new Error("HTTP 404"))).toBe("HTTP 404");
+  });
+});
+
+describe("fetchItemFile retries", () => {
+  const item = { name: "blur-in", type: "hyperframes:component" } as never;
+  const file = { path: "blur-in.html", target: "compositions/components/blur-in.html" } as never;
+  const dest = () => join(scratchHome, `dl-${Math.random().toString(36).slice(2)}.html`);
+
+  it("recovers from a transient blip instead of failing the whole install", async () => {
+    // Item files are the one uncached path, so a single blip used to kill the
+    // command outright. Two cheap retries is a better trade than that.
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("fetch failed", { cause: new Error("ECONNRESET") }))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => new TextEncoder().encode("<div>ok</div>").buffer,
+      } as unknown as Response);
+
+    await expect(fetchItemFile(item, file, dest(), DEFAULT_REGISTRY_URL)).resolves.toBeUndefined();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a certificate failure, which fails identically every time", async () => {
+    // The reported case: a private registry with a self-signed certificate.
+    // Retrying only makes the user wait three times as long for one answer.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("fetch failed", {
+        cause: new Error("self-signed certificate in certificate chain"),
+      }),
+    );
+
+    await expect(fetchItemFile(item, file, dest(), DEFAULT_REGISTRY_URL)).rejects.toThrow(
+      /self-signed certificate/,
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the URL it could not reach", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new Error("fetch failed", { cause: new Error("self-signed certificate in chain") }),
+    );
+
+    await expect(
+      fetchItemFile(item, file, dest(), "https://private.example/registry"),
+    ).rejects.toThrow(/https:\/\/private\.example\/registry\/components\/blur-in\/blur-in\.html/);
+  });
+
+  it("gives up after a bounded number of attempts", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("fetch failed", { cause: new Error("ECONNRESET") }));
+
+    await expect(fetchItemFile(item, file, dest(), DEFAULT_REGISTRY_URL)).rejects.toThrow();
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 });

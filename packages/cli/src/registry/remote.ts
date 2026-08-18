@@ -151,6 +151,72 @@ export async function fetchItemManifest(
 }
 
 /**
+ * Flatten an error and its `cause` chain into one readable line.
+ *
+ * `fetch failed` on its own is useless. `fetch failed (self-signed certificate
+ * in certificate chain)` tells the reader exactly which knob to turn, and that
+ * string only exists one or two levels down the chain.
+ */
+export function describeCauseChain(err: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = err;
+  const seen = new Set<unknown>();
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    const code = (current as { code?: unknown }).code;
+    const text =
+      code && !current.message.includes(String(code))
+        ? `${current.message} [${String(code)}]`
+        : current.message;
+    if (text && !parts.includes(text)) parts.push(text);
+    current = current.cause;
+  }
+  if (parts.length === 0) return String(err);
+  const [head, ...rest] = parts;
+  return rest.length ? `${head} (${rest.join("; ")})` : head!;
+}
+
+/**
+ * A transient failure worth trying again, as opposed to a settled answer.
+ *
+ * A refused connection, a reset socket or a DNS hiccup usually clears on the
+ * next attempt. A TLS failure does not: a self-signed certificate on a private
+ * registry fails identically every time, and retrying it only makes the user
+ * wait three times as long for the same message.
+ */
+function isRetryableTransport(err: unknown): boolean {
+  const text = describeCauseChain(err).toLowerCase();
+  if (/certificate|self-signed|self signed|unable to verify|altname|ssl|tls/.test(text)) {
+    return false;
+  }
+  return /fetch failed|econnreset|econnrefused|etimedout|eai_again|socket hang up|timeouterror|aborted|network/.test(
+    text,
+  );
+}
+
+/**
+ * Item files are the one uncached path: manifests fall back to a stale copy,
+ * but every install downloads its files fresh. That made a single blip fatal to
+ * the whole command, which is a bad trade for two extra attempts costing under
+ * a second when the network is healthy.
+ */
+async function fetchWithRetry(url: string, attempts = 3): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    } catch (err) {
+      lastErr = err;
+      if (attempt === attempts || !isRetryableTransport(err)) break;
+      // Short, bounded backoff. Long enough to clear a blip, short enough that
+      // a genuinely offline machine still fails promptly.
+      await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Download a single file referenced by an item to a local destination.
  * Caller is responsible for target-path validation (see installer.ts).
  */
@@ -165,7 +231,17 @@ export async function fetchItemFile(
     throw new Error(`Unsafe file.path "${file.path}": path segments may not contain "..".`);
   }
   const url = `${baseUrl}/${ITEM_TYPE_DIRS[item.type]}/${item.name}/${file.path}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  let res: Response;
+  try {
+    res = await fetchWithRetry(url);
+  } catch (err) {
+    // undici throws a bare "fetch failed" and buries the real reason in
+    // `cause`, sometimes a level deeper again. That is where the diagnosis
+    // lives: a self-signed certificate on a private registry, a DNS failure, a
+    // refused connection. Without it the message is two words that describe
+    // every possible network problem equally badly.
+    throw new Error(`File fetch failed: ${url} — ${describeCauseChain(err)}`, { cause: err });
+  }
   if (!res.ok) {
     throw new Error(`File fetch failed: ${url} — HTTP ${res.status}`);
   }

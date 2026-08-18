@@ -101,6 +101,71 @@ export interface ItemText {
 }
 
 /**
+ * Reconcile the two spellings of one compound word.
+ *
+ * The tokenizer splits on word boundaries, so `countdown` is one token and
+ * `count down` is two, and neither can ever match the other. That made the two
+ * spellings of a single idea return disjoint result sets: `countdown` returned
+ * only the one item tagged with that exact word, while `count down timer`
+ * returned sixteen that did not include it. Whichever phrasing an author
+ * happened to type decided which half of the answer they saw, and neither half
+ * was the whole answer.
+ *
+ * Both directions, and both gated on the catalog's own vocabulary so this can
+ * only ever add signal:
+ *
+ * - A query token is split when both halves are words the catalog actually
+ *   uses. The compound is always kept, so nothing is lost: `countdown` is rare
+ *   and keeps its high inverse-document-frequency weight, while the common
+ *   halves it adds bring in the items written the other way and carry almost
+ *   no weight of their own. That is why splitting `typewriter` into `type` and
+ *   `writer` cannot dislodge the item literally called typewriter.
+ * - Adjacent query tokens are joined when the compound is a word the catalog
+ *   actually uses, so `count down` also reaches items written `countdown`.
+ *
+ * A word in neither form, like `timer` (which appears in none of the catalog's
+ * items), is left exactly as it was: this widens phrasing, it does not invent
+ * matches.
+ *
+ * Everything added here is INFERRED rather than asked for, so it carries a
+ * fraction of a real token's weight. Without that the inference can outvote the
+ * question: `type` matching the name of `type-match-cut` at full strength beats
+ * `typewriter` matching the name of `typewriter`, and searching a word returns
+ * something that merely contains half of it. Relying on the halves being
+ * statistically common in a large catalog is not the same as making them
+ * count for less, and only one of the two holds when the corpus is small.
+ */
+const INFERRED_TOKEN_WEIGHT = 0.35;
+
+function expandCompounds(
+  want: Map<string, number>,
+  order: string[],
+  vocabulary: Set<string>,
+): void {
+  const infer = (token: string): void => {
+    if (!want.has(token)) want.set(token, INFERRED_TOKEN_WEIGHT);
+  };
+
+  for (const token of order) {
+    if (token.length < 6) continue;
+    // Shortest useful part is 3 characters, matching the tokenizer's own floor.
+    for (let cut = 3; cut <= token.length - 3; cut++) {
+      const head = token.slice(0, cut);
+      const tail = token.slice(cut);
+      if (vocabulary.has(head) && vocabulary.has(tail)) {
+        infer(head);
+        infer(tail);
+        break;
+      }
+    }
+  }
+  for (let i = 0; i < order.length - 1; i++) {
+    const joined = `${order[i]}${order[i + 1]}`;
+    if (vocabulary.has(joined)) infer(joined);
+  }
+}
+
+/**
  * Rank every item by shared vocabulary, best first.
  *
  * Returns all items rather than only matches, so a caller can decide where to
@@ -111,7 +176,10 @@ export function rankByWords<T>(
   items: T[],
   textOf: (item: T) => ItemText,
 ): Scored<T>[] {
-  const want = new Set(tokenize(query));
+  const asked = tokenize(query);
+  // Token -> how much a match on it is worth. Asked-for words count fully;
+  // words inferred from a compound count for a fraction.
+  const want = new Map<string, number>(asked.map((token) => [token, 1]));
   if (want.size === 0) return items.map((item) => ({ item, score: 0 }));
 
   const parsed = items.map((item) => {
@@ -120,6 +188,10 @@ export function rankByWords<T>(
     return { item, strongTokens, allTokens: new Set([...strongTokens, ...tokenize(weak)]) };
   });
 
+  const vocabulary = new Set<string>();
+  for (const entry of parsed) for (const token of entry.allTokens) vocabulary.add(token);
+  expandCompounds(want, asked, vocabulary);
+
   // How rare each queried word is across the catalog. Without this a common
   // word carries the same weight as a distinctive one, and field weighting
   // makes that worse rather than better: searching "reveal a headline one line
@@ -127,7 +199,7 @@ export function rankByWords<T>(
   // strong hit on the catalog's most common word outscored several weak hits
   // on the words that actually narrowed it down.
   const idf = new Map<string, number>();
-  for (const token of want) {
+  for (const token of want.keys()) {
     const df = parsed.reduce((count, p) => count + (p.allTokens.has(token) ? 1 : 0), 0);
     // +1 inside the log keeps a token present in every item at a small
     // positive weight rather than exactly zero: still nearly worthless, but
@@ -138,8 +210,8 @@ export function rankByWords<T>(
   return parsed
     .map(({ item, strongTokens, allTokens }) => {
       let shared = 0;
-      for (const token of want) {
-        const weight = idf.get(token) ?? 1;
+      for (const [token, asking] of want) {
+        const weight = (idf.get(token) ?? 1) * asking;
         if (strongTokens.has(token)) shared += STRONG_FIELD_WEIGHT * weight;
         else if (allTokens.has(token)) shared += weight;
       }

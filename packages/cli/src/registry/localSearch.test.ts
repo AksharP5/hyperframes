@@ -183,3 +183,53 @@ describe("hasNoSearchableTokens", () => {
     expect(hasNoSearchableTokens("the and of !!!")).toBe(true);
   });
 });
+
+describe("the two spellings of a compound word find the same items", () => {
+  // Reduced from the real failure: `countdown` returned exactly one item (the
+  // only thing tagged with that spelling) while `count down timer` returned
+  // sixteen that did not include it. Whichever phrasing an author happened to
+  // type decided which half of the answer they saw.
+  const items = [
+    named("yt-circle-pointer", "Circle Pointer", "An annotation overlay with a countdown chip."),
+    named("count-up", "Count Up", "A stat counter that eases between two values."),
+    named("decline-chart", "Decline Chart", "A line that counts down as its value falls."),
+    named("aurora-drift", "Aurora Drift", "A slow gradient background."),
+  ];
+  const namesFor = (q: string) => searchByWords(q, items, fieldsOf).map((i) => i.name);
+
+  it("finds the one-word item from the two-word query", () => {
+    expect(namesFor("count down timer")).toContain("yt-circle-pointer");
+  });
+
+  it("finds the two-word items from the one-word query", () => {
+    // The half of the answer the compound spelling used to hide.
+    expect(namesFor("countdown")).toEqual(expect.arrayContaining(["count-up", "decline-chart"]));
+  });
+
+  it("returns the same set either way, which is the actual defect", () => {
+    expect(namesFor("countdown").sort()).toEqual(namesFor("count down").sort());
+  });
+
+  it("still ranks the exact compound match first", () => {
+    // Splitting must not cost the item that spells it the way you asked. The
+    // compound is kept and is rare, so its weight survives the added halves.
+    expect(namesFor("countdown")[0]).toBe("yt-circle-pointer");
+  });
+
+  it("leaves a word the catalog never uses alone", () => {
+    // `timer` appears in none of these items, and inventing a match for it
+    // would be widening the query into fiction rather than into phrasing.
+    expect(namesFor("timer")).toEqual([]);
+  });
+
+  it("does not let a split dislodge the item named for the whole word", () => {
+    // `typewriter` splits into `type` + `writer` if both are known. The item
+    // literally called typewriter must still win.
+    const typing = [
+      named("typewriter", "Typewriter", "Character-by-character reveal."),
+      named("type-match-cut", "Type Match Cut", "A cut matched on a writer's type."),
+    ];
+
+    expect(searchByWords("typewriter", typing, fieldsOf)[0]?.name).toBe("typewriter");
+  });
+});
