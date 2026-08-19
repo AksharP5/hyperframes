@@ -201,4 +201,60 @@ describe("probeAndCacheElementVolume", () => {
     expect(interpolateVolumeGain(envelope, 0.5)).toBeCloseTo(1, 5);
     expect(interpolateVolumeGain(envelope, 1)).toBeCloseTo(1, 5);
   });
+  it("keeps a fade that starts from an above-unity authored gain", () => {
+    const audio = document.createElement("audio");
+    audio.dataset.start = "0";
+    audio.dataset.duration = "2";
+    audio.dataset.volume = "1.949845"; // +5.8 dB
+
+    // A GSAP tween reads the seeded value as its FROM. Through the spec's
+    // [0,1] clamp on `HTMLMediaElement.volume` that read back as 1, so the
+    // whole authored boost was thrown away by the mere presence of a fade.
+    const keyframes = probeElementVolumeKeyframes(
+      audio,
+      (time) => {
+        audio.volume = 1.949845 * Math.max(0, 1 - time / 2);
+      },
+      2,
+      10,
+    );
+
+    expect(keyframes?.[0]?.volume).toBeCloseTo(1.949845, 5);
+    expect(audio.volume).toBeLessThanOrEqual(1);
+  });
+
+  it("carries an above-unity tween target through to the envelope", () => {
+    const audio = document.createElement("audio");
+    audio.dataset.start = "0";
+    audio.dataset.duration = "1";
+    audio.dataset.volume = "1";
+
+    const keyframes = probeElementVolumeKeyframes(
+      audio,
+      (time) => {
+        audio.volume = 1 + time;
+      },
+      1,
+      10,
+    );
+
+    expect(keyframes?.at(-1)?.volume).toBeCloseTo(2, 5);
+  });
+
+  it("restores the native accessor once the probe is done", () => {
+    const audio = document.createElement("audio");
+    audio.dataset.start = "0";
+    audio.dataset.duration = "1";
+    audio.dataset.volume = "2";
+
+    probeElementVolumeKeyframes(audio, () => {}, 1, 10);
+
+    // The own accessor is gone and the spec setter is back in charge: it
+    // rejects an out-of-range volume rather than silently taking it.
+    expect(Object.getOwnPropertyDescriptor(audio, "volume")).toBeUndefined();
+    expect(audio.volume).toBe(1);
+    expect(() => {
+      audio.volume = 5;
+    }).toThrow();
+  });
 });

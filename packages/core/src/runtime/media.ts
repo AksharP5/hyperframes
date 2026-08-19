@@ -2,6 +2,7 @@ import { swallow } from "./diagnostics";
 import { interpolateVolumeGain, type VolumeKeyframe } from "./mediaVolumeEnvelope.js";
 import { elementVolumeLaneGain } from "./audioAutomationVolume.js";
 import { readElementPlaybackRate, readMediaStart } from "./playbackRate.js";
+import { clampAudioGain } from "../audioGain.js";
 export { readElementPlaybackRate, resolveNaturalMediaTimelineDuration } from "./playbackRate.js";
 
 export function readElementPlaybackStart(el: Element): number {
@@ -255,7 +256,7 @@ export function syncRuntimeMedia(params: {
         }
       }
       const userVol = clampVolume(params.userVolume ?? 1);
-      const fallbackAuthorVolume = clampVolume(clip.volume ?? 1);
+      const fallbackAuthorVolume = clampAudioGain(clip.volume ?? 1);
       const previousRuntimeVolume = lastRuntimeAppliedVolume.get(el);
       const currentElementVolume = clampVolume(el.volume);
 
@@ -273,7 +274,7 @@ export function syncRuntimeMedia(params: {
       // there is one time base, and this is it.
       const laneGain = elementVolumeLaneGain(el, params.timeSeconds - clip.start);
       if (laneGain !== null) {
-        authorVolume = clampVolume(laneGain);
+        authorVolume = clampAudioGain(laneGain);
       } else if (clip.volumeKeyframes && clip.volumeKeyframes.length > 0) {
         // Keyframes probed from the GSAP timeline — same source as the renderer.
         // Use the interpolated envelope value directly; no need to track GSAP changes.
@@ -283,7 +284,7 @@ export function syncRuntimeMedia(params: {
         // and the playback rate — so it only coincides with the envelope's time base
         // for an untrimmed clip playing at 1x from t=0.
         const elapsedInClip = params.timeSeconds - clip.start;
-        authorVolume = clampVolume(interpolateVolumeGain(clip.volumeKeyframes, elapsedInClip));
+        authorVolume = clampAudioGain(interpolateVolumeGain(clip.volumeKeyframes, elapsedInClip));
       } else if (params.isWebAudioRouted?.(el)) {
         authorVolume = fallbackAuthorVolume;
       } else if (previousRuntimeVolume === undefined) {
@@ -291,9 +292,22 @@ export function syncRuntimeMedia(params: {
         // to the current time (seekTimelineAndAdapters runs before syncRuntimeMedia),
         // so el.volume reflects the animated value — trust it rather than falling
         // back to data-volume, which would clobber the GSAP-seeked position.
-        authorVolume = currentElementVolume;
+        //
+        // Except above unity. `el.volume` is spec-bound to [0,1], so it cannot
+        // represent an authored boost, and reading it back can only lose the
+        // gain. Without this, a boosted clip opened at 0 dB for one tick and
+        // then jumped once the unchanged-since-last-tick branch below took over
+        // — audible, and invisible to any test that ticks more than once.
+        authorVolume = fallbackAuthorVolume > 1 ? fallbackAuthorVolume : currentElementVolume;
       } else if (Math.abs(currentElementVolume - previousRuntimeVolume) > 0.0001) {
         // GSAP (or user code) changed el.volume between ticks — track it.
+        //
+        // Unity-capped on purpose, and it is not a hole in the ceiling: this
+        // reads back through `el.volume`, which the spec pins to [0,1], so it
+        // cannot observe an above-unity value however wide the clamp gets. A
+        // clip whose volume is actually animated takes the probed-keyframes
+        // branch above, which carries the authored gain unclamped; this branch
+        // is the fallback for elements no probe ran on.
         authorVolume = currentElementVolume;
       } else {
         // Volume unchanged since last tick — use data-volume as the baseline.
