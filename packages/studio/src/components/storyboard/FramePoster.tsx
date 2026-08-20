@@ -11,10 +11,8 @@ export interface FramePosterProps {
   /**
    * Where this poster is rendered. A contact-sheet tile is ~300px wide and there
    * are many of them; the focus hero is up to 900px wide and there is exactly
-   * one. That single difference decides both the crop and how much resolution
-   * the server has to capture, so it is one prop rather than two that can
-   * disagree: `tile` fills+crops at the route's bounded preview density, `hero`
-   * letterboxes at the composition's own dimensions.
+   * one. Tiles use a bounded high-density capture; the hero uses source density.
+   * The surface also decides whether the result fills or letterboxes its cell.
    */
   surface?: "tile" | "hero";
   /**
@@ -57,11 +55,10 @@ export function FramePoster({
     seekTime: seconds,
     duration: 0,
     origin: window.location.origin,
-    // The hero is the sketch pass's only picture (references/review-loop.md), and
-    // it is shown large. Bounded to the preview cap it arrives at 240x135 and
-    // upscales past 7x on a retina display, which is unreadable for exactly the
-    // body copy and labels this pass exists to confirm.
-    ...(surface === "hero" ? { output: "source" as const } : {}),
+    // The normal 240x135 preview is unreadable in the contact sheet, while source
+    // density is unbounded across all tiles. Give tiles a capped review density
+    // and reserve true source output for the single focus hero.
+    output: surface === "hero" ? "source" : "storyboard",
   });
   if (posterVersion) {
     const withVersion = new URL(url, window.location.origin);
