@@ -18,6 +18,7 @@ import {
   detectThreeDTransformUsage,
   discoverMediaFromBrowser,
   discoverAudioVolumeAutomationFromTimeline,
+  discoverVideoVisibilityFromTimeline,
   inlineExternalScripts,
   localizeRemoteMediaSources,
   localizeRemoteImageSources,
@@ -2200,6 +2201,75 @@ describe("resolveCompositionDurations strict literal timing", () => {
   });
 });
 
+describe("discoverVideoVisibilityFromTimeline", () => {
+  it("returns scene visibility windows for auto-start videos", async () => {
+    const duration = 2;
+    const sampleStep = 0.1;
+    const windows = [
+      { id: "v0", start: 0.2, end: 0.7 },
+      { id: "v1", start: 0.5, end: 1.2 },
+      { id: "v2", start: 1.0, end: 1.8 },
+      { id: "v3", start: 0.0, end: 0.4 },
+    ];
+
+    type SceneEl = { opacityAt: (t: number) => number };
+    const videos = windows.map((win) => {
+      const sceneEl: SceneEl = {
+        opacityAt: (t) => (t >= win.start && t <= win.end ? 1 : 0),
+      };
+      return {
+        id: win.id,
+        closest: (selector: string) => (selector === ".scene" ? sceneEl : null),
+      };
+    });
+
+    let currentTime = 0;
+    const previousWindow = globalThis.window;
+    const previousDocument = globalThis.document;
+
+    globalThis.window = {
+      __timelines: {
+        root: {
+          totalTime: (time: number) => {
+            currentTime = time;
+          },
+        },
+      },
+      getComputedStyle: (el: SceneEl) => ({
+        opacity: String(el.opacityAt(currentTime)),
+      }),
+    } as typeof globalThis.window;
+    globalThis.document = {
+      querySelectorAll: (selector: string) =>
+        selector === "video[data-hf-auto-start]" ? videos : [],
+      querySelector: (selector: string) =>
+        selector === "[data-composition-id]"
+          ? { getAttribute: (name: string) => (name === "data-composition-id" ? "root" : null) }
+          : null,
+    } as typeof globalThis.document;
+
+    try {
+      const page = {
+        evaluate: async (fn: (arg: number) => unknown, arg: number) => fn(arg),
+      };
+
+      const result = await discoverVideoVisibilityFromTimeline(page as never, duration);
+
+      expect(result).toHaveLength(windows.length);
+      for (const win of windows) {
+        const found = result.find((entry) => entry.videoId === win.id);
+        expect(found).toBeDefined();
+        expect(found!.visibleStart).toBeGreaterThanOrEqual(win.start - sampleStep);
+        expect(found!.visibleStart).toBeLessThanOrEqual(win.start + sampleStep);
+        expect(found!.visibleEnd).toBeGreaterThanOrEqual(win.end - sampleStep);
+        expect(found!.visibleEnd).toBeLessThanOrEqual(win.end + sampleStep);
+      }
+    } finally {
+      globalThis.window = previousWindow;
+      globalThis.document = previousDocument;
+    }
+  });
+});
 describe("sub-composition variable injection (render path, #2064)", () => {
   function writeSubCompVarProject(hostVars: string): string {
     const projectDir = mkdtempSync(join(tmpdir(), "hf-subvar-"));

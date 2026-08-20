@@ -2346,24 +2346,40 @@ export async function discoverVideoVisibilityFromTimeline(
     const SAMPLE_STEP = 0.1;
     const BINARY_PRECISION = 1 / 60;
 
+    // Seek once per timestep and sample every video — seeking dominates and is
+    // independent of which element we read.
+    const entries: {
+      id: string;
+      sceneEl: Element;
+      firstVisible: number | null;
+      lastVisible: number | null;
+    }[] = [];
     for (const videoEl of videos) {
       const id = videoEl.id;
       if (!id) continue;
+      entries.push({
+        id,
+        sceneEl: videoEl.closest(".scene") || videoEl,
+        firstVisible: null,
+        lastVisible: null,
+      });
+    }
+    if (entries.length === 0) return results;
 
-      const sceneEl = videoEl.closest(".scene") || videoEl;
-
-      let firstVisible: number | null = null;
-      let lastVisible: number | null = null;
-
-      for (let t = 0; t <= duration; t += SAMPLE_STEP) {
-        seekTl(t);
-        const opacity = parseFloat(window.getComputedStyle(sceneEl).opacity);
+    for (let t = 0; t <= duration; t += SAMPLE_STEP) {
+      seekTl(t);
+      for (const entry of entries) {
+        const opacity = parseFloat(window.getComputedStyle(entry.sceneEl).opacity);
         if (opacity > 0) {
-          if (firstVisible === null) firstVisible = t;
-          lastVisible = t;
+          if (entry.firstVisible === null) entry.firstVisible = t;
+          entry.lastVisible = t;
         }
       }
+    }
 
+    // Per-video boundary refinement (cheap: O(log(step)) seeks each).
+    for (const entry of entries) {
+      const { id, sceneEl, firstVisible, lastVisible } = entry;
       if (firstVisible === null || lastVisible === null) continue;
 
       // Binary search left boundary
