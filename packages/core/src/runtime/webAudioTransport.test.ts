@@ -386,6 +386,36 @@ describe("WebAudioTransport", () => {
       expect(mock.startFn).toHaveBeenCalledWith(0, 3, 7);
     });
 
+    // The bound is in BUFFER seconds, and an authored `data-playback-rate`
+    // is the only thing that makes buffer seconds differ from composition
+    // seconds — the global rate scales the transport clock and the source's
+    // playbackRate together, so it cancels out. Dropping the `* mediaRate`
+    // therefore looks harmless at the default rate and truncates every
+    // authored-fast clip, which is why these two cases exist.
+    it("bounds an authored 2x clip by its buffer length, not its clip length", async () => {
+      const { transport, mock, gen } = setupTransport(100);
+      const fast = {
+        muted: false,
+        getAttribute: (name: string) => (name === "data-playback-rate" ? "2" : null),
+      } as unknown as HTMLMediaElement;
+      // A 10s clip authored at 2x consumes 20 buffer seconds; playing from the
+      // start must hand `start()` all 20, or the audio stops at the halfway mark.
+      await transport.schedulePlayback(fast, mockBuffer, 5, 0, 5, 1, gen, 1, 10);
+      expect(mock.startFn).toHaveBeenCalledWith(0, 0, 20);
+    });
+
+    it("bounds an authored 0.5x clip by its buffer length, not its clip length", async () => {
+      const { transport, mock, gen } = setupTransport(100);
+      const slow = {
+        muted: false,
+        getAttribute: (name: string) => (name === "data-playback-rate" ? "0.5" : null),
+      } as unknown as HTMLMediaElement;
+      // The mirror case: 10 composition seconds at 0.5x consume 5 buffer
+      // seconds, so an unscaled bound of 10 would run 5s past the clip's end.
+      await transport.schedulePlayback(slow, mockBuffer, 5, 0, 5, 1, gen, 1, 10);
+      expect(mock.startFn).toHaveBeenCalledWith(0, 0, 5);
+    });
+
     it("plays unbounded when clipDuration is omitted (legacy behavior)", async () => {
       const { transport, mock, gen } = setupTransport(100);
       await transport.schedulePlayback(mockEl, mockBuffer, 5, 0, 8, 1, gen);
