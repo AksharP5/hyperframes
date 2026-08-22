@@ -1,15 +1,24 @@
 import { Eye, EyeSlash, SpeakerHigh, SpeakerSlash } from "@phosphor-icons/react";
-import { isCanaryEnabled } from "../../telemetry/canary";
 import { Music } from "../../icons/SystemIcons";
 import { TimelineSoloButton } from "./TimelineSoloButton";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
 import { TrackClipCount } from "./TrackClipCount";
 import { trackDisplaySuffix } from "./timelineTrackDisplay";
 
-// Audio tracks say "Mute", not "Hide" — the eye IS mute for sound-only rows.
-// Gated: the relabel ships behind the canary, unlike the preview fix.
+/**
+ * Audio tracks say "Mute", not "Hide" — the eye IS mute for sound-only rows.
+ *
+ * Action-phrased and per-track, like the visual branch: `hidden` here is the
+ * CURRENT state, so the name has to promise the opposite. It read "Muted" /
+ * "Mute" until the rollout, which named the state instead of the action (a
+ * screen-reader user could not tell that activating an already-muted row would
+ * unmute it) and dropped `suffix`, so every audio row shared one accessible
+ * name — music plus VO being the ordinary case. The wording matches the undo
+ * entry `timelineTrackVisibility` writes for the same click, where `hidden` is
+ * the INCOMING state and the two therefore read inverted.
+ */
 function visibilityButtonLabel(showAsMute: boolean, hidden: boolean, suffix: string): string {
-  if (showAsMute) return hidden ? "Muted" : "Mute";
+  if (showAsMute) return hidden ? `Unmute track${suffix}` : `Mute track${suffix}`;
   return hidden ? `Show track${suffix}` : `Hide track${suffix}`;
 }
 
@@ -37,7 +46,7 @@ export function VisibilityButton({
   // Display number in the text, real key in the callback. The two must not be
   // conflated in either direction.
   const suffix = trackDisplaySuffix(trackDisplayNumber);
-  const showAsMute = Boolean(isAudioTrack) && isCanaryEnabled("audio-track-mute");
+  const showAsMute = Boolean(isAudioTrack);
   const label = visibilityButtonLabel(showAsMute, hidden, suffix);
   return (
     <button
@@ -50,7 +59,7 @@ export function VisibilityButton({
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.stopPropagation();
-        void onToggle?.(trackNumber, !hidden);
+        void onToggle?.(trackNumber, !hidden, trackDisplayNumber);
       }}
     >
       {visibilityButtonIcon(showAsMute, hidden)}
@@ -93,9 +102,7 @@ export function PlainTrackHeader({
       {showTrackLabel && (
         <span
           className={`min-w-0 flex-1 truncate text-[11px] ${
-            isAudioTrack && (isTrackHidden || isGroupMuted) && isCanaryEnabled("audio-track-mute")
-              ? "line-through"
-              : ""
+            isAudioTrack && (isTrackHidden || isGroupMuted) ? "line-through" : ""
           }`}
           title={isGroupMuted && !isTrackHidden ? `${trackLabel} (group muted)` : trackLabel}
         >
@@ -111,7 +118,7 @@ export function PlainTrackHeader({
         isAudioTrack={isAudioTrack}
         onToggle={onToggleTrackHidden}
       />
-      {isAudioTrack && isCanaryEnabled("audio-track-mute") && onToggleSolo && (
+      {isAudioTrack && onToggleSolo && (
         <TimelineSoloButton isSoloed={isSoloed} onToggle={onToggleSolo} />
       )}
     </>
