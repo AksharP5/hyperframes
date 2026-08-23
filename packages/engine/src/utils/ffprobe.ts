@@ -69,6 +69,8 @@ async function runFfprobe(
     // Nothing is ever written to the child's stdin; leaving it as a pipe is
     // what lets a stdin-reading invocation block indefinitely.
     stdio: ["ignore", "pipe", "pipe"],
+    // See runFfmpeg.ts: keeps a console window off the user's desktop on Windows.
+    windowsHide: true,
   });
   trackChildProcess(proc);
   // Decoded through StringDecoder rather than per-chunk toString(): a
@@ -608,7 +610,10 @@ function extractStillImageMetadata(filePath: string): StillImageMetadata | null 
  * in newer ones; HDR tags vary similarly. Use this for any sidecar tag where
  * you want to be resilient across muxer versions.
  */
-function readTagCI(tags: Record<string, string | undefined> | undefined, name: string): string {
+export function readTagCI(
+  tags: Record<string, string | undefined> | undefined,
+  name: string,
+): string {
   if (!tags) return "";
   const target = name.toLowerCase();
   for (const [key, value] of Object.entries(tags)) {

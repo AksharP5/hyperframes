@@ -37,6 +37,12 @@ declare global {
       onSwallowed?: (label: string, err: unknown) => void;
       seek?: (timeSeconds: number, options?: RuntimeSeekOptions) => void;
       duration?: number;
+      /**
+       * Studio's "Hear only this" push: the full set of soloed clip/group ids,
+       * replaced wholesale on every change. Session-only by design — never
+       * read from or written to any document attribute.
+       */
+      setAudioSolo?: (ids: readonly string[]) => void;
     };
     __playerReady?: boolean;
     __renderReady?: boolean;
@@ -97,13 +103,15 @@ declare global {
     };
     THREE?: ThreeLike;
     /**
-     * Global anime.js instance (set by including the anime.iife.min.js script).
-     * The adapter uses `anime.running` for auto-discovery.
+     * Global Anime.js v4 namespace (set by the UMD or IIFE bundle).
+     * Register returned instances on `window.__hfAnime`; v4 has no
+     * `anime.running` auto-discovery registry.
      */
     anime?: {
-      (params: unknown): unknown;
-      timeline?: (params?: unknown) => unknown;
-      running: unknown[];
+      animate?: (targets: unknown, params?: unknown) => unknown;
+      createTimeline?: (params?: unknown) => unknown;
+      /** Legacy v3 registry retained for backward-compatible discovery. */
+      running?: unknown[];
     };
     /**
      * anime.js instances registered by compositions.

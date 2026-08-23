@@ -127,6 +127,7 @@ export {
   isMemoryExhaustionError,
   type BeforeCaptureHook,
   type DiscardWarmupInnerCapture,
+  type StaticVerificationOutcome,
 } from "./services/frameCapture.js";
 export {
   CaptureFailure,
@@ -393,3 +394,13 @@ export {
   type HdrMasteringMetadata,
 } from "./utils/hdr.js";
 export type { VideoColorSpace } from "./utils/ffprobe.js";
+export {
+  renderProvenanceArgs,
+  appendRenderProvenanceArgs,
+  readRenderProvenance,
+  PROVENANCE_RENDERER_TAG,
+  PROVENANCE_VERSION_TAG,
+  PROVENANCE_RENDERER_NAME,
+  PROVENANCE_VERSION,
+  type RenderProvenance,
+} from "./utils/renderProvenance.js";

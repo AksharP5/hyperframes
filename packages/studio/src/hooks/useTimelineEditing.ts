@@ -1,16 +1,10 @@
 // fallow-ignore-file complexity
 import { useCallback, useRef } from "react";
 import type { TimelineElement } from "../player";
-import { usePlayerStore } from "../player";
 import { useRazorSplit } from "./useRazorSplit";
 import { useTimelineAssetDropOps } from "./useTimelineAssetDropOps";
-import { saveProjectFilesWithHistory } from "../utils/studioFileHistory";
-import { setCompositionDurationToContent } from "../utils/timelineAssetDrop";
-import { furthestClipEndFromSource } from "../player/lib/timelineElementHelpers";
-import { getTimelineElementLabel } from "../utils/studioHelpers";
 import {
   applyTimelineStackingReorder,
-  buildPatchTarget,
   patchIframeDomTiming,
   playbackStartAttributeForElement,
   persistTimelineEdit,
@@ -27,7 +21,11 @@ import {
 } from "./timelineTimingSync";
 import type { PersistTimelineEditInput } from "./timelineEditingHelpers";
 import type { TimelineStackingReorderIntent } from "../player/components/timelineEditing";
+import { useSetAudioGroupAttribute } from "./timelineAudioGroupVolume";
+import { useTimelineDeleteOps } from "./useTimelineDeleteOps";
+import { useSetElementAttribute } from "./timelineElementFxAttribute";
 import {
+  useAudioGroupCarveAssignment,
   useTimelineElementVisibilityEditing,
   useTimelineTrackVisibilityEditing,
 } from "./timelineTrackVisibility";
@@ -36,7 +34,6 @@ import { serializeZLaneGesture } from "../components/nle/zLaneGesture";
 import { cutoverCommittedOrThrow, sdkTimingPersist } from "../utils/sdkCutover";
 import type { UseTimelineEditingOptions } from "./useTimelineEditingTypes";
 import { getStudioSaveErrorMessage } from "../utils/studioSaveDiagnostics";
-import { studioWriteHeaders } from "../utils/studioFileVersion";
 
 type TimelineMoveUpdates = Pick<TimelineElement, "start" | "track"> & {
   stackingReorder?: TimelineStackingReorderIntent | null;
@@ -388,105 +385,55 @@ export function useTimelineEditing({
     forceReloadSdkSession,
   });
 
-  // fallow-ignore-next-line complexity
-  const handleTimelineElementDelete = useCallback(
-    // fallow-ignore-next-line complexity
-    async (element: TimelineElement) => {
-      if (isRecordingRef?.current) {
-        showToast("Cannot edit timeline while recording", "error");
-        return;
-      }
-      const pid = projectIdRef.current;
-      if (!pid) throw new Error("No active project");
-      const label = getTimelineElementLabel(element);
+  const handleAutoGroupCarveSources = useAudioGroupCarveAssignment({
+    projectIdRef,
+    activeCompPath,
+    showToast,
+    writeProjectFile,
+    recordEdit,
+    domEditSaveTimestampRef,
+    previewIframeRef,
+    pendingTimelineEditPathRef,
+    isRecordingRef,
+  });
 
-      const targetPath = element.sourceFile || activeCompPath || "index.html";
-      try {
-        const originalContent = await readFileContent(pid, targetPath);
+  const setElementFxAttribute = useSetElementAttribute({
+    projectIdRef,
+    activeCompPath,
+    showToast,
+    writeProjectFile,
+    recordEdit,
+    domEditSaveTimestampRef,
+    previewIframeRef,
+    pendingTimelineEditPathRef,
+    isRecordingRef,
+  });
 
-        const patchTarget = buildPatchTarget(element);
-        if (!patchTarget) {
-          throw new Error(`Timeline element ${element.id} is missing a patchable target`);
-        }
+  const setAudioGroupAttribute = useSetAudioGroupAttribute({
+    projectIdRef,
+    activeCompPath,
+    showToast,
+    writeProjectFile,
+    recordEdit,
+    domEditSaveTimestampRef,
+    previewIframeRef,
+    pendingTimelineEditPathRef,
+    isRecordingRef,
+  });
 
-        const removeResponse = await fetch(
-          `/api/projects/${pid}/file-mutations/remove-element/${encodeURIComponent(targetPath)}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...studioWriteHeaders() },
-            body: JSON.stringify({ target: patchTarget }),
-          },
-        );
-        if (!removeResponse.ok) {
-          throw new Error(`Failed to delete ${element.id} from ${targetPath}`);
-        }
-
-        const removeData = (await removeResponse.json()) as {
-          changed?: boolean;
-          content?: string;
-        };
-        const removedContent =
-          typeof removeData.content === "string" ? removeData.content : originalContent;
-        // Content-driven duration: shrink the composition to the furthest
-        // remaining clip end, read from the post-removal SOURCE (raw
-        // data-duration), so deleting the last/longest clip removes trailing
-        // empty space. Measured from the source, not the store, whose
-        // durations are runtime-truncated.
-        const deleteContentEnd = furthestClipEndFromSource(removedContent);
-        const patchedContent = setCompositionDurationToContent(removedContent, deleteContentEnd);
-        // Optimistically reflect the shrunk length in the readout/seek bar,
-        // rolling it back if the persist below fails (see captureDurationRollback).
-        const rollbackDuration = captureDurationRollback(previewIframeRef.current);
-        if (deleteContentEnd > 0 && targetPath === (activeCompPath || "index.html")) {
-          usePlayerStore.getState().setDuration(deleteContentEnd);
-        }
-
-        domEditSaveTimestampRef.current = Date.now();
-        try {
-          await saveProjectFilesWithHistory({
-            projectId: pid,
-            label: "Delete timeline clip",
-            kind: "timeline",
-            files: { [targetPath]: patchedContent },
-            readFile: async () => originalContent,
-            // remove-element already wrote the removal, so disk holds THAT — not the
-            // content read at the top. Undo still goes back to the original.
-            diskContent: { [targetPath]: removedContent },
-            writeFile: writeProjectFile,
-            recordEdit,
-          });
-        } catch (error) {
-          rollbackDuration();
-          throw error;
-        }
-
-        usePlayerStore
-          .getState()
-          .setElements(
-            timelineElements.filter((te) => (te.key ?? te.id) !== (element.key ?? element.id)),
-          );
-        usePlayerStore.getState().setSelectedElementId(null);
-        forceReloadSdkSession?.();
-        reloadPreview();
-        showToast(`Deleted ${label}. Use Undo to restore it.`, "info");
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to delete timeline clip";
-        showToast(message);
-      }
-    },
-    [
-      activeCompPath,
-      recordEdit,
-      showToast,
-      timelineElements,
-      writeProjectFile,
-      domEditSaveTimestampRef,
-      reloadPreview,
-      isRecordingRef,
-      forceReloadSdkSession,
-      previewIframeRef,
-    ],
-  );
+  const { handleTimelineElementsDelete, handleTimelineElementDelete } = useTimelineDeleteOps({
+    projectIdRef,
+    activeCompPath,
+    timelineElements,
+    showToast,
+    writeProjectFile,
+    recordEdit,
+    domEditSaveTimestampRef,
+    reloadPreview,
+    isRecordingRef,
+    forceReloadSdkSession,
+    previewIframeRef,
+  });
 
   const { handleTimelineAssetDrop, handleTimelineFileDrop, handleTimelineCompositionDrop } =
     useTimelineAssetDropOps({
@@ -532,7 +479,11 @@ export function useTimelineEditing({
     handleTimelineElementResize,
     handleToggleTrackHidden,
     handleToggleElementHidden,
+    handleAutoGroupCarveSources,
+    setAudioGroupAttribute,
+    setElementFxAttribute,
     handleTimelineElementDelete,
+    handleTimelineElementsDelete,
     handleTimelineElementSplit: handleRazorSplit,
     handleRazorSplit,
     handleRazorSplitAll,

@@ -429,6 +429,61 @@ describe("media_variable_src_no_fallback", () => {
   });
 });
 
+describe("audio_volume_tween_overrides_gain", () => {
+  const withScript = (audioAttrs: string, script: string) => `<!DOCTYPE html><html><body>
+    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="10">
+      <audio id="bgm" src="a.wav" data-start="0" data-duration="10" ${audioAttrs}></audio>
+    </div>
+    <script>${script}</script>
+  </body></html>`;
+
+  it("warns that the tween's values win over an authored gain", async () => {
+    const res = await lintHyperframeHtml(
+      withScript(`data-volume="1.949845"`, `tl.fromTo("#bgm", { volume: 0 }, { volume: 1 });`),
+    );
+    const finding = res.findings.find((f) => f.code === "audio_volume_tween_overrides_gain");
+    expect(finding?.severity).toBe("warning");
+    expect(finding?.elementId).toBe("bgm");
+    expect(finding?.message).toMatch(/5\.8 dB/);
+  });
+
+  it("warns about an attenuation the tween overrides, not just a boost", async () => {
+    const res = await lintHyperframeHtml(
+      withScript(`data-volume="0.3"`, `tl.to("#bgm", { volume: 1 });`),
+    );
+    expect(res.findings.some((f) => f.code === "audio_volume_tween_overrides_gain")).toBe(true);
+  });
+
+  it("stays quiet on the fade the docs recommend, which carries no data-volume", async () => {
+    // `Number(null)` is 0 — finite and not 1 — so a clip with NO `data-volume`
+    // was reported as authored at silence. Both halves were false, and this is
+    // the shape the docs recommend for a tweened clip: the baseline attribute is
+    // for elements no tween touches. The rule fired on exactly the common fade.
+    const res = await lintHyperframeHtml(
+      withScript("", `tl.fromTo("#bgm", { volume: 0 }, { volume: 1 });`),
+    );
+    expect(res.findings.some((f) => f.code === "audio_volume_tween_overrides_gain")).toBe(false);
+  });
+
+  it("stays quiet at unity, without a tween, or when a lane already owns the level", async () => {
+    const unity = await lintHyperframeHtml(
+      withScript(`data-volume="1"`, `tl.to("#bgm", { volume: 0 });`),
+    );
+    const noTween = await lintHyperframeHtml(
+      withScript(`data-volume="2"`, `tl.to("#bgm", { x: 1 });`),
+    );
+    const lane = await lintHyperframeHtml(
+      withScript(
+        `data-volume="2" data-automation='{"version":1,"lanes":[{"target":"volume","points":[{"t":0,"v":1}]}]}'`,
+        `tl.to("#bgm", { volume: 0 });`,
+      ),
+    );
+    for (const res of [unity, noTween, lane]) {
+      expect(res.findings.some((f) => f.code === "audio_volume_tween_overrides_gain")).toBe(false);
+    }
+  });
+});
+
 describe("audio_volume_double_automation", () => {
   const withScript = (audioAttrs: string, script: string) => `<!DOCTYPE html><html><body>
     <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="10">
@@ -498,5 +553,53 @@ describe("audio_volume_double_automation", () => {
       ),
     );
     expect(res.findings.some((f) => f.code === "audio_volume_double_automation")).toBe(false);
+  });
+});
+
+describe("audio_carve_ungrouped_sources", () => {
+  const withCarve = (carveJson: string, extra = "") => `<!DOCTYPE html><html><body>
+    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="10">
+      <audio id="bed" src="bed.wav" data-start="0" data-duration="10" data-fx-carve='${carveJson}'></audio>
+      ${extra}
+    </div>
+  </body></html>`;
+
+  it("warns when sources names two or more plain clip ids", async () => {
+    const res = await lintHyperframeHtml(
+      withCarve(`{"enabled":true,"sources":["vo-1","vo-2"],"strength":0.35}`),
+    );
+    const finding = res.findings.find((f) => f.code === "audio_carve_ungrouped_sources");
+    expect(finding?.severity).toBe("warning");
+    expect(finding?.elementId).toBe("bed");
+  });
+
+  it("stays quiet when sources names a group", async () => {
+    const res = await lintHyperframeHtml(
+      withCarve(
+        `{"enabled":true,"sources":["voiceover"],"strength":0.35}`,
+        `<hf-audio-group id="voiceover" data-label="Voiceover"></hf-audio-group>`,
+      ),
+    );
+    expect(res.findings.some((f) => f.code === "audio_carve_ungrouped_sources")).toBe(false);
+  });
+
+  it("stays quiet for a single-clip sources list", async () => {
+    const res = await lintHyperframeHtml(
+      withCarve(`{"enabled":true,"sources":["narration"],"strength":0.35}`),
+    );
+    expect(res.findings.some((f) => f.code === "audio_carve_ungrouped_sources")).toBe(false);
+  });
+
+  it("still warns when one entry is a group and the rest are plain clip ids", async () => {
+    // Mixing a group with two more bare clip ids is still an ungrouped-source
+    // rot risk for those two clips — only fully-grouped sources are silent.
+    const res = await lintHyperframeHtml(
+      withCarve(
+        `{"enabled":true,"sources":["voiceover","vo-3","vo-4"],"strength":0.35}`,
+        `<hf-audio-group id="voiceover" data-label="Voiceover"></hf-audio-group>`,
+      ),
+    );
+    const finding = res.findings.find((f) => f.code === "audio_carve_ungrouped_sources");
+    expect(finding?.severity).toBe("warning");
   });
 });

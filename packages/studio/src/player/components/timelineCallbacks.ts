@@ -67,7 +67,46 @@ export interface TimelineEditCallbacks {
     }>,
     options?: { coalesceKey?: string },
   ) => Promise<void> | void;
-  onToggleTrackHidden?: (track: number, hidden: boolean) => Promise<void> | void;
+  /**
+   * `displayNumber` is the row the CLICKED control announced. It travels with
+   * the click because the header and the undo-history label derive the row from
+   * two different orderings: the header's comes from the group-aware row list
+   * (synthetic anchor rows, members pulled contiguous), the history's from a
+   * plain ascending sort of element-bearing keys. Once a group exists those
+   * disagree, so the same click said "Mute track 2" and recorded "Mute track 1".
+   * Passing the rendered number keeps one answer instead of two derivations.
+   */
+  onToggleTrackHidden?: (
+    track: number,
+    hidden: boolean,
+    displayNumber?: number | null,
+  ) => Promise<void> | void;
+  /** B7's bus strip: live-write the group's own attribute while dragging. */
+  onSetAudioGroupAttributeLive?: (groupId: string, attr: string, value: string | null) => void;
+  /** ...and persist one undo entry on release. */
+  onSetAudioGroupAttributeQuiet?: (
+    groupId: string,
+    attr: string,
+    value: string | null,
+    label: string,
+  ) => Promise<void>;
+  /** C1's ungrouped-track FX pointer: "Group these clips" — write
+   *  `data-audio-group` on every one of them, atomically. Same shape B6's
+   *  carve auto-grouping uses. */
+  onGroupClips?: (clipIds: readonly string[], groupId: string) => Promise<void>;
+  /** C1's single-clip FX write: addressed by the clip itself rather than the
+   *  current selection, mirroring `onSetAudioGroupAttributeLive/Quiet`. */
+  onSetElementAttributeLive?: (
+    element: TimelineElement,
+    attr: string,
+    value: string | null,
+  ) => void;
+  onSetElementAttributeQuiet?: (
+    element: TimelineElement,
+    attr: string,
+    value: string | null,
+    label: string,
+  ) => Promise<void>;
   onBlockedEditAttempt?: (element: TimelineElement, intent: BlockedTimelineEditIntent) => void;
   onSplitElement?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplit?: (element: TimelineElement, splitTime: number) => Promise<void> | void;

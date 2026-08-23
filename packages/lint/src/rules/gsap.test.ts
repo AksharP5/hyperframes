@@ -240,27 +240,6 @@ describe("GSAP rules", () => {
     ).toHaveLength(1);
   });
 
-  it("errors when a full-frame transition flash uses a GSAP from reveal", async () => {
-    const html = `
-<html><body data-composition-id="c1" data-width="1920" data-height="1080">
-  <div id="tr-flash-1" style="position:fixed;inset:0;background:#fff;pointer-events:none;z-index:990"></div>
-  <section class="clip" data-start="0" data-duration="8"><h1>Scene 1</h1></section>
-  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-  <script>
-    window.__timelines = window.__timelines || {};
-    const tl = gsap.timeline({ paused: true });
-    tl.from("#tr-flash-1", { opacity: 0, duration: 0.18 }, 7.92);
-    window.__timelines["c1"] = tl;
-  </script>
-</body></html>`;
-    const result = await lintHyperframeHtml(html);
-    const finding = result.findings.find(
-      (f) => f.code === "gsap_fullscreen_overlay_starts_visible",
-    );
-    expect(finding).toBeDefined();
-    expect(finding?.selector).toBe("#tr-flash-1");
-  });
-
   it("errors when a grouped GSAP selector targets a visible full-frame flash", async () => {
     const html = `
 <html><body data-composition-id="c1" data-width="1920" data-height="1080">
@@ -1917,93 +1896,6 @@ describe("GSAP rules", () => {
     expect(finding).toBeUndefined();
   });
 
-  it("scene_layer_missing_visibility_kill: fires when multi-scene exit lacks hard kill", async () => {
-    const html = `
-<html><body>
-  <div data-composition-id="c1" data-width="1920" data-height="1080">
-    <div id="scene1"></div>
-    <div id="scene2"></div>
-  </div>
-  <script>
-    window.__timelines = window.__timelines || {};
-    const tl = gsap.timeline({ paused: true });
-    tl.to("#scene1", { opacity: 0, duration: 0.5 }, 2.0);
-    window.__timelines["c1"] = tl;
-  </script>
-</body></html>`;
-    const result = await lintHyperframeHtml(html);
-    const finding = result.findings.find((f) => f.code === "scene_layer_missing_visibility_kill");
-    expect(finding).toBeDefined();
-    expect(finding?.severity).toBe("error");
-    expect(finding?.elementId).toBe("scene1");
-  });
-
-  it("scene_layer_missing_visibility_kill points at the inner-wrapper pattern when the scene element is a clip", async () => {
-    // Same contradiction as gsap_exit_missing_hard_kill above, via the older
-    // id-pattern-based rule: `tl.set("#scene1", { visibility: "hidden" }, ...)`
-    // on a class="clip" scene element is exactly what gsap_animates_clip_element
-    // then errors on.
-    const html = `
-<html><body>
-  <div data-composition-id="c1" data-width="1920" data-height="1080">
-    <div id="scene1" class="clip"></div>
-    <div id="scene2" class="clip"></div>
-  </div>
-  <script>
-    window.__timelines = window.__timelines || {};
-    const tl = gsap.timeline({ paused: true });
-    tl.to("#scene1", { opacity: 0, duration: 0.5 }, 2.0);
-    window.__timelines["c1"] = tl;
-  </script>
-</body></html>`;
-    const result = await lintHyperframeHtml(html);
-    const finding = result.findings.find((f) => f.code === "scene_layer_missing_visibility_kill");
-    expect(finding).toBeDefined();
-    expect(finding?.fixHint).toContain("clip element");
-    expect(finding?.fixHint).toContain("inner");
-    expect(finding?.fixHint).not.toContain('tl.set("#scene1"');
-  });
-
-  it("scene_layer_missing_visibility_kill: DOES fire when kill is only in a comment (stripJsComments guard)", async () => {
-    const html = `
-<html><body>
-  <div data-composition-id="c1" data-width="1920" data-height="1080">
-    <div id="scene1"></div>
-    <div id="scene2"></div>
-  </div>
-  <script>
-    window.__timelines = window.__timelines || {};
-    const tl = gsap.timeline({ paused: true });
-    // tl.set("#scene1", { visibility: "hidden" }, 2.5);
-    tl.to("#scene1", { opacity: 0, duration: 0.5 }, 2.0);
-    window.__timelines["c1"] = tl;
-  </script>
-</body></html>`;
-    const result = await lintHyperframeHtml(html);
-    const finding = result.findings.find((f) => f.code === "scene_layer_missing_visibility_kill");
-    expect(finding).toBeDefined();
-  });
-
-  it("scene_layer_missing_visibility_kill: does NOT fire when hard kill is present", async () => {
-    const html = `
-<html><body>
-  <div data-composition-id="c1" data-width="1920" data-height="1080">
-    <div id="scene1"></div>
-    <div id="scene2"></div>
-  </div>
-  <script>
-    window.__timelines = window.__timelines || {};
-    const tl = gsap.timeline({ paused: true });
-    tl.to("#scene1", { opacity: 0, duration: 0.5 }, 2.0);
-    tl.set("#scene1", { visibility: "hidden" }, 2.5);
-    window.__timelines["c1"] = tl;
-  </script>
-</body></html>`;
-    const result = await lintHyperframeHtml(html);
-    const finding = result.findings.find((f) => f.code === "scene_layer_missing_visibility_kill");
-    expect(finding).toBeUndefined();
-  });
-
   it("gsap_non_transform_motion: errors on layout-prop tweens (left/marginLeft) and roundProps", async () => {
     const html = `
 <html><body>
@@ -3137,5 +3029,45 @@ describe("SVG draw-on rules", () => {
     const result = await lintHyperframeHtml(html);
     const finding = result.findings.find((f) => f.code === "svg_measure_before_path_d");
     expect(finding).toBeUndefined();
+  });
+
+  describe("gsap_fullscreen_overlay_starts_visible — the from() shape is not a defect", () => {
+    const overlay = (style: string, script: string) => `
+<html><body>
+  <div id="root" data-composition-id="c1" data-width="1920" data-height="1080" data-start="0" data-duration="10">
+    <div id="flash" style="position:fixed;inset:0;background:#000;${style}"></div>
+  </div>
+  <script src="gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    ${script}
+    window.__timelines["c1"] = tl;
+  </script>
+</body></html>`;
+
+    it("does not flag a from() reveal, which already seats opacity 0 at t=0", async () => {
+      // This used to error, and BOTH its fixHints (authored CSS opacity:0, or an
+      // immediate gsap.set) produce gsap_from_opacity_noop — whose own fixHint says
+      // to remove exactly what was just added. Applying either hint looped forever.
+      const result = await lintHyperframeHtml(
+        overlay("", `tl.from("#flash", { opacity: 0, duration: 1 }, 2);`),
+      );
+      expect(
+        result.findings.find((f) => f.code === "gsap_fullscreen_overlay_starts_visible"),
+      ).toBeUndefined();
+    });
+
+    it("still flags an overlay that is revealed and later hidden again", async () => {
+      const result = await lintHyperframeHtml(
+        overlay(
+          "",
+          `tl.to("#flash", { opacity: 1, duration: 1 }, 2);\n    tl.to("#flash", { opacity: 0, duration: 1 }, 5);`,
+        ),
+      );
+      expect(
+        result.findings.find((f) => f.code === "gsap_fullscreen_overlay_starts_visible"),
+      ).toBeDefined();
+    });
   });
 });

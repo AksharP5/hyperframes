@@ -134,6 +134,7 @@ const commandLoaders = {
   lint: () => import("./commands/lint.js").then((m) => m.default),
   check: () => import("./commands/check.js").then((m) => m.default),
   beats: () => import("./commands/beats.js").then((m) => m.default),
+  "normalize-audio": () => import("./commands/normalize-audio.js").then((m) => m.default),
   inspect: () => import("./commands/inspect.js").then((m) => m.default),
   keyframes: () => import("./commands/keyframes.js").then((m) => m.default),
   layout: () => import("./commands/layout.js").then((m) => m.default),
@@ -282,12 +283,21 @@ let finalized = false;
 async function finalizeCli(result: CommandResult): Promise<void> {
   if (finalized) return;
   finalized = true;
-  commandFailed ||= result.exitCode !== 0;
+  // Once the artifact has validated and been committed to disk, the run
+  // delivered — anything recorded as a failure after that is teardown noise.
+  // The uncaughtException / unhandledRejection handlers already consult
+  // isRenderSucceeded(), but a post-render throw that the command wrapper
+  // CATCHES never reaches them: it becomes an ordinary non-zero
+  // CommandResult, and a valid render is reported as a failure. Sanitizing
+  // here, once, is what those handlers cannot cover, and it keeps the exit
+  // code and the telemetry record from disagreeing about the same run.
+  const exitCode = isRenderSucceeded() ? 0 : result.exitCode;
+  commandFailed ||= exitCode !== 0;
   await telemetryReady.catch(() => {});
   _trackCommandResult?.({
     command,
-    success: result.exitCode === 0 && commandSucceededForTelemetry(),
-    exitCode: result.exitCode,
+    success: exitCode === 0 && commandSucceededForTelemetry(),
+    exitCode,
     durationMs: Date.now() - commandStart,
     runId,
   });
@@ -297,7 +307,7 @@ async function finalizeCli(result: CommandResult): Promise<void> {
     _printStalePinNotice?.();
     _printSkillsUpdateNotice?.();
   }
-  process.exitCode = result.exitCode;
+  process.exitCode = exitCode;
 }
 
 registerRootExitRequester((exitCode) => {

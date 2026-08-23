@@ -9,7 +9,11 @@ import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { existsSync, readFileSync, writeFileSync, statSync, unlinkSync } from "node:fs";
 import { resolve, join, basename } from "node:path";
-import { createProjectWatcher, type ProjectWatcher } from "./fileWatcher.js";
+import {
+  createProjectWatcher,
+  shouldWatchProjectFile,
+  type ProjectWatcher,
+} from "./fileWatcher.js";
 import {
   hashSignatureParts,
   loadRuntimeSource,
@@ -32,6 +36,7 @@ import {
   consumeFileWriteReceipt,
   fileContentVersion,
   getMimeType,
+  affectsProjectSignature,
   type PreviewApiAdapter,
   thumbnailDeviceScaleFactor,
   type ResolvedProject,
@@ -359,8 +364,10 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
 
   const project: ResolvedProject = { id: projectId, dir: projectDir, title: projectId };
   let cachedProjectSignature: string | null = null;
-  watcher.addListener(() => {
-    cachedProjectSignature = null;
+  watcher.addListener((changedPath) => {
+    if (affectsProjectSignature(projectDir, join(projectDir, changedPath))) {
+      cachedProjectSignature = null;
+    }
   });
 
   const adapter: PreviewApiAdapter = {
@@ -429,6 +436,11 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
     async lint(html: string, opts?: { filePath?: string }) {
       const { lintHyperframeHtml } = await import("@hyperframes/lint");
       return await lintHyperframeHtml(html, opts);
+    },
+
+    async lintProject(dir: string) {
+      const { lintProject } = await import("@hyperframes/lint");
+      return await lintProject(dir);
     },
 
     runtimeUrl: "/api/runtime.js",
@@ -765,10 +777,50 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
           .writeSSE({ event: "file-change", data: JSON.stringify(receipt ?? { path }) })
           .catch(() => {});
       };
-      watcher.addListener(listener);
+      // Re-applied here because the watcher now also emits the signature
+      // manifest files, which must not trigger a browser reload.
+      watcher.addListener((changedPath) => {
+        if (shouldWatchProjectFile(changedPath)) listener(changedPath);
+      });
       while (true) {
         await stream.sleep(30000);
       }
+    });
+  });
+
+  // ── Encoder availability, asked before Export is offered ────────────────
+  // The render route below already refuses without FFmpeg, but discovering at
+  // export time that the encoder was never installed is the worst possible
+  // moment: the user has already built the whole composition. Studio asks here
+  // when the Render panel opens so it can say so up front, with the same
+  // per-platform install command `doctor` prints.
+  //
+  // Only a passing result is cached. A user who reads the prompt, installs
+  // FFmpeg and hits Recheck has to get a fresh answer, or the fix they just
+  // applied is invisible until they restart Studio.
+  let ffmpegReady = false;
+  app.get("/api/environment/ffmpeg", async (c) => {
+    if (ffmpegReady) return c.json({ ok: true });
+    const [{ runEnvironmentChecks }, { getFFmpegInstallCommand }] = await Promise.all([
+      import("../browser/preflight.js"),
+      import("../browser/ffmpeg.js"),
+    ]);
+    // With every optional check off this is exactly the FFmpeg and ffprobe
+    // pair — the same two `doctor` runs. ffprobe matters on its own: it ships
+    // with FFmpeg but is a separate binary, and a project with any media asset
+    // fails at probe time without it.
+    const { outcomes } = await runEnvironmentChecks();
+    const failed = outcomes.find((outcome) => !outcome.ok);
+    if (!failed) {
+      ffmpegReady = true;
+      return c.json({ ok: true });
+    }
+    return c.json({
+      ok: false,
+      title: failed.title ?? `${failed.name} not found`,
+      detail: failed.detail,
+      hint: failed.hint,
+      command: getFFmpegInstallCommand(),
     });
   });
 

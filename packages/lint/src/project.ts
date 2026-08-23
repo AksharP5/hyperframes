@@ -1,4 +1,5 @@
 export { shouldBlockRender } from "./shouldBlockRender.js";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { rewriteAssetPath } from "@hyperframes/parsers/asset-paths";
@@ -17,6 +18,7 @@ import { collectLocalVideoCandidates, lintHevcPreviewCodec } from "./hevcPreview
 import { lintHyperframeHtml } from "./hyperframeLinter.js";
 import type { HyperframeLintFinding, HyperframeLintResult } from "./types.js";
 import type { ParsableDocumentLike } from "@hyperframes/parsers/sub-composition-validity";
+import { mediaSrcTagRe } from "./utils";
 
 /** Adapts linkedom's `parseHTML` to the `checkSubCompositionUsability` contract. */
 function parseSubCompHtml(html: string): ParsableDocumentLike {
@@ -47,10 +49,21 @@ function querySelectorAllIncludingTemplates(root: ParentNode, selector: string):
 }
 
 export interface ProjectLintResult {
-  results: Array<{ file: string; result: HyperframeLintResult }>;
+  results: Array<{ file: string; result: HyperframeLintResult; contentHash: string }>;
   totalErrors: number;
   totalWarnings: number;
   totalInfos: number;
+}
+
+/**
+ * Short content digest of a linted file. Callers use it to tell "the author
+ * edited this file and the finding survived" (an iteration that did not
+ * converge) from "the same file was linted twice" (no attempt was made).
+ * Truncated because it is only ever compared against the previous run's digest
+ * for the same file, never used as a security boundary.
+ */
+function contentDigest(html: string): string {
+  return createHash("sha256").update(html).digest("hex").slice(0, 16);
 }
 
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".aac", ".ogg", ".m4a", ".flac", ".opus"]);
@@ -151,7 +164,7 @@ export async function lintProject(
   }
   const rootFile = relative(resolve(projectDir), indexPath).replace(/\\/g, "/") || "index.html";
   const rootCompSrcPath = rootFile === "index.html" ? undefined : rootFile;
-  const results: Array<{ file: string; result: HyperframeLintResult }> = [];
+  const results: ProjectLintResult["results"] = [];
   let totalErrors = 0;
   let totalWarnings = 0;
   let totalInfos = 0;
@@ -161,7 +174,7 @@ export async function lintProject(
     filePath: indexPath,
     externalStyles: collectExternalStyles(projectDir, rootHtml, rootCompSrcPath),
   });
-  results.push({ file: rootFile, result: rootResult });
+  results.push({ file: rootFile, result: rootResult, contentHash: contentDigest(rootHtml) });
   totalErrors += rootResult.errorCount;
   totalWarnings += rootResult.warningCount;
   totalInfos += rootResult.infoCount;
@@ -201,7 +214,11 @@ export async function lintProject(
         isSubComposition: true,
         externalStyles: collectExternalStyles(projectDir, html, compSrcPath),
       });
-      results.push({ file: `compositions/${file}`, result });
+      results.push({
+        file: `compositions/${file}`,
+        result,
+        contentHash: contentDigest(html),
+      });
       totalErrors += result.errorCount;
       totalWarnings += result.warningCount;
       totalInfos += result.infoCount;
@@ -214,6 +231,7 @@ export async function lintProject(
     ...lintMissingLocalAsset(projectDir, allHtmlSources),
     ...lintTextureMaskAssetNotFound(projectDir, allHtmlSources),
     ...(!entryFile ? lintMultipleRootCompositions(projectDir) : []),
+    ...(!entryFile ? lintBlankRootWithStandaloneComposition(rootHtml, allHtmlSources) : []),
     ...lintDuplicateAudioTracks(allHtmlSources),
     ...lintMissingOrEmptySubComposition(projectDir, rootHtml),
     ...(await lintHevcPreviewCodec(collectLocalVideoCandidates(projectDir, allHtmlSources))),
@@ -236,6 +254,47 @@ export async function lintProject(
   }
 
   return { results, totalErrors, totalWarnings, totalInfos };
+}
+
+function lintBlankRootWithStandaloneComposition(
+  rootHtml: string,
+  htmlSources: HtmlSource[],
+): HyperframeLintFinding[] {
+  const { document: rootDocument } = parseHTML(rootHtml);
+  const root = rootDocument.querySelector("body [data-composition-id]");
+  // A no-media scaffold has no rendered descendants and can silently mask an authored file below.
+  // A scaffold that retained its A-roll <video>/<audio> is visibly non-blank, so this rule leaves it
+  // alone even when another composition is unmounted.
+  if (!root || root.querySelector("*:not(script):not(style):not(link):not(meta):not(template)")) {
+    return [];
+  }
+
+  const standaloneCandidates: string[] = [];
+  for (const source of htmlSources) {
+    if (!source.compSrcPath) continue;
+    const { document } = parseHTML(source.html);
+    const composition = document.querySelector("body [data-composition-id]");
+    if (!composition) continue;
+    const authoredTimedContent = Array.from(
+      composition.querySelectorAll(
+        ".clip, [data-start], [data-end], video, audio, img, svg, canvas",
+      ),
+    ).some((element) => !element.hasAttribute("data-composition-src"));
+    if (authoredTimedContent) standaloneCandidates.push(source.compSrcPath);
+  }
+
+  if (standaloneCandidates.length === 0) return [];
+  return [
+    {
+      code: "blank_root_with_standalone_composition",
+      severity: "error",
+      message: `The default index.html composition has no renderable content, but ${standaloneCandidates.join(", ")} contains a standalone timed composition. Default check, snapshot, preview, render, and publish commands open index.html, so they will capture or publish only its background.`,
+      fixHint:
+        `Move the authored composition into index.html, or mount it from index.html with data-composition-src and the sub-composition <template> contract. ` +
+        `If the separate file is intentional, render it explicitly with --composition ${standaloneCandidates[0]}.`,
+      suggestedComposition: standaloneCandidates[0],
+    },
+  ];
 }
 
 function lintProjectAudioFiles(
@@ -278,13 +337,13 @@ function lintAudioSrcNotFound(
 ): HyperframeLintFinding[] {
   const findings: HyperframeLintFinding[] = [];
 
-  const audioSrcRe = /<audio\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+  const audioSrcRe = mediaSrcTagRe("audio");
 
   const missingSrcs: string[] = [];
   for (const { html, compSrcPath } of htmlSources) {
     let match: RegExpExecArray | null;
     while ((match = audioSrcRe.exec(html)) !== null) {
-      const src = match[1]!;
+      const src = match[2]!;
       if (/^(https?:|data:|blob:)/i.test(src)) continue;
       if (isUnresolvedAssetPlaceholder(src)) continue;
       const rootRelative = compSrcPath
@@ -319,7 +378,7 @@ function lintMissingLocalAsset(
 ): HyperframeLintFinding[] {
   const findings: HyperframeLintFinding[] = [];
 
-  const localAssetSrcRe = /<(video|img|source)\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+  const localAssetSrcRe = mediaSrcTagRe("video|img|source");
 
   const missingByTag = new Map<string, Map<string, string>>();
 

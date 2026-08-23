@@ -51,6 +51,13 @@ export type {
 
 export { parseSlideshowManifest, resolveSlideshow } from "./slideshow/index.js";
 
+export type {
+  AuthoredTimingValue,
+  RawAuthoredTiming,
+  AuthoredTimingWindow,
+} from "./runtime/authoredTiming.js";
+export { resolveAuthoredTimingWindow } from "./runtime/authoredTiming.js";
+
 export {
   CANVAS_DIMENSIONS,
   VALID_CANVAS_RESOLUTIONS,
@@ -143,6 +150,14 @@ export {
   shouldClampResolvedMediaDuration,
   MEDIA_DURATION_CLAMP_EPSILON_SECONDS,
 } from "./compiler/timingCompiler";
+
+export { MEDIA_RENDER_ID_ATTR, assignMediaRenderIds } from "./compiler/mediaRenderIds";
+
+export {
+  RENDER_FRAME_ID_PREFIX,
+  RENDER_FRAME_ID_SUFFIX,
+  renderFrameIdForRenderId,
+} from "./runtime/renderFrameSibling";
 
 // Lint moved to @hyperframes/lint. Import lint APIs from @hyperframes/lint
 // directly, or via the back-compat stub at @hyperframes/core/lint. Not
@@ -298,6 +313,14 @@ export {
 // publishConfig entry points at a file the pack doesn't contain
 // (verify:packed-manifests catches exactly that).
 export { createRuntimeStartTimeResolver } from "./runtime/startResolver.js";
+export {
+  normalizePlaybackRate,
+  parseStrictFiniteTimingNumber,
+  readElementPlaybackRate,
+  readMediaStart,
+  resolveNaturalMediaTimelineDuration,
+  resolveNaturalMediaTimelineDurationFromValues,
+} from "./runtime/playbackRate.js";
 
 // Variable validation (CLI / tooling-side)
 export {

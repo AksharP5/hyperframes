@@ -77,6 +77,7 @@ import {
   type CaptureWarning,
   type SubTimelineWaitOutcome,
   type WorkerSizing,
+  type StaticVerificationOutcome,
   resolveBrowserGpuMode,
   resolveHeadlessShellPath,
   applyConcreteGpuScreenshotClamp,
@@ -461,8 +462,16 @@ export interface RenderPerfSummary {
     enabled: boolean;
     armed: boolean;
     predictedFrames: number;
+    verifiedFrames?: number;
     reusedFrames: number;
     skipReason?: string;
+    verificationOutcomes?: StaticVerificationOutcome[];
+    plannedRuns?: number;
+    completedRuns?: number;
+    screenshots?: number;
+    seeks?: number;
+    comparisons?: number;
+    verificationElapsedMs?: number;
   };
   /**
    * BeginFrame no-damage reuse outcome for this render (Linux/Docker),
@@ -545,6 +554,27 @@ export interface RenderPerfSummary {
     boundaryFrames: number;
     /** Per-frame "No cached paint record" screenshot fallbacks. */
     ncprFallbacks: number;
+  };
+  /**
+   * Render-host facts, captured from the orchestrator process. Lets fleet-wide
+   * telemetry correlate render performance with the machine it ran on — most
+   * importantly `cpuCount` vs the top-level `workers` (are we under-/over-
+   * subscribing cores?) and `totalMemMb` (does `lowMemoryMode` / single-worker
+   * collapse track real memory pressure?). `gpuDisabled` completes the GPU
+   * picture alongside `observability.browserGpuMode`.
+   *
+   * Reflects the ORCHESTRATOR host. For distributed renders the chunk workers
+   * may run on different machines; this is still the right signal for the
+   * common single-machine render. Optional for back-compat with serialized
+   * older summaries.
+   */
+  host?: {
+    platform: string;
+    arch: string;
+    cpuCount: number;
+    totalMemMb: number;
+    nodeVersion: string;
+    gpuDisabled: boolean;
   };
 }
 
@@ -2529,6 +2559,8 @@ async function executeRenderPipeline(input: {
           workDir,
           compiledDir,
           duration: probeResult.duration,
+          ffmpegProcessTimeout: cfg.ffmpegProcessTimeout,
+          audioGain: cfg.audioGain,
           audios: composition.audios,
           abortSignal: executionSignal,
           assertNotAborted,
@@ -3969,6 +4001,7 @@ async function executeRenderPipeline(input: {
       observability: observabilitySummary,
       peakRssBytes: memSampler.peakRssBytes(),
       peakHeapUsedBytes: memSampler.peakHeapUsedBytes(),
+      gpuDisabled: cfg.disableGpu,
     });
     job.perfSummary = perfSummary;
     if (job.config.debug) {

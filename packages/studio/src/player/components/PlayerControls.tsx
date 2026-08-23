@@ -6,8 +6,10 @@ import { liveTime, usePlayerStore } from "../store/playerStore";
 import { trackStudioEvent } from "../../utils/studioTelemetry";
 import { Tooltip } from "../../components/ui";
 import { useMountEffect } from "../../hooks/useMountEffect";
+import { useSoloBannerText } from "../../hooks/useAudioSoloBridge";
 import { ShortcutsPanel } from "./ShortcutsPanel";
 import { SpeedMenu } from "./SpeedMenu";
+import { VolumeControl } from "./VolumeControl";
 
 /* ── Icon sub-components ─────────────────────────────────────────── */
 
@@ -54,60 +56,6 @@ function PlayPauseMorphIcon({ playing }: { playing: boolean }) {
 }
 
 /* ── Button sub-components ───────────────────────────────────────── */
-
-const MuteButton = memo(function MuteButton({
-  audioMuted,
-  controlsDisabled,
-  setAudioMuted,
-}: {
-  audioMuted: boolean;
-  controlsDisabled: boolean;
-  setAudioMuted: (v: boolean) => void;
-}) {
-  const label = audioMuted ? "Unmute audio" : "Mute audio";
-  return (
-    <Tooltip label={label}>
-      <button
-        type="button"
-        onClick={() => {
-          trackStudioEvent("playback", { action: "mute_toggle", muted: !audioMuted });
-          setAudioMuted(!audioMuted);
-        }}
-        disabled={controlsDisabled}
-        aria-label={label}
-        aria-pressed={audioMuted}
-        className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md transition-colors disabled:pointer-events-none disabled:opacity-30 ${
-          audioMuted ? "text-studio-accent" : "text-neutral-500 hover:text-neutral-200"
-        }`}
-      >
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M11 5 6 9H3v6h3l5 4V5Z" />
-          {audioMuted ? (
-            <>
-              <path d="m19 9-6 6" />
-              <path d="m13 9 6 6" />
-            </>
-          ) : (
-            <>
-              <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-              <path d="M18.5 5.5a9 9 0 0 1 0 13" />
-            </>
-          )}
-        </svg>
-      </button>
-    </Tooltip>
-  );
-});
 
 const LoopButton = memo(function LoopButton({
   loopEnabled,
@@ -208,12 +156,47 @@ const FullscreenButton = memo(function FullscreenButton({
 
 /* ── Main component ──────────────────────────────────────────────── */
 
+/**
+ * "Hearing only this" notice. Solo is a PREVIEW-only gate — it never touches an
+ * attribute and never reaches the export — so the state has to say so out loud,
+ * or a soloed session reads as a broken mix.
+ */
+const SoloBanner = memo(function SoloBanner({
+  previewIframeRef,
+}: {
+  previewIframeRef: { current: HTMLIFrameElement | null };
+}) {
+  const bannerText = useSoloBannerText(previewIframeRef);
+  const clearSolo = usePlayerStore.getState().clearSolo;
+  if (bannerText === null) return null;
+  return (
+    <div
+      role="status"
+      className="flex h-7 items-center justify-center gap-2 border-b border-neutral-800 bg-neutral-900/90 px-3 text-[11px] text-neutral-300"
+    >
+      <span>
+        Hearing only <span className="font-medium text-neutral-100">{bannerText}</span> — your
+        export is not affected
+      </span>
+      <button
+        type="button"
+        onClick={() => clearSolo()}
+        className="rounded px-1.5 py-0.5 font-medium text-studio-accent transition-colors hover:text-white"
+      >
+        Clear
+      </button>
+    </div>
+  );
+});
+
 interface PlayerControlsProps {
   onTogglePlay: () => void;
   onSeek: (time: number) => void;
   disabled?: boolean;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  /** Needed to read the soloed clips' labels out of the preview document. */
+  previewIframeRef?: { current: HTMLIFrameElement | null };
 }
 
 export const PlayerControls = memo(function PlayerControls({
@@ -222,15 +205,18 @@ export const PlayerControls = memo(function PlayerControls({
   disabled = false,
   isFullscreen = false,
   onToggleFullscreen,
+  previewIframeRef,
 }: PlayerControlsProps) {
   const isPlaying = usePlayerStore((s) => s.isPlaying);
   const duration = usePlayerStore((s) => s.duration);
   const timelineReady = usePlayerStore((s) => s.timelineReady);
   const playbackRate = usePlayerStore((s) => s.playbackRate);
   const audioMuted = usePlayerStore((s) => s.audioMuted);
+  const audioVolume = usePlayerStore((s) => s.audioVolume);
   const loopEnabled = usePlayerStore((s) => s.loopEnabled);
   const setPlaybackRate = usePlayerStore.getState().setPlaybackRate;
   const setAudioMuted = usePlayerStore.getState().setAudioMuted;
+  const setAudioVolume = usePlayerStore.getState().setAudioVolume;
   const setLoopEnabled = usePlayerStore.getState().setLoopEnabled;
   const inPoint = usePlayerStore((s) => s.inPoint);
   const outPoint = usePlayerStore((s) => s.outPoint);
@@ -271,71 +257,80 @@ export const PlayerControls = memo(function PlayerControls({
   });
 
   return (
-    <div
-      className="grid h-10 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-3"
-      aria-disabled={disabled || undefined}
-      style={{
-        paddingBottom: "env(safe-area-inset-bottom)",
-      }}
-    >
-      <Tooltip
-        label={timeDisplayMode === "time" ? "Switch to frame display" : "Switch to time display"}
+    <div>
+      {previewIframeRef && <SoloBanner previewIframeRef={previewIframeRef} />}
+      <div
+        className="grid h-10 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-3"
+        aria-disabled={disabled || undefined}
+        style={{
+          paddingBottom: "env(safe-area-inset-bottom)",
+        }}
       >
-        <button
-          type="button"
-          onClick={() => setTimeDisplayMode(timeDisplayMode === "time" ? "frame" : "time")}
-          disabled={disabled}
-          className="min-w-0 justify-self-start whitespace-nowrap font-mono text-[11px] tabular-nums text-neutral-400 transition-colors hover:text-neutral-200 disabled:pointer-events-none"
+        <Tooltip
+          label={timeDisplayMode === "time" ? "Switch to frame display" : "Switch to time display"}
         >
-          <span ref={timeDisplayRef}>{formatTime(0)}</span>
-          {timeDisplayMode === "time" ? (
-            <>
-              <span className="mx-0.5 text-neutral-700">/</span>
-              <span className="text-neutral-600">{formatTime(duration)}</span>
-            </>
-          ) : null}
-        </button>
-      </Tooltip>
+          <button
+            type="button"
+            onClick={() => setTimeDisplayMode(timeDisplayMode === "time" ? "frame" : "time")}
+            disabled={disabled}
+            className="min-w-0 justify-self-start whitespace-nowrap font-mono text-[11px] tabular-nums text-neutral-400 transition-colors hover:text-neutral-200 disabled:pointer-events-none"
+          >
+            <span ref={timeDisplayRef}>{formatTime(0)}</span>
+            {timeDisplayMode === "time" ? (
+              <>
+                <span className="mx-0.5 text-neutral-700">/</span>
+                <span className="text-neutral-600">{formatTime(duration)}</span>
+              </>
+            ) : null}
+          </button>
+        </Tooltip>
 
-      <Tooltip label={isPlaying ? "Pause" : "Play"}>
-        <button
-          type="button"
-          aria-label={isPlaying ? "Pause" : "Play"}
-          onClick={() => {
-            trackStudioEvent("playback", { action: isPlaying ? "pause" : "play" });
-            onTogglePlay();
-          }}
-          disabled={controlsDisabled}
-          className="flex h-8 w-8 items-center justify-center justify-self-center rounded-md text-neutral-100 transition-colors hover:text-white disabled:pointer-events-none disabled:opacity-30"
-        >
-          <PlayPauseMorphIcon playing={isPlaying} />
-        </button>
-      </Tooltip>
+        <Tooltip label={isPlaying ? "Pause" : "Play"}>
+          <button
+            type="button"
+            aria-label={isPlaying ? "Pause" : "Play"}
+            onClick={() => {
+              trackStudioEvent("playback", { action: isPlaying ? "pause" : "play" });
+              onTogglePlay();
+            }}
+            disabled={controlsDisabled}
+            className="flex h-8 w-8 items-center justify-center justify-self-center rounded-md text-neutral-100 transition-colors hover:text-white disabled:pointer-events-none disabled:opacity-30"
+          >
+            <PlayPauseMorphIcon playing={isPlaying} />
+          </button>
+        </Tooltip>
 
-      <div className="flex min-w-0 items-center justify-self-end">
-        <MuteButton
-          audioMuted={audioMuted}
-          controlsDisabled={controlsDisabled}
-          setAudioMuted={setAudioMuted}
-        />
-        <SpeedMenu
-          playbackRate={playbackRate}
-          setPlaybackRate={setPlaybackRate}
-          disabled={disabled}
-        />
-        <LoopButton loopEnabled={loopEnabled} disabled={disabled} setLoopEnabled={setLoopEnabled} />
-        {onToggleFullscreen && (
-          <FullscreenButton isFullscreen={isFullscreen} onToggleFullscreen={onToggleFullscreen} />
-        )}
-        <ShortcutsPanel
-          disabled={disabled}
-          duration={duration}
-          inPoint={inPoint}
-          outPoint={outPoint}
-          setInPoint={setInPoint}
-          setOutPoint={setOutPoint}
-          onSeek={onSeek}
-        />
+        <div className="flex min-w-0 items-center justify-self-end">
+          <VolumeControl
+            audioMuted={audioMuted}
+            audioVolume={audioVolume}
+            disabled={controlsDisabled}
+            setAudioMuted={setAudioMuted}
+            setAudioVolume={setAudioVolume}
+          />
+          <SpeedMenu
+            playbackRate={playbackRate}
+            setPlaybackRate={setPlaybackRate}
+            disabled={disabled}
+          />
+          <LoopButton
+            loopEnabled={loopEnabled}
+            disabled={disabled}
+            setLoopEnabled={setLoopEnabled}
+          />
+          {onToggleFullscreen && (
+            <FullscreenButton isFullscreen={isFullscreen} onToggleFullscreen={onToggleFullscreen} />
+          )}
+          <ShortcutsPanel
+            disabled={disabled}
+            duration={duration}
+            inPoint={inPoint}
+            outPoint={outPoint}
+            setInPoint={setInPoint}
+            setOutPoint={setOutPoint}
+            onSeek={onSeek}
+          />
+        </div>
       </div>
     </div>
   );
