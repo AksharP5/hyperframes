@@ -14,6 +14,10 @@ Only defaults declared in `data-composition-variables` are editable:
 
 Keep replacement copy within 20% of the original length.
 
+## Safe editing mechanics
+
+Call `set_template_variable_defaults` once with the existing variable ids and their new defaults. Do not directly edit or rewrite `index.html` or its `data-composition-variables` attribute; the imported declaration is HTML-entity-encoded JSON and the setter preserves that encoding. Never edit `__template_baseline__.html` or a duplicate composition file. For an image slot, pass only the token returned by an image tool. Validate after the setter succeeds.
+
 ## Protected
 
 Do not change CSS, layout, backdrop, notification chrome, scene structure, duration, timing, easing, stacking, or reveal behavior. Do not replace any image outside the declared closing-card logo slot. Colors are protected because this template declares no color variables.

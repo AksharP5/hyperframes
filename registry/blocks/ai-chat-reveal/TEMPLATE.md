@@ -15,6 +15,10 @@ Only defaults declared in `data-composition-variables` are editable:
 
 Typed and streamed copy is length-locked to within 20% of the original.
 
+## Safe editing mechanics
+
+Call `set_template_variable_defaults` once with the existing variable ids and their new defaults. Do not directly edit or rewrite `index.html` or its `data-composition-variables` attribute; the imported declaration is HTML-entity-encoded JSON and the setter preserves that encoding. Never edit `__template_baseline__.html` or a duplicate composition file. For an image slot, pass only the token returned by an image tool. Validate after the setter succeeds.
+
 ## Protected
 
 Do not change chat chrome, keyboard, layout, palette, fonts, scene order, duration, timing, easing, typing cadence, or reveal logic. Do not replace any image outside the declared closing-card logo slot, and do not restyle the assistant interface to match the supplied website. This contract declares no color variables.
