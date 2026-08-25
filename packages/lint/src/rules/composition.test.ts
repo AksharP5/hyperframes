@@ -1049,6 +1049,24 @@ describe("composition rules", () => {
       expect(finding).toBeUndefined();
     });
 
+    it("does not warn for an HTML-entity-encoded declarations array", async () => {
+      const declarations = JSON.stringify([
+        {
+          id: "title",
+          type: "string",
+          label: "Title",
+          description: 'A "quoted" title',
+          default: "Hello",
+        },
+      ]).replaceAll('"', "&quot;");
+      const html = `<html data-composition-variables='${declarations}'><body><div data-composition-id="x"></div></body></html>`;
+      const result = await lintHyperframeHtml(html);
+      const finding = result.findings.find(
+        (f) => f.code === "invalid_composition_variables_declaration",
+      );
+      expect(finding).toBeUndefined();
+    });
+
     it("does not warn when data-composition-variables is absent", async () => {
       const html = `<html><body><div data-composition-id="x"></div></body></html>`;
       const result = await lintHyperframeHtml(html);

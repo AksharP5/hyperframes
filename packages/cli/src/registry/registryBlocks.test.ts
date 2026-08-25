@@ -62,6 +62,10 @@ describe("registry blocks", () => {
 
       expect(contractFiles, templateId).toHaveLength(1);
       expect(composition, templateId).toBeDefined();
+      const editingContract = readFileSync(join(itemDir, "TEMPLATE.md"), "utf8");
+      expect(editingContract, templateId).toContain("## Safe editing mechanics");
+      expect(editingContract, templateId).toContain("set_template_variable_defaults");
+      expect(editingContract, templateId).toContain("HTML-entity-encoded JSON");
       const html = readFileSync(join(itemDir, composition?.path ?? ""), "utf8");
       const { document } = parseHTML(html);
       const declarations = JSON.parse(
