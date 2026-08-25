@@ -10,9 +10,10 @@ Only defaults declared in `data-composition-variables` are editable:
 
 - `notifTitle`, `message1` through `message4`, and `appName`
 - `headlineTop`, `headlineAccent`, and `footerText`
+- `brandLogo`, using a transparent mark that remains legible on the dark closing card
 
 Keep replacement copy within 20% of the original length.
 
 ## Protected
 
-Do not change CSS, layout, backdrop, notification chrome, logo asset, scene structure, duration, timing, easing, stacking, or reveal behavior. Colors are protected because this template declares no color variables.
+Do not change CSS, layout, backdrop, notification chrome, scene structure, duration, timing, easing, stacking, or reveal behavior. Do not replace any image outside the declared closing-card logo slot. Colors are protected because this template declares no color variables.

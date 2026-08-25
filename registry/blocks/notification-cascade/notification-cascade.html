@@ -10,7 +10,8 @@
     { "id": "appName", "type": "string", "role": "content", "label": "App name", "description": "Small credit in the corner of every banner.", "default": "HyperFrames" },
     { "id": "headlineTop", "type": "string", "role": "content", "label": "End-card line 1", "description": "First line of the closing card.", "default": "SHIP VIDEO" },
     { "id": "headlineAccent", "type": "string", "role": "content", "label": "End-card line 2", "description": "Accented second line of the closing card.", "default": "FROM HTML" },
-    { "id": "footerText", "type": "string", "role": "content", "label": "End-card footer", "description": "URL or call to action under the headline.", "default": "hyperframes.heygen.com" }
+    { "id": "footerText", "type": "string", "role": "content", "label": "End-card footer", "description": "URL or call to action under the headline.", "default": "hyperframes.heygen.com" },
+    { "id": "brandLogo", "type": "image", "role": "content", "label": "Brand logo", "description": "Transparent logo centered on the closing card.", "default": "assets/hyperframes-logo-white.svg" }
   ]'
 >
   <head>
@@ -358,7 +359,12 @@
         <div id="nc-endcard-inner">
           <div id="nc-ec-top">SHIP VIDEO</div>
           <div id="nc-ec-accent">FROM HTML</div>
-          <img id="nc-ec-mark" src="assets/hyperframes-logo-white.svg" alt="HyperFrames" />
+          <img
+            id="nc-ec-mark"
+            data-var-src="brandLogo"
+            src="assets/hyperframes-logo-white.svg"
+            alt="Brand logo"
+          />
           <div id="nc-ec-footer">hyperframes.heygen.com</div>
         </div>
       </section>
