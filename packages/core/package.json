@@ -245,6 +245,12 @@
       "import": "./src/runtime/stackingContext.ts",
       "types": "./src/runtime/stackingContext.ts"
     },
+    "./runtime/web-audio-route": {
+      "bun": "./src/runtime/webAudioRoute.ts",
+      "node": "./dist/runtime/webAudioRoute.js",
+      "import": "./src/runtime/webAudioRoute.ts",
+      "types": "./src/runtime/webAudioRoute.ts"
+    },
     "./compiler/html-document": {
       "bun": "./src/compiler/htmlDocument.ts",
       "node": "./dist/compiler/htmlDocument.js",
@@ -538,6 +544,10 @@
       "./runtime/stacking-context": {
         "import": "./dist/runtime/stackingContext.js",
         "types": "./dist/runtime/stackingContext.d.ts"
+      },
+      "./runtime/web-audio-route": {
+        "import": "./dist/runtime/webAudioRoute.js",
+        "types": "./dist/runtime/webAudioRoute.d.ts"
       },
       "./compiler/html-document": {
         "import": "./dist/compiler/htmlDocument.js",

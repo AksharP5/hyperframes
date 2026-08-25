@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   classifyWebAudioMediaRoute,
+  isRouteSelectionSettled,
   nativeUnexpressibleProcessing,
   reportWebAudioMediaRoute,
 } from "./webAudioRoute";
@@ -18,6 +19,18 @@ function audio(attrs: Record<string, string> = {}): HTMLAudioElement {
  *  planted to exercise the branch where the browser has already committed. */
 function withCurrentSrc(el: HTMLAudioElement, currentSrc: string): HTMLAudioElement {
   Object.defineProperty(el, "currentSrc", { value: currentSrc, configurable: true });
+  return el;
+}
+
+/**
+ * Shadows the IDL `crossOrigin` accessor with a plain data property, so the
+ * value is visible ONLY via the property — unlike `el.crossOrigin = value`
+ * (which jsdom, like real browsers, reflects straight back to the
+ * `crossorigin` attribute), this simulates a host whose IDL property is
+ * genuinely decoupled from the attribute, per `hasCorsOptIn`'s secondary read.
+ */
+function withUnreflectedCrossOrigin(el: HTMLAudioElement, value: string): HTMLAudioElement {
+  Object.defineProperty(el, "crossOrigin", { value, configurable: true });
   return el;
 }
 
@@ -96,6 +109,53 @@ describe("classifyWebAudioMediaRoute", () => {
 
   it("routes an element with no resolvable source through Web Audio", () => {
     expect(classifyWebAudioMediaRoute(audio())).toEqual({ kind: "web-audio" });
+  });
+
+  it("treats an unreflected empty-string crossOrigin IDL property as opt-in", () => {
+    // The IDL fallback for `crossorigin=""` / bare `crossorigin` is the empty
+    // string. A host whose property setter doesn't reflect to the attribute
+    // (unlike jsdom's own accessor, which does) must not have that empty
+    // string misread as "no opt-in" — `Boolean("")` is false, which is
+    // exactly the fail-open this test guards against.
+    const el = withUnreflectedCrossOrigin(audio({ src: `${CROSS_ORIGIN}/track.mp3` }), "");
+    expect(el.getAttribute("crossorigin")).toBeNull(); // confirms it's genuinely unreflected
+
+    expect(classifyWebAudioMediaRoute(el)).toEqual({ kind: "web-audio" });
+  });
+
+  it("does not treat an untouched crossOrigin IDL property as opt-in", () => {
+    // The other direction of the same risk: a host must not default
+    // `crossOrigin` to a truthy/string value for elements that never opted
+    // in, or the cross-origin check would be permanently disabled.
+    const el = audio({ src: `${CROSS_ORIGIN}/track.mp3` });
+    expect(el.crossOrigin).toBeNull();
+
+    expect(classifyWebAudioMediaRoute(el)).toEqual({
+      kind: "decode-only",
+      reason: "cross_origin_no_cors",
+      asset: `${CROSS_ORIGIN}/track.mp3`,
+    });
+  });
+});
+
+describe("isRouteSelectionSettled", () => {
+  it("is unsettled for an element with only <source> children", () => {
+    const el = audio();
+    el.innerHTML = `<source src="/assets/first.mp3">`;
+    expect(isRouteSelectionSettled(el)).toBe(false);
+  });
+
+  it("is settled once a src attribute is definitive, even before load", () => {
+    expect(isRouteSelectionSettled(audio({ src: "/assets/vo.mp3" }))).toBe(true);
+  });
+
+  it("is settled once currentSrc has committed", () => {
+    const el = withCurrentSrc(audio(), `${SAME_ORIGIN}/assets/vo.mp3`);
+    expect(isRouteSelectionSettled(el)).toBe(true);
+  });
+
+  it("is unsettled for an element with no source at all", () => {
+    expect(isRouteSelectionSettled(audio())).toBe(false);
   });
 });
 

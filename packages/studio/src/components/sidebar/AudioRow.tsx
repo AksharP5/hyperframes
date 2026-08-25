@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { classifyWebAudioMediaRoute } from "@hyperframes/core/runtime/web-audio-route";
 import { ContextMenu } from "./AssetContextMenu";
 import { basename, getAudioSubtype, type CopyFeedback } from "./assetHelpers";
 import { TIMELINE_ASSET_MIME } from "../../utils/timelineAssetDrop";
@@ -167,14 +168,24 @@ export function AudioRow({
         setPlaying(false);
         cancelAnimationFrame(animRef.current);
       };
+      // `src` must be set BEFORE classifying: the check reads `currentSrc`/
+      // `src`, and a same-origin `serveUrl` mustn't be judged from a blank
+      // element.
+      el.src = serveUrl;
       audioRef.current = el;
       const analyser = analyserRef.current;
-      if (analyser) {
+      // Same hazard `webAudioRoute.ts` documents for the timeline runtime
+      // (#3458): `createMediaElementSource` on a cross-origin element without
+      // a `crossorigin` opt-in permanently reroutes it to a node that outputs
+      // SILENCE per the Web Audio spec, without throwing. Classify first so
+      // this preview player can't reintroduce that bug — skipping the Web
+      // Audio graph here only costs the frequency-bar visualizer; native
+      // `<audio>` playback below stays audible either way.
+      if (analyser && classifyWebAudioMediaRoute(el).kind === "web-audio") {
         sourceRef.current = actxRef.current.createMediaElementSource(el);
         sourceRef.current.connect(analyser);
         analyser.connect(actxRef.current.destination);
       }
-      el.src = serveUrl;
     }
 
     if (actxRef.current.state === "suspended") await actxRef.current.resume();

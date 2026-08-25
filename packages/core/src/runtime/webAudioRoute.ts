@@ -21,6 +21,19 @@ import type { RuntimeJson } from "./types";
  * a pure classifier, so the same verdict can be reached at media-discovery time
  * (to emit a diagnostic) and at schedule time (to actually withhold the node)
  * without those two ever drifting apart.
+ *
+ * That guarantee holds for every caller that routes through this classifier —
+ * it is NOT a runtime-wide interception of `createMediaElementSource`. The
+ * timeline transport (`webAudioTransport.ts`, via `init.ts`) always goes
+ * through it; a UI surface that builds its own throwaway `AudioContext` for
+ * an unrelated purpose (e.g. the asset sidebar's preview player,
+ * `AudioRow.tsx`) has to call it too, and is expected to. Known gap: an
+ * element playing a `MediaStream` via `srcObject` instead of `src`/`<source>`
+ * has no origin for this module to judge — `routeCandidates` only reads
+ * `src`-shaped attributes, so a `srcObject` element always reads as
+ * `web-audio` here, correctly or not. Nothing in this codebase feeds
+ * `createMediaElementSource` from a `srcObject` element today, so this is
+ * recorded as a boundary rather than fixed.
  */
 export type WebAudioMediaRoute =
   /** Same-origin, CORS-opted-in, or a scheme the check doesn't apply to. */
@@ -50,11 +63,23 @@ function hasAttr(el: HTMLMediaElement, name: string): boolean {
  * `anonymous`, so PRESENCE is the opt-in — `crossorigin=""` and even
  * `crossorigin="garbage"` both make the fetch a CORS request. Comparing the
  * value against `"anonymous"` would wrongly block those.
+ *
+ * Two independent reads, because a spec-faithful host and a permissive one
+ * disagree about where the truth lives:
+ *  - `getAttribute` is the primary read and covers every real browser: the
+ *    markup is unambiguous regardless of what the IDL getter does with it.
+ *  - `el.crossOrigin` is a secondary read for a host that sets the IDL
+ *    property without reflecting it back to the attribute — some
+ *    jsdom-style test/preview hosts do this. The check is `!= null`
+ *    (covers both `null` and `undefined`), not a truthiness check, ON
+ *    PURPOSE: `crossorigin=""` is a valid, common opt-in (see above), and
+ *    its IDL fallback value is the empty string — a falsy value that
+ *    `Boolean(el.crossOrigin)` would silently misread as "not opted in",
+ *    reintroducing the exact silent-audio bug this module exists to close.
  */
 function hasCorsOptIn(el: HTMLMediaElement): boolean {
   if (hasAttr(el, "crossorigin")) return true;
-  // Secondary read for a host that set the IDL property without reflecting it.
-  return typeof el.crossOrigin === "string";
+  return el.crossOrigin != null;
 }
 
 function baseUri(el: HTMLMediaElement): string {
@@ -106,6 +131,26 @@ function isCorsSilenced(rawUrl: string, el: HTMLMediaElement): boolean {
   if (url.protocol !== "http:" && url.protocol !== "https:") return false;
   if (url.origin === window.location.origin) return false;
   return !hasCorsOptIn(el);
+}
+
+/**
+ * Whether resource selection has settled enough for a verdict to be a FACT
+ * rather than a guess. `currentSrc`/`src` are both definitive per the HTML
+ * resource-selection algorithm (see `routeCandidates` above); before either
+ * is set, a verdict can only be built from `<source>` children, any of which
+ * the browser may still pass over before committing.
+ *
+ * `classifyWebAudioMediaRoute` itself stays unsettled-tolerant on purpose —
+ * the schedule path needs *a* verdict even before selection settles, and
+ * conservatively withholding the node there costs nothing but a decode-only
+ * fallback. This predicate exists for the one caller that must NOT act on a
+ * guess: the discovery-time diagnostic, which drops a message in a human's
+ * lap and only gets to say it once (see `reportWebAudioMediaRoute`'s latch).
+ */
+export function isRouteSelectionSettled(el: HTMLMediaElement): boolean {
+  const current = typeof el.currentSrc === "string" ? el.currentSrc : "";
+  if (current) return true;
+  return hasAttr(el, "src");
 }
 
 /**
@@ -163,7 +208,17 @@ export function nativeUnexpressibleProcessing(el: HTMLMediaElement): string[] {
  * only `<audio>` ever reaches this module.
  */
 function isRenderMode(): boolean {
-  return typeof window !== "undefined" && !!window.__HF_EXPORT_RENDER_SEEK_CONFIG;
+  // Read through an inline cast rather than the ambient `Window` augmentation
+  // in `window.d.ts`: that augmentation is only in scope for programs that
+  // include it (core's own tsconfig does), and this module is also exported
+  // as `./runtime/web-audio-route` for non-runtime consumers (e.g. the studio
+  // asset sidebar's preview player, `AudioRow.tsx`) whose tsconfig doesn't
+  // pull it in. This is a plain existence check, so the cast costs nothing.
+  return (
+    typeof window !== "undefined" &&
+    !!(window as unknown as { __HF_EXPORT_RENDER_SEEK_CONFIG?: unknown })
+      .__HF_EXPORT_RENDER_SEEK_CONFIG
+  );
 }
 
 // One diagnostic per element. Latched only when something is actually emitted,

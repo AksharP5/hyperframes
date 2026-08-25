@@ -42,7 +42,11 @@ import { applyVariableBindings } from "./applyVariableBindings";
 import { createColorGradingRuntime, type RuntimeColorGradingApi } from "./colorGrading";
 import { TransportClock } from "./clock";
 import { WebAudioTransport } from "./webAudioTransport";
-import { classifyWebAudioMediaRoute, reportWebAudioMediaRoute } from "./webAudioRoute.js";
+import {
+  classifyWebAudioMediaRoute,
+  isRouteSelectionSettled,
+  reportWebAudioMediaRoute,
+} from "./webAudioRoute.js";
 import {
   ensureAudioGroupInertStyle,
   HF_AUDIO_GROUP_TAG,
@@ -1840,6 +1844,13 @@ export function initSandboxRuntimeModular(): void {
   // were.
   const reportWebAudioRoute = (mediaEl: HTMLMediaElement) => {
     if (!(mediaEl instanceof HTMLAudioElement)) return;
+    // Before resource selection settles, the verdict is built from `<source>`
+    // children the browser might still pass over — good enough for the
+    // schedule path's conservative withhold, not good enough to put in front
+    // of a human as a diagnostic. Skip; the `loadedmetadata` call to this same
+    // function (see below) always has a settled `currentSrc` and will report
+    // for real once the guess would no longer be one.
+    if (!isRouteSelectionSettled(mediaEl)) return;
     reportWebAudioMediaRoute(mediaEl, classifyWebAudioMediaRoute(mediaEl));
   };
 
@@ -1875,10 +1886,15 @@ export function initSandboxRuntimeModular(): void {
       // schedule time. `hyperframes check` seeks, it never calls play(), so a
       // diagnostic raised from the transport would be invisible to the one
       // gate whose job is to surface exactly this class of silent failure.
-      // Bound twice on purpose: now, so a composition that never plays still
-      // reports, and again at `loadedmetadata`, when `currentSrc` is finally
-      // authoritative and the early read may have been guessing from
-      // `<source>` children. `reportWebAudioMediaRoute` latches per element.
+      // Bound twice on purpose: now, for a `src`/committed-`currentSrc`
+      // element so a composition that never plays still reports promptly, and
+      // again at `loadedmetadata`, when `currentSrc` is unconditionally
+      // authoritative. `reportWebAudioRoute` itself skips the "now" call when
+      // selection hasn't settled (see `isRouteSelectionSettled`) — with only
+      // `<source>` children to go on, the browser could still pick a
+      // different one than the classifier just judged, and a diagnostic is a
+      // claim of fact, not a guess. `reportWebAudioMediaRoute` latches per
+      // element, so the deferred-to-`loadedmetadata` case still reports once.
       mediaEl.addEventListener("loadedmetadata", onMediaLoadedMetadataForRoute);
       reportWebAudioRoute(mediaEl);
       // Reactive (zero-videoWidth) + tertiary (error event) proxy-fallback
