@@ -40,7 +40,7 @@ function findMissingLocalScripts(itemDir: string, manifest: RegistryManifest): s
 }
 
 describe("registry blocks", () => {
-  it("ships an editing contract and declared variables for every promoted template", () => {
+  it("ships a safe editing contract and declared variables for every promoted template", () => {
     const promotedManifests = readdirSync(blocksDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => ({
@@ -66,8 +66,26 @@ describe("registry blocks", () => {
       const { document } = parseHTML(html);
       const declarations = JSON.parse(
         document.documentElement.getAttribute("data-composition-variables") ?? "[]",
-      ) as unknown[];
+      ) as Array<{ id?: unknown; type?: unknown }>;
       expect(declarations.length, templateId).toBeGreaterThan(0);
+      expect(document.querySelectorAll("video"), `${templateId}: fixed video media`).toHaveLength(
+        0,
+      );
+
+      const imageVariableIds = declarations
+        .filter(
+          (variable): variable is { id: string; type: "image" } =>
+            variable.type === "image" && typeof variable.id === "string",
+        )
+        .map((variable) => variable.id);
+      for (const variableId of imageVariableIds) {
+        const escapedId = variableId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const occurrenceCount = html.match(new RegExp(`\\b${escapedId}\\b`, "g"))?.length ?? 0;
+        expect(
+          document.querySelector(`[data-var-src="${variableId}"]`) !== null || occurrenceCount > 1,
+          `${templateId}: unbound image variable ${variableId}`,
+        ).toBe(true);
+      }
     }
   });
 

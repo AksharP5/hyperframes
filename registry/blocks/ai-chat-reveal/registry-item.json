@@ -107,6 +107,14 @@
       "label": "End-card footer",
       "description": "Letter-spaced line at the very bottom.",
       "default": "HYPERFRAMES.HEYGEN.COM"
+    },
+    {
+      "id": "brandLogo",
+      "type": "image",
+      "role": "content",
+      "label": "Brand logo",
+      "description": "Transparent logo in the closing-card header.",
+      "default": "assets/hyperframes-logo-white.svg"
     }
   ],
   "files": [

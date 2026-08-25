@@ -3,9 +3,25 @@
   lang="en"
   data-composition-variables='[
     { "id": "contactName", "type": "string", "role": "content", "label": "Contact name", "description": "Name pill in the chat header; the avatar shows its first letter.", "default": "Rachel" },
+    { "id": "questionMessage", "type": "string", "role": "content", "label": "Opening question", "description": "First incoming message that establishes what the conversation is about.", "default": "what r u using for the launch video??" },
+    { "id": "teaserMessage", "type": "string", "role": "content", "label": "Teaser reply", "description": "First typed outgoing reply before the shared link card.", "default": "wait look 👀" },
+    { "id": "cardImage", "type": "image", "role": "content", "label": "Link card image", "description": "Preview image on the shared link card.", "default": "assets/card-image.jpg" },
     { "id": "cardTitle", "type": "string", "role": "content", "label": "Link card title", "description": "Title on the shared link card.", "default": "HyperFrames | Write HTML, render pixel-perfect video" },
     { "id": "cardDomain", "type": "string", "role": "content", "label": "Link card domain", "description": "Domain line under the card title.", "default": "hyperframes.heygen.com" },
+    { "id": "reactionMessage", "type": "string", "role": "content", "label": "Link reaction", "description": "Incoming reaction immediately after the shared link.", "default": "OMG IT&#39;S HTML" },
+    { "id": "reactionEmoji", "type": "string", "role": "content", "label": "Reaction emoji", "description": "Emoji-only reaction after the shared link.", "default": "🤯🤯🤯" },
+    { "id": "benefitMessage", "type": "string", "role": "content", "label": "Benefit reply", "description": "Typed outgoing reply that names the primary benefit.", "default": "renders in 4K. no editor" },
+    { "id": "discoveryMessage", "type": "string", "role": "content", "label": "Discovery question", "description": "Incoming question asking where the product was found.", "default": "where did u find this" },
+    { "id": "sourceMessage", "type": "string", "role": "content", "label": "Source reply", "description": "Typed outgoing reply naming where to find the product.", "default": "on heygen" },
+    { "id": "workflowMessage", "type": "string", "role": "content", "label": "Workflow reply", "description": "Typed outgoing reply describing how the product works.", "default": "u just write plain html tags" },
+    { "id": "ownershipMessage", "type": "string", "role": "content", "label": "Ownership reply", "description": "Typed outgoing reply that closes the product explanation.", "default": "the code is yours forever" },
+    { "id": "installMessage", "type": "string", "role": "content", "label": "Intent reply", "description": "Incoming message expressing intent to try the product.", "default": "installing rn" },
+    { "id": "thanksMessage", "type": "string", "role": "content", "label": "Closing reply", "description": "Final incoming message in the conversation.", "default": "ty bestie 💚" },
+    { "id": "brandLogo", "type": "image", "role": "content", "label": "Brand logo", "description": "Transparent horizontal wordmark on the closing card.", "default": "assets/hyperframes-logo-black.svg" },
     { "id": "ecProof", "type": "string", "role": "content", "label": "End-card proof", "description": "Social-proof line under the stars.", "default": "12,000+ creators" },
+    { "id": "ecFeature1", "type": "string", "role": "content", "label": "End-card feature 1", "description": "First two-line benefit; use | to break the line.", "default": "Write|plain HTML" },
+    { "id": "ecFeature2", "type": "string", "role": "content", "label": "End-card feature 2", "description": "Second two-line benefit; use | to break the line.", "default": "Render|pixel-perfect" },
+    { "id": "ecFeature3", "type": "string", "role": "content", "label": "End-card feature 3", "description": "Third two-line benefit; use | to break the line.", "default": "Own|every line" },
     { "id": "ecCta", "type": "string", "role": "content", "label": "End-card CTA", "description": "Label on the closing card button.", "default": "Start rendering free" }
   ]'
 >
@@ -556,7 +572,14 @@
               data-layout-allow-occlusion
             >
               <div class="pop pop-recv">
-                <div class="bubble recv">what r u using for the launch video??</div>
+                <div
+                  class="bubble recv"
+                  id="mtr-message-question"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  what r u using for the launch video??
+                </div>
               </div>
             </div>
             <div
@@ -584,7 +607,14 @@
               data-layout-allow-occlusion
             >
               <div class="pop pop-sent">
-                <div class="bubble sent tail-sent">wait look 👀</div>
+                <div
+                  class="bubble sent tail-sent"
+                  id="mtr-message-teaser"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  wait look 👀
+                </div>
                 <div class="delivered">Delivered</div>
               </div>
             </div>
@@ -597,7 +627,12 @@
             >
               <div class="pop pop-sent">
                 <div class="card">
-                  <img class="cardimg" src="assets/card-image.jpg" alt="" />
+                  <img
+                    class="cardimg"
+                    data-var-src="cardImage"
+                    src="assets/card-image.jpg"
+                    alt=""
+                  />
                   <div class="cardmeta">
                     <div class="cardtxt">
                       <div class="cardtitle">
@@ -617,7 +652,16 @@
               data-layout-allow-overlap
               data-layout-allow-occlusion
             >
-              <div class="pop pop-recv"><div class="bubble recv">OMG IT&#39;S HTML</div></div>
+              <div class="pop pop-recv">
+                <div
+                  class="bubble recv"
+                  id="mtr-message-reaction"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  OMG IT&#39;S HTML
+                </div>
+              </div>
             </div>
             <div
               class="item recv"
@@ -626,7 +670,16 @@
               data-layout-allow-overlap
               data-layout-allow-occlusion
             >
-              <div class="pop pop-recv"><div class="emojirow">🤯🤯🤯</div></div>
+              <div class="pop pop-recv">
+                <div
+                  class="emojirow"
+                  id="mtr-message-emoji"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  🤯🤯🤯
+                </div>
+              </div>
             </div>
             <div
               class="item sent"
@@ -636,7 +689,14 @@
               data-layout-allow-occlusion
             >
               <div class="pop pop-sent">
-                <div class="bubble sent tail-sent">renders in 4K. no editor</div>
+                <div
+                  class="bubble sent tail-sent"
+                  id="mtr-message-benefit"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  renders in 4K. no editor
+                </div>
                 <div class="delivered">Delivered</div>
               </div>
             </div>
@@ -665,7 +725,14 @@
               data-layout-allow-occlusion
             >
               <div class="pop pop-recv">
-                <div class="bubble recv tail-recv">where did u find this</div>
+                <div
+                  class="bubble recv tail-recv"
+                  id="mtr-message-discovery"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  where did u find this
+                </div>
               </div>
             </div>
             <div
@@ -675,7 +742,16 @@
               data-layout-allow-overlap
               data-layout-allow-occlusion
             >
-              <div class="pop pop-sent"><div class="bubble sent">on heygen</div></div>
+              <div class="pop pop-sent">
+                <div
+                  class="bubble sent"
+                  id="mtr-message-source"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  on heygen
+                </div>
+              </div>
             </div>
             <div
               class="item sent"
@@ -685,7 +761,14 @@
               data-layout-allow-occlusion
             >
               <div class="pop pop-sent">
-                <div class="bubble sent">u just write plain html tags</div>
+                <div
+                  class="bubble sent"
+                  id="mtr-message-workflow"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  u just write plain html tags
+                </div>
               </div>
             </div>
             <div
@@ -696,7 +779,14 @@
               data-layout-allow-occlusion
             >
               <div class="pop pop-sent">
-                <div class="bubble sent tail-sent">the code is yours forever</div>
+                <div
+                  class="bubble sent tail-sent"
+                  id="mtr-message-ownership"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  the code is yours forever
+                </div>
                 <div class="delivered">Delivered</div>
               </div>
             </div>
@@ -707,7 +797,16 @@
               data-layout-allow-overlap
               data-layout-allow-occlusion
             >
-              <div class="pop pop-recv"><div class="bubble recv">installing rn</div></div>
+              <div class="pop pop-recv">
+                <div
+                  class="bubble recv"
+                  id="mtr-message-install"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  installing rn
+                </div>
+              </div>
             </div>
             <div
               class="item recv"
@@ -716,7 +815,16 @@
               data-layout-allow-overlap
               data-layout-allow-occlusion
             >
-              <div class="pop pop-recv"><div class="bubble recv tail-recv">ty bestie 💚</div></div>
+              <div class="pop pop-recv">
+                <div
+                  class="bubble recv tail-recv"
+                  id="mtr-message-thanks"
+                  data-layout-allow-overlap
+                  data-layout-allow-occlusion
+                >
+                  ty bestie 💚
+                </div>
+              </div>
             </div>
           </div>
           <div id="mtr-plusbtn">+</div>
@@ -908,7 +1016,12 @@
         style="z-index: 5"
       >
         <div id="mtr-ec-wrap" data-layout-allow-overlap data-layout-allow-occlusion>
-          <img id="mtr-ec-logo" src="assets/hyperframes-logo-black.svg" alt="HyperFrames" />
+          <img
+            id="mtr-ec-logo"
+            data-var-src="brandLogo"
+            src="assets/hyperframes-logo-black.svg"
+            alt="Brand logo"
+          />
           <div id="mtr-ec-stars">
             <svg width="55" height="53" viewBox="0 0 24 23">
               <path
@@ -966,15 +1079,15 @@
               />
             </svg>
           </div>
-          <div class="ec-label" style="left: 100px">
+          <div class="ec-label" id="mtr-ec-feature-1" style="left: 100px">
             <div>Write</div>
             <div>plain HTML</div>
           </div>
-          <div class="ec-label" style="left: 420px">
+          <div class="ec-label" id="mtr-ec-feature-2" style="left: 420px">
             <div>Render</div>
             <div>pixel-perfect</div>
           </div>
-          <div class="ec-label" style="left: 740px">
+          <div class="ec-label" id="mtr-ec-feature-3" style="left: 740px">
             <div>Own</div>
             <div>every line</div>
           </div>
@@ -1005,6 +1118,58 @@
         chev.className = "chev";
         chev.textContent = "\u203A";
         namePill.appendChild(chev);
+        function setText(id, value) {
+          document.getElementById(id).textContent = value;
+        }
+        function setTyped(group, value) {
+          var frames = Array.from(document.querySelectorAll('[id^="mtr-ty-' + group + '-"]')).sort(
+            function (a, b) {
+              return Number(a.id.split("-").pop()) - Number(b.id.split("-").pop());
+            },
+          );
+          var characters = Array.from(value);
+          frames.forEach(function (frame, index) {
+            var prefixLength = Math.max(
+              1,
+              Math.ceil((characters.length * (index + 1)) / frames.length),
+            );
+            var textNode = Array.from(frame.childNodes).find(function (node) {
+              return node.nodeType === 3;
+            });
+            if (textNode) textNode.nodeValue = characters.slice(0, prefixLength).join("");
+          });
+        }
+        function setTwoLines(id, value) {
+          var lines = value.split("|").slice(0, 2);
+          var container = document.getElementById(id);
+          Array.from(container.children).forEach(function (line, index) {
+            line.textContent = lines[index] || lines[0] || "";
+          });
+        }
+        var teaserMessage = text(vars.teaserMessage, "wait look 👀", 20);
+        var benefitMessage = text(vars.benefitMessage, "renders in 4K. no editor", 32);
+        var sourceMessage = text(vars.sourceMessage, "on heygen", 20);
+        var workflowMessage = text(vars.workflowMessage, "u just write plain html tags", 34);
+        var ownershipMessage = text(vars.ownershipMessage, "the code is yours forever", 32);
+        setText(
+          "mtr-message-question",
+          text(vars.questionMessage, "what r u using for the launch video??", 46),
+        );
+        setText("mtr-message-teaser", teaserMessage);
+        setText("mtr-message-reaction", text(vars.reactionMessage, "OMG IT'S HTML", 24));
+        setText("mtr-message-emoji", text(vars.reactionEmoji, "🤯🤯🤯", 12));
+        setText("mtr-message-benefit", benefitMessage);
+        setText("mtr-message-discovery", text(vars.discoveryMessage, "where did u find this", 28));
+        setText("mtr-message-source", sourceMessage);
+        setText("mtr-message-workflow", workflowMessage);
+        setText("mtr-message-ownership", ownershipMessage);
+        setText("mtr-message-install", text(vars.installMessage, "installing rn", 20));
+        setText("mtr-message-thanks", text(vars.thanksMessage, "ty bestie 💚", 20));
+        setTyped(1, teaserMessage);
+        setTyped(2, benefitMessage);
+        setTyped(3, sourceMessage);
+        setTyped(4, workflowMessage);
+        setTyped(5, ownershipMessage);
         document.querySelector(".cardtitle").textContent = text(
           vars.cardTitle,
           "HyperFrames | Write HTML, render pixel-perfect video",
@@ -1020,6 +1185,9 @@
           "12,000+ creators",
           30,
         );
+        setTwoLines("mtr-ec-feature-1", text(vars.ecFeature1, "Write|plain HTML", 32));
+        setTwoLines("mtr-ec-feature-2", text(vars.ecFeature2, "Render|pixel-perfect", 32));
+        setTwoLines("mtr-ec-feature-3", text(vars.ecFeature3, "Own|every line", 32));
         document.getElementById("mtr-ec-cta").textContent = text(
           vars.ecCta,
           "Start rendering free",

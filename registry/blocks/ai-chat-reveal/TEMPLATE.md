@@ -11,9 +11,10 @@ Only defaults declared in `data-composition-variables` are editable:
 - `botName`, `userMessage`, `answer1` through `answer3`
 - `bullet1` through `bullet3`
 - `ecHeadline`, `ecSub`, `ecCta`, and `ecFooter`
+- `brandLogo`, using a transparent mark that remains legible on the dark header
 
 Typed and streamed copy is length-locked to within 20% of the original.
 
 ## Protected
 
-Do not change chat chrome, keyboard, layout, logo asset, palette, fonts, scene order, duration, timing, easing, typing cadence, or reveal logic. This contract declares no image or color variables.
+Do not change chat chrome, keyboard, layout, palette, fonts, scene order, duration, timing, easing, typing cadence, or reveal logic. Do not replace any image outside the declared closing-card logo slot, and do not restyle the assistant interface to match the supplied website. This contract declares no color variables.

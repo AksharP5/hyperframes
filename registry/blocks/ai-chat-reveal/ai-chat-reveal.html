@@ -13,7 +13,8 @@
     { "id": "ecHeadline", "type": "string", "role": "content", "label": "End-card headline", "description": "Closing card headline. A | breaks the line.", "default": "It&#39;s not magic.|It&#39;s HTML." },
     { "id": "ecSub", "type": "string", "role": "content", "label": "End-card subline", "description": "Supporting sentence on the closing card.", "default": "Open-source video rendering — write HTML, ship pixel-perfect video." },
     { "id": "ecCta", "type": "string", "role": "content", "label": "End-card CTA", "description": "Label on the closing card button.", "default": "Try HyperFrames" },
-    { "id": "ecFooter", "type": "string", "role": "content", "label": "End-card footer", "description": "Letter-spaced line at the very bottom.", "default": "HYPERFRAMES.HEYGEN.COM" }
+    { "id": "ecFooter", "type": "string", "role": "content", "label": "End-card footer", "description": "Letter-spaced line at the very bottom.", "default": "HYPERFRAMES.HEYGEN.COM" },
+    { "id": "brandLogo", "type": "image", "role": "content", "label": "Brand logo", "description": "Transparent logo in the closing-card header.", "default": "assets/hyperframes-logo-white.svg" }
   ]'
 >
   <head>
@@ -692,7 +693,12 @@
       >
         <div id="acr-endcard-inner">
           <div class="acr-stage">
-            <img id="acr-eclogo" src="assets/hyperframes-logo-white.svg" alt="HyperFrames" />
+            <img
+              id="acr-eclogo"
+              data-var-src="brandLogo"
+              src="assets/hyperframes-logo-white.svg"
+              alt="Brand logo"
+            />
             <svg id="acr-ecstar" width="80" height="80" viewBox="0 0 80 80">
               <g stroke="#2f6b57" stroke-width="8.5" stroke-linecap="round">
                 <line x1="47" y1="40" x2="77" y2="40" />

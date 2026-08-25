@@ -1937,8 +1937,7 @@
       "showcase",
       "avatar",
       "promotion",
-      "vertical",
-      "ad-template"
+      "vertical"
     ],
     "href": "/catalog/blocks/heygen-avatar-promo-card",
     "preview": "https://static.heygen.ai/hyperframes-oss/docs/images/catalog/blocks/heygen-avatar-promo-card.png"

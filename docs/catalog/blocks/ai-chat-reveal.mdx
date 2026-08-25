@@ -10,7 +10,7 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
   previewSrc="/public/catalog/blocks/ai-chat-reveal.json"
   compositionId="ai-chat-reveal"
   compositionSrc="compositions/ai-chat-reveal.html"
-  variables={[{"id":"botName","type":"string","role":"content","label":"Assistant name","description":"Title in the chat header.","default":"Assistant"},{"id":"userMessage","type":"string","role":"content","label":"User message","description":"The question typed on the keyboard and sent. Around 40 characters keeps the measured pacing.","default":"How do I turn my HTML into real video?"},{"id":"answer1","type":"string","role":"content","label":"Answer paragraph 1","description":"First streamed paragraph.","default":"You do not need an editor. HyperFrames renders the HTML you already write into deterministic, pixel-perfect video."},{"id":"answer2","type":"string","role":"content","label":"Answer paragraph 2","description":"Short second beat.","default":"It is markup, not magic."},{"id":"answer3","type":"string","role":"content","label":"Answer paragraph 3","description":"Lead-in to the list.","default":"What you get out of the box:"},{"id":"bullet1","type":"string","role":"content","label":"Bullet 1","description":"First list item.","default":"A catalog of motion primitives you install and own"},{"id":"bullet2","type":"string","role":"content","label":"Bullet 2","description":"Second list item.","default":"GSAP timelines that seek to any frame"},{"id":"bullet3","type":"string","role":"content","label":"Bullet 3","description":"Third list item.","default":"4K renders from a single CLI command"},{"id":"ecHeadline","type":"string","role":"content","label":"End-card headline","description":"Closing card headline. A | breaks the line.","default":"It's not magic.|It's HTML."},{"id":"ecSub","type":"string","role":"content","label":"End-card subline","description":"Supporting sentence on the closing card.","default":"Open-source video rendering — write HTML, ship pixel-perfect video."},{"id":"ecCta","type":"string","role":"content","label":"End-card CTA","description":"Label on the closing card button.","default":"Try HyperFrames"},{"id":"ecFooter","type":"string","role":"content","label":"End-card footer","description":"Letter-spaced line at the very bottom.","default":"HYPERFRAMES.HEYGEN.COM"}]}
+  variables={[{"id":"botName","type":"string","role":"content","label":"Assistant name","description":"Title in the chat header.","default":"Assistant"},{"id":"userMessage","type":"string","role":"content","label":"User message","description":"The question typed on the keyboard and sent. Around 40 characters keeps the measured pacing.","default":"How do I turn my HTML into real video?"},{"id":"answer1","type":"string","role":"content","label":"Answer paragraph 1","description":"First streamed paragraph.","default":"You do not need an editor. HyperFrames renders the HTML you already write into deterministic, pixel-perfect video."},{"id":"answer2","type":"string","role":"content","label":"Answer paragraph 2","description":"Short second beat.","default":"It is markup, not magic."},{"id":"answer3","type":"string","role":"content","label":"Answer paragraph 3","description":"Lead-in to the list.","default":"What you get out of the box:"},{"id":"bullet1","type":"string","role":"content","label":"Bullet 1","description":"First list item.","default":"A catalog of motion primitives you install and own"},{"id":"bullet2","type":"string","role":"content","label":"Bullet 2","description":"Second list item.","default":"GSAP timelines that seek to any frame"},{"id":"bullet3","type":"string","role":"content","label":"Bullet 3","description":"Third list item.","default":"4K renders from a single CLI command"},{"id":"ecHeadline","type":"string","role":"content","label":"End-card headline","description":"Closing card headline. A | breaks the line.","default":"It's not magic.|It's HTML."},{"id":"ecSub","type":"string","role":"content","label":"End-card subline","description":"Supporting sentence on the closing card.","default":"Open-source video rendering — write HTML, ship pixel-perfect video."},{"id":"ecCta","type":"string","role":"content","label":"End-card CTA","description":"Label on the closing card button.","default":"Try HyperFrames"},{"id":"ecFooter","type":"string","role":"content","label":"End-card footer","description":"Letter-spaced line at the very bottom.","default":"HYPERFRAMES.HEYGEN.COM"},{"id":"brandLogo","type":"image","role":"content","label":"Brand logo","description":"Transparent logo in the closing-card header.","default":"assets/hyperframes-logo-white.svg"}]}
 >
 
 ```html ai-chat-reveal.html
@@ -29,7 +29,8 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
     { "id": "ecHeadline", "type": "string", "role": "content", "label": "End-card headline", "description": "Closing card headline. A | breaks the line.", "default": "It&#39;s not magic.|It&#39;s HTML." },
     { "id": "ecSub", "type": "string", "role": "content", "label": "End-card subline", "description": "Supporting sentence on the closing card.", "default": "Open-source video rendering — write HTML, ship pixel-perfect video." },
     { "id": "ecCta", "type": "string", "role": "content", "label": "End-card CTA", "description": "Label on the closing card button.", "default": "Try HyperFrames" },
-    { "id": "ecFooter", "type": "string", "role": "content", "label": "End-card footer", "description": "Letter-spaced line at the very bottom.", "default": "HYPERFRAMES.HEYGEN.COM" }
+    { "id": "ecFooter", "type": "string", "role": "content", "label": "End-card footer", "description": "Letter-spaced line at the very bottom.", "default": "HYPERFRAMES.HEYGEN.COM" },
+    { "id": "brandLogo", "type": "image", "role": "content", "label": "Brand logo", "description": "Transparent logo in the closing-card header.", "default": "assets/hyperframes-logo-white.svg" }
   ]'
 >
   <head>
@@ -708,7 +709,12 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
       >
         <div id="acr-endcard-inner">
           <div class="acr-stage">
-            <img id="acr-eclogo" src="assets/hyperframes-logo-white.svg" alt="HyperFrames" />
+            <img
+              id="acr-eclogo"
+              data-var-src="brandLogo"
+              src="assets/hyperframes-logo-white.svg"
+              alt="Brand logo"
+            />
             <svg id="acr-ecstar" width="80" height="80" viewBox="0 0 80 80">
               <g stroke="#2f6b57" stroke-width="8.5" stroke-linecap="round">
                 <line x1="47" y1="40" x2="77" y2="40" />
@@ -1034,7 +1040,7 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
 
 <InstallCommand command="npx hyperframes add ai-chat-reveal" item="ai-chat-reveal" />
 
-That writes `compositions/ai-chat-reveal.html`, plus 1 supporting file under `assets/`.
+That writes `compositions/ai-chat-reveal.html`, plus 2 supporting files under `assets/`.
 
 ## Add it to your video
 
@@ -1074,6 +1080,7 @@ want to change on the element:
 | `ecSub` | `Open-source video rendering — write HTML, ship pixel-perfect video.` | string | Supporting sentence on the closing card. |
 | `ecCta` | `Try HyperFrames` | string | Label on the closing card button. |
 | `ecFooter` | `HYPERFRAMES.HEYGEN.COM` | string | Letter-spaced line at the very bottom. |
+| `brandLogo` | `assets/hyperframes-logo-white.svg` | image | Transparent logo in the closing-card header. |
 
 Set them with `data-variable-values` on the element that mounts it. These are the
 defaults, so this behaves exactly like the preview above until you change one:
@@ -1082,7 +1089,7 @@ defaults, so this behaves exactly like the preview above until you change one:
 <div
   data-composition-id="ai-chat-reveal"
   data-composition-src="compositions/ai-chat-reveal.html"
-  data-variable-values='{"botName":"Assistant","userMessage":"How do I turn my HTML into real video?","answer1":"You do not need an editor. HyperFrames renders the HTML you already write into deterministic, pixel-perfect video.","answer2":"It is markup, not magic.","answer3":"What you get out of the box:","bullet1":"A catalog of motion primitives you install and own","bullet2":"GSAP timelines that seek to any frame","bullet3":"4K renders from a single CLI command","ecHeadline":"It's not magic.|It's HTML.","ecSub":"Open-source video rendering — write HTML, ship pixel-perfect video.","ecCta":"Try HyperFrames","ecFooter":"HYPERFRAMES.HEYGEN.COM"}'
+  data-variable-values='{"botName":"Assistant","userMessage":"How do I turn my HTML into real video?","answer1":"You do not need an editor. HyperFrames renders the HTML you already write into deterministic, pixel-perfect video.","answer2":"It is markup, not magic.","answer3":"What you get out of the box:","bullet1":"A catalog of motion primitives you install and own","bullet2":"GSAP timelines that seek to any frame","bullet3":"4K renders from a single CLI command","ecHeadline":"It's not magic.|It's HTML.","ecSub":"Open-source video rendering — write HTML, ship pixel-perfect video.","ecCta":"Try HyperFrames","ecFooter":"HYPERFRAMES.HEYGEN.COM","brandLogo":"assets/hyperframes-logo-white.svg"}'
 ></div>
 ```
 
@@ -1106,7 +1113,8 @@ defaults, so this behaves exactly like the preview above until you change one:
     { "id": "ecHeadline", "type": "string", "role": "content", "label": "End-card headline", "description": "Closing card headline. A | breaks the line.", "default": "It&#39;s not magic.|It&#39;s HTML." },
     { "id": "ecSub", "type": "string", "role": "content", "label": "End-card subline", "description": "Supporting sentence on the closing card.", "default": "Open-source video rendering — write HTML, ship pixel-perfect video." },
     { "id": "ecCta", "type": "string", "role": "content", "label": "End-card CTA", "description": "Label on the closing card button.", "default": "Try HyperFrames" },
-    { "id": "ecFooter", "type": "string", "role": "content", "label": "End-card footer", "description": "Letter-spaced line at the very bottom.", "default": "HYPERFRAMES.HEYGEN.COM" }
+    { "id": "ecFooter", "type": "string", "role": "content", "label": "End-card footer", "description": "Letter-spaced line at the very bottom.", "default": "HYPERFRAMES.HEYGEN.COM" },
+    { "id": "brandLogo", "type": "image", "role": "content", "label": "Brand logo", "description": "Transparent logo in the closing-card header.", "default": "assets/hyperframes-logo-white.svg" }
   ]'
 >
   <head>
@@ -1785,7 +1793,12 @@ defaults, so this behaves exactly like the preview above until you change one:
       >
         <div id="acr-endcard-inner">
           <div class="acr-stage">
-            <img id="acr-eclogo" src="assets/hyperframes-logo-white.svg" alt="HyperFrames" />
+            <img
+              id="acr-eclogo"
+              data-var-src="brandLogo"
+              src="assets/hyperframes-logo-white.svg"
+              alt="Brand logo"
+            />
             <svg id="acr-ecstar" width="80" height="80" viewBox="0 0 80 80">
               <g stroke="#2f6b57" stroke-width="8.5" stroke-linecap="round">
                 <line x1="47" y1="40" x2="77" y2="40" />

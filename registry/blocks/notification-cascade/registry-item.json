@@ -83,6 +83,14 @@
       "label": "End-card footer",
       "description": "URL or call to action under the headline.",
       "default": "hyperframes.heygen.com"
+    },
+    {
+      "id": "brandLogo",
+      "type": "image",
+      "role": "content",
+      "label": "Brand logo",
+      "description": "Transparent logo centered on the closing card.",
+      "default": "assets/hyperframes-logo-white.svg"
     }
   ],
   "files": [
