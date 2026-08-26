@@ -1,6 +1,7 @@
 // fallow-ignore-file unused-file
 import { injectDeterministicFontFaces } from "@hyperframes/producer";
-import { runFontLocalize } from "./fontLocalize.js";
+import { runFontLocalize, stampFontCompilerVersion } from "./fontLocalize.js";
+import { VERSION } from "./version.js";
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -18,10 +19,12 @@ export async function main(): Promise<number> {
       writeOutput: (value) => process.stdout.write(value),
       writeError: (value) => process.stderr.write(value),
     },
-    (html) =>
-      injectDeterministicFontFaces(html, {
+    async (html) => {
+      const localized = await injectDeterministicFontFaces(html, {
         failClosedFontFetch: true,
         allowSystemFontCapture: false,
-      }),
+      });
+      return stampFontCompilerVersion(localized, VERSION);
+    },
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runFontLocalize, type FontLocalizeIo } from "./fontLocalize.js";
+import { runFontLocalize, stampFontCompilerVersion, type FontLocalizeIo } from "./fontLocalize.js";
 
 function makeIo(input: string): {
   io: FontLocalizeIo;
@@ -68,5 +68,19 @@ describe("runFontLocalize", () => {
     expect(exitCode).toBe(1);
     expect(harness.output).toEqual([]);
     expect(harness.errors.join(" ")).toContain("empty output");
+  });
+});
+
+describe("stampFontCompilerVersion", () => {
+  it("records the compiler version inside the document head", () => {
+    const stamped = stampFontCompilerVersion(
+      "<!doctype html><html><head><title>x</title></head><body></body></html>",
+      "0.8.15",
+    );
+
+    expect(stamped).toContain('<meta name="hyperframes-font-compiler-version" content="0.8.15">');
+    expect(stamped.indexOf("hyperframes-font-compiler-version")).toBeLessThan(
+      stamped.indexOf("</head>"),
+    );
   });
 });
