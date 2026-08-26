@@ -1,3 +1,4 @@
+// fallow-ignore-file unused-file
 import { injectDeterministicFontFaces } from "@hyperframes/producer";
 import { runFontLocalize } from "./fontLocalize.js";
 
@@ -9,15 +10,18 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-process.exitCode = await runFontLocalize(
-  {
-    readInput: readStdin,
-    writeOutput: (value) => process.stdout.write(value),
-    writeError: (value) => process.stderr.write(value),
-  },
-  (html) =>
-    injectDeterministicFontFaces(html, {
-      failClosedFontFetch: true,
-      allowSystemFontCapture: false,
-    }),
-);
+/** Standalone-entry main; the bin wrapper owns the actual process exit code. */
+export async function main(): Promise<number> {
+  return runFontLocalize(
+    {
+      readInput: readStdin,
+      writeOutput: (value) => process.stdout.write(value),
+      writeError: (value) => process.stderr.write(value),
+    },
+    (html) =>
+      injectDeterministicFontFaces(html, {
+        failClosedFontFetch: true,
+        allowSystemFontCapture: false,
+      }),
+  );
+}

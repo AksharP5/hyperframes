@@ -7,5 +7,6 @@ if (error) {
   console.error(error);
   process.exitCode = 1;
 } else {
-  await import("../dist/fontLocalizeCli.js");
+  const { main } = await import("../dist/fontLocalizeCli.js");
+  process.exitCode = await main();
 }
