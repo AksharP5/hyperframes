@@ -1201,11 +1201,15 @@ const GOOGLE_FONTS_TEXT_MAX_ENCODED_LENGTH = 1_700;
 function extractGoogleFontsText(html: string): string | undefined {
   const { document } = parseHTML(html);
   const decodedBodyText = document.body?.textContent ?? "";
+  // Source + decoded text is an intentional over-approximation: base64, scripts, and class names
+  // collapse in the Set, while decoded entities contribute the glyphs the browser actually paints.
   const characters = [...Array.from(html), ...Array.from(decodedBodyText)];
   const uniqueCharacters = new Set<string>();
   for (const character of characters) {
     uniqueCharacters.add(character);
-    // CSS text-transform can render glyphs absent from the authored source.
+    // This closes locale-independent Unicode casing, including multi-code-point expansions such as
+    // ß -> SS. Locale/context transforms (for example Turkish İ) and CSS full-width/full-size-kana
+    // need a transform-aware follow-up rather than pretending this code-point closure is exhaustive.
     for (const variant of `${character.toUpperCase()}${character.toLowerCase()}`) {
       uniqueCharacters.add(variant);
     }

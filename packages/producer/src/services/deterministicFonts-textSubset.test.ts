@@ -47,9 +47,22 @@ describe("Google Fonts text subsetting", () => {
     );
 
     const text = url.searchParams.get("text") ?? "";
+    expect(encodeURIComponent(text).length).toBeLessThan(700);
     for (const character of new Set("YOUR KIDNEY TRANSPLANT:WHAT HAPPENS NEXT")) {
       expect(text).toContain(character);
     }
+  });
+
+  it("covers capitalized words through the same case closure", async () => {
+    const url = await requestedGoogleFontUrl(
+      `<!doctype html><html><head><style>
+        h1 { font-family: "Inter", sans-serif; font-weight: 800; text-transform: capitalize; }
+      </style></head><body><h1>hello world</h1></body></html>`,
+    );
+
+    const text = url.searchParams.get("text") ?? "";
+    expect(text).toContain("H");
+    expect(text).toContain("W");
   });
 
   it("falls back to the full font when case closure exceeds the text URL budget", async () => {

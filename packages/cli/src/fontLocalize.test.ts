@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runFontLocalize, stampFontCompilerVersion, type FontLocalizeIo } from "./fontLocalize.js";
+import { runFontLocalize, stampFontVersions, type FontLocalizeIo } from "./fontLocalize.js";
 
 function makeIo(input: string): {
   io: FontLocalizeIo;
@@ -71,16 +71,39 @@ describe("runFontLocalize", () => {
   });
 });
 
-describe("stampFontCompilerVersion", () => {
-  it("records the compiler version inside the document head", () => {
-    const stamped = stampFontCompilerVersion(
+describe("stampFontVersions", () => {
+  it("records producer and localizer versions inside the document head", () => {
+    const stamped = stampFontVersions(
       "<!doctype html><html><head><title>x</title></head><body></body></html>",
-      "0.8.15",
+      { producer: "0.8.15", localizer: "0.8.16" },
     );
 
     expect(stamped).toContain('<meta name="hyperframes-font-compiler-version" content="0.8.15">');
+    expect(stamped).toContain('<meta name="hyperframes-font-localizer-version" content="0.8.16">');
     expect(stamped.indexOf("hyperframes-font-compiler-version")).toBeLessThan(
       stamped.indexOf("</head>"),
+    );
+  });
+
+  it("inserts both diagnostic stamps after a doctype when no head close exists", () => {
+    const stamped = stampFontVersions("<!doctype html><main>x</main>", {
+      producer: "0.8.15",
+      localizer: "0.8.16",
+    });
+
+    expect(stamped).toMatch(
+      /^<!doctype html><meta name="hyperframes-font-compiler-version" content="0\.8\.15"><meta name="hyperframes-font-localizer-version" content="0\.8\.16">/,
+    );
+  });
+
+  it("inserts both diagnostic stamps at the start when no head or doctype exists", () => {
+    const stamped = stampFontVersions("<main>x</main>", {
+      producer: "0.8.15<script>",
+      localizer: "0.8.16<script>",
+    });
+
+    expect(stamped).toBe(
+      '<meta name="hyperframes-font-compiler-version" content="0.8.15script"><meta name="hyperframes-font-localizer-version" content="0.8.16script"><main>x</main>',
     );
   });
 });

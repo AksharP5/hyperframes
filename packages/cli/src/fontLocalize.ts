@@ -4,15 +4,29 @@ export interface FontLocalizeIo {
   writeError(value: string): void;
 }
 
-export function stampFontCompilerVersion(html: string, version: string): string {
-  const safeVersion = version.replace(/[^A-Za-z0-9.+-]/g, "") || "unknown";
-  const tag = `<meta name="hyperframes-font-compiler-version" content="${safeVersion}">`;
+export interface FontVersions {
+  producer: string;
+  localizer: string;
+}
+
+function safeVersion(version: string): string {
+  return version.replace(/[^A-Za-z0-9.+-]/g, "") || "unknown";
+}
+
+/**
+ * Add post-hoc diagnostics for the producer resolver and the CLI wrapper that ran it.
+ * These stamps are traceability metadata, not an enforcement mechanism.
+ */
+export function stampFontVersions(html: string, versions: FontVersions): string {
+  const tags =
+    `<meta name="hyperframes-font-compiler-version" content="${safeVersion(versions.producer)}">` +
+    `<meta name="hyperframes-font-localizer-version" content="${safeVersion(versions.localizer)}">`;
   const headClose = html.search(/<\/head\s*>/i);
-  if (headClose >= 0) return `${html.slice(0, headClose)}${tag}${html.slice(headClose)}`;
+  if (headClose >= 0) return `${html.slice(0, headClose)}${tags}${html.slice(headClose)}`;
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
-  if (!doctype) return `${tag}${html}`;
+  if (!doctype) return `${tags}${html}`;
   const insertAt = doctype.index + doctype[0].length;
-  return `${html.slice(0, insertAt)}${tag}${html.slice(insertAt)}`;
+  return `${html.slice(0, insertAt)}${tags}${html.slice(insertAt)}`;
 }
 
 function safeErrorName(error: unknown): string {
