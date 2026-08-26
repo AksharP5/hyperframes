@@ -10,6 +10,7 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
 export default defineConfig({
   entry: {
     cli: "src/cli.ts",
+    fontLocalizeCli: "src/fontLocalizeCli.ts",
     runtimeVersion: "src/runtimeVersion.ts",
     shaderTransitionWorker: "../producer/src/services/shaderTransitionWorker.ts",
   },
