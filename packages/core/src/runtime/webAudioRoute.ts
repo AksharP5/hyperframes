@@ -34,6 +34,21 @@ import type { RuntimeJson } from "./types";
  * `web-audio` here, correctly or not. Nothing in this codebase feeds
  * `createMediaElementSource` from a `srcObject` element today, so this is
  * recorded as a boundary rather than fixed.
+ *
+ * Second known gap, same shape: `isCorsSilenced` judges the RAW url string —
+ * the same-origin URL the author wrote, or whatever the browser resolved into
+ * `currentSrc` — not wherever a server-side redirect chain actually lands.
+ * A same-origin URL that 302s to a cross-origin CDN reads as `web-audio` here
+ * and gets a real `createMediaElementSource` node; whether that node is
+ * silent then depends on the redirect target's CORS headers, which this
+ * classifier never sees (following the chain to inspect the final response
+ * would turn a pure, synchronous verdict — needed on every schedule call —
+ * into an async fetch). A cross-origin URL that redirects back to same-origin
+ * has the opposite miss: classified `decode-only` and sent down the fetch
+ * fallback when Web Audio capture would have worked fine either way. Not
+ * fixed for the same reason as `srcObject` — no caller in this codebase
+ * routes media through a redirecting URL today — but worth knowing before
+ * trusting this classifier's verdict for one that does.
  */
 export type WebAudioMediaRoute =
   /** Same-origin, CORS-opted-in, or a scheme the check doesn't apply to. */

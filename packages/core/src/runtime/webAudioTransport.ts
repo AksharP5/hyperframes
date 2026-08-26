@@ -255,13 +255,47 @@ export class WebAudioTransport {
    * element away from its native output, so the question has to be settled
    * before it, and there is no undo afterwards.
    *
-   * `init.ts` routes on the same verdict before ever calling in; this stays the
-   * enforcement point so a direct caller (studio, player) cannot reopen the
-   * one-way door.
+   * `init.ts` routes on the same verdict before ever calling in, and
+   * `AudioRow.tsx`'s standalone preview player classifies over its own
+   * throwaway `AudioContext` before its own `createMediaElementSource` call —
+   * this method is A enforcement point, not THE enforcement point; every
+   * caller that can reach `createMediaElementSource` is expected to classify
+   * first. What this method DOES own is the cache below: `_mediaElementSources`
+   * is keyed by element identity, not by asset, so a cache hit alone says
+   * nothing about the element's CURRENT resource. Reclassifying on every call
+   * — cache hit included — means a `src` mutation an outer caller missed (a
+   * pooled element swapped from a same-origin clip to a cross-origin one
+   * without going through a fresh generation) can't leave a stale
+   * `web-audio` verdict silently attached to the new resource.
    */
   private acquireMediaElementSource(el: HTMLMediaElement): MediaElementAudioSourceNode | null {
     const cached = this._mediaElementSources.get(el);
-    if (cached) return cached;
+    if (cached) {
+      // The node itself doesn't change identity on a src swap, but its
+      // eligibility can: the Web Audio spec's tainted-origin check runs
+      // against the element's CURRENT underlying resource, not the one that
+      // was current when the node was built. A same-origin-to-cross-origin
+      // mutation on this element would otherwise keep returning the old
+      // (now-silent) node forever — `destroy()` was the only thing that ever
+      // cleared this cache, so a long-lived element that changed sources
+      // stayed silenced for the rest of the session (the R2 finding this
+      // block exists to close). The node is still a one-way door — it can't
+      // be un-created, and the element's native output is gone either way —
+      // so disconnecting it just stops it feeding a graph that no longer
+      // matches the asset; the caller falls back to the decode-only path.
+      const route = classifyWebAudioMediaRoute(el);
+      if (route.kind !== "web-audio") {
+        try {
+          cached.disconnect();
+        } catch {
+          // Already torn down.
+        }
+        this._mediaElementSources.delete(el);
+        reportWebAudioMediaRoute(el, route);
+        return null;
+      }
+      return cached;
+    }
     if (!this._ctx) return null;
     const route = classifyWebAudioMediaRoute(el);
     if (route.kind !== "web-audio") {

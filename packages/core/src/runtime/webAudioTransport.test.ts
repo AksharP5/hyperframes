@@ -202,6 +202,58 @@ describe("WebAudioTransport", () => {
       expect(scheduled).not.toBeNull();
       expect(mock.ctx.createMediaElementSource).toHaveBeenCalledWith(el);
     });
+
+    // R2 finding: `_mediaElementSources` is keyed by element identity, not by
+    // asset. A cache hit alone said nothing about the element's CURRENT
+    // resource, so a pooled element reused for a new clip kept handing back
+    // the OLD (same-origin) node — and its stale `web-audio` verdict — after
+    // `src` moved to a cross-origin asset with no `crossorigin` opt-in. Only
+    // `destroy()` ever cleared the cache, so this silenced the element for the
+    // rest of the session.
+    it("stops returning the cached node once the same element's src moves cross-origin", async () => {
+      const { transport, mock, gen: gen1 } = setupTransport(100);
+      vi.spyOn(console, "info").mockImplementation(() => {});
+      const el = document.createElement("audio");
+      el.setAttribute("src", "/assets/vo.mp3");
+
+      const first = await transport.scheduleMediaElementPlayback(el, 0, 0, 0, 1, gen1, 1);
+      expect(first).not.toBeNull();
+      expect(mock.ctx.createMediaElementSource).toHaveBeenCalledTimes(1);
+
+      transport.stopAll();
+      // `stopAll()` itself disconnects the transient graph (see "disconnects
+      // the transient graph on stop but keeps the cached native source
+      // reusable" above) without evicting the cache — clear the spy so the
+      // assertion below is about the FIX's own eviction, not that call.
+      mock.mediaElementSourceNode.disconnect.mockClear();
+      el.setAttribute("src", "https://cdn.example.com/reused-clip.mp3");
+      const gen2 = transport.startGeneration();
+      const second = await transport.scheduleMediaElementPlayback(el, 0, 0, 0, 1, gen2, 1);
+
+      expect(second).toBeNull();
+      // The one-way door means a fresh node can't be built either — the
+      // fix's job is to stop HANDING BACK the stale one, not to conjure a
+      // new node over a src that was never eligible.
+      expect(mock.ctx.createMediaElementSource).toHaveBeenCalledTimes(1);
+      expect(mock.mediaElementSourceNode.disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps returning the cached node when a reused element's src stays eligible", async () => {
+      const { transport, mock, gen: gen1 } = setupTransport(100);
+      const el = document.createElement("audio");
+      el.setAttribute("src", "/assets/vo.mp3");
+
+      await transport.scheduleMediaElementPlayback(el, 0, 0, 0, 1, gen1, 1);
+      transport.stopAll();
+      mock.mediaElementSourceNode.disconnect.mockClear();
+      el.setAttribute("src", "/assets/other-same-origin-clip.mp3");
+      const gen2 = transport.startGeneration();
+      const second = await transport.scheduleMediaElementPlayback(el, 0, 0, 0, 1, gen2, 1);
+
+      expect(second).not.toBeNull();
+      expect(mock.ctx.createMediaElementSource).toHaveBeenCalledTimes(1);
+      expect(mock.mediaElementSourceNode.disconnect).not.toHaveBeenCalled();
+    });
   });
 
   it("tracks play generation for async race prevention", () => {
