@@ -67,7 +67,12 @@ import { shouldAttemptPeriodicTimelineBind } from "./timelineRebindPolicy";
 import { installStudioCustomEase } from "./customEase";
 import { parseNumeric } from "./startExpression";
 import { parseStrictFiniteTimingNumber } from "./playbackRate";
-import { clearRuntimeData, setRuntimeData, setRuntimeDataErrorReporter } from "./runtimeData";
+import {
+  clearRuntimeData,
+  setRuntimeData,
+  setRuntimeDataAppliedReporter,
+  setRuntimeDataErrorReporter,
+} from "./runtimeData";
 
 const AUTHORED_DURATION_ATTR = "data-hf-authored-duration";
 const AUTHORED_END_ATTR = "data-hf-authored-end";
@@ -133,12 +138,21 @@ export function initSandboxRuntimeModular(): void {
   // Own the analytics bridge before any best-effort runtime installation so
   // early failures are observable instead of disappearing before player setup.
   initRuntimeAnalytics(postRuntimeMessage as (payload: unknown) => void);
-  setRuntimeDataErrorReporter((channel, error) => {
+  setRuntimeDataErrorReporter((channel, requestId, error) => {
     postRuntimeMessage({
       source: "hf-preview",
       type: "runtime-data-error",
       channel,
+      requestId,
       message: error instanceof Error ? error.message : String(error),
+    });
+  });
+  setRuntimeDataAppliedReporter((channel, requestId) => {
+    postRuntimeMessage({
+      source: "hf-preview",
+      type: "runtime-data-applied",
+      channel,
+      requestId,
     });
   });
   // SDK moveElement edits must render even when no usable GSAP timeline ever

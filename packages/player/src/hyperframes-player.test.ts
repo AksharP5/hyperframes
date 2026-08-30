@@ -2481,7 +2481,7 @@ describe("HyperframesPlayer retained runtime data", () => {
 
     player.setRuntimeData("captions", { words: ["direct"] });
 
-    expect(direct).toHaveBeenCalledWith("captions", { words: ["direct"] });
+    expect(direct).toHaveBeenCalledWith("captions", { words: ["direct"] }, expect.any(Number));
     expect(runtimeCalls()).toHaveLength(0);
   });
 
@@ -2497,7 +2497,138 @@ describe("HyperframesPlayer retained runtime data", () => {
     expect(player.iframeElement.referrerPolicy).toBe("no-referrer");
   });
 
+  it("supports an opaque-origin sandbox for hosts that do not need direct iframe DOM access", () => {
+    player.setAttribute("sandbox-origin", "opaque");
+    expect(player.iframeElement.sandbox.contains("allow-scripts")).toBe(true);
+    expect(player.iframeElement.sandbox.contains("allow-same-origin")).toBe(false);
+    expect(player.iframeElement.sandbox.contains("allow-top-navigation")).toBe(false);
+
+    player.removeAttribute("sandbox-origin");
+    expect(player.iframeElement.sandbox.contains("allow-same-origin")).toBe(true);
+  });
+
+  it("treats every non-null sandbox-origin value as restrictive", () => {
+    player.setAttribute("sandbox-origin", "opaqu");
+    expect(player.iframeElement.sandbox.contains("allow-same-origin")).toBe(false);
+  });
+
   it("rejects payloads that structuredClone cannot transfer", () => {
     expect(() => player.setRuntimeData("captions", () => undefined)).toThrow();
+  });
+
+  it("fails closed when structuredClone is unavailable", () => {
+    const original = globalThis.structuredClone;
+    Object.defineProperty(globalThis, "structuredClone", {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      expect(() => player.setRuntimeData("captions", { words: ["unsafe"] })).toThrow(
+        /requires structuredClone support/,
+      );
+      player._onMessage(readyMessage());
+      expect(runtimeCalls()).toHaveLength(0);
+    } finally {
+      Object.defineProperty(globalThis, "structuredClone", {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+
+  it("reports postMessage delivery failures instead of silently dropping runtime data", () => {
+    player._onMessage(readyMessage());
+    postSpy.mockImplementation(() => {
+      throw new DOMException("payload cannot be cloned", "DataCloneError");
+    });
+    const errors: CustomEvent[] = [];
+    player.addEventListener("runtimedataerror", (event) => errors.push(event as CustomEvent));
+
+    player.setRuntimeData("captions", { words: ["value"] });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.detail).toMatchObject({
+      channel: "captions",
+      requestId: expect.any(Number),
+      message: "payload cannot be cloned",
+    });
+  });
+
+  it("reports a null iframe window as a delivery failure", () => {
+    player._onMessage(readyMessage());
+    Object.defineProperty(player.iframeElement, "contentWindow", {
+      configurable: true,
+      get: () => null,
+    });
+    const errors: CustomEvent[] = [];
+    player.addEventListener("runtimedataerror", (event) => errors.push(event as CustomEvent));
+
+    player.setRuntimeData("captions", { words: ["value"] });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.detail).toMatchObject({
+      channel: "captions",
+      requestId: expect.any(Number),
+      message: "Composition iframe is unavailable",
+    });
+  });
+
+  it("reports a bounded error when the runtime never responds", () => {
+    vi.useFakeTimers();
+    try {
+      player._onMessage(readyMessage());
+      const errors: CustomEvent[] = [];
+      player.addEventListener("runtimedataerror", (event) => errors.push(event as CustomEvent));
+
+      player.setRuntimeData("captions", { words: ["value"] });
+      vi.advanceTimersByTime(10_000);
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.detail).toMatchObject({
+        channel: "captions",
+        requestId: expect.any(Number),
+        message: "Runtime data delivery timed out after 10000ms",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a superseded completion and correlates the latest application", () => {
+    player._onMessage(readyMessage());
+    postSpy.mockClear();
+    const applied: CustomEvent[] = [];
+    player.addEventListener("runtimedataapplied", (event) => applied.push(event as CustomEvent));
+
+    player.setRuntimeData("captions", { words: ["first"] });
+    player.setRuntimeData("captions", { words: ["latest"] });
+    const requests = runtimeCalls().map((call) => (call[0] as { requestId: number }).requestId);
+
+    player._onMessage(
+      new MessageEvent("message", {
+        source: window,
+        data: {
+          source: "hf-preview",
+          type: "runtime-data-applied",
+          channel: "captions",
+          requestId: requests[0],
+        },
+      }),
+    );
+    expect(applied).toHaveLength(0);
+
+    player._onMessage(
+      new MessageEvent("message", {
+        source: window,
+        data: {
+          source: "hf-preview",
+          type: "runtime-data-applied",
+          channel: "captions",
+          requestId: requests[1],
+        },
+      }),
+    );
+    expect(applied).toHaveLength(1);
+    expect(applied[0]?.detail).toEqual({ channel: "captions", requestId: requests[1] });
   });
 });
