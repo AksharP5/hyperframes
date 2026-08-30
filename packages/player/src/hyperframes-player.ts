@@ -8,6 +8,7 @@ import { handleRuntimeMessage } from "./runtime-message-handler.js";
 import {
   SHADER_CAPTURE_SCALE_ATTR,
   SHADER_LOADING_ATTR,
+  RUNTIME_SRC_ATTR,
   type ShaderLoadingMode,
   getShaderCaptureScaleFromElement,
   getShaderModeFromElement,
@@ -78,6 +79,7 @@ class HyperframesPlayer extends HTMLElement {
       "playback-rate",
       "audio-src",
       SANDBOX_ORIGIN_ATTR,
+      RUNTIME_SRC_ATTR,
       SHADER_CAPTURE_SCALE_ATTR,
       SHADER_LOADING_ATTR,
     ];
@@ -218,6 +220,11 @@ class HyperframesPlayer extends HTMLElement {
   attributeChangedCallback(name: string, oldVal: string | null, val: string | null) {
     switch (name) {
       case "src":
+        // Custom-element attributes are normally assigned before insertion (React does this for
+        // every render). Navigating the inner iframe here would let its one-shot runtime `ready`
+        // message fire before connectedCallback installs the parent message listener. Initial
+        // attributes are applied below by connectedCallback; only live changes navigate here.
+        if (!this.isConnected) break;
         if (val) {
           this._ready = false;
           this._runtimeBridgeReady = false;
@@ -228,6 +235,7 @@ class HyperframesPlayer extends HTMLElement {
         }
         break;
       case "srcdoc":
+        if (!this.isConnected) break;
         this._ready = false;
         this._runtimeBridgeReady = false;
         this._rejectAllRuntimeDataDeliveries(
@@ -291,6 +299,8 @@ class HyperframesPlayer extends HTMLElement {
         break;
       case SHADER_CAPTURE_SCALE_ATTR:
       case SHADER_LOADING_ATTR:
+      case RUNTIME_SRC_ATTR:
+        if (!this.isConnected) break;
         this._reloadShaderOptions();
         break;
     }
@@ -773,6 +783,13 @@ class HyperframesPlayer extends HTMLElement {
   }
 
   private _reloadShaderOptions(): void {
+    // This navigates the frame, so readiness has to fall with it. Leaving
+    // `_runtimeBridgeReady` true lets a delivery post into a document that is being
+    // replaced, where it can only end in a delivery timeout rather than the immediate,
+    // explanatory rejection the caller gets from every other navigating path.
+    this._ready = false;
+    this._runtimeBridgeReady = false;
+    this._rejectAllRuntimeDataDeliveries("Shader options changed before runtime data was applied");
     if (getShaderModeFromElement(this) !== "player") this.shaderLoader.reset();
     if (this.hasAttribute("srcdoc")) {
       this.iframe.srcdoc = prepareSrcdocForElement(this, this.getAttribute("srcdoc") || "");
@@ -798,10 +815,18 @@ class HyperframesPlayer extends HTMLElement {
   }
 
   private _withDirectTimeline(fn: (tl: DirectTimelineAdapter) => void): boolean {
-    const tl = this._directTimelineAdapter || this.probe.resolveDirectTimelineAdapter();
+    const resolved = this.probe.resolveDirectTimelineAdapter();
+    const tl = resolved || this._directTimelineAdapter;
     if (!tl) return false;
     try {
       fn(tl);
+      if (resolved && resolved !== this._directTimelineAdapter) {
+        const duration = resolved.duration();
+        if (Number.isFinite(duration) && duration > 0) {
+          this._duration = duration;
+          this.controlsApi?.updateTime(this._currentTime, duration);
+        }
+      }
       this._directTimelineAdapter = tl;
       return true;
     } catch {
@@ -973,7 +998,10 @@ class HyperframesPlayer extends HTMLElement {
 
   private _onIframeLoad() {
     this._ready = false;
-    this._runtimeBridgeReady = false;
+    // The runtime installs its bridge at DOMContentLoaded, posts `ready`, and only then does the
+    // iframe's load event fire. Do not erase that authoritative handshake here: doing so strands
+    // retained data set after load until a second `ready` that never comes. Source setters and
+    // sandbox-policy reloads already clear bridge readiness before starting a navigation.
     this._directTimelineAdapter = null;
     this._directTimelineClock.stop();
     this._stopParentTickClock();
