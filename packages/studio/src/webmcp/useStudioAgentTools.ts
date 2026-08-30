@@ -25,6 +25,22 @@ import {
   type StudioSeekResult,
   type StudioSelectResult,
 } from "./tools/selectionTools";
+import {
+  studioFrame,
+  STUDIO_FRAME_DESCRIPTION,
+  STUDIO_FRAME_INPUT_SCHEMA,
+  type FrameToolDeps,
+  type StudioFrameInput,
+  type StudioFrameResult,
+} from "./tools/frameTools";
+import {
+  studioInspect,
+  STUDIO_INSPECT_DESCRIPTION,
+  STUDIO_INSPECT_INPUT_SCHEMA,
+  type InspectToolDeps,
+  type StudioInspectInput,
+  type StudioInspectResult,
+} from "./tools/inspectTools";
 
 const log = makeStudioDebugLogger("webmcp");
 
@@ -38,7 +54,7 @@ function reportRegistration(report: ToolRegistrationReport, native: boolean): vo
   }
 }
 
-export interface StudioAgentToolsDeps extends SelectionToolDeps {
+export interface StudioAgentToolsDeps extends SelectionToolDeps, FrameToolDeps, InspectToolDeps {
   /** Read Studio's current state. Called per tool invocation, never cached. */
   getSnapshot: () => StudioLookSnapshot;
 }
@@ -88,6 +104,26 @@ function buildStudioTools(depsRef: { readonly current: StudioAgentToolsDeps }): 
       execute: (input): Promise<ToolResult<StudioSeekResult>> =>
         runToolBody("studio_seek", async () =>
           studioSeek(depsRef.current, readNumberInput(input, "time")),
+        ),
+    },
+    {
+      name: "studio_frame",
+      title: "See the composition",
+      description: STUDIO_FRAME_DESCRIPTION,
+      inputSchema: STUDIO_FRAME_INPUT_SCHEMA,
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      execute: (input): Promise<ToolResult<StudioFrameResult>> =>
+        runToolBody("studio_frame", () => studioFrame(depsRef.current, input as StudioFrameInput)),
+    },
+    {
+      name: "studio_inspect",
+      title: "Inspect one element",
+      description: STUDIO_INSPECT_DESCRIPTION,
+      inputSchema: STUDIO_INSPECT_INPUT_SCHEMA,
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      execute: (input): Promise<ToolResult<StudioInspectResult>> =>
+        runToolBody("studio_inspect", () =>
+          studioInspect(depsRef.current, input as StudioInspectInput),
         ),
     },
   ];

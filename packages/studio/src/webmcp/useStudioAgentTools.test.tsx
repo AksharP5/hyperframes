@@ -38,6 +38,16 @@ function deps(overrides: Partial<StudioAgentToolsDeps> = {}): StudioAgentToolsDe
     applySelection: () => undefined,
     requestSeek: () => undefined,
     readPlayhead: () => ({ currentTime: 0, duration: 10, isPlaying: false }),
+    getProjectId: () => "demo",
+    getCompositionPath: () => "index.html",
+    probeFrame: async () => ({ ok: true, status: 200 }),
+    wait: async () => undefined,
+    getCurrentSelection: () => null,
+    getGsapDiagnostics: () => ({
+      animations: [],
+      multipleTimelines: false,
+      unsupportedTimelinePattern: false,
+    }),
     ...overrides,
   };
 }
@@ -102,6 +112,8 @@ describe("useStudioAgentTools", () => {
       "studio_look",
       "studio_select",
       "studio_seek",
+      "studio_frame",
+      "studio_inspect",
     ]);
     expect(trackEvent).toHaveBeenCalledWith("webmcp.native_present");
   });
@@ -116,14 +128,14 @@ describe("useStudioAgentTools", () => {
     await act(async () => {
       harness = mountTools(deps({ getSnapshot: () => snapshot() }));
     });
-    expect(registerTool).toHaveBeenCalledTimes(3);
+    expect(registerTool).toHaveBeenCalledTimes(5);
 
     await act(async () => {
       harness?.rerenderWith(deps({ getSnapshot: () => snapshot({ currentTime: 5 }) }));
       harness?.rerenderWith(deps({ getSnapshot: () => snapshot({ currentTime: 6 }) }));
     });
 
-    expect(registerTool).toHaveBeenCalledTimes(3);
+    expect(registerTool).toHaveBeenCalledTimes(5);
   });
 
   it("executes against the LATEST deps, not the ones present at registration", async () => {
@@ -166,16 +178,16 @@ describe("useStudioAgentTools", () => {
     expect(signal?.aborted).toBe(true);
   });
 
-  it("boots cleanly when the browser has no native WebMCP", async () => {
+  it("registers nothing when the browser has no WebMCP", async () => {
     removeModelContext();
 
     await act(async () => {
       mountTools(deps({ getSnapshot: () => snapshot() }));
     });
 
-    // The assertion is that mounting did not throw; a browser without the
-    // native API must still boot Studio. The polyfill may install
-    // document.modelContext as a fallback — that is expected.
+    // The assertion is that mounting did not throw; a browser without the API
+    // must still boot Studio.
+    expect(document).not.toHaveProperty("modelContext");
   });
 
   it("registers nothing when the preference is turned off", async () => {
@@ -196,7 +208,7 @@ describe("useStudioAgentTools", () => {
       mountTools(deps({ getSnapshot: () => snapshot() }));
     });
 
-    expect(registerTool).toHaveBeenCalledTimes(3);
+    expect(registerTool).toHaveBeenCalledTimes(5);
   });
 
   it("reports a non-abort registration failure through production telemetry", async () => {
