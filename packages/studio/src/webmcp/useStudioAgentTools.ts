@@ -41,6 +41,25 @@ import {
   type StudioInspectInput,
   type StudioInspectResult,
 } from "./tools/inspectTools";
+import {
+  studioSetStyle,
+  studioSetText,
+  STUDIO_SET_STYLE_DESCRIPTION,
+  STUDIO_SET_STYLE_INPUT_SCHEMA,
+  STUDIO_SET_TEXT_DESCRIPTION,
+  STUDIO_SET_TEXT_INPUT_SCHEMA,
+  type ContentToolDeps,
+  type StudioSetStyleResult,
+  type StudioSetTextResult,
+} from "./tools/contentTools";
+import {
+  studioTransform,
+  STUDIO_TRANSFORM_DESCRIPTION,
+  STUDIO_TRANSFORM_INPUT_SCHEMA,
+  type StudioTransformInput,
+  type StudioTransformResult,
+  type TransformToolDeps,
+} from "./tools/transformTools";
 
 const log = makeStudioDebugLogger("webmcp");
 
@@ -54,7 +73,8 @@ function reportRegistration(report: ToolRegistrationReport, native: boolean): vo
   }
 }
 
-export interface StudioAgentToolsDeps extends SelectionToolDeps, FrameToolDeps, InspectToolDeps {
+export interface StudioAgentToolsDeps
+  extends SelectionToolDeps, FrameToolDeps, InspectToolDeps, ContentToolDeps, TransformToolDeps {
   /** Read Studio's current state. Called per tool invocation, never cached. */
   getSnapshot: () => StudioLookSnapshot;
 }
@@ -124,6 +144,35 @@ function buildStudioTools(depsRef: { readonly current: StudioAgentToolsDeps }): 
       execute: (input): Promise<ToolResult<StudioInspectResult>> =>
         runToolBody("studio_inspect", () =>
           studioInspect(depsRef.current, input as StudioInspectInput),
+        ),
+    },
+    {
+      name: "studio_set_text",
+      title: "Set an element's text",
+      description: STUDIO_SET_TEXT_DESCRIPTION,
+      inputSchema: STUDIO_SET_TEXT_INPUT_SCHEMA,
+      annotations: { readOnlyHint: false, untrustedContentHint: true },
+      execute: (input): Promise<ToolResult<StudioSetTextResult>> =>
+        runToolBody("studio_set_text", () => studioSetText(depsRef.current, input)),
+    },
+    {
+      name: "studio_set_style",
+      title: "Set an element's styles",
+      description: STUDIO_SET_STYLE_DESCRIPTION,
+      inputSchema: STUDIO_SET_STYLE_INPUT_SCHEMA,
+      annotations: { readOnlyHint: false },
+      execute: (input): Promise<ToolResult<StudioSetStyleResult>> =>
+        runToolBody("studio_set_style", () => studioSetStyle(depsRef.current, input)),
+    },
+    {
+      name: "studio_transform",
+      title: "Move, resize or rotate",
+      description: STUDIO_TRANSFORM_DESCRIPTION,
+      inputSchema: STUDIO_TRANSFORM_INPUT_SCHEMA,
+      annotations: { readOnlyHint: false },
+      execute: (input): Promise<ToolResult<StudioTransformResult>> =>
+        runToolBody("studio_transform", () =>
+          studioTransform(depsRef.current, input as StudioTransformInput),
         ),
     },
   ];
