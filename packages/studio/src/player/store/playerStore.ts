@@ -23,9 +23,13 @@ import { createThumbnailSlice, type ThumbnailSlice } from "./thumbnailSlice";
 export type { KeyframeCacheEntry } from "./keyframeSlice";
 export { liveTime } from "./liveTime";
 
-import type { TimelineElement, TimelineElementPatch } from "./timelineElement";
+import type {
+  TimelineElement,
+  TimelineElementPatch,
+  SubCompositionHostState,
+} from "./timelineElement";
 
-export type { TimelineElement };
+export type { TimelineElement, SubCompositionHostState };
 export type ZoomMode = "fit" | "manual";
 type TimelineTool = "select" | "razor";
 
@@ -212,6 +216,14 @@ interface PlayerState
    */
   domClipChildren: DomClipChild[];
   setDomClipChildren: (children: DomClipChild[]) => void;
+  /**
+   * Host-element state for every id'd element inside a sub-composition, keyed by
+   * dom id. Collected from the live preview because it is the only place that
+   * sees it: these elements are filtered out of `elements` before the flat store
+   * is built, and the clip manifest carries timing, not attributes.
+   */
+  subCompositionHostState: Map<string, SubCompositionHostState>;
+  setSubCompositionHostState: (state: Map<string, SubCompositionHostState>) => void;
 }
 
 /** A sub-comp DOM-only timeline child (no data-start) and its nesting context. */
@@ -284,6 +296,7 @@ export function createTimelineResetState() {
     clipManifest: null,
     clipParentMap: new Map<string, string>(),
     domClipChildren: [],
+    subCompositionHostState: new Map<string, SubCompositionHostState>(),
   };
 }
 
@@ -430,6 +443,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setClipParentMap: (map) => set({ clipParentMap: map }),
   domClipChildren: [],
   setDomClipChildren: (children) => set({ domClipChildren: children }),
+  subCompositionHostState: new Map(),
+  setSubCompositionHostState: (state) => set({ subCompositionHostState: state }),
 
   setIsPlaying: (playing) => {
     if (get().isPlaying === playing) return;

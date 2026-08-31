@@ -10,7 +10,7 @@
  */
 
 import { usePlayerStore } from "../store/playerStore";
-import type { TimelineElement, DomClipChild } from "../store/playerStore";
+import type { TimelineElement, DomClipChild, SubCompositionHostState } from "../store/playerStore";
 import { resolveCssStackingContextId } from "@hyperframes/core/runtime/stacking-context";
 import type { ClipTree } from "@hyperframes/core/runtime/clipTree";
 import { HF_AUDIO_GROUP_ATTR } from "@hyperframes/core/audio-groups";
@@ -133,6 +133,52 @@ export function collectSubCompositionDomChildren(
     if (!hostEl) continue;
     const innerRoot = hostEl.querySelector("[data-hf-inner-root]") ?? hostEl;
     collectHostDomChildren(clip.id, innerRoot, clip.id, parentMap, out);
+  }
+  return out;
+}
+
+/** The host-element `data-*` state one element carries, or null when it has none. */
+function readSubCompositionHostState(el: Element): SubCompositionHostState | null {
+  const state: SubCompositionHostState = {};
+  if (el.hasAttribute("data-hidden")) state.hidden = true;
+  if (el.hasAttribute("data-timeline-locked")) state.timelineLocked = true;
+  const timelineRole = el.getAttribute("data-timeline-role");
+  if (timelineRole) state.timelineRole = timelineRole;
+  const fxChain = el.getAttribute("data-fx-chain");
+  if (fxChain) state.fxChain = fxChain;
+  const automation = el.getAttribute("data-automation");
+  if (automation) state.automation = automation;
+  return Object.keys(state).length > 0 ? state : null;
+}
+
+/**
+ * Host-element state for every id'd element inside every sub-composition.
+ *
+ * This walk exists because nothing else in the pipeline can see these
+ * attributes. A clip whose parent composition is itself in the manifest is
+ * filtered out before the flat store is built, so an expanded child has no twin
+ * to inherit from, and the manifest carries timing rather than attributes.
+ *
+ * Deliberately separate from {@link collectSubCompositionDomChildren}: that walk
+ * defines which rows exist and writes `parentMap`, and it stops at the first
+ * id'd descendant. Scene footage commonly sits one level below an id'd region
+ * wrapper, so it is never reached there. This one descends the whole subtree and
+ * touches neither rows nor parentage.
+ */
+export function collectSubCompositionHostState(
+  iframeDoc: Document | null,
+  clips: readonly ClipManifestClip[],
+): Map<string, SubCompositionHostState> {
+  const out = new Map<string, SubCompositionHostState>();
+  if (!iframeDoc) return out;
+  for (const clip of clips) {
+    if (clip.kind !== "composition" || !clip.id) continue;
+    const hostEl = iframeDoc.getElementById(clip.id);
+    if (!hostEl) continue;
+    for (const el of Array.from(hostEl.querySelectorAll("[id]"))) {
+      const state = readSubCompositionHostState(el);
+      if (state) out.set(el.id, state);
+    }
   }
   return out;
 }

@@ -118,3 +118,24 @@ export type TimelineElementPatch = Partial<
     | "audioGroupAutomation"
   >
 >;
+
+/**
+ * The `data-*` state an expanded sub-composition child needs but cannot reach.
+ *
+ * A child row is synthesized from a manifest clip with no element to read, and
+ * for a real sub-composition it has no flat store twin either: such clips are
+ * dropped before the flat store is built. Read off the live preview instead
+ * (`collectSubCompositionHostState`) and carried on the store by dom id.
+ *
+ * Without it the eye reported every hidden child visible, so clicking it wrote
+ * `data-hidden` a second time instead of removing it, and the element could
+ * never be shown again, not even after a reload, since the attribute is in the
+ * source.
+ */
+export interface SubCompositionHostState {
+  hidden?: boolean;
+  timelineLocked?: boolean;
+  timelineRole?: string;
+  fxChain?: string;
+  automation?: string;
+}

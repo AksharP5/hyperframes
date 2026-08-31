@@ -270,6 +270,49 @@ describe("buildExpandedElements", () => {
     expect(child.timelineLocked).toBe(true);
   });
 
+  // The test above only covers a host with no compositionSrc, where the child's
+  // key falls back to the `index.html` scope and a flat store twin can exist. A
+  // REAL sub-composition scopes the child key to the sub-comp file, and clips
+  // whose parent composition is itself in the manifest are filtered out of the
+  // flat store before it is built (`processTimelineMessage`). So the twin never
+  // exists there and the inheritance above is dead code for the one case it was
+  // written for: the eye reported every hidden child visible, clicking it
+  // rewrote data-hidden, and nothing could be shown again.
+  it("reads hidden and locked off the live element when the child has no flat twin", () => {
+    // Only the host is in the flat store — exactly what the manifest filter leaves.
+    const elements = [
+      el({
+        id: "scene-2",
+        domId: "scene-2",
+        start: 3.25,
+        duration: 3.5,
+        compositionSrc: "scene-2.html",
+      }),
+    ];
+    const manifest = [
+      clip({ id: "scene-2", start: 3.25, duration: 3.5, compositionSrc: "scene-2.html" }),
+      clip({ id: "scene-2-video", start: 3.25, duration: 3.5, parentCompositionId: "scene-2" }),
+    ];
+    const parentMap = new Map([["scene-2-video", "scene-2"]]);
+    const hostState = new Map([["scene-2-video", { hidden: true, timelineLocked: true }]]);
+
+    const out = buildExpandedElements(
+      elements,
+      manifest,
+      parentMap,
+      "scene-2",
+      "scene-2",
+      [],
+      hostState,
+    );
+    const child = out.find((e) => e.domId === "scene-2-video")!;
+    // The child key is scoped to the sub-comp file, so no store element can match it.
+    expect(child.key).toBe("scene-2.html#scene-2-video");
+    expect(elements.some((element) => element.key === child.key)).toBe(false);
+    expect(child.hidden).toBe(true);
+    expect(child.timelineLocked).toBe(true);
+  });
+
   // Sub-comp internals (group + pills) have no data-start, so they're not in the
   // manifest. They arrive as DOM children and must still expand under their host.
   it("expands DOM-only sub-comp children (no manifest clip) under the host", () => {
