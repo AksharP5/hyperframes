@@ -1,8 +1,8 @@
 /**
  * Keyboard surface for the active automation selection: Escape clears,
- * Delete/Backspace empties the range (anchors pinned, envelope outside
- * untouched), Cmd/Ctrl+C copies it, Cmd/Ctrl+V pastes at the selection's
- * start (or the playhead) onto the selected clip's lane. Sibling of
+ * Delete/Backspace deletes every breakpoint inside the selection box, Cmd/Ctrl+C
+ * copies its span, Cmd/Ctrl+V pastes at the selection's start (or the playhead) onto the
+ * selected clip's lane. Sibling of
  * useKeyframeKeyboard and copies its contract: capture phase so playback
  * shortcuts cannot swallow keys we act on, inert while any text input has
  * focus, and a key is only consumed when it does something.
@@ -16,7 +16,7 @@
 import { useEffect } from "react";
 import { usePlayerStore, type TimelineElement } from "../player/store/playerStore";
 import { laneFor, withLane } from "../player/components/automationLaneGeometry";
-import { replaceRange } from "../player/components/automationLaneSelection";
+import { pointInSelection, replaceRange } from "../player/components/automationLaneSelection";
 import {
   copyRange,
   isLastPasteSpan,
@@ -87,11 +87,22 @@ function resolveSelectionContext(
 }
 
 /**
- * The write that empties the active selection, or null when there is nothing
- * to do: the clip is gone, its lane is read-only, the target no longer
- * resolves to a range, or the lane already has no points in it. Split out of
- * the keydown handler so each stays under the complexity a single branch of
- * keyboard dispatch should carry.
+ * The write that deletes the breakpoints inside the active selection, or null when
+ * there is nothing to do: the clip is gone, its lane is read-only, the target no
+ * longer resolves to a range, or the selection covers no breakpoints.
+ *
+ * Deletes them outright rather than emptying the span behind anchor points. Anchors
+ * are what `replaceRange` exists for, and they are right for a shape insert or a
+ * paste — the envelope either side of the edit must not move. But Delete over a
+ * selection is the author saying "these points, gone", and answering that with two
+ * NEW points at the selection's edges reads as the delete not having worked. The
+ * envelope between the surviving neighbours re-interpolates, which is what deleting
+ * a breakpoint means everywhere else in the lane (right-clicking one does exactly
+ * this).
+ *
+ * Both axes of the selection box, edges included: what Delete removes is exactly
+ * what the lane drew a ring around. A point at the right time but outside the box's
+ * value bounds stays — which is the whole reason the box has them.
  */
 function resolveDeleteWrite(
   state: PlayerState,
@@ -99,14 +110,12 @@ function resolveDeleteWrite(
   sel: AutomationSelection,
 ): { onCommit(next: HfAutomation): void; next: HfAutomation } | null {
   const ctx = resolveSelectionContext(state, lanes, sel);
-  if (!ctx || ctx.lane.points.length === 0) return null;
-  const points = replaceRange({
-    lane: ctx.lane,
-    range: ctx.range,
-    t0: sel.t0,
-    t1: sel.t1,
-    inner: [],
-  });
+  if (!ctx) return null;
+  const points = ctx.lane.points.filter((p) => !pointInSelection(p, sel));
+  // Nothing inside is nothing to do — and it must stay a no-op rather than
+  // writing, or Delete over a smooth stretch would push an undo entry that
+  // changed nothing.
+  if (points.length === ctx.lane.points.length) return null;
   return {
     onCommit: ctx.binding.onCommit,
     next: withLane(ctx.binding.automation, { target: sel.target, points }),
@@ -247,7 +256,16 @@ function handlePaste(
   // Select the pasted span — the only feedback that it landed — and mark it, so
   // an immediate second Cmd+V recognises this selection as the paste's own and
   // chains right after it instead of overwriting it.
-  const mark = { elementKey: paste.elementKey, target: paste.target, t0: atT, t1 };
+  // Full-height box over the pasted span: everything that landed is selected, so
+  // Delete straight after a paste undoes it in one press.
+  const mark = {
+    elementKey: paste.elementKey,
+    target: paste.target,
+    t0: atT,
+    t1,
+    v0: paste.range.min,
+    v1: paste.range.max,
+  };
   state.setAutomationSelection(mark);
   markLastPaste(mark);
   return true;

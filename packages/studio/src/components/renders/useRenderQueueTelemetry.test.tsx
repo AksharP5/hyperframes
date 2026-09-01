@@ -7,9 +7,8 @@
 // install id rather than the user's, which is worse than attributing it
 // correctly.
 
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { startRenderAndReadBody, type MountedQueue } from "./renderQueueTestHarness";
 
 const policyState = { allowed: true };
 const mintCalls = vi.fn(() => "browser-user-123");
@@ -26,48 +25,15 @@ vi.mock("../../telemetry/events", () => ({
 
 const { useRenderQueue } = await import("./useRenderQueue");
 
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-
-let root: Root | null = null;
+let queue: MountedQueue | null = null;
 
 /** Body of the POST the hook makes when a render is started. */
 async function startRenderBody(): Promise<Record<string, unknown>> {
-  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
-    Promise.resolve(
-      new Response(JSON.stringify({ jobId: "j1", status: "rendering" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    ),
-  );
-  vi.stubGlobal("fetch", fetchMock);
-  vi.stubGlobal(
-    "EventSource",
-    class {
-      close(): void {}
-      addEventListener(): void {}
-    },
-  );
-
-  let api: ReturnType<typeof useRenderQueue> | null = null;
-  function Harness(): null {
-    api = useRenderQueue("demo");
-    return null;
-  }
-  const host = document.createElement("div");
-  document.body.append(host);
-  root = createRoot(host);
-  act(() => {
-    root?.render(<Harness />);
+  const started = await startRenderAndReadBody(useRenderQueue, {
+    opts: { fps: 30, quality: "standard", format: "mp4" },
   });
-  await act(async () => {
-    await api?.startRender({ fps: 30, quality: "standard", format: "mp4" });
-  });
-
-  const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
-  const body = post?.[1]?.body;
-  if (body === undefined || body === null) throw new Error("hook made no POST with a body");
-  return JSON.parse(String(body)) as Record<string, unknown>;
+  queue = started.queue;
+  return started.body;
 }
 
 beforeEach(() => {
@@ -76,8 +42,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (root) act(() => root?.unmount());
-  root = null;
+  queue?.unmount();
+  queue = null;
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
 });

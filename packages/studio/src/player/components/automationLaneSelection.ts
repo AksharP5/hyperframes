@@ -2,7 +2,7 @@
  * Range operations over one automation lane.
  *
  * `replaceRange` is the only mutator every range feature (delete, shapes,
- * paste, stretch) composes, and it carries the invariant that makes them safe:
+ * paste) composes, and it carries the invariant that makes them safe:
  * the envelope OUTSIDE the selection never moves. It samples the lane at both
  * edges first and pins anchor points there, so cutting the middle out of a
  * ramp cannot reshape the rest of the clip.
@@ -76,6 +76,24 @@ export function replaceRange(input: {
   return [...outside, ...edges, ...cappedInner].sort((a, b) => a.t - b.t);
 }
 
+/**
+ * Whether a breakpoint falls inside the selection box, edges included.
+ *
+ * The one rule three places need: what Delete removes, what the lane rings, and
+ * what a group drag moves. They have to agree — a point drawn as caught but left
+ * behind by the drag is worse than either answer.
+ *
+ * Both axes, which is what makes a selection a box: a point at the right time but
+ * the wrong value is not in it. Values compare in the parameter's own units, and
+ * that is correct on a logarithmic axis too — the mapping to screen is monotonic,
+ * so a box drawn around some pixels holds exactly the values it looks like it does.
+ */
+export function pointInSelection(
+  point: { t: number; v: number },
+  box: { t0: number; t1: number; v0: number; v1: number },
+): boolean {
+  return point.t >= box.t0 && point.t <= box.t1 && point.v >= box.v0 && point.v <= box.v1;
+}
 /**
  * Retime a selection: interior points scale proportionally into the new span,
  * then replaceRange runs over the UNION of old and new spans — growing eats

@@ -23,10 +23,30 @@ export interface RunFfmpegOptions {
 export interface RunFfmpegResult {
   success: boolean;
   exitCode: number | null;
+  signal?: NodeJS.Signals | null;
   stderr: string;
   durationMs: number;
   terminationReason: ManagedProcessTerminationReason;
+  failureReason?: "external_interruption";
   error?: Error;
+}
+
+const FFMPEG_SIGTERM_EXIT_LINE = /^Exiting normally, received signal 15\.?\r?$/m;
+
+/**
+ * Return true only when ffmpeg was terminated from outside this managed call.
+ *
+ * FFmpeg handles SIGTERM itself and can therefore report exit code 255 with a
+ * null Node signal. The exact terminal stderr line covers that case. Managed
+ * abort/deadline/inactivity reasons always take precedence so our own SIGTERM
+ * requests never become retryable lifecycle interruptions.
+ */
+export function isExternalFfmpegInterruption(
+  result: Pick<RunFfmpegResult, "exitCode" | "signal" | "stderr" | "terminationReason">,
+): boolean {
+  if (result.terminationReason !== "exit" || result.exitCode === 0) return false;
+  if (result.signal === "SIGTERM") return true;
+  return result.exitCode === 255 && FFMPEG_SIGTERM_EXIT_LINE.test(result.stderr);
 }
 
 const DEFAULT_TIMEOUT = 300_000;
@@ -92,7 +112,11 @@ export function formatFfmpegError(
 
 export async function runFfmpeg(args: string[], opts?: RunFfmpegOptions): Promise<RunFfmpegResult> {
   const timeout = opts?.timeout ?? DEFAULT_TIMEOUT;
-  const ffmpeg = spawn(getFfmpegBinary(), args);
+  // windowsHide: ffmpeg/ffprobe are console-subsystem binaries, so without
+  // this Node opens a visible console window per spawn on Windows. A render
+  // shells out dozens of times across parallel workers, which flashes a burst
+  // of windows across the user's desktop. No-op on macOS and Linux.
+  const ffmpeg = spawn(getFfmpegBinary(), args, { windowsHide: true });
   trackChildProcess(ffmpeg);
   const managed = new ManagedChildProcess(ffmpeg, {
     signal: opts?.signal,
@@ -100,12 +124,17 @@ export async function runFfmpeg(args: string[], opts?: RunFfmpegOptions): Promis
     onStderr: opts?.onStderr,
   });
   const outcome = await managed.wait();
-  return {
+  const result: RunFfmpegResult = {
     success: outcome.reason === "exit" && outcome.exitCode === 0,
     exitCode: outcome.exitCode,
+    signal: outcome.signal,
     stderr: outcome.stderr,
     durationMs: outcome.durationMs,
     terminationReason: outcome.reason,
     error: outcome.error,
   };
+  if (isExternalFfmpegInterruption(result)) {
+    result.failureReason = "external_interruption";
+  }
+  return result;
 }

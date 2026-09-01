@@ -35,16 +35,15 @@ import {
 import {
   readTimelineDurationFromDocument,
   mergeTimelineElementsPreservingDowngrades,
-  parseTimelineFromDOM,
 } from "../lib/timelineDOM";
 import { normalizeToZones } from "../components/timelineZones";
-import { setPreviewMediaMuted, setPreviewPlaybackRate } from "../lib/timelineIframeHelpers";
+import { applyPreviewAudioFlags, setPreviewPlaybackRate } from "../lib/timelineIframeHelpers";
 import { scrubMusicAtSeek, stopScrubPreviewAudio } from "../lib/playbackScrub";
 import { hasTimelinePerformanceFixtureLease } from "../lib/timelinePerformanceFixture";
 import { applyCachedSourceDurations, probeMissingSourceDurations } from "../lib/mediaProbe";
 import { shouldResumeForwardPlaybackAfterSeek, shouldStopAfterSeek } from "../lib/playbackSeek";
 import { applyPreviewVariablesToUrl } from "../../hooks/previewVariablesStore";
-import { acceptStudioRuntimeMessage } from "../lib/runtimeProtocol";
+import { createPreviewMessageHandler } from "./previewMessageRouter";
 import { timelineElementsChanged } from "./timelinePlayerSync";
 
 export function useTimelinePlayer() {
@@ -231,8 +230,8 @@ export function useTimelinePlayer() {
     } catch {}
   }, []);
   const applyPreviewAudioState = useCallback(() => {
-    const { audioMuted } = usePlayerStore.getState();
-    setPreviewMediaMuted(iframeRef.current, audioMuted);
+    const { audioMuted, audioVolume } = usePlayerStore.getState();
+    applyPreviewAudioFlags(iframeRef.current, audioMuted, audioVolume);
   }, []);
   const play = useCallback(() => {
     stopRAFLoop();
@@ -389,8 +388,20 @@ export function useTimelinePlayer() {
         seek(state.requestedSeekTime);
         usePlayerStore.getState().clearSeekRequest();
       }
+      // Play or stop from outside the loop — the FX rack auditioning a preset
+      // while paused, which is silent otherwise. `returnTo` puts the playhead
+      // back where the request found it: hovering is not an edit.
+      const request = state.playbackRequest;
+      if (request && request.nonce !== prev.playbackRequest?.nonce) {
+        if (request.playing) play();
+        else {
+          pause();
+          if (request.returnTo !== null) seek(request.returnTo);
+        }
+        usePlayerStore.getState().clearPlaybackRequest();
+      }
     });
-  }, [seek]);
+  }, [seek, play, pause]);
   const { playbackKeyDownRef, playbackKeyUpRef, attachIframeShortcutListeners, togglePlay } =
     usePlaybackKeyboard({
       iframeRef,
@@ -471,51 +482,14 @@ export function useTimelinePlayer() {
     const handleWindowKeyDown = (e: KeyboardEvent) => playbackKeyDownRef.current(e);
     const handleWindowKeyUp = (e: KeyboardEvent) => playbackKeyUpRef.current(e);
 
-    // Pre-existing message-router complexity — surfaced by line shifts, not new logic.
-    // fallow-ignore-next-line complexity
-    const handleMessage = (e: MessageEvent) => {
-      if (hasTimelinePerformanceFixtureLease()) return;
-      const data = e.data;
-      const ourIframe = iframeRef.current;
-      if (e.source && ourIframe && e.source !== ourIframe.contentWindow) {
-        return;
-      }
-      if (data?.source === "hf-preview") {
-        if (!acceptStudioRuntimeMessage(data)) return;
-      }
-      if (data?.source === "hf-preview" && data?.type === "state") {
-        try {
-          if (usePlayerStore.getState().elements.length === 0) {
-            const iframeWin = ourIframe?.contentWindow as IframeWindow | null;
-            const manifest = iframeWin?.__clipManifest;
-            if (manifest && manifest.clips.length > 0) {
-              processTimelineMessageRef.current(manifest);
-            }
-          }
-          const msSinceTimeline = Date.now() - lastTimelineMessageRef.current;
-          if (msSinceTimeline > 500) {
-            enrichMissingCompositionsRef.current();
-          }
-        } catch {}
-      }
-      if (data?.source === "hf-preview" && data?.type === "timeline" && Array.isArray(data.clips)) {
-        lastTimelineMessageRef.current = Date.now();
-        processTimelineMessageRef.current(data);
-        enrichMissingCompositionsRef.current();
-        if (usePlayerStore.getState().elements.length === 0) {
-          try {
-            const doc = ourIframe?.contentDocument;
-            const adapter = getAdapter();
-            if (doc && adapter) {
-              const els = parseTimelineFromDOM(doc, adapter.getDuration());
-              if (els.length > 0) {
-                syncTimelineElements(els);
-              }
-            }
-          } catch {}
-        }
-      }
-    };
+    const handleMessage = createPreviewMessageHandler({
+      iframeRef,
+      processTimelineMessageRef,
+      enrichMissingCompositionsRef,
+      lastTimelineMessageRef,
+      getAdapter,
+      syncTimelineElements,
+    });
 
     const handleVisibilityChange = () => {
       if (document.hidden && usePlayerStore.getState().isPlaying) {
@@ -558,7 +532,8 @@ export function useTimelinePlayer() {
     return usePlayerStore.subscribe((state, prev) => {
       const playbackRateChanged = state.playbackRate !== prev.playbackRate;
       const audioMutedChanged = state.audioMuted !== prev.audioMuted;
-      if (!playbackRateChanged && !audioMutedChanged) return;
+      const audioVolumeChanged = state.audioVolume !== prev.audioVolume;
+      if (!playbackRateChanged && !audioMutedChanged && !audioVolumeChanged) return;
 
       if (playbackRateChanged) {
         applyPlaybackRate(state.playbackRate);

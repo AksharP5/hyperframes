@@ -13,6 +13,8 @@ const makeCallbacks = (): MessageHandlerCallbacks => ({
   updateControlsPlaying: vi.fn(),
   dispatchEvent: vi.fn(),
   onRuntimeReady: vi.fn(),
+  onRuntimeDataApplied: vi.fn(),
+  onRuntimeDataError: vi.fn(),
   onRuntimeTimelineReady: vi.fn(),
   setRuntimeFps: vi.fn(),
   seek: vi.fn(),
@@ -68,6 +70,47 @@ describe("handleRuntimeMessage stage-size", () => {
     handleRuntimeMessage(stageSizeEvent(1280, 720, {}), frameWindow, callbacks);
 
     expect(callbacks.setCompositionSize).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleRuntimeMessage runtime data errors", () => {
+  it("routes a correlated channel-scoped error", () => {
+    const frameWindow = {} as Window;
+    const callbacks = makeCallbacks();
+    handleRuntimeMessage(
+      {
+        source: frameWindow,
+        data: {
+          source: "hf-preview",
+          type: "runtime-data-error",
+          channel: "captions",
+          requestId: 41,
+          message: "attach failed",
+        },
+      } as MessageEvent,
+      frameWindow,
+      callbacks,
+    );
+    expect(callbacks.onRuntimeDataError).toHaveBeenCalledWith("captions", 41, "attach failed");
+  });
+
+  it("routes a correlated successful application", () => {
+    const frameWindow = {} as Window;
+    const callbacks = makeCallbacks();
+    handleRuntimeMessage(
+      {
+        source: frameWindow,
+        data: {
+          source: "hf-preview",
+          type: "runtime-data-applied",
+          channel: "captions",
+          requestId: 42,
+        },
+      } as MessageEvent,
+      frameWindow,
+      callbacks,
+    );
+    expect(callbacks.onRuntimeDataApplied).toHaveBeenCalledWith("captions", 42);
   });
 });
 

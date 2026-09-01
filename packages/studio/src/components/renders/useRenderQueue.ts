@@ -4,6 +4,8 @@ import { trackStudioRenderStart } from "../../telemetry/events";
 import { getAnonymousId } from "../../telemetry/config";
 import { browserTelemetryAllowed } from "../../telemetry/policy";
 import { generateId } from "../../utils/generateId";
+import { readServerError } from "./serverError";
+import { ffmpegInstallMessage, useFfmpegStatus } from "./useFfmpegStatus";
 import { requestStudioFeedback, type FeedbackContext } from "../feedback/feedbackTrigger";
 
 export interface RenderJob {
@@ -28,7 +30,11 @@ export interface StartRenderOptions {
   format?: "mp4" | "webm" | "mov";
   /** `"auto"` (default) renders at the composition's authored dimensions. */
   resolution?: ResolutionPreset | "auto";
-  /** Render a specific composition file instead of index.html. */
+  /**
+   * Render a specific composition file. Omit it to render the composition the
+   * user currently has open — only the sidebar's per-composition Render button
+   * names one, because it renders a card the user is not looking at.
+   */
   composition?: string;
   /**
    * Composition-variable overrides ({variableId: value}), forwarded to the
@@ -64,13 +70,30 @@ function writeHiddenIds(projectId: string, ids: Set<string>): void {
   }
 }
 
-export function useRenderQueue(projectId: string | null) {
+export function useRenderQueue(
+  projectId: string | null,
+  // A ref, not the value: the render target has to be read at click time, and
+  // threading the value through would rebuild every callback below on each
+  // composition switch.
+  activeCompPathRef: { current: string | null },
+) {
   const [jobs, setJobs] = useState<RenderJob[]>([]);
   // History fetch failure — distinguished from "no renders yet" so the panel
   // never shows a false empty state.
   const [loadError, setLoadError] = useState<string | null>(null);
   // Failure of a user action (delete/cancel), surfaced inline in the panel.
   const [actionError, setActionError] = useState<string | null>(null);
+  // Owned here rather than in the panel: Studio renders from three places —
+  // the panel's Export button, the header's, and each composition card in the
+  // left sidebar — and a check living in one of them leaves the rest free to
+  // start a render this machine cannot finish. Every caller routes through
+  // `startRender`, so that is where the refusal belongs. Call sites still
+  // read `ffmpegMissing` to put the prompt on screen, because a refusal the
+  // user cannot see reads as a broken button.
+  const { status: ffmpeg, checking: ffmpegChecking, recheck: recheckFfmpeg } = useFfmpegStatus();
+  // A null status means the probe gave no answer (older server, failed
+  // request), which is not evidence of a missing encoder. Unknown fails open.
+  const ffmpegMissing = ffmpeg !== null && !ffmpeg.ok;
   const eventSourceRef = useRef<EventSource | null>(null);
   const activeJobRef = useRef<string | null>(null);
   // Renders started in THIS tab, mapped to the settings they ran with.
@@ -150,12 +173,35 @@ export function useRenderQueue(projectId: string | null) {
     // fallow-ignore-next-line complexity
     async (opts: StartRenderOptions = {}) => {
       if (!projectId) return;
+      // The server would answer this with a 503 anyway. Refusing here keeps
+      // the reason and the fix in the message, and keeps a control that
+      // forgot to disable itself from producing a mystery failure.
+      if (ffmpegMissing) {
+        addSessionJob(
+          {
+            id: generateId(),
+            status: "failed",
+            progress: 0,
+            error: ffmpegInstallMessage(ffmpeg),
+            filename: "Export blocked",
+            createdAt: Date.now(),
+          },
+          {},
+        );
+        return;
+      }
 
       const fps = opts.fps ?? 30;
       const quality = opts.quality ?? "standard";
       const format = opts.format ?? "mp4";
       const resolution = opts.resolution;
-      const composition = opts.composition;
+      // Which composition a render targets belongs here, with the same
+      // argument the FFmpeg gate above makes: Studio starts renders from three
+      // controls, and a default living in one of them leaves the others
+      // exporting a file the user is not looking at. The header's Export
+      // passed no options at all, so every render it started went to
+      // index.html no matter which composition was selected (#3549).
+      const composition = opts.composition ?? activeCompPathRef.current ?? undefined;
 
       trackStudioRenderStart({
         fps,
@@ -220,12 +266,19 @@ export function useRenderQueue(projectId: string | null) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-      } catch {
+      } catch (err) {
+        // The cause used to be discarded. Every failure — a dead server, an
+        // aborted request, a DNS error, a mid-render crash — surfaced as the
+        // same sentence, and this string is what travels into the feedback
+        // report too, so field reports of a render that fails *every time*
+        // still carried nothing to act on. Keep the CLI guidance, name the
+        // cause after it.
+        const cause = err instanceof Error ? err.message : String(err);
         const failedJob: RenderJob = {
           id: generateId(),
           status: "failed",
           progress: 0,
-          error: "Could not reach render server. Use `hyperframes render` from the CLI instead.",
+          error: `Could not reach render server: ${cause}. Use \`hyperframes render\` from the CLI instead.`,
           filename: "Export failed",
           createdAt: startTime,
         };
@@ -237,7 +290,7 @@ export function useRenderQueue(projectId: string | null) {
           id: generateId(),
           status: "failed",
           progress: 0,
-          error: `Server error (${res.status}). Check the terminal for details.`,
+          error: await readServerError(res),
           filename: "Export failed",
           createdAt: startTime,
         };
@@ -307,7 +360,7 @@ export function useRenderQueue(projectId: string | null) {
 
       return jobId;
     },
-    [projectId, closeActiveEventSource, addSessionJob],
+    [projectId, activeCompPathRef, closeActiveEventSource, addSessionJob, ffmpeg, ffmpegMissing],
   );
 
   // Cancel an in-flight render. The job row stays (as "cancelled") so the
@@ -431,6 +484,12 @@ export function useRenderQueue(projectId: string | null) {
       cancelRender,
       clearCompleted,
       startRender: startRender as (options: unknown) => Promise<void>,
+      // Every Export control reads these, so no caller has to decide for
+      // itself whether this machine can encode.
+      ffmpeg,
+      ffmpegMissing,
+      ffmpegChecking,
+      recheckFfmpeg,
     }),
     [
       jobs,
@@ -443,6 +502,10 @@ export function useRenderQueue(projectId: string | null) {
       cancelRender,
       clearCompleted,
       startRender,
+      ffmpeg,
+      ffmpegMissing,
+      ffmpegChecking,
+      recheckFfmpeg,
     ],
   );
 }

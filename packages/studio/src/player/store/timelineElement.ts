@@ -67,6 +67,17 @@ export interface TimelineElement {
   hidden?: boolean;
   /** Value of data-timeline-role attribute — used to identify music vs. voiceover. */
   timelineRole?: string;
+  /** Verbatim `data-audio-group` — the id of the `<hf-audio-group>` this clip belongs to, when any. */
+  audioGroup?: string;
+  /** The owning group's `data-label` (falls back to its id) — resolved once per parse. */
+  audioGroupLabel?: string;
+  /** The owning group's `data-volume` (defaults to 1) — resolved once per parse. */
+  audioGroupVolume?: number;
+  /** The owning group's `data-hidden` (defaults to false) — resolved once per parse. */
+  audioGroupHidden?: boolean;
+  /** The owning group's serialized `data-fx-chain`, when set — resolved once per parse. */
+  audioGroupFxChain?: string;
+  audioGroupAutomation?: string;
   /**
    * Set by useExpandedTimelineElements on an inline-expanded sub-composition
    * child: the absolute master-timeline start of the sub-comp host the child
@@ -75,4 +86,56 @@ export interface TimelineElement {
    */
   expandedParentStart?: number;
   expandedHostKey?: string;
+}
+
+/**
+ * The fields `updateElement` may write.
+ *
+ * Deliberately a narrow allow-list rather than `Partial<TimelineElement>`: most
+ * of an element is derived from the document at parse time, and letting a
+ * caller poke those would put the store out of step with the file it mirrors.
+ *
+ * The `audioGroup*` entries are the GROUP's state, mirrored onto every member —
+ * a group row derives its label, fader, mute and chain from these, so a group
+ * write has to be able to land here or the header goes on rendering whatever it
+ * parsed at load.
+ */
+export type TimelineElementPatch = Partial<
+  Pick<
+    TimelineElement,
+    | "start"
+    | "duration"
+    | "track"
+    | "zIndex"
+    | "hasExplicitZIndex"
+    | "playbackStart"
+    | "hidden"
+    | "audioGroup"
+    | "audioGroupLabel"
+    | "audioGroupVolume"
+    | "audioGroupHidden"
+    | "audioGroupFxChain"
+    | "audioGroupAutomation"
+  >
+>;
+
+/**
+ * The `data-*` state an expanded sub-composition child needs but cannot reach.
+ *
+ * A child row is synthesized from a manifest clip with no element to read, and
+ * for a real sub-composition it has no flat store twin either: such clips are
+ * dropped before the flat store is built. Read off the live preview instead
+ * (`collectSubCompositionHostState`) and carried on the store by dom id.
+ *
+ * Without it the eye reported every hidden child visible, so clicking it wrote
+ * `data-hidden` a second time instead of removing it, and the element could
+ * never be shown again, not even after a reload, since the attribute is in the
+ * source.
+ */
+export interface SubCompositionHostState {
+  hidden?: boolean;
+  timelineLocked?: boolean;
+  timelineRole?: string;
+  fxChain?: string;
+  automation?: string;
 }

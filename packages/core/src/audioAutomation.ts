@@ -11,9 +11,13 @@
  * curve, three consumers, or the picture and the sound disagree.
  */
 
-import { getAudioFxDef, type HfAudioFxChain, type HfAudioFxNumberParam } from "./audioFx.js";
+import { getAudioFxDef, type HfAudioFxChain } from "./audioFx.js";
+import { MAX_AUDIO_GAIN } from "./audioGain.js";
 
 export const HF_AUDIO_AUTOMATION_ATTR = "data-automation";
+
+/** The same attribute as a `dataset` / `dataAttributes` key. See `HF_AUDIO_FX_DATA_KEY`. */
+export const HF_AUDIO_AUTOMATION_DATA_KEY = HF_AUDIO_AUTOMATION_ATTR.slice("data-".length);
 
 /** Automation files are versioned; a reader must refuse a version it doesn't know. */
 export const HF_AUDIO_AUTOMATION_VERSION = 1;
@@ -35,6 +39,25 @@ export interface HfAutomationPoint {
    * straight line; positive holds low then rises late, negative rises early.
    */
   curve?: number;
+  /**
+   * An interior point the segment *leaving* this point passes through, in
+   * normalised segment space: `viaX` is progress 0..1 between the two
+   * breakpoints, `viaY` is how far the value has travelled by then. Both are
+   * needed for either to mean anything; without them the segment falls back to
+   * `curve` above, so everything authored before this existed reads unchanged.
+   *
+   * Two numbers rather than one because `curve` answers only "how hard", and an
+   * exponent cannot say "and where". Every upward bend a single exponent can
+   * draw has its deepest deviation in the first fifth of the segment, whatever
+   * the author aimed at, and an exponent steep enough to reach a point near
+   * either end runs past the ±1 the model accepts — so a bend dragged near the
+   * right-hand breakpoint bulged on the left and then stopped following the
+   * pointer at all. Naming the point the curve goes through makes both the
+   * height and the position of the bend the author's to choose, and takes the
+   * saturation with it: any interior point is reachable exactly.
+   */
+  viaX?: number;
+  viaY?: number;
 }
 
 export interface HfAutomationLane {
@@ -57,12 +80,22 @@ export class AudioAutomationError extends Error {
 
 export const VOLUME_TARGET = "volume";
 
-export type HfAutomationTarget = { kind: "volume" } | { kind: "fx"; nodeId: string; param: string };
+export type HfAutomationTarget =
+  | { kind: "volume" }
+  | { kind: "fx"; nodeId: string; param: string }
+  | { kind: "preset"; presetId: string };
 
 /** Split a target string. Returns null for anything unrecognised. */
 export function parseAutomationTarget(target: string): HfAutomationTarget | null {
   if (target === VOLUME_TARGET) return { kind: "volume" };
   const parts = target.split(".");
+  // `fx.preset.<id>` before the 3-part fx form, because it IS a 3-part fx form
+  // with a reserved node id — an effect can never be called "preset", since ids
+  // are minted `n1`, `n2`, ….
+  if (parts.length === 3 && parts[0] === "fx" && parts[1] === PRESET_TARGET_KEY) {
+    const presetId = parts[2];
+    return presetId ? { kind: "preset", presetId } : null;
+  }
   if (parts.length !== 3 || parts[0] !== "fx") return null;
   const [, nodeId, param] = parts;
   if (!nodeId || !param) return null;
@@ -73,11 +106,39 @@ export function fxAutomationTarget(nodeId: string, param: string): string {
   return `fx.${nodeId}.${param}`;
 }
 
+/** The reserved node-id slot that marks a whole-preset target. */
+const PRESET_TARGET_KEY = "preset";
+
+/**
+ * How much of a preset is applied, 0..1.
+ *
+ * A preset's nodes share no automatable parameter — and its worklet effects
+ * expose no AudioParams at all — so there is nothing to aim a lane at
+ * node-by-node. The graph wraps a preset's run in a wet/dry pair instead, and
+ * this drives the blend: 0 is the dry signal untouched, 1 is the preset fully
+ * applied, and between them it crossfades.
+ */
+export function presetAutomationTarget(presetId: string): string {
+  return `fx.${PRESET_TARGET_KEY}.${presetId}`;
+}
+
+/** 0..1 blend, the same shape as a wet/dry mix knob. */
+export const PRESET_RANGE: AutomationRange = {
+  min: 0,
+  max: 1,
+  step: 0.01,
+  unit: "",
+  label: "Amount",
+  scale: "linear",
+  default: 1,
+};
+
 /**
  * The value range a lane is drawn and clamped against.
  *
- * Volume is linear 0..1, matching `data-volume` and the existing volume
- * envelope machinery — no dB conversion enters the volume path. Everything
+ * Volume is linear over the full authoring gain range, matching `data-volume`
+ * and the existing volume envelope machinery — no dB conversion enters the
+ * volume path. Everything
  * else is read from the effect registry, so a lane can never offer a value the
  * renderer would reject, and the log-scaled knobs sweep the way a DAW's do.
  */
@@ -92,9 +153,15 @@ export interface AutomationRange {
   default: number;
 }
 
+/**
+ * One ceiling for the fader, the lane, the preview transport and the render
+ * mixer. Capping the lane at unity while the fader reached +12 dB made
+ * automating a boosted clip silently discard the boost — and the panel
+ * disables the fader while a lane owns it, so there was no way back.
+ */
 export const VOLUME_RANGE: AutomationRange = {
   min: 0,
-  max: 1,
+  max: MAX_AUDIO_GAIN,
   step: 0.01,
   unit: "",
   label: "Volume",
@@ -114,20 +181,26 @@ export function resolveAutomationRange(
   const parsed = parseAutomationTarget(target);
   if (!parsed) return null;
   if (parsed.kind === "volume") return VOLUME_RANGE;
+  if (parsed.kind === "preset") {
+    // Only for a preset the chain actually carries, so a lane left behind by a
+    // removed preset resolves to nothing and is dropped at read time — the same
+    // contract an orphaned node lane has.
+    const present = chain?.nodes.some((n) => n.fromPreset === parsed.presetId);
+    return present ? { ...PRESET_RANGE, label: `${parsed.presetId} · Amount` } : null;
+  }
   const node = chain?.nodes.find((n) => n.id === parsed.nodeId);
   if (!node) return null;
   const def = getAudioFxDef(node.type);
   const param = def?.params.find((p) => p.key === parsed.param);
   if (!param || param.kind !== "number") return null;
-  const p = param as HfAudioFxNumberParam;
   return {
-    min: p.min,
-    max: p.max,
-    step: p.step,
-    unit: p.unit,
-    label: `${def?.label ?? node.type} · ${p.label}`,
-    scale: p.scale === "log" && p.min > 0 ? "log" : "linear",
-    default: p.default,
+    min: param.min,
+    max: param.max,
+    step: param.step,
+    unit: param.unit,
+    label: `${def?.label ?? node.type} · ${param.label}`,
+    scale: param.scale === "log" && param.min > 0 ? "log" : "linear",
+    default: param.default,
   };
 }
 
@@ -154,6 +227,67 @@ function clampCurve(v: unknown): number {
 }
 
 /**
+ * A via point, or null when there isn't a usable one.
+ *
+ * Only two things disqualify one: a coordinate outside the segment, which names a
+ * point the curve does not travel through, and a point ON the straight line, which
+ * is a straight line — storing that would claim a bend the segment does not have.
+ *
+ * Depth is deliberately NOT limited. An earlier version held bends to a maximum
+ * slope so a segment could never leave a breakpoint steeply, and it was wrong twice
+ * over: it capped how far a curve could be pulled, and clamping the two coordinates
+ * separately could land a bend exactly on the straight line and flatten it mid-drag.
+ * A steep departure is a smooth curve doing what it was asked; what must never
+ * happen is a crease, and that is the sampler's job below, not a limit here.
+ */
+function clampVia(rawX: unknown, rawY: unknown): { x: number; y: number } | null {
+  const x = numberOrNull(rawX);
+  const y = numberOrNull(rawY);
+  if (x === null || y === null) return null;
+  const inside = (n: number): number => Math.min(0.999, Math.max(0.001, n));
+  const cx = inside(x);
+  const cy = inside(y);
+  if (Math.abs(cx - cy) < 1e-6) return null;
+  return { x: cx, y: cy };
+}
+
+/**
+ * The via point a segment will actually be drawn with, given one that was asked
+ * for — pulled into the steady region, or null when it describes no bend.
+ *
+ * Exported so an editor can write what the model will honour rather than what the
+ * pointer happened to ask for. Without it a lane's attribute claims a shape the
+ * renderer quietly declines to draw, and the two only agree once the file makes a
+ * round trip.
+ */
+export function steadyViaPoint(
+  viaX: number | undefined,
+  viaY: number | undefined,
+): { viaX: number; viaY: number } | null {
+  const via = clampVia(viaX, viaY);
+  return via ? { viaX: via.x, viaY: via.y } : null;
+}
+
+/**
+ * The shape fields a point carries, cleaned: whichever of `curve` and the via
+ * pair survive, each omitted when it describes nothing.
+ *
+ * The via pair is kept or dropped together. Half a via point says nothing, and
+ * letting one coordinate through would leave the segment's shape depending on
+ * which half survived a hand edit.
+ */
+function shapeFields(
+  p: HfAutomationPoint | undefined,
+): Pick<HfAutomationPoint, "curve" | "viaX" | "viaY"> {
+  const curve = clampCurve(p?.curve);
+  const via = clampVia(p?.viaX, p?.viaY);
+  return {
+    ...(curve ? { curve } : {}),
+    ...(via ? { viaX: via.x, viaY: via.y } : {}),
+  };
+}
+
+/**
  * Clean one point, or reject it.
  *
  * A missing or non-finite value reaching an AudioParam silences the node for
@@ -167,8 +301,7 @@ function cleanPoint(
   const v = numberOrNull(p?.v);
   if (t === null || v === null) return null;
   const clamped = range ? Math.min(range.max, Math.max(range.min, v)) : v;
-  const curve = clampCurve(p?.curve);
-  return { t: Math.max(0, t), v: clamped, ...(curve ? { curve } : {}) };
+  return { t: Math.max(0, t), v: clamped, ...shapeFields(p) };
 }
 
 /**
@@ -281,6 +414,7 @@ export function serializeAutomation(automation: HfAutomation): string {
         t: p.t,
         v: p.v,
         ...(p.curve ? { curve: p.curve } : {}),
+        ...(p.viaX !== undefined && p.viaY !== undefined ? { viaX: p.viaX, viaY: p.viaY } : {}),
       })),
     })),
   });
@@ -296,6 +430,99 @@ export function serializeAutomation(automation: HfAutomation): string {
 export function applyCurve(x: number, curve: number | undefined): number {
   if (!curve) return x;
   return Math.pow(x, Math.pow(2, 2 * curve));
+}
+
+/**
+ * The conic that carries a segment through its via point: control point and weight
+ * of a rational quadratic Bezier from (0,0) to (1,1).
+ *
+ * A rational quadratic at its own midparameter is `(P0 + 2wC + P1) / (2 + 2w)`, so
+ * demanding that equal the via point `Q` fixes the control point for any weight:
+ * `C = Q + (Q - M) / w`, with `M` the straight midpoint. The curve therefore passes
+ * exactly through `Q` whatever the weight, and — because it does so at the
+ * midparameter, with the two halves symmetric in parameter — its furthest departure
+ * from the straight line is at `Q` too. The pointer is the apex, by construction.
+ *
+ * The weight is what buys reach. A plain quadratic (`w = 1`) needs its control point
+ * at `2Q - M`, which leaves the segment as soon as `Q` is past the middle half — so
+ * a plain quadratic simply cannot pass through a deep or off-centre point. Raising
+ * the weight draws the control point back toward `Q`, so take the smallest weight
+ * that keeps `C` inside the segment: inside is what makes progress monotone, and
+ * smallest-that-fits is the broadest curve available through that point.
+ *
+ * Deep bends therefore come out tight and steep near the breakpoint they lean on.
+ * That is the shape being asked for, and it stays a single smooth arc while doing
+ * it — no join, no inflection, no crease.
+ */
+function viaConic(viaX: number, viaY: number): { cx: number; cy: number; w: number } {
+  const dx = viaX - 0.5;
+  const dy = viaY - 0.5;
+  const edge = 0.999;
+  // Per axis, `C` stays inside when the weight is at least the pull divided by the
+  // room left in the pull's own direction. A via point clamped to `edge` itself
+  // leaves zero room — `edge - viaX` is exactly 0 — which would divide out to
+  // Infinity and carry NaN into every downstream sample. Capped rather than left
+  // unbounded: past this weight the arc already reads as touching the via point,
+  // so the cap costs no visible reach.
+  const MAX_WEIGHT = 1e6;
+  const needX = dx > 0 ? dx / (edge - viaX) : dx < 0 ? -dx / (viaX - (1 - edge)) : 0;
+  const needY = dy > 0 ? dy / (edge - viaY) : dy < 0 ? -dy / (viaY - (1 - edge)) : 0;
+  const w = Math.min(MAX_WEIGHT, Math.max(1, needX, needY));
+  return { cx: viaX + dx / w, cy: viaY + dy / w, w };
+}
+
+/**
+ * Progress through a segment that passes through its via point: one conic arc, from
+ * breakpoint to breakpoint.
+ *
+ * One curve, not two joined at the via point, because anything joined there can only
+ * be as smooth as the join — and keeping such a join monotone forces its tangent
+ * down to a fraction of the slope the curve arrives with, creasing the segment
+ * exactly where the pointer is. A conic has no join and no inflection: its slope
+ * moves one way from end to end, which is what makes it read as one curve rather
+ * than a shape with features in it.
+ */
+function shapeVia(x: number, viaX: number, viaY: number): number {
+  const { cx, cy, w } = viaConic(viaX, viaY);
+  // Both coordinates are quadratics over one shared denominator, so `x(t) = x`
+  // rearranges into an ordinary quadratic in `t`: closed form, and the same answer on
+  // every machine, which a render that has to match its own preview depends on.
+  const spread = 2 - 2 * w;
+  const a = x * spread - 1 + 2 * w * cx;
+  const b = -x * spread - 2 * w * cx;
+  const t = conicParam(a, b, x);
+  const rest = 1 - t;
+  const denominator = rest * rest + 2 * w * t * rest + t * t;
+  if (!(denominator > 0)) return x;
+  return (2 * w * cy * t * rest + t * t) / denominator;
+}
+
+/** The root of `a*t^2 + b*t + c` that lies on the arc the segment travels. */
+function conicParam(a: number, b: number, c: number): number {
+  if (Math.abs(a) < 1e-12) return Math.abs(b) < 1e-12 ? c : -c / b;
+  const root = Math.sqrt(Math.max(0, b * b - 4 * a * c));
+  const first = (-b + root) / (2 * a);
+  const second = (-b - root) / (2 * a);
+  const onArc = (t: number): boolean => t >= -1e-9 && t <= 1 + 1e-9;
+  if (onArc(first)) return Math.min(1, Math.max(0, first));
+  if (onArc(second)) return Math.min(1, Math.max(0, second));
+  return c;
+}
+
+/**
+ * The progress a segment leaving `point` has reached at normalised `x`.
+ *
+ * A via point wins when it is there, since it says strictly more than an
+ * exponent can. Everything authored before via points existed carries only
+ * `curve` and takes the exponent path unchanged.
+ */
+export function shapeProgress(
+  x: number,
+  point: { curve?: number | undefined; viaX?: number | undefined; viaY?: number | undefined },
+): number {
+  const via = clampVia(point.viaX, point.viaY);
+  if (via) return shapeVia(Math.min(1, Math.max(0, x)), via.x, via.y);
+  return applyCurve(x, point.curve);
 }
 
 function lerpValue(a: number, b: number, x: number, scale: "linear" | "log"): number {
@@ -338,7 +565,7 @@ export function sampleAutomationLane(
   const b = pts[hi]!;
   const span = b.t - a.t;
   if (span <= 0) return b.v;
-  return lerpValue(a.v, b.v, applyCurve((t - a.t) / span, a.curve), scale);
+  return lerpValue(a.v, b.v, shapeProgress((t - a.t) / span, a), scale);
 }
 
 /** True when the lane is a single value, i.e. worth setting once and not scheduling. */

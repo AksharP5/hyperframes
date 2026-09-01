@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { trackStudioEvent } from "../utils/studioTelemetry";
+import { isAudioDomElement } from "../utils/timelineInspector";
 import type { SelectElementOptions, TimelineElement } from "../player";
 import type { ImportedFontAsset } from "../components/editor/fontAssets";
-import type { EditHistoryKind } from "../utils/editHistory";
 import type { RightPanelTab } from "../utils/studioHelpers";
 import type { PatchTarget } from "../utils/sourcePatcher";
 import type { SidebarTab } from "../components/sidebar/LeftSidebar";
@@ -20,13 +20,12 @@ import { useDomEditWiring } from "./useDomEditWiring";
 import { useGsapAwareEditing } from "./useGsapAwareEditing";
 import { useStudioSelectionPublisher } from "./useStudioSelectionPublisher";
 import { useKeyframeEaseCommits } from "./useKeyframeEaseCommits";
-
-interface RecordEditInput {
-  label: string;
-  kind: EditHistoryKind;
-  coalesceKey?: string;
-  files: Record<string, { before: string; after: string }>;
-}
+import type { DomEditSelection } from "../components/editor/domEditingTypes";
+import { membersForDelete } from "./domEditDeleteMembers";
+import type { RecordEditInput } from "./domEditDeleteMembers";
+// Re-exported: the delete rule lives in its own module now, and callers (and its
+// own test) have always imported it from here.
+export { membersForDelete };
 
 export interface UseDomEditSessionParams {
   projectId: string | null;
@@ -42,6 +41,7 @@ export interface UseDomEditSessionParams {
   setRightCollapsed: (collapsed: boolean) => void;
   setRightPanelTab: (tab: RightPanelTab) => void;
   showToast: (message: string, tone?: "error" | "info") => void;
+  isRecordingRef?: React.RefObject<boolean>;
   refreshPreviewDocumentVersion: () => void;
   queueDomEditSave: <T>(save: () => Promise<T>) => Promise<T>;
   readProjectFile: (path: string) => Promise<string>;
@@ -60,7 +60,7 @@ export interface UseDomEditSessionParams {
   applyStudioManualEditsToPreviewRef: React.MutableRefObject<
     (iframe: HTMLIFrameElement) => Promise<void>
   >;
-  syncPreviewHistoryHotkey: (iframe: HTMLIFrameElement | null) => void;
+  syncPreviewHotkeys: (iframe: HTMLIFrameElement | null) => void;
   reloadPreview: () => void;
   setRefreshKey: React.Dispatch<React.SetStateAction<number>>;
   openSourceForSelection?: (sourceFile: string, target: PatchTarget) => void;
@@ -85,6 +85,7 @@ export function useDomEditSession({
   setRightCollapsed,
   setRightPanelTab,
   showToast,
+  isRecordingRef,
   refreshPreviewDocumentVersion,
   queueDomEditSave,
   readProjectFile,
@@ -101,7 +102,7 @@ export function useDomEditSession({
   previewDocumentVersion,
   rightPanelTab,
   applyStudioManualEditsToPreviewRef,
-  syncPreviewHistoryHotkey,
+  syncPreviewHotkeys,
   reloadPreview,
   setRefreshKey: _setRefreshKey,
   openSourceForSelection,
@@ -238,7 +239,7 @@ export function useDomEditSession({
     handleDomRemoveTextField,
     handleDomBoxSizeCommit,
     handleDomManualEditsReset,
-    handleDomEditElementDelete,
+    handleDomEditElementsDelete,
     handleDomZIndexReorderCommit,
   } = useDomEditCommits({
     activeCompPath,
@@ -332,12 +333,44 @@ export function useDomEditSession({
     forceReloadSdkSession,
   });
 
+  const handleDomEditElementDelete = useCallback(
+    async (selection: DomEditSelection, options?: { expandGroup?: boolean }) => {
+      // Same structural edit the timeline delete refuses mid-recording, so it
+      // refuses here too — this is now the path a Delete press takes whenever
+      // the canvas holds a selection.
+      if (isRecordingRef?.current) {
+        showToast("Cannot edit timeline while recording", "error");
+        return;
+      }
+      const members = membersForDelete(selection, domEditGroupSelectionsRef.current, options);
+      await handleDomEditElementsDelete(members);
+    },
+    [domEditGroupSelectionsRef, handleDomEditElementsDelete, isRecordingRef, showToast],
+  );
+
   const handleGroupSelection = useCallback(() => {
     const group = domEditGroupSelectionsRef.current;
     const single = domEditSelectionRef.current;
     const members = group.length > 0 ? group : single ? [single] : [];
     if (members.length < 2) {
       showToast("Select at least 2 elements to group", "info");
+      return;
+    }
+    // A layout group is a positioned wrapper: it takes the members' bounding
+    // box, rebases each child's left/top against it, and adopts the topmost
+    // z-index. An <audio> clip has no box — offsetWidth/Height are 0 — so
+    // grouping audio produced a 0x0 div with inline left/top written onto
+    // elements that have never been laid out, and the timeline gained a
+    // wrapper standing for nothing audible. The audio answer to "these clips
+    // belong together" is an <hf-audio-group> bus, which the timeline's own FX
+    // pointer creates, so the refusal names it rather than just declining.
+    if (members.some((m) => isAudioDomElement(m.element))) {
+      showToast(
+        members.every((m) => isAudioDomElement(m.element))
+          ? "Audio clips group into a bus — use FX on the track header"
+          : "Can't group audio clips with layout elements",
+        "info",
+      );
       return;
     }
     trackStudioEvent("group", { action: "create", count: members.length });
@@ -400,7 +433,7 @@ export function useDomEditSession({
     bumpGsapCache,
     showToast,
     refreshPreviewDocumentVersion,
-    syncPreviewHistoryHotkey,
+    syncPreviewHotkeys,
     applyStudioManualEditsToPreviewRef,
     applyDomSelection,
     buildDomSelectionFromTarget,

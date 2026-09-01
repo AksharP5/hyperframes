@@ -18,7 +18,7 @@
 
 **Porting an existing composition?** `/remotion-to-hyperframes` translates a Remotion (React) composition into HyperFrames HTML — a source migration, separate from the creation workflows above.
 
-The domain skills (`/hyperframes-core`, `/hyperframes-animation`, `/hyperframes-keyframes`, `/hyperframes-creative`, `/hyperframes-cli`, `/media-use`, `/hyperframes-registry`, `/figma`) and the full capability map live inside `/hyperframes` — it is the single source of truth for which skill handles which intent.
+The domain skills (`/hyperframes-core`, `/hyperframes-animation`, `/hyperframes-keyframes`, `/hyperframes-creative`, `/hyperframes-cli`, `/media-use`, `/hyperframes-audio`, `/hyperframes-registry`, `/figma`) and the full capability map live inside `/hyperframes` — it is the single source of truth for which skill handles which intent.
 
 **Changing how real footage or images look or reveal?** Load `/media-use` and read its `references/media-treatments.md` before editing, even when the request only says dark, flat, boring, retro, private, or “make the reveal cooler.” It governs how footage is treated, never whether media may be used. Use canonical media treatments and seek-safe motion; do not improvise equivalent CSS/SVG filters or overlays.
 
@@ -33,7 +33,10 @@ The domain skills (`/hyperframes-core`, `/hyperframes-animation`, `/hyperframes-
 ## Commands
 
 ```bash
-npm run dev          # start the preview server (long-running — keep it alive in background)
+npm run dev          # human-operated foreground preview (blocks until stopped)
+npx hyperframes preview --background  # agent-safe persistent Studio preview
+npx hyperframes preview --status      # verify the persistent preview is listening
+npx hyperframes preview --stop        # stop it when review is finished
 npm run check        # lint + runtime + layout + motion + contrast (one command)
 npm run render       # render to MP4
 npm run publish      # publish and get a shareable link
@@ -42,9 +45,11 @@ npx hyperframes lint --json     # machine-readable output for CI
 npx hyperframes docs <topic> # reference docs in terminal
 ```
 
-> **`npm run dev` is a long-running server, not a one-shot command.** It blocks until stopped.
-> In Claude Code, always run it with `run_in_background: true`. Never run it as a foreground
-> command — it will time out and the server will die, breaking the browser preview.
+> **Agents must use `npx hyperframes preview --background` for Studio handoff.** Do not rely
+> on a shell/tool `run_in_background` wrapper around `npm run dev`: that foreground process
+> remains owned by the invoking session and can disappear while the browser stays open,
+> leaving refreshes at `ERR_CONNECTION_TIMED_OUT`. Verify with `preview --status`, keep it
+> alive through review, and stop it explicitly with `preview --stop` afterward.
 
 > **Pinned CLI version.** These scripts pin an exact `hyperframes@X.Y.Z` so this project re-renders identically over time. Weeks later that pin lags fixes shipped since. To move up: `npx hyperframes@latest upgrade --project . --check` (shows the delta), then `npx hyperframes@latest upgrade --project .` to rewrite the pins. Always unpinned — the pinned script re-runs the old version against itself.
 
@@ -83,8 +88,8 @@ Fix all errors before presenting the result. Warnings should be reviewed before 
 
 ## Key Rules
 
-1. Every timed element needs `data-start`, `data-duration`, and `data-track-index`
-2. Elements with timing **MUST** have `class="clip"` — the framework uses this for visibility control
+1. Every timed element needs `data-start` and a duration. `data-start` is what marks it as timed; `data-track-index` is an optional Studio display lane the render never reads
+2. Give timed visual elements `class="clip"`. The framework keys visibility off `data-start`, not the class, but the shared `.clip` CSS is what gives a scene its full-frame box, and `lint` warns without it
 3. Timelines must be paused and registered on `window.__timelines`:
    ```js
    window.__timelines = window.__timelines || {};

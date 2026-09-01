@@ -7,6 +7,7 @@ import {
   trackDisplaySuffix,
 } from "../player/components/timelineTrackDisplay";
 import { saveProjectFilesWithHistory } from "../utils/studioFileHistory";
+import { isAudioTimelineElement } from "../utils/timelineInspector";
 import { readTagSnippetByTarget, type PatchOperation } from "../utils/sourcePatcher";
 import {
   applyPatchByTarget,
@@ -16,7 +17,7 @@ import {
   type RecordEditInput,
 } from "./timelineEditingHelpers";
 
-interface MutableRef<T> {
+export interface MutableRef<T> {
   current: T;
 }
 
@@ -30,6 +31,9 @@ interface ToggleTimelineTrackHiddenInput {
   timelineElements: readonly TimelineElement[];
   track: number;
   hidden: boolean;
+  /** The row the CLICKED control announced. Absent when the caller has no
+   *  rendered number to hand over, which falls back to deriving one. */
+  displayNumber?: number | null;
   previewIframe: HTMLIFrameElement | null;
   writeProjectFile: (path: string, content: string) => Promise<void>;
   recordEdit: (input: RecordEditInput) => Promise<void>;
@@ -66,7 +70,7 @@ interface UseTimelineTrackVisibilityEditingInput extends Omit<
   forceReloadSdkSession?: () => void;
 }
 
-interface UseTimelineElementVisibilityEditingInput extends Omit<
+export interface UseTimelineElementVisibilityEditingInput extends Omit<
   ToggleTimelineElementHiddenInput,
   "projectId" | "elementKey" | "hidden" | "previewIframe" | "timelineElements"
 > {
@@ -101,7 +105,7 @@ function patchLiveHiddenState(
   }
 }
 
-function reseekPreviewRuntime(iframe: HTMLIFrameElement | null): void {
+export function reseekPreviewRuntime(iframe: HTMLIFrameElement | null): void {
   try {
     const win: (Window & { __player?: { seek?: (time: number) => void } }) | null =
       iframe?.contentWindow ?? null;
@@ -109,7 +113,7 @@ function reseekPreviewRuntime(iframe: HTMLIFrameElement | null): void {
   } catch {}
 }
 
-function groupElementsByTargetPath(
+export function groupElementsByTargetPath(
   elements: readonly TimelineElement[],
   activeCompPath: string | null,
 ): Map<string, TimelineElement[]> {
@@ -207,6 +211,7 @@ export async function toggleTimelineTrackHidden({
   timelineElements,
   track,
   hidden,
+  displayNumber,
   previewIframe,
   writeProjectFile,
   recordEdit,
@@ -214,16 +219,29 @@ export async function toggleTimelineTrackHidden({
   pendingTimelineEditPathRef,
 }: ToggleTimelineTrackHiddenInput): Promise<string[]> {
   // `track` is the fractional sort key the callback needs; the history entry is
-  // read by a human, so it gets the display row instead.
+  // read by a human, so it gets the display row instead — the one the clicked
+  // control announced, when the caller passed it. Deriving it again here would
+  // use ascending element-bearing keys, which stop matching the header as soon
+  // as an audio group reorders the rows and inserts an anchor: the same click
+  // then said "Mute track 2" and recorded "Mute track 1".
   const suffix = trackDisplaySuffix(
-    trackDisplayNumber(timelineTrackOrder(timelineElements), track),
+    displayNumber ?? trackDisplayNumber(timelineTrackOrder(timelineElements), track),
   );
+  const trackElements = timelineElements.filter((element) => element.track === track);
+  const isAudioOnlyTrack = trackElements.length > 0 && trackElements.every(isAudioTimelineElement);
+  const label = isAudioOnlyTrack
+    ? hidden
+      ? `Mute track${suffix}`
+      : `Unmute track${suffix}`
+    : hidden
+      ? `Hide track${suffix}`
+      : `Show track${suffix}`;
   return setElementsHidden({
     projectId,
     activeCompPath,
-    elements: timelineElements.filter((element) => element.track === track),
+    elements: trackElements,
     hidden,
-    label: hidden ? `Hide track${suffix}` : `Show track${suffix}`,
+    label,
     previewIframe,
     writeProjectFile,
     recordEdit,
@@ -278,14 +296,18 @@ export function useTimelineTrackVisibilityEditing({
   pendingTimelineEditPathRef,
   isRecordingRef,
   forceReloadSdkSession,
-}: UseTimelineTrackVisibilityEditingInput): (track: number, hidden: boolean) => Promise<void> {
+}: UseTimelineTrackVisibilityEditingInput): (
+  track: number,
+  hidden: boolean,
+  displayNumber?: number | null,
+) => Promise<void> {
   // Resolve the eye toggle against the EXPANDED rows the canvas actually renders:
   // virtual sub-comp children carry their own (display.track + idx) track numbers,
   // so filtering the raw store list by a virtual track number would hide the wrong
   // outer-scene sibling sharing that index.
   const expandedElements = useExpandedTimelineElements();
   return useCallback(
-    async (track: number, hidden: boolean) => {
+    async (track: number, hidden: boolean, displayNumber?: number | null) => {
       if (isRecordingRef?.current) {
         showToast("Cannot edit timeline while recording", "error");
         return;
@@ -299,6 +321,7 @@ export function useTimelineTrackVisibilityEditing({
           timelineElements: expandedElements,
           track,
           hidden,
+          displayNumber,
           previewIframe: previewIframeRef.current,
           writeProjectFile,
           recordEdit,

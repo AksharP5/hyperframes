@@ -19,6 +19,23 @@ it("source contains no raw NUL bytes", () => {
 });
 
 describe("compileTimingAttrs", () => {
+  it.each(["", "   ", "0s", "0abc", "0px", "-1s", "Infinity", "NaN"])(
+    "does not partially parse invalid literal data-duration=%j",
+    (duration) => {
+      const html = `<video id="v1" src="a.mp4" data-start="2" data-duration="${duration}">`;
+      const { html: compiled } = compileTimingAttrs(html);
+
+      expect(compiled).not.toContain("data-end=");
+    },
+  );
+
+  it("uses Number semantics for hexadecimal literal timing", () => {
+    const { html: compiled } = compileTimingAttrs(
+      '<video id="v1" src="a.mp4" data-start="2" data-duration="0x10">',
+    );
+    expect(compiled).toContain('data-end="18"');
+  });
+
   it("adds data-end when data-start and data-duration are present on a video", () => {
     const html = '<video id="v1" src="a.mp4" data-start="2" data-duration="5">';
     const { html: compiled, unresolved } = compileTimingAttrs(html);
@@ -116,6 +133,17 @@ describe("compileTimingAttrs", () => {
     expect(compiled).not.toContain("data-hf-auto-start");
   });
 
+  it("leaves data-end off a relative data-start id-ref", () => {
+    const html =
+      '<video id="intro" src="a.mp4" data-start="0" data-duration="10">' +
+      '<video id="main" src="b.mp4" data-start="intro" data-duration="20">';
+    const { html: compiled } = compileTimingAttrs(html);
+
+    expect(compiled).toContain('data-start="intro"');
+    expect(compiled).not.toMatch(/id="main"[^>]*data-end=/);
+    expect(compiled).toMatch(/id="intro"[^>]*data-end="10"/);
+  });
+
   it("compiles audio tags the same as video (minus data-has-audio)", () => {
     const html = '<audio id="a1" src="music.mp3" data-start="0" data-duration="10">';
     const { html: compiled } = compileTimingAttrs(html);
@@ -211,6 +239,15 @@ describe("injectDurations", () => {
 
     // data-duration already present, should not be duplicated
     expect(result).toContain('data-duration="3"');
+  });
+
+  it("injects data-duration but not data-end when data-start is a relative id-ref", () => {
+    const html = '<video id="main" src="b.mp4" data-start="intro">';
+    const result = injectDurations(html, [{ id: "main", duration: 5 }]);
+
+    expect(result).toContain('data-duration="5"');
+    expect(result).toContain('data-start="intro"');
+    expect(result).not.toMatch(/data-end=/);
   });
 });
 

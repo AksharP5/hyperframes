@@ -81,6 +81,11 @@ async function render(
   const chain: HfAudioFxChain = parseAudioFxChain(chainJson);
   const channels = Math.max(1, planes.length);
   const frames = planes[0]?.length ?? 0;
+  // Nothing to process, and `new OfflineAudioContext(ch, 0, rate)` throws — an
+  // error the render treats as fatal. applyAudioFxChain screens empty tracks
+  // out before they reach the browser; this is the same guard at the point the
+  // constructor would actually blow up.
+  if (frames === 0) return planes;
   const parsedAutomation = automationJson
     ? resolveAutomation(parseAutomation(automationJson), chain)
     : null;
@@ -98,11 +103,13 @@ async function render(
   // time is offline time — the envelope needs no offset here. Same scheduler as
   // preview, which is what makes the two agree.
   if (parsedAutomation) {
-    scheduleChainAutomation(parsedAutomation, chain, fx.nodes, {
-      scheduledAt: 0,
-      elapsed: 0,
-      rate: 1,
-    });
+    scheduleChainAutomation(
+      parsedAutomation,
+      chain,
+      fx.nodes,
+      { scheduledAt: 0, elapsed: 0, rate: 1 },
+      fx.presets,
+    );
   }
 
   source.connect(fx.input);

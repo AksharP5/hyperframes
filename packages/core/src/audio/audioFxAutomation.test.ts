@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cancelParamLane,
+  clearParamLane,
   scheduleChainAutomation,
   scheduleParamLane,
   volumeLane,
@@ -63,12 +64,33 @@ const ramp: HfAutomationLane = {
   ],
 };
 
+const curvedRamp: HfAutomationLane = {
+  target: "volume",
+  points: [
+    { t: 0, v: 0, curve: 1 },
+    { t: 2, v: 1 },
+  ],
+};
+
+/** Schedule `curvedRamp` and return the fake param it wrote to — the setup
+ *  three tests below share, each checking something different about the
+ *  curve it produces. */
+function scheduleCurved(): { target: FxParamTarget; param: FakeParam } {
+  const { target, param } = fake();
+  scheduleParamLane([target], curvedRamp, "linear", at(0));
+  return { target, param };
+}
+
 describe("scheduleParamLane", () => {
   it("seeds the current value, then ramps to each later point", () => {
     const { target, param } = fake();
     scheduleParamLane([target], ramp, "linear", at(0));
     expect(param.calls).toEqual([
-      { op: "cancel", time: 10 },
+      // Cleared from zero, not held: holding leaves the span of a running curve
+      // booked, and Chrome refuses the next curve — or a plain `.value` write —
+      // that lands inside it. The seed below restores the value in the same pass,
+      // so clearing costs nothing audible.
+      { op: "cancel", time: 0 },
       // Before the first point the envelope holds that point's value.
       { op: "set", value: 0.2, time: 10 },
       { op: "ramp", value: 0.8, time: 13 },
@@ -87,7 +109,7 @@ describe("scheduleParamLane", () => {
     const { target, param } = fake();
     scheduleParamLane([target], ramp, "linear", at(9));
     expect(param.calls).toEqual([
-      { op: "cancel", time: 10 },
+      { op: "cancel", time: 0 },
       { op: "set", value: 0.8, time: 10 },
     ]);
   });
@@ -122,25 +144,13 @@ describe("scheduleParamLane", () => {
       at(0),
     );
     expect(param.calls).toEqual([
-      { op: "cancel", time: 10 },
+      { op: "cancel", time: 0 },
       { op: "set", value: 0.4, time: 10 },
     ]);
   });
 
   it("samples a curved segment rather than ramping through the bend", () => {
-    const { target, param } = fake();
-    scheduleParamLane(
-      [target],
-      {
-        target: "volume",
-        points: [
-          { t: 0, v: 0, curve: 1 },
-          { t: 2, v: 1 },
-        ],
-      },
-      "linear",
-      at(0),
-    );
+    const { param } = scheduleCurved();
     const curve = param.calls.find((c) => c.op === "curve");
     expect(curve).toBeTruthy();
     if (curve?.op !== "curve") throw new Error("expected a curve");
@@ -150,6 +160,31 @@ describe("scheduleParamLane", () => {
     expect(curve.values[curve.values.length - 1]).toBeCloseTo(1, 6);
     // Curved, so the midpoint is not halfway.
     expect(curve.values[Math.floor(curve.values.length / 2)]).toBeLessThan(0.4);
+  });
+
+  it("samples a segment bent by a via point, not just one bent by `curve`", () => {
+    // Both express the same thing — a segment that is not a straight line — and
+    // the via form is what the timeline writes when a bend is dragged. Read as
+    // straight, the whole bend was played as a linear ramp: the envelope drawn in
+    // the lane and the envelope heard were different shapes.
+    const { target, param } = fake();
+    scheduleParamLane(
+      [target],
+      {
+        target: "volume",
+        points: [
+          { t: 0, v: 0, viaX: 0.5, viaY: 0.9 },
+          { t: 2, v: 1 },
+        ],
+      },
+      "linear",
+      at(0),
+    );
+    const curve = param.calls.find((c) => c.op === "curve");
+    expect(curve, "a via-bent segment must be sampled, not ramped").toBeTruthy();
+    if (curve?.op !== "curve") throw new Error("expected a curve");
+    // Through the via point: 90% of the way up at the halfway mark.
+    expect(curve.values[Math.floor(curve.values.length / 2)]).toBeGreaterThan(0.8);
   });
 
   it("samples a log-scaled sweep, which a linear ramp would get wrong", () => {
@@ -180,19 +215,7 @@ describe("scheduleParamLane", () => {
   });
 
   it("does not seed on top of a curve that starts at the same instant", () => {
-    const { target, param } = fake();
-    scheduleParamLane(
-      [target],
-      {
-        target: "volume",
-        points: [
-          { t: 0, v: 0, curve: 1 },
-          { t: 2, v: 1 },
-        ],
-      },
-      "linear",
-      at(0),
-    );
+    const { param } = scheduleCurved();
     // A value curve may not overlap another event, so there is no set at 10.
     expect(param.calls.filter((c) => c.op === "set")).toEqual([]);
     expect(param.calls[1]?.op).toBe("curve");
@@ -229,6 +252,238 @@ describe("scheduleParamLane", () => {
     const { target, param } = fake();
     scheduleParamLane([target], { target: "volume", points: [] }, "linear", at(0));
     expect(param.calls).toEqual([]);
+  });
+});
+
+/**
+ * An AudioParam with Chrome's own overlap rule, and its own cancel semantics.
+ *
+ * The distinction that matters: `cancelScheduledValues(t)` drops events at or
+ * after `t` but leaves a value curve that is already running — the spec only
+ * special-cases an in-progress curve for `cancelAndHoldAtTime`, which truncates
+ * it. Schedule a curve inside one that is still live and the browser throws.
+ */
+class OverlapAwareParam {
+  curves: { time: number; duration: number }[] = [];
+  value = 0;
+  setValueAtTime(): void {}
+  linearRampToValueAtTime(): void {}
+  setValueCurveAtTime(_values: Float32Array, time: number, duration: number): void {
+    const clash = this.curves.find((c) => time < c.time + c.duration && time + duration > c.time);
+    if (clash) {
+      throw new Error(
+        `Failed to execute 'setValueCurveAtTime' on 'AudioParam': ` +
+          `setValueCurveAtTime(..., ${time}, ${duration}) overlaps ` +
+          `setValueCurveAtTime(..., ${clash.time}, ${clash.duration})`,
+      );
+    }
+    this.curves.push({ time, duration });
+  }
+  cancelScheduledValues(time: number): void {
+    // Events at or after the cancel; a curve already under way is untouched.
+    this.curves = this.curves.filter((c) => c.time < time);
+  }
+  cancelAndHoldAtTime(time: number): void {
+    this.curves = this.curves
+      .filter((c) => c.time < time)
+      .map((c) => ({ time: c.time, duration: Math.min(c.duration, time - c.time) }));
+  }
+}
+
+describe("rescheduling over a curve that is still playing", () => {
+  const bent: HfAutomationLane = {
+    target: "volume",
+    points: [
+      { t: 0, v: 1, curve: 1 },
+      { t: 8, v: 0.2, curve: 1 },
+      { t: 12, v: 1 },
+    ],
+  };
+
+  it("takes over from an in-progress curve instead of throwing", () => {
+    // Two schedule passes a few milliseconds apart is ordinary: an attribute edit
+    // lands, the graph is re-parameterised, and the envelope is re-aimed at the
+    // live playhead. The second pass has to displace the curve the first one
+    // started, which `cancelScheduledValues` does not do for a curve that is
+    // already running — the browser then refuses the new curve outright.
+    const param = new OverlapAwareParam();
+    const target = { param: param as unknown as AudioParam };
+    scheduleParamLane([target], bent, "linear", at(0, 1, 9.109333));
+    expect(() =>
+      scheduleParamLane([target], bent, "linear", at(0.005334, 1, 9.114667)),
+    ).not.toThrow();
+  });
+
+  it("survives a burst of reschedules, as a dragged knob produces", () => {
+    const param = new OverlapAwareParam();
+    const target = { param: param as unknown as AudioParam };
+    for (let i = 0; i < 12; i++) {
+      const when = 9.1 + i * 0.005;
+      expect(() =>
+        scheduleParamLane([target], bent, "linear", at(i * 0.005, 1, when)),
+      ).not.toThrow();
+    }
+  });
+});
+
+describe("a curve the browser refuses", () => {
+  /**
+   * A param that rejects any curve overlapping one it has been given, and — like
+   * Chrome — keeps counting a held curve's original span. Holding stops what is
+   * audible; it does not free the slot for overlap checking.
+   */
+  class UnforgivingParam {
+    curves: { time: number; duration: number }[] = [];
+    ramps: { time: number; value: number }[] = [];
+    sets: { time: number; value: number }[] = [];
+    value = 0;
+    setValueAtTime(value: number, time: number): void {
+      this.sets.push({ time, value });
+    }
+    linearRampToValueAtTime(value: number, time: number): void {
+      this.ramps.push({ time, value });
+    }
+    setValueCurveAtTime(_v: Float32Array, time: number, duration: number): void {
+      const clash = this.curves.find((c) => time < c.time + c.duration && time + duration > c.time);
+      if (clash) {
+        throw new Error(
+          `Failed to execute 'setValueCurveAtTime' on 'AudioParam': ` +
+            `setValueCurveAtTime(..., ${time}, ${duration}) overlaps ` +
+            `setValueCurveAtTime(..., ${clash.time}, ${clash.duration})`,
+        );
+      }
+      this.curves.push({ time, duration });
+    }
+    // Measured against Chrome, in a live running context and in an offline one
+    // suspended mid-curve: either cancel frees the span of a curve already under
+    // way, so only a write with no cancel at all is refused.
+    cancelScheduledValues(time: number): void {
+      this.curves = this.curves.filter((c) => c.time + c.duration < time);
+    }
+    cancelAndHoldAtTime(time: number): void {
+      this.cancelScheduledValues(time);
+    }
+  }
+
+  const bent: HfAutomationLane = {
+    target: "volume",
+    points: [
+      { t: 0, v: 1, curve: 1 },
+      { t: 0.25, v: 0.4, curve: 1 },
+      { t: 0.6, v: 1, curve: 1 },
+      { t: 1.2, v: 0.3 },
+    ],
+  };
+
+  it("reschedules mid-playback with its curves intact", () => {
+    // Applying a carve while the transport runs reschedules into curves that are
+    // already playing — one render quantum apart is the common case. Cancelling
+    // the parameter first is what lets the new pass keep its shape instead of
+    // being refused; this does not discriminate the strength of the cancel, which
+    // the no-cancel test below is for.
+    const param = new UnforgivingParam();
+    const target = { param: param as unknown as AudioParam };
+    scheduleParamLane([target], bent, "linear", at(0, 1, 1492.016));
+    const first = param.curves.length;
+    expect(() =>
+      scheduleParamLane([target], bent, "linear", at(0.005333, 1, 1492.021333)),
+    ).not.toThrow();
+    expect(param.curves.length).toBeGreaterThan(0);
+    // Curves, not ramps: nothing had to be degraded.
+    expect(param.ramps).toHaveLength(0);
+    expect(first).toBeGreaterThan(0);
+  });
+
+  it("still degrades to a ramp where the span cannot be freed at all", () => {
+    // The last line of defence, for a hypothetical param that refuses to give the
+    // span up. No engine has been measured behaving this way; it stands in for the
+    // unexplained curve-over-curve refusals reported from the field. The envelope
+    // loses a bend rather than the exception escaping and abandoning the rest.
+    class ImmovableParam extends UnforgivingParam {
+      override cancelScheduledValues(): void {
+        // Nothing is ever freed.
+      }
+    }
+    const param = new ImmovableParam();
+    const target = { param: param as unknown as AudioParam };
+    scheduleParamLane([target], bent, "linear", at(0, 1, 100));
+    expect(() =>
+      scheduleParamLane([target], bent, "linear", at(0.005333, 1, 100.005333)),
+    ).not.toThrow();
+    expect(param.ramps.length).toBeGreaterThan(0);
+  });
+});
+
+describe("a curve that starts at this very instant", () => {
+  /**
+   * Chrome's behaviour at the boundary, which is where this bit: holding at a
+   * time does not free a curve that *begins* at that time, so both a fresh curve
+   * and a plain `.value` write at the same instant are refused. Only a cancel
+   * clears it.
+   */
+  class BoundaryParam {
+    curves: { time: number; duration: number }[] = [];
+    #value = 0;
+    constructor(private clock: { currentTime: number }) {}
+    get value(): number {
+      return this.#value;
+    }
+    set value(v: number) {
+      const t = this.clock.currentTime;
+      const clash = this.curves.find((c) => t >= c.time && t <= c.time + c.duration);
+      if (clash) {
+        throw new Error(
+          `Failed to set the 'value' property on 'AudioParam': setValueAtTime(${v}, ${t}) ` +
+            `overlaps setValueCurveAtTime(..., ${clash.time}, ${clash.duration})`,
+        );
+      }
+      this.#value = v;
+    }
+    setValueAtTime(v: number): void {
+      this.#value = v;
+    }
+    linearRampToValueAtTime(): void {}
+    setValueCurveAtTime(_v: Float32Array, time: number, duration: number): void {
+      this.curves.push({ time, duration });
+    }
+    // As Chrome behaves: either cancel frees a running curve's span.
+    cancelScheduledValues(time: number): void {
+      this.curves = this.curves.filter((c) => c.time + c.duration < time);
+    }
+    cancelAndHoldAtTime(time: number): void {
+      this.cancelScheduledValues(time);
+    }
+  }
+
+  const bent: HfAutomationLane = {
+    target: "volume",
+    points: [
+      { t: 0, v: 1, curve: 1 },
+      { t: 0.04, v: 0.2, curve: 1 },
+      { t: 4, v: 1 },
+    ],
+  };
+
+  it("clears the booked span so the next pass can schedule at all", () => {
+    const clock = { currentTime: 91.069 };
+    const param = new BoundaryParam(clock);
+    const target = { param: param as unknown as AudioParam };
+    scheduleParamLane([target], bent, "linear", at(0, 1, 91.069));
+    expect(() => scheduleParamLane([target], bent, "linear", at(0, 1, 91.069))).not.toThrow();
+  });
+
+  it("leaves the parameter writable, which is what a chain edit does next", () => {
+    // The re-parameterise after an edit writes every knob straight onto its param.
+    // Landing inside a span the scheduler booked at this instant is the error the
+    // console kept reporting, with the gain stage's own unity value in it.
+    const clock = { currentTime: 91.069 };
+    const param = new BoundaryParam(clock);
+    const target = { param: param as unknown as AudioParam };
+    scheduleParamLane([target], bent, "linear", at(0, 1, 91.069));
+    clearParamLane([target]);
+    expect(() => {
+      (param as unknown as { value: number }).value = 1;
+    }).not.toThrow();
   });
 });
 

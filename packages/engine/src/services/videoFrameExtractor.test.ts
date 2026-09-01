@@ -36,6 +36,19 @@ import {
   type ExtractedFrames,
   type ExtractionResult,
 } from "./videoFrameExtractor.js";
+
+describe("parseVideoElements strict literal timing", () => {
+  it.each(["", "   ", "0s", "0abc", "0px", "-1s", "Infinity", "NaN", "0x10"])(
+    "does not drop hand-authored data-duration=%j as an explicit zero window",
+    (duration) => {
+      expect(
+        parseVideoElements(
+          `<video id="v" src="clip.mp4" data-start="0" data-duration="${duration}"></video>`,
+        ),
+      ).toHaveLength(1);
+    },
+  );
+});
 import {
   extractFinalVideoFrameTimestamp,
   extractVideoMetadata,
@@ -44,6 +57,7 @@ import {
 import { runFfmpeg } from "../utils/runFfmpeg.js";
 import { COMPLETE_SENTINEL, GC_MARKER, SCHEMA_PREFIX } from "./extractionCache.js";
 import { resolveRuntimeMediaClipDuration } from "../../../core/src/runtime/media.js";
+import { compileTimingAttrs } from "@hyperframes/core";
 
 // ffmpeg is not preinstalled on GitHub's ubuntu-24.04 runners. The producer
 // regression test at packages/producer/tests/vfr-screen-recording/ runs inside
@@ -75,6 +89,7 @@ describe("resolveVideoExtractionDuration", () => {
     start: 0,
     end: Number.POSITIVE_INFINITY,
     mediaStart: 0,
+    playbackRate: 1,
     loop: false,
     hasAudio: false,
     ...overrides,
@@ -96,6 +111,32 @@ describe("resolveVideoExtractionDuration", () => {
     const explicitLoop = video({ end: 8, loop: true });
     expect(resolveVideoExtractionDuration(explicitLoop, metadata(60), 10)).toBe(8);
     expect(explicitLoop.loop).toBe(true);
+  });
+
+  it("extracts the source span consumed by an explicit 2x timeline slot", () => {
+    expect(
+      resolveVideoExtractionWindow(
+        video({ end: 2, mediaStart: 1, playbackRate: 2 }),
+        metadata(8),
+        2,
+      ),
+    ).toMatchObject({
+      compositionStart: 0,
+      mediaStart: 1,
+      durationSeconds: 4,
+      timelineDurationSeconds: 2,
+    });
+  });
+
+  it("reports natural timeline duration after constant playback-rate retiming", () => {
+    expect(
+      resolveVideoExtractionWindow(video({ mediaStart: 1, playbackRate: 2 }), metadata(5), 10),
+    ).toMatchObject({
+      compositionStart: 0,
+      mediaStart: 1,
+      durationSeconds: 4,
+      timelineDurationSeconds: 2,
+    });
   });
 
   it("trims materially negative preroll and advances the source offset", () => {
@@ -648,6 +689,65 @@ describe("resolveProjectRelativeSrc — sub-composition path clamping", () => {
 });
 
 describe("parseVideoElements", () => {
+  it.each([
+    {
+      label: "valueless playback-start",
+      attributes: 'data-playback-start data-media-start="1.5"',
+      expected: 1.5,
+    },
+    {
+      label: "empty playback-start",
+      attributes: 'data-playback-start="" data-media-start="1.5"',
+      expected: 1.5,
+    },
+    {
+      label: "whitespace playback-start",
+      attributes: 'data-playback-start="   " data-media-start="1.5"',
+      expected: 1.5,
+    },
+    {
+      label: "invalid playback-start",
+      attributes: 'data-playback-start="later" data-media-start="1.5"',
+      expected: 1.5,
+    },
+    { label: "missing media-start", attributes: "", expected: 0 },
+    { label: "invalid media-start", attributes: 'data-media-start="later"', expected: 0 },
+    {
+      label: "negative playback-start",
+      attributes: 'data-playback-start="-1" data-media-start="1.5"',
+      expected: 1.5,
+    },
+    { label: "negative media-start", attributes: 'data-media-start="-1"', expected: 0 },
+    {
+      label: "finite playback-start",
+      attributes: 'data-playback-start="2.25" data-media-start="1.5"',
+      expected: 2.25,
+    },
+    {
+      label: "zero playback-start",
+      attributes: 'data-playback-start="0" data-media-start="1.5"',
+      expected: 0,
+    },
+  ])("uses finite playback-start -> media-start -> 0 for $label", ({ attributes, expected }) => {
+    const [video] = parseVideoElements(`<video id="hero" src="clip.mp4" ${attributes}></video>`);
+
+    expect(video?.mediaStart).toBe(expected);
+  });
+
+  it("parses and normalizes constant playback rate for final rendering", () => {
+    const [fast, low, high, invalid] = parseVideoElements(
+      '<video id="fast" src="clip.mp4" data-playback-rate="2"></video>' +
+        '<video id="low" src="clip.mp4" data-playback-rate="0.01"></video>' +
+        '<video id="high" src="clip.mp4" data-playback-rate="20"></video>' +
+        '<video id="invalid" src="clip.mp4" data-playback-rate="nope"></video>',
+    );
+
+    expect(fast?.playbackRate).toBe(2);
+    expect(low?.playbackRate).toBe(0.1);
+    expect(high?.playbackRate).toBe(5);
+    expect(invalid?.playbackRate).toBe(1);
+  });
+
   it("parses videos without an id or data-start attribute", () => {
     const videos = parseVideoElements('<video src="clip.mp4"></video>');
 
@@ -675,6 +775,7 @@ describe("parseVideoElements", () => {
       start: 2,
       end: 7,
       mediaStart: 1.5,
+      playbackRate: 1,
       loop: false,
       hasAudio: true,
     });
@@ -700,6 +801,16 @@ describe("parseVideoElements", () => {
     );
     const main = videos.find((v) => v.id === "main");
     // intro ends at 10, so main starts at 10 and ends at 30 — not NaN.
+    expect(main?.start).toBe(10);
+    expect(main?.end).toBe(30);
+  });
+
+  it("still resolves relative data-start after compileTimingAttrs", () => {
+    const raw =
+      '<video id="intro" src="a.mp4" data-start="0" data-duration="10"></video>' +
+      '<video id="main" src="b.mp4" data-start="intro" data-duration="20"></video>';
+    const { html } = compileTimingAttrs(raw);
+    const main = parseVideoElements(html).find((v) => v.id === "main");
     expect(main?.start).toBe(10);
     expect(main?.end).toBe(30);
   });
@@ -760,6 +871,17 @@ describe("parseVideoElements", () => {
       expect(Number.isNaN(v.start)).toBe(false);
     }
   });
+
+  it("discovers <video> elements that use <source> children", () => {
+    const videos = parseVideoElements(
+      '<video id="rec" data-start="1" data-duration="4">' +
+        '<source src="https://cdn.example.com/rec.mp4" type="video/mp4">' +
+        '<source src="_remote_media/rec.webm" type="video/webm">' +
+        "</video>",
+    );
+    expect(videos).toHaveLength(1);
+    expect(videos[0]).toMatchObject({ id: "rec", src: "_remote_media/rec.webm", start: 1, end: 5 });
+  });
 });
 
 describe("FrameLookupTable", () => {
@@ -813,6 +935,15 @@ describe("FrameLookupTable", () => {
     expect(table.getActiveFramePayloads(0.5).get("hero")?.frameIndex).toBe(15);
     expect(table.getActiveFramePayloads(1.5).get("hero")?.frameIndex).toBe(15);
     expect(table.getActiveFramePayloads(4.5).get("hero")?.frameIndex).toBe(15);
+  });
+
+  it("selects source frames at the authored constant playback rate", () => {
+    const videos = parseVideoElements(
+      '<video id="hero" src="clip.webm" data-start="0" data-duration="2" data-playback-rate="2"></video>',
+    );
+    const table = createFrameLookupTable(videos, [fakeExtracted(120, 30)]);
+
+    expect(table.getActiveFramePayloads(1).get("hero")?.frameIndex).toBe(60);
   });
 
   it("wraps at video-stream EOF when a mux container has longer audio", () => {
@@ -1566,6 +1697,27 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
     const md = await extractVideoMetadata(VFR_FIXTURE);
     expect(md.isVFR).toBe(true);
   });
+
+  it.each([
+    ["compiled EOF", 4, 1],
+    ["compiled past EOF", 5, 2],
+    ["ordinary explicit zero", 6, 0],
+  ])(
+    "drops a known zero timeline window without extraction or error: %s",
+    async (label, start, mediaStart) => {
+      const src = await synthCfrClip(`zero-window-${label.replaceAll(" ", "-")}.mp4`, 1);
+      const videos = parseVideoElements(
+        `<video id="zero-window" src="${src}" data-start="${start}" data-duration="0" data-end="${start}" data-media-start="${mediaStart}" muted></video>`,
+      );
+      const outputDir = join(FIXTURE_DIR, `out-zero-window-${label.replaceAll(" ", "-")}`);
+      const result = await extractAllVideoFrames(videos, FIXTURE_DIR, { fps: 30, outputDir });
+
+      expect(result.errors).toEqual([]);
+      expect(result.extracted).toEqual([]);
+      expect(result.totalFramesExtracted).toBe(0);
+      expect(videos).toEqual([]);
+    },
+  );
 
   it("passes an exact 24000/1001 rate through VFR normalization", async () => {
     const outputDir = join(FIXTURE_DIR, "out-vfr-ntsc-boundary");

@@ -5,7 +5,9 @@ import {
   enabledAudioFxNodes,
   getAudioFxDef,
   HF_AUDIO_FX,
+  HF_AUDIO_FX_ATTR,
   HF_AUDIO_FX_CHAIN_VERSION,
+  HF_AUDIO_FX_DATA_KEY,
   HF_AUDIO_FX_IDS,
   normalizeAudioFxParams,
   parseAudioFxChain,
@@ -47,6 +49,15 @@ describe("effect registry", () => {
   });
 });
 
+describe("the chain attribute's two spellings", () => {
+  it("names the same attribute either way", () => {
+    // The studio WRITES through the attribute and READS through the dataset
+    // key, so the read side used to carry its own `"fx-chain"` literal and a
+    // rename would only half-land. Derived now; this is what keeps it derived.
+    expect(HF_AUDIO_FX_ATTR).toBe(`data-${HF_AUDIO_FX_DATA_KEY}`);
+  });
+});
+
 describe("normalizeAudioFxParams", () => {
   it("fills missing keys with defaults", () => {
     expect(normalizeAudioFxParams("peaking", {})).toEqual(defaultAudioFxParams("peaking"));
@@ -67,6 +78,27 @@ describe("normalizeAudioFxParams", () => {
     });
     expect(v.frequency).toBe(1000);
     expect(v.gain).toBe(0);
+  });
+
+  it("treats a blank or missing value as absent rather than as zero", () => {
+    // `Number(null)`, `Number("")`, `Number(false)` and `Number([])` are all 0
+    // and all finite, so these used to clamp to 0 instead of falling back. Zero
+    // is a legal setting for most of these knobs, so nothing downstream could
+    // tell: a compressor whose threshold arrived as null sat at 0 dB and never
+    // engaged, silently, rather than at its declared -24 dB.
+    const def = defaultAudioFxParams("compressor").threshold;
+    expect(def).not.toBe(0);
+    for (const blank of [null, undefined, "", "   ", false, [], {}]) {
+      expect(
+        normalizeAudioFxParams("compressor", { threshold: blank as unknown as number }).threshold,
+        `${JSON.stringify(blank)} was read as a number`,
+      ).toBe(def);
+    }
+    // A string that really does spell a number still counts — that is how the
+    // panel's inputs arrive.
+    expect(
+      normalizeAudioFxParams("compressor", { threshold: "-30" as unknown as number }).threshold,
+    ).toBe(-30);
   });
 
   it("falls back to the default for an unrecognised enum value", () => {

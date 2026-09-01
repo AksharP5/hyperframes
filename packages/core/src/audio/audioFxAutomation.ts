@@ -14,6 +14,7 @@ import {
   sampleAutomationLane,
   type HfAutomation,
   type HfAutomationLane,
+  type HfAutomationPoint,
 } from "../audioAutomation.js";
 import { parseAutomationTarget, VOLUME_TARGET } from "../audioAutomation.js";
 import type { HfAudioFxChain } from "../audioFx.js";
@@ -46,16 +47,23 @@ type Op =
   | { kind: "curve"; time: number; duration: number; values: Float32Array };
 
 /**
- * A segment is a straight line only when nothing bends it: no curvature on the
- * point it leaves, a linear parameter scale, and no unit mapping that could be
- * non-linear. Everything else is sampled.
+ * A segment is a straight line only when nothing bends it: no curvature and no
+ * via point on the point it leaves, a linear parameter scale, and no unit
+ * mapping that could be non-linear. Everything else is sampled.
+ *
+ * Both bend forms have to be checked. `curve` is an exponent; a via point names
+ * an interior point the segment passes through, and it is what the timeline
+ * writes when a bend is dragged. Testing only the exponent read every dragged
+ * bend as straight and played it as a linear ramp — the lane drew one shape and
+ * the ear got another.
  */
 function isStraight(
-  curve: number | undefined,
+  point: Pick<HfAutomationPoint, "curve" | "viaX" | "viaY">,
   scale: "linear" | "log",
   map: FxParamTarget["map"],
 ): boolean {
-  return !curve && scale === "linear" && !map;
+  const bent = Boolean(point.curve) || (point.viaX !== undefined && point.viaY !== undefined);
+  return !bent && scale === "linear" && !map;
 }
 
 function curvePointCount(duration: number): number {
@@ -86,7 +94,7 @@ function segmentOp(
   const duration = toTime - fromTime;
   if (duration <= 0) return null;
 
-  if (isStraight(a.curve, scale, map)) {
+  if (isStraight(a, scale, map)) {
     return { kind: "ramp", time: toTime, value: apply(b.v) };
   }
   // Sample from wherever the segment is entered, which is mid-segment when the
@@ -128,11 +136,66 @@ function planOps(
   return ops;
 }
 
+/**
+ * Hand the plan to the AudioParam, degrading a curve the browser will not take.
+ *
+ * A value curve may not overlap another, and this has been seen refused in the
+ * field while rescheduling mid-playback — two passes landing a render quantum
+ * apart, which is what applying a carve while the transport runs does. Every
+ * caller here cancels the parameter first, and measured against Chrome that is
+ * enough to free even a curve already under way, so the mechanism behind those
+ * reports is not understood and does not reproduce. This catch is the backstop
+ * for it: unhandled, the exception reached the console and abandoned every
+ * remaining segment of the envelope.
+ *
+ * A ramp to the same destination is always accepted, since it books no span. The
+ * segment loses its bend until the next full reschedule, which is a far better
+ * failure than the rest of the envelope never being scheduled at all.
+ */
 function emit(param: AudioParam, ops: readonly Op[]): void {
   for (const op of ops) {
     if (op.kind === "set") param.setValueAtTime(op.value, op.time);
     else if (op.kind === "ramp") param.linearRampToValueAtTime(op.value, op.time);
-    else param.setValueCurveAtTime(op.values, op.time, op.duration);
+    else {
+      try {
+        param.setValueCurveAtTime(op.values, op.time, op.duration);
+      } catch {
+        const end = op.values[op.values.length - 1] ?? 0;
+        param.linearRampToValueAtTime(end, op.time + op.duration);
+      }
+    }
+  }
+}
+
+/**
+ * Drop every event booked on a parameter, including a curve already under way.
+ *
+ * Anything landing inside a running curve is refused — a fresh curve, or the
+ * plain `.value` write that re-parameterising a chain performs — so the param has
+ * to be cancelled first. Measured against Chrome, any cancel frees the span; this
+ * takes the strongest form on purpose, because curve-over-curve refusals were
+ * reported from the field with a cancel at the new schedule time already in place
+ * and have never reproduced. Cancelling from zero cannot leave a stale event
+ * behind whatever that mechanism is.
+ *
+ * Safe on these parameters because this scheduler is their only writer: they
+ * belong to effect nodes it built, and the caller re-seeds the value in the same
+ * breath, so nothing clicks.
+ */
+export function clearParamLane(targets: readonly FxParamTarget[]): void {
+  for (const target of targets) target.param.cancelScheduledValues(0);
+}
+
+/** Stop an envelope, leaving the parameter wherever it currently sits. */
+export function cancelParamLane(targets: readonly FxParamTarget[], from: number): void {
+  for (const target of targets) {
+    // Keep the value the ramp had reached rather than snapping back to the
+    // last explicitly-set one, which would click.
+    if (typeof target.param.cancelAndHoldAtTime === "function") {
+      target.param.cancelAndHoldAtTime(from);
+    } else {
+      target.param.cancelScheduledValues(from);
+    }
   }
 }
 
@@ -150,26 +213,17 @@ export function scheduleParamLane(
 ): void {
   if (lane.points.length === 0) return;
   for (const target of targets) {
-    target.param.cancelScheduledValues(timing.scheduledAt);
+    // Cleared from zero rather than from this instant: a reschedule mid-playback
+    // lands inside the previous pass's still-running curve, and the field reports
+    // of that being refused had a cancel at this instant already in place. The
+    // plan below re-seeds the value here, so clearing costs nothing audible.
+    clearParamLane([target]);
     if (isConstantLane(lane)) {
       const value = (target.map ?? identity)(lane.points[0]!.v);
       target.param.setValueAtTime(value, timing.scheduledAt);
       continue;
     }
     emit(target.param, planOps(lane, scale, timing, target.map));
-  }
-}
-
-/** Stop an envelope, leaving the parameter wherever it currently sits. */
-export function cancelParamLane(targets: readonly FxParamTarget[], from: number): void {
-  for (const target of targets) {
-    // Keep the value the ramp had reached rather than snapping back to the
-    // last explicitly-set one, which would click.
-    if (typeof target.param.cancelAndHoldAtTime === "function") {
-      target.param.cancelAndHoldAtTime(from);
-    } else {
-      target.param.cancelScheduledValues(from);
-    }
   }
 }
 
@@ -191,13 +245,24 @@ export function scheduleChainAutomation(
   chain: HfAudioFxChain,
   nodes: readonly AutomatableNode[],
   timing: AutomationTiming,
+  /** The wet/dry blend around each preset run, from `FxChainHandle.presets`. */
+  presets?: Record<string, FxParamTarget[]>,
 ): FxParamTarget[] {
   const byId = new Map(nodes.filter((n) => n.id).map((n) => [n.id as string, n.handle]));
   const scheduled: FxParamTarget[] = [];
   for (const lane of automation.lanes) {
     const parsed = parseAutomationTarget(lane.target);
-    if (!parsed || parsed.kind !== "fx") continue;
-    const targets = byId.get(parsed.nodeId)?.automation?.[parsed.param];
+    if (!parsed) continue;
+    // A whole-preset lane drives the wet/dry blend the graph wrapped its run in,
+    // rather than any node's parameter — which is the point of it: a preset's
+    // nodes share no automatable parameter, and its worklet effects expose none
+    // at all.
+    const targets =
+      parsed.kind === "preset"
+        ? presets?.[parsed.presetId]
+        : parsed.kind === "fx"
+          ? byId.get(parsed.nodeId)?.automation?.[parsed.param]
+          : undefined;
     if (!targets || targets.length === 0) continue;
     const range = resolveAutomationRange(lane.target, chain);
     if (!range) continue;

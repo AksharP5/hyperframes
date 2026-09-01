@@ -26,11 +26,14 @@ import {
   estimateHdrExtractionBytes,
   extractHdrVideoFrames,
   getHdrExtractionReservedBytes,
+  planHdrResources,
   reserveHdrExtractionBytes,
   resolveHdrExtractionActiveBudgetBytes,
   resolveHdrExtractionBudgetBytes,
   resolveHdrExtractionWindow,
 } from "./captureHdrResources.js";
+import type { CompositionMetadata } from "../shared.js";
+import { EncoderInterruptedError } from "../encoderInterruption.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -114,6 +117,57 @@ function hdrExtractionFixture(videos: VideoElement[], framesDir: string) {
     resolveFinalFrameExtractionWindowImpl: async (_srcPath, _video, _metadata, window) => window,
   };
 }
+
+function videoComposition(src: string): CompositionMetadata {
+  return {
+    duration: 5,
+    width: 1920,
+    height: 1080,
+    audios: [],
+    images: [],
+    videos: [{ id: "a-roll", src, start: 0, end: 5, mediaStart: 0, loop: false, hasAudio: false }],
+  };
+}
+
+describe("planHdrResources non-ASCII src resolution (PRINFRA-349)", () => {
+  it("decodes a percent-encoded CJK <video src> back to the real on-disk path", () => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-hdr-cjk-"));
+    try {
+      const realName = "视频1.mp4";
+      writeFileSync(join(projectDir, realName), "x");
+      // The compiled DOM carries the URL-encoded attribute value.
+      const encoded = encodeURIComponent(realName); // %E8%A7%86%E9%A2%911.mp4
+      const prep = planHdrResources({
+        composition: videoComposition(encoded),
+        nativeHdrVideoIds: new Set(["a-roll"]),
+        nativeHdrImageIds: new Set(),
+        projectDir,
+        compiledDir: projectDir,
+      });
+      // Must be the decoded filesystem path ffmpeg can open, not the %-encoded string.
+      expect(prep.hdrVideoSrcPaths.get("a-roll")).toBe(join(projectDir, realName));
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves an ASCII src untouched", () => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-hdr-ascii-"));
+    try {
+      writeFileSync(join(projectDir, "clip.mp4"), "x");
+      const prep = planHdrResources({
+        composition: videoComposition("clip.mp4"),
+        nativeHdrVideoIds: new Set(["a-roll"]),
+        nativeHdrImageIds: new Set(),
+        projectDir,
+        compiledDir: projectDir,
+      });
+      expect(prep.hdrVideoSrcPaths.get("a-roll")).toBe(join(projectDir, "clip.mp4"));
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("estimateHdrExtractionBytes", () => {
   it("sums 6 bytes per pixel per frame across videos", () => {
@@ -435,6 +489,26 @@ describe("reserveHdrExtractionBytes", () => {
 });
 
 describe("extractHdrVideoFrames", () => {
+  it("preserves an external FFmpeg interruption as the structured retry signal", async () => {
+    const framesDir = mkdtempSync(join(tmpdir(), "hf-hdr-interrupted-"));
+    const fixture = hdrExtractionFixture([hdrVideo("interrupted")], framesDir);
+
+    try {
+      await expect(
+        extractHdrVideoFrames({
+          ...fixture,
+          runFfmpegImpl: async () => ({
+            ...ffmpegResult(false),
+            exitCode: 255,
+            failureReason: "external_interruption",
+          }),
+        }),
+      ).rejects.toBeInstanceOf(EncoderInterruptedError);
+    } finally {
+      rmSync(framesDir, { recursive: true, force: true });
+    }
+  });
+
   it("pins FFmpeg seek/duration, raw frame count, and reservation lifetime", async () => {
     const framesDir = mkdtempSync(join(tmpdir(), "hf-hdr-extract-"));
     const video = hdrVideo("preroll", { start: -60, end: 120, mediaStart: 0 });

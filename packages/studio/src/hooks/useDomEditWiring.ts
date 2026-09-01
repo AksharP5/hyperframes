@@ -33,7 +33,7 @@ export interface UseDomEditWiringParams {
   bumpGsapCache: () => void;
   showToast: (message: string, tone?: "error" | "info") => void;
   refreshPreviewDocumentVersion: () => void;
-  syncPreviewHistoryHotkey: (iframe: HTMLIFrameElement | null) => void;
+  syncPreviewHotkeys: (iframe: HTMLIFrameElement | null) => void;
   applyStudioManualEditsToPreviewRef: React.MutableRefObject<
     (iframe: HTMLIFrameElement) => Promise<void>
   >;
@@ -107,7 +107,7 @@ export interface UseDomEditWiringParams {
     resolvedFromValues?: Record<string, number | string>,
   ) => Promise<void>;
   removeAllKeyframes: (sel: DomEditSelection, animId: string) => Promise<void>;
-  handleDomManualEditsReset: (sel: DomEditSelection) => void;
+  handleDomManualEditsReset: (sel: DomEditSelection) => Promise<void>;
 }
 
 // fallow-ignore-next-line complexity
@@ -127,7 +127,7 @@ export function useDomEditWiring({
   bumpGsapCache,
   showToast,
   refreshPreviewDocumentVersion,
-  syncPreviewHistoryHotkey,
+  syncPreviewHotkeys,
   applyStudioManualEditsToPreviewRef,
   applyDomSelection,
   buildDomSelectionFromTarget,
@@ -264,7 +264,7 @@ export function useDomEditWiring({
     refreshDomEditGroupSelectionsFromPreview,
     buildDomSelectionFromTarget,
     refreshPreviewDocumentVersion,
-    syncPreviewHistoryHotkey,
+    syncPreviewHotkeys,
     applyStudioManualEditsToPreviewRef,
     openSourceForSelection,
     getSidebarTab,

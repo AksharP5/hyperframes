@@ -24,6 +24,8 @@ import {
   type AudioProcessingFailure,
 } from "@hyperframes/engine";
 import type { CompositionMetadata } from "../shared.js";
+import type { ProducerLogger } from "../../../logger.js";
+import { encoderFailureError } from "../encoderInterruption.js";
 
 export interface AudioStageInput {
   projectDir: string;
@@ -32,10 +34,16 @@ export interface AudioStageInput {
   compiledDir: string;
   /** Composition duration (post-probe). Must be > 0 — probeStage guarantees this. */
   duration: number;
+  /** Timeout forwarded to ffmpeg subprocesses used by the audio mixer. */
+  ffmpegProcessTimeout: number;
+  /** Master gain forwarded to the audio mixer. */
+  audioGain: number;
   /** Read-only view of `composition.audios`. */
   audios: CompositionMetadata["audios"];
   abortSignal: AbortSignal | undefined;
   assertNotAborted: () => void;
+  /** Where a per-track failure's detail goes. Optional so tests need not pass one. */
+  log?: ProducerLogger;
 }
 
 export interface AudioStageResult {
@@ -56,8 +64,18 @@ export interface AudioStageResult {
 }
 
 export async function runAudioStage(input: AudioStageInput): Promise<AudioStageResult> {
-  const { projectDir, workDir, compiledDir, duration, audios, abortSignal, assertNotAborted } =
-    input;
+  const {
+    projectDir,
+    workDir,
+    compiledDir,
+    duration,
+    ffmpegProcessTimeout,
+    audioGain,
+    audios,
+    abortSignal,
+    assertNotAborted,
+    log,
+  } = input;
 
   const stage3Start = Date.now();
   const audioOutputPath = join(workDir, MIXED_AUDIO_FILENAME);
@@ -81,21 +99,47 @@ export async function runAudioStage(input: AudioStageInput): Promise<AudioStageR
         audioOutputPath,
         duration,
         abortSignal,
-        undefined,
+        { ffmpegProcessTimeout, audioGain },
         compiledDir,
       );
     } catch (err) {
       // An abort is the caller's own signal and must keep its own shape.
       assertNotAborted();
+      const detail = err instanceof Error ? err.message : String(err);
       return {
         audioOutputPath,
         hasAudio: false,
         audioProcessMs: Date.now() - stage3Start,
-        audioError: err instanceof Error ? err.message : String(err),
-        audioFailures: undefined,
+        audioError: detail,
+        // Synthesised rather than left undefined. The warning policy reads
+        // owner, retryability, reason and stage off this list, so reporting the
+        // FATAL failure — the one that took the whole mix down — with an empty
+        // one gave it strictly less classification than a single dropped track
+        // gets, which is the opposite of what this stage exists to do.
+        // "internal" is the honest bucket: the stages enumerate ffmpeg steps
+        // and this is the FX render, which is none of them.
+        audioFailures: [
+          {
+            stage: "internal",
+            reason: "internal",
+            owner: "system",
+            retryable: false,
+            detail: detail.slice(0, 2_000),
+          },
+        ],
       };
     }
     assertNotAborted();
+
+    const interrupted = audioResult.failures?.find(
+      (failure) => failure.reason === "external_interruption",
+    );
+    if (interrupted) {
+      throw encoderFailureError("Audio processing failed", {
+        error: interrupted.detail,
+        failureReason: "external_interruption",
+      });
+    }
 
     hasAudio = audioResult.success;
     audioFailures = audioResult.failures;
@@ -103,7 +147,23 @@ export async function runAudioStage(input: AudioStageInput): Promise<AudioStageR
     // error) used to be discarded here — the caller only saw hasAudio flip to
     // false with no explanation, so a real audio failure looked identical to
     // "no audio was authored" and shipped a silent video-only render.
-    if (!hasAudio) audioError = audioResult.error ?? "audio mix failed for an unknown reason";
+    if (!hasAudio) {
+      audioError = audioResult.error ?? "audio mix failed for an unknown reason";
+      // Each failure's `detail` names the element and what went wrong with it,
+      // and it was going nowhere: the render printed the warning code and
+      // dropped everything that said why, so an audio failure could only be
+      // diagnosed by re-running the mixer by hand outside the pipeline.
+      for (const failure of audioResult.failures ?? []) {
+        log?.warn("Audio track failed", {
+          elementId: failure.elementId,
+          stage: failure.stage,
+          reason: failure.reason,
+          owner: failure.owner,
+          retryable: failure.retryable,
+          detail: failure.detail,
+        });
+      }
+    }
   }
   const audioProcessMs = Date.now() - stage3Start;
 

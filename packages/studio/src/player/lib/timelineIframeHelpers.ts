@@ -84,8 +84,14 @@ export function autoHealMissingCompositionIds(doc: Document): void {
 
 type PreviewPlayerHost = HTMLElement & {
   muted?: boolean;
+  volume?: number;
   playbackRate?: number;
 };
+
+function normalizePreviewVolume(volume: number): number {
+  if (!Number.isFinite(volume)) return 1;
+  return Math.max(0, Math.min(1, volume));
+}
 
 function isPreviewPlayerHost(value: unknown): value is PreviewPlayerHost {
   return value instanceof HTMLElement;
@@ -121,6 +127,36 @@ export function setPreviewMediaMuted(iframe: HTMLIFrameElement | null, muted: bo
     }
     postPreviewControl(iframe, "set-muted", { muted });
   } catch {}
+}
+
+export function setPreviewMediaVolume(iframe: HTMLIFrameElement | null, volume: number): void {
+  if (!iframe) return;
+  const nextVolume = normalizePreviewVolume(volume);
+  try {
+    const host = resolvePreviewPlayerHost(iframe);
+    if (host && typeof host.volume === "number") {
+      host.volume = nextVolume;
+      return;
+    }
+    postPreviewControl(iframe, "set-volume", { volume: nextVolume });
+  } catch {}
+}
+
+/**
+ * Everything the preview runtime has to be told about audio after it loads.
+ * Called from `applyPreviewAudioState`, which is the path that re-runs after a
+ * preview reload — the runtime comes back with the transport at its defaults
+ * and nothing else pushes them again.
+ */
+export function applyPreviewAudioFlags(
+  iframe: HTMLIFrameElement | null,
+  muted: boolean,
+  volume: number,
+): void {
+  setPreviewMediaMuted(iframe, muted);
+  // Volume too: the transport comes back at unity after a reload, so a preview
+  // the author had turned down came back loud.
+  setPreviewMediaVolume(iframe, volume);
 }
 
 export function setPreviewPlaybackRate(
@@ -193,14 +229,14 @@ function resolveScrubAudioEl(doc: Document, musicId?: string | null): HTMLAudioE
   );
 }
 
-function applyScrub(el: HTMLAudioElement, audioFileTime: number): void {
+function applyScrub(el: HTMLAudioElement, audioFileTime: number, previewVolume: number): void {
   if (scrubAudioEl && scrubAudioEl !== el) stopScrubPreviewAudio();
   if (scrubPrevMuted === null) scrubPrevMuted = el.muted;
   if (scrubPrevVolume === null) scrubPrevVolume = el.volume;
   scrubAudioEl = el;
   try {
     el.muted = false;
-    el.volume = SCRUB_VOLUME;
+    el.volume = SCRUB_VOLUME * normalizePreviewVolume(previewVolume);
     if (Math.abs(el.currentTime - audioFileTime) > 0.04) el.currentTime = audioFileTime;
     if (el.paused) void el.play().catch(() => {});
   } catch {
@@ -218,6 +254,7 @@ export function scrubPreviewAudio(
   iframe: HTMLIFrameElement | null,
   audioFileTime: number | null,
   musicId?: string | null,
+  previewVolume = 1,
 ): void {
   if (!iframe) return;
   if (audioFileTime === null) {
@@ -232,7 +269,7 @@ export function scrubPreviewAudio(
   }
   if (!doc) return;
   const el = resolveScrubAudioEl(doc, musicId);
-  if (el) applyScrub(el, audioFileTime);
+  if (el) applyScrub(el, audioFileTime, previewVolume);
 }
 
 export function stopScrubPreviewAudio(): void {

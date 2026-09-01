@@ -3,8 +3,14 @@
  * the `perf-summary.json` debug artifact.
  */
 
+import { arch, cpus, platform, totalmem } from "node:os";
 import { fpsToNumber } from "@hyperframes/core";
-import type { CapturePerfSummary, SubTimelineWaitOutcome, WorkerSizing } from "@hyperframes/engine";
+import type {
+  CapturePerfSummary,
+  StaticVerificationOutcome,
+  SubTimelineWaitOutcome,
+  WorkerSizing,
+} from "@hyperframes/engine";
 import type { CaptureCalibrationSample, CaptureCostEstimate } from "./captureCost.js";
 import type {
   CaptureAttemptSummary,
@@ -164,12 +170,53 @@ function aggregateDedup(perfs: CapturePerfSummary[]): RenderPerfSummary["staticD
     : [
         ...new Set(perfs.map((p) => p.staticDedupSkipReason).filter((r): r is string => !!r)),
       ].sort();
+  const verificationPerfs = perfs.filter((perf) => perf.staticDedupVerificationOutcome);
+  const verificationOutcomes = [
+    ...new Set(
+      verificationPerfs
+        .map((perf) => perf.staticDedupVerificationOutcome)
+        .filter((outcome): outcome is StaticVerificationOutcome => outcome != null),
+    ),
+  ].sort();
   return {
     enabled: perfs.some((p) => p.staticDedupEnabled),
     armed,
     predictedFrames: perfs.reduce((sum, p) => sum + (p.staticDedupPredicted ?? 0), 0),
     reusedFrames: perfs.reduce((sum, p) => sum + (p.staticDedupReused ?? 0), 0),
     skipReason: skipReasons.length > 0 ? skipReasons.join("|") : undefined,
+    ...(verificationPerfs.length === 0
+      ? {}
+      : {
+          verifiedFrames: verificationPerfs.reduce(
+            (sum, perf) => sum + (perf.staticDedupVerified ?? 0),
+            0,
+          ),
+          verificationOutcomes,
+          plannedRuns: verificationPerfs.reduce(
+            (sum, perf) => sum + (perf.staticDedupVerificationPlannedRuns ?? 0),
+            0,
+          ),
+          completedRuns: verificationPerfs.reduce(
+            (sum, perf) => sum + (perf.staticDedupVerificationCompletedRuns ?? 0),
+            0,
+          ),
+          screenshots: verificationPerfs.reduce(
+            (sum, perf) => sum + (perf.staticDedupVerificationScreenshots ?? 0),
+            0,
+          ),
+          seeks: verificationPerfs.reduce(
+            (sum, perf) => sum + (perf.staticDedupVerificationSeeks ?? 0),
+            0,
+          ),
+          comparisons: verificationPerfs.reduce(
+            (sum, perf) => sum + (perf.staticDedupVerificationComparisons ?? 0),
+            0,
+          ),
+          verificationElapsedMs: verificationPerfs.reduce(
+            (sum, perf) => sum + (perf.staticDedupVerificationElapsedMs ?? 0),
+            0,
+          ),
+        }),
   };
 }
 
@@ -221,6 +268,8 @@ export function buildRenderPerfSummary(input: {
   /** Per-session/per-worker static-dedup perf; aggregated into `staticDedup`. */
   dedupPerfs: CapturePerfSummary[];
   drawElement?: DrawElementPerfInput;
+  /** `cfg.disableGpu` — the hard `--disable-gpu` flag, for the `host` GPU picture. */
+  gpuDisabled: boolean;
 }): RenderPerfSummary {
   return {
     renderId: input.job.id,
@@ -282,5 +331,13 @@ export function buildRenderPerfSummary(input: {
       input.dedupPerfs,
       input.drawElement ?? { selfVerifyFallback: false },
     ),
+    host: {
+      platform: platform(),
+      arch: arch(),
+      cpuCount: cpus().length,
+      totalMemMb: Math.round(totalmem() / (1024 * 1024)),
+      nodeVersion: process.version,
+      gpuDisabled: input.gpuDisabled,
+    },
   };
 }

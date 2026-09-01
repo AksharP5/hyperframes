@@ -80,6 +80,24 @@ const rms = (s: Float32Array): number =>
   Math.sqrt(s.reduce((a, x) => a + x * x, 0) / Math.max(1, s.length));
 const db = (x: number): number => 20 * Math.log10(x + 1e-30);
 
+/**
+ * Rising zero-crossings per second, over `[from, to)` seconds.
+ *
+ * `to` matters as much as `from`: a chain with a tail (reverb, delay,
+ * pitchshift) renders extra silence/decay past the input's own end, and
+ * averaging crossings over that stretch too dilutes the estimate toward zero
+ * — measure only the steady, driven portion.
+ */
+function estimateFreq(s: Float32Array, sampleRate: number, from = 0.05, to?: number): number {
+  const start = Math.round(from * sampleRate);
+  const end = to === undefined ? s.length : Math.min(s.length, Math.round(to * sampleRate));
+  let crossings = 0;
+  for (let i = start + 1; i < end; i++) {
+    if ((s[i - 1] ?? 0) < 0 && (s[i] ?? 0) >= 0) crossings++;
+  }
+  return crossings / ((end - start) / sampleRate);
+}
+
 describe("readWav / writeWav", () => {
   it("round-trips samples as 16-bit PCM, the format the volume bake requires", () => {
     const p = join(dir, "rt.wav");
@@ -180,7 +198,7 @@ describe("applyAudioFxChain", () => {
       join(dir, "out.wav"),
       { trackId: "t" },
     );
-    expect(out).toBe(input);
+    expect(out).toEqual({ path: input, envelopeBaked: false });
     expect(existsSync(join(dir, "out.wav"))).toBe(false);
   });
 
@@ -213,7 +231,7 @@ describe.skipIf(!HAS_BROWSER)("browser render", () => {
       outPath,
       { trackId: "t" },
     );
-    expect(result).toBe(outPath);
+    expect(result).toEqual({ path: outPath, envelopeBaked: false });
     const before = readWav(input).samples;
     const after = readWav(outPath).samples;
     expect(after.length).toBe(before.length);
@@ -242,6 +260,33 @@ describe.skipIf(!HAS_BROWSER)("browser render", () => {
       { trackId: "t" },
     );
     expect(db(rms(readWav(outPath).samples))).toBeLessThan(db(rms(readWav(input).samples)) - 3);
+  }, 180_000);
+
+  it("shifts pitch up an octave, matching the preview worklet", async () => {
+    const input = join(dir, "in.wav");
+    tone(input, 0.5, 220);
+    const outPath = join(dir, "out.wav");
+    await applyAudioFxChain(
+      input,
+      {
+        version: 1,
+        nodes: [
+          {
+            type: "pitchshift",
+            enabled: true,
+            params: { ...defaultAudioFxParams("pitchshift"), semitones: 12, mix: 1 },
+          },
+        ],
+      },
+      outPath,
+      { trackId: "t" },
+    );
+    // Measure only the driven portion — chainTailSeconds appends ~0.2s of
+    // decaying tail past the clip's own 0.5s, and averaging crossings over
+    // that too dilutes the estimate.
+    const freq = estimateFreq(readWav(outPath).samples, SR, 0.05, 0.45);
+    expect(freq).toBeGreaterThan(220 * 1.7);
+    expect(freq).toBeLessThan(220 * 2.3);
   }, 180_000);
 
   it("sweeps a filter across the clip when a lane automates it", async () => {
@@ -283,6 +328,139 @@ describe.skipIf(!HAS_BROWSER)("browser render", () => {
     expect(tail).toBeGreaterThan(head + 15);
   }, 180_000);
 
+  it("ducks a hot chain before quantising it, not after", async () => {
+    // A +6 dB peaking band on a 0.9 tone leaves the chain output around 1.8 —
+    // well past full scale — and the volume lane immediately halves it. Baking
+    // the envelope into the float samples lands that at ~0.9 intact. Letting
+    // writeWav clamp first and ducking the file afterwards lands at ~0.5 with
+    // the tops sheared off: distortion the render bakes in and preview, which
+    // is float all the way through, never has.
+    //
+    // Stereo with a step partway through, so the same run also proves the
+    // envelope is walked per frame across all channels rather than per channel:
+    // one walker restarted for a second plane would hand it the tail gain for
+    // its whole length.
+    const input = join(dir, "hot-in.wav");
+    const frames = Math.floor(SR * 0.3);
+    const s = new Float32Array(frames * 2);
+    for (let i = 0; i < frames; i++) {
+      const v = 0.9 * Math.sin((2 * Math.PI * 440 * i) / SR);
+      s[i * 2] = v;
+      s[i * 2 + 1] = v;
+    }
+    writeWav(input, s, SR, 2);
+
+    const outPath = join(dir, "hot-out.wav");
+    const result = await applyAudioFxChain(
+      input,
+      {
+        version: 1,
+        nodes: [{ type: "peaking", enabled: true, params: { frequency: 440, gain: 6, q: 1 } }],
+      },
+      outPath,
+      {
+        trackId: "t",
+        envelope: {
+          // 0.5 for the first 150 ms, then 0.25 — the step is a segment
+          // advance, which is what the walker's cursor exists for.
+          keyframes: [
+            { time: 0, volume: 0.5 },
+            { time: 0.15, volume: 0.5 },
+            { time: 0.1501, volume: 0.25 },
+            { time: 0.3, volume: 0.25 },
+          ],
+          trackStart: 0,
+          baseVolume: 1,
+        },
+      },
+    );
+    expect(result.envelopeBaked).toBe(true);
+
+    const out = readWav(outPath);
+    expect(out.channels).toBe(2);
+    const channel = (c: number): Float32Array =>
+      Float32Array.from({ length: frames }, (_, i) => out.samples[i * 2 + c] ?? 0);
+    const window = (s: Float32Array, from: number, to: number): Float32Array =>
+      s.slice(Math.floor(from * SR), Math.floor(to * SR));
+
+    for (const c of [0, 1]) {
+      const plane = channel(c);
+      // Past the filter's settling transient, before the step.
+      const loud = window(plane, 0.1, 0.14);
+      const peak = Math.max(...Array.from(loud, Math.abs));
+      // ~0.9. Clamped-then-ducked gives 0.5; a dropped envelope gives 1.0; a
+      // walker restarted per plane gives channel 1 the 0.25 tail gain.
+      expect(peak).toBeGreaterThan(0.8);
+      expect(peak).toBeLessThan(0.95);
+      // And still a sine, not a squared-off one: clipping 1.8 down to 1.0 pulls
+      // the crest factor from 1.41 towards 1.15.
+      expect(peak / rms(loud)).toBeGreaterThan(1.35);
+      // The step landed, so the envelope was sampled over time, not once.
+      const quiet = window(plane, 0.2, 0.29);
+      expect(Math.max(...Array.from(quiet, Math.abs))).toBeCloseTo(peak / 2, 1);
+    }
+  }, 180_000);
+
+  it("round-trips a track larger than one transfer chunk", async () => {
+    // The PCM used to cross in a single evaluate pair, so a stereo track past
+    // ~8.7 minutes blew puppeteer's 256 MB frame cap and failed the render.
+    // It now goes a chunk at a time; this clip is 45 s stereo, so each plane
+    // spans two chunks and the seam is inside the audio rather than at its end.
+    //
+    // A ramp, not a tone: every sample is a unique position marker, so a chunk
+    // dropped, reordered or over-read shows up as a value at the wrong place
+    // instead of hiding inside a periodic signal.
+    const input = join(dir, "long-in.wav");
+    const frames = SR * 45;
+    const at = (i: number): number => -0.9 + (1.8 * i) / (frames - 1);
+    const s = new Float32Array(frames * 2);
+    for (let i = 0; i < frames; i++) {
+      s[i * 2] = at(i);
+      s[i * 2 + 1] = -at(i);
+    }
+    writeWav(input, s, SR, 2);
+
+    const outPath = join(dir, "long-out.wav");
+    await applyAudioFxChain(
+      input,
+      // Transparent: a peaking band at 0 dB is unity, so the output is the
+      // input and any difference is the transfer's doing.
+      {
+        version: 1,
+        nodes: [{ type: "peaking", enabled: true, params: { frequency: 1000, gain: 0, q: 1 } }],
+      },
+      outPath,
+      { trackId: "t" },
+    );
+
+    const out = readWav(outPath);
+    expect(out.channels).toBe(2);
+    // A dropped tail chunk shows up here first.
+    expect(out.samples.length).toBe(frames * 2);
+
+    // Probe across the whole clip and tightly around the 8 MiB seam.
+    const seam = (8 * 1024 * 1024) / 4;
+    const probes = [
+      ...Array.from({ length: 60 }, (_, k) => Math.floor((k * (frames - 1)) / 59)),
+      ...[-2, -1, 0, 1, 2].map((d) => seam + d),
+    ].filter((i) => i >= 0 && i < frames);
+    for (const i of probes) {
+      // Two 16-bit steps of tolerance: the input was quantised on the way in
+      // and the output again on the way out.
+      expect(out.samples[i * 2]).toBeCloseTo(at(i), 3);
+      expect(out.samples[i * 2 + 1]).toBeCloseTo(-at(i), 3);
+    }
+
+    // The ramp only ever rises, so this reads every sample and fails on a
+    // chunk reordered, duplicated or over-read anywhere in the file — not just
+    // at the points probed above.
+    let breaks = 0;
+    for (let i = 1; i < frames; i++) {
+      if ((out.samples[i * 2] ?? 0) < (out.samples[(i - 1) * 2] ?? 0)) breaks += 1;
+    }
+    expect(breaks).toBe(0);
+  }, 180_000);
+
   it("renders a multi-effect chain including reverb", async () => {
     const input = join(dir, "in.wav");
     tone(input);
@@ -292,4 +470,26 @@ describe.skipIf(!HAS_BROWSER)("browser render", () => {
     });
     expect(readWav(outPath).samples.length).toBeGreaterThan(0);
   }, 180_000);
+});
+
+/**
+ * ffmpeg exits 0 and writes a structurally valid but EMPTY wav whenever a
+ * clip's trim starts past the end of its source (`-ss 10 -t 5` on a 2 s file).
+ * That track used to reach `new OfflineAudioContext(ch, 0, rate)`, which throws
+ * — and the error travels past the mixer's per-track failure collector, so one
+ * mis-set `data-media-start` took the whole render down.
+ */
+describe("an empty track", () => {
+  it("is handed back untouched rather than failing the render", async () => {
+    const input = join(dir, "empty.wav");
+    writeWav(input, new Float32Array(0), SR);
+    const output = join(dir, "out.wav");
+
+    // Returns the input path, the same contract as a chain with nothing enabled
+    // — and without paying for a browser to decide it.
+    await expect(
+      applyAudioFxChain(input, chainOf("peaking"), output, { trackId: "t" }),
+    ).resolves.toEqual({ path: input, envelopeBaked: false });
+    expect(existsSync(output)).toBe(false);
+  });
 });

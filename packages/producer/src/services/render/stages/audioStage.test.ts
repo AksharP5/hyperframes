@@ -14,6 +14,7 @@ vi.mock("@hyperframes/engine", async (importOriginal) => {
 });
 
 import { runAudioStage } from "./audioStage.js";
+import { EncoderInterruptedError } from "../encoderInterruption.js";
 
 // Regression: hasAudio flipping to false used to be indistinguishable from
 // "no audio was authored" — processCompositionAudio's error (per-element
@@ -39,6 +40,8 @@ describe("runAudioStage", () => {
       workDir,
       compiledDir: join(workDir, "compiled"),
       duration: 5,
+      ffmpegProcessTimeout: 3_600_000,
+      audioGain: 1,
       audios,
       abortSignal: undefined,
       assertNotAborted: () => {},
@@ -72,6 +75,16 @@ describe("runAudioStage", () => {
     expect(result.audioFailures).toEqual([
       expect.objectContaining({ reason: "source_not_found", stage: "source" }),
     ]);
+    expect(processCompositionAudioMock).toHaveBeenCalledWith(
+      audios,
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      5,
+      undefined,
+      { ffmpegProcessTimeout: 3_600_000, audioGain: 1 },
+      expect.any(String),
+    );
   });
 
   it("falls back to a generic message when the mixer fails without an error string", async () => {
@@ -102,6 +115,26 @@ describe("runAudioStage", () => {
     expect(result.audioError).toBeUndefined();
   });
 
+  it("throws a structured retry signal when audio ffmpeg is externally interrupted", async () => {
+    processCompositionAudioMock.mockResolvedValue({
+      success: false,
+      outputPath: "audio.m4a",
+      durationMs: 1,
+      tracksProcessed: 0,
+      failures: [
+        {
+          stage: "mix",
+          reason: "external_interruption",
+          owner: "system",
+          retryable: true,
+          detail: "ffmpeg handled signal 15",
+        },
+      ],
+    });
+
+    await expect(runAudioStage(makeInput())).rejects.toBeInstanceOf(EncoderInterruptedError);
+  });
+
   it("does not set audioError when there is no audio to mix", async () => {
     const result = await runAudioStage(makeInput({ audios: [] }));
 
@@ -122,7 +155,27 @@ describe("runAudioStage", () => {
     const result = await runAudioStage(makeInput());
     expect(result.hasAudio).toBe(false);
     expect(result.audioError).toMatch(/Audio FX failed for track bgm/);
-    expect(result.audioFailures).toBeUndefined();
+    // And it is classified. This used to come back undefined, so the warning
+    // policy — which reads owner, retryability, reason and stage off this list
+    // — described the FATAL failure with strictly less detail than a single
+    // dropped track gets.
+    expect(result.audioFailures).toEqual([
+      {
+        stage: "internal",
+        reason: "internal",
+        owner: "system",
+        retryable: false,
+        detail: "Audio FX failed for track bgm: browser launch failed",
+      },
+    ]);
+  });
+
+  it("bounds the synthesised failure's detail", async () => {
+    // `detail` is contractually bounded diagnostic text; an ffmpeg-flavoured
+    // message can run to tens of kilobytes.
+    processCompositionAudioMock.mockRejectedValue(new Error("x".repeat(5_000)));
+    const result = await runAudioStage(makeInput());
+    expect(result.audioFailures?.[0]?.detail.length).toBe(2_000);
   });
 
   it("lets an abort keep its own shape rather than becoming an audio error", async () => {

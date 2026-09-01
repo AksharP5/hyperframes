@@ -11,6 +11,7 @@ import {
   fxAutomationTarget,
   resolveAutomationRange,
   sampleAutomationLane,
+  steadyViaPoint,
   VOLUME_RANGE,
   VOLUME_TARGET,
   type AutomationRange,
@@ -21,8 +22,21 @@ import { getAudioFxDef, type HfAudioFxChain } from "@hyperframes/core/audio-fx";
 
 /** Points nearer than this in clip seconds are the same point, not two. */
 export const POINT_MERGE_SEC = 0.02;
+
+/**
+ * Closest two breakpoints may sit in clip seconds while still being two points.
+ *
+ * A drag clamps to this short of its neighbour rather than onto it. Landing on the
+ * exact same time is not a step, it is a deletion: the lane's own normalisation
+ * collapses points that share a `t`, keeping the later one — so dragging a point
+ * fully into its neighbour used to consume that neighbour. A millisecond is under a
+ * pixel at any zoom the lane offers, so the two still read as touching.
+ */
+export const MIN_POINT_GAP_SEC = 0.001;
 /** Hit radius for grabbing a point, in px. */
 export const GRAB_PX = 7;
+/** Distance from the drawn envelope that offers a segment drag, in px. */
+export const SEGMENT_GRAB_PX = 5;
 /** Samples used to draw a segment the eye should see as curved. */
 export const DRAW_SAMPLES = 64;
 /**
@@ -98,16 +112,21 @@ export function formatValue(range: AutomationRange, value: number): string {
 }
 
 /**
- * The `curve` that bends a segment through a dragged point.
+ * The via point that bends a segment through a dragged pointer: the pointer's own
+ * position in the segment's normalised space, which is all the model needs.
  *
- * `applyCurve` raises normalised progress to `2^(2*curve)`, so a point the
- * pointer holds at progress `x` and unit height `f` fixes the exponent:
- * `x^e = f`, hence `e = ln f / ln x` and `curve = log2(e) / 2`. Solving rather
- * than accumulating a delta means the segment passes through the pointer
- * instead of drifting away from it over a long drag.
+ * There is nothing to solve any more, and that is the point. This used to fit an
+ * exponent — `x^e = f`, so `curve = log2(ln f / ln x) / 2` — and an exponent is
+ * one knob for two questions. It spent it on the wrong one: every upward bend it
+ * could draw deviated most inside the first fifth of the segment, so grabbing the
+ * line near its right-hand breakpoint still bulged it on the left. And reaching a
+ * pointer near either end needed an exponent the model refuses — `e` runs past 15
+ * at `x = 0.9`, clamped to 4 — so the line stopped following the pointer
+ * altogether, missing it by up to a third of the segment's height. Naming the
+ * point the curve passes through says both things at once, exactly, anywhere.
  *
- * Null when the segment cannot express the shape: a flat segment has no room to
- * bend, and progress or height at the very ends divides by zero.
+ * Null when the segment cannot take a bend: a flat segment draws the same line
+ * whatever the shape, and a pointer at the very ends is the ends.
  */
 export function curveForDrag(input: {
   range: AutomationRange;
@@ -115,7 +134,7 @@ export function curveForDrag(input: {
   b: { t: number; v: number };
   t: number;
   v: number;
-}): number | null {
+}): { viaX: number; viaY: number } | null {
   const { range, a, b, t, v } = input;
   const span = b.t - a.t;
   if (span <= 0) return null;
@@ -126,7 +145,11 @@ export function curveForDrag(input: {
   if (Math.abs(ub - ua) < 0.001) return null;
   const f = (toUnit(range, v) - ua) / (ub - ua);
   if (f <= 0.001 || f >= 0.999) return null;
-  return Math.max(-1, Math.min(1, Math.log2(Math.log(f) / Math.log(x)) / 2));
+  // Reported as the model will honour it, not as the pointer asked. A bend is held
+  // to a steady curve, so a pointer dragged past that stops being followed — and
+  // the write, the preview and the readout all have to say the same thing about
+  // where the line actually went.
+  return steadyViaPoint(x, f);
 }
 
 /**
@@ -137,6 +160,32 @@ export function curveForDrag(input: {
  * Which axis "won" is decided in pixels, not in seconds and dB — those are
  * different units and comparing them would make the lock depend on the zoom.
  */
+/** Which way a gesture is going, in pixels — the only comparable unit. */
+export function dominantDragAxis(input: {
+  origin: { t: number; v: number };
+  raw: { t: number; v: number };
+  xOf(t: number): number;
+  yOf(v: number): number;
+}): "time" | "value" {
+  const { origin, raw, xOf, yOf } = input;
+  return Math.abs(xOf(raw.t) - xOf(origin.t)) > Math.abs(yOf(raw.v) - yOf(origin.v))
+    ? "time"
+    : "value";
+}
+
+/**
+ * The pointer, constrained to one axis.
+ *
+ * The axis is handed in rather than worked out here, because it has to be decided
+ * once for the gesture and held. Recomputed per event it followed whichever way
+ * the last move happened to lean, so a hand drifting sideways during a vertical
+ * drag flipped the lock and the point moved in both — which is indistinguishable
+ * from no lock at all.
+ *
+ * Locking to time holds the value exactly. Locking to value holds the time and
+ * moves the value at a quarter speed: the same gesture is the fine adjustment,
+ * because a fader spanning 60px of lane has no other way to be set precisely.
+ */
 export function applyShiftConstraint(input: {
   range: AutomationRange;
   origin: { t: number; v: number };
@@ -144,11 +193,12 @@ export function applyShiftConstraint(input: {
   /** Same projections the lane draws with, so the comparison is on screen. */
   xOf(t: number): number;
   yOf(v: number): number;
+  /** Decided on the gesture's first travel; worked out here when absent. */
+  axis?: "time" | "value";
 }): { t: number; v: number } {
-  const { range, origin, raw, xOf, yOf } = input;
-  if (Math.abs(xOf(raw.t) - xOf(origin.t)) > Math.abs(yOf(raw.v) - yOf(origin.v))) {
-    return { t: raw.t, v: origin.v };
-  }
+  const { range, origin, raw } = input;
+  const axis = input.axis ?? dominantDragAxis(input);
+  if (axis === "time") return { t: raw.t, v: origin.v };
   const from = toUnit(range, origin.v);
   return { t: origin.t, v: fromUnit(range, from + (toUnit(range, raw.v) - from) * 0.25) };
 }
@@ -172,6 +222,29 @@ export function snapLaneTime(t: number, targets: readonly number[], thresholdSec
     }
   }
   return best;
+}
+
+/** Draw commands from one breakpoint to the next, sampled when it is curved. */
+function segmentLineCommands(input: {
+  lane: HfAutomationLane;
+  range: AutomationRange;
+  index: number;
+  xOf(t: number): number;
+  yOf(v: number): number;
+}): string[] {
+  const { lane, range, index, xOf, yOf } = input;
+  const a = lane.points[index];
+  const b = lane.points[index + 1];
+  if (!a || !b) return [];
+  // A via point bends the segment with no `curve` of its own, so the
+  // straight-line shortcut has to rule out both.
+  if (!a.curve && a.viaX === undefined && range.scale === "linear") {
+    return [`L ${xOf(b.t)} ${yOf(b.v)}`];
+  }
+  return Array.from({ length: DRAW_SAMPLES }, (_, sample) => {
+    const t = a.t + ((b.t - a.t) * (sample + 1)) / DRAW_SAMPLES;
+    return `L ${xOf(t)} ${yOf(sampleAutomationLane(lane, t, range.scale))}`;
+  });
 }
 
 /**
@@ -199,19 +272,35 @@ export function envelopePath(input: {
   }
   const pts = [`M ${PAD_X} ${yOf(first.v)}`, `L ${xOf(first.t)} ${yOf(first.v)}`];
   for (let i = 0; i + 1 < lane.points.length; i += 1) {
-    const a = lane.points[i];
-    const b = lane.points[i + 1];
-    if (!a || !b) continue;
-    if (!a.curve && range.scale === "linear") {
-      pts.push(`L ${xOf(b.t)} ${yOf(b.v)}`);
-      continue;
-    }
-    for (let k = 1; k <= DRAW_SAMPLES; k += 1) {
-      const t = a.t + ((b.t - a.t) * k) / DRAW_SAMPLES;
-      pts.push(`L ${xOf(t)} ${yOf(sampleAutomationLane(lane, t, range.scale))}`);
-    }
+    pts.push(...segmentLineCommands({ lane, range, index: i, xOf, yOf }));
   }
   pts.push(`L ${PAD_X + widthPx} ${yOf(last.v)}`);
+  return pts.join(" ");
+}
+
+/**
+ * The visible path for one segment, without the lane's constant extensions.
+ *
+ * Used for the hover/drag affordance: only the segment under the pointer grows
+ * heavier, rather than making the entire envelope look selected. It samples by
+ * the same rule as `envelopePath`, so a curved or logarithmic segment's hover
+ * stroke sits exactly on the line the audio model draws.
+ */
+export function envelopeSegmentPath(input: {
+  lane: HfAutomationLane;
+  range: AutomationRange;
+  index: number;
+  xOf(t: number): number;
+  yOf(v: number): number;
+}): string | null {
+  const { lane, range, index, xOf, yOf } = input;
+  const a = lane.points[index];
+  const b = lane.points[index + 1];
+  if (!a || !b) return null;
+  const pts = [
+    `M ${xOf(a.t)} ${yOf(a.v)}`,
+    ...segmentLineCommands({ lane, range, index, xOf, yOf }),
+  ];
   return pts.join(" ");
 }
 

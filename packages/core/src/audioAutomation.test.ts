@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCurve,
+  shapeProgress,
   fxAutomationTarget,
+  HF_AUDIO_AUTOMATION_ATTR,
+  HF_AUDIO_AUTOMATION_DATA_KEY,
   isConstantLane,
   parseAutomation,
   parseAutomationTarget,
@@ -10,10 +13,12 @@ import {
   sampleAutomationCurve,
   sampleAutomationLane,
   serializeAutomation,
+  steadyViaPoint,
   VOLUME_RANGE,
   type HfAutomationLane,
 } from "./audioAutomation.js";
 import { mintAudioFxNodeId, parseAudioFxChain, type HfAudioFxChain } from "./audioFx.js";
+import { MAX_AUDIO_GAIN } from "./audioGain.js";
 
 const chain: HfAudioFxChain = {
   version: 1,
@@ -26,6 +31,14 @@ const chain: HfAudioFxChain = {
 const lane = (points: HfAutomationLane["points"], target = "volume"): HfAutomationLane => ({
   target,
   points,
+});
+
+describe("the automation attribute's two spellings", () => {
+  it("names the same attribute either way", () => {
+    // Same split as the FX chain: written as an attribute, read as a dataset
+    // key. Derived, so a rename cannot half-land.
+    expect(HF_AUDIO_AUTOMATION_ATTR).toBe(`data-${HF_AUDIO_AUTOMATION_DATA_KEY}`);
+  });
 });
 
 describe("targets", () => {
@@ -104,7 +117,7 @@ describe("normalisation", () => {
     ]);
   });
 
-  it("clamps volume into 0..1 at parse time", () => {
+  it("clamps volume into the authoring gain range at parse time", () => {
     const parsed = parseAutomation(
       JSON.stringify({
         version: 1,
@@ -119,7 +132,9 @@ describe("normalisation", () => {
         ],
       }),
     );
-    expect(parsed.lanes[0]!.points.map((p) => p.v)).toEqual([1, 0]);
+    // The lane shares the fader's ceiling. Clamping it at unity discarded the
+    // boost of any clip authored above 0 dB the moment it was automated.
+    expect(parsed.lanes[0]!.points.map((p) => p.v)).toEqual([MAX_AUDIO_GAIN, 0]);
   });
 
   it("refuses malformed input instead of silently losing an envelope", () => {
@@ -151,6 +166,54 @@ describe("normalisation", () => {
       ],
     };
     expect(parseAutomation(serializeAutomation(source))).toEqual(source);
+  });
+
+  it("round-trips a via point, and keeps it as a pair", () => {
+    const source = {
+      version: 1,
+      lanes: [
+        lane([
+          // A via point with no `curve` at all: the bend is entirely described by
+          // where the segment goes. It has to survive on its own, or a bend
+          // dragged near a breakpoint silently straightens on the next load.
+          { t: 0, v: 0.8, viaX: 0.7, viaY: 0.6 },
+          { t: 2, v: 0.2, curve: 0.5, viaX: 0.3, viaY: 0.44 },
+          { t: 3, v: 0.5 },
+        ]),
+      ],
+    };
+    expect(parseAutomation(serializeAutomation(source))).toEqual(source);
+  });
+
+  it("drops a via point that says nothing, and clamps one off the segment", () => {
+    const parsed = parseAutomation(
+      JSON.stringify({
+        version: 1,
+        lanes: [
+          {
+            target: "volume",
+            points: [
+              // Half a via point describes no shape; taking one coordinate on its
+              // own would leave the segment's shape depending on which half
+              // survived a hand edit.
+              { t: 0, v: 0.5, viaX: 0.4 },
+              // On the diagonal: this IS the straight line, so storing it would
+              // claim a bend the segment does not have.
+              { t: 1, v: 0.6, viaX: 0.4, viaY: 0.4 },
+              // Outside the segment entirely: pulled back to the steady region
+              // rather than describing a shape no curve can draw.
+              { t: 2, v: 0.7, viaX: 5, viaY: -3 },
+              { t: 3, v: 1 },
+            ],
+          },
+        ],
+      }),
+    );
+    const points = parsed.lanes[0]!.points;
+    expect(points[0]).not.toHaveProperty("viaX");
+    expect(points[1]).not.toHaveProperty("viaX");
+    expect(points[2]!.viaX).toBeCloseTo(0.999, 6);
+    expect(points[2]!.viaY).toBeCloseTo(0.001, 6);
   });
 });
 
@@ -228,6 +291,227 @@ describe("sampling", () => {
     ]);
     expect(sampleAutomationLane(eased, 0.5)).toBeGreaterThan(0.5);
     expect(applyCurve(0.5, 0)).toBe(0.5);
+  });
+
+  it("leaves a legacy curve-only point sampling exactly as it always did", () => {
+    for (const x of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]) {
+      expect(shapeProgress(x, { curve: 0.5 })).toBe(Math.pow(x, Math.pow(2, 1)));
+    }
+    expect(shapeProgress(0.5, {})).toBe(0.5);
+  });
+
+  it("passes exactly through any via point, however deep or off-centre", () => {
+    // The contract the drag depends on: the pointer's position IS the shape. No
+    // depth cap and no position cap — an earlier version held bends to a maximum
+    // slope, which capped how far the line could be pulled and, worse, could clamp a
+    // bend onto the straight line and flatten it mid-drag.
+    for (const [vx, vy] of [
+      [0.5, 0.7],
+      [0.5, 0.95],
+      [0.2, 0.8],
+      [0.1, 0.9],
+      [0.05, 0.95],
+      [0.9, 0.15],
+      [0.3, 0.05],
+      [0.95, 0.55],
+    ] as const) {
+      expect(shapeProgress(vx, { viaX: vx, viaY: vy })).toBeCloseTo(vy, 6);
+    }
+  });
+
+  it("puts the curve's furthest point from straight exactly at the via point", () => {
+    // "The cursor is the apex": not near it, at it. The conic passes through the via
+    // point at its own midparameter, and its two halves are symmetric in parameter,
+    // so the deepest departure from the straight line lands there by construction.
+    for (const [vx, vy] of [
+      [0.1, 0.9],
+      [0.2, 0.8],
+      [0.5, 0.95],
+      [0.8, 0.3],
+      [0.9, 0.15],
+      [0.95, 0.55],
+    ] as const) {
+      let deepest = 0;
+      let at = 0;
+      for (let k = 1; k < 1000; k++) {
+        const x = k / 1000;
+        const gap = Math.abs(shapeProgress(x, { viaX: vx, viaY: vy }) - x);
+        if (gap > deepest) {
+          deepest = gap;
+          at = x;
+        }
+      }
+      expect(at).toBeCloseTo(vx, 2);
+      expect(deepest).toBeCloseTo(Math.abs(vy - vx), 2);
+    }
+  });
+
+  it("reaches a bend far deeper than a plain quadratic could", () => {
+    // A plain quadratic needs its control point at 2Q - M, which leaves the segment
+    // once the via point is past the middle half — so it cannot pass through a deep
+    // point at all. The conic's weight is what buys the reach.
+    expect(shapeProgress(0.1, { viaX: 0.1, viaY: 0.9 })).toBeCloseTo(0.9, 6);
+    expect(shapeProgress(0.05, { viaX: 0.05, viaY: 0.95 })).toBeCloseTo(0.95, 6);
+  });
+
+  it("never returns NaN for a via point dragged past the segment edge", () => {
+    // A via point pulled out to (5, -3) clamps to (0.999, 0.001) — exactly on the
+    // steady region's edge, where `edge - viaX` is 0 and the conic's weight used
+    // to divide out to Infinity, then NaN a few steps later. NaN reaching
+    // setValueCurveAtTime silences the node for the rest of the render.
+    for (const x of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]) {
+      const y = shapeProgress(x, { viaX: 5, viaY: -3 });
+      expect(Number.isFinite(y)).toBe(true);
+    }
+  });
+
+  it("never flattens a bend that is pulled harder", () => {
+    // The regression. Holding a bend's depth inside the steady region by clamping
+    // its coordinates one at a time snapped the curve flat mid-drag: near the ends
+    // of a segment almost every legal value sits on ONE side of the straight line,
+    // so a bend pulled the other way got clamped onto the line itself and vanished.
+    // Pulling further has to keep bending the way the pointer asked, always.
+    for (const viaX of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+      for (const viaY of [0.9, 0.6, 0.45, 0.3, 0.05, -0.5, 1.5]) {
+        if (Math.abs(viaY - viaX) < 0.02) continue;
+        const via = steadyViaPoint(viaX, viaY);
+        expect(via).not.toBeNull();
+        if (!via) continue;
+        // Same side of the straight line as the pointer asked for.
+        expect(Math.sign(via.viaY - via.viaX)).toBe(Math.sign(viaY - viaX));
+        // And a bend worth seeing, not a hair off straight.
+        expect(Math.abs(via.viaY - via.viaX)).toBeGreaterThan(0.01);
+      }
+    }
+  });
+
+  it("stays a steady curve through the via point, with no corner to see", () => {
+    // A shape built from two curves meeting AT the via point can only be as smooth
+    // as that join, and keeping such a join monotone forces its tangent down to a
+    // fraction of the slope the curve arrives with — which reads as a sharp corner
+    // exactly where the pointer is. One conic arc has no join: slope is continuous
+    // by construction, so the ratio across the via point stays near 1 even for the
+    // extreme bends where a spliced curve kinked hardest.
+    const slopeAt = (x: number, viaX: number, viaY: number): number => {
+      const h = 1e-4;
+      return (
+        (shapeProgress(x + h, { viaX, viaY }) - shapeProgress(x - h, { viaX, viaY })) / (2 * h)
+      );
+    };
+    for (const [viaX, viaY] of [
+      [0.1, 0.9],
+      [0.9, 0.1],
+      [0.15, 0.6],
+      [0.8, 0.95],
+      [0.5, 0.95],
+      [0.5, 0.05],
+    ] as const) {
+      const before = slopeAt(viaX - 0.02, viaX, viaY);
+      const after = slopeAt(viaX + 0.02, viaX, viaY);
+      expect(before).toBeGreaterThan(0);
+      expect(after).toBeGreaterThan(0);
+      // Within a factor of 2.2 across a 4% window either side — that much is real
+      // curvature on a tight bend. Two cubics spliced at the via point measured
+      // 27.6 on the first of these, and 2.4-3.6 on the gentler ones.
+      const ratio = before > after ? before / after : after / before;
+      expect(ratio).toBeLessThan(2.2);
+    }
+  });
+
+  it("never changes slope abruptly anywhere along the segment", () => {
+    // The same property swept rather than probed at the via point, so a corner
+    // introduced anywhere else would fail too.
+    for (const [viaX, viaY] of [
+      [0.2, 0.8],
+      [0.85, 0.35],
+      [0.5, 0.9],
+      [0.1, 0.9],
+      [0.9, 0.08],
+    ] as const) {
+      let previous: number | null = null;
+      for (let k = 2; k < 98; k++) {
+        const x = k / 100;
+        const h = 1e-3;
+        const slope =
+          (shapeProgress(x + h, { viaX, viaY }) - shapeProgress(x - h, { viaX, viaY })) / (2 * h);
+        if (previous !== null) {
+          const ratio = slope > previous ? slope / previous : previous / slope;
+          // 1% of the segment at a time: a steady curve changes slope gradually.
+          // The spliced version measured 2.2 here, and 14.5 with the via point
+          // dragged into a corner.
+          expect(ratio).toBeLessThan(1.7);
+        }
+        previous = slope;
+      }
+    }
+  });
+
+  it("keeps the segment pinned at both breakpoints", () => {
+    for (const [vx, vy] of [
+      [0.2, 0.7],
+      [0.85, 0.3],
+    ] as const) {
+      expect(shapeProgress(0, { viaX: vx, viaY: vy })).toBeCloseTo(0, 9);
+      expect(shapeProgress(1, { viaX: vx, viaY: vy })).toBeCloseTo(1, 9);
+    }
+  });
+
+  it("stays monotone for every via point, so a render never sags mid-segment", () => {
+    // Not cosmetic: a segment is baked into setValueCurveAtTime, and progress
+    // that dipped backwards is a rising fader audibly dropping. This is the
+    // property the Fritsch-Carlson tangent limit is there to guarantee, so it is
+    // swept rather than spot-checked.
+    for (let ix = 1; ix < 20; ix++) {
+      for (let iy = 1; iy < 20; iy++) {
+        const viaX = ix / 20;
+        const viaY = iy / 20;
+        let previous = -Infinity;
+        for (let k = 0; k <= 60; k++) {
+          const y = shapeProgress(k / 60, { viaX, viaY });
+          expect(y).toBeGreaterThanOrEqual(previous - 1e-9);
+          previous = y;
+        }
+      }
+    }
+  });
+
+  it("puts the bend where the via point is, not always on the same side", () => {
+    // The complaint this replaced: every upward bend a single exponent could draw
+    // deviated most in the first fifth of the segment. Now the peak deviation
+    // tracks the via point across the whole span.
+    const apexOf = (viaX: number, viaY: number): number => {
+      let best = 0;
+      let at = 0;
+      for (let k = 1; k < 100; k++) {
+        const x = k / 100;
+        const gap = Math.abs(shapeProgress(x, { viaX, viaY }) - x);
+        if (gap > best) {
+          best = gap;
+          at = x;
+        }
+      }
+      return at;
+    };
+    // Near, not exactly at: the deviation is smooth through the knot, so its peak
+    // can sit slightly inside. What matters is that it tracks the via point
+    // across the whole segment instead of parking in the first fifth.
+    for (const viaX of [0.3, 0.4, 0.5, 0.6, 0.7]) {
+      expect(Math.abs(apexOf(viaX, viaX + 0.06) - viaX)).toBeLessThan(0.12);
+    }
+    expect(apexOf(0.3, 0.36)).toBeLessThan(apexOf(0.7, 0.76));
+  });
+
+  it("bends either way from the same via progress", () => {
+    const at = (viaY: number) =>
+      sampleAutomationLane(
+        lane([
+          { t: 0, v: 0, viaX: 0.7, viaY },
+          { t: 1, v: 1 },
+        ]),
+        0.7,
+      );
+    expect(at(0.56)).toBeCloseTo(0.56, 6);
+    expect(at(0.73)).toBeCloseTo(0.73, 6);
   });
 
   it("walks a dense lane by bisection, not by scanning", () => {

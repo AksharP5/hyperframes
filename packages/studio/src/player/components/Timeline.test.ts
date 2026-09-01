@@ -37,6 +37,7 @@ import {
   getTimelineLaneTop,
   createTimelineRowGeometry,
 } from "./timelineLayout";
+import { AUTOMATION_LANE_H } from "./automationLaneHeight";
 import { formatTime } from "../lib/time";
 import { usePlayerStore } from "../store/playerStore";
 import { TimelineEditProvider } from "../../contexts/TimelineEditContext";
@@ -298,6 +299,42 @@ describe("Timeline provider boundary", () => {
     act(() => root.unmount());
   });
 
+  // The same assertion, with a group present. It passed on an empty fixture
+  // while TimelineGroupRow called the THROWING context hook — one grouped clip
+  // and the whole timeline render died, not just the row.
+  it("renders without the provider even when a group row is on screen", () => {
+    const host = createSizedTimelineHost(640);
+    usePlayerStore.setState({
+      duration: 4,
+      timelineReady: true,
+      elements: [
+        {
+          id: "voice-1",
+          domId: "voice-1",
+          tag: "audio",
+          start: 0,
+          duration: 2,
+          track: 0,
+          audioGroup: "voiceover",
+        },
+        {
+          id: "voice-2",
+          domId: "voice-2",
+          tag: "audio",
+          start: 2,
+          duration: 2,
+          track: 1,
+          audioGroup: "voiceover",
+        },
+      ],
+    });
+    const root = createRoot(host);
+    act(() => root.render(React.createElement(Timeline)));
+
+    expect(host.querySelector('[role="treegrid"]')).not.toBeNull();
+    act(() => root.unmount());
+  });
+
   it("renders the complete track list while row virtualization is gated off", () => {
     const host = createSizedTimelineHost(640);
     usePlayerStore.setState({
@@ -388,10 +425,13 @@ describe("Timeline provider boundary", () => {
       button.click();
     });
 
-    const row = button.parentElement?.parentElement;
+    // Up from the rowheader rather than counting parents: the header now lays
+    // its name and its controls out on two lines, so the button sits one level
+    // deeper than it used to.
+    const row = button.closest('[role="rowheader"]')?.parentElement;
     // Row children: [TimelineTrackHeader (sticky column), time-mapped content].
     const trackContent = row?.children.item(1);
-    expect(onToggleTrackHidden).toHaveBeenCalledWith(0, false);
+    expect(onToggleTrackHidden).toHaveBeenCalledWith(0, false, 1);
     expect(trackContent).toBeInstanceOf(HTMLElement);
     if (!(trackContent instanceof HTMLElement)) {
       throw new Error("Expected track content element");
@@ -555,11 +595,11 @@ describe("Timeline provider boundary", () => {
     // Keyframed clip-1 is expanded by default (AE/Figma default); its disclosure
     // lives in the left column. clip-2 has no keyframes so it never shows one.
     const collapseButton = host.querySelector<HTMLButtonElement>(
-      'button[aria-label="Collapse clip-1 keyframes"]',
+      'button[aria-label="Hide clip-1 lanes"]',
     );
     expect(collapseButton).not.toBeNull();
-    expect(host.querySelector('button[aria-label="Expand clip-2 keyframes"]')).toBeNull();
-    expect(host.querySelector('button[aria-label="Collapse clip-2 keyframes"]')).toBeNull();
+    expect(host.querySelector('button[aria-label="Show clip-2 lanes"]')).toBeNull();
+    expect(host.querySelector('button[aria-label="Hide clip-2 lanes"]')).toBeNull();
 
     const clip = host.querySelector<HTMLElement>('[data-el-id="clip-1"]');
     const row = clip?.parentElement?.parentElement;
@@ -570,11 +610,94 @@ describe("Timeline provider boundary", () => {
     expectTrackExpansion(row, [], TRACK_H);
 
     const expandButton = host.querySelector<HTMLButtonElement>(
-      'button[aria-label="Expand clip-1 keyframes"]',
+      'button[aria-label="Show clip-1 lanes"]',
     );
     expect(expandButton).not.toBeNull();
     act(() => expandButton?.click());
     expectTrackExpansion(row, ["clip-1"], TRACK_H + 2 * LANE_H);
+    act(() => root.unmount());
+  });
+
+  // The caret belongs to the row, not to whichever clip on it is selected: the
+  // automation lanes below it are the track's, shared per property. Toggling one
+  // clip left the row's state depending on the selection, and a collapse that
+  // only dropped the active clip left the row stuck open.
+  it("expands and collapses every clip on a shared track together", () => {
+    const host = createSizedTimelineHost(720);
+    const automation = JSON.stringify({
+      version: 1,
+      lanes: [{ target: "volume", points: [{ t: 0, v: 1 }] }],
+    });
+    usePlayerStore.setState({
+      duration: 8,
+      timelineReady: true,
+      elements: [
+        { id: "narration-1", tag: "audio", start: 0, duration: 4, track: 0, automation },
+        { id: "narration-2", tag: "audio", start: 4, duration: 4, track: 0, automation },
+      ],
+    });
+    const root = createRoot(host);
+    act(() => root.render(React.createElement(Timeline)));
+
+    const row = host.querySelector<HTMLElement>('[data-el-id="narration-1"]')?.parentElement
+      ?.parentElement;
+    // A row of several clips is named for the track, so the caret is too.
+    const caret = () => host.querySelector<HTMLButtonElement>('button[aria-label$=" lanes"]');
+    expect(caret()?.getAttribute("aria-label")).toBe("Show Track 1 lanes");
+
+    act(() => caret()?.click());
+    // One shared volume row, and BOTH clips hold it open.
+    expectTrackExpansion(row, ["narration-1", "narration-2"], TRACK_H + AUTOMATION_LANE_H);
+
+    // Every clip bar on the row is capped to one track height. Only the clip
+    // owning the property lanes used to be, so its siblings stretched the whole
+    // expanded row and painted their waveforms over the envelopes below.
+    expect(
+      ["narration-1", "narration-2"].map(
+        (id) => host.querySelector<HTMLElement>(`[data-el-id="${id}"]`)?.style.height,
+      ),
+    ).toEqual([`${TRACK_H - 2 * CLIP_Y}px`, `${TRACK_H - 2 * CLIP_Y}px`]);
+
+    act(() => caret()?.click());
+    expectTrackExpansion(row, [], TRACK_H);
+    act(() => root.unmount());
+  });
+
+  // The lanes are the row's, and selecting a clip must not rebuild them. They
+  // used to hang off the active clip's property lanes, so clicking a sibling
+  // moved the whole subtree into a different element and remounted every lane —
+  // which threw away each one's hover state and any gesture in flight. Pressing
+  // a lane to select its clip therefore made the handles vanish under the
+  // pointer, which is the one gesture the read-only lane exists to support.
+  it("keeps the automation lanes mounted when the selection moves along the row", () => {
+    const host = createSizedTimelineHost(720);
+    const automation = JSON.stringify({
+      version: 1,
+      lanes: [{ target: "volume", points: [{ t: 0, v: 1 }] }],
+    });
+    usePlayerStore.setState({
+      duration: 8,
+      timelineReady: true,
+      selectedElementId: "narration-2",
+      elements: [
+        { id: "narration-1", tag: "audio", start: 0, duration: 4, track: 0, automation },
+        { id: "narration-2", tag: "audio", start: 4, duration: 4, track: 0, automation },
+      ],
+    });
+    const root = createRoot(host);
+    act(() => root.render(React.createElement(Timeline)));
+    act(() => host.querySelector<HTMLButtonElement>('button[aria-label$=" lanes"]')?.click());
+
+    const before = [...host.querySelectorAll(".hf-automation-lane")];
+    expect(before).toHaveLength(2);
+
+    act(() => usePlayerStore.setState({ selectedElementId: "narration-1" }));
+
+    // Identity, not deep equality: a remount produces structurally identical
+    // nodes, so only `toBe` can tell the two apart.
+    const after = [...host.querySelectorAll(".hf-automation-lane")];
+    expect(after).toHaveLength(before.length);
+    after.forEach((node, index) => expect(node).toBe(before[index]));
     act(() => root.unmount());
   });
 

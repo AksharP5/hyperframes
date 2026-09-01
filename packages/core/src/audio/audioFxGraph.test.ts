@@ -25,13 +25,17 @@ class FakeNode {
   Q = new FakeParam();
   gain = new FakeParam();
   delayTime = new FakeParam();
+  playbackRate = new FakeParam();
+  loop = false;
   type = "";
   curve: Float32Array | null = null;
   oversample = "none";
-  buffer: unknown = null;
+  buffer: FakeBuffer | null = null;
   normalize = true;
   port = { postMessage: (m: unknown) => this.messages.push(m) };
   messages: unknown[] = [];
+  /** `start(when, offset)` — the offset is the LFO's phase, so it is asserted. */
+  startArgs: (number | undefined)[] | null = null;
   constructor(public kind: string) {}
   connect(next: FakeNode): FakeNode {
     this.connections.push(next);
@@ -40,8 +44,21 @@ class FakeNode {
   disconnect(): void {
     this.disconnected = true;
   }
-  start(): void {}
+  start(...args: (number | undefined)[]): void {
+    this.startArgs = args;
+  }
   stop(): void {}
+}
+
+/** One channel, kept across `getChannelData` calls so what is written can be read. */
+class FakeBuffer {
+  private data: Float32Array;
+  constructor(public length: number) {
+    this.data = new Float32Array(length);
+  }
+  getChannelData(): Float32Array {
+    return this.data;
+  }
 }
 
 class FakeCtx {
@@ -67,6 +84,9 @@ class FakeCtx {
   createOscillator() {
     return this.make("osc");
   }
+  createBufferSource() {
+    return this.make("bufferSource");
+  }
   createWaveShaper() {
     return this.make("waveshaper");
   }
@@ -74,7 +94,7 @@ class FakeCtx {
     return this.make("convolver");
   }
   createBuffer(_c: number, length: number) {
-    return { length, getChannelData: () => new Float32Array(length) };
+    return new FakeBuffer(length);
   }
 }
 
@@ -155,6 +175,16 @@ describe("buildFxNode", () => {
     expect(workletNodes[0]!.messages[0]).toMatchObject({ threshold: -30 });
   });
 
+  it("tells a worklet processor to retire on dispose, not just disconnect it", () => {
+    // Disconnecting leaves the processor alive — it lives until `process()`
+    // returns false — so every rebuild that dropped a worklet effect left one
+    // running on the audio thread for the rest of the session.
+    workletNodes.length = 0;
+    const h = buildFxNode(asCtx(ctx()), "compressor", defaultAudioFxParams("compressor"));
+    h.dispose();
+    expect(workletNodes[0]!.messages).toEqual([{ __hfDispose: true }]);
+  });
+
   it("rebuilds the saturation curve for the selected shape", () => {
     const c = ctx();
     buildFxNode(asCtx(c), "saturate", { ...defaultAudioFxParams("saturate"), type: "hard" });
@@ -204,6 +234,39 @@ describe("buildFxChain", () => {
     expect(ok).toBe(true);
     expect(c.created.length).toBe(before); // nothing rebuilt
     expect(c.created.find((x) => x.kind === "biquad")!.frequency.value).toBe(2000);
+  });
+
+  it("lines new values up against the built nodes, skipping a bypassed one", () => {
+    // A bypassed node is not in the graph, so the update has to walk the
+    // ENABLED nodes to stay aligned with what was built. Walking `next.nodes`
+    // instead shifts everything after the bypass by one and pushes each node's
+    // parameters into its neighbour — and the shape is unchanged either way,
+    // so nothing forces a rebuild that would hide it.
+    const c = ctx();
+    const withBypass = (frequency: number): HfAudioFxChain => ({
+      version: 1,
+      nodes: [
+        {
+          type: "highpass",
+          enabled: true,
+          params: { ...defaultAudioFxParams("highpass"), frequency: 100 },
+        },
+        { type: "peaking", enabled: false, params: defaultAudioFxParams("peaking") },
+        {
+          type: "lowpass",
+          enabled: true,
+          params: { ...defaultAudioFxParams("lowpass"), frequency },
+        },
+      ],
+    });
+    const h = buildFxChain(asCtx(c), withBypass(8000));
+    const biquads = c.created.filter((n) => n.kind === "biquad");
+    expect(biquads).toHaveLength(2);
+
+    expect(h.update(withBypass(3000))).toBe(true);
+    // The lowpass took the new cutoff; the highpass was left where it was.
+    expect(biquads[0]!.frequency.value).toBe(100);
+    expect(biquads[1]!.frequency.value).toBe(3000);
   });
 
   it("reports that a rebuild is needed when the chain shape changes", () => {
@@ -307,19 +370,91 @@ describe("levels and per-channel state", () => {
   });
 
   it("sets the phaser LFO waveform it declares", () => {
-    const ctx = new FakeCtx();
-    buildFxNode(ctx as unknown as BaseAudioContext, "phaser", {
-      ...defaultAudioFxParams("phaser"),
-      type: "0",
+    // A quarter of the way through the cycle both waveforms peak at 1, so the
+    // eighth is where they part: a sine is at sin(π/4), a triangle halfway up.
+    const eighth = (c: FakeCtx): number => {
+      const buffer = c.created.find((n) => n.kind === "bufferSource")?.buffer;
+      if (!buffer) throw new Error("no LFO buffer");
+      return buffer.getChannelData()[Math.round(buffer.length / 8)] ?? 0;
+    };
+    const build = (type: string): FakeCtx => {
+      const c = new FakeCtx();
+      buildFxNode(c as unknown as BaseAudioContext, "phaser", {
+        ...defaultAudioFxParams("phaser"),
+        type,
+      });
+      return c;
+    };
+    expect(eighth(build("0"))).toBeCloseTo(0.5, 3);
+    expect(eighth(build("1"))).toBeCloseTo(Math.SQRT1_2, 3);
+  });
+
+  /**
+   * The waveform is baked into a buffer at construction, so pushing a type change
+   * into the running graph would be a no-op — preview would keep sweeping on a
+   * triangle while the render used the sine the attribute now says.
+   */
+  it("rebuilds a phaser when its LFO waveform changes", () => {
+    const phaser = (params: Record<string, number | string>): HfAudioFxChain => ({
+      version: 1,
+      nodes: [
+        {
+          type: "phaser",
+          enabled: true,
+          params: { ...defaultAudioFxParams("phaser"), type: "0", ...params },
+        },
+      ],
     });
-    const osc = ctx.created.find((n) => n.kind === "osc");
-    expect(osc?.type).toBe("triangle");
-    const ctx2 = new FakeCtx();
-    buildFxNode(ctx2 as unknown as BaseAudioContext, "phaser", {
-      ...defaultAudioFxParams("phaser"),
-      type: "1",
-    });
-    expect(ctx2.created.find((n) => n.kind === "osc")?.type).toBe("sine");
+    const built = buildFxChain(asCtx(ctx()), phaser({}));
+    expect(built.update(phaser({ type: "1" }))).toBe(false);
+    // Everything else about a phaser still updates in place.
+    const other = buildFxChain(asCtx(ctx()), phaser({}));
+    expect(other.update(phaser({ speed: 2 }))).toBe(true);
+  });
+
+  /**
+   * An LFO's phase is the whole reason it is a looping buffer rather than an
+   * OscillatorNode, whose phase is zero at `start()` and cannot be set.
+   *
+   * Preview rebuilds the graph mid-play — a seek, a scrub, any structural edit —
+   * and an oscillator restarted there put the chorus at the top of its sweep
+   * wherever the playhead happened to be, so preview disagreed with the render
+   * and with itself across an edit.
+   */
+  it("starts a modulated effect's LFO at the phase the clip has reached", () => {
+    // 3.5 s at 2 Hz is seven whole cycles: back at phase zero.
+    const whole = ctx();
+    buildFxNode(asCtx(whole), "chorus", { ...defaultAudioFxParams("chorus"), speed: 2 }, 3.5);
+    expect(whole.created.find((n) => n.kind === "bufferSource")?.startArgs?.[1]).toBeCloseTo(0, 6);
+    // 3.6 s at 2 Hz is seven cycles and a fifth.
+    const part = ctx();
+    buildFxNode(asCtx(part), "chorus", { ...defaultAudioFxParams("chorus"), speed: 2 }, 3.6);
+    const src = part.created.find((n) => n.kind === "bufferSource");
+    expect(src?.startArgs?.[1]).toBeCloseTo(0.2, 6);
+    expect(src?.loop).toBe(true);
+    // One second of waveform: the rate reads in Hz, so a speed lane needs no map.
+    expect(src?.playbackRate.value).toBeCloseTo(2, 6);
+  });
+
+  /**
+   * A source node is not retired by disconnecting what it feeds. The chorus and
+   * phaser stopped their LFO and left it out of the nodes they disconnect, so
+   * every rebuild that dropped one left a modulator still wired to the delay or
+   * the allpass bank it had been driving.
+   */
+  it("unwires a modulated effect's LFO when the effect is disposed", () => {
+    for (const type of ["chorus", "phaser"]) {
+      const c = ctx();
+      buildFxNode(asCtx(c), type, defaultAudioFxParams(type)).dispose();
+      const lfo = c.created.find((node) => node.kind === "bufferSource");
+      expect(lfo?.disconnected, `${type} left its LFO connected`).toBe(true);
+    }
+  });
+
+  it("starts the LFO at zero for a render, which always begins at the clip's start", () => {
+    const c = ctx();
+    buildFxNode(asCtx(c), "phaser", defaultAudioFxParams("phaser"));
+    expect(c.created.find((n) => n.kind === "bufferSource")?.startArgs?.[1]).toBe(0);
   });
 
   it("rebuilds a one-pole filter when its cutoff moves", () => {
@@ -339,6 +474,39 @@ describe("levels and per-channel state", () => {
       nodes: [{ type: "highpass", enabled: true, params: { frequency, q: 0.707, poles: "2" } }],
     });
     expect(buildFxChain(ctx, twoPole(300)).update(twoPole(2000))).toBe(true);
+  });
+});
+
+describe("gain stage", () => {
+  /**
+   * A level control the chain owns, so a carve can make broadband room for a
+   * voice without touching the track's own volume lane — which belongs to the
+   * author, and which a carve re-run would otherwise have to overwrite.
+   */
+  it("sets a GainNode from a value in dB", () => {
+    const c = ctx();
+    buildFxNode(c as unknown as BaseAudioContext, "gain", { gain: -6 });
+    const node = c.created.find((x) => x.kind === "gain");
+    expect(node).toBeTruthy();
+    expect(node!.gain.value).toBeCloseTo(0.501, 3);
+  });
+
+  it("passes unity through at 0 dB", () => {
+    const c = ctx();
+    buildFxNode(c as unknown as BaseAudioContext, "gain", { gain: 0 });
+    expect(c.created.find((x) => x.kind === "gain")!.gain.value).toBeCloseTo(1, 6);
+  });
+
+  it("maps an automation lane's dB into the AudioParam's linear units", () => {
+    // The lane is authored in the knob's own unit — dB, like every other gain in
+    // the registry — but a GainNode's param is a linear multiplier. Without the
+    // mapping, a lane point of -12 would schedule a gain of -12: a phase flip
+    // twelve times too loud, not a cut.
+    const handle = buildFxNode(ctx() as unknown as BaseAudioContext, "gain", { gain: 0 });
+    const target = handle.automation?.gain?.[0];
+    expect(target?.map).toBeTypeOf("function");
+    expect(target!.map!(-12)).toBeCloseTo(0.251, 3);
+    expect(target!.map!(0)).toBeCloseTo(1, 6);
   });
 });
 
@@ -403,5 +571,193 @@ describe("automatable parameters", () => {
       poles: "1",
     });
     expect(onePole.automation?.frequency).toBeUndefined();
+  });
+});
+
+describe("phaser automation targets", () => {
+  /**
+   * `in_gain` and `out_gain` trim the signal entering and leaving the effect,
+   * which the builder drives through inTrim/outTrim while pinning wet and dry
+   * to 1. The automation map used to aim both lanes at wet/dry — so an envelope
+   * modulated a constant, the trim it was supposed to move stayed frozen, and
+   * "fade the phaser out" left the dry leg playing at full level.
+   *
+   * Asserted by VALUE rather than by node identity: the trims are internal, and
+   * the only honest question is whether the param a lane would drive is the one
+   * the knob sets.
+   */
+  it("drives the trims a lane is named for, not the pinned wet/dry pair", () => {
+    const handle = buildFxNode(ctx() as unknown as BaseAudioContext, "phaser", {
+      ...defaultAudioFxParams("phaser"),
+      in_gain: 0.25,
+      out_gain: 0.5,
+    });
+    expect(handle.automation?.in_gain?.[0]?.param.value).toBeCloseTo(0.25, 6);
+    expect(handle.automation?.out_gain?.[0]?.param.value).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe("chain update keeps ids with their effects", () => {
+  const band = (id: string, frequency: number) => ({
+    type: "peaking",
+    id,
+    enabled: true,
+    params: { ...defaultAudioFxParams("peaking"), frequency },
+  });
+
+  /**
+   * Reordering two effects of the same type leaves the shape string identical,
+   * so the chain updates in place rather than rebuilding — correct for the
+   * audio, since the params move with the position. The ids have to move too:
+   * a lane addresses its effect by id, and an id captured at build time names
+   * whichever effect used to occupy that slot. The scheduler would then drive
+   * `fx.n2.frequency` into the band that is now n1 — the exact swap that
+   * HfAudioFxNode.id documents itself as preventing, and the one the voiceover
+   * carve's all-peaking chains make easy to hit.
+   */
+  it("moves an id with its slot when same-type effects are reordered", () => {
+    const chain: HfAudioFxChain = { version: 1, nodes: [band("n1", 200), band("n2", 4000)] };
+    const handle = buildFxChain(ctx() as unknown as BaseAudioContext, chain);
+
+    const swapped: HfAudioFxChain = { version: 1, nodes: [band("n2", 4000), band("n1", 200)] };
+    expect(handle.update(swapped)).toBe(true);
+    expect(handle.nodes.map((n) => n.id)).toEqual(["n2", "n1"]);
+  });
+});
+
+describe("a preset's run is wrapped in a wet/dry blend", () => {
+  /** Two nodes from one preset, with an ordinary effect after them. */
+  const chainWith = (amount?: number): HfAudioFxChain => ({
+    version: 1,
+    nodes: [
+      {
+        type: "highpass",
+        id: "p1",
+        fromPreset: "telephone",
+        enabled: true,
+        ...(amount === undefined ? {} : { presetAmount: amount }),
+        params: defaultAudioFxParams("highpass"),
+      },
+      {
+        type: "lowpass",
+        id: "p2",
+        fromPreset: "telephone",
+        enabled: true,
+        params: defaultAudioFxParams("lowpass"),
+      },
+      { type: "reverb", id: "own", enabled: true, params: defaultAudioFxParams("reverb") },
+    ],
+  });
+
+  it("exposes one blend for the whole preset, not one per node", () => {
+    // The reason this exists: a preset's nodes share no automatable parameter,
+    // and its worklet effects expose no AudioParams at all, so there is nothing
+    // to aim a lane at node-by-node.
+    const built = buildFxChain(asCtx(ctx()), chainWith());
+    expect(Object.keys(built.presets)).toEqual(["telephone"]);
+    // Two gains in opposition, the same shape an effect's own mix knob has.
+    expect(built.presets.telephone).toHaveLength(2);
+  });
+
+  it("blends dry against wet at the stored amount", () => {
+    const built = buildFxChain(asCtx(ctx()), chainWith(0.25));
+    const [wet, dry] = built.presets.telephone ?? [];
+    expect(wet?.param.value).toBeCloseTo(0.25, 6);
+    expect(dry?.param.value).toBeCloseTo(0.75, 6);
+  });
+
+  it("is fully applied when nothing says otherwise", () => {
+    // Every chain written before this shipped means "all of it".
+    const [wet, dry] = buildFxChain(asCtx(ctx()), chainWith()).presets.telephone ?? [];
+    expect(wet?.param.value).toBe(1);
+    expect(dry?.param.value).toBe(0);
+  });
+
+  it("pushes a changed amount into the running graph rather than rebuilding", () => {
+    // Switching a preset off is a value change, and a rebuild would restart the
+    // audio underneath it.
+    const built = buildFxChain(asCtx(ctx()), chainWith(1));
+    expect(built.update(chainWith(0))).toBe(true);
+    const [wet, dry] = built.presets.telephone ?? [];
+    expect(wet?.param.value).toBe(0);
+    expect(dry?.param.value).toBe(1);
+  });
+
+  it("wraps nothing around effects the author placed themselves", () => {
+    const built = buildFxChain(asCtx(ctx()), chain("peaking", "reverb"));
+    expect(Object.keys(built.presets)).toEqual([]);
+  });
+
+  it("unwires the blend on dispose", () => {
+    // The wrap belongs to the chain rather than to any effect, so it is not in
+    // `handles` — without this a rebuild leaves a crossfade connected to the
+    // graph it used to bridge.
+    const c = ctx();
+    buildFxChain(asCtx(c), chainWith(0.5)).dispose();
+    const live = c.created.filter((n) => n.kind === "gain" && !n.disconnected);
+    expect(live).toEqual([]);
+  });
+});
+
+describe("a preset's wrap stays with the nodes it belongs to", () => {
+  const peak = (over: Partial<HfAudioFxNode>): HfAudioFxNode =>
+    ({
+      type: "peaking",
+      enabled: true,
+      params: defaultAudioFxParams("peaking"),
+      ...over,
+    }) as HfAudioFxNode;
+
+  it("rebuilds when a reorder moves a node across a preset boundary", () => {
+    // The type sequence is identical either way, so without preset identity in
+    // the shape the chain updated in place and left the wet/dry wrap bracketing
+    // the hand-added effect instead of the preset's — preview blending out the
+    // author's own node while the render, which rebuilds, blended out the
+    // preset's.
+    const before: HfAudioFxChain = {
+      version: 1,
+      nodes: [peak({ id: "p1", fromPreset: "boom-tame" }), peak({ id: "own" })],
+    };
+    const after: HfAudioFxChain = {
+      version: 1,
+      nodes: [peak({ id: "own" }), peak({ id: "p1", fromPreset: "boom-tame" })],
+    };
+    expect(buildFxChain(asCtx(ctx()), before).update(after)).toBe(false);
+  });
+
+  it("gives every run of one preset its own blend", () => {
+    // A preset pulled apart by a reorder occupies two runs. Keyed by id and
+    // assigned, the second wrap overwrote the first, so a whole-preset lane
+    // reached one fragment and the switch silently left the rest applied.
+    const split: HfAudioFxChain = {
+      version: 1,
+      nodes: [
+        peak({ id: "t1", fromPreset: "telephone" }),
+        { type: "reverb", id: "own", enabled: true, params: defaultAudioFxParams("reverb") },
+        peak({ id: "t2", fromPreset: "telephone" }),
+      ],
+    };
+    const built = buildFxChain(asCtx(ctx()), split);
+    // Two wraps, so two wet/dry pairs — four params under the one id.
+    expect(built.presets.telephone).toHaveLength(4);
+  });
+
+  it("pushes an amount into each run of a split preset, not one of them twice", () => {
+    const at = (amount: number): HfAudioFxChain => ({
+      version: 1,
+      nodes: [
+        peak({ id: "t1", fromPreset: "telephone", presetAmount: amount }),
+        { type: "reverb", id: "own", enabled: true, params: defaultAudioFxParams("reverb") },
+        peak({ id: "t2", fromPreset: "telephone", presetAmount: amount }),
+      ],
+    });
+    const built = buildFxChain(asCtx(ctx()), at(1));
+    expect(built.update(at(0))).toBe(true);
+    // Every wet leg off and every dry leg fully open: switching the preset off
+    // has to silence all of it, not the last fragment only.
+    const wets = (built.presets.telephone ?? []).filter((_, i) => i % 2 === 0);
+    const drys = (built.presets.telephone ?? []).filter((_, i) => i % 2 === 1);
+    for (const t of wets) expect(t.param.value).toBe(0);
+    for (const t of drys) expect(t.param.value).toBe(1);
   });
 });

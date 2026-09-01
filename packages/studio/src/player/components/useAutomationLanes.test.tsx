@@ -78,6 +78,9 @@ describe("useAutomationLanes", () => {
   });
 
   it("gives one lane per automated parameter, in draw order", () => {
+    // Draw order is the spectrum: a lane belonging to an effect that sits at a
+    // frequency is placed by that frequency, high first, and lanes with none —
+    // the track's own volume — follow in written order.
     const automation = JSON.stringify({
       version: 1,
       lanes: [
@@ -87,7 +90,7 @@ describe("useAutomationLanes", () => {
       ],
     });
     const bound = bindOnce(el({ automation, fxChain: CHAIN }));
-    expect(bound.lanes.map((l) => l.target)).toEqual(["volume", "fx.n2.frequency", "fx.n2.q"]);
+    expect(bound.lanes.map((l) => l.target)).toEqual(["fx.n2.frequency", "fx.n2.q", "volume"]);
   });
 
   it("reads an element with neither attribute as an empty volume lane", () => {

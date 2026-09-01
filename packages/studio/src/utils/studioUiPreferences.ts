@@ -14,6 +14,7 @@ export interface StudioUiPreferences {
   timelineHeight?: number;
   playbackRate?: number;
   audioMuted?: boolean;
+  audioVolume?: number;
   thumbnailMode?: "adaptive" | "hidden";
   previewZoom?: StoredPreviewZoomState;
   recentBlocks?: string[];
@@ -33,6 +34,14 @@ export interface StudioUiPreferences {
   timelineZoomMode?: "fit" | "manual";
   /** Manual timeline zoom percent, paired with `timelineZoomMode: "manual"`. */
   timelineManualZoomPercent?: number;
+  /**
+   * Expose Studio's editing capabilities to an agentic browser as WebMCP tools.
+   * Absent means on: the browser still gates every actual call behind its own
+   * permission prompt, so "registered" is not "reachable without consent".
+   * Changes take effect on the next Studio reload because registration is
+   * intentionally scoped to one mount.
+   */
+  agentToolsEnabled?: boolean;
 }
 
 const STUDIO_UI_PREFERENCES_KEY = "hf-studio-ui-preferences";
@@ -80,6 +89,14 @@ function readStorage(storage: Storage | null): StudioUiPreferences {
     }
     if (typeof parsed.audioMuted === "boolean") {
       preferences.audioMuted = parsed.audioMuted;
+    }
+    if (
+      typeof parsed.audioVolume === "number" &&
+      Number.isFinite(parsed.audioVolume) &&
+      parsed.audioVolume >= 0 &&
+      parsed.audioVolume <= 1
+    ) {
+      preferences.audioVolume = parsed.audioVolume;
     }
     if (parsed.thumbnailMode === "adaptive" || parsed.thumbnailMode === "hidden") {
       preferences.thumbnailMode = parsed.thumbnailMode;
@@ -130,6 +147,9 @@ function readStorage(storage: Storage | null): StudioUiPreferences {
       Number.isFinite(parsed.timelineManualZoomPercent)
     ) {
       preferences.timelineManualZoomPercent = parsed.timelineManualZoomPercent;
+    }
+    if (typeof parsed.agentToolsEnabled === "boolean") {
+      preferences.agentToolsEnabled = parsed.agentToolsEnabled;
     }
     return preferences;
   } catch {

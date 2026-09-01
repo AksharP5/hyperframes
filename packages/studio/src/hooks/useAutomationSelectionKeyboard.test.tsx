@@ -16,6 +16,17 @@ import type {
 } from "../player/components/useAutomationLanes";
 import type { TimelineElement } from "../player/store/timelineElement";
 
+/**
+ * A selection box spanning the lane's whole value axis.
+ *
+ * What almost every test here is about is the time span — which breakpoints a
+ * Delete or a copy covers. The box's value bounds have their own tests; giving
+ * these an unbounded axis keeps them testing the one thing they name.
+ */
+function wholeAxis<T extends { t0: number; t1: number }>(sel: T): T & { v0: number; v1: number } {
+  return { ...sel, v0: Number.NEGATIVE_INFINITY, v1: Number.POSITIVE_INFINITY };
+}
+
 /** Minimal valid fixture — TimelineElement only requires these five fields. */
 const bgmElement: TimelineElement = {
   id: "bgm",
@@ -106,22 +117,88 @@ describe("useAutomationSelectionKeyboard", () => {
     return { onCommit };
   };
 
-  it("Delete empties the selected range and pins anchors", () => {
+  it("Delete removes every breakpoint the selection covers", () => {
+    // Deleted, not emptied. Pinning anchors at the selection's edges keeps the
+    // envelope either side from moving, which is right for a shape insert or a
+    // paste — but answering "delete these points" with two NEW points at the edges
+    // reads as the delete not having worked.
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 }));
     const { onCommit } = setup({});
     key("Delete");
     const written = onCommit.mock.calls.at(-1)?.[0];
     const points = written?.lanes?.[0]?.points ?? [];
-    expect(points.map((p: { t: number }) => p.t)).toEqual([0, 1, 3, 4]);
+    // The fixture lane is 0, 2, 4: only t=2 was inside.
+    expect(points.map((p: { t: number }) => p.t)).toEqual([0, 4]);
+  });
+
+  it("Delete leaves a point the box's value bounds exclude", () => {
+    // The box spans the whole clip but only its top, so Delete takes the one
+    // breakpoint up there and nothing else. A time range could not express this.
+    usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
+    usePlayerStore.getState().setAutomationSelection({
+      elementKey: "bgm",
+      target: "volume",
+      t0: 0,
+      t1: 4,
+      v0: 0.9,
+      v1: 1,
+    });
+    const { onCommit } = setup({});
+    key("Delete");
+    const written = onCommit.mock.calls.at(-1)?.[0];
+    const points = written?.lanes?.[0]?.points ?? [];
+    // Fixture is (0, v=1), (2, v=0.5), (4, v=0): only the first was in the box.
+    expect(points.map((p: { t: number }) => p.t)).toEqual([2, 4]);
+  });
+
+  it("Delete takes points sitting exactly on the selection's edges", () => {
+    // Endpoint-inclusive, matching the copy path: a point the selection was dragged
+    // over is inside it, edge or not. Every range operation leaves a breakpoint
+    // exactly on an edge, so excluding them would leave those behind every time.
+    usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
+    usePlayerStore
+      .getState()
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
+    const { onCommit } = setup({});
+    key("Delete");
+    const points = onCommit.mock.calls.at(-1)?.[0]?.lanes?.[0]?.points ?? [];
+    expect(points.map((p: { t: number }) => p.t)).toEqual([0]);
+  });
+
+  it("Delete over a stretch with no breakpoints writes nothing at all", () => {
+    // A no-op rather than a write: emptying a span that had nothing in it used to
+    // push an undo entry that changed nothing but the anchors it invented.
+    usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
+    usePlayerStore
+      .getState()
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2.5, t1: 3.5 }));
+    const { onCommit } = setup({});
+    const e = new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true });
+    act(() => void document.dispatchEvent(e));
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  it("Delete clears the lane when the selection covers all of it", () => {
+    usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
+    usePlayerStore
+      .getState()
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 0, t1: 6 }));
+    const { onCommit } = setup({});
+    key("Delete");
+    const written = onCommit.mock.calls.at(-1)?.[0];
+    // withLane drops a lane with no points left, so the attribute goes empty and
+    // the clip is back to its plain data-volume.
+    expect(written?.lanes ?? []).toEqual([]);
   });
 
   it("Escape clears the selection", () => {
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 }));
     setup({});
     key("Escape");
     expect(usePlayerStore.getState().automationSelection).toBeNull();
@@ -130,7 +207,7 @@ describe("useAutomationSelectionKeyboard", () => {
   it("is inert while a text input has focus", () => {
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 1, t1: 3 }));
     const { onCommit } = setup({});
     const input = document.createElement("input");
     document.body.append(input);
@@ -145,7 +222,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     setup({});
     combo("c");
     const entry = readClipboard(null);
@@ -165,7 +242,7 @@ describe("useAutomationSelectionKeyboard", () => {
     });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("c");
     expect(readClipboard(null)?.span).toBe(2);
@@ -183,6 +260,11 @@ describe("useAutomationSelectionKeyboard", () => {
       target: "volume",
       t0: 5,
       t1: 7,
+      // Full height: everything the paste landed is selected, so Delete straight
+      // after undoes it in one press. The volume axis tops out at the authoring
+      // ceiling, not at unity.
+      v0: 0,
+      v1: VOLUME_RANGE.max,
     });
   });
 
@@ -196,7 +278,7 @@ describe("useAutomationSelectionKeyboard", () => {
     });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("c");
 
@@ -218,6 +300,11 @@ describe("useAutomationSelectionKeyboard", () => {
       target: "volume",
       t0: 4,
       t1: 6,
+      // Full height: everything the paste landed is selected, so Delete straight
+      // after undoes it in one press. The volume axis tops out at the authoring
+      // ceiling, not at unity.
+      v0: 0,
+      v1: VOLUME_RANGE.max,
     });
   });
 
@@ -230,7 +317,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("c");
     expect(readClipboard(null)?.span).toBe(2);
@@ -238,7 +325,7 @@ describe("useAutomationSelectionKeyboard", () => {
     // A 0.1s-wide selection right near the clip's 6s end.
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 5.5, t1: 5.6 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 5.5, t1: 5.6 }));
     combo("v");
     const written = onCommit.mock.calls.at(-1)?.[0];
     const times = (written?.lanes?.[0]?.points ?? []).map((p: { t: number }) => p.t);
@@ -252,6 +339,11 @@ describe("useAutomationSelectionKeyboard", () => {
       target: "volume",
       t0: 4,
       t1: 6,
+      // Full height: everything the paste landed is selected, so Delete straight
+      // after undoes it in one press. The volume axis tops out at the authoring
+      // ceiling, not at unity.
+      v0: 0,
+      v1: VOLUME_RANGE.max,
     });
   });
 
@@ -264,7 +356,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({ commitTargetKey: "some-other-clip" });
     const e = combo("v");
     expect(e.defaultPrevented).toBe(false);
@@ -282,7 +374,7 @@ describe("useAutomationSelectionKeyboard", () => {
     });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("c");
     usePlayerStore.getState().clearAutomationSelection();
@@ -302,7 +394,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 1, t1: 2 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 1, t1: 2 }));
     setup({ automation: { version: 1, lanes: [{ target: "volume", points: [] }] } });
 
     const e = combo("c");
@@ -315,7 +407,7 @@ describe("useAutomationSelectionKeyboard", () => {
     usePlayerStore.setState({ elements: [bgmElement], selectedElementId: "bgm" });
     usePlayerStore
       .getState()
-      .setAutomationSelection({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 });
+      .setAutomationSelection(wholeAxis({ elementKey: "bgm", target: "volume", t0: 2, t1: 4 }));
     const { onCommit } = setup({});
     combo("C");
     expect(readClipboard(null)?.span).toBe(2);

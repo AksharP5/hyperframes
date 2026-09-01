@@ -461,6 +461,43 @@ export function shouldVerifyWorkerGpu(workerId: number, config?: Partial<EngineC
   return config?.browserGpuMode === "software" && workerId === 0;
 }
 
+/**
+ * Race a single in-flight capture call against `signal` actually firing.
+ *
+ * `captureFrame`/`captureFrameToBuffer`/`captureFrameToBufferPipelined` take
+ * no abort signal of their own — a native browser call wedged inside one of
+ * them (WSL2 hangs the very first drawElement/BeginFrame capture at frame 0
+ * with no error, heygen-com/hyperframes#3441) cannot be cancelled, only
+ * raced. Without this, the `signal?.aborted` checks at the top of the
+ * `captureFrameRange` loop are a no-op the moment a worker is already
+ * awaiting a hung call: nothing revisits that check until the await settles,
+ * which on a genuine hang is never. The DE parallel-router's stall watchdog
+ * (`captureStreamingStage.ts`) does fire `stallController.abort()` after
+ * `HF_DE_STALL_MS`, but until this call actually observes the signal, that
+ * abort has no effect on an already-wedged worker — `executeParallelCapture`'s
+ * `Promise.all` waits forever, so the render hangs indefinitely and the CLI's
+ * circuit breaker (which only runs after `executeRenderJob` settles) never
+ * gets a chance to trip.
+ */
+function raceAgainstAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(new Error("Parallel worker cancelled"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error("Parallel worker cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 // fallow-ignore-next-line complexity
 async function captureFrameRange(
   session: CaptureSession,
@@ -498,7 +535,10 @@ async function captureFrameRange(
       if (dbg && i < task.startFrame + dbgWin) {
         console.log(`[par:w${task.workerId}] +${Date.now() - dbgT0}ms produce ${i} start`);
       }
-      const { encodeResult } = await captureFrameToBufferPipelined(session, i - outputOffset, time);
+      const { encodeResult } = await raceAgainstAbort(
+        captureFrameToBufferPipelined(session, i - outputOffset, time),
+        signal,
+      );
       // Marks the promise "handled" for Node's unhandled-rejection detector
       // without affecting the real `await prev.encodeResult` below — if a
       // later iteration throws (abort, downstream writeFrame failure) before
@@ -542,10 +582,13 @@ async function captureFrameRange(
     const fileFrameIdx = i - outputOffset;
 
     if (onFrameBuffer) {
-      const { buffer } = await captureFrameToBuffer(session, fileFrameIdx, time);
+      const { buffer } = await raceAgainstAbort(
+        captureFrameToBuffer(session, fileFrameIdx, time),
+        signal,
+      );
       await onFrameBuffer(i, buffer, session);
     } else {
-      await captureFrame(session, fileFrameIdx, time);
+      await raceAgainstAbort(captureFrame(session, fileFrameIdx, time), signal);
     }
     framesCaptured++;
     if (onFrameCaptured) onFrameCaptured(task.workerId, i);
@@ -620,10 +663,36 @@ function assertDiskSampleAboveFloor(
 }
 
 /**
+ * Distinguishes infrastructure-class ffmpeg failures (spawn ENOENT, missing
+ * `psnr` filter) from per-sample noise (readFile races, transient tmpdir
+ * EPERM). Only the infrastructure class should terminate the render — the
+ * ffmpeg preflight in `initDrawElementOrTransparentBackground` catches these
+ * at bootstrap, so surfacing them here means the preflight was bypassed or
+ * the host ffmpeg changed mid-render.
+ *
+ * Exported for testing; the discriminator is a pure error-shape read.
+ */
+export function isFfmpegInfrastructureFailure(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const record = err as { code?: unknown; message?: unknown; stderr?: unknown };
+  if (record.code === "ENOENT") return true;
+  const message = typeof record.message === "string" ? record.message : "";
+  const stderr = typeof record.stderr === "string" ? record.stderr : "";
+  const text = `${message}\n${stderr}`;
+  // Spawn-side failures ("spawn ffmpeg ENOENT") and filter-side failures
+  // ("No such filter: 'psnr'", ffmpeg <=5 emits "Unknown filter 'psnr'").
+  return /\bENOENT\b|No such filter|Unknown filter/i.test(text);
+}
+
+/**
  * Compare one captured frame file against its ground truth. Returns the
- * PSNR, or null on infrastructure failure (missing file already surfaces
- * via the frame completeness check; ffmpeg spawn/tmpdir here) — a skipped
- * sample is not damage evidence and must not fail the capture.
+ * PSNR, or null on per-sample noise (readFile races, transient EPERM,
+ * unparseable ffmpeg output on a single sample) — a skipped sample is not
+ * damage evidence and must not fail the capture. Re-throws when the error
+ * shape indicates the ffmpeg install itself is broken (missing binary or
+ * missing `psnr` filter): the drawElement self-verify safety net cannot
+ * possibly run in that state, and continuing would silently ship every
+ * remaining frame unverified.
  */
 async function psnrForDiskSample(
   framePath: string,
@@ -634,6 +703,17 @@ async function psnrForDiskSample(
   try {
     return await psnrDb(await readFile(framePath), truth);
   } catch (err) {
+    if (isFfmpegInfrastructureFailure(err)) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `[Parallel] drawElement disk self-verify aborted (worker ${workerId}, frame ${idx}): ` +
+          `ffmpeg or the \`psnr\` filter is unavailable — ${detail}. The preflight in ` +
+          "initDrawElementOrTransparentBackground normally catches this at bootstrap; if you " +
+          "hit this after a successful preflight, ffmpeg was replaced mid-render or " +
+          "HYPERFRAMES_FFMPEG_PATH now points at a different binary.",
+        { cause: err },
+      );
+    }
     console.warn(
       `[Parallel] drawElement disk self-verify sample skipped (worker ${workerId}, ` +
         `frame ${idx}): ${err instanceof Error ? err.message : String(err)}`,

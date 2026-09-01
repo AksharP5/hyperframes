@@ -525,6 +525,7 @@ describe("HyperframesPlayer shader transition options", () => {
     const player = document.createElement("hyperframes-player") as PlayerWithIframe;
     player.setAttribute("shader-capture-scale", "0.5");
     player.setAttribute("shader-loading", "player");
+    document.body.appendChild(player);
     player.setAttribute("src", "/api/projects/demo/preview?x=1#stage");
 
     const url = new URL(player.iframeElement.src);
@@ -539,6 +540,7 @@ describe("HyperframesPlayer shader transition options", () => {
     const player = document.createElement("hyperframes-player") as PlayerWithIframe;
     player.setAttribute("shader-capture-scale", "0.5");
     player.setAttribute("shader-loading", "player");
+    document.body.appendChild(player);
     player.setAttribute(
       "srcdoc",
       '<!doctype html><html><head><script src="composition.js"></script></head><body></body></html>',
@@ -983,6 +985,7 @@ describe("HyperframesPlayer seek() sync path", () => {
     stopMedia: () => void;
     iframe: HTMLIFrameElement;
     _currentTime: number;
+    duration: number;
     _parentMedia: Array<{
       el: { pause: ReturnType<typeof vi.fn>; src: string };
       start: number;
@@ -1102,6 +1105,35 @@ describe("HyperframesPlayer seek() sync path", () => {
     expect(timeline.seek).toHaveBeenCalledTimes(1);
     // suppressEvents=false so onUpdate fires (imperative-visibility compositions repaint).
     expect(timeline.seek).toHaveBeenCalledWith(2, false);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("rebinds when a same-origin composition replaces its registered timeline", () => {
+    const first: TimelineStub = {
+      duration: vi.fn(() => 5),
+      time: vi.fn(() => 0),
+      seek: vi.fn(),
+      play: vi.fn(),
+      pause: vi.fn(),
+    };
+    const second: TimelineStub = {
+      duration: vi.fn(() => 8),
+      time: vi.fn(() => 0),
+      seek: vi.fn(),
+      play: vi.fn(),
+      pause: vi.fn(),
+    };
+    const timelines = { main: first };
+    const post = vi.fn();
+    stubContentWindow({ __timelines: timelines, postMessage: post });
+
+    player.seek(1);
+    timelines.main = second;
+    player.seek(6);
+
+    expect(first.seek).toHaveBeenCalledTimes(1);
+    expect(second.seek).toHaveBeenCalledWith(6, false);
+    expect(player.duration).toBe(8);
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -1462,6 +1494,51 @@ describe("HyperframesPlayer srcdoc attribute", () => {
       | undefined;
     expect(ctor).toBeDefined();
     expect(ctor!.observedAttributes).toContain("srcdoc");
+    expect(ctor!.observedAttributes).toContain("runtime-src");
+  });
+
+  it("uses a configured runtime source for loopback srcdoc", () => {
+    const player = document.createElement("hyperframes-player") as PlayerInternal;
+    player.setAttribute("srcdoc", "<!doctype html><html><head></head><body></body></html>");
+    player.setAttribute("runtime-src", "http://127.0.0.1:8900/hyperframe.runtime.iife.js");
+
+    expect(player.iframe.hasAttribute("srcdoc")).toBe(false);
+
+    document.body.appendChild(player);
+
+    expect(player.iframe.getAttribute("srcdoc")).toContain(
+      '<script src="http://127.0.0.1:8900/hyperframe.runtime.iife.js"></script>',
+    );
+
+    player.remove();
+  });
+
+  it("falls back to the pinned runtime for a foreign-origin runtime source", () => {
+    // A srcdoc frame inherits the embedder's origin under the default `allow-same-origin`,
+    // so an attacker-controlled host would be script execution in the embedding page.
+    const player = document.createElement("hyperframes-player") as PlayerInternal;
+    player.setAttribute("runtime-src", "https://evil.example.com/hyperframe.runtime.iife.js");
+    player.setAttribute("srcdoc", "<!doctype html><html><head></head><body></body></html>");
+    document.body.appendChild(player);
+
+    const srcdoc = player.iframe.getAttribute("srcdoc") ?? "";
+    expect(srcdoc).not.toContain("evil.example.com");
+    expect(srcdoc).toContain("hyperframe.runtime.iife.js");
+
+    player.remove();
+  });
+
+  it("falls back to the pinned runtime for an unsafe runtime source", () => {
+    const player = document.createElement("hyperframes-player") as PlayerInternal;
+    player.setAttribute("runtime-src", 'javascript:alert("no")');
+    player.setAttribute("srcdoc", "<!doctype html><html><head></head><body></body></html>");
+    document.body.appendChild(player);
+
+    const srcdoc = player.iframe.getAttribute("srcdoc") ?? "";
+    expect(srcdoc).not.toContain("javascript:");
+    expect(srcdoc).toContain("hyperframe.runtime.iife.js");
+
+    player.remove();
   });
 
   it("forwards an initial srcdoc attribute to the iframe on connect", () => {
@@ -1473,7 +1550,41 @@ describe("HyperframesPlayer srcdoc attribute", () => {
     player.setAttribute("srcdoc", html);
     document.body.appendChild(player);
 
-    expect(player.iframe.getAttribute("srcdoc")).toBe(html);
+    // Not byte-identical: srcdoc now also carries the runtime, injected ahead
+    // of body scripts so a pasted component can read its variables during
+    // parse. The composition itself must still arrive intact.
+    expect(player.iframe.getAttribute("srcdoc")).toContain("<body>hello</body>");
+    expect(player.iframe.getAttribute("srcdoc")).toContain("hyperframe.runtime.iife.js");
+
+    player.remove();
+  });
+
+  it("does not navigate initial srcdoc before the runtime listener is connected", () => {
+    // React assigns custom-element attributes before inserting the element. If the observed
+    // attribute callback navigates the child iframe immediately, a fast srcdoc runtime can post
+    // its one-shot `ready` message before connectedCallback subscribes to `window.message`.
+    // Retained runtime data then waits forever and a caption style appears stuck on its bootstrap
+    // frame. The connect path owns the first navigation; attributeChangedCallback owns only
+    // subsequent swaps.
+    const player = document.createElement("hyperframes-player") as PlayerInternal;
+    player.setAttribute("srcdoc", "<!doctype html><html><body>deferred</body></html>");
+
+    expect(player.iframe.hasAttribute("srcdoc")).toBe(false);
+
+    document.body.appendChild(player);
+    expect(player.iframe.getAttribute("srcdoc")).toContain("<body>deferred</body>");
+
+    player.remove();
+  });
+
+  it("does not navigate initial src before the runtime listener is connected", () => {
+    const player = document.createElement("hyperframes-player") as PlayerInternal;
+    player.setAttribute("src", "/api/projects/deferred/preview");
+
+    expect(player.iframe.hasAttribute("src")).toBe(false);
+
+    document.body.appendChild(player);
+    expect(player.iframe.getAttribute("src")).toBe("/api/projects/deferred/preview");
 
     player.remove();
   });
@@ -1487,7 +1598,8 @@ describe("HyperframesPlayer srcdoc attribute", () => {
     const html = "<!doctype html><html><body>after connect</body></html>";
     player.setAttribute("srcdoc", html);
 
-    expect(player.iframe.getAttribute("srcdoc")).toBe(html);
+    expect(player.iframe.getAttribute("srcdoc")).toContain("<body>after connect</body>");
+    expect(player.iframe.getAttribute("srcdoc")).toContain("hyperframe.runtime.iife.js");
 
     player.remove();
   });
@@ -1548,7 +1660,9 @@ describe("HyperframesPlayer srcdoc attribute", () => {
     document.body.appendChild(player);
 
     expect(player.iframe.getAttribute("src")).toBe("/api/projects/foo/preview");
-    expect(player.iframe.getAttribute("srcdoc")).toBe("<!doctype html><html></html>");
+    // srcdoc carries the runtime now; what matters here is that both
+    // attributes are present so the browser can arbitrate.
+    expect(player.iframe.getAttribute("srcdoc")).toContain("<html>");
 
     player.remove();
   });
@@ -1892,6 +2006,8 @@ describe("HyperframesPlayer runtime ready handshake", () => {
     paused: boolean;
     iframe: HTMLIFrameElement;
     _onMessage: (event: MessageEvent) => void;
+    _onIframeLoad: () => void;
+    _runtimeBridgeReady: boolean;
   }
 
   let player: PlayerInternal;
@@ -2031,6 +2147,26 @@ describe("HyperframesPlayer runtime ready handshake", () => {
     player._onMessage(readyMessage());
 
     expect(findControlCalls("set-muted")).toHaveLength(2);
+  });
+
+  it("does not erase a DOMContentLoaded runtime handshake when iframe load follows it", () => {
+    player._onMessage(readyMessage());
+    expect(player._runtimeBridgeReady).toBe(true);
+
+    player._onIframeLoad();
+
+    expect(player._runtimeBridgeReady).toBe(true);
+  });
+
+  it("drops the runtime handshake when a shader-option change navigates the frame", () => {
+    // The navigating sandbox path already clears readiness. This path navigates too, so a
+    // delivery issued afterwards must not be posted into the document being replaced.
+    player._onMessage(readyMessage());
+    expect(player._runtimeBridgeReady).toBe(true);
+
+    player.setAttribute("shader-capture-scale", "0.5");
+
+    expect(player._runtimeBridgeReady).toBe(false);
   });
 
   it("ignores ready events from a different window", () => {
@@ -2378,5 +2514,250 @@ describe("HyperframesPlayer composition dimension attributes", () => {
     player.setAttribute("width", "1280");
     player.removeAttribute("width");
     expect(player._compositionWidth).toBe(1920);
+  });
+});
+
+describe("HyperframesPlayer retained runtime data", () => {
+  interface RuntimeDataPlayer extends HTMLElement {
+    iframeElement: HTMLIFrameElement;
+    setRuntimeData: (channel: string, payload: unknown) => void;
+    clearRuntimeData: (channel: string) => void;
+    _onMessage: (event: MessageEvent) => void;
+  }
+
+  let player: RuntimeDataPlayer;
+  let postSpy: ReturnType<typeof vi.spyOn>;
+
+  const readyMessage = () =>
+    new MessageEvent("message", {
+      source: window,
+      data: { source: "hf-preview", type: "ready" },
+    });
+
+  const runtimeCalls = () =>
+    postSpy.mock.calls.filter((call) => {
+      const message = call[0] as { action?: string };
+      return message.action === "set-runtime-data" || message.action === "clear-runtime-data";
+    });
+
+  beforeEach(async () => {
+    await import("./hyperframes-player.js");
+    player = document.createElement("hyperframes-player") as RuntimeDataPlayer;
+    postSpy = vi.spyOn(window, "postMessage").mockImplementation(() => undefined);
+    Object.defineProperty(player.iframeElement, "contentWindow", {
+      configurable: true,
+      get: () => window,
+    });
+    delete (window as Window & { __hyperframes?: unknown }).__hyperframes;
+    document.body.appendChild(player);
+  });
+
+  afterEach(() => {
+    player.remove();
+    delete (window as Window & { __hyperframes?: unknown }).__hyperframes;
+    vi.restoreAllMocks();
+  });
+
+  it("retains data set before load and replays it exactly once after runtime ready", () => {
+    player.setRuntimeData("captions", { words: ["before"] });
+    expect(runtimeCalls()).toHaveLength(0);
+
+    player._onMessage(readyMessage());
+
+    expect(runtimeCalls()).toHaveLength(1);
+    expect(runtimeCalls()[0]?.[0]).toMatchObject({
+      action: "set-runtime-data",
+      channel: "captions",
+      payload: { words: ["before"] },
+    });
+  });
+
+  it("delivers after readiness and replays only the latest value after a source swap", () => {
+    player._onMessage(readyMessage());
+    player.setRuntimeData("captions", { words: ["first"] });
+    postSpy.mockClear();
+
+    player.setAttribute("srcdoc", "<!doctype html><html><body></body></html>");
+    player.setRuntimeData("captions", { words: ["latest"] });
+    expect(runtimeCalls()).toHaveLength(0);
+    player._onMessage(readyMessage());
+
+    expect(runtimeCalls()).toHaveLength(1);
+    expect(runtimeCalls()[0]?.[0]).toMatchObject({ payload: { words: ["latest"] } });
+  });
+
+  it("clears the current channel and does not replay it", () => {
+    player._onMessage(readyMessage());
+    player.setRuntimeData("captions", { words: [] });
+    player.clearRuntimeData("captions");
+    expect(runtimeCalls().at(-1)?.[0]).toMatchObject({
+      action: "clear-runtime-data",
+      channel: "captions",
+    });
+    postSpy.mockClear();
+    player.setAttribute("srcdoc", "<!doctype html><html></html>");
+    player._onMessage(readyMessage());
+    expect(runtimeCalls()).toHaveLength(0);
+  });
+
+  it("uses the same-origin registry directly and falls back to postMessage otherwise", () => {
+    const direct = vi.fn();
+    (window as Window & { __hyperframes?: unknown }).__hyperframes = {
+      setRuntimeData: direct,
+    };
+    player._onMessage(readyMessage());
+    postSpy.mockClear();
+
+    player.setRuntimeData("captions", { words: ["direct"] });
+
+    expect(direct).toHaveBeenCalledWith("captions", { words: ["direct"] }, expect.any(Number));
+    expect(runtimeCalls()).toHaveLength(0);
+  });
+
+  it("does not deliver while disconnected and preserves the standard sandbox", () => {
+    player._onMessage(readyMessage());
+    postSpy.mockClear();
+    player.remove();
+    player.setRuntimeData("captions", { words: ["offline"] });
+    expect(runtimeCalls()).toHaveLength(0);
+    expect(player.iframeElement.sandbox.contains("allow-scripts")).toBe(true);
+    expect(player.iframeElement.sandbox.contains("allow-same-origin")).toBe(true);
+    expect(player.iframeElement.sandbox.contains("allow-top-navigation")).toBe(false);
+    expect(player.iframeElement.referrerPolicy).toBe("no-referrer");
+  });
+
+  it("supports an opaque-origin sandbox for hosts that do not need direct iframe DOM access", () => {
+    player.setAttribute("sandbox-origin", "opaque");
+    expect(player.iframeElement.sandbox.contains("allow-scripts")).toBe(true);
+    expect(player.iframeElement.sandbox.contains("allow-same-origin")).toBe(false);
+    expect(player.iframeElement.sandbox.contains("allow-top-navigation")).toBe(false);
+
+    player.removeAttribute("sandbox-origin");
+    expect(player.iframeElement.sandbox.contains("allow-same-origin")).toBe(true);
+  });
+
+  it("treats every non-null sandbox-origin value as restrictive", () => {
+    player.setAttribute("sandbox-origin", "opaqu");
+    expect(player.iframeElement.sandbox.contains("allow-same-origin")).toBe(false);
+  });
+
+  it("rejects payloads that structuredClone cannot transfer", () => {
+    expect(() => player.setRuntimeData("captions", () => undefined)).toThrow();
+  });
+
+  it("fails closed when structuredClone is unavailable", () => {
+    const original = globalThis.structuredClone;
+    Object.defineProperty(globalThis, "structuredClone", {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      expect(() => player.setRuntimeData("captions", { words: ["unsafe"] })).toThrow(
+        /requires structuredClone support/,
+      );
+      player._onMessage(readyMessage());
+      expect(runtimeCalls()).toHaveLength(0);
+    } finally {
+      Object.defineProperty(globalThis, "structuredClone", {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+
+  it("reports postMessage delivery failures instead of silently dropping runtime data", () => {
+    player._onMessage(readyMessage());
+    postSpy.mockImplementation(() => {
+      throw new DOMException("payload cannot be cloned", "DataCloneError");
+    });
+    const errors: CustomEvent[] = [];
+    player.addEventListener("runtimedataerror", (event) => errors.push(event as CustomEvent));
+
+    player.setRuntimeData("captions", { words: ["value"] });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.detail).toMatchObject({
+      channel: "captions",
+      requestId: expect.any(Number),
+      message: "payload cannot be cloned",
+    });
+  });
+
+  it("reports a null iframe window as a delivery failure", () => {
+    player._onMessage(readyMessage());
+    Object.defineProperty(player.iframeElement, "contentWindow", {
+      configurable: true,
+      get: () => null,
+    });
+    const errors: CustomEvent[] = [];
+    player.addEventListener("runtimedataerror", (event) => errors.push(event as CustomEvent));
+
+    player.setRuntimeData("captions", { words: ["value"] });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.detail).toMatchObject({
+      channel: "captions",
+      requestId: expect.any(Number),
+      message: "Composition iframe is unavailable",
+    });
+  });
+
+  it("reports a bounded error when the runtime never responds", () => {
+    vi.useFakeTimers();
+    try {
+      player._onMessage(readyMessage());
+      const errors: CustomEvent[] = [];
+      player.addEventListener("runtimedataerror", (event) => errors.push(event as CustomEvent));
+
+      player.setRuntimeData("captions", { words: ["value"] });
+      vi.advanceTimersByTime(10_000);
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.detail).toMatchObject({
+        channel: "captions",
+        requestId: expect.any(Number),
+        message: "Runtime data delivery timed out after 10000ms",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a superseded completion and correlates the latest application", () => {
+    player._onMessage(readyMessage());
+    postSpy.mockClear();
+    const applied: CustomEvent[] = [];
+    player.addEventListener("runtimedataapplied", (event) => applied.push(event as CustomEvent));
+
+    player.setRuntimeData("captions", { words: ["first"] });
+    player.setRuntimeData("captions", { words: ["latest"] });
+    const requests = runtimeCalls().map((call) => (call[0] as { requestId: number }).requestId);
+
+    player._onMessage(
+      new MessageEvent("message", {
+        source: window,
+        data: {
+          source: "hf-preview",
+          type: "runtime-data-applied",
+          channel: "captions",
+          requestId: requests[0],
+        },
+      }),
+    );
+    expect(applied).toHaveLength(0);
+
+    player._onMessage(
+      new MessageEvent("message", {
+        source: window,
+        data: {
+          source: "hf-preview",
+          type: "runtime-data-applied",
+          channel: "captions",
+          requestId: requests[1],
+        },
+      }),
+    );
+    expect(applied).toHaveLength(1);
+    expect(applied[0]?.detail).toEqual({ channel: "captions", requestId: requests[1] });
   });
 });

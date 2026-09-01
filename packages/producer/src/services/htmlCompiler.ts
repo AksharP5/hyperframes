@@ -21,11 +21,17 @@ import {
   shouldClampResolvedMediaDuration,
   CSS_URL_RE,
   isNonRelativeUrl,
+  parseStrictFiniteTimingNumber,
+  readMediaStart,
+  redactTelemetryString,
+  resolveNaturalMediaTimelineDurationFromValues,
   type ResolvedDuration,
   type UnresolvedElement,
 } from "@hyperframes/core";
+import { MAX_AUDIO_GAIN } from "@hyperframes/core/audio-gain";
 import {
   assignBundledRuntimeCompositionIds,
+  assignMediaRenderIds,
   type BundledHostCompositionIdentity,
   buildVariablesByCompScript,
   inlineSubCompositions as inlineSubCompositionsShared,
@@ -41,12 +47,10 @@ import {
 import { isUnresolvedAssetPlaceholder } from "@hyperframes/parsers/asset-resolution";
 import { extractMediaMetadata, extractAudioMetadata } from "../utils/ffprobe.js";
 import { isPathInside, toExternalAssetKey } from "../utils/paths.js";
+import { collectRenderMedia } from "./renderMediaCollector.js";
 import {
-  parseVideoElements,
-  parseImageElements,
   type VideoElement,
   type ImageElement,
-  parseAudioElements,
   type AudioElement,
   type AudioVolumeKeyframe,
   type MediaProbeProfile,
@@ -248,14 +252,6 @@ export interface RenderModeHints {
   reasons: RenderModeHint[];
 }
 
-function dedupeElementsById<T extends { id: string }>(elements: T[]): T[] {
-  const deduped = new Map<string, T>();
-  for (const element of elements) {
-    deduped.set(element.id, element);
-  }
-  return Array.from(deduped.values());
-}
-
 const INLINE_SCRIPT_PATTERN = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
 const COMPILER_MOUNT_BLOCK_START = "/* __HF_COMPILER_MOUNT_START__ */";
 const COMPILER_MOUNT_BLOCK_END = "/* __HF_COMPILER_MOUNT_END__ */";
@@ -421,12 +417,13 @@ export function detectShaderTransitionUsage(html: string): boolean {
 async function resolveMediaDuration(
   src: string,
   mediaStart: number,
+  playbackRate: number,
   baseDir: string,
   downloadDir: string,
   tagName: string,
   elementIdentity: string,
   log?: ProducerLogger,
-): Promise<{ duration: number; resolvedPath: string }> {
+): Promise<{ duration: number | null; resolvedPath: string }> {
   let filePath = src;
 
   if (isHttpUrl(src)) {
@@ -438,15 +435,40 @@ async function resolveMediaDuration(
     } catch {
       // Download failed (e.g. 404 placeholder URL) — skip gracefully.
       // The element will get duration 0 and be excluded from the render.
-      return { duration: 0, resolvedPath: src };
+      return { duration: null, resolvedPath: src };
     }
   } else if (!filePath.startsWith("/")) {
     filePath = join(baseDir, filePath);
   }
 
   if (!existsSync(filePath)) {
-    return { duration: 0, resolvedPath: filePath };
+    return { duration: null, resolvedPath: filePath };
   }
+
+  // STUDIO-5433: attach the remote `src` to any ffprobe failure surfaced from
+  // this branch. `extractMediaMetadata` → `runFfprobe` intentionally redacts
+  // its local `filePath` out of the error message (see
+  // engine/utils/ffprobe.ts::redactFfprobeInput), so a bare `moov atom not
+  // found` in Datadog carries no attribution and requires a Temporal history
+  // dump to identify the offending source. Re-throwing with the `src`
+  // (query-string redacted via `redactTelemetryString` so pre-signed URL
+  // signatures never reach telemetry) makes the next occurrence diagnosable
+  // directly from the render error. Fail-fast semantics for the video branch
+  // are preserved — only the message is enriched.
+  const withSrcContext = (error: unknown): Error => {
+    // A NotMediaPayloadError already carries its own attribution AND the
+    // routing metadata downstream keys on — `.code = "NOT_MEDIA_PAYLOAD"`,
+    // `.owner = "user"`, `.retryable = false`, `.elementFingerprints`. Wrapping
+    // it in a bare Error drops all four, flipping a user-input bug to
+    // generic/system/retryable: it pages ops and re-runs the render. Pass it
+    // through untouched.
+    if (error instanceof NotMediaPayloadError) return error;
+    const originalMessage = error instanceof Error ? error.message : String(error);
+    const safeSrc = redactTelemetryString(src);
+    const wrapped = new Error(`${originalMessage} [src=${safeSrc}]`);
+    if (error instanceof Error && error.stack) wrapped.stack = error.stack;
+    return wrapped;
+  };
 
   return withMediaProbeSlot(async () => {
     let profile: MediaProbeProfile;
@@ -473,15 +495,19 @@ async function resolveMediaDuration(
               "file — the element is dropped from the render. Point it at a rendered media file.",
           );
         }
-        return { duration: 0, resolvedPath: filePath };
+        return { duration: null, resolvedPath: filePath };
       }
-      throw error;
+      throw withSrcContext(error);
     }
     assertAssetMediaTypeProfile(tagName === "video" ? "video" : "audio", profile, elementIdentity);
 
     let metadata: { durationSeconds: number };
     if (tagName === "video") {
-      metadata = await extractMediaMetadata(filePath);
+      try {
+        metadata = await extractMediaMetadata(filePath);
+      } catch (error) {
+        throw withSrcContext(error);
+      }
     } else {
       try {
         metadata = await extractAudioMetadata(filePath);
@@ -489,13 +515,16 @@ async function resolveMediaDuration(
         // Source file has no audio stream (e.g. a silent video used as an audio src).
         // Return duration 0 so the element is excluded from the composition gracefully,
         // matching how missing files and failed downloads are already handled above.
-        return { duration: 0, resolvedPath: filePath };
+        return { duration: null, resolvedPath: filePath };
       }
     }
 
     const fileDuration = metadata.durationSeconds;
-    const effectiveDuration = fileDuration - mediaStart;
-    const duration = effectiveDuration > 0 ? effectiveDuration : fileDuration;
+    const duration = resolveNaturalMediaTimelineDurationFromValues(
+      fileDuration,
+      mediaStart,
+      playbackRate,
+    );
 
     return { duration, resolvedPath: filePath };
   });
@@ -525,6 +554,7 @@ async function compileHtmlFile(
       resolveMediaDuration(
         el.src!,
         el.mediaStart,
+        el.playbackRate,
         baseDir,
         downloadDir,
         el.tagName,
@@ -533,7 +563,9 @@ async function compileHtmlFile(
       ).then(({ duration }) => ({ id: el.id, duration })),
     ),
   );
-  const resolutions: ResolvedDuration[] = resolvedResults.filter((r) => r.duration > 0);
+  const resolutions: ResolvedDuration[] = resolvedResults.filter(
+    (r): r is ResolvedDuration => r.duration != null && Number.isFinite(r.duration),
+  );
 
   let compiledHtml =
     resolutions.length > 0 ? injectDurations(staticCompiled, resolutions) : staticCompiled;
@@ -548,6 +580,7 @@ async function compileHtmlFile(
         const { duration: maxDuration } = await resolveMediaDuration(
           el.src!,
           el.mediaStart,
+          el.playbackRate,
           baseDir,
           downloadDir,
           el.tagName,
@@ -560,7 +593,7 @@ async function compileHtmlFile(
   const clampList: ResolvedDuration[] = [];
   for (const r of clampResults) {
     if (
-      r.maxDuration > 0 &&
+      r.maxDuration != null &&
       shouldClampResolvedMediaDuration(r.tagName, r.duration, r.maxDuration)
     ) {
       clampList.push({ id: r.id, duration: r.maxDuration });
@@ -606,26 +639,21 @@ async function compileHtmlFile(
 }
 
 /**
- * Parse sub-compositions referenced via data-composition-src.
- * Reads each file, compiles it, extracts video/audio, adjusts timing offsets.
- * Recurses into nested sub-compositions with accumulated offsets.
+ * Compile every sub-composition referenced via data-composition-src, keyed by
+ * its source path for the inliner to hoist into the render document.
+ * Recurses so nested references are compiled too.
+ *
+ * Media used to be extracted here as well, with each file's clips offset onto
+ * the parent timeline. That is now read off the inlined document instead
+ * (collectRenderMedia): per-file extraction had to merge on element id, which
+ * is not unique across files, so colliding clips silently collapsed (#3340).
  */
 async function parseSubCompositions(
   html: string,
   projectDir: string,
   downloadDir: string,
-  parentOffset: number = 0,
-  parentEnd: number = Infinity,
   visited: Set<string> = new Set(),
-): Promise<{
-  videos: VideoElement[];
-  audios: AudioElement[];
-  images: ImageElement[];
-  subCompositions: Map<string, string>;
-}> {
-  const videos: VideoElement[] = [];
-  const audios: AudioElement[] = [];
-  const images: ImageElement[] = [];
+): Promise<{ subCompositions: Map<string, string> }> {
   const subCompositions = new Map<string, string>();
 
   const { document } = parseHTML(html);
@@ -634,8 +662,6 @@ async function parseSubCompositions(
   // Build work items, filtering out invalid/circular entries synchronously
   const workItems: Array<{
     srcPath: string;
-    absoluteStart: number;
-    absoluteEnd: number;
     filePath: string;
     rawSubHtml: string;
     nestedVisited: Set<string>;
@@ -644,13 +670,6 @@ async function parseSubCompositions(
   for (const el of compEls) {
     const srcPath = el.getAttribute("data-composition-src");
     if (!srcPath) continue;
-
-    const elStart = parseFloat(el.getAttribute("data-start") || "0");
-    const elEndRaw = el.getAttribute("data-end");
-    const elEnd = elEndRaw ? parseFloat(elEndRaw) : Infinity;
-
-    const absoluteStart = parentOffset + elStart;
-    const absoluteEnd = Math.min(parentEnd, isFinite(elEnd) ? parentOffset + elEnd : Infinity);
 
     const filePath = resolve(projectDir, srcPath);
 
@@ -667,7 +686,7 @@ async function parseSubCompositions(
     const nestedVisited = new Set(visited);
     nestedVisited.add(filePath);
 
-    workItems.push({ srcPath, absoluteStart, absoluteEnd, filePath, rawSubHtml, nestedVisited });
+    workItems.push({ srcPath, filePath, rawSubHtml, nestedVisited });
   }
 
   // Parallelize file compilation + recursive parsing
@@ -683,24 +702,13 @@ async function parseSubCompositions(
         compiledSub,
         projectDir,
         downloadDir,
-        item.absoluteStart,
-        item.absoluteEnd,
         item.nestedVisited,
       );
-
-      const subVideos = parseVideoElements(compiledSub);
-      const subAudios = parseAudioElements(compiledSub);
-      const subImages = parseImageElements(compiledSub);
 
       return {
         srcPath: item.srcPath,
         compiledSub,
         nested,
-        subVideos,
-        subAudios,
-        subImages,
-        absoluteStart: item.absoluteStart,
-        absoluteEnd: item.absoluteEnd,
       };
     }),
   );
@@ -712,55 +720,9 @@ async function parseSubCompositions(
     for (const [key, value] of r.nested.subCompositions) {
       subCompositions.set(key, value);
     }
-    videos.push(...r.nested.videos);
-    audios.push(...r.nested.audios);
-    images.push(...r.nested.images);
-
-    for (const v of r.subVideos) {
-      v.start += r.absoluteStart;
-      v.end += r.absoluteStart;
-      if (v.end > r.absoluteEnd) {
-        v.end = r.absoluteEnd;
-      }
-      if (v.start < r.absoluteEnd) {
-        videos.push(v);
-      }
-    }
-
-    for (const a of r.subAudios) {
-      a.start += r.absoluteStart;
-      a.end += r.absoluteStart;
-      if (a.end > r.absoluteEnd) {
-        a.end = r.absoluteEnd;
-      }
-      if (a.start < r.absoluteEnd) {
-        audios.push(a);
-      }
-    }
-
-    for (const img of r.subImages) {
-      img.start += r.absoluteStart;
-      img.end += r.absoluteStart;
-      if (img.end > r.absoluteEnd) {
-        img.end = r.absoluteEnd;
-      }
-      if (img.start < r.absoluteEnd) {
-        images.push(img);
-      }
-    }
-
-    if (
-      r.subVideos.length > 0 ||
-      r.subAudios.length > 0 ||
-      r.subImages.length > 0 ||
-      r.nested.videos.length > 0 ||
-      r.nested.audios.length > 0 ||
-      r.nested.images.length > 0
-    ) {
-    }
   }
 
-  return { videos, audios, images, subCompositions };
+  return { subCompositions };
 }
 
 /**
@@ -1119,6 +1081,12 @@ function inlineSubCompositions(
     variableOverrides,
   );
 
+  // Inlining is what makes element ids ambiguous: each composition file is
+  // internally consistent, the union of them is not. Hand every media element a
+  // document-unique key here, while the merged document is in hand and before
+  // anything downstream keys media on an id. See core's mediaRenderIds.ts.
+  assignMediaRenderIds(document as unknown as Document);
+
   return document.toString();
 }
 
@@ -1312,6 +1280,8 @@ const REMOTE_MEDIA_SUBDIR = "_remote_media";
 // have `>` inside quoted attribute values (data-title etc.).
 const REMOTE_MEDIA_TAG_RE =
   /<(?:video|audio)\b[^>]*?\bsrc\s*=\s*["'](https?:\/\/[^"']+)["'][^>]*>/gi;
+// <source src> on media elements (picture uses srcset, not src).
+const REMOTE_SOURCE_TAG_RE = /<source\b[^>]*?\bsrc\s*=\s*["'](https?:\/\/[^"']+)["'][^>]*>/gi;
 // Match <img> tags (including agent-pipeline-emitted variants where `src` is
 // not the first attribute). Producer-side localisation is the primary fix for
 // the remote-<img> flicker; frameCapture's `pollImagesReady`/`decodeAllImages`
@@ -1382,10 +1352,11 @@ async function downloadAndRewriteUrls(
 }
 
 /**
- * Download any remote `src` URLs on `<video>` and `<audio>` elements into a
- * local subdirectory of `downloadDir`, rewrite the HTML src attributes to
- * relative paths, and return the updated HTML along with a map of
- * `{ relativePath → absoluteLocalPath }` for callers to add to `externalAssets`.
+ * Download any remote `src` URLs on `<video>` / `<audio>` elements and their
+ * `<source>` children into a local subdirectory of `downloadDir`, rewrite the
+ * HTML src attributes to relative paths, and return the updated HTML along with
+ * a map of `{ relativePath → absoluteLocalPath }` for callers to add to
+ * `externalAssets`.
  *
  * Skips URLs that fail to download (warns and preserves the original URL so
  * the browser can still attempt the remote fetch as a fallback).
@@ -1401,12 +1372,13 @@ export async function localizeRemoteMediaSources(
   html: string,
   downloadDir: string,
 ): Promise<{ html: string; remoteMediaAssets: Map<string, string> }> {
-  // Collect unique HTTP URLs from <video>/<audio> src attributes.
   const urlSet = new Set<string>();
-  const re = new RegExp(REMOTE_MEDIA_TAG_RE.source, REMOTE_MEDIA_TAG_RE.flags);
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    if (m[1]) urlSet.add(m[1]);
+  for (const tagRe of [REMOTE_MEDIA_TAG_RE, REMOTE_SOURCE_TAG_RE]) {
+    const re = new RegExp(tagRe.source, tagRe.flags);
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      if (m[1]) urlSet.add(m[1]);
+    }
   }
   return downloadAndRewriteUrls(
     urlSet,
@@ -1700,7 +1672,21 @@ export async function localizeRemoteFontFaces(
   );
 }
 
-const LOCAL_FONTFACE_URL_RE = /url\(["']?(?!data:|https?:\/\/)([^"')]+)["']?\)/gi;
+// `file:` joins data: and http(s): in the exclusion list. Without it an
+// absolute `file:///abs/path/font.ttf` src was read as a project-RELATIVE path,
+// resolved to `<projectDir>/file:/abs/path/...`, and the failed read was
+// swallowed below — leaving the rule untouched for the browser to reject.
+const LOCAL_FONTFACE_URL_RE = /url\(["']?(?!data:|file:|https?:\/\/)([^"')]+)["']?\)/gi;
+
+/**
+ * Match one `url(<path>)` occurrence, with or without quotes, for a literal
+ * path. Exported for tests: the suffix-collision it prevents is invisible in
+ * ordinary projects and easy to reintroduce.
+ */
+export function urlOccurrenceRe(localPath: string): RegExp {
+  const escaped = localPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`url\\((["']?)${escaped}\\1\\)`, "g");
+}
 // Base64 expands bytes by ~33%, then immutable HTML replacements retain more
 // string copies while compiling. Files up to and including 5 MiB remain inline;
 // the first byte above that stays file-backed. This conservative ceiling keeps
@@ -1771,10 +1757,26 @@ async function embedLocalFontFaces(html: string, projectDir: string): Promise<st
               `[Compiler] Embedded local font file: ${localPath} (${(font.buffer.length / 1024).toFixed(0)} KB → data URI)`,
             );
           }
-          result = result.replaceAll(localPath, dataUri);
+          // Anchored on the `url(...)` occurrence, not a bare substring. A
+          // plain replaceAll of `localPath` also rewrites that text anywhere
+          // else it appears -- including inside a LONGER url whose tail
+          // happens to match, e.g. embedding `fonts/x.ttf` would corrupt an
+          // untouched `url("file:///abs/fonts/x.ttf")` into
+          // `url("file:///abs/<data-uri>")`. Any two paths where one is a
+          // suffix of the other collide the same way. Every sibling rewrite
+          // in this file already anchors like this.
+          result = result.replace(urlOccurrenceRe(localPath), `url("${dataUri}")`);
           embeddedPaths.add(localPath);
-        } catch {
-          // File read or compression failed — keep the original path
+        } catch (error) {
+          // Keep the original path: a font that cannot be read must not fail
+          // the render. Logged rather than silently swallowed -- a silent skip
+          // here means the composition renders in a fallback typeface and
+          // nothing says why.
+          defaultLogger.warn(
+            `[Compiler] Could not embed local font ${localPath}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
         }
       }
     }
@@ -1871,13 +1873,8 @@ export async function compileForRender(
     options.log,
   );
 
-  // Parse sub-compositions first (extracts media + compiled HTML for each)
-  const {
-    videos: subVideos,
-    audios: subAudios,
-    images: subImages,
-    subCompositions,
-  } = await parseSubCompositions(compiledHtml, projectDir, downloadDir);
+  // Compile each referenced sub-composition so the inliner can hoist it.
+  const { subCompositions } = await parseSubCompositions(compiledHtml, projectDir, downloadDir);
 
   // Ensure the HTML is a full document before inlining sub-compositions.
   // When index.html is a fragment (no <html>/<head>/<body>), linkedom.parseHTML()
@@ -2019,17 +2016,12 @@ export async function compileForRender(
     externalAssets.set(relPath, absPath);
   }
 
-  // Parse main HTML elements
-  const mainVideos = parseVideoElements(html);
-  const mainAudios = parseAudioElements(html);
-  const mainImages = parseImageElements(html);
-
-  // Keep inlined sub-composition media authoritative on ID collisions.
-  // inlineSubCompositions() hoists those nodes into the final HTML, so the
-  // producer should follow the same precedence the runtime sees in the merged DOM.
-  const videos = dedupeElementsById([...mainVideos, ...subVideos]);
-  const audios = dedupeElementsById([...mainAudios, ...subAudios]);
-  const images = dedupeElementsById([...mainImages, ...subImages]);
+  // Read the media list off the inlined document rather than merging the
+  // per-file lists. Merging deduplicated by element id, which is only unique
+  // within one composition file: two scenes declaring `<video id="clip">` — or
+  // two bare `<video>`s, both auto-numbered `hf-video-0` — collapsed into one
+  // entry and injected frames onto whichever element came first. See #3340.
+  const { videos, audios, images } = collectRenderMedia(html);
 
   // Advisory video checks (sparse keyframes, VFR). Fire-and-forget — these spawn
   // ffprobe subprocesses and should not block compilation since they only produce warnings.
@@ -2070,11 +2062,9 @@ export async function compileForRender(
 
   // Static duration (may be 0 if set at runtime by GSAP)
   const staticDuration = rootEl
-    ? parseFloat(
-        rootEl.getAttribute("data-duration") ||
-          rootEl.getAttribute("data-composition-duration") ||
-          "0",
-      )
+    ? (parseStrictFiniteTimingNumber(rootEl.getAttribute("data-duration")) ??
+      parseStrictFiniteTimingNumber(rootEl.getAttribute("data-composition-duration")) ??
+      0)
     : 0;
 
   return {
@@ -2100,7 +2090,9 @@ export async function compileForRender(
  * Discover media elements from the browser DOM after JavaScript has run.
  * This catches videos/audios whose `src` is set dynamically via JS
  * (e.g. `document.getElementById("pip-video").src = URL`), which the
- * static regex parsers miss because the HTML has `src=""`.
+ * static regex parsers miss because the HTML has `src=""`. Clips are keyed
+ * by `data-hf-render-id` when present — author ids collide across inlined
+ * scenes, and this snapshot is the only identity those empty-src elements get.
  */
 export interface BrowserMediaElement {
   id: string;
@@ -2126,12 +2118,13 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
   const elements = await page.evaluate(() => {
     const results: {
       id: string;
-      tagName: string;
+      tagName: "video" | "audio" | "image";
       src: string;
       start: number;
-      end: number;
-      duration: number;
-      mediaStart: number;
+      endRaw: string | null;
+      durationRaw: string | null;
+      playbackStartRaw: string | null;
+      mediaStartRaw: string | null;
       loop: boolean;
       hasAudio: boolean;
       volume: number;
@@ -2156,15 +2149,28 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
     mediaEls.forEach((el) => {
       const htmlEl = el as HTMLVideoElement | HTMLAudioElement | HTMLImageElement;
       const isImage = htmlEl.tagName.toLowerCase() === "img";
-      const id = htmlEl.id || (isImage ? autoImageIds.get(htmlEl) : undefined);
+      const tagName: "video" | "audio" | "image" = isImage
+        ? "image"
+        : htmlEl.tagName.toLowerCase() === "video"
+          ? "video"
+          : "audio";
+      // Render id is document-unique after inlining; author id is only unique
+      // per composition file. Empty-src media is skipped by the static parse
+      // and lives or dies on this snapshot — keying by author id collapses
+      // colliding scenes onto one clip (residual of #3340).
+      const id =
+        htmlEl.getAttribute("data-hf-render-id") ||
+        htmlEl.id ||
+        (isImage ? autoImageIds.get(htmlEl) : undefined);
       if (!id) return;
 
       // currentSrc is authoritative for <video>/<audio><source> and responsive images.
       const src = htmlEl.currentSrc || htmlEl.src || htmlEl.getAttribute("src") || "";
       const start = parseFloat(htmlEl.getAttribute("data-start") || "0");
-      const end = parseFloat(htmlEl.getAttribute("data-end") || "0");
-      const duration = parseFloat(htmlEl.getAttribute("data-duration") || "0");
-      const mediaStart = parseFloat(htmlEl.getAttribute("data-media-start") || "0");
+      const endRaw = htmlEl.getAttribute("data-end");
+      const durationRaw = htmlEl.getAttribute("data-duration");
+      const playbackStartRaw = htmlEl.getAttribute("data-playback-start");
+      const mediaStartRaw = htmlEl.getAttribute("data-media-start");
       const loop = htmlEl.hasAttribute("loop");
       const hasAudio = htmlEl.getAttribute("data-has-audio") === "true";
       const volume = parseFloat(htmlEl.getAttribute("data-volume") || "1");
@@ -2174,12 +2180,13 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
 
       results.push({
         id,
-        tagName: isImage ? "image" : htmlEl.tagName.toLowerCase(),
+        tagName,
         src,
         start,
-        end,
-        duration,
-        mediaStart,
+        endRaw,
+        durationRaw,
+        playbackStartRaw,
+        mediaStartRaw,
         loop,
         hasAudio,
         volume,
@@ -2190,7 +2197,18 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
     return results;
   });
 
-  return elements as BrowserMediaElement[];
+  return elements.map(({ endRaw, durationRaw, playbackStartRaw, mediaStartRaw, ...element }) => ({
+    ...element,
+    end: parseStrictFiniteTimingNumber(endRaw) ?? 0,
+    duration: parseStrictFiniteTimingNumber(durationRaw) ?? 0,
+    mediaStart: readMediaStart({
+      getAttribute(name: string) {
+        if (name === "data-playback-start") return playbackStartRaw;
+        if (name === "data-media-start") return mediaStartRaw;
+        return null;
+      },
+    }),
+  }));
 }
 
 export async function discoverAudioVolumeAutomationFromTimeline(
@@ -2202,9 +2220,74 @@ export async function discoverAudioVolumeAutomationFromTimeline(
   if (audioIds.length === 0 || compositionDuration <= 0) return [];
 
   const sampleStep = 1 / Math.min(60, Math.max(1, sampleFps));
+  const rawWindows = await page.evaluate((ids: string[]) => {
+    return ids.flatMap((id) => {
+      const el =
+        window.__hfMediaEl?.(id) ??
+        document.getElementById(id) ??
+        document.getElementById(id.replace(/-audio$/, ""));
+      if (!(el instanceof HTMLAudioElement) && !(el instanceof HTMLVideoElement)) return [];
+      return [
+        {
+          id,
+          startRaw: el.dataset.start ?? null,
+          endRaw: el.dataset.end ?? null,
+          durationRaw: el.dataset.duration ?? null,
+        },
+      ];
+    });
+  }, audioIds);
+  const clips = rawWindows.map(({ id, startRaw, endRaw, durationRaw }) => {
+    const start = parseStrictFiniteTimingNumber(startRaw) ?? 0;
+    const authoredDuration = parseStrictFiniteTimingNumber(durationRaw);
+    const authoredEnd = parseStrictFiniteTimingNumber(endRaw);
+    const end =
+      authoredDuration != null && authoredDuration > 0
+        ? start + authoredDuration
+        : authoredEnd != null && authoredEnd > start
+          ? authoredEnd
+          : compositionDuration;
+    return { id, start, end };
+  });
   return page.evaluate(
-    ({ ids, duration, step }) => {
+    ({ clips, duration, step, maxGain }) => {
       const results: { id: string; keyframes: { time: number; volume: number }[] }[] = [];
+      const clampGain = (value: number) =>
+        Number.isFinite(value) ? Math.max(0, Math.min(maxGain, value)) : 1;
+      // `HTMLMediaElement.volume` is spec-clamped to [0,1], so a clip authored
+      // above unity — or a GSAP tween seeded from one — reads back as 0 dB and
+      // the whole authored boost is lost from the mix. Shadow the accessor for
+      // the probe so the authored value survives; the native setter still gets
+      // the clamped value. Mirrors `withUnclampedVolume` in
+      // packages/core/src/audioGain.ts, which the preview probe uses; this copy
+      // exists only because the probe body is serialized into the page.
+      //
+      // Guarded because this body is also executed directly by tests that stand
+      // in for a Page, where there is no DOM and no HTMLMediaElement.
+      const volumeDescriptor =
+        typeof HTMLMediaElement === "undefined"
+          ? undefined
+          : Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
+      const nativeVolumeGet = volumeDescriptor?.get;
+      const nativeVolumeSet = volumeDescriptor?.set;
+      const withUnclampedVolume = <T>(el: HTMLMediaElement, probe: () => T): T => {
+        if (!nativeVolumeGet || !nativeVolumeSet) return probe();
+        let authored = Number(nativeVolumeGet.call(el));
+        Object.defineProperty(el, "volume", {
+          configurable: true,
+          get: () => authored,
+          set: (value: number) => {
+            authored = Number(value);
+            nativeVolumeSet.call(el, Math.max(0, Math.min(1, authored)));
+          },
+        });
+        try {
+          return probe();
+        } finally {
+          delete (el as unknown as Record<"volume", unknown>).volume;
+          nativeVolumeSet.call(el, Math.max(0, Math.min(1, authored)));
+        }
+      };
       const timelines = (window as unknown as { __timelines?: Record<string, unknown> })
         .__timelines;
       if (!timelines) return results;
@@ -2229,59 +2312,56 @@ export async function discoverAudioVolumeAutomationFromTimeline(
         }
       };
 
-      for (const id of ids) {
+      for (const { id, start, end } of clips) {
         const el =
-          document.getElementById(id) ?? document.getElementById(id.replace(/-audio$/, ""));
+          window.__hfMediaEl?.(id) ??
+          document.getElementById(id) ??
+          document.getElementById(id.replace(/-audio$/, ""));
         if (!(el instanceof HTMLAudioElement) && !(el instanceof HTMLVideoElement)) continue;
 
-        const start = Number.parseFloat(el.dataset.start ?? "0") || 0;
-        const endAttr = Number.parseFloat(el.dataset.end ?? "");
-        const durationAttr = Number.parseFloat(el.dataset.duration ?? "");
-        const end =
-          Number.isFinite(durationAttr) && durationAttr > 0
-            ? start + durationAttr
-            : Number.isFinite(endAttr) && endAttr > start
-              ? endAttr
-              : duration;
         const sampleStart = Math.max(0, start);
         const sampleEnd = Math.min(duration, end);
         const initialVolumeAttr = Number.parseFloat(el.dataset.volume ?? "");
-        if (Number.isFinite(initialVolumeAttr)) {
-          el.volume = Math.max(0, Math.min(1, initialVolumeAttr));
-        }
 
-        const keyframes: { time: number; volume: number }[] = [];
-        let previousSample: { time: number; volume: number } | undefined;
-        for (let t = sampleStart; t <= sampleEnd + 0.000001; t = Math.min(sampleEnd, t + step)) {
-          seekTl(t);
-          const rawVolume = Number(el.volume);
-          if (!Number.isFinite(rawVolume)) {
-            if (t === sampleEnd) break;
-            continue;
+        const keyframes = withUnclampedVolume(el, () => {
+          if (Number.isFinite(initialVolumeAttr)) {
+            el.volume = clampGain(initialVolumeAttr);
           }
-          const volume = Math.max(0, Math.min(1, rawVolume));
-          const sample = {
-            time: Number(t.toFixed(6)),
-            volume: Number(volume.toFixed(6)),
-          };
-          const last = keyframes.at(-1);
-          if (!last || Math.abs(last.volume - volume) > 0.0001) {
-            // Retain the preceding real sample when compression omitted a flat
-            // run. Continuous ramps already have that sample as their last
-            // keyframe, so their interpolation remains unchanged.
-            if (last && previousSample && previousSample.time > last.time) {
-              keyframes.push(previousSample);
+
+          const keyframes: { time: number; volume: number }[] = [];
+          let previousSample: { time: number; volume: number } | undefined;
+          for (let t = sampleStart; t <= sampleEnd + 0.000001; t = Math.min(sampleEnd, t + step)) {
+            seekTl(t);
+            const rawVolume = Number(el.volume);
+            if (!Number.isFinite(rawVolume)) {
+              if (t === sampleEnd) break;
+              continue;
             }
-            keyframes.push(sample);
-          } else if (t === sampleEnd && sample.time > last.time) {
-            keyframes.push(sample);
+            const volume = clampGain(rawVolume);
+            const sample = {
+              time: Number(t.toFixed(6)),
+              volume: Number(volume.toFixed(6)),
+            };
+            const last = keyframes.at(-1);
+            if (!last || Math.abs(last.volume - volume) > 0.0001) {
+              // Retain the preceding real sample when compression omitted a flat
+              // run. Continuous ramps already have that sample as their last
+              // keyframe, so their interpolation remains unchanged.
+              if (last && previousSample && previousSample.time > last.time) {
+                keyframes.push(previousSample);
+              }
+              keyframes.push(sample);
+            } else if (t === sampleEnd && sample.time > last.time) {
+              keyframes.push(sample);
+            }
+            previousSample = sample;
+            if (t === sampleEnd) break;
           }
-          previousSample = sample;
-          if (t === sampleEnd) break;
-        }
+          return keyframes;
+        });
 
         const staticAttr = Number.parseFloat(el.dataset.volume ?? "");
-        const staticVolume = Number.isFinite(staticAttr) ? Math.max(0, Math.min(1, staticAttr)) : 1;
+        const staticVolume = Number.isFinite(staticAttr) ? clampGain(staticAttr) : 1;
         const hasAutomation = keyframes.some(
           (keyframe) => Math.abs(keyframe.volume - staticVolume) > 0.0001,
         );
@@ -2293,7 +2373,7 @@ export async function discoverAudioVolumeAutomationFromTimeline(
       seekTl(0);
       return results;
     },
-    { ids: audioIds, duration: compositionDuration, step: sampleStep },
+    { clips, duration: compositionDuration, step: sampleStep, maxGain: MAX_AUDIO_GAIN },
   );
 }
 
@@ -2344,24 +2424,40 @@ export async function discoverVideoVisibilityFromTimeline(
     const SAMPLE_STEP = 0.1;
     const BINARY_PRECISION = 1 / 60;
 
+    // Seek once per timestep and sample every video — seeking dominates and is
+    // independent of which element we read.
+    const entries: {
+      id: string;
+      sceneEl: Element;
+      firstVisible: number | null;
+      lastVisible: number | null;
+    }[] = [];
     for (const videoEl of videos) {
-      const id = videoEl.id;
+      const id = videoEl.getAttribute?.("data-hf-render-id") || videoEl.id;
       if (!id) continue;
+      entries.push({
+        id,
+        sceneEl: videoEl.closest(".scene") || videoEl,
+        firstVisible: null,
+        lastVisible: null,
+      });
+    }
+    if (entries.length === 0) return results;
 
-      const sceneEl = videoEl.closest(".scene") || videoEl;
-
-      let firstVisible: number | null = null;
-      let lastVisible: number | null = null;
-
-      for (let t = 0; t <= duration; t += SAMPLE_STEP) {
-        seekTl(t);
-        const opacity = parseFloat(window.getComputedStyle(sceneEl).opacity);
+    for (let t = 0; t <= duration; t += SAMPLE_STEP) {
+      seekTl(t);
+      for (const entry of entries) {
+        const opacity = parseFloat(window.getComputedStyle(entry.sceneEl).opacity);
         if (opacity > 0) {
-          if (firstVisible === null) firstVisible = t;
-          lastVisible = t;
+          if (entry.firstVisible === null) entry.firstVisible = t;
+          entry.lastVisible = t;
         }
       }
+    }
 
+    // Per-video boundary refinement (cheap: O(log(step)) seeks each).
+    for (const entry of entries) {
+      const { id, sceneEl, firstVisible, lastVisible } = entry;
       if (firstVisible === null || lastVisible === null) continue;
 
       // Binary search left boundary
@@ -2415,7 +2511,13 @@ export async function resolveCompositionDurations(
   const results = await page.evaluate((compIds: string[]) => {
     const win = window as unknown as { __timelines?: Record<string, { duration(): number }> };
     const timelines = win.__timelines || {};
-    const resolved: { id: string; duration: number; source: string }[] = [];
+    const resolved: {
+      id: string;
+      duration: number;
+      source: string;
+      durationRaw?: string;
+      compositionDurationRaw?: string;
+    }[] = [];
 
     for (const id of compIds) {
       // Try window.__timelines[id].duration() first (GSAP timeline)
@@ -2431,14 +2533,17 @@ export async function resolveCompositionDurations(
       // Fallback: check for authored duration on the element itself
       const el = document.getElementById(id);
       if (el) {
-        const compDurAttr =
-          el.getAttribute("data-duration") || el.getAttribute("data-composition-duration");
-        if (compDurAttr) {
-          const dur = parseFloat(compDurAttr);
-          if (dur > 0) {
-            resolved.push({ id, duration: dur, source: "data-duration" });
-            continue;
-          }
+        const durationRaw = el.getAttribute("data-duration");
+        const compositionDurationRaw = el.getAttribute("data-composition-duration");
+        if (durationRaw != null || compositionDurationRaw != null) {
+          resolved.push({
+            id,
+            duration: 0,
+            source: "data-duration",
+            ...(durationRaw != null ? { durationRaw } : {}),
+            ...(compositionDurationRaw != null ? { compositionDurationRaw } : {}),
+          });
+          continue;
         }
       }
 
@@ -2450,8 +2555,12 @@ export async function resolveCompositionDurations(
 
   const resolutions: ResolvedDuration[] = [];
   for (const r of results) {
-    if (r.duration > 0) {
-      resolutions.push({ id: r.id, duration: r.duration });
+    const duration =
+      parseStrictFiniteTimingNumber(r.durationRaw) ??
+      parseStrictFiniteTimingNumber(r.compositionDurationRaw) ??
+      r.duration;
+    if (duration != null && duration > 0) {
+      resolutions.push({ id: r.id, duration });
     }
   }
 
@@ -2472,23 +2581,13 @@ export async function recompileWithResolutions(
 
   const html = injectDurations(compiled.html, resolutions);
 
-  // Re-parse sub-compositions with the updated parent bounds
-  const {
-    videos: subVideos,
-    audios: subAudios,
-    images: subImages,
-    subCompositions,
-  } = await parseSubCompositions(html, projectDir, downloadDir);
-
-  const mainVideos = parseVideoElements(html);
-  const mainAudios = parseAudioElements(html);
-  const mainImages = parseImageElements(html);
-
-  // Keep inlined sub-composition media authoritative on ID collisions.
-  const hasSubMedia = subVideos.length > 0 || subAudios.length > 0 || subImages.length > 0;
-  const videos = hasSubMedia ? dedupeElementsById([...mainVideos, ...subVideos]) : compiled.videos;
-  const audios = hasSubMedia ? dedupeElementsById([...mainAudios, ...subAudios]) : compiled.audios;
-  const images = hasSubMedia ? dedupeElementsById([...mainImages, ...subImages]) : compiled.images;
+  // Re-resolve the sub-composition map against the updated HTML, but keep the
+  // media list from the first pass. Resolving a composition's duration stamps a
+  // `data-end` on its host, and re-collecting would newly clamp clips to it —
+  // a retiming, not an identity fix. `compiled.videos` was already collected
+  // from this same inlined document, so it is complete and correctly keyed.
+  const { subCompositions } = await parseSubCompositions(html, projectDir, downloadDir);
+  const { videos, audios, images } = compiled;
 
   const remaining = compiled.unresolvedCompositions.filter(
     (c) => !resolutions.some((r) => r.id === c.id),

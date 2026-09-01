@@ -127,6 +127,7 @@ export {
   isMemoryExhaustionError,
   type BeforeCaptureHook,
   type DiscardWarmupInnerCapture,
+  type StaticVerificationOutcome,
 } from "./services/frameCapture.js";
 export {
   CaptureFailure,
@@ -210,6 +211,12 @@ export {
   VIDEO_FRAME_FORMATS,
   isVideoFrameFormat,
 } from "./services/videoFrameExtractor.js";
+
+export {
+  resolveReferencedStart,
+  type RefResolverEl,
+  type RefResolverDoc,
+} from "./services/referenceResolver.js";
 
 export { createVideoFrameInjector } from "./services/videoFrameInjector.js";
 
@@ -302,6 +309,7 @@ export {
 export {
   runFfmpeg,
   formatFfmpegError,
+  isExternalFfmpegInterruption,
   type RunFfmpegOptions,
   type RunFfmpegResult,
 } from "./utils/runFfmpeg.js";
@@ -393,3 +401,13 @@ export {
   type HdrMasteringMetadata,
 } from "./utils/hdr.js";
 export type { VideoColorSpace } from "./utils/ffprobe.js";
+export {
+  renderProvenanceArgs,
+  appendRenderProvenanceArgs,
+  readRenderProvenance,
+  PROVENANCE_RENDERER_TAG,
+  PROVENANCE_VERSION_TAG,
+  PROVENANCE_RENDERER_NAME,
+  PROVENANCE_VERSION,
+  type RenderProvenance,
+} from "./utils/renderProvenance.js";

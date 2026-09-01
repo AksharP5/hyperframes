@@ -52,9 +52,15 @@ describe("automationTargets", () => {
 
 describe("value ↔ lane position", () => {
   it("maps a linear range straight onto the lane", () => {
-    expect(toUnit(VOLUME_RANGE, 0)).toBe(0);
-    expect(toUnit(VOLUME_RANGE, 1)).toBe(1);
-    expect(toUnit(VOLUME_RANGE, 0.25)).toBeCloseTo(0.25, 10);
+    const unit = { ...VOLUME_RANGE, max: 1 };
+    expect(toUnit(unit, 0)).toBe(0);
+    expect(toUnit(unit, 1)).toBe(1);
+    expect(toUnit(unit, 0.25)).toBeCloseTo(0.25, 10);
+  });
+
+  it("puts unity a quarter up the volume lane, which reaches +12 dB", () => {
+    expect(toUnit(VOLUME_RANGE, VOLUME_RANGE.max)).toBe(1);
+    expect(toUnit(VOLUME_RANGE, 1)).toBeCloseTo(1 / VOLUME_RANGE.max, 10);
   });
 
   it("maps a log-read knob on its own scale, so its middle is geometric", () => {
@@ -67,7 +73,7 @@ describe("value ↔ lane position", () => {
 
   it("clamps a pointer that has left the lane", () => {
     expect(fromUnit(VOLUME_RANGE, -3)).toBe(0);
-    expect(fromUnit(VOLUME_RANGE, 4)).toBe(1);
+    expect(fromUnit(VOLUME_RANGE, 4)).toBe(VOLUME_RANGE.max);
   });
 
   it("reads a zero-width range as the bottom rather than dividing by zero", () => {
@@ -79,29 +85,97 @@ describe("curveForDrag", () => {
   const a = { t: 0, v: 1 };
   const b = { t: 4, v: 0 };
 
+  /** The segment the drag describes, as the model would store it. */
+  const bentLane = (bend: { viaX: number; viaY: number } | null) => ({
+    target: "volume",
+    points: [{ ...a, ...(bend ?? {}) }, b],
+  });
+
   it("puts the curved segment through the point that was dragged", () => {
-    // The whole contract: whatever curve comes back, sampling the segment at the
-    // dragged time has to give the dragged value back — otherwise the line runs
-    // away from the pointer.
+    // The whole contract: sampling the segment at the dragged time gives the dragged
+    // value back, so the line never runs away from the pointer. Anywhere in the
+    // segment, at any depth.
     for (const [t, v] of [
-      [1, 0.9],
-      [2, 0.8],
-      [3, 0.15],
+      [0.4, 0.75],
+      [1.6, 0.65],
+      [2, 0.6],
+      [2, 0.1],
+      [2.8, 0.4],
+      [3.6, 0.5],
     ] as const) {
-      const curve = curveForDrag({ range: VOLUME_RANGE, a, b, t, v });
-      expect(curve).not.toBeNull();
-      const lane = { target: "volume", points: [{ ...a, curve: curve ?? 0 }, b] };
-      expect(sampleAutomationLane(lane, t, "linear")).toBeCloseTo(v, 2);
+      const bend = curveForDrag({ range: VOLUME_RANGE, a, b, t, v });
+      expect(bend).not.toBeNull();
+      expect(sampleAutomationLane(bentLane(bend), t, "linear")).toBeCloseTo(v, 2);
     }
   });
 
-  it("stays inside the range the model will accept", () => {
-    // Anything outside ±1 is clamped on parse, so a drag past the limit has to
-    // saturate rather than round-trip to something else.
-    const curve = curveForDrag({ range: VOLUME_RANGE, a, b, t: 0.05, v: 0.02 });
-    expect(curve).not.toBeNull();
-    expect(Math.abs(curve ?? 0)).toBeLessThanOrEqual(1);
-    expect(applyCurve(0.5, curve ?? 0)).toBeGreaterThan(0);
+  it("follows the pointer into the corner of a segment, as deep as it is dragged", () => {
+    // The extreme: 10% along, pulled almost to the floor of a falling ramp. The old
+    // exponent saturated a third of the segment away from the pointer, and a later
+    // slope cap stopped following it too. Reached exactly now, and the shape it draws
+    // stays one smooth arc — checked by sampling it, not by trusting it.
+    const bend = curveForDrag({ range: VOLUME_RANGE, a, b, t: 0.4, v: 0.05 });
+    expect(bend).not.toBeNull();
+    const drawn = bentLane(bend);
+    expect(sampleAutomationLane(drawn, 0.4, "linear")).toBeCloseTo(0.05, 2);
+
+    let previous: number | null = null;
+    let worst = 1;
+    for (let i = 1; i < 60; i += 1) {
+      const t = (4 * i) / 60;
+      const h = 0.01;
+      const slope =
+        (sampleAutomationLane(drawn, t + h, "linear") -
+          sampleAutomationLane(drawn, t - h, "linear")) /
+        (2 * h);
+      if (previous !== null && Math.abs(previous) > 1e-6) {
+        const ratio = Math.abs(slope) > Math.abs(previous) ? slope / previous : previous / slope;
+        worst = Math.max(worst, Math.abs(ratio));
+      }
+      previous = slope;
+    }
+    // Gradual: a crease would show up here as a step change in slope.
+    expect(worst).toBeLessThan(3);
+  });
+
+  it("biases the bend toward whichever point the pointer is nearer", () => {
+    // The behaviour a single exponent could not give: grabbing the line near the
+    // right-hand point has to bulge it on the RIGHT. Measured as where the curve
+    // deviates furthest from the straight line it replaced.
+    const apexOf = (bend: { viaX: number; viaY: number } | null): number => {
+      const lane = bentLane(bend);
+      let best = 0;
+      let at = 0;
+      for (let i = 1; i < 40; i++) {
+        const t = (4 * i) / 40;
+        const straight = 1 - t / 4;
+        const gap = Math.abs(sampleAutomationLane(lane, t, "linear") - straight);
+        if (gap > best) {
+          best = gap;
+          at = t;
+        }
+      }
+      return at;
+    };
+    const nearA = curveForDrag({ range: VOLUME_RANGE, a, b, t: 0.6, v: 0.55 });
+    const nearB = curveForDrag({ range: VOLUME_RANGE, a, b, t: 3.4, v: 0.45 });
+    expect(apexOf(nearA)).toBeLessThan(1.6);
+    expect(apexOf(nearB)).toBeGreaterThan(2.4);
+    // And the two sit on opposite sides of centre, which is the whole complaint:
+    // every bend used to land on the same side whatever the pointer did.
+    expect(apexOf(nearA)).toBeLessThan(apexOf(nearB));
+  });
+
+  it("stays inside the normalised segment the model will accept", () => {
+    // Both coordinates are clamped clear of the ends on parse, so a drag right up
+    // against a breakpoint has to describe an interior point, not the breakpoint.
+    const bend = curveForDrag({ range: VOLUME_RANGE, a, b, t: 0.05, v: 0.02 });
+    expect(bend).not.toBeNull();
+    expect(bend?.viaX).toBeGreaterThan(0);
+    expect(bend?.viaX).toBeLessThan(1);
+    expect(bend?.viaY).toBeGreaterThan(0);
+    expect(bend?.viaY).toBeLessThan(1);
+    expect(applyCurve(0.5, 0)).toBe(0.5);
   });
 
   it("declines a segment with no room to bend", () => {

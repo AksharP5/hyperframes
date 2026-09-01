@@ -60,11 +60,13 @@ class HfCompressor extends AudioWorkletProcessor {
     this.p = o.processorOptions || {};
     this.env = new EnvBank(this.p.attack ?? 20, this.p.release ?? 250);
     this.port.onmessage = (e) => {
+      if (e.data && e.data.__hfDispose) { this.dead = true; return; }
       this.p = { ...this.p, ...e.data };
       this.env.set(this.p.attack ?? 20, this.p.release ?? 250);
     };
   }
   process(inputs, outputs) {
+    if (this.dead) return false;
     const i = inputs[0], o = outputs[0];
     if (!i || !i.length) return true;
     const p = this.p;
@@ -105,11 +107,13 @@ class HfLimiter extends AudioWorkletProcessor {
     this.p = o.processorOptions || {};
     this.env = new EnvBank(this.p.attack ?? 5, this.p.release ?? 50);
     this.port.onmessage = (e) => {
+      if (e.data && e.data.__hfDispose) { this.dead = true; return; }
       this.p = { ...this.p, ...e.data };
       this.env.set(this.p.attack ?? 5, this.p.release ?? 50);
     };
   }
   process(inputs, outputs) {
+    if (this.dead) return false;
     const i = inputs[0], o = outputs[0];
     if (!i || !i.length) return true;
     const ceiling = dbToLin(this.p.limit ?? -1);
@@ -136,11 +140,13 @@ class HfGate extends AudioWorkletProcessor {
     this.env = new EnvBank(this.p.attack ?? 1, this.p.release ?? 100);
     this.gains = [];
     this.port.onmessage = (e) => {
+      if (e.data && e.data.__hfDispose) { this.dead = true; return; }
       this.p = { ...this.p, ...e.data };
       this.env.set(this.p.attack ?? 1, this.p.release ?? 100);
     };
   }
   process(inputs, outputs) {
+    if (this.dead) return false;
     const i = inputs[0], o = outputs[0];
     if (!i || !i.length) return true;
     const p = this.p;
@@ -183,9 +189,13 @@ class HfBitcrush extends AudioWorkletProcessor {
     this.p = o.processorOptions || {};
     this.holds = [];
     this.held = [];
-    this.port.onmessage = (e) => { this.p = { ...this.p, ...e.data }; };
+    this.port.onmessage = (e) => {
+      if (e.data && e.data.__hfDispose) { this.dead = true; return; }
+      this.p = { ...this.p, ...e.data };
+    };
   }
   process(inputs, outputs) {
+    if (this.dead) return false;
     const i = inputs[0], o = outputs[0];
     if (!i || !i.length) return true;
     const p = this.p;
@@ -209,6 +219,132 @@ class HfBitcrush extends AudioWorkletProcessor {
   }
 }
 registerProcessor("hf-bitcrush", HfBitcrush);
+
+/** Linear-interpolated read, \`delaySamples\` behind the write head. */
+function readTap(ring, write, delaySamples) {
+  const len = ring.length;
+  const pos = (write - 1 - delaySamples + len) % len;
+  const i0 = Math.floor(pos);
+  const frac = pos - i0;
+  const i1 = (i0 + 1) % len;
+  return ring[i0] * (1 - frac) + ring[i1] * frac;
+}
+
+/** Equal-power-ish crossfade, zero at a tap's reset point — hides the splice. */
+function xfade(phase) {
+  return Math.sin(Math.PI * phase);
+}
+
+/**
+ * Dual-tap granular delay line: two read taps 180° apart in a 100 ms grain,
+ * each sweeping at a speed relative to the write head that shifts pitch
+ * without changing duration. One tap is always fading in as the other fades
+ * out, which hides the splice each tap makes when it wraps.
+ *
+ * write/phase are block-level state, advanced once per SAMPLE across all
+ * channels together (not once per channel) — advancing them inside the
+ * per-channel loop would move the tap 2x/4x too fast on a stereo/quad input.
+ */
+class HfPitchshift extends AudioWorkletProcessor {
+  constructor(o) {
+    super();
+    this.p = o.processorOptions || {};
+    this.grain = Math.round(sampleRate * 0.1);
+    this.buf = [];
+    this.write = 0;
+    this.phase = 0;
+    // Samples written so far, capped at one grain. The taps read up to a grain
+    // behind the write head, so until this fills they would read the ring's
+    // zeros — the head of every clip came out attenuated or silent.
+    this.filled = 0;
+    // How much of the wet (pitch-shifted) path is currently in the output, and
+    // where it is heading. Crossing between dry and wet is a ~50 ms jump in the
+    // signal, so it is RAMPED rather than switched: a hard swap either way is a
+    // click. Ramping in both directions is also what lets a node return to true
+    // bypass at semitones 0 — a one-way latch left preview stuck with the delay
+    // that the render, building a fresh node from the attribute, does not have.
+    this.wet = 0;
+    this.wetTarget = 0;
+    // ~15 ms one-pole, short enough to feel immediate on a slider drag and long
+    // enough that the splice is inaudible.
+    this.wetCoef = Math.exp(-1 / (sampleRate * 0.015));
+    this.port.onmessage = (e) => {
+      if (e.data && e.data.__hfDispose) { this.dead = true; return; }
+      this.p = { ...this.p, ...e.data };
+    };
+  }
+  process(inputs, outputs) {
+    if (this.dead) return false;
+    const i = inputs[0], o = outputs[0];
+    if (!i || !i.length) return true;
+    const p = this.p;
+    const semitones = Math.max(-12, Math.min(12, p.semitones ?? 0));
+    const mix = Math.max(0, Math.min(1, p.mix ?? 1));
+    const grain = this.grain;
+    const ringLen = grain * 2;
+    const n = i[0] ? i[0].length : 0;
+    for (let ch = 0; ch < i.length; ch++) {
+      if (!this.buf[ch]) this.buf[ch] = new Float32Array(ringLen);
+    }
+
+    // Nothing to shift, or mixed fully out. The grain delay is ~grain/2
+    // whatever the ratio, so at semitones=0 this degenerated into a pure 50 ms
+    // delay of the signal — while the copy for that exact setting reads
+    // "Unchanged pitch".
+    this.wetTarget = semitones === 0 ? 0 : mix;
+
+    // Fully dry AND settled: take the cheap transparent path. The ring keeps
+    // filling, so a later shift does not start cold.
+    if (this.wetTarget === 0 && this.wet < 1e-4) {
+      this.wet = 0;
+      let w = this.write;
+      for (let s = 0; s < n; s++) {
+        for (let ch = 0; ch < i.length; ch++) {
+          const x = i[ch][s];
+          this.buf[ch][w] = x;
+          o[ch][s] = x;
+        }
+        w = (w + 1) % ringLen;
+      }
+      this.write = w;
+      this.filled = Math.min(grain, this.filled + n);
+      return true;
+    }
+
+    const ratio = Math.pow(2, semitones / 12);
+    const inc = (1 - ratio) / grain;
+    let write = this.write, phase = this.phase, filled = this.filled, wetNow = this.wet;
+    const target = this.wetTarget, coef = this.wetCoef;
+    for (let s = 0; s < n; s++) {
+      phase += inc;
+      phase -= Math.floor(phase);
+      const phaseB = (phase + 0.5) % 1;
+      const gA = xfade(phase), gB = xfade(phaseB);
+      // Ramp the wet path in as the ring fills rather than reading zeros:
+      // 100 ms of unshifted audio at the head of a clip beats 50 ms of silence.
+      const warm = filled >= grain ? 1 : filled / grain;
+      wetNow = target + coef * (wetNow - target);
+      const wetMix = wetNow * warm;
+      for (let ch = 0; ch < i.length; ch++) {
+        const ring = this.buf[ch];
+        const inp = i[ch], out = o[ch];
+        const x = inp[s];
+        ring[write] = x;
+        const wet =
+          readTap(ring, write, phase * grain) * gA + readTap(ring, write, phaseB * grain) * gB;
+        out[s] = x * (1 - wetMix) + wet * wetMix;
+      }
+      write = (write + 1) % ringLen;
+      if (filled < grain) filled++;
+    }
+    this.write = write;
+    this.phase = phase;
+    this.filled = filled;
+    this.wet = wetNow;
+    return true;
+  }
+}
+registerProcessor("hf-pitchshift", HfPitchshift);
 `;
 
 // Registration is per context, not per module: a processor registered on one
@@ -243,7 +379,16 @@ export function ensureAudioFxWorklets(ctx: BaseAudioContext): Promise<void> {
       )}`;
       await ctx.audioWorklet.addModule(url);
       readyContexts.add(ctx);
-    })();
+    })().catch((err: unknown) => {
+      // A failed registration must not be remembered. `readyContexts` is only
+      // written on success, so callers correctly keep asking — and every ask
+      // replayed this same rejected promise, leaving the limiter, compressor,
+      // gate and bitcrush silent for the life of the context with no way back.
+      // One transient failure (a slow module load, a context still warming up)
+      // permanently disabled half the rack.
+      registered.delete(ctx);
+      throw err;
+    });
     registered.set(ctx, modulePromise);
   }
   return modulePromise;

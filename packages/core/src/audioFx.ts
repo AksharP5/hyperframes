@@ -16,6 +16,16 @@
 
 export const HF_AUDIO_FX_ATTR = "data-fx-chain";
 
+/**
+ * The same attribute as a `dataset` / `dataAttributes` key — the `data-` prefix
+ * is not part of that spelling.
+ *
+ * Derived rather than restated: the studio writes through
+ * `HF_AUDIO_FX_ATTR` and reads through the key, so a hardcoded `"fx-chain"`
+ * on the read side is a rename waiting to half-land.
+ */
+export const HF_AUDIO_FX_DATA_KEY = HF_AUDIO_FX_ATTR.slice("data-".length);
+
 /** Chain files are versioned; a reader must refuse a version it doesn't know. */
 export const HF_AUDIO_FX_CHAIN_VERSION = 1;
 
@@ -136,6 +146,16 @@ const poles: HfAudioFxEnumParam = {
  * a value that survives `normalizeAudioFxParams` is always safe to realise.
  */
 export const HF_AUDIO_FX: readonly HfAudioFxDef[] = [
+  {
+    id: "gain",
+    label: "Gain",
+    group: "dynamics",
+    description: "Raise or lower the whole signal. Automate it to duck under something else.",
+    // Cuts go deep, boosts stay modest: this is a level stage for making room,
+    // and a chain that can add 40 dB clips long before it is useful.
+    params: [gainDb(-60, 12, 0)],
+    web: "gain-node",
+  },
   {
     id: "peaking",
     label: "Peaking EQ",
@@ -485,6 +505,40 @@ export const HF_AUDIO_FX: readonly HfAudioFxDef[] = [
     ],
     web: "worklet-bitcrush",
   },
+  {
+    id: "pitchshift",
+    label: "Pitch shift",
+    group: "time",
+    // The granular algorithm reads from a 100 ms grain, so its output runs a
+    // constant ~50 ms behind its input and nothing in the graph subtracts that
+    // — there is no latency/pre-roll concept here yet. It is inaudible on its
+    // own and audible against picture or against an unshifted track, so it is
+    // stated rather than hidden. `semitones: 0` bypasses the node entirely.
+    description: "Shifts pitch up or down without changing playback speed. Adds ~50 ms of latency.",
+    params: [
+      {
+        kind: "number",
+        key: "semitones",
+        label: "Semitones",
+        unit: "st",
+        min: -12,
+        max: 12,
+        step: 1,
+        default: 0,
+      },
+      {
+        kind: "number",
+        key: "mix",
+        label: "Mix",
+        unit: "",
+        min: 0,
+        max: 1,
+        step: 0.01,
+        default: 1,
+      },
+    ],
+    web: "worklet-pitchshift",
+  },
 
   {
     id: "delay",
@@ -751,7 +805,20 @@ export function normalizeAudioFxParams(
       out[p.key] = ok ? (raw as string) : p.default;
       continue;
     }
-    const n = typeof raw === "number" ? raw : Number(raw);
+    // Only a number, or a string that actually spells one. `Number(null)`,
+    // `Number("")`, `Number(false)` and `Number([])` are all 0 and all pass
+    // Number.isFinite, so a missing or blanked value used to clamp to 0 rather
+    // than fall back to the declared default — and 0 is a legal value for most
+    // of these knobs, so nothing downstream could tell. A compressor whose
+    // threshold arrived as null sat at 0 dB and never engaged, silently,
+    // instead of at its -24 dB default. `numberOrNull` in audioAutomation.ts
+    // already guards exactly this.
+    const n =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim() !== ""
+          ? Number(raw)
+          : Number.NaN;
     out[p.key] = Number.isFinite(n) ? Math.min(p.max, Math.max(p.min, n)) : p.default;
   }
   return out;
@@ -771,6 +838,51 @@ export interface HfAudioFxNode {
   /** Set on nodes the carve analysis generated, so re-running replaces them
    *  instead of stacking another set on top of hand-added effects. */
   fromCarve?: boolean;
+  /**
+   * Id of the preset that wrote this node, for the same reason `fromCarve`
+   * exists: re-applying a preset replaces its own nodes rather than adding a
+   * second copy, and the rack can brace them together under the preset's name.
+   *
+   * The id rather than a flag, because a chain can carry more than one preset
+   * and each has to be able to find its own.
+   */
+  fromPreset?: string;
+  /**
+   * What the rack calls this node, when the effect's own name is not specific
+   * enough to be useful.
+   *
+   * A peaking filter is "Shape One Range" wherever it appears, so a chain that
+   * cuts mud at 250 Hz and lifts clarity at 3 kHz shows the same words twice
+   * and an author cannot tell the two apart. A preset names each node for the
+   * JOB it is doing instead — "Reduce Mud", "Add Clarity" — and the rack reads
+   * as a list of things that were done rather than a list of filter types.
+   */
+  label?: string;
+  /**
+   * Id of the multi-band EQ that owns this node, when it is one of its bands.
+   *
+   * Same device as `fromCarve`: the module gathers its own nodes out of the
+   * chain and presents them as one control surface, so an EQ needs no new
+   * effect type and its bands stay ordinary filters underneath.
+   */
+  fromEq?: string;
+
+  /**
+   * How much of this node's preset is applied, 0..1 — the wet/dry blend the
+   * graph wraps its run in.
+   *
+   * On every node of the run rather than beside the chain, because the chain has
+   * nowhere else to put it: `HfAudioFxChain` is a version and a list of nodes,
+   * and a preset is defined by which nodes carry its tag. The graph reads it off
+   * the first node of each run. Absent means fully applied, which is what every
+   * chain written before this means.
+   */
+  presetAmount?: number;
+  /**
+   * Set on the gain stage the leveller writes, so re-running replaces it rather
+   * than stacking a second one — the same contract `fromCarve` has.
+   */
+  fromLeveller?: boolean;
   /** Absent means enabled — chain files written before the field existed still load. */
   enabled?: boolean;
   params?: HfAudioFxParamValues;
@@ -810,31 +922,7 @@ export function parseAudioFxChain(json: string): HfAudioFxChain {
   if (!Array.isArray(obj.nodes)) {
     throw new AudioFxChainError("Chain file is missing a `nodes` array.");
   }
-  const nodes: HfAudioFxNode[] = obj.nodes.map((n, i) => {
-    if (typeof n !== "object" || n === null) {
-      throw new AudioFxChainError(`Node ${i} is not an object.`);
-    }
-    const node = n as {
-      type?: unknown;
-      id?: unknown;
-      enabled?: unknown;
-      params?: unknown;
-      fromCarve?: unknown;
-    };
-    if (typeof node.type !== "string" || !BY_ID.has(node.type)) {
-      throw new AudioFxChainError(`Node ${i} has unknown effect type: ${String(node.type)}`);
-    }
-    return {
-      type: node.type,
-      ...(typeof node.id === "string" && node.id ? { id: node.id } : {}),
-      ...(node.fromCarve === true ? { fromCarve: true as const } : {}),
-      enabled: node.enabled !== false,
-      params: normalizeAudioFxParams(
-        node.type,
-        (node.params ?? undefined) as HfAudioFxParamValues | undefined,
-      ),
-    };
-  });
+  const nodes = obj.nodes.map(parseAudioFxNode);
   return { version: HF_AUDIO_FX_CHAIN_VERSION, nodes };
 }
 
@@ -847,13 +935,7 @@ export function enabledAudioFxNodes(chain: HfAudioFxChain): HfAudioFxNode[] {
 export function serializeAudioFxChain(chain: HfAudioFxChain): string {
   return JSON.stringify({
     version: HF_AUDIO_FX_CHAIN_VERSION,
-    nodes: chain.nodes.map((node) => ({
-      type: node.type,
-      ...(node.id ? { id: node.id } : {}),
-      ...(node.fromCarve === true ? { fromCarve: true } : {}),
-      ...(node.enabled === false ? { enabled: false } : {}),
-      params: normalizeAudioFxParams(node.type, node.params),
-    })),
+    nodes: chain.nodes.map(serializeAudioFxNode),
   });
 }
 
@@ -868,4 +950,103 @@ export function mintAudioFxNodeId(chain: HfAudioFxChain): string {
     const id = `n${i}`;
     if (!taken.has(id)) return id;
   }
+}
+
+/** The shape a node is READ as: everything unknown until checked. */
+interface RawAudioFxNode {
+  type?: unknown;
+  id?: unknown;
+  enabled?: unknown;
+  params?: unknown;
+  fromCarve?: unknown;
+  fromPreset?: unknown;
+  label?: unknown;
+  fromEq?: unknown;
+  fromLeveller?: unknown;
+  presetAmount?: unknown;
+}
+
+/**
+ * One node out of a chain file, validated. Throws rather than dropping: a chain
+ * that silently loses a node would render differently from the project the
+ * author saved.
+ */
+function parseAudioFxNode(n: unknown, i: number): HfAudioFxNode {
+  if (typeof n !== "object" || n === null) {
+    throw new AudioFxChainError(`Node ${i} is not an object.`);
+  }
+  const node = n as RawAudioFxNode;
+  if (typeof node.type !== "string" || !BY_ID.has(node.type)) {
+    throw new AudioFxChainError(`Node ${i} has unknown effect type: ${String(node.type)}`);
+  }
+  return withoutUndefined({
+    type: node.type,
+    id: nonEmptyString(node.id),
+    fromCarve: onlyTrue(node.fromCarve),
+    // fromPreset and label both survive the round trip or a preset stops being
+    // able to find its own nodes after a reload: re-applying would stack a
+    // second copy and the rack would lose the grouping it braces them with.
+    fromPreset: nonEmptyString(node.fromPreset),
+    label: nonEmptyString(node.label),
+    fromEq: nonEmptyString(node.fromEq),
+    fromLeveller: onlyTrue(node.fromLeveller),
+    presetAmount: clampedPresetAmount(node.presetAmount),
+    enabled: node.enabled !== false,
+    params: normalizeAudioFxParams(
+      node.type,
+      (node.params ?? undefined) as HfAudioFxParamValues | undefined,
+    ),
+  });
+}
+
+/** One node as the `data-fx-chain` attribute carries it. Every optional field is
+ *  omitted when it holds its default, so a plain chain stays plain. */
+function serializeAudioFxNode(node: HfAudioFxNode) {
+  return withoutUndefined({
+    type: node.type,
+    id: nonEmptyString(node.id),
+    fromCarve: onlyTrue(node.fromCarve),
+    fromPreset: nonEmptyString(node.fromPreset),
+    label: nonEmptyString(node.label),
+    fromEq: nonEmptyString(node.fromEq),
+    fromLeveller: onlyTrue(node.fromLeveller),
+    // Omitted when fully applied, so an untouched preset does not grow a field
+    // in every chain that carries one.
+    presetAmount: node.presetAmount === 1 ? undefined : clampedPresetAmount(node.presetAmount),
+    // Only the non-default is written: a chain of enabled nodes stays plain.
+    enabled: node.enabled === false ? (false as const) : undefined,
+    params: normalizeAudioFxParams(node.type, node.params),
+  });
+}
+
+/**
+ * The field readers the two node codecs share.
+ *
+ * Written as readers rather than as conditional spreads inline: nine
+ * `...(cond ? { x } : {})` clauses in one object literal is nine branches in a
+ * function whose actual job is "copy the fields that are set", and it read as
+ * complex because it was measured as complex.
+ */
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function onlyTrue(value: unknown): true | undefined {
+  return value === true ? true : undefined;
+}
+
+/** Clamped on the way in: the blend is two gains in opposition, and a value
+ *  outside 0..1 makes the dry leg negative rather than simply loud. */
+function clampedPresetAmount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.min(1, Math.max(0, value));
+}
+
+/** Drop the keys whose reader returned undefined, so an absent field stays
+ *  absent rather than becoming an explicit `undefined` in the document. */
+function withoutUndefined<T extends object>(obj: T): T {
+  for (const key of Object.keys(obj) as Array<keyof T>) {
+    if (obj[key] === undefined) delete obj[key];
+  }
+  return obj;
 }

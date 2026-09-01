@@ -28,7 +28,10 @@
  */
 
 import { readVariablesForElement } from "./variableScope";
-import { isScalarVariableValue as isScalar } from "@hyperframes/parsers/composition";
+import {
+  isScalarVariableValue as isScalar,
+  isSafeMediaUrl,
+} from "@hyperframes/parsers/composition";
 
 // data-var-src only rebinds media `src` on media elements. A user-controlled
 // variable value assigned to a src is an XSS surface on tags whose src executes
@@ -46,28 +49,6 @@ function resolveUrl(value: unknown): string | null {
 }
 
 /**
- * Protocol allowlist for a resolved media URL. Relative URLs (no scheme) resolve
- * against the page origin and are always safe. Absolute URLs are restricted to
- * http(s)/blob and image data: URIs — defense-in-depth alongside VAR_SRC_TAGS,
- * blocking `javascript:`, `data:text/html`, `file:`, etc. even if a future tag
- * slips past the element guard. Control chars are stripped before the scheme
- * test because browsers ignore them when parsing the URL (`java\tscript:`).
- */
-function isSafeMediaUrl(url: string): boolean {
-  // Browsers ignore ASCII control chars/whitespace when parsing a URL, so strip
-  // them before reading the scheme (defeats `java\tscript:` style bypasses).
-  // oxlint-disable-next-line no-control-regex -- control chars are the target here
-  const normalized = url.replace(/[\u0000-\u0020]/g, "");
-  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(normalized);
-  if (!scheme) return true;
-  const proto = scheme[1]?.toLowerCase();
-  if (!proto) return false;
-  if (proto === "https" || proto === "http" || proto === "blob") return true;
-  if (proto === "data") return /^data:image\//i.test(normalized);
-  return false;
-}
-
-/**
  * Strip characters that could smuggle additional declarations or markup out of
  * a var() substitution site. A scalar value folded into `background: var(--x)`
  * or `background-image: url(var(--x))` must not be able to close the declaration
@@ -75,8 +56,13 @@ function isSafeMediaUrl(url: string): boolean {
  * characters is legal in a scalar variable value (string, number, color, font
  * family), so removing them is lossless for real inputs and neutralizes the
  * declaration/URL-exfiltration channel.
+ *
+ * Exported because the static compiler bakes the same scalars into a stylesheet
+ * at build time and has to reach the same result: a value that the runtime
+ * strips but a compile-time emit passes through would make the rendered MP4
+ * differ from the preview, which is the more dangerous of the two directions.
  */
-function sanitizeCssValue(value: string): string {
+export function sanitizeCssValue(value: string): string {
   return value.replace(/[;{}<>\r\n]/g, "");
 }
 

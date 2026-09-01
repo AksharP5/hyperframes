@@ -272,6 +272,10 @@
       "type": "hyperframes:block"
     },
     {
+      "name": "heygen-avatar-promo-card",
+      "type": "hyperframes:block"
+    },
+    {
       "name": "hw-frame",
       "type": "hyperframes:block"
     },
@@ -293,6 +297,10 @@
     },
     {
       "name": "hw-title",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "hw-write-title",
       "type": "hyperframes:block"
     },
     {
@@ -465,6 +473,10 @@
     },
     {
       "name": "share-sheet-carousel",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "slack-notification-ad",
       "type": "hyperframes:block"
     },
     {
@@ -648,14 +660,6 @@
       "type": "hyperframes:block"
     },
     {
-      "name": "ai-generation-canvas",
-      "type": "hyperframes:component"
-    },
-    {
-      "name": "ai-prompt-flow",
-      "type": "hyperframes:component"
-    },
-    {
       "name": "animated-bar-chart",
       "type": "hyperframes:component"
     },
@@ -817,10 +821,6 @@
     },
     {
       "name": "chat-thread",
-      "type": "hyperframes:component"
-    },
-    {
-      "name": "checkout-flow",
       "type": "hyperframes:component"
     },
     {
@@ -1533,6 +1533,6 @@
     }
   ],
   "catalogArtifact": {
-    "revision": "6e03561a0082cf676faac12c7d566fa2846ac0593be183b2fca4543e51aff1ee"
+    "revision": "2611d04335aacf5a70649019f948e5ba2f474c38bc45cd59e179d71294cd8cb8"
   }
 }

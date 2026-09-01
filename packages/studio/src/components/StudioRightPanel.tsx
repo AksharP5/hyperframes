@@ -1,19 +1,18 @@
-import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
+import { useCallback } from "react";
+import type { StudioRightPanelProps } from "./StudioRightPanel.types";
+
+export type { StudioRightPanelProps };
 import { PropertyPanel } from "./editor/PropertyPanel";
 import { LayersPanel } from "./editor/LayersPanel";
 import { CaptionPropertyPanel } from "../captions/components/CaptionPropertyPanel";
 import { BlockParamsPanel } from "./editor/BlockParamsPanel";
-import { RenderQueue } from "./renders/RenderQueue";
+import { RenderQueuePanel } from "./renders/RenderQueuePanel";
 import { SlideshowPanel } from "./panels/SlideshowPanel";
-import { VariablesPanel, type StudioEditPersistenceProps } from "./panels/VariablesPanel";
+import { VariablesPanel } from "./panels/VariablesPanel";
 import { PanelTabButton } from "./PanelTabButton";
-import { usePreviewVariablesStore } from "../hooks/previewVariablesStore";
 import type { RenderJob } from "./renders/useRenderQueue";
-import type { BlockParam } from "@hyperframes/core/registry";
 import { STUDIO_FLAT_INSPECTOR_ENABLED } from "./editor/manualEditingAvailability";
-import type { Composition } from "@hyperframes/sdk";
-import type { EditHistoryKind } from "../utils/editHistory";
-import { useSlideshowPersist, type UseSlideshowPersistParams } from "../hooks/useSlideshowPersist";
+import { useSlideshowPersist } from "../hooks/useSlideshowPersist";
 import { useSlideshowTabState } from "../hooks/useSlideshowTabState";
 import { DesignPanelPromoteProvider } from "./DesignPanelPromoteProvider";
 import { useStudioPlaybackContext, useStudioShellContext } from "../contexts/StudioContext";
@@ -21,57 +20,15 @@ import { usePanelLayoutContext } from "../contexts/PanelLayoutContext";
 import { useFileManagerContext } from "../contexts/FileManagerContext";
 import { useDomEditContext } from "../contexts/DomEditContext";
 import { usePlayerStore } from "../player";
-import { waitForMediaJob } from "./studioMediaJobs";
 import {
   applyColorGradingScopeUpdate,
   EMPTY_COLOR_GRADING_SCOPE_RESULT,
   type ColorGradingScope,
 } from "./studioColorGradingScope";
-import type {
-  AddMediaOverlayHandler,
-  BackgroundRemovalProgress,
-} from "./editor/propertyPanelTypes";
-import { timelineKeysForSelections, type ToggleHiddenHandler } from "../utils/studioHelpers";
+import { timelineKeysForSelections } from "../utils/studioHelpers";
+import { canHideSelections } from "../utils/timelineInspector";
 import { useInspectorSplitResize } from "../hooks/useInspectorSplitResize";
-
-export interface StudioRightPanelProps extends StudioEditPersistenceProps {
-  designPanelActive: boolean;
-  activeBlockParams?: {
-    blockName: string;
-    blockTitle: string;
-    params: BlockParam[];
-    compositionPath: string;
-  } | null;
-  onCloseBlockParams?: () => void;
-  recordingState?: "idle" | "recording" | "preview";
-  recordingDuration?: number;
-  onToggleRecording?: () => void;
-  /** Dependencies for the Slideshow persist callback, threaded from App.tsx. */
-  sdkSession: Composition | null;
-  publishSdkSession: NonNullable<UseSlideshowPersistParams["publishSdkSession"]>;
-  /**
-   * Forces THIS `sdkSession` to re-open from disk. DesignPanelPromoteProvider
-   * opens its own separate SDK session scoped to the selected element's own
-   * file (needed so promoting inside a sub-composition binds a variable there,
-   * not on the host) — for a top-level selection that's the SAME file this
-   * session already has open, so a write through that other session leaves
-   * this one holding stale in-memory content. The self-write-echo registry
-   * that normally suppresses redundant reloads is keyed by file path only, not
-   * by session instance, so it wrongly treats the sibling session's write as
-   * "our own echo" and never reloads on its own — this must be called
-   * explicitly after such a write.
-   */
-  forceReloadSdkSession?: () => void;
-  reloadPreview: () => void;
-  domEditSaveTimestampRef: MutableRefObject<number>;
-  recordEdit: (entry: {
-    label: string;
-    kind: EditHistoryKind;
-    files: Record<string, { before: string; after: string }>;
-  }) => Promise<void>;
-  onToggleElementHidden?: ToggleHiddenHandler;
-  onAddMediaOverlay?: AddMediaOverlayHandler;
-}
+import { useRemoveBackground } from "../hooks/useRemoveBackground";
 
 // fallow-ignore-next-line complexity
 export function StudioRightPanel({
@@ -88,6 +45,7 @@ export function StudioRightPanel({
   domEditSaveTimestampRef,
   recordEdit,
   onToggleElementHidden,
+  onAutoGroupCarveSources,
   onAddMediaOverlay,
 }: StudioRightPanelProps) {
   const {
@@ -108,7 +66,6 @@ export function StudioRightPanel({
     projectId,
     activeCompPath,
     showToast,
-    compositionDimensions,
     waitForPendingDomEditSaves,
     renderQueue,
   } = useStudioShellContext();
@@ -207,14 +164,6 @@ export function StudioRightPanel({
     handleInspectorSplitResizeMove,
     handleInspectorSplitResizeEnd,
   } = useInspectorSplitResize();
-  const backgroundRemovalAbortRef = useRef<AbortController | null>(null);
-
-  useEffect(
-    () => () => {
-      backgroundRemovalAbortRef.current?.abort();
-    },
-    [],
-  );
 
   const renderJobs = renderQueue.jobs as RenderJob[];
   const inspectorTabActive = rightPanelTab === "design" || rightPanelTab === "layers";
@@ -281,53 +230,34 @@ export function StudioRightPanel({
     ],
   );
 
-  const handleRemoveBackground = useCallback(
-    // fallow-ignore-next-line complexity
-    async (
-      inputPath: string,
-      options: {
-        createBackgroundPlate?: boolean;
-        quality?: "fast" | "balanced" | "best";
-        onProgress?: (progress: BackgroundRemovalProgress) => void;
-      },
-    ) => {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/media/remove-background`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inputPath,
-            createBackgroundPlate: options.createBackgroundPlate === true,
-            quality: options.quality ?? "balanced",
-          }),
-        },
-      );
-      const data = (await response.json().catch(() => ({}))) as {
-        jobId?: string;
-        error?: string;
-      };
-      if (!response.ok || !data.jobId) {
-        throw new Error(data.error || `Background removal failed (${response.status})`);
-      }
-      showToast("Removing background...", "info");
-      backgroundRemovalAbortRef.current?.abort();
-      const controller = new AbortController();
-      backgroundRemovalAbortRef.current = controller;
-      try {
-        const result = await waitForMediaJob(data.jobId, options.onProgress, controller.signal);
-        await refreshFileTree();
-        showToast(`Created transparent asset: ${result.outputPath.split("/").pop()}`, "info");
-        return result;
-      } finally {
-        if (backgroundRemovalAbortRef.current === controller) {
-          backgroundRemovalAbortRef.current = null;
-        }
-      }
-    },
-    [projectId, refreshFileTree, showToast],
+  const handleRemoveBackground = useRemoveBackground(projectId, refreshFileTree, showToast);
+
+  /**
+   * A dial being dragged writes to the preview and stops there.
+   *
+   * Every one of these panels previews on each pointermove and commits on
+   * release. Persisting the moves too put a fragment of the drag in the undo
+   * stack — and since those writes race, history could not coalesce them
+   * reliably, so undo took back a sliver of the gesture rather than the gesture.
+   * The release's own commit is what reaches the file and the undo stack.
+   */
+  const setAttributeWhileDragging = useCallback(
+    (attr: string, value: string | null) =>
+      handleDomAttributeLiveCommit(attr, value, undefined, { previewOnly: true }),
+    [handleDomAttributeLiveCommit],
   );
   const handleHideAllSelected = () => {
+    // Audio has no visual to hide, and `data-hidden` on an audio element is what
+    // MUTES it — preview silences it and the render drops it from the mix. The
+    // timeline withholds the eye on an audio track for that reason
+    // (`visible={!isAudioTrack}`), and the single-selection panel gates the same
+    // write on `audioSelection`; this multi-selection path was the way back to
+    // it. Checked here as well as in the panel because the button is not the
+    // only caller.
+    if (!canHideSelections(domEditGroupSelections)) {
+      showToast("Audio can't be hidden — use the group's own controls", "info");
+      return;
+    }
     const { elements } = usePlayerStore.getState();
     const keys = timelineKeysForSelections(domEditGroupSelections, elements, activeCompPath);
     if (keys.length > 0) void onToggleElementHidden?.(keys, true);
@@ -357,11 +287,12 @@ export function StudioRightPanel({
         copiedAgentPrompt={copiedAgentPrompt}
         onClearSelection={clearDomSelection}
         onToggleElementHidden={onToggleElementHidden}
+        onAutoGroupCarveSources={onAutoGroupCarveSources}
         onUngroup={handleUngroupSelection}
         onSetStyle={handleDomStyleCommit}
         onSetAttribute={handleDomAttributeCommit}
         onSetAttributes={handleDomAttributesCommit}
-        onSetAttributeLive={handleDomAttributeLiveCommit}
+        onSetAttributeLive={setAttributeWhileDragging}
         onSetAttributeQuiet={handleDomAttributeQuietCommit}
         onApplyColorGradingScope={handleApplyColorGradingScope}
         onSetHtmlAttribute={handleDomHtmlAttributeCommit}
@@ -412,36 +343,7 @@ export function StudioRightPanel({
     </DesignPanelPromoteProvider>
   );
 
-  const renderQueuePanel = (
-    <RenderQueue
-      jobs={renderJobs}
-      projectId={projectId}
-      onDelete={renderQueue.deleteRender}
-      onCancel={renderQueue.cancelRender}
-      loadError={renderQueue.loadError}
-      onRetryLoad={renderQueue.reloadRenders}
-      actionError={renderQueue.actionError}
-      onDismissActionError={renderQueue.dismissActionError}
-      onClearCompleted={renderQueue.clearCompleted}
-      onStartRender={async (format, quality, resolution, fps) => {
-        await waitForPendingDomEditSaves();
-        const composition =
-          activeCompPath && activeCompPath !== "index.html" ? activeCompPath : undefined;
-        await renderQueue.startRender({
-          fps,
-          quality,
-          format,
-          resolution,
-          composition,
-          // Render what the user is previewing: active variable overrides
-          // from the Variables panel ride along (undefined = defaults).
-          variables: usePreviewVariablesStore.getState().values ?? undefined,
-        });
-      }}
-      compositionDimensions={compositionDimensions}
-      isRendering={renderQueue.isRendering}
-    />
-  );
+  const renderQueuePanel = <RenderQueuePanel />;
 
   return (
     <>

@@ -6,7 +6,7 @@
  * rather than a second interpretation of the attribute.
  */
 
-import { VOLUME_TARGET } from "@hyperframes/core/audio-automation";
+import { HF_AUDIO_AUTOMATION_DATA_KEY, VOLUME_TARGET } from "@hyperframes/core/audio-automation";
 import type { DomEditSelection } from "./domEditingTypes";
 import {
   automationAttrValue,
@@ -28,7 +28,10 @@ export function useVolumeAutomation(
 ): VolumeAutomationBinding {
   // The chain is not needed to resolve a volume lane — volume is always a valid
   // target — so this deliberately does not parse it.
-  const automation = readPanelAutomation(element.dataAttributes?.["automation"], undefined);
+  const automation = readPanelAutomation(
+    element.dataAttributes?.[HF_AUDIO_AUTOMATION_DATA_KEY],
+    undefined,
+  );
   const write = (next: Parameters<typeof automationAttrValue>[0]): void => {
     // Quiet: clicking the toggle used to reload the preview and restart every
     // playing track, while the same click on an effect parameter did not.
