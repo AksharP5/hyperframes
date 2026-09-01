@@ -624,7 +624,7 @@ drift), `*.motion.json` assertions, and WCAG AA contrast.
 | `--timeout`                                  | Render-ready budget in ms; also raises page navigation above its 10s floor (default 3000)                                   |
 | `--no-contrast`                              | Skip the WCAG pass while iterating                                                                                         |
 | `--strict`                                   | Exit non-zero on warnings too (default: errors only)                                                                        |
-| `--caption-zone "<x0=..;y0=..;x1=..;y1=..>"` | Opt-in band gate. Flags content whose centre sits inside the fractional band. Optional `severity` and `seek`.               |
+| `--caption-zone "<x0=..;y0=..;x1=..;y1=..>"` | Opt-in band gate. Flags a text element's DOM box that overlaps the fractional band. Optional `severity` and `seek`.         |
 | `--frame-check`                              | Opt-in out-of-frame detection for `img`, `svg`, `video`, and `canvas`                                                       |
 | `--layout`                                   | Layout knobs, currently `proseCoverageFloor=0.05` (0–1, default 0.15)                                                       |
 | `--browser-gpu` / `--no-browser-gpu`         | Hardware GPU capture, or deterministic SwiftShader (default: auto-detect)                                                   |
@@ -646,7 +646,10 @@ When the audit is wrong because the layout is deliberate, say so in the HTML and
 re-run. Put `data-layout-allow-overflow` on a planned off-canvas entrance,
 `data-layout-allow-overlap` on text you meant to stack, `data-layout-allow-occlusion`
 on text you meant to hide behind a prop, and `data-layout-ignore` on decoration
-that should not be audited at all. Each is inherited, so an ancestor works.
+that should not be audited at all. Overflow, occlusion, and ignore markers are
+inherited, so an ancestor works. The overlap marker is intentionally local: put it
+on the specific text block participating in the layering, never on a scene/root
+wrapper, so unrelated descendant collisions remain auditable.
 
 For deliberate lower-third copy under `--caption-zone`, use
 `data-layout-allow-caption-zone`. It silences `caption_zone_collision` and

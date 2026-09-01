@@ -212,6 +212,12 @@ export {
   isVideoFrameFormat,
 } from "./services/videoFrameExtractor.js";
 
+export {
+  resolveReferencedStart,
+  type RefResolverEl,
+  type RefResolverDoc,
+} from "./services/referenceResolver.js";
+
 export { createVideoFrameInjector } from "./services/videoFrameInjector.js";
 
 export {
@@ -303,6 +309,7 @@ export {
 export {
   runFfmpeg,
   formatFfmpegError,
+  isExternalFfmpegInterruption,
   type RunFfmpegOptions,
   type RunFfmpegResult,
 } from "./utils/runFfmpeg.js";

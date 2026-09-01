@@ -50,6 +50,7 @@ export function killProcessTree(pid: number, signal: NodeJS.Signals = "SIGTERM")
       execFileSync("taskkill", windowsProcessTreeKillArgs(pid), {
         stdio: "ignore",
         timeout: 5000,
+        windowsHide: true,
       });
     } catch {
       // Process already exited or taskkill could not inspect it.
@@ -101,9 +102,14 @@ export function processIdentity(pid: number): string | null {
           "-NoProfile",
           "-NonInteractive",
           "-Command",
-          `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CreationDate.ToFileTimeUtc()`,
+          `$p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -ErrorAction SilentlyContinue; if ($p) { $p.CreationDate.ToFileTimeUtc() }`,
         ],
-        { encoding: "utf8", timeout: 2000 },
+        {
+          encoding: "utf8",
+          timeout: 2000,
+          stdio: ["pipe", "pipe", "ignore"],
+          windowsHide: true,
+        },
       ).trim();
       return created ? `windows:${created}` : null;
     }
@@ -140,9 +146,14 @@ function processParentPid(pid: number): number | null {
               "-NoProfile",
               "-NonInteractive",
               "-Command",
-              `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').ParentProcessId`,
+              `$p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -ErrorAction SilentlyContinue; if ($p) { $p.ParentProcessId }`,
             ],
-            { encoding: "utf8", timeout: 2000 },
+            {
+              encoding: "utf8",
+              timeout: 2000,
+              stdio: ["pipe", "pipe", "ignore"],
+              windowsHide: true,
+            },
           )
         : execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], {
             encoding: "utf8",

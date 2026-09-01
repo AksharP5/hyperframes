@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import { usePlayerStore, type TimelineElement, type DomClipChild } from "../store/playerStore";
+import {
+  usePlayerStore,
+  type TimelineElement,
+  type DomClipChild,
+  type SubCompositionHostState,
+} from "../store/playerStore";
 import type { ClipManifestClip } from "../lib/playbackTypes";
 import { createTimelineElementFromManifestClip } from "../lib/timelineDOM";
 import { buildTimelineElementKey, splitTimelineElementKey } from "../lib/timelineElementHelpers";
@@ -132,31 +137,59 @@ interface DisplayBounds {
 }
 
 /**
- * State that lives on the live host element, not in the clip manifest:
- * `data-hidden`, `data-timeline-locked`, `data-timeline-role`. A child row is
- * built from a manifest clip with no hostEl to read, so
- * createTimelineElementFromManifestClip cannot see any of it. The flat store
- * element for the same child WAS built with one, so it is inherited from there.
+ * Audio-group membership for an expanded child, from whichever source has it.
  *
- * Without this the eye on an expanded child always reported the row visible, so
- * clicking it wrote data-hidden again instead of removing it, and a hidden child
- * could never be shown again (not even after a reload, since the attribute is in
- * the source).
+ * The flat store twin when there is one; otherwise the `DomClipChild` record,
+ * which carried it off the live element during the DOM walk. That fallback is
+ * the ONLY source for a sub-composition that declares both a group and its
+ * members: those members never enter the flat store, so "inherit from the flat
+ * twin" silently produced no membership and therefore no group row — for
+ * exactly the case group support was extended to cover.
  */
-function hostElementState(flat: TimelineElement | undefined): Partial<TimelineElement> {
-  if (!flat) return {};
+function childGroupState(
+  flat: TimelineElement | undefined,
+  domChild: DomClipChild | undefined,
+): Partial<TimelineElement> {
+  const source = flat?.audioGroup ? flat : domChild?.audioGroup ? domChild : null;
+  if (!source) return {};
   return {
-    hidden: flat.hidden,
-    timelineLocked: flat.timelineLocked,
-    timelineRole: flat.timelineRole,
-    // Same reason as the three above: these are read off the host element, which
-    // an expanded child is built without. Missing them, an audio child inside a
-    // sub-composition reserved no automation height and drew no lanes, while the
-    // property panel — reading the live DOM selection rather than this row —
-    // still showed the chain and its toggles.
-    fxChain: flat.fxChain,
-    automation: flat.automation,
+    audioGroup: source.audioGroup,
+    audioGroupLabel: source.audioGroupLabel,
+    audioGroupVolume: source.audioGroupVolume,
+    audioGroupHidden: source.audioGroupHidden,
+    audioGroupFxChain: source.audioGroupFxChain,
+    audioGroupAutomation: source.audioGroupAutomation,
   };
+}
+
+/**
+ * State that lives on the live host element, not in the clip manifest:
+ * `data-hidden`, `data-timeline-locked`, `data-timeline-role`, `data-fx-chain`,
+ * `data-automation`. A child row is built from a manifest clip with no hostEl to
+ * read, so createTimelineElementFromManifestClip cannot see any of it.
+ *
+ * `live` is the reading taken off the element itself and is authoritative. For a
+ * child of a REAL sub-composition it is also the only source: such a clip is
+ * filtered out of the manifest before the flat store is built, so no twin exists
+ * to inherit from. The flat twin still covers the phantom-wrapper case, where
+ * the child does keep a store entry of its own.
+ *
+ * Without a reading of the element, the eye on an expanded child always reported
+ * the row visible, so clicking it wrote data-hidden again instead of removing
+ * it, and a hidden child could never be shown again (not even after a reload,
+ * since the attribute is in the source). Missing fxChain and automation, an
+ * audio child inside a sub-composition reserved no automation height and drew no
+ * lanes, while the property panel, which reads the live DOM selection rather
+ * than this row, still showed the chain and its toggles.
+ */
+function hostElementState(
+  flat: TimelineElement | undefined,
+  live: SubCompositionHostState | undefined,
+): Partial<TimelineElement> {
+  if (!flat) return { ...live };
+  const { hidden, timelineLocked, timelineRole, fxChain, automation } = flat;
+  // `live` last: it is the reading off the element, so it wins wherever it has one.
+  return { hidden, timelineLocked, timelineRole, fxChain, automation, ...live };
 }
 
 // `display` bounds come from the top-level scene clip (where the expanded row is
@@ -169,6 +202,8 @@ function buildChildElements(
   editBasis: { start: number; sourceFile: string | undefined },
   expandedHostKey: string,
   elements: readonly TimelineElement[],
+  domChildrenById: ReadonlyMap<string, DomClipChild>,
+  hostStateById: ReadonlyMap<string, SubCompositionHostState>,
 ): TimelineElement[] {
   const result: TimelineElement[] = [];
   for (const child of siblings) {
@@ -196,7 +231,14 @@ function buildChildElements(
     });
     result.push({
       ...base,
-      ...hostElementState(elements.find((element) => element.key === key)),
+      ...hostElementState(
+        elements.find((element) => element.key === key),
+        domId ? hostStateById.get(domId) : undefined,
+      ),
+      ...childGroupState(
+        elements.find((element) => element.key === key),
+        domId ? domChildrenById.get(domId) : undefined,
+      ),
       key,
       start: clamped.start,
       duration: clamped.duration,
@@ -215,7 +257,13 @@ function buildChildElements(
       // clips. Fractions strictly between the host's lane and the next integer
       // can never equal a normalized (integer) lane, while still rendering the
       // children as their own ordered rows directly under the host.
-      track: display.track + (result.length + 1) / (siblings.length + 2),
+      //
+      // Confined to the LOWER half of that gap, because a GROUP row anchors at
+      // exactly `firstMemberTrack - 0.5` (`useTimelineTrackDerivations`) — and
+      // the old `k / (n + 2)` hit 0.5 dead on for a host with two children
+      // (2/4), producing a duplicate row key and a duplicated group header. This
+      // scheme's maximum is `0.5 * n / (n + 1)`, strictly under 0.5 for every n.
+      track: display.track + (0.5 * (result.length + 1)) / (siblings.length + 1),
       authoredTrack: base.authoredTrack,
       stackingContextId: base.stackingContextId,
       expandedParentStart: editBasis.start,
@@ -272,6 +320,7 @@ export function buildExpandedElements(
   topLevelId: string,
   siblingParentId: string,
   domClipChildren: DomClipChild[] = [],
+  subCompositionHostState: ReadonlyMap<string, SubCompositionHostState> = new Map(),
 ): TimelineElement[] {
   const topLevelElement = elements.find((el) => el.id === topLevelId || el.domId === topLevelId);
   if (!topLevelElement) return filterToTopLevel(elements, parentMap);
@@ -299,6 +348,7 @@ export function buildExpandedElements(
   };
 
   const parentKey = topLevelElement.key ?? topLevelElement.id;
+  const domChildrenById = new Map(domClipChildren.map((child) => [child.id, child]));
   const expanded = buildChildElements(
     siblings,
     {
@@ -309,6 +359,8 @@ export function buildExpandedElements(
     editBasis,
     parentKey,
     elements,
+    domChildrenById,
+    subCompositionHostState,
   );
   if (expanded.length === 0) return filterToTopLevel(elements, parentMap);
 
@@ -352,6 +404,7 @@ export function useExpandedTimelineElements(): TimelineElement[] {
   const clipManifest = usePlayerStore((s) => s.clipManifest);
   const clipParentMap = usePlayerStore((s) => s.clipParentMap);
   const domClipChildren = usePlayerStore((s) => s.domClipChildren);
+  const subCompositionHostState = usePlayerStore((s) => s.subCompositionHostState);
   const selectedElementId = usePlayerStore((s) => s.selectedElementId);
   const currentTime = usePlayerStore((s) => s.currentTime);
 
@@ -393,6 +446,15 @@ export function useExpandedTimelineElements(): TimelineElement[] {
       topLevel,
       immediateParent,
       domClipChildren,
+      subCompositionHostState,
     );
-  }, [elements, clipManifest, clipParentMap, domClipChildren, rawId, selectedRawId]);
+  }, [
+    elements,
+    clipManifest,
+    clipParentMap,
+    domClipChildren,
+    subCompositionHostState,
+    rawId,
+    selectedRawId,
+  ]);
 }

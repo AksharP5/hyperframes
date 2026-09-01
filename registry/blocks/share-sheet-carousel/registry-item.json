@@ -25,7 +25,8 @@
       "type": "string",
       "role": "content",
       "label": "Sender",
-      "description": "Bold name in the sheet subtitle.",
+      "description": "Name of the brand this video promotes, shown as the sender offering the item. Use the real name of that brand.",
+      "portrays": ["subject_name"],
       "default": "HyperFrames"
     },
     {
@@ -41,7 +42,8 @@
       "type": "string",
       "role": "content",
       "label": "Brand strip",
-      "description": "Small-caps line under the preview, beside the logo.",
+      "description": "Positioning line of the brand this video promotes, in small caps beside its logo.",
+      "portrays": ["subject_tagline"],
       "default": "OPEN-SOURCE VIDEO ENGINE · SHIP FROM HTML"
     },
     {
@@ -59,6 +61,47 @@
       "label": "Decline label",
       "description": "Left-hand action button.",
       "default": "Decline"
+    },
+    {
+      "id": "slideImage1",
+      "type": "image",
+      "role": "content",
+      "label": "Slide image 1",
+      "description": "First carousel image; also fills the blurred background.",
+      "default": "assets/slide-01.jpg"
+    },
+    {
+      "id": "slideImage2",
+      "type": "image",
+      "role": "content",
+      "label": "Slide image 2",
+      "description": "Second carousel image; also fills the blurred background.",
+      "default": "assets/slide-02.jpg"
+    },
+    {
+      "id": "slideImage3",
+      "type": "image",
+      "role": "content",
+      "label": "Slide image 3",
+      "description": "Third carousel image; also fills the blurred background.",
+      "default": "assets/slide-03.jpg"
+    },
+    {
+      "id": "slideImage4",
+      "type": "image",
+      "role": "content",
+      "label": "Slide image 4",
+      "description": "Fourth carousel image; also fills the blurred background.",
+      "default": "assets/slide-04.jpg"
+    },
+    {
+      "id": "brandLogo",
+      "type": "image",
+      "role": "content",
+      "label": "Brand logo",
+      "description": "Transparent horizontal wordmark of the brand this video promotes, in the preview strip.",
+      "portrays": ["subject_logo"],
+      "default": "assets/hyperframes-logo-black.svg"
     }
   ],
   "files": [

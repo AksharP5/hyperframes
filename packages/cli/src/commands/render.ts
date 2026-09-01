@@ -4,6 +4,7 @@ import type { Example } from "./_examples.js";
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { createRenderPlan, resolveBrowserGpuForCli, type RenderFormat } from "./render/plan.js";
 import { seedProjectAuthoringSkill } from "../utils/projectConfig.js";
+import type { CatalogUsage } from "../utils/catalogUsage.js";
 import { presentRenderPlan } from "./render/present.js";
 import { executeRenderPlan, renderLintContinuationHint, runRenderLint } from "./render/execute.js";
 // Test-only seams retained at the command boundary for render behavior tests.
@@ -377,6 +378,12 @@ export interface RenderOptions {
   quality: "draft" | "standard" | "high";
   /** Authoring workflow skill that drove this render (telemetry attribution). */
   authoringSkill?: string;
+  /**
+   * Catalog items installed in this project and those the rendered composition
+   * reaches. Resolved once in the render plan; absent on programmatic callers
+   * that build options by hand, which simply omit the catalog properties.
+   */
+  catalogUsage?: CatalogUsage;
   format: RenderFormat;
   gifLoop?: number;
   workers?: number;
@@ -763,6 +770,7 @@ async function renderDocker(
       docker: true,
       gpu: options.gpu,
       authoringSkill: options.authoringSkill,
+      catalogUsage: options.catalogUsage,
       ...getMemorySnapshot(),
     }),
   );
@@ -1306,8 +1314,9 @@ function persistDeParallelRouterTrialFired(): boolean {
 
 /**
  * After a trial-armed render, persist that the router's OWN bet actually
- * failed — its self-verify/generic-failure safety net fired
- * (`deParallelRouter === "reverted"`) — or that the render-count backstop
+ * failed — its self-verify/generic-failure safety net fired (recorded as
+ * anything other than a clean `"routed"`, e.g. `"reverted"`, or a stall/hang
+ * outcome — heygen-com/hyperframes#3441) — or that the render-count backstop
  * (`DE_PARALLEL_ROUTER_TRIAL_MAX_RENDERS`) was reached, so it's never
  * enabled again for this install. A clean "routed" (the render succeeded
  * with no fallback) does NOT consume the trial by itself — the whole point
@@ -1344,11 +1353,19 @@ function maybeConsumeDeParallelRouterTrial(
   const config = readConfigFresh();
   const renderCount = (config.deParallelRouterTrialRenderCount ?? 0) + 1;
   config.deParallelRouterTrialRenderCount = renderCount;
-  // Trip ONLY on an actual fallback. The old trial also tripped at a
-  // 25-render exposure cap, which was sampling logic: bound how long an
-  // experiment force-enables itself. Under a shipped default that would
-  // switch the feature off behind the user's back after 25 good renders.
-  const fired = outcome === "reverted";
+  // Trip on any recorded non-success, not only the literal string
+  // "reverted". The old trial also tripped at a 25-render exposure cap,
+  // which was sampling logic: bound how long an experiment force-enables
+  // itself. Under a shipped default that would switch the feature off
+  // behind the user's back after 25 good renders — so a clean "routed" (no
+  // fallback needed) must NOT trip. But narrowing the positive check to the
+  // single string "reverted" (heygen-com/hyperframes#3441) meant any other
+  // non-success signal the observability layer might ever record — a stall,
+  // a timeout, a future outcome value — would silently fall through to "not
+  // fired" instead of tripping. `outcome` is `undefined`-filtered above, so
+  // by this point it is a real recorded outcome; the only one that means
+  // "no fallback happened" is "routed" itself.
+  const fired = outcome !== "routed";
   if (fired) {
     config.deParallelRouterTrialFired = true;
     // Latch BEFORE attempting persistence — the decision holds for this
@@ -1498,6 +1515,7 @@ function trackRenderMetrics(
     docker,
     gpu: options.gpu,
     authoringSkill: options.authoringSkill,
+    catalogUsage: options.catalogUsage,
     staticDedupEnabled: perf?.staticDedup?.enabled,
     staticDedupArmed: perf?.staticDedup?.armed,
     staticDedupSkipReason: perf?.staticDedup?.skipReason,

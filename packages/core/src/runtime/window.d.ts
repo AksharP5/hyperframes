@@ -30,6 +30,15 @@ declare global {
   interface Window {
     __timelines: Record<string, RuntimeTimelineLike>;
     __player?: PlayerAPI;
+    __hyperframes?: {
+      registerRuntimeDataHandler?: (
+        channel: string,
+        handler: (payload: unknown) => void,
+      ) => () => void;
+      setRuntimeData?: (channel: string, payload: unknown, requestId?: number) => void;
+      clearRuntimeData?: (channel: string) => void;
+      [key: string]: unknown;
+    };
     __clipManifest?: RuntimeTimelineMessage;
     __clipTree?: ClipTree;
     __hf?: {
@@ -37,12 +46,6 @@ declare global {
       onSwallowed?: (label: string, err: unknown) => void;
       seek?: (timeSeconds: number, options?: RuntimeSeekOptions) => void;
       duration?: number;
-      /**
-       * Studio's "Hear only this" push: the full set of soloed clip/group ids,
-       * replaced wholesale on every change. Session-only by design — never
-       * read from or written to any document attribute.
-       */
-      setAudioSolo?: (ids: readonly string[]) => void;
     };
     __playerReady?: boolean;
     __renderReady?: boolean;

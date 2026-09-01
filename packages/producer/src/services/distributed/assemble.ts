@@ -45,6 +45,7 @@ import { fpsToFfmpegArg } from "@hyperframes/core";
 import { defaultLogger, type ProducerLogger } from "../../logger.js";
 import { formatExportFrameName } from "../../utils/paths.js";
 import { padOrTrimAudioToVideoFrameCount } from "../render/audioPadTrim.js";
+import { encoderFailureError } from "../render/encoderInterruption.js";
 import type { ChunkSliceJson } from "../render/stages/freezePlan.js";
 import { DISTRIBUTED_RENDER_CAPABILITIES, readPlanProtocolV1 } from "./planProtocol.js";
 import { validatePlanV2MaterializedTarget } from "./planV2.js";
@@ -183,10 +184,10 @@ export async function assemble(
       remuxArgs.push("-y", concatOutputPath);
       const remuxResult = await runFfmpeg(remuxArgs, { signal: abortSignal });
       if (!remuxResult.success) {
-        throw new Error(
-          `[assemble] ffmpeg single-chunk remux failed (exit ${remuxResult.exitCode}): ` +
-            `${remuxResult.stderr.slice(-400)}`,
-        );
+        throw encoderFailureError("[assemble] ffmpeg single-chunk remux failed", {
+          error: `exit ${remuxResult.exitCode}: ${remuxResult.stderr.slice(-400)}`,
+          failureReason: remuxResult.failureReason,
+        });
       }
     } else {
       // Concat list file — one `file '<path>'` per chunk, in order. ffmpeg's
@@ -218,10 +219,10 @@ export async function assemble(
       concatArgs.push("-y", concatOutputPath);
       const concatResult = await runFfmpeg(concatArgs, { signal: abortSignal });
       if (!concatResult.success) {
-        throw new Error(
-          `[assemble] ffmpeg concat-copy failed (exit ${concatResult.exitCode}): ` +
-            `${concatResult.stderr.slice(-400)}`,
-        );
+        throw encoderFailureError("[assemble] ffmpeg concat-copy failed", {
+          error: `exit ${concatResult.exitCode}: ${concatResult.stderr.slice(-400)}`,
+          failureReason: concatResult.failureReason,
+        });
       }
     }
 
@@ -288,10 +289,10 @@ export async function assemble(
       cfrArgs.push("-y", cfrOutputPath);
       const cfrResult = await runFfmpeg(cfrArgs, { signal: abortSignal });
       if (!cfrResult.success) {
-        throw new Error(
-          `[assemble] ffmpeg cfr re-encode failed (exit ${cfrResult.exitCode}): ` +
-            `${cfrResult.stderr.slice(-400)}`,
-        );
+        throw encoderFailureError("[assemble] ffmpeg cfr re-encode failed", {
+          error: `exit ${cfrResult.exitCode}: ${cfrResult.stderr.slice(-400)}`,
+          failureReason: cfrResult.failureReason,
+        });
       }
       postConcatPath = cfrOutputPath;
       log.info("[assemble] cfr re-encode applied", {
@@ -302,10 +303,7 @@ export async function assemble(
     }
 
     // ── 3. Audio: pad-or-trim then mux ────────────────────────────────────
-    let normalizedAudio: {
-      path: string;
-      preserveAudioPrimingEditList: boolean;
-    } | null = null;
+    let normalizedAudioPath: string | null = null;
     if (audioPath !== null && existsSync(audioPath)) {
       const paddedAudioPath = join(workDir, "audio-padded.m4a");
       const padTrimResult = await padOrTrimAudioToVideoFrameCount({
@@ -315,12 +313,9 @@ export async function assemble(
         signal: abortSignal,
       });
       if (!padTrimResult.success) {
-        throw new Error(`[assemble] audio pad/trim failed: ${padTrimResult.error}`);
+        throw encoderFailureError("[assemble] audio pad/trim failed", padTrimResult);
       }
-      normalizedAudio = {
-        path: paddedAudioPath,
-        preserveAudioPrimingEditList: padTrimResult.operation !== "copy",
-      };
+      normalizedAudioPath = paddedAudioPath;
       log.info("[assemble] audio normalized for mux", {
         operation: padTrimResult.operation,
         targetDurationSeconds: padTrimResult.targetDurationSeconds,
@@ -333,21 +328,22 @@ export async function assemble(
     // because it operates on a `RenderJob` and emits `updateJobStatus`
     // payloads — the distributed activity has no job to thread through.
     const muxOutputPath =
-      normalizedAudio !== null ? join(workDir, `mux.${plan.dimensions.format}`) : postConcatPath;
-    if (normalizedAudio !== null) {
+      normalizedAudioPath !== null
+        ? join(workDir, `mux.${plan.dimensions.format}`)
+        : postConcatPath;
+    if (normalizedAudioPath !== null) {
       const muxResult = await muxVideoWithAudio(
         postConcatPath,
-        normalizedAudio.path,
+        normalizedAudioPath,
         muxOutputPath,
         abortSignal,
         {
           audioCodec: "aac",
-          preserveAudioPrimingEditList: normalizedAudio.preserveAudioPrimingEditList,
         },
         { num: plan.dimensions.fpsNum, den: plan.dimensions.fpsDen },
       );
       if (!muxResult.success) {
-        throw new Error(`[assemble] audio mux failed: ${muxResult.error}`);
+        throw encoderFailureError("[assemble] audio mux failed", muxResult);
       }
     }
 
@@ -364,7 +360,7 @@ export async function assemble(
       },
     );
     if (!faststartResult.success) {
-      throw new Error(`[assemble] faststart failed: ${faststartResult.error}`);
+      throw encoderFailureError("[assemble] faststart failed", faststartResult);
     }
   } finally {
     try {

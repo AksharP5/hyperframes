@@ -6,10 +6,14 @@ import { sourceAliases } from "../../scripts/package-subpaths.mjs";
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf-8")) as {
   version: string;
 };
+const producerPkg = JSON.parse(
+  readFileSync(new URL("../producer/package.json", import.meta.url), "utf-8"),
+) as { version: string };
 
 export default defineConfig({
   entry: {
     cli: "src/cli.ts",
+    fontLocalizeCli: "src/fontLocalizeCli.ts",
     runtimeVersion: "src/runtimeVersion.ts",
     shaderTransitionWorker: "../producer/src/services/shaderTransitionWorker.ts",
   },
@@ -79,6 +83,7 @@ var __dirname = __hf_dirname(__filename);`,
   ],
   define: {
     __CLI_VERSION__: JSON.stringify(pkg.version),
+    __PRODUCER_VERSION__: JSON.stringify(producerPkg.version),
   },
   esbuildOptions(options) {
     options.alias = {

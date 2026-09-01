@@ -10,7 +10,7 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
   previewSrc="/public/catalog/blocks/notification-cascade.json"
   compositionId="notification-cascade"
   compositionSrc="compositions/notification-cascade.html"
-  variables={[{"id":"notifTitle","type":"string","role":"content","label":"Notification title","description":"Bold first line on every banner.","default":"New render"},{"id":"message1","type":"string","role":"content","label":"Message 1","description":"Subtitle of the first banner to land.","default":"Launch video is ready."},{"id":"message2","type":"string","role":"content","label":"Message 2","description":"Subtitle of the second banner.","default":"All checks passed."},{"id":"message3","type":"string","role":"content","label":"Message 3","description":"Subtitle of the third banner.","default":"4K render done in 92s."},{"id":"message4","type":"string","role":"content","label":"Message 4","description":"Subtitle of the fourth banner.","default":"Published to the catalog."},{"id":"appName","type":"string","role":"content","label":"App name","description":"Small credit in the corner of every banner.","default":"HyperFrames"},{"id":"headlineTop","type":"string","role":"content","label":"End-card line 1","description":"First line of the closing card.","default":"SHIP VIDEO"},{"id":"headlineAccent","type":"string","role":"content","label":"End-card line 2","description":"Accented second line of the closing card.","default":"FROM HTML"},{"id":"footerText","type":"string","role":"content","label":"End-card footer","description":"URL or call to action under the headline.","default":"hyperframes.heygen.com"}]}
+  variables={[{"id":"notifTitle","type":"string","role":"content","label":"Notification title","description":"Bold first line on every banner.","default":"New render"},{"id":"message1","type":"string","role":"content","label":"Message 1","description":"Subtitle of the first banner to land.","default":"Launch video is ready."},{"id":"message2","type":"string","role":"content","label":"Message 2","description":"Subtitle of the second banner.","default":"All checks passed."},{"id":"message3","type":"string","role":"content","label":"Message 3","description":"Subtitle of the third banner.","default":"4K render done in 92s."},{"id":"message4","type":"string","role":"content","label":"Message 4","description":"Subtitle of the fourth banner.","default":"Published to the catalog."},{"id":"appName","type":"string","role":"content","label":"App name","description":"Name of the brand this video promotes, credited in the corner of every banner. Use the real name of that brand.","portrays":["subject_name"],"default":"HyperFrames"},{"id":"headlineTop","type":"string","role":"content","label":"End-card line 1","description":"First line of the closing card.","default":"SHIP VIDEO"},{"id":"headlineAccent","type":"string","role":"content","label":"End-card line 2","description":"Accented second line of the closing card.","default":"FROM HTML"},{"id":"footerText","type":"string","role":"content","label":"End-card footer","description":"Domain of the brand this video promotes, under the end-card headline. Use the real domain, or a call to action when no domain fits.","portrays":["subject_domain"],"default":"hyperframes.heygen.com"},{"id":"brandLogo","type":"image","role":"content","label":"Brand logo","description":"Transparent mark of the brand this video promotes, centered on the closing card.","portrays":["subject_logo"],"default":"assets/hyperframes-logo-white.svg"}]}
 >
 
 ```html notification-cascade.html
@@ -23,10 +23,11 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
     { "id": "message2", "type": "string", "role": "content", "label": "Message 2", "description": "Subtitle of the second banner.", "default": "All checks passed." },
     { "id": "message3", "type": "string", "role": "content", "label": "Message 3", "description": "Subtitle of the third banner.", "default": "4K render done in 92s." },
     { "id": "message4", "type": "string", "role": "content", "label": "Message 4", "description": "Subtitle of the fourth banner.", "default": "Published to the catalog." },
-    { "id": "appName", "type": "string", "role": "content", "label": "App name", "description": "Small credit in the corner of every banner.", "default": "HyperFrames" },
+    { "id": "appName", "type": "string", "role": "content", "label": "App name", "description": "Name of the brand this video promotes, credited in the corner of every banner. Use the real name of that brand.", "portrays": ["subject_name"], "default": "HyperFrames" },
     { "id": "headlineTop", "type": "string", "role": "content", "label": "End-card line 1", "description": "First line of the closing card.", "default": "SHIP VIDEO" },
     { "id": "headlineAccent", "type": "string", "role": "content", "label": "End-card line 2", "description": "Accented second line of the closing card.", "default": "FROM HTML" },
-    { "id": "footerText", "type": "string", "role": "content", "label": "End-card footer", "description": "URL or call to action under the headline.", "default": "hyperframes.heygen.com" }
+    { "id": "footerText", "type": "string", "role": "content", "label": "End-card footer", "description": "Domain of the brand this video promotes, under the end-card headline. Use the real domain, or a call to action when no domain fits.", "portrays": ["subject_domain"], "default": "hyperframes.heygen.com" },
+    { "id": "brandLogo", "type": "image", "role": "content", "label": "Brand logo", "description": "Transparent mark of the brand this video promotes, centered on the closing card.", "portrays": ["subject_logo"], "default": "assets/hyperframes-logo-white.svg" }
   ]'
 >
   <head>
@@ -374,7 +375,12 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
         <div id="nc-endcard-inner">
           <div id="nc-ec-top">SHIP VIDEO</div>
           <div id="nc-ec-accent">FROM HTML</div>
-          <img id="nc-ec-mark" src="assets/hyperframes-logo-white.svg" alt="HyperFrames" />
+          <img
+            id="nc-ec-mark"
+            data-var-src="brandLogo"
+            src="assets/hyperframes-logo-white.svg"
+            alt="Brand logo"
+          />
           <div id="nc-ec-footer">hyperframes.heygen.com</div>
         </div>
       </section>
@@ -536,7 +542,7 @@ import { VariablesExplorer } from "/snippets/variables-explorer.jsx";
 
 <InstallCommand command="npx hyperframes add notification-cascade" item="notification-cascade" />
 
-That writes `compositions/notification-cascade.html`, plus 2 supporting files under `assets/`.
+That writes `compositions/notification-cascade.html`, plus 3 supporting files under `assets/`.
 
 ## Add it to your video
 
@@ -569,10 +575,11 @@ want to change on the element:
 | `message2` | `All checks passed.` | string | Subtitle of the second banner. |
 | `message3` | `4K render done in 92s.` | string | Subtitle of the third banner. |
 | `message4` | `Published to the catalog.` | string | Subtitle of the fourth banner. |
-| `appName` | `HyperFrames` | string | Small credit in the corner of every banner. |
+| `appName` | `HyperFrames` | string | Name of the brand this video promotes, credited in the corner of every banner. Use the real name of that brand. |
 | `headlineTop` | `SHIP VIDEO` | string | First line of the closing card. |
 | `headlineAccent` | `FROM HTML` | string | Accented second line of the closing card. |
-| `footerText` | `hyperframes.heygen.com` | string | URL or call to action under the headline. |
+| `footerText` | `hyperframes.heygen.com` | string | Domain of the brand this video promotes, under the end-card headline. Use the real domain, or a call to action when no domain fits. |
+| `brandLogo` | `assets/hyperframes-logo-white.svg` | image | Transparent mark of the brand this video promotes, centered on the closing card. |
 
 Set them with `data-variable-values` on the element that mounts it. These are the
 defaults, so this behaves exactly like the preview above until you change one:
@@ -581,7 +588,7 @@ defaults, so this behaves exactly like the preview above until you change one:
 <div
   data-composition-id="notification-cascade"
   data-composition-src="compositions/notification-cascade.html"
-  data-variable-values='{"notifTitle":"New render","message1":"Launch video is ready.","message2":"All checks passed.","message3":"4K render done in 92s.","message4":"Published to the catalog.","appName":"HyperFrames","headlineTop":"SHIP VIDEO","headlineAccent":"FROM HTML","footerText":"hyperframes.heygen.com"}'
+  data-variable-values='{"notifTitle":"New render","message1":"Launch video is ready.","message2":"All checks passed.","message3":"4K render done in 92s.","message4":"Published to the catalog.","appName":"HyperFrames","headlineTop":"SHIP VIDEO","headlineAccent":"FROM HTML","footerText":"hyperframes.heygen.com","brandLogo":"assets/hyperframes-logo-white.svg"}'
 ></div>
 ```
 
@@ -599,10 +606,11 @@ defaults, so this behaves exactly like the preview above until you change one:
     { "id": "message2", "type": "string", "role": "content", "label": "Message 2", "description": "Subtitle of the second banner.", "default": "All checks passed." },
     { "id": "message3", "type": "string", "role": "content", "label": "Message 3", "description": "Subtitle of the third banner.", "default": "4K render done in 92s." },
     { "id": "message4", "type": "string", "role": "content", "label": "Message 4", "description": "Subtitle of the fourth banner.", "default": "Published to the catalog." },
-    { "id": "appName", "type": "string", "role": "content", "label": "App name", "description": "Small credit in the corner of every banner.", "default": "HyperFrames" },
+    { "id": "appName", "type": "string", "role": "content", "label": "App name", "description": "Name of the brand this video promotes, credited in the corner of every banner. Use the real name of that brand.", "portrays": ["subject_name"], "default": "HyperFrames" },
     { "id": "headlineTop", "type": "string", "role": "content", "label": "End-card line 1", "description": "First line of the closing card.", "default": "SHIP VIDEO" },
     { "id": "headlineAccent", "type": "string", "role": "content", "label": "End-card line 2", "description": "Accented second line of the closing card.", "default": "FROM HTML" },
-    { "id": "footerText", "type": "string", "role": "content", "label": "End-card footer", "description": "URL or call to action under the headline.", "default": "hyperframes.heygen.com" }
+    { "id": "footerText", "type": "string", "role": "content", "label": "End-card footer", "description": "Domain of the brand this video promotes, under the end-card headline. Use the real domain, or a call to action when no domain fits.", "portrays": ["subject_domain"], "default": "hyperframes.heygen.com" },
+    { "id": "brandLogo", "type": "image", "role": "content", "label": "Brand logo", "description": "Transparent mark of the brand this video promotes, centered on the closing card.", "portrays": ["subject_logo"], "default": "assets/hyperframes-logo-white.svg" }
   ]'
 >
   <head>
@@ -950,7 +958,12 @@ defaults, so this behaves exactly like the preview above until you change one:
         <div id="nc-endcard-inner">
           <div id="nc-ec-top">SHIP VIDEO</div>
           <div id="nc-ec-accent">FROM HTML</div>
-          <img id="nc-ec-mark" src="assets/hyperframes-logo-white.svg" alt="HyperFrames" />
+          <img
+            id="nc-ec-mark"
+            data-var-src="brandLogo"
+            src="assets/hyperframes-logo-white.svg"
+            alt="Brand logo"
+          />
           <div id="nc-ec-footer">hyperframes.heygen.com</div>
         </div>
       </section>

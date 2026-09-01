@@ -236,6 +236,12 @@
       "types": "./dist/runtime/stackingContext.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./runtime/web-audio-route": {
+      "source": "./src/runtime/webAudioRoute.ts",
+      "runtime": "./dist/runtime/webAudioRoute.js",
+      "types": "./dist/runtime/webAudioRoute.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./compiler/html-document": {
       "source": "./src/compiler/htmlDocument.ts",
       "runtime": "./dist/compiler/htmlDocument.js",

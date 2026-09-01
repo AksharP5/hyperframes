@@ -17,6 +17,7 @@ import {
   shouldCopyExtractedFrames,
   VideoExtractionStageError,
 } from "./extractVideosStage.js";
+import { EncoderInterruptedError } from "../encoderInterruption.js";
 
 function makeVideo(overrides: Partial<VideoElement> = {}): VideoElement {
   return {
@@ -77,6 +78,21 @@ function extractionResult(errors: VideoExtractionFailure[]): ExtractionResult {
     },
   };
 }
+
+describe("encoder interruption classification", () => {
+  it("preserves an external ffmpeg interruption as the structured retry signal", () => {
+    const result = extractionResult([
+      {
+        videoId: "v1",
+        kind: "external_interruption",
+        retryable: true,
+        error: "ffmpeg handled signal 15",
+      },
+    ]);
+
+    expect(() => assertVideoExtractionSucceeded(result)).toThrow(EncoderInterruptedError);
+  });
+});
 
 describe("appendAutoDetectedVideoAudio", () => {
   it("adds audio for an audible video whose file has an audio track", () => {
@@ -205,14 +221,14 @@ describe("shouldCopyExtractedFrames", () => {
 });
 
 describe("resolveVideoExtractionPolicy", () => {
-  it("preserves stable behavior by default", () => {
+  it("enforces extraction failures by default (#3372)", () => {
     expect(resolveVideoExtractionPolicy({})).toEqual({
-      failureMode: "off",
+      failureMode: "enforce",
       maxTransientRetries: 0,
     });
   });
 
-  it("allows only the bounded candidate rollout values", () => {
+  it("allows explicit opt-out or observe mode", () => {
     expect(
       resolveVideoExtractionPolicy({
         HF_VIDEO_EXTRACTION_FAILURE_MODE: "observe",
@@ -221,10 +237,15 @@ describe("resolveVideoExtractionPolicy", () => {
     ).toEqual({ failureMode: "observe", maxTransientRetries: 1 });
     expect(
       resolveVideoExtractionPolicy({
-        HF_VIDEO_EXTRACTION_FAILURE_MODE: "unexpected",
-        HF_VIDEO_EXTRACTION_MAX_RETRIES: "1",
+        HF_VIDEO_EXTRACTION_FAILURE_MODE: "off",
       }),
     ).toEqual({ failureMode: "off", maxTransientRetries: 0 });
+    expect(
+      resolveVideoExtractionPolicy({
+        HF_VIDEO_EXTRACTION_FAILURE_MODE: "enforce",
+        HF_VIDEO_EXTRACTION_MAX_RETRIES: "1",
+      }),
+    ).toEqual({ failureMode: "enforce", maxTransientRetries: 1 });
   });
 });
 

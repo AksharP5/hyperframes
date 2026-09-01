@@ -55,6 +55,7 @@ import {
 } from "../../renderOrchestrator.js";
 import { materializeExtractedFramesForCompiledDir, type CompositionMetadata } from "../shared.js";
 import type { ProducerLogger } from "../../../logger.js";
+import { encoderFailureError } from "../encoderInterruption.js";
 
 export interface ExtractVideosStageInput {
   projectDir: string;
@@ -131,15 +132,17 @@ export interface VideoExtractionPolicy {
 }
 
 /**
- * Candidate-lane rollout controls. Stable behavior remains unchanged unless
- * explicitly enabled in the producer environment.
+ * Extraction failure policy. Defaults to `enforce` so per-source errors
+ * surface as render failures instead of being silently swallowed (#3372).
+ * Set `HF_VIDEO_EXTRACTION_FAILURE_MODE=off` to restore the old silent
+ * behavior, or `observe` to log without failing.
  */
 export function resolveVideoExtractionPolicy(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): VideoExtractionPolicy {
   const rawMode = env.HF_VIDEO_EXTRACTION_FAILURE_MODE?.trim().toLowerCase();
   const failureMode: VideoExtractionFailureMode =
-    rawMode === "observe" || rawMode === "enforce" ? rawMode : "off";
+    rawMode === "observe" || rawMode === "off" ? rawMode : "enforce";
   const maxTransientRetries =
     failureMode !== "off" && env.HF_VIDEO_EXTRACTION_MAX_RETRIES?.trim() === "1" ? 1 : 0;
   return { failureMode, maxTransientRetries };
@@ -167,8 +170,18 @@ export class VideoExtractionStageError extends Error {
 }
 
 export function assertVideoExtractionSucceeded(result: ExtractionResult): void {
+  throwIfEncoderInterrupted(result);
   const error = buildVideoExtractionStageError(result);
   if (error) throw error;
+}
+
+function throwIfEncoderInterrupted(result: ExtractionResult): void {
+  const interrupted = result.errors.find((failure) => failure.kind === "external_interruption");
+  if (!interrupted) return;
+  throw encoderFailureError("Video frame extraction failed", {
+    error: String(interrupted.error),
+    failureReason: "external_interruption",
+  });
 }
 
 function buildVideoExtractionStageError(
@@ -224,6 +237,16 @@ function throwHdrProbeFailures(
   mode: VideoExtractionFailureMode,
 ): void {
   if (failures.length === 0) return;
+  const interrupted = failures.find(
+    (failure) => failure.classified.kind === "external_interruption",
+  );
+  if (interrupted) {
+    throw encoderFailureError("Video HDR probe failed", {
+      error:
+        interrupted.error instanceof Error ? interrupted.error.message : String(interrupted.error),
+      failureReason: "external_interruption",
+    });
+  }
   if (mode === "enforce") {
     throw buildHdrProbeStageError(failures.map((failure) => failure.classified));
   }
@@ -411,6 +434,7 @@ export async function runExtractVideosStage(
     extractionResult.phaseBreakdown.transientRetries =
       (extractionResult.phaseBreakdown.transientRetries ?? 0) + hdrProbeTransientRetries;
     assertNotAborted();
+    throwIfEncoderInterrupted(extractionResult);
     failureToEnforce = applyVideoExtractionFailurePolicy(extractionResult, extractionPolicy, log);
 
     materializeExtractedFramesForCompiledDir(extractionResult.extracted, compiledDir, {

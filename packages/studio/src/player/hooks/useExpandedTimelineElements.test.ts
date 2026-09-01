@@ -270,6 +270,49 @@ describe("buildExpandedElements", () => {
     expect(child.timelineLocked).toBe(true);
   });
 
+  // The test above only covers a host with no compositionSrc, where the child's
+  // key falls back to the `index.html` scope and a flat store twin can exist. A
+  // REAL sub-composition scopes the child key to the sub-comp file, and clips
+  // whose parent composition is itself in the manifest are filtered out of the
+  // flat store before it is built (`processTimelineMessage`). So the twin never
+  // exists there and the inheritance above is dead code for the one case it was
+  // written for: the eye reported every hidden child visible, clicking it
+  // rewrote data-hidden, and nothing could be shown again.
+  it("reads hidden and locked off the live element when the child has no flat twin", () => {
+    // Only the host is in the flat store — exactly what the manifest filter leaves.
+    const elements = [
+      el({
+        id: "scene-2",
+        domId: "scene-2",
+        start: 3.25,
+        duration: 3.5,
+        compositionSrc: "scene-2.html",
+      }),
+    ];
+    const manifest = [
+      clip({ id: "scene-2", start: 3.25, duration: 3.5, compositionSrc: "scene-2.html" }),
+      clip({ id: "scene-2-video", start: 3.25, duration: 3.5, parentCompositionId: "scene-2" }),
+    ];
+    const parentMap = new Map([["scene-2-video", "scene-2"]]);
+    const hostState = new Map([["scene-2-video", { hidden: true, timelineLocked: true }]]);
+
+    const out = buildExpandedElements(
+      elements,
+      manifest,
+      parentMap,
+      "scene-2",
+      "scene-2",
+      [],
+      hostState,
+    );
+    const child = out.find((e) => e.domId === "scene-2-video")!;
+    // The child key is scoped to the sub-comp file, so no store element can match it.
+    expect(child.key).toBe("scene-2.html#scene-2-video");
+    expect(elements.some((element) => element.key === child.key)).toBe(false);
+    expect(child.hidden).toBe(true);
+    expect(child.timelineLocked).toBe(true);
+  });
+
   // Sub-comp internals (group + pills) have no data-start, so they're not in the
   // manifest. They arrive as DOM children and must still expand under their host.
   it("expands DOM-only sub-comp children (no manifest clip) under the host", () => {
@@ -644,5 +687,88 @@ describe("buildExpandedElements — collision-free synthetic rows (cross-file la
     }
     // Distinct ordered rows per child.
     expect(children[0].track).not.toBe(children[1].track);
+  });
+
+  /**
+   * A sub-composition that declares BOTH a group and its members keeps those
+   * members out of the flat store entirely — the store holds only the host.
+   * So "inherit membership from the flat twin" had nothing to inherit from,
+   * and the group produced no timeline row at all, for exactly the case group
+   * support was extended to cover. Verified against a real studio session
+   * before this test was written: the flat store held three elements (the
+   * panel, the sub-comp host and an ungrouped bed) and neither voice.
+   */
+  it("takes group membership from the DOM child when there is no flat store twin", () => {
+    const elements = [
+      el({ id: "voices-host", start: 0, duration: 12, compositionSrc: "voices.html" }),
+    ];
+    const manifest = [
+      clip({ id: "voices-host", start: 0, duration: 12, compositionSrc: "voices.html" }),
+    ];
+    const parentMap = new Map([
+      ["voice-1", "voices-host"],
+      ["voice-2", "voices-host"],
+    ]);
+    const domClipChildren = [
+      {
+        id: "voice-1",
+        parentId: "voices-host",
+        hostId: "voices-host",
+        label: "voice-1",
+        stackingContextId: "css:0",
+        audioGroup: "voiceover",
+        audioGroupLabel: "Voiceover",
+        audioGroupVolume: 0.8,
+        audioGroupHidden: false,
+      },
+      {
+        id: "voice-2",
+        parentId: "voices-host",
+        hostId: "voices-host",
+        label: "voice-2",
+        stackingContextId: "css:0",
+        audioGroup: "voiceover",
+        audioGroupLabel: "Voiceover",
+        audioGroupVolume: 0.8,
+        audioGroupHidden: false,
+      },
+    ];
+
+    const out = buildExpandedElements(
+      elements,
+      manifest,
+      parentMap,
+      "voices-host",
+      "voices-host",
+      domClipChildren,
+    );
+
+    const voices = out.filter((e) => e.domId?.startsWith("voice-"));
+    expect(voices).toHaveLength(2);
+    for (const voice of voices) {
+      expect(voice.audioGroup).toBe("voiceover");
+      expect(voice.audioGroupLabel).toBe("Voiceover");
+      expect(voice.audioGroupVolume).toBeCloseTo(0.8, 6);
+    }
+  });
+});
+
+describe("sub-comp child rows never collide with a group anchor", () => {
+  /**
+   * A group row anchors at exactly `firstMemberTrack - 0.5`. The old child
+   * scheme `k / (n + 2)` hit 0.5 dead on for a host with TWO children (2/4),
+   * producing a duplicate row key and a duplicated group header.
+   */
+  it("keeps every child strictly below the host's half-lane", () => {
+    for (const childCount of [1, 2, 3, 4, 7]) {
+      const fractions = Array.from(
+        { length: childCount },
+        (_unused, i) => (0.5 * (i + 1)) / (childCount + 1),
+      );
+      expect(fractions.every((f) => f > 0 && f < 0.5)).toBe(true);
+      // Still distinct and ordered, which is what makes them usable as rows.
+      expect(new Set(fractions).size).toBe(childCount);
+      expect([...fractions].sort((a, b) => a - b)).toEqual(fractions);
+    }
   });
 });
