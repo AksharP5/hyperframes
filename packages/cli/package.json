@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/cli",
-  "version": "0.8.3",
+  "version": "0.8.23",
   "description": "HyperFrames CLI — create, preview, and render HTML video compositions",
   "license": "Apache-2.0",
   "repository": {
@@ -9,7 +9,8 @@
     "directory": "packages/cli"
   },
   "bin": {
-    "hyperframes": "./bin/hyperframes.mjs"
+    "hyperframes": "./bin/hyperframes.mjs",
+    "hyperframes-localize-fonts": "./bin/hyperframes-localize-fonts.mjs"
   },
   "files": [
     "bin",
@@ -30,7 +31,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.0.5",
-    "@puppeteer/browsers": "^3.0.6",
+    "@puppeteer/browsers": "^3.2.1",
     "adm-zip": "^0.6.0",
     "citty": "^0.2.1",
     "compare-versions": "^6.1.1",
@@ -44,7 +45,7 @@
     "open": "^10.0.0",
     "postcss": "^8.5.8",
     "prettier": "^3.8.1",
-    "puppeteer-core": "^25.2.1",
+    "puppeteer-core": "^25.8.0",
     "sharp": "^0.35.0"
   },
   "devDependencies": {
@@ -61,6 +62,7 @@
     "@types/fontkit": "^2.0.9",
     "@types/mime-types": "^3.0.1",
     "@types/node": "^25.0.10",
+    "ajv": "^8.20.0",
     "linkedom": "^0.18.12",
     "picocolors": "^1.1.1",
     "tsup": "^8.0.0",

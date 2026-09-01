@@ -299,6 +299,42 @@ describe("Timeline provider boundary", () => {
     act(() => root.unmount());
   });
 
+  // The same assertion, with a group present. It passed on an empty fixture
+  // while TimelineGroupRow called the THROWING context hook — one grouped clip
+  // and the whole timeline render died, not just the row.
+  it("renders without the provider even when a group row is on screen", () => {
+    const host = createSizedTimelineHost(640);
+    usePlayerStore.setState({
+      duration: 4,
+      timelineReady: true,
+      elements: [
+        {
+          id: "voice-1",
+          domId: "voice-1",
+          tag: "audio",
+          start: 0,
+          duration: 2,
+          track: 0,
+          audioGroup: "voiceover",
+        },
+        {
+          id: "voice-2",
+          domId: "voice-2",
+          tag: "audio",
+          start: 2,
+          duration: 2,
+          track: 1,
+          audioGroup: "voiceover",
+        },
+      ],
+    });
+    const root = createRoot(host);
+    act(() => root.render(React.createElement(Timeline)));
+
+    expect(host.querySelector('[role="treegrid"]')).not.toBeNull();
+    act(() => root.unmount());
+  });
+
   it("renders the complete track list while row virtualization is gated off", () => {
     const host = createSizedTimelineHost(640);
     usePlayerStore.setState({
@@ -389,10 +425,13 @@ describe("Timeline provider boundary", () => {
       button.click();
     });
 
-    const row = button.parentElement?.parentElement;
+    // Up from the rowheader rather than counting parents: the header now lays
+    // its name and its controls out on two lines, so the button sits one level
+    // deeper than it used to.
+    const row = button.closest('[role="rowheader"]')?.parentElement;
     // Row children: [TimelineTrackHeader (sticky column), time-mapped content].
     const trackContent = row?.children.item(1);
-    expect(onToggleTrackHidden).toHaveBeenCalledWith(0, false);
+    expect(onToggleTrackHidden).toHaveBeenCalledWith(0, false, 1);
     expect(trackContent).toBeInstanceOf(HTMLElement);
     if (!(trackContent instanceof HTMLElement)) {
       throw new Error("Expected track content element");
@@ -556,11 +595,11 @@ describe("Timeline provider boundary", () => {
     // Keyframed clip-1 is expanded by default (AE/Figma default); its disclosure
     // lives in the left column. clip-2 has no keyframes so it never shows one.
     const collapseButton = host.querySelector<HTMLButtonElement>(
-      'button[aria-label="Collapse clip-1 keyframes"]',
+      'button[aria-label="Hide clip-1 lanes"]',
     );
     expect(collapseButton).not.toBeNull();
-    expect(host.querySelector('button[aria-label="Expand clip-2 keyframes"]')).toBeNull();
-    expect(host.querySelector('button[aria-label="Collapse clip-2 keyframes"]')).toBeNull();
+    expect(host.querySelector('button[aria-label="Show clip-2 lanes"]')).toBeNull();
+    expect(host.querySelector('button[aria-label="Hide clip-2 lanes"]')).toBeNull();
 
     const clip = host.querySelector<HTMLElement>('[data-el-id="clip-1"]');
     const row = clip?.parentElement?.parentElement;
@@ -571,7 +610,7 @@ describe("Timeline provider boundary", () => {
     expectTrackExpansion(row, [], TRACK_H);
 
     const expandButton = host.querySelector<HTMLButtonElement>(
-      'button[aria-label="Expand clip-1 keyframes"]',
+      'button[aria-label="Show clip-1 lanes"]',
     );
     expect(expandButton).not.toBeNull();
     act(() => expandButton?.click());
@@ -603,8 +642,8 @@ describe("Timeline provider boundary", () => {
     const row = host.querySelector<HTMLElement>('[data-el-id="narration-1"]')?.parentElement
       ?.parentElement;
     // A row of several clips is named for the track, so the caret is too.
-    const caret = () => host.querySelector<HTMLButtonElement>('button[aria-label$=" keyframes"]');
-    expect(caret()?.getAttribute("aria-label")).toBe("Expand Track 1 keyframes");
+    const caret = () => host.querySelector<HTMLButtonElement>('button[aria-label$=" lanes"]');
+    expect(caret()?.getAttribute("aria-label")).toBe("Show Track 1 lanes");
 
     act(() => caret()?.click());
     // One shared volume row, and BOTH clips hold it open.
@@ -647,7 +686,7 @@ describe("Timeline provider boundary", () => {
     });
     const root = createRoot(host);
     act(() => root.render(React.createElement(Timeline)));
-    act(() => host.querySelector<HTMLButtonElement>('button[aria-label$=" keyframes"]')?.click());
+    act(() => host.querySelector<HTMLButtonElement>('button[aria-label$=" lanes"]')?.click());
 
     const before = [...host.querySelectorAll(".hf-automation-lane")];
     expect(before).toHaveLength(2);

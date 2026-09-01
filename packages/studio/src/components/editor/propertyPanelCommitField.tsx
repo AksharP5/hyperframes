@@ -21,7 +21,7 @@ export function CommitField({
   liveCommit?: boolean;
   align?: "left" | "right";
   onPreview?: (nextValue: string) => void;
-  onCommit: (nextValue: string) => void | Promise<void>;
+  onCommit: (nextValue: string) => void | Promise<unknown>;
 }) {
   const [draft, setDraft] = useState(value);
   const valueRef = useRef(value);
@@ -134,7 +134,15 @@ export function CommitField({
       return;
     }
     if (event.key === "Escape") {
-      cancelGestureFromKeyEvent(event);
+      if (cancelGestureFromKeyEvent(event)) return;
+      // No gesture to cancel means the draft was typed. Escape abandons it
+      // rather than leaving it for the blur-commit to write.
+      event.preventDefault();
+      event.stopPropagation();
+      dirtyRef.current = false;
+      setDraft(valueRef.current);
+      if (liveCommit) onPreview?.(valueRef.current);
+      event.currentTarget.blur();
       return;
     }
     if (event.key === "Enter") {

@@ -77,6 +77,7 @@ import {
   type CaptureWarning,
   type SubTimelineWaitOutcome,
   type WorkerSizing,
+  type StaticVerificationOutcome,
   resolveBrowserGpuMode,
   resolveHeadlessShellPath,
   applyConcreteGpuScreenshotClamp,
@@ -110,6 +111,7 @@ import {
 import { createMemorySampler, type MemorySampler, updateJobStatus } from "./render/shared.js";
 import { buildRenderErrorDetails } from "./render/cleanup.js";
 import { publishRenderFailure } from "./render/renderEventPublisher.js";
+import { EncoderInterruptedError } from "./render/encoderInterruption.js";
 import { RenderExecutionContext } from "./render/renderExecutionContext.js";
 import { ArtifactTransaction } from "./render/artifactTransaction.js";
 import {
@@ -461,8 +463,16 @@ export interface RenderPerfSummary {
     enabled: boolean;
     armed: boolean;
     predictedFrames: number;
+    verifiedFrames?: number;
     reusedFrames: number;
     skipReason?: string;
+    verificationOutcomes?: StaticVerificationOutcome[];
+    plannedRuns?: number;
+    completedRuns?: number;
+    screenshots?: number;
+    seeks?: number;
+    comparisons?: number;
+    verificationElapsedMs?: number;
   };
   /**
    * BeginFrame no-damage reuse outcome for this render (Linux/Docker),
@@ -545,6 +555,27 @@ export interface RenderPerfSummary {
     boundaryFrames: number;
     /** Per-frame "No cached paint record" screenshot fallbacks. */
     ncprFallbacks: number;
+  };
+  /**
+   * Render-host facts, captured from the orchestrator process. Lets fleet-wide
+   * telemetry correlate render performance with the machine it ran on — most
+   * importantly `cpuCount` vs the top-level `workers` (are we under-/over-
+   * subscribing cores?) and `totalMemMb` (does `lowMemoryMode` / single-worker
+   * collapse track real memory pressure?). `gpuDisabled` completes the GPU
+   * picture alongside `observability.browserGpuMode`.
+   *
+   * Reflects the ORCHESTRATOR host. For distributed renders the chunk workers
+   * may run on different machines; this is still the right signal for the
+   * common single-machine render. Optional for back-compat with serialized
+   * older summaries.
+   */
+  host?: {
+    platform: string;
+    arch: string;
+    cpuCount: number;
+    totalMemMb: number;
+    nodeVersion: string;
+    gpuDisabled: boolean;
   };
 }
 
@@ -655,7 +686,13 @@ export function applyRenderWarningPolicy(
   const hasAudioProcessingFailure = job.warnings.some(
     (warning) => warning.code === "audio_processing_failed",
   );
-  if (strictness === "strict" || hasAudioProcessingFailure) {
+  // A script failure means the composition's GSAP timelines can never
+  // register — the render produces a degenerate 2-frame output that looks
+  // like a still image. Fail loudly rather than shipping garbage (#3352).
+  const hasSubTimelineScriptFailure = job.warnings.some(
+    (warning) => warning.code === "sub_timeline_script_failure",
+  );
+  if (strictness === "strict" || hasAudioProcessingFailure || hasSubTimelineScriptFailure) {
     throw new RenderQualityError(job.warnings);
   }
 }
@@ -1806,10 +1843,11 @@ export function resolveParallelRouterRetryPlan(args: {
 export function shouldRetryViaPinnedFallback(args: {
   isVerifyError: boolean;
   isCancellation: boolean;
+  isEncoderInterrupted?: boolean;
   deWorkerInversion: "inverted" | "reverted" | undefined;
   deParallelRouter: "routed" | "reverted" | undefined;
 }): boolean {
-  if (args.isCancellation) return false;
+  if (args.isCancellation || args.isEncoderInterrupted) return false;
   if (args.isVerifyError) return true;
   return args.deWorkerInversion === "inverted" || args.deParallelRouter === "routed";
 }
@@ -3565,6 +3603,7 @@ async function executeRenderPipeline(input: {
             !shouldRetryViaPinnedFallback({
               isVerifyError,
               isCancellation,
+              isEncoderInterrupted: err instanceof EncoderInterruptedError,
               deWorkerInversion,
               deParallelRouter,
             })
@@ -3913,7 +3952,15 @@ async function executeRenderPipeline(input: {
       observability.checkpoint("assemble", `skipped for ${outputFormat}`);
     }
 
-    artifactTransaction.validate();
+    await artifactTransaction.validate(
+      !isPngSequence && !isGif && Number.isFinite(job.duration) && job.duration > 0
+        ? {
+            expectedDurationSeconds: job.duration,
+            fps: fpsToNumber(job.config.fps),
+            expectedFrames: captureTotalFrames,
+          }
+        : undefined,
+    );
 
     const totalElapsed = Date.now() - pipelineStart;
 
@@ -3971,6 +4018,7 @@ async function executeRenderPipeline(input: {
       observability: observabilitySummary,
       peakRssBytes: memSampler.peakRssBytes(),
       peakHeapUsedBytes: memSampler.peakHeapUsedBytes(),
+      gpuDisabled: cfg.disableGpu,
     });
     job.perfSummary = perfSummary;
     if (job.config.debug) {
@@ -3995,7 +4043,7 @@ async function executeRenderPipeline(input: {
       }
     }
 
-    artifactTransaction.commit();
+    await artifactTransaction.commit();
     job.outputPath = outputPath;
     updateJobStatus(job, "complete", "Render complete", 100, onProgress);
     await eventPublisher.flush();
@@ -4007,6 +4055,12 @@ async function executeRenderPipeline(input: {
       throw error instanceof RenderCancelledError
         ? error
         : new RenderCancelledError("render_cancelled");
+    }
+    if (error instanceof EncoderInterruptedError) {
+      log.warn("[Render] encoder process interrupted by host lifecycle", {
+        code: error.code,
+        diagnostic: error.diagnosticMessage.slice(-2_000),
+      });
     }
     const memoryGuidance = describeMemoryExhaustion(error, {
       width: captureCompositionWidth,

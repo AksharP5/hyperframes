@@ -2,6 +2,9 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { usePlayerStore, type TimelineElement } from "../player";
+import { resolveAudioGroups } from "@hyperframes/core/audio-groups";
+import { readTagSnippetByTarget } from "../utils/sourcePatcher";
+import { createAudioGroupAndAssignMembers } from "./timelineAudioGroupCreate";
 import { toggleTimelineElementHidden, toggleTimelineTrackHidden } from "./timelineTrackVisibility";
 
 afterEach(() => {
@@ -194,6 +197,118 @@ describe("toggleTimelineTrackHidden", () => {
 
     expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Show track 2");
   });
+
+  it("labels an audio-only track Mute/Unmute instead of Hide/Show", async () => {
+    const files = new Map([
+      ["index.html", `<div id="voiceover" data-start="0" data-duration="2"></div>`],
+    ]);
+    stubProjectFiles(files);
+
+    const recordEdit = vi.fn();
+
+    await toggleTimelineTrackHidden({
+      projectId: "project-1",
+      activeCompPath: "index.html",
+      timelineElements: [element({ id: "voiceover", domId: "voiceover", track: 0, tag: "audio" })],
+      track: 0,
+      hidden: true,
+      previewIframe: null,
+      writeProjectFile: async () => {},
+      recordEdit,
+      domEditSaveTimestampRef: { current: 0 },
+      pendingTimelineEditPathRef: { current: new Set() },
+    });
+
+    expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Mute track 1");
+  });
+
+  // The header derives its row from the GROUP-AWARE order (a synthetic anchor
+  // row, members pulled contiguous); this function's own fallback derives it
+  // from ascending element-bearing keys. Once a group exists those disagree, so
+  // the same click announced "Mute track 2" and recorded "Mute track 1". The
+  // clicked control passes the row it showed, and that is what gets recorded.
+  it("records the display row the clicked control announced, not its own derivation", async () => {
+    const files = new Map([
+      ["index.html", `<div id="voiceover" data-start="0" data-duration="2"></div>`],
+    ]);
+    stubProjectFiles(files);
+
+    const recordEdit = vi.fn();
+
+    await toggleTimelineTrackHidden({
+      projectId: "project-1",
+      activeCompPath: "index.html",
+      timelineElements: [element({ id: "voiceover", domId: "voiceover", track: 0, tag: "audio" })],
+      track: 0,
+      hidden: true,
+      // Row 2 in the header: the group's anchor row sits above this member.
+      displayNumber: 2,
+      previewIframe: null,
+      writeProjectFile: async () => {},
+      recordEdit,
+      domEditSaveTimestampRef: { current: 0 },
+      pendingTimelineEditPathRef: { current: new Set() },
+    });
+
+    expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Mute track 2");
+  });
+
+  it("labels unmuting an audio-only track back on", async () => {
+    const files = new Map([
+      ["index.html", `<div id="voiceover" data-start="0" data-duration="2" data-hidden=""></div>`],
+    ]);
+    stubProjectFiles(files);
+
+    const recordEdit = vi.fn();
+
+    await toggleTimelineTrackHidden({
+      projectId: "project-1",
+      activeCompPath: "index.html",
+      timelineElements: [
+        element({ id: "voiceover", domId: "voiceover", track: 0, tag: "audio", hidden: true }),
+      ],
+      track: 0,
+      hidden: false,
+      previewIframe: null,
+      writeProjectFile: async () => {},
+      recordEdit,
+      domEditSaveTimestampRef: { current: 0 },
+      pendingTimelineEditPathRef: { current: new Set() },
+    });
+
+    expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Unmute track 1");
+  });
+
+  it("keeps Hide/Show wording for a mixed (audio + visual) track", async () => {
+    const files = new Map([
+      [
+        "index.html",
+        `<div id="voiceover" data-start="0" data-duration="2"></div>
+<div id="caption" data-start="0" data-duration="2"></div>`,
+      ],
+    ]);
+    stubProjectFiles(files);
+
+    const recordEdit = vi.fn();
+
+    await toggleTimelineTrackHidden({
+      projectId: "project-1",
+      activeCompPath: "index.html",
+      timelineElements: [
+        element({ id: "voiceover", domId: "voiceover", track: 0, tag: "audio" }),
+        element({ id: "caption", domId: "caption", track: 0, tag: "div" }),
+      ],
+      track: 0,
+      hidden: true,
+      previewIframe: null,
+      writeProjectFile: async () => {},
+      recordEdit,
+      domEditSaveTimestampRef: { current: 0 },
+      pendingTimelineEditPathRef: { current: new Set() },
+    });
+
+    expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Hide track 1");
+  });
 });
 
 describe("toggleTimelineElementHidden", () => {
@@ -312,5 +427,224 @@ describe("toggleTimelineElementHidden", () => {
     expect(writes[0]?.content).toContain('id="badge" data-start="2" data-duration="2"></div>');
     expect(recordEdit).toHaveBeenCalledTimes(1);
     expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Hide 2 elements");
+  });
+});
+
+describe("createAudioGroupAndAssignMembers", () => {
+  it("writes data-audio-group on every member in ONE atomic edit and updates the player store", async () => {
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    if (iframe.contentDocument) {
+      iframe.contentDocument.body.innerHTML = `
+        <audio id="narration"></audio>
+        <audio id="interview-guest"></audio>
+      `;
+    }
+
+    const files = new Map([
+      [
+        "index.html",
+        `<audio id="narration" data-start="0" data-duration="5"></audio>
+<audio id="interview-guest" data-start="10" data-duration="5"></audio>
+<audio id="sfx-boom" data-start="0" data-duration="1"></audio>`,
+      ],
+    ]);
+    stubProjectFiles(files);
+
+    const narration = element({
+      id: "narration",
+      key: "index.html:#narration",
+      domId: "narration",
+      track: 0,
+    });
+    const guest = element({
+      id: "interview-guest",
+      key: "index.html:#interview-guest",
+      domId: "interview-guest",
+      track: 1,
+    });
+    usePlayerStore.getState().setElements([narration, guest]);
+
+    const writes = new Map<string, string>();
+    const recordEdit = vi.fn();
+
+    const changedPaths = await createAudioGroupAndAssignMembers({
+      projectId: "project-1",
+      activeCompPath: "index.html",
+      elements: [narration, guest],
+      groupId: "voiceover",
+      previewIframe: iframe,
+      writeProjectFile: async (path, content) => {
+        writes.set(path, content);
+      },
+      recordEdit,
+      domEditSaveTimestampRef: { current: 0 },
+      pendingTimelineEditPathRef: { current: new Set() },
+    });
+
+    expect(changedPaths).toEqual(["index.html"]);
+    expect(
+      iframe.contentDocument?.getElementById("narration")?.getAttribute("data-audio-group"),
+    ).toBe("voiceover");
+    expect(
+      iframe.contentDocument?.getElementById("interview-guest")?.getAttribute("data-audio-group"),
+    ).toBe("voiceover");
+    // One write carrying BOTH members — per-element writes would clobber each
+    // other (each starts from the original file content).
+    expect(writes.get("index.html")).toContain(
+      'id="narration" data-start="0" data-duration="5" data-audio-group="voiceover"',
+    );
+    expect(writes.get("index.html")).toContain(
+      'id="interview-guest" data-start="10" data-duration="5" data-audio-group="voiceover"',
+    );
+    expect(writes.get("index.html")).toContain(
+      'id="sfx-boom" data-start="0" data-duration="1"></audio>',
+    );
+    expect(recordEdit).toHaveBeenCalledTimes(1);
+    expect(recordEdit.mock.calls[0]?.[0]?.label).toBe("Group 2 voice clips");
+    expect(
+      usePlayerStore.getState().elements.find((el) => el.key === "index.html:#narration")
+        ?.audioGroup,
+    ).toBe("voiceover");
+    expect(
+      usePlayerStore.getState().elements.find((el) => el.key === "index.html:#interview-guest")
+        ?.audioGroup,
+    ).toBe("voiceover");
+  });
+
+  // The group element is what every LATER group write addresses — mute, the bus
+  // fader's data-volume, an FX preset all go through
+  // `buildPatchTarget({ domId: groupId })`. Membership alone parses, but leaves
+  // a group nothing can edit.
+  it("emits the group's own <hf-audio-group> element, patchable by its DOM id", async () => {
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    if (iframe.contentDocument) {
+      iframe.contentDocument.body.innerHTML = `
+        <audio id="narration"></audio>
+        <audio id="interview-guest"></audio>
+      `;
+    }
+    const files = new Map([
+      [
+        "index.html",
+        `<html><body>
+<audio id="narration" data-start="0" data-duration="5"></audio>
+<audio id="interview-guest" data-start="10" data-duration="5"></audio>
+</body></html>`,
+      ],
+    ]);
+    stubProjectFiles(files);
+
+    const narration = element({ id: "narration", domId: "narration", track: 0 });
+    const guest = element({ id: "interview-guest", domId: "interview-guest", track: 1 });
+    usePlayerStore.getState().setElements([narration, guest]);
+
+    const writes = new Map<string, string>();
+    await createAudioGroupAndAssignMembers({
+      projectId: "project-1",
+      activeCompPath: "index.html",
+      elements: [narration, guest],
+      groupId: "voiceover",
+      previewIframe: iframe,
+      writeProjectFile: async (path, content) => {
+        writes.set(path, content);
+      },
+      recordEdit: vi.fn(),
+      domEditSaveTimestampRef: { current: 0 },
+      pendingTimelineEditPathRef: { current: new Set() },
+    });
+
+    const written = writes.get("index.html") ?? "";
+    expect(written).toContain('<hf-audio-group id="voiceover"></hf-audio-group>');
+    // The actual contract: the group-attribute writer can now find a target.
+    // This is the read that threw "Unable to patch element in index.html".
+    expect(readTagSnippetByTarget(written, { id: "voiceover" })).toBeDefined();
+    // ...and in the live preview, which is what patchLiveGroupAttribute reads
+    // before the next reload.
+    expect(iframe.contentDocument?.getElementById("voiceover")?.tagName.toLowerCase()).toBe(
+      "hf-audio-group",
+    );
+    // Both members still resolve into it.
+    expect(resolveAudioGroups(iframe.contentDocument as Document)[0]).toMatchObject({
+      id: "voiceover",
+      memberIds: ["narration", "interview-guest"],
+    });
+  });
+
+  // Rejects rather than resolving empty: the carve's auto-group persists
+  // `sources: [groupId]` once this resolves, so a silent no-op leaves the carve
+  // pointing at a group that was never written — and stops ducking.
+  it("rejects for fewer than two elements — grouping is a plural concept", async () => {
+    const recordEdit = vi.fn();
+    await expect(
+      createAudioGroupAndAssignMembers({
+        projectId: "project-1",
+        activeCompPath: "index.html",
+        elements: [element({ id: "narration", domId: "narration" })],
+        groupId: "voiceover",
+        previewIframe: null,
+        writeProjectFile: async () => {},
+        recordEdit,
+        domEditSaveTimestampRef: { current: 0 },
+        pendingTimelineEditPathRef: { current: new Set() },
+      }),
+    ).rejects.toThrow("a group needs at least two");
+    expect(recordEdit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a group id that is not safe to interpolate into markup or a path", async () => {
+    await expect(
+      createAudioGroupAndAssignMembers({
+        projectId: "project-1",
+        activeCompPath: "index.html",
+        elements: [
+          element({ id: "narration", domId: "narration" }),
+          element({ id: "guest", domId: "guest" }),
+        ],
+        groupId: '../x"><script>',
+        previewIframe: null,
+        writeProjectFile: async () => {},
+        recordEdit: vi.fn(),
+        domEditSaveTimestampRef: { current: 0 },
+        pendingTimelineEditPathRef: { current: new Set() },
+      }),
+    ).rejects.toThrow("Invalid audio group id");
+  });
+
+  it("reverts the optimistic live patch when the save fails", async () => {
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    if (iframe.contentDocument) {
+      iframe.contentDocument.body.innerHTML = `
+        <audio id="narration"></audio>
+        <audio id="interview-guest"></audio>
+      `;
+    }
+    // No stubbed fetch: readFileContent's request will fail, forcing the
+    // catch path.
+    const narration = element({ id: "narration", domId: "narration" });
+    const guest = element({ id: "interview-guest", domId: "interview-guest" });
+
+    await expect(
+      createAudioGroupAndAssignMembers({
+        projectId: "project-1",
+        activeCompPath: "index.html",
+        elements: [narration, guest],
+        groupId: "voiceover",
+        previewIframe: iframe,
+        writeProjectFile: async () => {},
+        recordEdit: vi.fn(),
+        domEditSaveTimestampRef: { current: 0 },
+        pendingTimelineEditPathRef: { current: new Set() },
+      }),
+    ).rejects.toThrow();
+
+    expect(
+      iframe.contentDocument?.getElementById("narration")?.hasAttribute("data-audio-group"),
+    ).toBe(false);
+    expect(
+      iframe.contentDocument?.getElementById("interview-guest")?.hasAttribute("data-audio-group"),
+    ).toBe(false);
   });
 });

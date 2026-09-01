@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/core",
-  "version": "0.8.3",
+  "version": "0.8.23",
   "description": "",
   "repository": {
     "type": "git",
@@ -166,11 +166,23 @@
       "import": "./src/audioCarve.ts",
       "types": "./src/audioCarve.ts"
     },
+    "./audio-groups": {
+      "bun": "./src/audioGroups.ts",
+      "node": "./dist/audioGroups.js",
+      "import": "./src/audioGroups.ts",
+      "types": "./src/audioGroups.ts"
+    },
     "./audio-automation": {
       "bun": "./src/audioAutomation.ts",
       "node": "./dist/audioAutomation.js",
       "import": "./src/audioAutomation.ts",
       "types": "./src/audioAutomation.ts"
+    },
+    "./audio-gain": {
+      "bun": "./src/audioGain.ts",
+      "node": "./dist/audioGain.js",
+      "import": "./src/audioGain.ts",
+      "types": "./src/audioGain.ts"
     },
     "./color-grading": {
       "bun": "./src/colorGrading.ts",
@@ -232,6 +244,12 @@
       "node": "./dist/runtime/stackingContext.js",
       "import": "./src/runtime/stackingContext.ts",
       "types": "./src/runtime/stackingContext.ts"
+    },
+    "./runtime/web-audio-route": {
+      "bun": "./src/runtime/webAudioRoute.ts",
+      "node": "./dist/runtime/webAudioRoute.js",
+      "import": "./src/runtime/webAudioRoute.ts",
+      "types": "./src/runtime/webAudioRoute.ts"
     },
     "./compiler/html-document": {
       "bun": "./src/compiler/htmlDocument.ts",
@@ -474,9 +492,17 @@
         "import": "./dist/audioCarve.js",
         "types": "./dist/audioCarve.d.ts"
       },
+      "./audio-groups": {
+        "import": "./dist/audioGroups.js",
+        "types": "./dist/audioGroups.d.ts"
+      },
       "./audio-automation": {
         "import": "./dist/audioAutomation.js",
         "types": "./dist/audioAutomation.d.ts"
+      },
+      "./audio-gain": {
+        "import": "./dist/audioGain.js",
+        "types": "./dist/audioGain.d.ts"
       },
       "./color-grading": {
         "import": "./dist/colorGrading.js",
@@ -518,6 +544,10 @@
       "./runtime/stacking-context": {
         "import": "./dist/runtime/stackingContext.js",
         "types": "./dist/runtime/stackingContext.d.ts"
+      },
+      "./runtime/web-audio-route": {
+        "import": "./dist/runtime/webAudioRoute.js",
+        "types": "./dist/runtime/webAudioRoute.d.ts"
       },
       "./compiler/html-document": {
         "import": "./dist/compiler/htmlDocument.js",

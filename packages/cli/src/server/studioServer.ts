@@ -9,7 +9,11 @@ import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { existsSync, readFileSync, writeFileSync, statSync, unlinkSync } from "node:fs";
 import { resolve, join, basename } from "node:path";
-import { createProjectWatcher, type ProjectWatcher } from "./fileWatcher.js";
+import {
+  createProjectWatcher,
+  shouldWatchProjectFile,
+  type ProjectWatcher,
+} from "./fileWatcher.js";
 import {
   hashSignatureParts,
   loadRuntimeSource,
@@ -32,6 +36,7 @@ import {
   consumeFileWriteReceipt,
   fileContentVersion,
   getMimeType,
+  affectsProjectSignature,
   type PreviewApiAdapter,
   thumbnailDeviceScaleFactor,
   type ResolvedProject,
@@ -56,9 +61,20 @@ const REMOTE_GIF_IMG_SRC_RE =
   /<img\b[^>]*?\bsrc\s*=\s*["'](https?:\/\/[^"']+\.gif(?:[?#][^"']*)?)["'][^>]*>/gi;
 
 async function loadStudioProducer() {
-  return isDevMode()
-    ? await import("../../../producer/src/index.js")
-    : await import("@hyperframes/producer");
+  if (!isDevMode()) return await import("@hyperframes/producer");
+  // The producer's SOURCE uses the TS convention of `.js` specifiers naming
+  // `.ts` files, which bun resolves and Node does not. Node 22 strips TS types
+  // natively, so a Node-hosted dev server boots fine and only dies here, as
+  // `Cannot find module .../renderOrchestrator.js` with no other context.
+  // Vite's own shebang is `#!/usr/bin/env node` and it hosts this API
+  // in-process, so `vite` without `bun --bun` lands exactly here.
+  if (!process.versions.bun) {
+    throw new Error(
+      "Studio dev-mode rendering requires bun (the producer is loaded from TypeScript source, " +
+        "which Node cannot resolve). Restart the studio with `bun run studio`.",
+    );
+  }
+  return await import("../../../producer/src/index.js");
 }
 
 // ── Path resolution ─────────────────────────────────────────────────────────
@@ -359,8 +375,10 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
 
   const project: ResolvedProject = { id: projectId, dir: projectDir, title: projectId };
   let cachedProjectSignature: string | null = null;
-  watcher.addListener(() => {
-    cachedProjectSignature = null;
+  watcher.addListener((changedPath) => {
+    if (affectsProjectSignature(projectDir, join(projectDir, changedPath))) {
+      cachedProjectSignature = null;
+    }
   });
 
   const adapter: PreviewApiAdapter = {
@@ -429,6 +447,11 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
     async lint(html: string, opts?: { filePath?: string }) {
       const { lintHyperframeHtml } = await import("@hyperframes/lint");
       return await lintHyperframeHtml(html, opts);
+    },
+
+    async lintProject(dir: string) {
+      const { lintProject } = await import("@hyperframes/lint");
+      return await lintProject(dir);
     },
 
     runtimeUrl: "/api/runtime.js",
@@ -765,7 +788,11 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
           .writeSSE({ event: "file-change", data: JSON.stringify(receipt ?? { path }) })
           .catch(() => {});
       };
-      watcher.addListener(listener);
+      // Re-applied here because the watcher now also emits the signature
+      // manifest files, which must not trigger a browser reload.
+      watcher.addListener((changedPath) => {
+        if (shouldWatchProjectFile(changedPath)) listener(changedPath);
+      });
       while (true) {
         await stream.sleep(30000);
       }

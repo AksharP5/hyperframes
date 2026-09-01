@@ -8,7 +8,7 @@ import {
   truncateSnippet,
   WINDOW_TIMELINE_ASSIGN_PATTERN,
 } from "../utils";
-import { COMPOSITION_VARIABLE_TYPES } from "@hyperframes/parsers/composition";
+import { COMPOSITION_VARIABLE_TYPES, isSafeMediaUrl } from "@hyperframes/parsers/composition";
 import { COMPOSITION_ATTRIBUTES, readClipTiming } from "@hyperframes/parsers/composition-contract";
 
 // Agent guidance thresholds: warning-only nudges for files/tracks that become hard
@@ -58,14 +58,6 @@ const HEAVY_OVERLAY_EXEMPT_TAGS = new Set([
 const HEAVY_OVERLAY_CSS_PATTERN =
   /(?:filter\s*:[^;}]*\bblur\s*\()|(?:clip-path\s*:(?!\s*(?:none|inherit|initial|unset)\b)\s*[^;}]+)|(?:radial-gradient\s*\()/i;
 const INLINE_STYLE_DISPLAY_NONE_PATTERN = /(?:^|;)\s*display\s*:\s*none\b/i;
-
-// `parseFloat("0.1") + parseFloat("0.2") = 0.30000000000000004`. Sub-second
-// authored adjacencies survive parse + add as a value a few ulps above the
-// next clip's start; a strict `>` fires the overlap rule on adjacencies that
-// are exact in the source HTML. 1μs sits ~11 orders of magnitude above the
-// observed drift (worst ~2e-16s across every realistic decimal pair) and 4
-// below one 60fps frame (~16.67ms), so this only ever swallows float slop.
-const OVERLAP_EPSILON_SECONDS = 1e-6;
 
 function readTagTiming(rawTag: string) {
   return readClipTiming({ getAttribute: (name) => readAttr(rawTag, name) });
@@ -164,6 +156,7 @@ function leftmostCompoundId(selector: string): string | null {
 // are scanned — the flat `[^{}]*` body class naturally skips @keyframes
 // bodies (which contain nested `{...}` stops) and other @-rules, so keyframe
 // selectors like `0%`/`100%` don't leak in.
+// fallow-ignore-next-line complexity
 function collectHeavyOverlayHooks(styles: ExtractedBlock[]): {
   classes: Set<string>;
   ids: Set<string>;
@@ -269,6 +262,16 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
     const tagsByCompositionId = new Map<string, string[]>();
     for (const tag of tags) {
       if (isInsideInertTemplate(tag, tags)) continue;
+      // A `data-composition-src` element is a MOUNT of a sub-composition, not a
+      // composition root, and sub-compositions.md documents mounting one source
+      // repeatedly with different `data-variable-values` to get per-instance
+      // variations. Those mounts legitimately share an id: the runtime rewrites
+      // repeated ones to `id__hf1`, `id__hf2` so they coexist. Counting them
+      // here made the documented pattern an error with no correct way to
+      // satisfy it. The collision this rule exists for -- a <meta> tag carrying
+      // the root's id, per its own fixHint -- is unaffected, since that tag has
+      // no `data-composition-src`.
+      if (readAttr(tag.raw, "data-composition-src")) continue;
       const compositionId = readDecodedAttr(tag.raw, "data-composition-id");
       if (!compositionId || compositionId.trim().length === 0) continue;
 
@@ -416,36 +419,6 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
     return findings;
   },
 
-  // timed_element_missing_visibility_hidden
-  // fallow-ignore-next-line complexity
-  ({ tags }) => {
-    const findings: HyperframeLintFinding[] = [];
-    for (const tag of tags) {
-      if (tag.name === "audio" || tag.name === "script" || tag.name === "style") continue;
-      if (!readAttr(tag.raw, "data-start")) continue;
-      if (readDecodedAttr(tag.raw, "data-composition-id")) continue;
-      if (readAttr(tag.raw, "data-composition-src")) continue;
-      const classAttr = readAttr(tag.raw, "class") || "";
-      const styleAttr = readAttr(tag.raw, "style") || "";
-      const hasClip = classAttr.split(/\s+/).includes("clip");
-      const hasHiddenStyle =
-        /visibility\s*:\s*hidden/i.test(styleAttr) || /opacity\s*:\s*0/i.test(styleAttr);
-      if (!hasClip && !hasHiddenStyle) {
-        const elementId = readAttr(tag.raw, "id") || undefined;
-        findings.push({
-          code: "timed_element_missing_visibility_hidden",
-          severity: "info",
-          message: `<${tag.name}${elementId ? ` id="${elementId}"` : ""}> has data-start but no class="clip", visibility:hidden, or opacity:0. Consider adding initial hidden state if the element should not be visible before its start time.`,
-          elementId,
-          fixHint:
-            'Add class="clip" (with CSS: .clip { visibility: hidden; }) or style="opacity:0" if the element should start hidden.',
-          snippet: truncateSnippet(tag.raw),
-        });
-      }
-    }
-    return findings;
-  },
-
   // deprecated_data_layer + deprecated_data_end
   // fallow-ignore-next-line complexity
   ({ tags }) => {
@@ -459,7 +432,8 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
           severity: "error",
           message: `<${tag.name}${elementId ? ` id="${elementId}"` : ""}> uses data-layer instead of data-track-index.`,
           elementId,
-          fixHint: "Replace data-layer with data-track-index. The runtime reads data-track-index.",
+          fixHint:
+            "Replace data-layer with data-track-index, which is the canonical name Studio and the linter read. Neither name is read by the render.",
           snippet: truncateSnippet(tag.raw),
         });
       }
@@ -545,7 +519,12 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
   // fallow-ignore-next-line complexity
   ({ tags }) => {
     const findings: HyperframeLintFinding[] = [];
-    const skipTags = new Set(["audio", "video", "script", "style", "template"]);
+    // `img` sits here for the same reason `video` and `audio` already did: the
+    // three media primitives are authored without `class="clip"` in the
+    // canonical clip block (packages/core/docs/core.md), so requiring it on the
+    // `<img>` alone errored on the documented pattern while its two siblings on
+    // the adjacent lines passed.
+    const skipTags = new Set(["audio", "img", "video", "script", "style", "template"]);
     for (const tag of tags) {
       if (skipTags.has(tag.name)) continue;
       // Skip composition hosts
@@ -564,81 +543,19 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
       const elementId = readAttr(tag.raw, "id") || undefined;
       findings.push({
         code: "timed_element_missing_clip_class",
-        severity: "error",
-        message: `<${tag.name}${elementId ? ` id="${elementId}"` : ""}> has timing attributes but no class="clip". The element will be visible for the entire composition instead of only during its scheduled time range.`,
+        // Not an error: the runtime drives timed visibility off the `data-start`
+        // ATTRIBUTE, not this class — `syncTimedElementVisibility` walks
+        // `querySelectorAll("[data-start]")` and toggles `style.visibility`
+        // regardless of class (pinned by the runtime's own init test, which
+        // uses a bare `<div data-start data-duration>` with no `class="clip"`).
+        // The class is an authoring convention the tooling reads, so a missing
+        // one is worth flagging but does not break the render.
+        severity: "warning",
+        message: `<${tag.name}${elementId ? ` id="${elementId}"` : ""}> has timing attributes but no class="clip". The runtime still hides it outside its time range, but Studio and the GSAP clip-ownership rules use .clip to recognise a clip, so leaving it off makes the element harder to edit and to lint.`,
         elementId,
         fixHint:
-          'Add class="clip" to the element. The HyperFrames runtime uses .clip to control visibility based on data-start/data-duration.',
+          'Add class="clip" to the element so Studio and the linter can recognise it as a clip.',
         snippet: truncateSnippet(tag.raw),
-      });
-    }
-    return findings;
-  },
-
-  // overlapping_clips_same_track
-  // fallow-ignore-next-line complexity
-  ({ tags }) => {
-    const findings: HyperframeLintFinding[] = [];
-
-    type ClipInfo = { start: number; end: number; elementId?: string; snippet: string };
-    const trackMap = new Map<string, ClipInfo[]>();
-
-    for (const tag of tags) {
-      const trackStr = readAttr(tag.raw, COMPOSITION_ATTRIBUTES.trackIndex);
-      if (!trackStr) continue;
-      const timing = readTagTiming(tag.raw);
-      const { start, duration } = timing;
-      const track = trackStr;
-
-      // Skip non-numeric (relative timing references like "intro-comp")
-      if (start == null || duration == null) continue;
-
-      const clips = trackMap.get(track) || [];
-      clips.push({
-        start,
-        end: start + duration,
-        elementId: readAttr(tag.raw, "id") || undefined,
-        snippet: truncateSnippet(tag.raw) || "",
-      });
-      trackMap.set(track, clips);
-    }
-
-    for (const [track, clips] of trackMap) {
-      clips.sort((a, b) => a.start - b.start);
-      for (let i = 0; i < clips.length - 1; i++) {
-        const current = clips[i];
-        const next = clips[i + 1];
-        if (!current || !next) continue;
-        if (current.end - next.start > OVERLAP_EPSILON_SECONDS) {
-          findings.push({
-            code: "overlapping_clips_same_track",
-            severity: "error",
-            message: `Track ${track}: clip ending at ${current.end}s overlaps with clip starting at ${next.start}s. Overlapping clips on the same track cause rendering conflicts.`,
-            fixHint:
-              "Adjust data-start or data-duration so clips on the same track do not overlap, or move one clip to a different data-track-index.",
-          });
-        }
-      }
-    }
-
-    return findings;
-  },
-
-  // root_composition_missing_data_start
-  ({ rootTag, options }) => {
-    const findings: HyperframeLintFinding[] = [];
-    if (options.isSubComposition) return findings;
-    if (!rootTag) return findings;
-    const compId = readDecodedAttr(rootTag.raw, "data-composition-id");
-    if (!compId) return findings;
-    const hasStart = readAttr(rootTag.raw, "data-start") !== null;
-    if (!hasStart) {
-      findings.push({
-        code: "root_composition_missing_data_start",
-        severity: "error",
-        message: `Root composition "${compId}" is missing data-start. The runtime needs data-start="0" on the root element to begin playback.`,
-        fixHint: 'Add data-start="0" to the root composition element.',
-        snippet: truncateSnippet(rootTag.raw),
       });
     }
     return findings;
@@ -866,6 +783,14 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
 
     const findings: HyperframeLintFinding[] = [];
     const knownTypes = new Set<string>(COMPOSITION_VARIABLE_TYPES);
+    // Ids whose value the runtime pushes through isSafeMediaUrl: every
+    // data-var-src binding, plus image-typed variables (always consumed as a
+    // URL even when the binding lives in a sub-composition this file can't see).
+    const varSrcIds = new Set<string>();
+    for (const tag of tags) {
+      const bound = readAttr(tag.raw, "data-var-src");
+      if (bound) varSrcIds.add(bound);
+    }
     for (let i = 0; i < parsed.length; i += 1) {
       const entry = parsed[i];
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
@@ -888,6 +813,22 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
           code: "invalid_composition_variables_declaration",
           severity: "error",
           message: `data-composition-variables entry [${i}] is missing or has invalid: ${missing.join(", ")}. Type must be one of string, number, color, boolean, enum, font, image.`,
+          snippet: truncateSnippet(htmlTag.raw),
+        });
+        continue;
+      }
+      const id = String(e.id);
+      if (
+        (e.type === "image" || varSrcIds.has(id)) &&
+        typeof e.default === "string" &&
+        e.default.length > 0 &&
+        !isSafeMediaUrl(e.default)
+      ) {
+        findings.push({
+          code: "unloadable_media_variable_default",
+          severity: "error",
+          message: `Variable "${id}" defaults to a URL the runtime will refuse to load, so any element bound to it renders its authored fallback src instead and the render still exits 0.`,
+          fixHint: `Media URLs must be relative, http(s), blob:, or a data:image/* URI. Copy the file into the project and reference it relatively (e.g. "assets/bg.png") rather than by absolute path.`,
           snippet: truncateSnippet(htmlTag.raw),
         });
       }
@@ -995,10 +936,13 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
   // can't leak styles into each other. A rule whose LEFTMOST selector is the ROOT
   // element's own class (e.g. `.frame { ... }` on the same element that carries
   // data-composition-id) therefore becomes a DESCENDANT selector that can never
-  // match the root — the whole scene renders unstyled (tiny text top-left, images
-  // at natural size). lint/validate/inspect evaluate the file in isolation (no
-  // scoping) and Studio previews each scene in its own iframe (no scoping), so the
-  // break is invisible until the composited MP4 render. Style the root via `#root`
+  // match the SCOPED element itself. NOTE on the symptom: since #1886 the producer
+  // preserves the authored root as a `data-hf-inner-root` wrapper INSIDE the scoped
+  // element (regression fixture packages/producer/tests/sub-comp-class-selector),
+  // so the class still matches as a descendant and the scene no longer renders
+  // unstyled. This rule is now a consistency constraint, not a render-bug guard:
+  // `#root` is the shape the registry blocks model and the one the scoper
+  // special-cases. Style the root via `#root`
   // (the scoper special-cases the root id) and descendants via plain selectors,
   // like the registry blocks — the runtime already scopes each scene by id, so a
   // class namespace on the root is redundant.
@@ -1020,10 +964,10 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
         severity: "error",
         message:
           `Root element has class="${rootClasses.join(" ")}" and is styled by ${offenders.length} rule(s) keyed off that class (e.g. ${example}). ` +
-          `At render, every sub-composition rule is scoped to [data-composition-id="${rootCompositionId}"] <selector>, so a selector whose leftmost part is the ROOT's own class becomes a descendant selector that cannot match the root — the scene renders unstyled (tiny text top-left, full-size images). ` +
-          `lint/validate/inspect and Studio's per-frame iframe preview do not scope, so this passes every static check and looks correct in preview.`,
+          `At render, every sub-composition rule is scoped to [data-composition-id="${rootCompositionId}"] <selector>, so a selector whose leftmost part is the ROOT's own class becomes a descendant selector that cannot match the scoped element itself. ` +
+          `Since #1886 the producer preserves the authored root as an inner wrapper, so this no longer renders the scene unstyled, but #root is the shape the scoper special-cases and the registry blocks model. Use it so preview, render, and Studio agree.`,
         selector: example,
-        fixHint: `Give the root id="root" and style it with \`#root { ... }\` plus plain descendant selectors (\`.kicker\`, \`#hero\`) — the runtime already scopes each sub-composition by data-composition-id, so a class namespace on the root is redundant and breaks under scoping.`,
+        fixHint: `Give the root id="root" and style it with \`#root { ... }\` plus plain descendant selectors (\`.kicker\`, \`#hero\`) — the runtime already scopes each sub-composition by data-composition-id, so a class namespace on the root is redundant.`,
         snippet: truncateSnippet(rootTag.raw),
       },
     ];

@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   ExtractedFrames,
   ExtractionResult,
   VideoElement,
   VideoExtractionFailure,
 } from "@hyperframes/engine";
+import { resolveProjectRelativeSrc } from "@hyperframes/engine";
 import {
   appendAutoDetectedVideoAudio,
   assertVideoExtractionSucceeded,
@@ -13,6 +17,7 @@ import {
   shouldCopyExtractedFrames,
   VideoExtractionStageError,
 } from "./extractVideosStage.js";
+import { EncoderInterruptedError } from "../encoderInterruption.js";
 
 function makeVideo(overrides: Partial<VideoElement> = {}): VideoElement {
   return {
@@ -74,6 +79,21 @@ function extractionResult(errors: VideoExtractionFailure[]): ExtractionResult {
   };
 }
 
+describe("encoder interruption classification", () => {
+  it("preserves an external ffmpeg interruption as the structured retry signal", () => {
+    const result = extractionResult([
+      {
+        videoId: "v1",
+        kind: "external_interruption",
+        retryable: true,
+        error: "ffmpeg handled signal 15",
+      },
+    ]);
+
+    expect(() => assertVideoExtractionSucceeded(result)).toThrow(EncoderInterruptedError);
+  });
+});
+
 describe("appendAutoDetectedVideoAudio", () => {
   it("adds audio for an audible video whose file has an audio track", () => {
     const composition = { videos: [makeVideo()], audios: [] as never[] };
@@ -121,6 +141,74 @@ describe("appendAutoDetectedVideoAudio", () => {
   });
 });
 
+// The HDR probes in this stage resolve `<video>`/`<img>` srcs with
+// resolveProjectRelativeSrc and NO isAbsolute() pre-check. These pin the src
+// shapes that a pre-check would silently break — an earlier revision of the
+// PRINFRA-349 fix short-circuited on isAbsolute and left root-relative srcs
+// percent-encoded, so the HDR image never resolved and the render shipped SDR.
+describe("HDR probe src resolution (PRINFRA-349)", () => {
+  it("decodes a percent-encoded CJK src to the real on-disk path", () => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-probe-cjk-"));
+    const compiledDir = mkdtempSync(join(tmpdir(), "hf-probe-compiled-"));
+    try {
+      const realName = "图1.png";
+      writeFileSync(join(projectDir, realName), "x");
+      // The compiled DOM carries the URL-encoded attribute value.
+      const encoded = encodeURIComponent(realName); // %E5%9B%BE1.png
+      expect(resolveProjectRelativeSrc(encoded, projectDir, compiledDir)).toBe(
+        join(projectDir, realName),
+      );
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+      rmSync(compiledDir, { recursive: true, force: true });
+    }
+  });
+
+  it("decodes a percent-encoded CJK src served from a browser origin-root URL", () => {
+    // Regression guard: `isAbsolute("/assets/%E5%9B%BE1.png")` is true on POSIX,
+    // so a pre-check would return it verbatim, existsSync would fail, and the
+    // image would never enter nativeHdrImageIds — a silent SDR render.
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-probe-root-"));
+    try {
+      mkdirSync(join(projectDir, "assets"));
+      const realName = "图1.png";
+      writeFileSync(join(projectDir, "assets", realName), "x");
+      const rootRelative = `/assets/${encodeURIComponent(realName)}`;
+      expect(resolveProjectRelativeSrc(rootRelative, projectDir, projectDir)).toBe(
+        join(projectDir, "assets", realName),
+      );
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers compiledDir over projectDir when both hold the asset", () => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-probe-proj-"));
+    const compiledDir = mkdtempSync(join(tmpdir(), "hf-probe-comp-"));
+    try {
+      writeFileSync(join(projectDir, "clip.mp4"), "x");
+      writeFileSync(join(compiledDir, "clip.mp4"), "x");
+      expect(resolveProjectRelativeSrc("clip.mp4", projectDir, compiledDir)).toBe(
+        join(compiledDir, "clip.mp4"),
+      );
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+      rmSync(compiledDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns an existing absolute path unchanged", () => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-probe-abs-"));
+    try {
+      const abs = join(projectDir, "clip.mp4");
+      writeFileSync(abs, "x");
+      expect(resolveProjectRelativeSrc(abs, projectDir, projectDir)).toBe(abs);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("shouldCopyExtractedFrames", () => {
   it("copies frames on Windows (symlinkSync throws EPERM without Developer Mode)", () => {
     expect(shouldCopyExtractedFrames("win32")).toBe(true);
@@ -133,14 +221,14 @@ describe("shouldCopyExtractedFrames", () => {
 });
 
 describe("resolveVideoExtractionPolicy", () => {
-  it("preserves stable behavior by default", () => {
+  it("enforces extraction failures by default (#3372)", () => {
     expect(resolveVideoExtractionPolicy({})).toEqual({
-      failureMode: "off",
+      failureMode: "enforce",
       maxTransientRetries: 0,
     });
   });
 
-  it("allows only the bounded candidate rollout values", () => {
+  it("allows explicit opt-out or observe mode", () => {
     expect(
       resolveVideoExtractionPolicy({
         HF_VIDEO_EXTRACTION_FAILURE_MODE: "observe",
@@ -149,10 +237,15 @@ describe("resolveVideoExtractionPolicy", () => {
     ).toEqual({ failureMode: "observe", maxTransientRetries: 1 });
     expect(
       resolveVideoExtractionPolicy({
-        HF_VIDEO_EXTRACTION_FAILURE_MODE: "unexpected",
-        HF_VIDEO_EXTRACTION_MAX_RETRIES: "1",
+        HF_VIDEO_EXTRACTION_FAILURE_MODE: "off",
       }),
     ).toEqual({ failureMode: "off", maxTransientRetries: 0 });
+    expect(
+      resolveVideoExtractionPolicy({
+        HF_VIDEO_EXTRACTION_FAILURE_MODE: "enforce",
+        HF_VIDEO_EXTRACTION_MAX_RETRIES: "1",
+      }),
+    ).toEqual({ failureMode: "enforce", maxTransientRetries: 1 });
   });
 });
 

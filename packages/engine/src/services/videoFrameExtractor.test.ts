@@ -57,6 +57,7 @@ import {
 import { runFfmpeg } from "../utils/runFfmpeg.js";
 import { COMPLETE_SENTINEL, GC_MARKER, SCHEMA_PREFIX } from "./extractionCache.js";
 import { resolveRuntimeMediaClipDuration } from "../../../core/src/runtime/media.js";
+import { compileTimingAttrs } from "@hyperframes/core";
 
 // ffmpeg is not preinstalled on GitHub's ubuntu-24.04 runners. The producer
 // regression test at packages/producer/tests/vfr-screen-recording/ runs inside
@@ -804,6 +805,16 @@ describe("parseVideoElements", () => {
     expect(main?.end).toBe(30);
   });
 
+  it("still resolves relative data-start after compileTimingAttrs", () => {
+    const raw =
+      '<video id="intro" src="a.mp4" data-start="0" data-duration="10"></video>' +
+      '<video id="main" src="b.mp4" data-start="intro" data-duration="20"></video>';
+    const { html } = compileTimingAttrs(raw);
+    const main = parseVideoElements(html).find((v) => v.id === "main");
+    expect(main?.start).toBe(10);
+    expect(main?.end).toBe(30);
+  });
+
   it("applies + and - offsets on a relative reference", () => {
     const videos = parseVideoElements(
       '<video id="intro" src="a.mp4" data-start="0" data-duration="10"></video>' +
@@ -859,6 +870,17 @@ describe("parseVideoElements", () => {
     for (const v of videos) {
       expect(Number.isNaN(v.start)).toBe(false);
     }
+  });
+
+  it("discovers <video> elements that use <source> children", () => {
+    const videos = parseVideoElements(
+      '<video id="rec" data-start="1" data-duration="4">' +
+        '<source src="https://cdn.example.com/rec.mp4" type="video/mp4">' +
+        '<source src="_remote_media/rec.webm" type="video/webm">' +
+        "</video>",
+    );
+    expect(videos).toHaveLength(1);
+    expect(videos[0]).toMatchObject({ id: "rec", src: "_remote_media/rec.webm", start: 1, end: 5 });
   });
 });
 

@@ -12,6 +12,7 @@ import type { TimelineElement } from "../store/playerStore";
 import type { ClipManifestClip } from "./playbackTypes";
 import { resolveCssStackingContextId } from "@hyperframes/core/runtime/stacking-context";
 import { readClipTiming } from "@hyperframes/core/composition-contract";
+import { groupInfoFor } from "./timelineGroupInfo";
 import {
   resolveMediaElement,
   applyMediaMetadataFromElement,
@@ -138,6 +139,16 @@ export function createTimelineElementFromManifestClip(params: {
     if (hostEl.hasAttribute("data-hidden")) entry.hidden = true;
     const timelineRole = hostEl.getAttribute("data-timeline-role");
     if (timelineRole) entry.timelineRole = timelineRole;
+    const audioGroup = hostEl.getAttribute("data-audio-group");
+    if (audioGroup) {
+      entry.audioGroup = audioGroup;
+      const info = groupInfoFor(doc ?? hostEl.ownerDocument, audioGroup);
+      entry.audioGroupLabel = info.label;
+      entry.audioGroupVolume = info.volume;
+      entry.audioGroupHidden = info.hidden;
+      if (info.fxChain) entry.audioGroupFxChain = info.fxChain;
+      if (info.automation) entry.audioGroupAutomation = info.automation;
+    }
     const fxChain = hostEl.getAttribute("data-fx-chain");
     if (fxChain) entry.fxChain = fxChain;
     const automation = hostEl.getAttribute("data-automation");
@@ -355,6 +366,17 @@ export function parseTimelineFromDOM(doc: Document, rootDuration: number): Timel
 
     const timelineRole = el.getAttribute("data-timeline-role");
     if (timelineRole) entry.timelineRole = timelineRole;
+
+    const domAudioGroup = el.getAttribute("data-audio-group");
+    if (domAudioGroup) {
+      entry.audioGroup = domAudioGroup;
+      const domGroupInfo = groupInfoFor(doc, domAudioGroup);
+      entry.audioGroupLabel = domGroupInfo.label;
+      entry.audioGroupVolume = domGroupInfo.volume;
+      entry.audioGroupHidden = domGroupInfo.hidden;
+      if (domGroupInfo.fxChain) entry.audioGroupFxChain = domGroupInfo.fxChain;
+      if (domGroupInfo.automation) entry.audioGroupAutomation = domGroupInfo.automation;
+    }
 
     // Sub-compositions
     const compSrc =

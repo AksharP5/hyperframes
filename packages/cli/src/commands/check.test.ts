@@ -58,6 +58,7 @@ function cleanLint(): ProjectLintResult {
     results: [
       {
         file: "index.html",
+        contentHash: "test",
         result: {
           ok: true,
           errorCount: 0,
@@ -82,6 +83,7 @@ function lintWith(
     results: [
       {
         file: "index.html",
+        contentHash: "test",
         result: {
           ok: severity !== "error",
           errorCount: severity === "error" ? 1 : 0,
@@ -143,6 +145,7 @@ function fakeDriver(overrides: Partial<CheckAuditDriver> = {}): CheckAuditDriver
   return {
     initialize: vi.fn(async (_contrast: boolean) => undefined),
     getDuration: vi.fn(async () => 9),
+    hasNoTimelineDeclaration: vi.fn(async () => false),
     getTransitionBoundaries: vi.fn(async () => []),
     getCanvas: vi.fn(async () => ({ width: 1920, height: 1080 })),
     findAmbiguousSelectors: vi.fn(async (_selectors: string[]) => []),
@@ -458,7 +461,7 @@ it("rejects malformed caption-zone specs instead of silently disabling the gate"
   });
 });
 
-it("flags only text whose center is inside the caption band at the default end seek", async () => {
+it("flags text whose DOM box overlaps the caption band at the default end seek", async () => {
   const collectGeometryCandidates = vi.fn(async (time: number) => [
     geometryCandidate({
       kind: "text",
@@ -504,8 +507,56 @@ it("flags only text whose center is inside the caption band at the default end s
       text: "Centered title",
       time: 10,
     }),
+    expect.objectContaining({
+      code: "caption_zone_collision",
+      severity: "warning",
+      selector: "#overlap-only",
+      text: "Overlap only",
+      time: 10,
+    }),
   ]);
   expect(report.ok).toBe(true);
+});
+
+it("rejects a 1920×1080 card centered at y=.860 that overlaps the 5% keepout", async () => {
+  const collectGeometryCandidates = vi.fn(async (time: number) => [
+    geometryCandidate({
+      kind: "text",
+      tag: "div",
+      text: "Demand card",
+      selector: "#at-860",
+      rect: fixtureRect(200, 889, 400, 80),
+      time,
+    }),
+    geometryCandidate({
+      kind: "text",
+      tag: "div",
+      text: "Clear above keepout",
+      selector: "#tiny-860",
+      rect: fixtureRect(200, 919, 400, 20),
+      time,
+    }),
+  ]);
+  const { report } = await runScenario(
+    fakeDriver({
+      getDuration: vi.fn(async () => 10),
+      collectGeometryCandidates,
+    }),
+    {
+      samples: 1,
+      contrast: false,
+      captionZone: { x0: 0.118, y0: 0.875, x1: 0.882, y1: 0.925, severity: "error" },
+    },
+  );
+
+  expect(report.layout.findings).toEqual([
+    expect.objectContaining({
+      code: "caption_zone_collision",
+      severity: "error",
+      selector: "#at-860",
+    }),
+  ]);
+  expect(report.ok).toBe(false);
 });
 
 it("skips caption_zone_collision when data-layout-allow-caption-zone is set", async () => {
@@ -528,7 +579,50 @@ it("skips caption_zone_collision when data-layout-allow-caption-zone is set", as
   expect(report.layout.findings).toEqual([]);
 });
 
-it("filters caption candidates by the element box while centering the text rect", async () => {
+it("keeps overlap waivers from suppressing changelog caption-rail collisions", async () => {
+  const collectGeometryCandidates = vi.fn(async (time: number) => [
+    geometryCandidate({
+      kind: "text",
+      tag: "div",
+      text: "Release card copy",
+      selector: "#release-card",
+      rect: fixtureRect(120, 970, 840, 118),
+      time,
+      dataAttributes: { "data-layout-allow-overlap": "" },
+    }),
+    geometryCandidate({
+      kind: "text",
+      tag: "div",
+      text: "Intentional caption rail",
+      selector: "#cap-line",
+      rect: fixtureRect(0, 990, 1080, 52),
+      time,
+      dataAttributes: { "data-layout-allow-caption-zone": "" },
+    }),
+  ]);
+  const { report } = await runScenario(
+    fakeDriver({
+      getCanvas: vi.fn(async () => ({ width: 1080, height: 1080 })),
+      collectGeometryCandidates,
+    }),
+    {
+      samples: 1,
+      contrast: false,
+      captionZone: { x0: 0, y0: 0.9, x1: 1, y1: 1, severity: "error" },
+    },
+  );
+
+  expect(report.layout.findings).toEqual([
+    expect.objectContaining({
+      code: "caption_zone_collision",
+      severity: "error",
+      selector: "#release-card",
+    }),
+  ]);
+  expect(report.ok).toBe(false);
+});
+
+it("skips full-frame and tiny wrappers when measuring the caption box", async () => {
   const collectGeometryCandidates = vi.fn(async (time: number) => [
     geometryCandidate({
       kind: "text",
@@ -1175,6 +1269,18 @@ describe("check pipeline", () => {
             finding.message.includes("did not advance"),
         ),
       ).toBe(true);
+    });
+
+    it("does not flag intentional static content declared with data-no-timeline", async () => {
+      const driver = fakeDriver({
+        getDuration: vi.fn(async () => 6),
+        hasNoTimelineDeclaration: vi.fn(async () => true),
+        collectLayoutGeometry: vi.fn(async () => "frozen"),
+      });
+
+      const { report } = await runScenario(driver);
+
+      expect(report.layout.findings.some((finding) => finding.code === "sweep_static")).toBe(false);
     });
 
     it("does not flag a 1.5s static title card — too short for the guard to apply", async () => {

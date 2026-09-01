@@ -11,6 +11,7 @@ import {
   resolveExistingLocalAsset,
 } from "@hyperframes/parsers/asset-resolution";
 import type { HyperframeLintFinding } from "./types.js";
+import { mediaSrcTagRe } from "./utils";
 
 /** Structurally compatible with `project.ts`'s (unexported) `HtmlSource` —
  * duplicated as a shape, not imported, to avoid a circular import between
@@ -26,7 +27,7 @@ const PROBE_CONCURRENCY = 8;
 
 function execFileAsync(file: string, args: string[]): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    execFile(file, args, { timeout: PROBE_TIMEOUT_MS }, (error, stdout) => {
+    execFile(file, args, { timeout: PROBE_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
       if (error) reject(error);
       else resolvePromise(stdout.toString());
     });
@@ -82,14 +83,14 @@ export function collectLocalVideoCandidates(
   htmlSources: HtmlSourceLike[],
 ): Map<string, string> {
   const candidates = new Map<string, string>();
-  const videoSrcRe = /<video\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+  const videoSrcRe = mediaSrcTagRe("video");
 
   for (const { html, compSrcPath } of htmlSources) {
     const scannable = maskNonScannableRanges(html);
     const re = new RegExp(videoSrcRe.source, videoSrcRe.flags);
     let match: RegExpExecArray | null;
     while ((match = re.exec(scannable)) !== null) {
-      const rawSrc = match[1] ?? "";
+      const rawSrc = match[2] ?? "";
       // Placeholder check runs on the RAW value: cleanAssetUrl() splits on ?/# and would chop inside a ${...} token.
       if (isUnresolvedAssetPlaceholder(rawSrc)) continue;
       const src = cleanAssetUrl(rawSrc);

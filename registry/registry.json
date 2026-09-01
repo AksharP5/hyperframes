@@ -300,6 +300,10 @@
       "type": "hyperframes:block"
     },
     {
+      "name": "hw-write-title",
+      "type": "hyperframes:block"
+    },
+    {
       "name": "instagram-follow",
       "type": "hyperframes:block"
     },
@@ -817,10 +821,6 @@
     },
     {
       "name": "chat-thread",
-      "type": "hyperframes:component"
-    },
-    {
-      "name": "checkout-flow",
       "type": "hyperframes:component"
     },
     {
@@ -1537,6 +1537,6 @@
     }
   ],
   "catalogArtifact": {
-    "revision": "032078c10ac211b74a29a4826f113876ee4ef14c3e4cf9f935b0ec763cdca97f"
+    "revision": "2611d04335aacf5a70649019f948e5ba2f474c38bc45cd59e179d71294cd8cb8"
   }
 }

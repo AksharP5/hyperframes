@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { runInThisContext } from "node:vm";
 import { parseHTML } from "linkedom";
 import { interpolateVolumeGain } from "@hyperframes/core/media-volume-envelope";
+import { redactTelemetryString } from "@hyperframes/core";
 import { defaultLogger } from "../logger.js";
 import { NotMediaPayloadError } from "@hyperframes/engine";
 import {
@@ -18,6 +19,7 @@ import {
   detectThreeDTransformUsage,
   discoverMediaFromBrowser,
   discoverAudioVolumeAutomationFromTimeline,
+  discoverVideoVisibilityFromTimeline,
   inlineExternalScripts,
   localizeRemoteMediaSources,
   localizeRemoteImageSources,
@@ -104,6 +106,16 @@ describe("discoverMediaFromBrowser", () => {
       true,
     );
     expect(media[0]).toMatchObject({ start: 0, end: 2, duration: 2, mediaStart: 1 });
+  });
+
+  it("reports colliding empty-src videos by render id, not author id", async () => {
+    const media = await discover(
+      `<video id="clip" data-hf-render-id="clip" src="" data-start="0" data-end="4" data-media-start="10"></video>` +
+        `<video id="clip" data-hf-render-id="clip__hf2" src="" data-start="4" data-end="8" data-media-start="40"></video>`,
+      {},
+    );
+    expect(media.map((entry) => entry.id)).toEqual(["clip", "clip__hf2"]);
+    expect(media.map((entry) => entry.mediaStart)).toEqual([10, 40]);
   });
 });
 
@@ -1136,6 +1148,35 @@ describe("template-wrapped sub-composition media offsets", () => {
     });
   });
 
+  it("offsets nested media by a host data-start id-ref to a sibling slot", async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-chained-slots-"));
+    const compositionsDir = join(projectDir, "compositions");
+    mkdirSync(compositionsDir, { recursive: true });
+    const scene = (id: string) => `<template>
+  <div data-composition-id="${id}" data-start="0" data-duration="2" data-width="640" data-height="360">
+    <video id="${id}-video" src="../assets/clip.mp4" data-start="0" data-duration="2" data-track-index="0"></video>
+  </div>
+</template>`;
+    writeFileSync(join(compositionsDir, "hook.html"), scene("hook"));
+    writeFileSync(join(compositionsDir, "body.html"), scene("body"));
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!DOCTYPE html>
+<html><body>
+  <div data-composition-id="root" data-start="0" data-duration="4" data-width="640" data-height="360">
+    <div data-composition-id="hook" data-composition-src="compositions/hook.html" data-start="0" data-duration="2"></div>
+    <div data-composition-id="body" data-composition-src="compositions/body.html" data-start="hook" data-duration="2"></div>
+  </div>
+  <script>window.__timelines = { root: { duration: () => 4 } };</script>
+</body></html>`,
+    );
+
+    const compiled = await compileForRender(projectDir, join(projectDir, "index.html"), projectDir);
+    const byId = Object.fromEntries(compiled.videos.map((v) => [v.id, v]));
+    expect(byId["hook-video"]).toMatchObject({ start: 0, end: 2 });
+    expect(byId["body-video"]).toMatchObject({ start: 2, end: 4 });
+  });
+
   it("preserves first-pass media offsets when durations are resolved after inlining", async () => {
     const { projectDir, indexPath } = writeTemplateWrappedProject(
       'data-start="2" data-width="640" data-height="360"',
@@ -1541,6 +1582,25 @@ describe("localizeRemoteMediaSources", () => {
     expect(result).toContain("assets/local.mp4");
     expect(result).not.toContain("_remote_media/");
     expect(remoteMediaAssets.size).toBe(0);
+  });
+
+  it("localizes remote <source> children of a <video>", async () => {
+    const orig = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).fetch = async () => validTestMediaResponse();
+    try {
+      const dl = mkdtempSync(join(tmpdir(), "hf-dl-src-"));
+      const html = `<video id="rec" data-start="0" data-end="5" muted>
+<source src="https://src-ok.example.com/rec.mp4" type="video/mp4">
+<source src="https://src-ok.example.com/rec.webm" type="video/webm">
+</video>`;
+      const { html: result, remoteMediaAssets } = await localizeRemoteMediaSources(html, dl);
+      expect(result).not.toContain("https://src-ok.example.com/");
+      expect(remoteMediaAssets.size).toBe(2);
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).fetch = orig;
+    }
   });
 
   it("rewrites src in both double-quoted and single-quoted attributes", async () => {
@@ -2200,6 +2260,75 @@ describe("resolveCompositionDurations strict literal timing", () => {
   });
 });
 
+describe("discoverVideoVisibilityFromTimeline", () => {
+  it("returns scene visibility windows for auto-start videos", async () => {
+    const duration = 2;
+    const sampleStep = 0.1;
+    const windows = [
+      { id: "v0", start: 0.2, end: 0.7 },
+      { id: "v1", start: 0.5, end: 1.2 },
+      { id: "v2", start: 1.0, end: 1.8 },
+      { id: "v3", start: 0.0, end: 0.4 },
+    ];
+
+    type SceneEl = { opacityAt: (t: number) => number };
+    const videos = windows.map((win) => {
+      const sceneEl: SceneEl = {
+        opacityAt: (t) => (t >= win.start && t <= win.end ? 1 : 0),
+      };
+      return {
+        id: win.id,
+        closest: (selector: string) => (selector === ".scene" ? sceneEl : null),
+      };
+    });
+
+    let currentTime = 0;
+    const previousWindow = globalThis.window;
+    const previousDocument = globalThis.document;
+
+    globalThis.window = {
+      __timelines: {
+        root: {
+          totalTime: (time: number) => {
+            currentTime = time;
+          },
+        },
+      },
+      getComputedStyle: (el: SceneEl) => ({
+        opacity: String(el.opacityAt(currentTime)),
+      }),
+    } as typeof globalThis.window;
+    globalThis.document = {
+      querySelectorAll: (selector: string) =>
+        selector === "video[data-hf-auto-start]" ? videos : [],
+      querySelector: (selector: string) =>
+        selector === "[data-composition-id]"
+          ? { getAttribute: (name: string) => (name === "data-composition-id" ? "root" : null) }
+          : null,
+    } as typeof globalThis.document;
+
+    try {
+      const page = {
+        evaluate: async (fn: (arg: number) => unknown, arg: number) => fn(arg),
+      };
+
+      const result = await discoverVideoVisibilityFromTimeline(page as never, duration);
+
+      expect(result).toHaveLength(windows.length);
+      for (const win of windows) {
+        const found = result.find((entry) => entry.videoId === win.id);
+        expect(found).toBeDefined();
+        expect(found!.visibleStart).toBeGreaterThanOrEqual(win.start - sampleStep);
+        expect(found!.visibleStart).toBeLessThanOrEqual(win.start + sampleStep);
+        expect(found!.visibleEnd).toBeGreaterThanOrEqual(win.end - sampleStep);
+        expect(found!.visibleEnd).toBeLessThanOrEqual(win.end + sampleStep);
+      }
+    } finally {
+      globalThis.window = previousWindow;
+      globalThis.document = previousDocument;
+    }
+  });
+});
 describe("sub-composition variable injection (render path, #2064)", () => {
   function writeSubCompVarProject(hostVars: string): string {
     const projectDir = mkdtempSync(join(tmpdir(), "hf-subvar-"));
@@ -2559,5 +2688,229 @@ describe("compileForRender non-media payload sniff (STUDIO-5433)", () => {
     expect(compiled.html).not.toContain('id="a1" src="assets/nested.html" data-end');
     expect(warnings.join("\n")).toContain("text document");
     expect(warnings.join("\n")).toContain("a1");
+  });
+});
+
+describe("duplicate media ids across nested compositions", () => {
+  // Element ids are unique per composition FILE; the render document is the
+  // inlined union of every file. The producer used to merge the per-file media
+  // lists and deduplicate by id, so colliding clips collapsed into one entry
+  // and the survivor's frames were injected onto whichever element came first
+  // in the document — leaving the visible scene without footage (#3340).
+  function sceneWithVideoId(label: string, mediaStart: number): string {
+    return `<div data-composition-id="${label}" data-start="0" data-duration="3"
+     data-width="640" data-height="360">
+  <video id="clip" src="../assets/long-take.mp4" data-start="0" data-duration="3"
+         data-media-start="${mediaStart}" data-track-index="0"></video>
+</div>`;
+  }
+
+  function writeTwoSceneProject(
+    sceneAFile: string,
+    sceneBFile: string = sceneAFile,
+    sceneBody: (label: string, mediaStart: number) => string = sceneWithVideoId,
+  ): { projectDir: string; indexPath: string } {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-dup-media-"));
+    const compositionsDir = join(projectDir, "compositions");
+    mkdirSync(compositionsDir, { recursive: true });
+
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!DOCTYPE html>
+<html><head></head><body>
+  <div id="root" data-composition-id="root" data-start="0" data-duration="6"
+       data-width="640" data-height="360">
+    <div id="scene-a-host" data-composition-id="scene-a" data-composition-src="compositions/${sceneAFile}"
+         data-start="0" data-duration="3" data-width="640" data-height="360"></div>
+    <div id="scene-b-host" data-composition-id="scene-b" data-composition-src="compositions/${sceneBFile}"
+         data-start="3" data-duration="3" data-width="640" data-height="360"></div>
+  </div>
+</body></html>`,
+    );
+
+    const wrap = (label: string, mediaStart: number) =>
+      `<template id="${label}-template">\n${sceneBody(label, mediaStart)}\n</template>`;
+    writeFileSync(join(compositionsDir, sceneAFile), wrap("scene-a", 5));
+    if (sceneBFile !== sceneAFile) {
+      writeFileSync(join(compositionsDir, sceneBFile), wrap("scene-b", 50));
+    }
+
+    return { projectDir, indexPath: join(projectDir, "index.html") };
+  }
+
+  it("keeps both clips when two scenes declare the same video id", async () => {
+    const { projectDir, indexPath } = writeTwoSceneProject("scene-a.html", "scene-b.html");
+
+    const compiled = await compileForRender(projectDir, indexPath, projectDir);
+
+    expect(compiled.videos).toHaveLength(2);
+    expect(compiled.videos[0]).toMatchObject({ start: 0, end: 3, mediaStart: 5 });
+    expect(compiled.videos[1]).toMatchObject({ start: 3, end: 6, mediaStart: 50 });
+  });
+
+  it("gives the colliding clips ids that each address one element", async () => {
+    const { projectDir, indexPath } = writeTwoSceneProject("scene-a.html", "scene-b.html");
+
+    const compiled = await compileForRender(projectDir, indexPath, projectDir);
+
+    const ids = compiled.videos.map((v) => v.id);
+    expect(new Set(ids).size).toBe(2);
+
+    // One element per id is exactly what the frame injector relies on.
+    const { document } = parseHTML(compiled.html);
+    for (const id of ids) {
+      expect(document.querySelectorAll(`[data-hf-render-id="${id}"]`)).toHaveLength(1);
+    }
+  });
+
+  it("keeps author ids intact so scene CSS and scripts still resolve", async () => {
+    const { projectDir, indexPath } = writeTwoSceneProject("scene-a.html", "scene-b.html");
+
+    const compiled = await compileForRender(projectDir, indexPath, projectDir);
+
+    const { document } = parseHTML(compiled.html);
+    expect(document.querySelectorAll('video[id="clip"]')).toHaveLength(2);
+  });
+
+  it("keeps both clips when the same scene file is mounted twice", async () => {
+    // The author cannot make these unique: it is one file, mounted twice.
+    const { projectDir, indexPath } = writeTwoSceneProject("scene.html");
+
+    const compiled = await compileForRender(projectDir, indexPath, projectDir);
+
+    expect(compiled.videos).toHaveLength(2);
+    expect(compiled.videos[0]).toMatchObject({ start: 0, end: 3 });
+    expect(compiled.videos[1]).toMatchObject({ start: 3, end: 6 });
+  });
+
+  it("keeps both clips when neither scene names its video", async () => {
+    // No authored id at all: the timing compiler numbers auto-ids per file, so
+    // both scenes arrive as `hf-video-0`.
+    const { projectDir, indexPath } = writeTwoSceneProject(
+      "scene-a.html",
+      "scene-b.html",
+      (label, mediaStart) =>
+        `<div data-composition-id="${label}" data-start="0" data-duration="3"
+     data-width="640" data-height="360">
+  <video src="../assets/long-take.mp4" data-start="0" data-duration="3"
+         data-media-start="${mediaStart}" data-track-index="0"></video>
+</div>`,
+    );
+
+    const compiled = await compileForRender(projectDir, indexPath, projectDir);
+
+    expect(compiled.videos).toHaveLength(2);
+    expect(compiled.videos.map((v) => v.mediaStart)).toEqual([5, 50]);
+  });
+
+  it("keeps both audio tracks when two scenes declare the same audio id", async () => {
+    const { projectDir, indexPath } = writeTwoSceneProject(
+      "scene-a.html",
+      "scene-b.html",
+      (label, mediaStart) =>
+        `<div data-composition-id="${label}" data-start="0" data-duration="3"
+     data-width="640" data-height="360">
+  <audio id="vo" src="../assets/narration.wav" data-start="0" data-duration="3"
+         data-media-start="${mediaStart}" data-track-index="1"></audio>
+</div>`,
+    );
+
+    const compiled = await compileForRender(projectDir, indexPath, projectDir);
+
+    expect(compiled.audios).toHaveLength(2);
+    expect(compiled.audios[0]).toMatchObject({ start: 0, end: 3, mediaStart: 5 });
+    expect(compiled.audios[1]).toMatchObject({ start: 3, end: 6, mediaStart: 50 });
+  });
+
+  it("stamps unique render ids on empty-src videos across two scenes", async () => {
+    const { projectDir, indexPath } = writeTwoSceneProject(
+      "scene-a.html",
+      "scene-b.html",
+      (label, mediaStart) =>
+        `<div data-composition-id="${label}" data-start="0" data-duration="3"
+     data-width="640" data-height="360">
+  <video id="clip" src="" data-start="0" data-duration="3"
+         data-media-start="${mediaStart}" data-track-index="0"></video>
+</div>`,
+    );
+
+    const compiled = await compileForRender(projectDir, indexPath, projectDir);
+
+    // Static parse still omits empty src from the media list; the stamp is
+    // what the snapshot uses to keep the two clips distinct.
+    expect(compiled.videos).toHaveLength(0);
+    const { document } = parseHTML(compiled.html);
+    expect(
+      Array.from(document.querySelectorAll("video")).map((el) =>
+        el.getAttribute("data-hf-render-id"),
+      ),
+    ).toEqual(["clip", "clip__hf2"]);
+  });
+});
+
+describe("STUDIO-5433 — ffprobe failure includes src URL for attribution", () => {
+  function writeCorruptVideoProject(videoSrc: string, assetBytes: Buffer): string {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-studio-5433-"));
+    mkdirSync(join(projectDir, "assets"), { recursive: true });
+    writeFileSync(join(projectDir, "assets", "clip.mp4"), assetBytes);
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!DOCTYPE html>
+<html>
+  <body>
+    <div id="root" data-composition-id="root" data-start="0" data-duration="4" data-width="640" data-height="360">
+      <video
+        id="clip"
+        src="${videoSrc}"
+        data-start="0"
+        data-duration="4"
+        data-width="640"
+        data-height="360"
+      ></video>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["root"] = { duration: () => 4 };
+    </script>
+  </body>
+</html>`,
+    );
+    return projectDir;
+  }
+
+  it("wraps the ffprobe error with [src=<relative-path>] when the local video is corrupt", async () => {
+    // 0-byte mp4 — ffprobe reports "Invalid data found when processing input",
+    // the same class as the STUDIO-5433 moov failure. Fail-fast semantics remain
+    // (video branch throws, unlike audio's graceful-degrade to duration=0).
+    const projectDir = writeCorruptVideoProject("assets/clip.mp4", Buffer.alloc(0));
+
+    let thrown: unknown;
+    try {
+      await compileForRender(projectDir, join(projectDir, "index.html"), projectDir);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const message = (thrown as Error).message;
+    // A bare relative path IS the redactor's `BARE_RELATIVE_PATH` shape (one
+    // separator + a media extension), so it lands as `[path]`. The attribution
+    // that matters is the remote-URL case below; a local relative src carries
+    // no host to attribute and the redactor is right to drop it.
+    expect(message).toContain("[src=[path]]");
+    // Original ffprobe diagnostic must still be present so failure classifiers
+    // downstream (e.g. hyperframes_render_metrics.py) continue to match.
+    expect(message).toMatch(/ffprobe|Invalid data|No video stream/i);
+  });
+
+  // The STUDIO-5433 case is a remote src, and that is the shape whose
+  // attribution has to survive redaction: host + path kept, query dropped so a
+  // pre-signed signature never reaches telemetry. Pinned on the redactor
+  // directly — driving a remote src through `compileForRender` would need a
+  // download stub, and the wrapper's only transform IS this call.
+  it("keeps host and path but drops the query when redacting a remote src", () => {
+    expect(redactTelemetryString("https://cdn.example.com/renders/clip.mp4?sig=abc123&exp=1")).toBe(
+      "https://cdn.example.com/renders/clip.mp4?\u2026",
+    );
   });
 });

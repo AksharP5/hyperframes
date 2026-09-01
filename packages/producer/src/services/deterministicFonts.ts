@@ -1193,18 +1193,30 @@ export interface InjectDeterministicFontFacesOptions {
 }
 
 // Keep the complete CSS request under the broadly supported ~2 KB URL limit.
-// Using unique source characters covers static text plus strings authored in
-// scripts, while collapsing repeated prose and base64 assets to a tiny set.
+// Using unique source/decoded characters plus deterministic case variants covers
+// static text, strings authored in scripts, and CSS case transforms while
+// collapsing repeated prose and base64 assets to a tiny set.
 const GOOGLE_FONTS_TEXT_MAX_ENCODED_LENGTH = 1_700;
 
 function extractGoogleFontsText(html: string): string | undefined {
   const { document } = parseHTML(html);
   const decodedBodyText = document.body?.textContent ?? "";
-  const uniqueCharacters = [...new Set([...Array.from(html), ...Array.from(decodedBodyText)])].join(
-    "",
-  );
-  return encodeURIComponent(uniqueCharacters).length <= GOOGLE_FONTS_TEXT_MAX_ENCODED_LENGTH
-    ? uniqueCharacters
+  // Source + decoded text is an intentional over-approximation: base64, scripts, and class names
+  // collapse in the Set, while decoded entities contribute the glyphs the browser actually paints.
+  const characters = [...Array.from(html), ...Array.from(decodedBodyText)];
+  const uniqueCharacters = new Set<string>();
+  for (const character of characters) {
+    uniqueCharacters.add(character);
+    // This closes locale-independent Unicode casing, including multi-code-point expansions such as
+    // ß -> SS. Locale/context transforms (for example Turkish İ) and CSS full-width/full-size-kana
+    // need a transform-aware follow-up rather than pretending this code-point closure is exhaustive.
+    for (const variant of `${character.toUpperCase()}${character.toLowerCase()}`) {
+      uniqueCharacters.add(variant);
+    }
+  }
+  const fontText = [...uniqueCharacters].join("");
+  return encodeURIComponent(fontText).length <= GOOGLE_FONTS_TEXT_MAX_ENCODED_LENGTH
+    ? fontText
     : undefined;
 }
 

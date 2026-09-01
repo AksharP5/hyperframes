@@ -5,7 +5,8 @@
  * is not an entry in the chain.
  */
 
-import { useCallback, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { audioFxRevealTarget, scrollRevealedRowIntoView } from "./audioFxRevealTarget.js";
 import {
   defaultAudioFxParams,
   mintAudioFxNodeId,
@@ -14,6 +15,7 @@ import {
   type HfAudioFxParamValues,
 } from "@hyperframes/core/audio-fx";
 import { applyAudioFxPreset, getAudioFxPreset } from "@hyperframes/core/audio-fx-presets";
+import { applyPresetToChain } from "./useApplyAudioFxPreset.js";
 import {
   addAudioEq,
   audioEqIds,
@@ -24,6 +26,7 @@ import { applyAudioFxProfile, getAudioFxProfile } from "@hyperframes/core/audio-
 import { audioFxJobNode, type HfAudioFxJob } from "@hyperframes/core/audio-fx-jobs";
 import { FxPresetMenu } from "./propertyPanelFxPresetMenu.js";
 import { FxRackChain } from "./propertyPanelFxRackChain.js";
+import { CLIP_SIGNAL_PATH } from "./audioFxSignalPath.js";
 import { FxAddMenu } from "./propertyPanelFxAddMenu.js";
 import { useFxAudition } from "./useFxAudition.js";
 import {
@@ -31,7 +34,6 @@ import {
   trackNodeAdded,
   trackNodeMoved,
   trackNodeRemoved,
-  trackPresetApplied,
   trackPresetAuditioned,
   trackPresetAutomated,
   trackPresetRemoved,
@@ -103,6 +105,9 @@ export function FxSection({
   onRemovePresetAutomation,
   automatedPresets,
   onAuditionTransport,
+  signalPath,
+  revealTarget,
+  revealNonce,
 }: FxSectionProps) {
   const presetAutomated = automatedPresets ?? new Set<string>();
   // Falls back to the persisting write when no preview handler is supplied, which
@@ -134,27 +139,19 @@ export function FxSection({
     [chain, onChainPreview],
   );
 
-  const { audition, clearAudition } = useFxAudition(chain, onChainPreview, onAuditionTransport);
+  const { audition, clearAudition, storedChain } = useFxAudition(
+    chain,
+    onChainPreview,
+    onAuditionTransport,
+  );
 
   const applyPreset = useCallback(
     (id: string) => {
-      const preset = getAudioFxPreset(id);
-      if (!preset) return;
-      // Appends. Stacking a character preset onto an already-cleaned voice is a
-      // real thing to want, and replacing silently would throw work away — so
-      // the destructive option is a separate gesture, not the default one.
-      const next = applyAudioFxPreset(chain, preset);
-      // Re-applying replaces this preset's own nodes in place rather than
-      // appending a second copy, and the two are different decisions — worth
-      // telling apart in the numbers.
-      const reapply = chain.nodes.some((n) => n.fromPreset === preset.id);
-      trackPresetApplied(
-        preset.id,
-        preset.family,
-        preset.nodes.length,
-        reapply ? "reapply" : "append",
-        { trackKind },
-      );
+      // The stored chain, not whatever is being auditioned on top of it — see
+      // `storedChain`. Clicking preset B while hovering preset A used to save
+      // both, which is heard as the effect running twice.
+      const next = applyPresetToChain(storedChain(), id, trackKind);
+      if (!next) return;
       // The audition WAS this, so there is nothing to put back — and putting the
       // old chain back over the write that just landed is a race the author
       // hears as the preset arriving and then leaving again.
@@ -162,10 +159,10 @@ export function FxSection({
       mutate(next.nodes);
       // Land on the first node the preset wrote, so the author can hear what
       // arrived and immediately see what it is made of.
-      setOpenNode(next.nodes.findIndex((n) => n.fromPreset === preset.id));
+      setOpenNode(next.nodes.findIndex((n) => n.fromPreset === id));
       setPicking(false);
     },
-    [chain, mutate, clearAudition, trackKind],
+    [storedChain, mutate, clearAudition, trackKind],
   );
 
   const addJob = useCallback(
@@ -326,6 +323,51 @@ export function FxSection({
   }, [handBuilt, eqIds.length, showCarve]);
   const [openEq, setOpenEq] = useState<string | null>(null);
 
+  /** The reveal request held until its row is mounted and scrolled. */
+  const [consumedRevealNonce, setConsumedRevealNonce] = useState<number | null>(null);
+  const [pendingReveal, setPendingReveal] = useState<{
+    nonce: number;
+    target: string;
+  } | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  if (revealNonce != null && revealNonce !== consumedRevealNonce) {
+    setConsumedRevealNonce(revealNonce);
+    const where = revealTarget ? audioFxRevealTarget(revealTarget, chain) : null;
+    if (where) {
+      // Each surface has its own open-state; the resolver says which one owns
+      // this parameter. Opening the wrong one leaves the click looking dead.
+      if (where.kind === "node") setOpenNode(where.index);
+      if (where.kind === "eq") setOpenEq(where.eqId);
+      if (where.kind === "carve") setCarveOpen(true);
+      if (where.kind === "preset") {
+        setCollapsedRuns((was) => {
+          if (!was.has(where.runKey)) return was;
+          const next = new Set(was);
+          next.delete(where.runKey);
+          return next;
+        });
+      }
+    }
+    setPendingReveal(where && revealTarget ? { nonce: revealNonce, target: revealTarget } : null);
+  }
+
+  /**
+   * Scroll the revealed parameter into view once its row has actually mounted.
+   *
+   * The request itself is a dependency so a second click on an already-open
+   * surface still scrolls. It is cleared once used, so a later unrelated
+   * re-render does not yank the panel back to an old parameter.
+   */
+  useEffect(() => {
+    const target = pendingReveal?.target;
+    if (target && scrollRevealedRowIntoView(rootRef.current, target, chain)) {
+      setPendingReveal(null);
+    }
+    // `chain` is deliberately not a dependency: it changes on every knob edit,
+    // and re-running then would scroll the panel while the author is dragging.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openNode, openEq, carveOpen, collapsedRuns, pendingReveal]);
+
   const addEq = useCallback(() => {
     clearAudition();
     const { chain: next, eqId } = addAudioEq(chain);
@@ -419,12 +461,14 @@ export function FxSection({
 
   return (
     <div
+      ref={rootRef}
       className="hf-fx-section space-y-2"
       // Focus lives on the buttons and menu items inside, so the keystroke
       // bubbles to here without the section needing focus of its own.
       onKeyDown={closeMenus}
     >
       <FxRackChain
+        signalPath={signalPath ?? CLIP_SIGNAL_PATH}
         chain={chain}
         showCarve={showCarve}
         carveNodes={carveNodes}
@@ -511,10 +555,10 @@ export function FxSection({
           opened one and changed their mind had no way back: picking something
           was the only thing that set these false, so the only exits were adding
           an effect they did not want or deselecting the clip. */}
-      <div className="flex gap-1">
+      <div className="flex flex-col gap-1">
         <button
           type="button"
-          className="hf-fx-preset w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-2 hover:text-panel-text-0 disabled:opacity-40"
+          className="hf-fx-preset w-full rounded-[4px] border border-panel-text-0 py-1.5 text-[11px] font-semibold text-panel-text-0 disabled:opacity-40"
           aria-expanded={picking}
           disabled={disabled}
           onClick={() => {
@@ -530,7 +574,7 @@ export function FxSection({
         </button>
         <button
           type="button"
-          className="hf-fx-add w-full rounded-[4px] border border-dashed border-panel-border-input py-1 text-[11px] text-panel-text-2 hover:text-panel-text-0 disabled:opacity-40"
+          className="hf-fx-add self-end px-1 text-[10px] text-panel-text-2 hover:text-panel-text-0 disabled:opacity-40"
           aria-expanded={adding}
           disabled={disabled}
           onClick={() => {
@@ -542,7 +586,7 @@ export function FxSection({
             setPicking(false);
           }}
         >
-          {adding ? "Close" : "Add effect"}
+          {adding ? "Close" : "+ effect"}
         </button>
       </div>
     </div>

@@ -46,9 +46,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { VideoMetadata } from "../utils/ffprobe.js";
+import { FRAME_FILENAME_PREFIX, framePathsFromDirectory } from "./extractedFrameIndex.js";
 
 /** Filename prefix for extracted frames. Shared with the extractor. */
-export const FRAME_FILENAME_PREFIX = "frame_";
+export { FRAME_FILENAME_PREFIX } from "./extractedFrameIndex.js";
 
 /** Sentinel filename written after a cache entry is fully populated. */
 export const COMPLETE_SENTINEL = ".hf-complete";
@@ -171,15 +172,37 @@ export function cacheEntryDirName(keyHash: string): string {
 }
 
 /**
+ * Whether a sentineled entry directory still holds at least one frame file.
+ *
+ * The sentinel records that extraction finished, not that the frames survived.
+ * Any per-file cleanup that empties the directory leaves the sentinel behind,
+ * and the entry then rehydrates as a hit with zero frames. Deliberately
+ * format-agnostic: a hit must be usable whatever extension the frames carry.
+ */
+function hasFrameFiles(dir: string): boolean {
+  try {
+    return readdirSync(dir).some((file) => file.startsWith(FRAME_FILENAME_PREFIX));
+  } catch {
+    // Unreadable entry directory: treat as a miss and re-extract.
+    return false;
+  }
+}
+
+/**
  * Look up a cache entry by key input. Returns the resolved entry path plus a
  * `hit` flag. On miss, callers should extract frames into a
  * `partialCacheEntryDir(entry)` directory and publish it with
  * `publishCacheEntry` once extraction succeeds.
+ *
+ * An entry only counts as a hit when it carries the completion sentinel AND
+ * still has frames to serve. Without the second condition an emptied entry
+ * keeps rehydrating with zero frames, so every later render of that project
+ * fails identically at the coverage gate with no user-discoverable fix.
  */
 export function lookupCacheEntry(rootDir: string, input: CacheKeyInput): CacheLookup {
   const keyHash = computeCacheKey(input);
   const dir = join(rootDir, cacheEntryDirName(keyHash));
-  const complete = existsSync(join(dir, COMPLETE_SENTINEL));
+  const complete = existsSync(join(dir, COMPLETE_SENTINEL)) && hasFrameFiles(dir);
   return { entry: { dir, keyHash }, hit: complete };
 }
 
@@ -486,14 +509,7 @@ export function rehydrateCacheEntry(
   options: RehydrateOptions,
 ): RehydratedFrames {
   const framePattern = `${FRAME_FILENAME_PREFIX}%05d.${options.format}`;
-  const framePaths = new Map<number, string>();
-  const suffix = `.${options.format}`;
-  const files = readdirSync(entry.dir)
-    .filter((f) => f.startsWith(FRAME_FILENAME_PREFIX) && f.endsWith(suffix))
-    .sort();
-  files.forEach((file, idx) => {
-    framePaths.set(idx, join(entry.dir, file));
-  });
+  const framePaths = framePathsFromDirectory(entry.dir, options.format);
   return {
     videoId: options.videoId,
     srcPath: options.srcPath,

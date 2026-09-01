@@ -1,6 +1,5 @@
 import { useRef, useMemo, useCallback, useState, memo } from "react";
-import { useMusicBeatAnalysis } from "../../hooks/useMusicBeatAnalysis";
-import { remapBeatAnalysisToComposition } from "../../utils/beatEditActions";
+import { useAdjustedBeatAnalysis, useMusicBeatAnalysis } from "../../hooks/useMusicBeatAnalysis";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import { useExpandedTimelineElements } from "../hooks/useExpandedTimelineElements";
 import { defaultTimelineTheme } from "./timelineTheme";
@@ -34,12 +33,11 @@ import { useTimelinePerformanceTelemetry } from "./useTimelinePerformanceTelemet
 import {
   getEffectiveTimelineDuration,
   getTimelinePreviewElement,
-  hasKeyframedTimelineClips,
+  timelineNeedsLabelColumn,
 } from "./timelineViewModel";
 import { useTimelineSelectionLifecycle } from "./useTimelineSelectionLifecycle";
 import { useTimelineShiftModifier } from "./useTimelineShiftModifier";
 import { useTimelineTicks } from "./useTimelineTicks";
-import { getTimelineElementIndexes } from "../lib/timelineElementIndexes";
 import { getTimelineElementIdentity } from "../lib/timelineElementHelpers";
 import { useTimelineClipRenderWindow } from "./useTimelineClipRenderWindow";
 import { useTimelineActiveClips } from "./useTimelineActiveClips";
@@ -109,13 +107,7 @@ export const Timeline = memo(function Timeline({
   useMusicBeatAnalysis();
   const rawElements = usePlayerStore((s) => s.elements);
   const expandedElements = useExpandedTimelineElements();
-  const beatAnalysis = usePlayerStore((s) => s.beatAnalysis);
-  const musicElement = usePlayerStore((s) => getTimelineElementIndexes(s.elements).musicElement);
-  const beatEdits = usePlayerStore((s) => s.beatEdits);
-  const adjustedBeatAnalysis = useMemo(
-    () => remapBeatAnalysisToComposition(beatAnalysis, musicElement, beatEdits),
-    [beatAnalysis, musicElement, beatEdits],
-  );
+  const adjustedBeatAnalysis = useAdjustedBeatAnalysis();
   const duration = usePlayerStore((s) => s.duration);
   const timeDisplayMode = usePlayerStore((s) => s.timeDisplayMode);
   const timelineReady = usePlayerStore((s) => s.timelineReady);
@@ -123,7 +115,10 @@ export const Timeline = memo(function Timeline({
   const selectedElementIds = usePlayerStore((s) => s.selectedElementIds);
   const focusedEaseSegment = usePlayerStore((s) => s.focusedEaseSegment);
   const gsapAnimations = usePlayerStore((s) => s.gsapAnimations);
-  const labelMode = useMemo(() => hasKeyframedTimelineClips(gsapAnimations), [gsapAnimations]);
+  const labelMode = useMemo(
+    () => timelineNeedsLabelColumn(gsapAnimations, expandedElements),
+    [gsapAnimations, expandedElements],
+  );
   // The label column provides pre-t=0 space; otherwise keep TRACKS_LEFT_PAD after the gutter.
   const contentOrigin = labelMode ? LABEL_COL_W + GUTTER : GUTTER + TRACKS_LEFT_PAD;
   const contentGutter = labelMode ? GUTTER : 0;
@@ -158,6 +153,8 @@ export const Timeline = memo(function Timeline({
     laneCounts,
     rowGeometry,
     rowGeometryRef,
+    groups,
+    trackGroupOf,
   } = useTimelineTrackLayout(
     expandedElements,
     gsapAnimations,
@@ -289,6 +286,8 @@ export const Timeline = memo(function Timeline({
     laneCounts,
     selectedElementId,
     selectedElementIds,
+    groups,
+    trackGroupOf,
     gsapAnimations,
     elements: expandedElements,
     pixelsPerSecond: pps,
@@ -509,6 +508,7 @@ export const Timeline = memo(function Timeline({
           trackOrder={trackOrder}
           tracks={tracks}
           trackStyles={trackStyles}
+          groups={groups}
           laneCounts={laneCounts}
           selectedElementId={selectedElementId}
           selectedElementIds={selectedElementIds}

@@ -220,73 +220,79 @@ export const PlayerControls = memo(function PlayerControls({
   });
 
   return (
-    <div
-      className="grid h-10 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-3"
-      aria-disabled={disabled || undefined}
-      style={{
-        paddingBottom: "env(safe-area-inset-bottom)",
-      }}
-    >
-      <Tooltip
-        label={timeDisplayMode === "time" ? "Switch to frame display" : "Switch to time display"}
+    <div>
+      <div
+        className="grid h-10 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-3"
+        aria-disabled={disabled || undefined}
+        style={{
+          paddingBottom: "env(safe-area-inset-bottom)",
+        }}
       >
-        <button
-          type="button"
-          onClick={() => setTimeDisplayMode(timeDisplayMode === "time" ? "frame" : "time")}
-          disabled={disabled}
-          className="min-w-0 justify-self-start whitespace-nowrap font-mono text-[11px] tabular-nums text-neutral-400 transition-colors hover:text-neutral-200 disabled:pointer-events-none"
+        <Tooltip
+          label={timeDisplayMode === "time" ? "Switch to frame display" : "Switch to time display"}
         >
-          <span ref={timeDisplayRef}>{formatTime(0)}</span>
-          {timeDisplayMode === "time" ? (
-            <>
-              <span className="mx-0.5 text-neutral-700">/</span>
-              <span className="text-neutral-600">{formatTime(duration)}</span>
-            </>
-          ) : null}
-        </button>
-      </Tooltip>
+          <button
+            type="button"
+            onClick={() => setTimeDisplayMode(timeDisplayMode === "time" ? "frame" : "time")}
+            disabled={disabled}
+            className="min-w-0 justify-self-start whitespace-nowrap font-mono text-[11px] tabular-nums text-neutral-400 transition-colors hover:text-neutral-200 disabled:pointer-events-none"
+          >
+            <span ref={timeDisplayRef}>{formatTime(0)}</span>
+            {timeDisplayMode === "time" ? (
+              <>
+                <span className="mx-0.5 text-neutral-700">/</span>
+                <span className="text-neutral-600">{formatTime(duration)}</span>
+              </>
+            ) : null}
+          </button>
+        </Tooltip>
 
-      <Tooltip label={isPlaying ? "Pause" : "Play"}>
-        <button
-          type="button"
-          aria-label={isPlaying ? "Pause" : "Play"}
-          onClick={() => {
-            trackStudioEvent("playback", { action: isPlaying ? "pause" : "play" });
-            onTogglePlay();
-          }}
-          disabled={controlsDisabled}
-          className="flex h-8 w-8 items-center justify-center justify-self-center rounded-md text-neutral-100 transition-colors hover:text-white disabled:pointer-events-none disabled:opacity-30"
-        >
-          <PlayPauseMorphIcon playing={isPlaying} />
-        </button>
-      </Tooltip>
+        <Tooltip label={isPlaying ? "Pause" : "Play"}>
+          <button
+            type="button"
+            aria-label={isPlaying ? "Pause" : "Play"}
+            onClick={() => {
+              trackStudioEvent("playback", { action: isPlaying ? "pause" : "play" });
+              onTogglePlay();
+            }}
+            disabled={controlsDisabled}
+            className="flex h-8 w-8 items-center justify-center justify-self-center rounded-md text-neutral-100 transition-colors hover:text-white disabled:pointer-events-none disabled:opacity-30"
+          >
+            <PlayPauseMorphIcon playing={isPlaying} />
+          </button>
+        </Tooltip>
 
-      <div className="flex min-w-0 items-center justify-self-end">
-        <VolumeControl
-          audioMuted={audioMuted}
-          audioVolume={audioVolume}
-          disabled={controlsDisabled}
-          setAudioMuted={setAudioMuted}
-          setAudioVolume={setAudioVolume}
-        />
-        <SpeedMenu
-          playbackRate={playbackRate}
-          setPlaybackRate={setPlaybackRate}
-          disabled={disabled}
-        />
-        <LoopButton loopEnabled={loopEnabled} disabled={disabled} setLoopEnabled={setLoopEnabled} />
-        {onToggleFullscreen && (
-          <FullscreenButton isFullscreen={isFullscreen} onToggleFullscreen={onToggleFullscreen} />
-        )}
-        <ShortcutsPanel
-          disabled={disabled}
-          duration={duration}
-          inPoint={inPoint}
-          outPoint={outPoint}
-          setInPoint={setInPoint}
-          setOutPoint={setOutPoint}
-          onSeek={onSeek}
-        />
+        <div className="flex min-w-0 items-center justify-self-end">
+          <VolumeControl
+            audioMuted={audioMuted}
+            audioVolume={audioVolume}
+            disabled={controlsDisabled}
+            setAudioMuted={setAudioMuted}
+            setAudioVolume={setAudioVolume}
+          />
+          <SpeedMenu
+            playbackRate={playbackRate}
+            setPlaybackRate={setPlaybackRate}
+            disabled={disabled}
+          />
+          <LoopButton
+            loopEnabled={loopEnabled}
+            disabled={disabled}
+            setLoopEnabled={setLoopEnabled}
+          />
+          {onToggleFullscreen && (
+            <FullscreenButton isFullscreen={isFullscreen} onToggleFullscreen={onToggleFullscreen} />
+          )}
+          <ShortcutsPanel
+            disabled={disabled}
+            duration={duration}
+            inPoint={inPoint}
+            outPoint={outPoint}
+            setInPoint={setInPoint}
+            setOutPoint={setOutPoint}
+            onSeek={onSeek}
+          />
+        </div>
       </div>
     </div>
   );

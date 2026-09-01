@@ -1,5 +1,11 @@
 import { type TimelineElement, usePlayerStore } from "../player/store/playerStore";
-import { applyPatchByTarget, findTagByTarget, readAttributeByTarget } from "../utils/sourcePatcher";
+import {
+  applyPatchByTarget,
+  findTagByTarget,
+  readAttributeByTarget,
+  readTagSnippetByTarget,
+  type PatchOperation,
+} from "../utils/sourcePatcher";
 import {
   formatTimelineAttributeNumber,
   type TimelineStackingReorderIntent,
@@ -390,3 +396,86 @@ export async function persistTimelineBatchEdit(
 export { applyPatchByTarget, formatTimelineAttributeNumber };
 
 export { patchDocumentRootDuration } from "./timelineEditingGsap";
+
+export interface PersistElementAttributeInput {
+  projectId: string;
+  targetPath: string;
+  patchTarget: PatchTarget;
+  attr: string;
+  value: string | null;
+  label: string;
+  writeProjectFile: (path: string, content: string) => Promise<void>;
+  recordEdit: (input: RecordEditInput) => Promise<void>;
+  domEditSaveTimestampRef: { current: number };
+  pendingTimelineEditPathRef: { current: Set<string> };
+  /** Write the attribute directly on the live preview DOM node. */
+  patchLive: (value: string | null) => void;
+}
+
+/**
+ * One attribute, persisted to source and optimistically patched onto the
+ * live preview, with a revert on save failure. The shared core behind
+ * `setAudioGroupAttribute` (a group id addressed by its own DOM id) and
+ * `useSetElementAttribute` (an arbitrary timeline clip) — same shape, only
+ * how the live node is found and where the patch target resolves to differs,
+ * which is exactly what `patchLive`/`patchTarget` parameterize.
+ */
+export async function persistElementAttribute({
+  projectId,
+  targetPath,
+  patchTarget,
+  attr,
+  value,
+  label,
+  writeProjectFile,
+  recordEdit,
+  domEditSaveTimestampRef,
+  pendingTimelineEditPathRef,
+  patchLive,
+}: PersistElementAttributeInput): Promise<string[]> {
+  // Resolve the target BEFORE patching the live DOM. The optimistic patch used
+  // to run first, and only the save was wrapped in the unwind — so an
+  // unresolvable target threw with the live preview (and, through the callers'
+  // catch, the store mirrored off it) holding a value that never reached disk.
+  // The write then read as successful until a reload dropped it.
+  const before = await readFileContent(projectId, targetPath);
+  if (readTagSnippetByTarget(before, patchTarget) === undefined) {
+    throw new Error(`Unable to patch element in ${targetPath}`);
+  }
+  // The unwind value comes from the FILE, not from `readLive()`.
+  //
+  // Every live-write caller patches the DOM before committing — a fader drag is
+  // `setLive` per frame, hovering a preset auditions the whole chain — so by the
+  // time this runs the live DOM already holds the in-progress value. Reading it
+  // here made `previousValue === value`, so the unwind below was a no-op, and
+  // `setQuiet`'s catch (which deliberately re-mirrors the store from the live
+  // DOM) then mirrored that same never-saved value. The group audibly had the
+  // preset, the panel agreed, and a reload dropped it — the failure class the
+  // target check above was added to close, still open on the live-write path.
+  const previousValue = readAttributeByTarget(before, patchTarget, attr) ?? null;
+  patchLive(value);
+
+  const operation: PatchOperation = { type: "attribute", property: attr, value };
+  const patched = applyPatchByTarget(before, patchTarget, operation);
+
+  pendingTimelineEditPathRef.current.add(targetPath);
+  domEditSaveTimestampRef.current = Date.now();
+  try {
+    const changedPaths = await saveProjectFilesWithHistory({
+      projectId,
+      label,
+      kind: "timeline",
+      files: { [targetPath]: patched },
+      readFile: async (path) => (path === targetPath ? before : readFileContent(projectId, path)),
+      writeFile: writeProjectFile,
+      recordEdit,
+    });
+    domEditSaveTimestampRef.current = Date.now();
+    return changedPaths;
+  } catch (error) {
+    // The optimistic live write already ran; unwind it on a save failure so
+    // the preview doesn't show a value that never reached disk.
+    patchLive(previousValue);
+    throw error;
+  }
+}

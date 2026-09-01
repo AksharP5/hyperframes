@@ -5,6 +5,7 @@ import type {
   RuntimeTimelineLike,
 } from "./types";
 import { stableClipId } from "./clipTree";
+import { resolveAuthoredTimingWindow } from "./authoredTiming";
 import { swallow } from "./diagnostics";
 import { readElementPlaybackRate, readElementPlaybackStart } from "./media";
 import { parseStrictFiniteTimingNumber, resolveNaturalMediaTimelineDuration } from "./playbackRate";
@@ -14,23 +15,32 @@ import { isSceneLikeCompositionId } from "../slideshow/index.js";
 import { COMPOSITION_CONTRACT_VERSION } from "../compositionContract.js";
 import { runtimeProtocolMetadata } from "./protocol.js";
 
-const AUTHORED_DURATION_ATTR = "data-hf-authored-duration";
-const AUTHORED_END_ATTR = "data-hf-authored-end";
-
 function parseNum(value: string | null | undefined): number | null {
   return parseStrictFiniteTimingNumber(value);
 }
 
 function parseElementDurationAttr(element: Element): number | null {
-  return (
-    parseNum(element.getAttribute("data-duration")) ??
-    parseNum(element.getAttribute(AUTHORED_DURATION_ATTR))
-  );
+  const publicDuration = element.getAttribute("data-duration");
+  const authoredDuration = element.getAttribute("data-hf-authored-duration");
+  const resolved = resolveAuthoredTimingWindow({
+    start: 0,
+    duration: publicDuration,
+    authoredDuration,
+  })?.duration;
+  if (resolved != null) return resolved;
+  const hasExplicitNonpositive = [publicDuration, authoredDuration]
+    .map(parseNum)
+    .some((duration) => duration != null && duration <= 0);
+  return hasExplicitNonpositive ? 0 : null;
 }
 
 function parseElementEndAttr(element: Element): number | null {
   return (
-    parseNum(element.getAttribute("data-end")) ?? parseNum(element.getAttribute(AUTHORED_END_ATTR))
+    resolveAuthoredTimingWindow({
+      start: 0,
+      end: element.getAttribute("data-end"),
+      authoredEnd: element.getAttribute("data-hf-authored-end"),
+    })?.end ?? null
   );
 }
 

@@ -37,6 +37,7 @@ import {
   queryElementStacking,
   resampleRgb48leObjectFit,
   resolveFinalFrameExtractionWindow,
+  resolveProjectRelativeSrc,
   resolveVideoExtractionWindow,
   runFfmpeg,
   type TimelineExtractionWindow,
@@ -51,6 +52,7 @@ import {
 } from "../../hdrCompositor.js";
 import type { HdrDiagnostics, RenderJob } from "../../renderOrchestrator.js";
 import type { CompositionMetadata } from "../shared.js";
+import { encoderFailureError } from "../encoderInterruption.js";
 
 const NO_FOLLOW_FLAG = constants.O_NOFOLLOW ?? 0;
 
@@ -78,7 +80,6 @@ export function planHdrResources(args: {
   nativeHdrImageIds: Set<string>;
   projectDir: string;
   compiledDir: string;
-  existsSync: (p: string) => boolean;
 }): HdrResourcePrep {
   const { composition, nativeHdrVideoIds, nativeHdrImageIds, projectDir, compiledDir } = args;
   const hdrVideoIds = composition.videos
@@ -87,12 +88,14 @@ export function planHdrResources(args: {
   const hdrVideoSrcPaths = new Map<string, string>();
   for (const v of composition.videos) {
     if (!hdrVideoIds.includes(v.id)) continue;
-    let srcPath = v.src;
-    if (!srcPath.startsWith("/")) {
-      const fromCompiled = join(compiledDir, srcPath);
-      srcPath = args.existsSync(fromCompiled) ? fromCompiled : join(projectDir, srcPath);
-    }
-    hdrVideoSrcPaths.set(v.id, srcPath);
+    // Resolve via the shared SDR resolver so a percent-encoded `<video src>`
+    // (`视频1.mp4` → `%E8%A7%86%E9%A2%911.mp4` in the compiled DOM URL) decodes
+    // back to the real on-disk filename before ffmpeg sees it. The old
+    // hand-rolled join passed the encoded string straight through, so HDR
+    // pre-extraction failed with "No such file" on non-ASCII media
+    // (PRINFRA-349 symptom c). resolveProjectRelativeSrc also handles query
+    // strings, origin-root URLs, and `..` traversal identically to the SDR path.
+    hdrVideoSrcPaths.set(v.id, resolveProjectRelativeSrc(v.src, projectDir, compiledDir));
   }
   const hdrVideoStartTimes = new Map<string, number>();
   for (const v of composition.videos) {
@@ -494,10 +497,10 @@ export async function extractHdrVideoFrames(args: {
           srcPath,
           stderr: result.stderr.slice(-400),
         });
-        throw new Error(
-          `HDR frame extraction failed for video "${videoId}". ` +
-            `Aborting render to avoid shipping black HDR layers.`,
-        );
+        throw encoderFailureError(`HDR frame extraction failed for video "${videoId}"`, {
+          error: `Aborting render to avoid shipping black HDR layers: ${result.stderr.slice(-400)}`,
+          failureReason: result.failureReason,
+        });
       }
       const frameSize = dims.width * dims.height * 6;
       const fd = openSync(rawPath, constants.O_RDONLY | NO_FOLLOW_FLAG);

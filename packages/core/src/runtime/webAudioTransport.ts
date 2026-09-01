@@ -1,17 +1,38 @@
 import { attachElementFxChain, readElementAutomation, type ElementFxHandle } from "./audioFx.js";
 import {
+  clearParamLane,
   scheduleParamLane,
   volumeLane,
   type AutomationTiming,
 } from "../audio/audioFxAutomation.js";
 import { VOLUME_RANGE } from "../audioAutomation.js";
+import { audioGroupOf, readAudioGroupVolume, resolveGroupElement } from "../audioGroups.js";
 import { swallow } from "./diagnostics";
+import { clampAudioGain } from "../audioGain.js";
 import { getDebugSurface } from "./globals.js";
 import { readElementPlaybackRate } from "./media.js";
+import { classifyWebAudioMediaRoute, reportWebAudioMediaRoute } from "./webAudioRoute.js";
 
 function normalizeRate(rate: number): number {
   if (!Number.isFinite(rate) || rate <= 0) return 1;
   return rate;
+}
+
+/**
+ * The render puts every track volume through `clampVolume`, which is
+ * `clampAudioGain` — ceiling MAX_AUDIO_GAIN (+12 dB, ~3.98), not unity. Preview
+ * has to agree or the two diverge on exactly the attribute this bus exists to
+ * honour: an authored `<hf-audio-group data-volume="2">` previewed at 1.0 and
+ * exported at 2.0, up to 6 dB quieter in the audition than in the file, and
+ * 12 dB at the ceiling. Preview was also self-inconsistent — the same
+ * parameter's automation lane is bounded by `VOLUME_RANGE.max`, which IS
+ * MAX_AUDIO_GAIN, so an envelope could reach 3.98 where the static fader could
+ * not pass 1.0. `clampAudioGain` still floors at 0, so a negative value cannot
+ * invert polarity in preview while rendering silent. Compositions are
+ * hand-authorable, so out-of-range values do not need a slider to be reachable.
+ */
+function clampGroupVolume(volume: number): number {
+  return clampAudioGain(volume);
 }
 
 /**
@@ -69,9 +90,12 @@ function startBoundedSource(
 /**
  * The volume lane rides the fader, after the effects — where a DAW puts it,
  * and the order the render bakes it in.
+ *
+ * Typed against the attribute reader rather than `HTMLMediaElement` so a group
+ * bus (an `<hf-audio-group>`, not a media element) can ride the same path.
  */
 function scheduleVolumeLane(
-  el: HTMLMediaElement,
+  el: { getAttribute?(name: string): string | null },
   gainNode: GainNode,
   timing: AutomationTiming,
 ): void {
@@ -118,6 +142,26 @@ export class WebAudioTransport {
   private _masterGain: GainNode | null = null;
   private _masterVolume = 1;
   private _masterMuted = false;
+  // One shared bus per group id, lazily built the first time a member of that
+  // group is scheduled. Lives for the session (mirrors `_masterGain`'s own
+  // lifecycle) rather than being torn down on every `stopAll()`, so replaying
+  // a group does not rebuild its chain; only `destroy()` disposes these.
+  private _groups = new Map<
+    string,
+    {
+      input: GainNode;
+      /** Post-FX fader: `data-volume` plus the volume lane. */
+      fader: GainNode;
+      muteGain: GainNode;
+      /** Kept so `setRate` can re-aim this bus's FX automation, the way it does
+       *  every source's — its docblock claims it already did. */
+      fx: ElementFxHandle | null;
+      /** Play generation the current envelopes were booked against. */
+      generation: number;
+      reanchor(timing: AutomationTiming): void;
+      dispose(): void;
+    }
+  >();
   // Composition-time reference frame: at AudioContext time `_rateAnchorCtx`,
   // composition time was `_rateAnchorComp`, and time has been advancing at
   // `_rate` composition-seconds per wallclock-second since.
@@ -200,6 +244,70 @@ export class WebAudioTransport {
   }
 
   /**
+   * The element's cached MediaElementAudioSourceNode, building it on first use
+   * — or `null` when this element must not be captured at all.
+   *
+   * That second outcome is the whole point. `createMediaElementSource` cannot
+   * report that it produced a silent node: over a CORS-cross-origin resource
+   * the Web Audio spec asks the node for SILENCE rather than an exception, so
+   * the caller's `try/catch` never fires and the composition plays through
+   * with no audio and no error (#3458). The call also permanently reroutes the
+   * element away from its native output, so the question has to be settled
+   * before it, and there is no undo afterwards.
+   *
+   * `init.ts` routes on the same verdict before ever calling in, and
+   * `AudioRow.tsx`'s standalone preview player classifies over its own
+   * throwaway `AudioContext` before its own `createMediaElementSource` call —
+   * this method is A enforcement point, not THE enforcement point; every
+   * caller that can reach `createMediaElementSource` is expected to classify
+   * first. What this method DOES own is the cache below: `_mediaElementSources`
+   * is keyed by element identity, not by asset, so a cache hit alone says
+   * nothing about the element's CURRENT resource. Reclassifying on every call
+   * — cache hit included — means a `src` mutation an outer caller missed (a
+   * pooled element swapped from a same-origin clip to a cross-origin one
+   * without going through a fresh generation) can't leave a stale
+   * `web-audio` verdict silently attached to the new resource.
+   */
+  private acquireMediaElementSource(el: HTMLMediaElement): MediaElementAudioSourceNode | null {
+    const cached = this._mediaElementSources.get(el);
+    if (cached) {
+      // The node itself doesn't change identity on a src swap, but its
+      // eligibility can: the Web Audio spec's tainted-origin check runs
+      // against the element's CURRENT underlying resource, not the one that
+      // was current when the node was built. A same-origin-to-cross-origin
+      // mutation on this element would otherwise keep returning the old
+      // (now-silent) node forever — `destroy()` was the only thing that ever
+      // cleared this cache, so a long-lived element that changed sources
+      // stayed silenced for the rest of the session (the R2 finding this
+      // block exists to close). The node is still a one-way door — it can't
+      // be un-created, and the element's native output is gone either way —
+      // so disconnecting it just stops it feeding a graph that no longer
+      // matches the asset; the caller falls back to the decode-only path.
+      const route = classifyWebAudioMediaRoute(el);
+      if (route.kind !== "web-audio") {
+        try {
+          cached.disconnect();
+        } catch {
+          // Already torn down.
+        }
+        this._mediaElementSources.delete(el);
+        reportWebAudioMediaRoute(el, route);
+        return null;
+      }
+      return cached;
+    }
+    if (!this._ctx) return null;
+    const route = classifyWebAudioMediaRoute(el);
+    if (route.kind !== "web-audio") {
+      reportWebAudioMediaRoute(el, route);
+      return null;
+    }
+    const sourceNode = this._ctx.createMediaElementSource(el);
+    this._mediaElementSources.set(el, sourceNode);
+    return sourceNode;
+  }
+
+  /**
    * Route the browser's pitch-preserving HTMLMediaElement transport through the
    * same FX, automation, element-gain, and master graph used by final audio.
    * The media element remains the source-time/rate owner; Web Audio is strictly
@@ -221,11 +329,8 @@ export class WebAudioTransport {
       if (this._ctx.state === "suspended") await this._ctx.resume();
       if (generation !== this._playGeneration) return null;
 
-      let sourceNode = this._mediaElementSources.get(el);
-      if (!sourceNode) {
-        sourceNode = this._ctx.createMediaElementSource(el);
-        this._mediaElementSources.set(el, sourceNode);
-      }
+      const sourceNode = this.acquireMediaElementSource(el);
+      if (!sourceNode) return null;
 
       const safeRate = normalizeRate(rate);
       const gainNode = this._ctx.createGain();
@@ -234,7 +339,14 @@ export class WebAudioTransport {
       const elapsed = compositionTime - compositionStart;
       const timing: AutomationTiming = { scheduledAt, elapsed, rate: safeRate };
       const fx = attachElementFxChain(this._ctx, el, sourceNode, gainNode, timing);
-      gainNode.connect(this._masterGain);
+      // The group bus, not master, for a member — same as the decoded-buffer
+      // path. This transport is the PRIMARY one for audio (the decode path is
+      // its fallback), so routing it at master would have left every grouped
+      // track bypassing the bus whose whole premise is that a group is one
+      // signal.
+      gainNode.connect(
+        this.resolveDestination(el, scheduledAt, compositionTime, safeRate) ?? this._masterGain,
+      );
       scheduleVolumeLane(el, gainNode, timing);
 
       this._rate = safeRate;
@@ -268,6 +380,183 @@ export class WebAudioTransport {
     }
   }
 
+  /**
+   * The gain a grouped member's signal should land on, building it on first
+   * use. A group's clock is COMPOSITION time (design doc §1.3) — it has no
+   * `data-start`, and a missing start parses as 0, which is exactly
+   * composition time — so its chain and volume lane are scheduled once here
+   * against that zero-offset timing, not the member's own clip-local timing.
+   * A group id with no matching `<hf-audio-group>` element still gets a bus
+   * (flat, no chain) so a hand-authored `data-audio-group` degrades to a
+   * plain sum rather than losing the member's audio.
+   */
+  private groupInput(groupId: string, doc: Document, timing: AutomationTiming): GainNode | null {
+    const existing = this._groups.get(groupId);
+    if (existing) {
+      // The bus outlives `stopAll()` on purpose, so a replay or a seek reuses
+      // this graph — but its envelopes were committed to the FIRST pass's
+      // absolute context times. Left alone they hold their last value forever,
+      // which for a fade-out is silence for the rest of the session. Re-anchor
+      // once per play generation, not once per member scheduled.
+      if (existing.generation !== this._playGeneration) {
+        // Stamped only on success, and isolated: this runs inside
+        // `schedulePlayback`, whose catch turns any throw into `return null` —
+        // i.e. a bus problem would silently drop the MEMBER from the pass. And
+        // stamping first would consume the generation, so no later member of
+        // the same group would retry and the bus would keep the previous pass's
+        // envelopes: finding 11 unfixed on exactly the pass that failed.
+        try {
+          existing.reanchor(timing);
+          existing.generation = this._playGeneration;
+        } catch (err) {
+          swallow("webAudioTransport.groupReanchor", err);
+        }
+      }
+      return existing.input;
+    }
+    if (!this._ctx || !this._masterGain) return null;
+
+    const input = this._ctx.createGain();
+    // Stable point the FX chain (or, when there's none, the dry passthrough —
+    // see `attachElementFxChain`'s `detach()`) always lands on before master,
+    // regardless of whether a chain is attached/detached/rebuilt later. The
+    // mute gain splices in BEFORE `output`, between the FX chain and here.
+    const output = this._ctx.createGain();
+    output.connect(this._masterGain);
+
+    // Tag-checked, and re-resolved on every reanchor below rather than frozen:
+    // a bus whose element does not exist yet (studio group creation, or a
+    // sub-composition that loads later) kept the `getAttribute: () => null`
+    // stub for the whole session, so its fader, chain and mute never reached
+    // preview while the export honoured all three.
+    const resolveEl = (): Element | null => resolveGroupElement(doc, groupId);
+    const groupEl = resolveEl();
+    const muteGain = this._ctx.createGain();
+    muteGain.gain.value = groupEl?.hasAttribute("data-hidden") ? 0 : 1;
+    muteGain.connect(output);
+    // The group's fader, POST-FX: `data-volume` is the static position and the
+    // volume lane rides it, which is where a DAW puts it and the order the
+    // render bakes it in (`scheduleVolumeLane`'s own contract). Scheduling it
+    // on `input` instead put the fader ahead of the effects, so any nonlinear
+    // group effect — a compressor, the Giant preset — previewed differently
+    // than it rendered.
+    const fader = this._ctx.createGain();
+    fader.gain.value = clampGroupVolume(readAudioGroupVolume(groupEl));
+    fader.connect(muteGain);
+    const fx = attachElementFxChain(
+      this._ctx,
+      groupEl ?? { getAttribute: () => null },
+      input,
+      fader,
+      timing,
+    );
+    if (groupEl) scheduleVolumeLane(groupEl, fader, timing);
+
+    this._groups.set(groupId, {
+      input,
+      fader,
+      muteGain,
+      fx,
+      generation: this._playGeneration,
+      reanchor: (at: AutomationTiming) => {
+        // Cleared BEFORE the value write, and unconditionally. `scheduleVolumeLane`
+        // clears as part of scheduling, but returns early when the group no
+        // longer has a lane — and a scheduled envelope outranks a `.value`
+        // write, so deleting a group's automation mid-session otherwise left
+        // the previous pass's ramps still owning the param (for a fade-out,
+        // silence) for the rest of the session.
+        clearParamLane([{ param: fader.gain }]);
+        // Re-resolved, not the element captured at build time — see `resolveEl`.
+        const live = resolveEl();
+        fader.gain.value = clampGroupVolume(readAudioGroupVolume(live));
+        muteGain.gain.value = live?.hasAttribute("data-hidden") ? 0 : 1;
+        fx?.reanchor(at);
+        if (live) scheduleVolumeLane(live, fader, at);
+      },
+      dispose: () => {
+        try {
+          fx?.dispose();
+          input.disconnect();
+          fader.disconnect();
+          muteGain.disconnect();
+          output.disconnect();
+        } catch {
+          // Already torn down.
+        }
+      },
+    });
+    return input;
+  }
+
+  /**
+   * Group mute, preview side — a separate gain from `input`'s volume fader
+   * so a mute toggle never fights `scheduleVolumeLane`'s ramps on the
+   * same param (the same hazard the design doc flags for §2.1). A no-op
+   * until the group has an active member: at that point `groupInput` reads
+   * the element's own `data-hidden` for its initial value, so there is
+   * nothing to catch up on here.
+   */
+  setGroupMuted(groupId: string, muted: boolean): void {
+    const group = this._groups.get(groupId);
+    if (!group) return;
+    try {
+      group.muteGain.gain.value = muted ? 0 : 1;
+    } catch (err) {
+      swallow("webAudioTransport.setGroupMuted", err);
+    }
+  }
+
+  /** Master, unless `el` belongs to a group — then that group's bus (built on
+   *  first use, per `groupInput`). */
+  private resolveDestination(
+    el: HTMLMediaElement,
+    scheduledAt: number,
+    compositionTime: number,
+    safeRate: number,
+  ): GainNode | null {
+    if (!this._masterGain) return null;
+    const groupId = audioGroupOf(el);
+    if (!groupId) return this._masterGain;
+    const groupTiming: AutomationTiming = { scheduledAt, elapsed: compositionTime, rate: safeRate };
+    return this.groupInput(groupId, el.ownerDocument, groupTiming) ?? this._masterGain;
+  }
+
+  /**
+   * The graph goes with it. Splicing alone left the FX handle alive and then
+   * UNREACHABLE — `stopAll()` disposes by walking `_activeSources`, which the
+   * splice just emptied of this entry. Every clip that finished naturally
+   * leaked its MutationObserver for the session, and each one still answered
+   * later `data-fx-chain` edits by rebuilding a whole graph (impulse response,
+   * chorus/phaser oscillators started and never stopped) around a dead
+   * source. Not disposed when the index is already -1: `stopAll()` has
+   * already done it, and `stop()` is what fired this event.
+   */
+  private handleSourceEnded(
+    sourceNode: AudioBufferSourceNode,
+    scheduled: ScheduledSource,
+    el: HTMLMediaElement,
+    priorMuted: boolean,
+  ): void {
+    const idx = this._activeSources.indexOf(scheduled);
+    if (idx === -1) return;
+    this._activeSources.splice(idx, 1);
+    el.muted = priorMuted;
+    try {
+      sourceNode.disconnect();
+      scheduled.fx?.dispose();
+      scheduled.gainNode.disconnect();
+    } catch {
+      // Already torn down.
+    }
+    if (this._activeSources.length === 0) this._paused = true;
+  }
+
+  // Pre-existing size (110 lines before this diff, which shrank it to under
+  // 95 via two extractions — see `handleSourceEnded`/`resolveDestination`);
+  // the remainder is inherently sequential graph-wiring, not a nested
+  // decision tree, and further splitting would cost more readability than it
+  // buys. Same call the B2 step took on `TimelineLogicalRow`.
+  // fallow-ignore-next-line complexity
   async schedulePlayback(
     el: HTMLMediaElement,
     buffer: AudioBuffer,
@@ -308,7 +597,9 @@ export class WebAudioTransport {
       // output — the same order the offline render uses. Preview and render run
       // the identical graph builders, so what is heard here is what is written.
       const fx = attachElementFxChain(this._ctx, el, sourceNode, gainNode, timing);
-      gainNode.connect(this._masterGain);
+      gainNode.connect(
+        this.resolveDestination(el, scheduledAt, compositionTime, safeRate) ?? this._masterGain,
+      );
 
       scheduleVolumeLane(el, gainNode, timing);
 
@@ -354,29 +645,9 @@ export class WebAudioTransport {
       this._activeSources.push(scheduled);
       this._paused = false;
 
-      sourceNode.addEventListener("ended", () => {
-        const idx = this._activeSources.indexOf(scheduled);
-        if (idx !== -1) {
-          this._activeSources.splice(idx, 1);
-          el.muted = priorMuted;
-          // The graph goes with it. Splicing alone left the FX handle alive and
-          // then UNREACHABLE — stopAll() disposes by walking this array, which
-          // the splice just emptied of this entry. Every clip that finished
-          // naturally leaked its MutationObserver for the session, and each one
-          // still answered later `data-fx-chain` edits by rebuilding a whole
-          // graph (impulse response, chorus/phaser oscillators started and never
-          // stopped) around a dead source. Not disposed when idx is -1: stopAll()
-          // has already done it, and `stop()` is what fired this event.
-          try {
-            sourceNode.disconnect();
-            fx?.dispose();
-            gainNode.disconnect();
-          } catch {
-            // Already torn down.
-          }
-          if (this._activeSources.length === 0) this._paused = true;
-        }
-      });
+      sourceNode.addEventListener("ended", () =>
+        this.handleSourceEnded(sourceNode, scheduled, el, priorMuted),
+      );
 
       return scheduled;
     } catch (err) {
@@ -417,6 +688,16 @@ export class WebAudioTransport {
         swallow("webAudioTransport.setRate", err);
       }
     }
+    // Group buses are not in `_activeSources` — they outlive it — so their FX
+    // automation needs re-aiming here too, or a rate change leaves a group's
+    // envelopes running the old plan over audio at the new speed.
+    for (const group of this._groups.values()) {
+      try {
+        group.fx?.setRate(safeRate);
+      } catch (err) {
+        swallow("webAudioTransport.setRate.group", err);
+      }
+    }
     return true;
   }
 
@@ -449,8 +730,19 @@ export class WebAudioTransport {
     this.applyMasterGain();
   }
 
+  /**
+   * The per-element gain carries the clip's AUTHOR gain, which reaches
+   * MAX_AUDIO_GAIN — so it is clamped against that ceiling, not the spec's
+   * [0,1]. `setVolume` above is the opposite case and stays spec-clamped: the
+   * user's master volume is a fader, not a gain.
+   *
+   * Clamping this one at unity capped every static above-unity `data-volume` on
+   * the preview path while the render honoured it — the exact preview/render
+   * divergence this ceiling exists to close. Automation lanes hid it, because
+   * they schedule ramps onto the param directly and never pass through here.
+   */
   setElementVolume(el: HTMLMediaElement, volume: number): void {
-    const safeVolume = Math.max(0, Math.min(1, volume));
+    const safeVolume = clampAudioGain(volume);
     for (const source of this._activeSources) {
       if (source.el !== el) continue;
       try {
@@ -488,6 +780,8 @@ export class WebAudioTransport {
 
   destroy(): void {
     this.stopAll();
+    for (const group of this._groups.values()) group.dispose();
+    this._groups.clear();
     this._bufferCache.clear();
     this._failedSrcs.clear();
     this._mediaElementSources = new WeakMap();

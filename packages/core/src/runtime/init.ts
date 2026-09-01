@@ -42,6 +42,17 @@ import { applyVariableBindings } from "./applyVariableBindings";
 import { createColorGradingRuntime, type RuntimeColorGradingApi } from "./colorGrading";
 import { TransportClock } from "./clock";
 import { WebAudioTransport } from "./webAudioTransport";
+import {
+  classifyWebAudioMediaRoute,
+  isRouteSelectionSettled,
+  reportWebAudioMediaRoute,
+} from "./webAudioRoute.js";
+import {
+  ensureAudioGroupInertStyle,
+  HF_AUDIO_GROUP_TAG,
+  isMemberGroupHidden,
+} from "../audioGroups";
+import { clampNativeMediaVolume } from "../audioGain";
 import { quantizeTimeToFrame } from "../inline-scripts/parityContract";
 import { STUDIO_MANUAL_EDIT_GESTURE_ATTR } from "../editing/draftMarkers";
 import type {
@@ -56,6 +67,12 @@ import { shouldAttemptPeriodicTimelineBind } from "./timelineRebindPolicy";
 import { installStudioCustomEase } from "./customEase";
 import { parseNumeric } from "./startExpression";
 import { parseStrictFiniteTimingNumber } from "./playbackRate";
+import {
+  clearRuntimeData,
+  setRuntimeData,
+  setRuntimeDataAppliedReporter,
+  setRuntimeDataErrorReporter,
+} from "./runtimeData";
 
 const AUTHORED_DURATION_ATTR = "data-hf-authored-duration";
 const AUTHORED_END_ATTR = "data-hf-authored-end";
@@ -118,9 +135,43 @@ function resolveExportRenderFps(): ExportRenderFpsResolution {
 
 export function initSandboxRuntimeModular(): void {
   const state = createRuntimeState();
+  // Runtime-data handlers may replace the timeline object they mutate. Keep the
+  // reconciliation callback late-bound because the reporter is installed before
+  // the timeline resolver/binder is declared below. Delivery cannot complete
+  // until after init has installed the final callback.
+  let reconcileTimelineAfterRuntimeData: () => void = () => undefined;
   // Own the analytics bridge before any best-effort runtime installation so
   // early failures are observable instead of disappearing before player setup.
   initRuntimeAnalytics(postRuntimeMessage as (payload: unknown) => void);
+  setRuntimeDataErrorReporter((channel, requestId, error) => {
+    postRuntimeMessage({
+      source: "hf-preview",
+      type: "runtime-data-error",
+      channel,
+      requestId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  });
+  setRuntimeDataAppliedReporter((channel, requestId) => {
+    try {
+      reconcileTimelineAfterRuntimeData();
+    } catch (error) {
+      postRuntimeMessage({
+        source: "hf-preview",
+        type: "runtime-data-error",
+        channel,
+        requestId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    postRuntimeMessage({
+      source: "hf-preview",
+      type: "runtime-data-applied",
+      channel,
+      requestId,
+    });
+  });
   // SDK moveElement edits must render even when no usable GSAP timeline ever
   // binds (CSS/WAAPI-animated or fully static compositions) — apply at init.
   // This runs at DOMContentLoaded, after inline composition scripts have
@@ -131,6 +182,10 @@ export function initSandboxRuntimeModular(): void {
   // custom props) — values are fixed for the page's lifetime, so applying
   // once at init keeps renders deterministic and seeks safe.
   applyVariableBindings(document);
+  // `<hf-audio-group>` is metadata, so it must not occupy a box — see
+  // ensureAudioGroupInertStyle. Injected here, before timelines bind, so no
+  // captured frame ever sees the group as a layout item.
+  ensureAudioGroupInertStyle(document);
   const exportRenderFps = resolveExportRenderFps();
   state.canonicalFps = exportRenderFps.fps ?? state.canonicalFps;
   setRuntimeProtocolFps(state.canonicalFps);
@@ -177,6 +232,12 @@ export function initSandboxRuntimeModular(): void {
   void webAudio.init().then((ok) => {
     webAudioReady = ok;
   });
+  window.__hf = window.__hf || {};
+  /** Hidden by an ancestor, or by the BUS this clip belongs to. The bus is
+   *  never an ancestor — membership is on the member's `data-audio-group` — so
+   *  `closest()` alone could not see a muted group, which the render drops. */
+  const isSilencedByHidden = (el: Element): boolean =>
+    el.closest("[data-hidden]") !== null || isMemberGroupHidden(el.ownerDocument, el);
   // `_auto` is a Studio-internal keyframe marker (an auto-tracked endpoint the
   // parser reads back), NOT an animatable property. Register it as a no-op GSAP
   // plugin so GSAP doesn't log "Invalid property _auto" on every tween build —
@@ -633,22 +694,15 @@ export function initSandboxRuntimeModular(): void {
     // Both timing conventions exist in shipped projects:
     //   - composition-local media, e.g. host@20 + video@0 => root@20
     //   - legacy root-global PIP media, e.g. host@45.4 + video@45.4 => root@45.4
-    // Preserve the global value when its authored window already intersects
-    // the host's absolute window. Otherwise it is unambiguously local and
-    // must inherit the recursively-resolved host start.
-    const authoredDuration = parseStrictFiniteTimingNumber(element.getAttribute("data-duration"));
+    // Preserve the global value when its authored start already falls inside
+    // the host's absolute window. A long local clip can overlap that window
+    // even when its start is local (host@39.233 + video@0/duration=80), so the
+    // duration cannot disambiguate the timing convention.
     const hostDuration = context.inheritedDuration;
     const hostEnd = hostDuration != null && hostDuration > 0 ? inheritedStart + hostDuration : null;
-    const authoredEnd =
-      authoredDuration != null && authoredDuration > 0
-        ? authoredStart + authoredDuration
-        : authoredStart;
-    const overlapsHostWindow =
-      hostEnd == null
-        ? authoredStart >= inheritedStart
-        : authoredStart < hostEnd &&
-          (authoredEnd > inheritedStart || authoredStart === inheritedStart);
-    return overlapsHostWindow ? authoredStart : inheritedStart + authoredStart;
+    const startsInsideHostWindow =
+      authoredStart >= inheritedStart && (hostEnd == null || authoredStart < hostEnd);
+    return startsInsideHostWindow ? authoredStart : inheritedStart + authoredStart;
   };
 
   window.__hfResolveMediaStartSeconds = resolveAbsoluteMediaStartSeconds;
@@ -1431,6 +1485,14 @@ export function initSandboxRuntimeModular(): void {
       // scene container we auto-stamp below (e.g. an opacity-crossfaded scene)
       // must NOT suppress its own animated children — otherwise those children
       // never become timeline clips and that scene can't inline-expand.
+      // A bus is not a clip. `<hf-audio-group>` carries a group's label, fader,
+      // mute and FX chain and has no timing of its own, so stamping it put it in
+      // `__clipManifest` as a full-duration element — which the studio drew as an
+      // ordinary clip row above the real group header. That row was draggable,
+      // trimmable and deletable, and deleting it removed the bus, taking the
+      // group's automation lanes and FX rack with it.
+      const isAudioGroupBus = (el: Element): boolean =>
+        el.tagName.toLowerCase() === HF_AUDIO_GROUP_TAG;
       const authoredTimed = new Set<Element>(document.querySelectorAll("[data-start]"));
       const hasAuthoredTimedAncestor = (element: HTMLElement): boolean => {
         let node = element.parentElement;
@@ -1449,6 +1511,7 @@ export function initSandboxRuntimeModular(): void {
             for (const target of child.targets()) {
               if (!(target instanceof HTMLElement)) continue;
               if (target === rootComp) continue;
+              if (isAudioGroupBus(target)) continue;
               if (target.hasAttribute("data-start")) continue;
               if (hasAuthoredTimedAncestor(target)) continue;
               if (seen.has(target)) continue;
@@ -1476,6 +1539,7 @@ export function initSandboxRuntimeModular(): void {
           if (hasAuthoredTimedAncestor(el)) continue;
           if (seen.has(el)) continue;
           if (el.tagName === "SCRIPT" || el.tagName === "STYLE" || el.tagName === "LINK") continue;
+          if (isAudioGroupBus(el)) continue;
           seen.add(el);
           el.setAttribute("data-start", "0");
           el.setAttribute("data-duration", dur);
@@ -1495,11 +1559,37 @@ export function initSandboxRuntimeModular(): void {
     return true;
   };
 
-  (window as Window & { __hfForceTimelineRebind?: () => void }).__hfForceTimelineRebind = () => {
-    childrenBound = false;
-    bindRootTimelineIfAvailable();
+  const reconcileTimeline = () => {
+    if (state.tornDown) return;
+    const resolution = resolveRootTimelineFromDocument();
+    if (!resolution.timeline) {
+      // A successful clear must not leave the player seeking a killed timeline.
+      state.capturedTimeline = null;
+      childrenBound = false;
+      clock.setDuration(0);
+      syncTimedElementVisibility(state.currentTime);
+      return;
+    }
+
+    // Avoid needlessly invalidating the child-binding cache when a handler
+    // updates data in place. A replacement object is the signal that a rebind
+    // is required.
+    if (state.capturedTimeline !== resolution.timeline) {
+      childrenBound = false;
+      bindRootTimelineIfAvailable();
+    }
     syncTimedElementVisibility(state.currentTime);
   };
+  reconcileTimelineAfterRuntimeData = () => {
+    reconcileTimeline();
+    // The parent treats runtime-data-applied as permission to re-seek immediately. Publish the
+    // replacement duration first; otherwise that seek is clamped by the bootstrap timeline (often
+    // one second) and a style switch appears frozen on the first caption segment until some later
+    // polling tick happens to post the rebuilt timeline.
+    postTimeline();
+  };
+  (window as Window & { __hfForceTimelineRebind?: () => void }).__hfForceTimelineRebind =
+    reconcileTimeline;
 
   const emitRootStageLayoutDiagnostics = () => {
     const rootNode = resolveRootCompositionElement();
@@ -1807,11 +1897,33 @@ export function initSandboxRuntimeModular(): void {
     }
   };
 
+  // Only `<audio>` reaches `createMediaElementSource` (see
+  // `scheduleWebAudioForActiveClips`, which queries `audio[data-start]`), so a
+  // cross-origin `<video>` is not affected and must not be reported as if it
+  // were.
+  const reportWebAudioRoute = (mediaEl: HTMLMediaElement) => {
+    if (!(mediaEl instanceof HTMLAudioElement)) return;
+    // Before resource selection settles, the verdict is built from `<source>`
+    // children the browser might still pass over — good enough for the
+    // schedule path's conservative withhold, not good enough to put in front
+    // of a human as a diagnostic. Skip; the `loadedmetadata` call to this same
+    // function (see below) always has a settled `currentSrc` and will report
+    // for real once the guess would no longer be one.
+    if (!isRouteSelectionSettled(mediaEl)) return;
+    reportWebAudioMediaRoute(mediaEl, classifyWebAudioMediaRoute(mediaEl));
+  };
+
+  const onMediaLoadedMetadataForRoute = (event: Event) => {
+    const target = event.currentTarget;
+    if (target instanceof HTMLMediaElement) reportWebAudioRoute(target);
+  };
+
   const unbindMediaMetadataListeners = () => {
     for (const mediaEl of metadataBoundMedia) {
       mediaEl.removeEventListener("loadedmetadata", scheduleMetadataDurationHydration);
       mediaEl.removeEventListener("durationchange", scheduleMetadataDurationHydration);
       mediaEl.removeEventListener("loadedmetadata", onMediaLoadedMetadataForProxy);
+      mediaEl.removeEventListener("loadedmetadata", onMediaLoadedMetadataForRoute);
       mediaEl.removeEventListener("error", onMediaErrorForProxy);
     }
     metadataBoundMedia.clear();
@@ -1829,6 +1941,21 @@ export function initSandboxRuntimeModular(): void {
       }
       mediaEl.addEventListener("loadedmetadata", scheduleMetadataDurationHydration);
       mediaEl.addEventListener("durationchange", scheduleMetadataDurationHydration);
+      // Web Audio eligibility, reported at DISCOVERY rather than only at
+      // schedule time. `hyperframes check` seeks, it never calls play(), so a
+      // diagnostic raised from the transport would be invisible to the one
+      // gate whose job is to surface exactly this class of silent failure.
+      // Bound twice on purpose: now, for a `src`/committed-`currentSrc`
+      // element so a composition that never plays still reports promptly, and
+      // again at `loadedmetadata`, when `currentSrc` is unconditionally
+      // authoritative. `reportWebAudioRoute` itself skips the "now" call when
+      // selection hasn't settled (see `isRouteSelectionSettled`) — with only
+      // `<source>` children to go on, the browser could still pick a
+      // different one than the classifier just judged, and a diagnostic is a
+      // claim of fact, not a guess. `reportWebAudioMediaRoute` latches per
+      // element, so the deferred-to-`loadedmetadata` case still reports once.
+      mediaEl.addEventListener("loadedmetadata", onMediaLoadedMetadataForRoute);
+      reportWebAudioRoute(mediaEl);
       // Reactive (zero-videoWidth) + tertiary (error event) proxy-fallback
       // triggers. Inert in render mode / when the codec map is absent /
       // for <audio> — all guarded inside mediaProxy.ts itself.
@@ -1916,6 +2043,43 @@ export function initSandboxRuntimeModular(): void {
   };
   const dataHiddenDisplayRestores = new WeakMap<HTMLElement, string>();
   const dataHiddenDisplayNodes = new WeakSet<HTMLElement>();
+  // A data-hidden toggle on (or affecting) an audio element must re-schedule
+  // WebAudio playback so the hidden clip's source is dropped/restored mid-
+  // playback. Batched to one call per syncTimedElementVisibility pass, not
+  // one per toggled node.
+  //
+  // The reschedule is paired with `stopAll()` below, for the reason
+  // `applyWebAudioRate` already spells out: scheduling does
+  // NOT replace the active set. It bumps a generation, which only rejects
+  // stale schedules still in flight — every source already started keeps
+  // playing, and there is no per-element dedup. This comment used to claim the
+  // opposite and the call site trusted it, so muting a track mid-playback
+  // started a second buffer source for every in-window clip on top of the ones
+  // still sounding: the whole mix audibly doubled, slightly out of phase.
+  let hiddenAudioDirty = false;
+  const nodeAffectsAudio = (node: HTMLElement): boolean =>
+    node.matches("audio[data-start]") || node.querySelector("audio[data-start]") !== null;
+
+  // An `<hf-audio-group>` carries no `data-start`, so it is never among
+  // `visibilityNodes` above — group mute needs its own small diff pass.
+  // Preview-side only (render reads the group's `data-hidden` directly at
+  // export time, per B4); this just keeps the live WebAudio group bus in
+  // sync with a `data-hidden` toggle made mid-playback.
+  const groupHiddenLast = new WeakMap<Element, boolean>();
+  /** Set when a `data-hidden` mutation could have touched a BUS, so the sweep
+   *  below is not a whole-document query on every visibility pass. Same
+   *  dirty-flag shape as `hiddenAudioDirty` right above it. */
+  let groupMuteDirty = true;
+  const syncAudioGroupMute = () => {
+    if (!groupMuteDirty) return;
+    groupMuteDirty = false;
+    for (const groupEl of document.querySelectorAll(HF_AUDIO_GROUP_TAG)) {
+      const hidden = groupEl.hasAttribute("data-hidden");
+      if (groupHiddenLast.get(groupEl) === hidden) continue;
+      groupHiddenLast.set(groupEl, hidden);
+      if (groupEl.id) webAudio.setGroupMuted(groupEl.id, hidden);
+    }
+  };
 
   const syncTimedElementVisibility = (
     currentTime: number,
@@ -1929,6 +2093,8 @@ export function initSandboxRuntimeModular(): void {
         if (!dataHiddenDisplayNodes.has(rawNode)) {
           dataHiddenDisplayRestores.set(rawNode, rawNode.style.getPropertyValue("display"));
           dataHiddenDisplayNodes.add(rawNode);
+          if (nodeAffectsAudio(rawNode)) hiddenAudioDirty = true;
+          groupMuteDirty = true;
         }
         rawNode.style.display = "none";
         if (rawNode instanceof HTMLVideoElement || rawNode instanceof HTMLImageElement) {
@@ -1946,6 +2112,8 @@ export function initSandboxRuntimeModular(): void {
         }
         dataHiddenDisplayRestores.delete(rawNode);
         dataHiddenDisplayNodes.delete(rawNode);
+        if (nodeAffectsAudio(rawNode)) hiddenAudioDirty = true;
+        groupMuteDirty = true;
       }
 
       let isVisibleNow = isTimedElementVisibleAt(rawNode, currentTime);
@@ -1975,6 +2143,16 @@ export function initSandboxRuntimeModular(): void {
         rawNode.style.display = "none";
       }
     }
+    // Only when a `data-hidden` mutation actually moved something: the skips
+    // this reschedule exists to re-run are what change the active set, so
+    // firing it otherwise was an audible stop-and-restart across the whole mix
+    // that rebuilt an identical set.
+    if (hiddenAudioDirty && clock.isPlaying()) {
+      webAudio.stopAll();
+      scheduleWebAudioForActiveClips();
+    }
+    hiddenAudioDirty = false;
+    syncAudioGroupMute();
   };
 
   const syncMediaForCurrentState = () => {
@@ -2631,6 +2809,13 @@ export function initSandboxRuntimeModular(): void {
   }
   let transportTickCount = 0;
   let inTransportTick = false;
+  // A paused transport has no new frame to render. Re-seeking the same GSAP timeline at the
+  // same time on every rAF is not merely redundant: one picker can embed several paused
+  // players, multiplying full timeline traversal and style invalidation across every iframe.
+  // Keep enough identity to render once when time or the asynchronously-bound timeline changes.
+  let lastTransportSeekTime = Number.NaN;
+  let lastTransportSeekTimeline: RuntimeTimelineLike | null = null;
+  let pausedSeekDeferredByManualGesture = false;
 
   const seekRuntimeTimeline = (
     timeline: RuntimeTimelineLike,
@@ -2915,6 +3100,7 @@ export function initSandboxRuntimeModular(): void {
           let foundActive = false;
           for (const rawEl of audioEls) {
             if (!(rawEl instanceof HTMLMediaElement) || !rawEl.isConnected) continue;
+            if (isSilencedByHidden(rawEl)) continue;
             const start = Number.parseFloat(rawEl.dataset.start ?? "");
             const durAttr = parseStrictFiniteTimingNumber(rawEl.dataset.duration);
             const end = durAttr != null && durAttr > 0 ? start + durAttr : Infinity;
@@ -2950,10 +3136,23 @@ export function initSandboxRuntimeModular(): void {
       // skipping the re-seek is a no-op for every other element; it resumes
       // the frame the gesture marker clears (drop/cancel). Playback is never
       // affected — the seek runs whenever the clock is playing.
-      if (clock.isPlaying() || !hasActiveStudioManualEditGesture()) {
+      const isPlaying = clock.isPlaying();
+      const manualEditOwnsPausedFrame = !isPlaying && hasActiveStudioManualEditGesture();
+      if (manualEditOwnsPausedFrame) {
+        // Force one reconciliation after drop/cancel even though the playhead did not move.
+        pausedSeekDeferredByManualGesture = true;
+      } else if (
+        isPlaying ||
+        pausedSeekDeferredByManualGesture ||
+        t !== lastTransportSeekTime ||
+        state.capturedTimeline !== lastTransportSeekTimeline
+      ) {
         seekTimelineAndAdapters(t);
+        lastTransportSeekTime = t;
+        lastTransportSeekTimeline = state.capturedTimeline;
+        if (!isPlaying) pausedSeekDeferredByManualGesture = false;
       }
-      if (clock.isPlaying()) {
+      if (isPlaying) {
         colorGrading.redrawAnimated();
       }
 
@@ -3022,6 +3221,7 @@ export function initSandboxRuntimeModular(): void {
     const audioEls = document.querySelectorAll("audio[data-start]");
     for (const rawEl of audioEls) {
       if (!(rawEl instanceof HTMLMediaElement) || !rawEl.isConnected) continue;
+      if (isSilencedByHidden(rawEl)) continue;
       const compStart = Number.parseFloat(rawEl.dataset.start ?? "");
       if (!Number.isFinite(compStart)) continue;
       const mediaStart = readElementPlaybackStart(rawEl);
@@ -3043,43 +3243,66 @@ export function initSandboxRuntimeModular(): void {
           );
         }
       }
-      void webAudio
-        .scheduleMediaElementPlayback(
-          rawEl,
-          compStart,
-          mediaStart,
-          clock.now(),
-          vol,
-          gen,
-          state.playbackRate,
-        )
-        .then((scheduled) => {
-          if (scheduled || !clock.isPlaying()) return;
-          const effectiveRate = state.playbackRate * readElementPlaybackRate(rawEl);
-          const hasProcessing =
-            rawEl.hasAttribute("data-fx-chain") || rawEl.hasAttribute("data-automation");
-          // A decoded AudioBufferSourceNode changes pitch whenever its playback
-          // rate is non-unit. Bare tracks may safely stay on native output; a
-          // processed track must fail closed rather than silently lose its graph.
-          if (Math.abs(effectiveRate - 1) > 1e-9) {
-            if (hasProcessing) rawEl.muted = true;
-            return;
-          }
-          void webAudio.decodeAudioElement(rawEl).then((buffer) => {
-            if (!buffer || !clock.isPlaying()) return;
-            void webAudio.schedulePlayback(
+      // Decided BEFORE the transport is asked, because the two verdicts want
+      // two different fallback chains — and only one of them is the chain
+      // that existed before (#3458).
+      const route = classifyWebAudioMediaRoute(rawEl);
+      reportWebAudioMediaRoute(rawEl, route);
+      // The cross-origin verdict's BEST outcome is decode, since a CDN that
+      // sends `Access-Control-Allow-Origin` (the author just never wrote the
+      // `crossorigin` attribute) decodes fine and keeps the whole FX graph.
+      const capture =
+        route.kind === "web-audio"
+          ? webAudio.scheduleMediaElementPlayback(
               rawEl,
-              buffer,
               compStart,
               mediaStart,
               clock.now(),
               vol,
               gen,
               state.playbackRate,
-              clipDuration,
-            );
-          });
+            )
+          : Promise.resolve(null);
+      void capture.then((scheduled) => {
+        if (scheduled || !clock.isPlaying()) return;
+        const effectiveRate = state.playbackRate * readElementPlaybackRate(rawEl);
+        // Deliberately the FX/automation pair and NOT
+        // `nativeUnexpressibleProcessing()`, which this route's diagnostic uses.
+        // The two answer different questions: the diagnostic lists everything
+        // native output cannot carry (group bus and above-unity gain included),
+        // while this decides whether losing the graph is worse than silence.
+        // Widening it here would newly mute tracks that play today — a grouped
+        // clip at a non-unit rate among them — which is a behaviour change
+        // #3458 does not call for.
+        const hasProcessing =
+          rawEl.hasAttribute("data-fx-chain") || rawEl.hasAttribute("data-automation");
+        // A decoded AudioBufferSourceNode changes pitch whenever its playback
+        // rate is non-unit. Bare tracks may safely stay on native output; a
+        // processed track must fail closed rather than silently lose its graph.
+        if (Math.abs(effectiveRate - 1) > 1e-9) {
+          // ...but only when the transport TRIED and failed. On the
+          // cross-origin route capture was withheld on purpose, and native
+          // output is the fix — muting here would hand back the exact
+          // silence #3458 is about, now with the runtime's own blessing. The
+          // dropped processing is reported instead (`reportWebAudioMediaRoute`).
+          if (route.kind === "web-audio" && hasProcessing) rawEl.muted = true;
+          return;
+        }
+        void webAudio.decodeAudioElement(rawEl).then((buffer) => {
+          if (!buffer || !clock.isPlaying()) return;
+          void webAudio.schedulePlayback(
+            rawEl,
+            buffer,
+            compStart,
+            mediaStart,
+            clock.now(),
+            vol,
+            gen,
+            state.playbackRate,
+            clipDuration,
+          );
         });
+      });
     }
   };
 
@@ -3159,7 +3382,16 @@ export function initSandboxRuntimeModular(): void {
         if (!(el instanceof HTMLMediaElement)) continue;
         const parsed = parseFloat(el.dataset.volume ?? "");
         const clipVolume = Number.isFinite(parsed) ? parsed : 1;
-        el.volume = clipVolume * volume;
+        // `data-volume` carries authored gain, which goes above unity now that
+        // the ceiling is 12 dB — and `el.volume` is spec-pinned to [0,1], so
+        // assigning the product raw THROWS IndexSizeError and takes the rest of
+        // the loop with it. The element carries the legal part; the boost above
+        // unity belongs to Web Audio, which already has it from `setVolume`.
+        //
+        // Through `clampNativeMediaVolume` rather than an inline clamp: that
+        // helper exists in `audioGain.ts` for exactly this bound and is what
+        // `withUnclampedVolume` uses, so the two cannot drift.
+        el.volume = clampNativeMediaVolume(clipVolume * volume);
       }
     },
     onSetMediaOutputMuted: (muted) => {
@@ -3230,6 +3462,8 @@ export function initSandboxRuntimeModular(): void {
     },
     onEnablePickMode: () => picker.enablePickMode(),
     onDisablePickMode: () => picker.disablePickMode(),
+    onSetRuntimeData: setRuntimeData,
+    onClearRuntimeData: clearRuntimeData,
     getCanonicalFps: () => state.canonicalFps,
   });
 
@@ -3314,6 +3548,7 @@ export function initSandboxRuntimeModular(): void {
     }
     state.injectedCompScripts = [];
     state.capturedTimeline = null;
+    reconcileTimelineAfterRuntimeData = () => undefined;
     if (window.__hfRuntimeTeardown === teardown) {
       window.__hfRuntimeTeardown = null;
     }

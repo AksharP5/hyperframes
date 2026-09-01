@@ -1,13 +1,38 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { collectRuntimeTimelinePayload } from "./timeline";
 
+type TimelineTestWindow = Window & {
+  __timelines?: Record<string, { duration: () => number }>;
+};
+
 describe("collectRuntimeTimelinePayload", () => {
   afterEach(() => {
     document.body.innerHTML = "";
-    delete (window as any).__timelines;
+    delete (window as TimelineTestWindow).__timelines;
   });
 
   const defaultParams = { canonicalFps: 30 };
+
+  function appendTimedCompositionClip(
+    id: string,
+    duration: string,
+    authoredDuration?: string,
+  ): HTMLDivElement {
+    const root = document.createElement("div");
+    root.setAttribute("data-composition-id", "main");
+    root.setAttribute("data-duration", "10");
+    document.body.appendChild(root);
+    const clip = document.createElement("div");
+    clip.id = id;
+    clip.setAttribute("data-composition-id", id);
+    clip.setAttribute("data-start", "0");
+    clip.setAttribute("data-duration", duration);
+    if (authoredDuration != null) {
+      clip.setAttribute("data-hf-authored-duration", authoredDuration);
+    }
+    root.appendChild(clip);
+    return clip;
+  }
 
   it("returns minimal payload for empty document", () => {
     const result = collectRuntimeTimelinePayload(defaultParams);
@@ -663,6 +688,26 @@ describe("collectRuntimeTimelinePayload", () => {
     expect(starts["slide-3"]).toBe(26);
     expect(result.durationInFrames).toBe(42 * 30);
   });
+
+  it("uses preserved duration when a normalized timeline clip retains public zero", () => {
+    const clip = appendTimedCompositionClip("normalized-zero", "0", "3.5");
+
+    const result = collectRuntimeTimelinePayload(defaultParams);
+    expect(result.clips.find((candidate) => candidate.id === clip.id)?.duration).toBe(3.5);
+  });
+
+  it.each(["0", "-2"])(
+    "drops an explicit nonpositive duration %s before timeline fallback",
+    (duration) => {
+      const clip = appendTimedCompositionClip("invalid-window", duration);
+      (window as TimelineTestWindow).__timelines = {
+        "invalid-window": { duration: () => 5 },
+      };
+
+      const result = collectRuntimeTimelinePayload(defaultParams);
+      expect(result.clips.find((candidate) => candidate.id === clip.id)).toBeUndefined();
+    },
+  );
 
   it("discovers GSAP-animated scene elements via timeline introspection", () => {
     const root = document.createElement("div");

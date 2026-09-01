@@ -5,8 +5,9 @@ description: >
   fade-in/fade-out, crossfade, track gain or volume, volume automation, ducking,
   a music bed that fights a voiceover (voiceover carve), effects on a track
   (EQ, compressor, limiter, gate, saturation, delay, reverb, chorus, phaser,
-  bitcrush), or automation envelopes drawn on a track's volume or any effect
-  parameter.
+  bitcrush), automation envelopes drawn on a track's volume or any effect
+  parameter, or one submix bus carrying a chain, a fader and an automation clock
+  for several tracks at once (`<hf-audio-group>`).
   Don't use for sourcing or generating audio — finding BGM, SFX, or making a
   voiceover is `/media-use`. Don't use for clip timing or track layout, which is
   `/hyperframes-core`.
@@ -38,7 +39,8 @@ no rate envelope; preprocess a derived synchronized asset. HyperFrames does not
 provide automatic waveform sync or drift correction.
 For copyable cut/crossfade/retime recipes, use `/hyperframes-core` → `references/creator-editing-recipes.md`.
 
-Three attributes carry everything, all on the audio/video element itself:
+Three attributes carry everything, on the audio/video element itself — or, for
+the first two, on an `<hf-audio-group>` bus (see "One bus for many tracks"):
 
 | Attribute         | Holds                                                     |
 | ----------------- | --------------------------------------------------------- |
@@ -236,6 +238,118 @@ so one analysis covers all of them: the bands come from all the speech there is,
 the envelopes rise wherever any of it is happening. Voices that never play while the
 bed does are left out; they cannot mask it.
 
+**A carve against more than one clip id is wrong. Group the clips and carve
+against the group.** This is an invariant, not a tip. Naming clips one by one has
+to be exhaustively right and stays right only until the next edit — a fourth
+narration clip added later plays outside the carve's awareness, and the bed
+fails to duck under it silently. Naming the group instead resolves membership at
+analysis time, so a clip added to the group later is covered without touching
+`sources` at all:
+
+```html
+<!-- group the narration, then carve the bed against the group -->
+<audio id="vo-intro" data-audio-group="voiceover" …></audio>
+<audio id="vo-middle" data-audio-group="voiceover" …></audio>
+<audio id="vo-outro" data-audio-group="voiceover" …></audio>
+
+<audio
+  id="music"
+  data-fx-carve='{"enabled":true,"sources":["voiceover"],"strength":0.25}'
+  …
+></audio>
+```
+
+A `sources` list naming two or more plain clip ids instead of a group is caught
+by the `audio_carve_ungrouped_sources` lint rule — it still works, but it is the
+version that silently rots when a clip is added.
+
+**Keep the carve group a voice group: no bed, no SFX, no music.** A group id in
+`sources` resolves to every _current_ member on _every_ analysis, so the group
+you name is the group you get later — not the tracks that were measured when it
+was written. Two ways that bites:
+
+- **The bed in its own source group.** It is handed to itself as a voice and
+  carved against its own content — the "never carve a track against itself" rule
+  arriving one re-analysis later.
+- **An SFX or music clip in the voice group.** It enters the sidechain on the
+  next analysis and the bed starts ducking under a whoosh, even though the run
+  that wrote the attribute never measured it.
+
+Both are invisible at the moment the carve is written: the analysis sums the
+voices it detected and never round-trips through group resolution, so the first
+pass is genuinely correct and only the next one is wrong. So give each role its
+own group — `music` for the bed, `voiceover` for the narration, `sfx` for the
+hits — and keep the group named in `sources` holding nothing but voices.
+
+`carve.mjs` refuses to write the group form when it sees either case, records
+clip ids, and says on stderr which member blocked it. The
+`audio_carve_ungrouped_sources` rule then points at the arrangement instead of
+the CLI quietly persisting a wider carve than it measured.
+
+A voice that this run left out is **not** one of these cases and does not block
+the group form: `carve.mjs` only analyses voices that overlap the bed, and
+picking up a clip that plays later without an edit to `sources` is the whole
+reason to name the group.
+
+### One bus for many tracks
+
+Membership alone is enough to carve against, as above — but add an
+`<hf-audio-group>` element with that id and the group becomes a real submix bus:
+one chain, one fader, one automation clock for every member.
+
+```html
+<hf-audio-group
+  id="voiceover"
+  data-label="Voiceover"
+  data-volume="0.9"
+  data-fx-chain='{"version":1,"nodes":[
+    {"type":"compressor","id":"g1","params":{"threshold":-18,"ratio":3}},
+    {"type":"peaking","id":"g2","params":{"frequency":3000,"gain":2,"q":1}}]}'
+></hf-audio-group>
+
+<audio id="vo-intro" data-audio-group="voiceover" …></audio>
+<audio id="vo-middle" data-audio-group="voiceover" …></audio>
+```
+
+**Reach for the bus when the same treatment belongs on several tracks.** Four
+narration clips that each want the same compressor is four chains to keep in
+step, and they drift the moment one is edited; on the bus it is one chain, and
+the compressor sees the whole voice rather than each clip in isolation — which is
+the point, since a compressor cannot ride a sequence it only hears a third of.
+Per-clip chains remain right for what is genuinely per-clip: one noisy take that
+needs its own de-esser.
+
+| On the bus        | Does                                      |
+| ----------------- | ----------------------------------------- |
+| `data-fx-chain`   | one chain over the summed members         |
+| `data-automation` | envelopes on the bus, in COMPOSITION time |
+| `data-volume`     | one fader for every member (default 1)    |
+| `data-label`      | the display name; falls back to the id    |
+| `data-hidden`     | drops every member from the mix           |
+
+**Group automation is composition time, not clip time.** A bus has no
+`data-start` — members are already at their composition positions when they
+reach it — so `t: 0` in a group lane is the start of the composition, not of any
+clip. A lane on a clip is clip-local; the same numbers mean different instants on
+the two, which is the one thing to get right when moving an envelope from a clip
+up onto its bus.
+
+**A carve stays on the clip.** `data-fx-carve` is not a group attribute. The bed
+being carved is a single track, and it is that track which carries
+`data-fx-carve` — pointed AT a group, per the rule above. Group and carve meet in
+`sources`, not on one element. A carve written onto a bus is half an effect
+applied twice: the level half measures the bed's own audio, which a bus has none
+of, so only the filters survive — and a bus and its members are one signal path,
+so the bed then runs through the bus's filters AND its own. The
+`audio_group_carve_attr` lint rule catches it.
+
+**One clip is not a bus.** A group exists to give several tracks one chain, one
+fader and one clock. Wrapping a single clip in a bus buys nothing the clip's own
+`data-fx-chain` does not already do, and it doubles the places a later edit has
+to land. The one reason to do it anyway: a bus's automation clock is composition
+time, so a single-member bus is how a lane on that clip gets composition-time
+timing.
+
 **One knob.** `strength` is 0..1 and derives everything: how deep to cut, how
 many bands, how wide, how far to favour intelligibility over raw voice energy,
 how far the level may drop, how far under the voice to aim. Those six move
@@ -332,7 +446,10 @@ instead. `references/fx-registry.md` marks every parameter.
 Almost no static gate covers the mix. The linter reads `data-automation` for
 exactly one conflict — `audio_volume_double_automation`, a volume lane on a track
 that also has a GSAP tween on `volume`, where the lane wins and the tween is
-ignored — and nothing validates the chain or the effect lanes at all. What
+ignored — plus `audio_volume_tween_overrides_gain`, an authored `data-volume`
+on a track whose `volume` is tweened, where the tween's values are absolute and
+replace that gain instead of scaling it. Nothing validates the
+chain or the effect lanes at all. What
 enforces those is the render: a chain it cannot parse fails the whole mix rather
 than quietly writing the dry signal, because a mix that sounds plausible and is
 wrong is worse than a refusal. Preview is the opposite by design: an unreadable

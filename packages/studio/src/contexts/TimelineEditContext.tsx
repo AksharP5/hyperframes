@@ -1,7 +1,11 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { useContext, useMemo, type ReactNode } from "react";
+import { createStableContext } from "../utils/hmrStableContext";
 import type { TimelineEditCallbacks } from "../player/components/timelineCallbacks";
 
-const TimelineEditContext = createContext<TimelineEditCallbacks | null>(null);
+const TimelineEditContext = createStableContext<TimelineEditCallbacks | null>(
+  "TimelineEditContext",
+  null,
+);
 
 export function useTimelineEditContext(): TimelineEditCallbacks {
   const ctx = useContext(TimelineEditContext);
@@ -34,6 +38,11 @@ export function TimelineEditProvider({
       value.onMoveElements,
       value.onResizeElement,
       value.onToggleTrackHidden,
+      value.onSetAudioGroupAttributeLive,
+      value.onSetAudioGroupAttributeQuiet,
+      value.onGroupClips,
+      value.onSetElementAttributeLive,
+      value.onSetElementAttributeQuiet,
       value.onBlockedEditAttempt,
       value.onSplitElement,
       value.onRazorSplit,

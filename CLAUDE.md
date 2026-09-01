@@ -7,13 +7,13 @@ Open-source video rendering framework: write HTML, render video.
 This repo ships 20 AI agent skills via [vercel-labs/skills](https://github.com/vercel-labs/skills). Install them before writing compositions — they encode framework-specific patterns that generic docs don't cover. **Default to the core set**: the `/hyperframes` router installs each creation workflow on demand; install all 20 only when the user explicitly asks for the full set.
 
 ```bash
-npx hyperframes skills update                                   # default: installs/refreshes the core set — workflows install on demand
-npx skills add heygen-com/hyperframes --full-depth              # interactive picker (terminal only — non-interactive without --skill installs all 20)
-npx skills add heygen-com/hyperframes --all --full-depth        # all 20 at once — only on explicit request
-npx skills add heygen-com/hyperframes --skill <name> --full-depth  # just one (bare name, no leading slash)
+npx hyperframes skills update                         # default: installs/refreshes the core set — workflows install on demand
+npx skills add heygen-com/hyperframes                 # interactive picker (terminal only — non-interactive without --skill installs all 20)
+npx skills add heygen-com/hyperframes --all           # all 20 at once — only on explicit request
+npx skills add heygen-com/hyperframes --skill <name>  # just one (bare name, no leading slash)
 ```
 
-Keep `--full-depth`: it installs the current `main`. Without it, `skills add` fetches the skills.sh registry blob, which lags `main` by hours (you'd get a stale skill). `hyperframes skills update` already uses full-depth.
+`skills add` resolves the skills.sh registry blob, which can lag `main` by hours, so a freshly added skill may be a little behind. `npx hyperframes skills update` installs from the current `main`; prefer it when freshness matters.
 
 **`/hyperframes` is the entry skill — read it first.** It's the capability map for the domain skills below, the intent layer that confirms every creation brief up front, AND the intent router for the creation workflows. The full README skills section mirrors this list; keep them in sync (see "Skill catalog maintenance" below).
 
@@ -39,7 +39,7 @@ Atomic capabilities the creation workflows compose against — pull one when you
 - `/hyperframes-keyframes` — seek-safe keyframe authoring across runtimes: GSAP timelines, CSS keyframes, Anime.js, WAAPI, FLIP, paths, masks, SVG morph/draw, text trails, 3D depth; plus `hyperframes keyframes` diagnostics for surfacing and verifying rendered motion.
 - `/hyperframes-creative` — non-animation creative direction: `frame.md` / `design.md` handling, palettes, typography, narration, beat planning, audio-reactive visuals, composition patterns.
 - `/media-use` — the media OS: resolve any media need (BGM, SFX, image, icon, logo, voice, color grade, LUT) into a frozen local file or paste-ready block + ledger record; generate via TTS / music / image models when the catalog misses; transcribe, caption, remove backgrounds, and reuse assets across projects. One shared `scripts/audio.mjs` engine + manifest tracking; keeps search noise on disk.
-- `/hyperframes-audio` — mix the audio already placed in a composition: voiceover carve (dip a music bed only in the bands the voice occupies, static or dynamic, level match included), the effect chain (EQ, compressor, limiter, gate, saturation, delay, reverb, chorus, phaser, bitcrush), and automation envelopes on volume or any effect parameter. Sourcing the audio is `/media-use`; this is what happens to it afterwards.
+- `/hyperframes-audio` — mix the audio already placed in a composition: voiceover carve (dip a music bed only in the bands the voice occupies, static or dynamic, level match included), the effect chain (EQ, compressor, limiter, gate, saturation, delay, reverb, chorus, phaser, bitcrush), automation envelopes on volume or any effect parameter, and submix buses (`<hf-audio-group>`) that carry one chain, fader and automation clock for several tracks at once. Sourcing the audio is `/media-use`; this is what happens to it afterwards.
 - `/hyperframes-cli` — CLI dev loop: `init`, `add`, `lint`, `check`, `snapshot`, `preview`, `render`, `publish`, `doctor`, `lambda` (AWS Lambda cloud rendering).
 - `/hyperframes-registry` — install and wire registry blocks and components into compositions via `hyperframes add`. Covers authoring a new block or component to contribute upstream.
 - `/figma` — import Figma assets, tokens, components, and storyboard sections → reconstructed motion (frames read as states, not slides) (REST/CLI) plus Motion animations (MCP) and shaders (MCP source / native export) into a composition.

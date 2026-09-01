@@ -118,6 +118,10 @@ function renderLanes(options: RenderLanesOptions = {}): {
             selectedElementId: null,
             selectedElementIds: next.selectedElementIds ?? new Set(),
             expandedClipIds: new Set(next.expandedClipIds ?? []),
+            collapsedGroupIds: new Set(),
+            expandedLaneOwnerIds: new Set(),
+            groups: [],
+            trackGroupOf: new Map(),
             gsapAnimations,
           })}
           clipIndex={createTimelineClipIndex(tracks)}
@@ -127,6 +131,7 @@ function renderLanes(options: RenderLanesOptions = {}): {
           trackOrder={displayTrackOrder}
           tracks={tracks}
           trackStyles={new Map()}
+          groups={[]}
           laneCounts={laneCounts}
           selectedElementId={null}
           selectedElementIds={next.selectedElementIds ?? new Set()}
@@ -198,7 +203,9 @@ describe("TimelineLanes track numbering", () => {
     const second = view.host.querySelector<HTMLButtonElement>('button[aria-label="Hide track 2"]');
     act(() => second?.click());
 
-    expect(onToggleTrackHidden).toHaveBeenCalledWith(TRACK_B, true);
+    // Both, and they are different numbers: the real key acts, the display row
+    // is what the undo-history label must announce (see `onToggleTrackHidden`).
+    expect(onToggleTrackHidden).toHaveBeenCalledWith(TRACK_B, true, 2);
     act(() => view.root.unmount());
   });
 

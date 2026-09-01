@@ -152,10 +152,22 @@
       "types": "./dist/audioCarve.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./audio-groups": {
+      "source": "./src/audioGroups.ts",
+      "runtime": "./dist/audioGroups.js",
+      "types": "./dist/audioGroups.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./audio-automation": {
       "source": "./src/audioAutomation.ts",
       "runtime": "./dist/audioAutomation.js",
       "types": "./dist/audioAutomation.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
+    "./audio-gain": {
+      "source": "./src/audioGain.ts",
+      "runtime": "./dist/audioGain.js",
+      "types": "./dist/audioGain.d.ts",
       "environments": ["browser", "bun", "node"]
     },
     "./color-grading": {
@@ -222,6 +234,12 @@
       "source": "./src/runtime/stackingContext.ts",
       "runtime": "./dist/runtime/stackingContext.js",
       "types": "./dist/runtime/stackingContext.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
+    "./runtime/web-audio-route": {
+      "source": "./src/runtime/webAudioRoute.ts",
+      "runtime": "./dist/runtime/webAudioRoute.js",
+      "types": "./dist/runtime/webAudioRoute.d.ts",
       "environments": ["browser", "bun", "node"]
     },
     "./compiler/html-document": {

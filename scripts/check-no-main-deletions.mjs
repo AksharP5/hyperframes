@@ -46,12 +46,20 @@ export const ALLOWED_DELETIONS = new Map([
     "owner-directed removal of the AI Prompt Flow catalog item and its generated documentation",
   ],
   [
+    "docs/catalog/components/checkout-flow.mdx",
+    "owner-directed removal of the Checkout Flow catalog item and its generated documentation",
+  ],
+  [
     "docs/public/catalog/components/ai-generation-canvas.json",
     "owner-directed removal of the AI Generation Canvas catalog item and its generated public payload",
   ],
   [
     "docs/public/catalog/components/ai-prompt-flow.json",
     "owner-directed removal of the AI Prompt Flow catalog item and its generated public payload",
+  ],
+  [
+    "docs/public/catalog/components/checkout-flow.json",
+    "owner-directed removal of the Checkout Flow catalog item and its generated public payload",
   ],
   [
     "registry/components/ai-generation-canvas/ai-generation-canvas.html",
@@ -78,6 +86,18 @@ export const ALLOWED_DELETIONS = new Map([
     "owner-directed removal of the AI Prompt Flow catalog registry entry",
   ],
   [
+    "registry/components/checkout-flow/checkout-flow.html",
+    "owner-directed removal of the Checkout Flow catalog source component",
+  ],
+  [
+    "registry/components/checkout-flow/demo.html",
+    "owner-directed removal of the Checkout Flow catalog preview source",
+  ],
+  [
+    "registry/components/checkout-flow/registry-item.json",
+    "owner-directed removal of the Checkout Flow catalog registry entry",
+  ],
+  [
     "packages/studio/src/components/StudioFeedbackBar.tsx",
     "replaced by components/feedback/StudioFeedbackCard.tsx; too little shared content for git to pair as a rename",
   ],
@@ -100,6 +120,38 @@ export const ALLOWED_DELETIONS = new Map([
   [
     "packages/core/scripts/build-inline-artifact.ts",
     "a later branch in this stack (wa-20b2-lfo-fixes) independently deduped the same two build scripts a different way — buildInjectedArtifact.ts plus two thin per-target files — before this consolidation and that one had merged; this branch's tree keeps that shape instead, so build-inline-artifact.ts is the one that goes.",
+  ],
+  [
+    "packages/studio/src/hooks/useAudioSoloBridge.ts",
+    "#3453 removes the obsolete solo bridge after its last consumer leaves",
+  ],
+  [
+    "packages/studio/src/hooks/useGroupLevel.ts",
+    "#3454 deliberately removes the group level meter with the group volume strip",
+  ],
+  [
+    "packages/studio/src/player/components/TimelineGroupBusStrip.test.tsx",
+    "#3454 deliberately removes the group volume and level-meter strip and its tests",
+  ],
+  [
+    "packages/studio/src/player/components/TimelineGroupBusStrip.tsx",
+    "#3454 deliberately removes the group volume and level-meter strip",
+  ],
+  [
+    "packages/studio/src/player/components/TimelineSoloButton.tsx",
+    "#3454 deliberately removes track and group solo controls",
+  ],
+  [
+    "packages/studio/src/player/store/audioSoloSlice.test.ts",
+    "#3454 deliberately removes session solo state and its tests",
+  ],
+  [
+    "packages/studio/src/player/store/audioSoloSlice.ts",
+    "#3454 deliberately removes session solo state",
+  ],
+  [
+    "packages/studio/src/player/store/groupLevels.ts",
+    "#3454 deliberately removes group level-meter state",
   ],
 ]);
 
