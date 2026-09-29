@@ -3,6 +3,16 @@ import { initSandboxRuntimeModular } from "./init";
 import { STUDIO_MANUAL_EDIT_GESTURE_ATTR } from "../editing/draftMarkers";
 import type { RuntimeTimelineLike } from "./types";
 
+// The readiness gate's 8s timeout is a one-shot timer these transport tests must not count.
+vi.mock("../compositionReadiness", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../compositionReadiness")>();
+  return {
+    ...actual,
+    settleCompositionReadiness: vi.fn(),
+    settleFirstFrameCompositionReadiness: vi.fn(),
+  };
+});
+
 /**
  * The transport parks itself when the editor is paused and settled. Everything
  * it used to discover by looking again on the next frame has to arrive by some
@@ -67,6 +77,28 @@ function createMockTimeline(duration: number): RuntimeTimelineLike {
   };
 }
 
+/** jsdom implements neither play() nor pause(), and `paused` is the only state the
+ *  runtime reads. Returns a handle driving it the way a browser does, so a test can
+ *  start the element and watch whether the transport stops it. */
+function stubMediaPlayback(
+  el: HTMLMediaElement,
+  durationSeconds: number,
+): { start: () => void; isPaused: () => boolean } {
+  let paused = true;
+  Object.defineProperty(el, "duration", { value: durationSeconds, configurable: true });
+  Object.defineProperty(el, "paused", { configurable: true, get: () => paused });
+  el.pause = () => {
+    paused = true;
+  };
+  el.play = () => {
+    paused = false;
+    // A real browser fires this, and firing it is what makes the defect deterministic.
+    el.dispatchEvent(new Event("play"));
+    return Promise.resolve();
+  };
+  return { start: () => void el.play(), isPaused: () => paused };
+}
+
 /** MutationObserver records land in a microtask; nothing observes them sooner. */
 const flushObservers = () => new Promise<void>((resolve) => queueMicrotask(() => resolve()));
 
@@ -89,6 +121,12 @@ describe("parked transport loop", () => {
       frames += 1;
     }
     return frames;
+  };
+
+  /** One frame at 120 Hz: the clock and the animation frame advance together. */
+  const frame120Hz = () => {
+    vi.advanceTimersByTime(8);
+    raf.step(8);
   };
 
   /**
@@ -150,6 +188,133 @@ describe("parked transport loop", () => {
     expect(vi.getTimerCount()).toBe(1);
   });
 
+  it("reports the end in the state it posts when the film finishes", () => {
+    let nowMs = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => nowMs);
+    document.body.innerHTML = `<div id="root" data-composition-id="main" data-root="true" data-start="0" data-duration="4.97"><div id="clip" data-start="0.48" data-duration="4.49"></div></div>`;
+    window.__timelines = { main: createMockTimeline(4.97) };
+    initSandboxRuntimeModular();
+    quiesce();
+
+    window.__player!.play();
+    for (let step = 0; step < 120 && window.__player!.isPlaying(); step += 1) {
+      nowMs += 50;
+      raf.step(50);
+    }
+
+    const states = posted.filter((m) => m["type"] === "state");
+    expect(states.at(-1)).toMatchObject({ isPlaying: false, ended: true, frame: 149 });
+  });
+
+  const setPlayRange = (startSeconds: number | null, endSeconds: number | null) =>
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: window.parent,
+        data: {
+          source: "hf-parent",
+          type: "control",
+          action: "set-play-range",
+          startSeconds,
+          endSeconds,
+        },
+      }),
+    );
+  const stateMessages = () => posted.filter((m) => m["type"] === "state");
+
+  /** Mounts a 5 s film with clips a [0, 3) and b [3, 5), driven by a mocked clock. */
+  const mountRangeFilm = () => {
+    let nowMs = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => nowMs);
+    mount(
+      `<div id="a" data-start="0" data-duration="3"></div><div id="b" data-start="3" data-duration="2"></div>`,
+    );
+    const timeline = window.__timelines!.main!;
+    initSandboxRuntimeModular();
+    quiesce();
+    const frames: Array<{ time: number; b: string }> = [];
+    const step = () => {
+      nowMs += 7;
+      raf.step(7);
+      frames.push({ time: timeline.time(), b: document.getElementById("b")!.style.visibility });
+    };
+    const playOut = () => {
+      window.__player!.play();
+      for (let n = 0; n < 1000 && window.__player!.isPlaying(); n += 1) step();
+    };
+    return { timeline, frames, step, playOut };
+  };
+
+  it("stops on a play range's last frame, says it ended, and restarts at the range start only while it is set", () => {
+    const { timeline, frames, playOut } = mountRangeFilm();
+
+    setPlayRange(2, 3);
+    window.__player!.seek(2);
+    for (let wrap = 0; wrap < 3; wrap += 1) playOut();
+    expect(stateMessages().at(-1)).toMatchObject({ isPlaying: false, ended: true, frame: 89 });
+    expect(stateMessages().at(-1)?.["currentTime"]).toBeCloseTo(89 / 30, 9);
+    expect(timeline.time()).toBeCloseTo(89 / 30, 9);
+    expect(Math.max(...frames.map((f) => f.time))).toBeLessThan(3);
+    expect(frames.every((f) => f.b === "hidden")).toBe(true);
+    expect(document.getElementById("a")!.style.visibility).not.toBe("hidden");
+    expect(window.__player!.getDuration()).toBe(5);
+
+    const before = stateMessages().length;
+    window.__player!.play();
+    expect(stateMessages()[before]).toMatchObject({ isPlaying: true, frame: 60 });
+    window.__player!.pause();
+
+    setPlayRange(null, null);
+    playOut();
+    expect(stateMessages().at(-1)).toMatchObject({ isPlaying: false, ended: true, frame: 150 });
+    const atFilmEnd = stateMessages().length;
+    window.__player!.play();
+    expect(stateMessages()[atFilmEnd]).toMatchObject({ isPlaying: true, frame: 0 });
+  });
+
+  it("jumps to the range start and keeps playing when a new range leaves the playhead outside", () => {
+    const { step } = mountRangeFilm();
+    setPlayRange(2, 3);
+    window.__player!.seek(2.5);
+    window.__player!.play();
+    step();
+    const before = stateMessages().length;
+
+    setPlayRange(2, 2.4);
+
+    const after = stateMessages().slice(before);
+    expect(after.some((m) => m["ended"] === true)).toBe(false);
+    expect(after.at(-1)).toMatchObject({ isPlaying: true, currentTime: 2 });
+    expect(after.at(-1)?.["capabilities"]).toContain("play-range");
+    expect(window.__player!.isPlaying()).toBe(true);
+  });
+
+  // The render stops at the root's declared length too; a longer animation is cut off.
+  it.each([
+    ["3 s, shorter than its animation", "3", 90],
+    ["under a second", "0.2", 6],
+    ["one 60 fps frame", String(1 / 60), 1],
+  ])("stops a film declared %s at that length, and says so", (_label, declared, frame) => {
+    const seconds = Number(declared);
+    let nowMs = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => nowMs);
+    document.body.innerHTML = `<div id="root" data-composition-id="main" data-root="true" data-start="0" data-duration="${declared}"></div>`;
+    window.__timelines = { main: createMockTimeline(5) };
+    initSandboxRuntimeModular();
+    quiesce();
+
+    window.__player!.play();
+    for (let step = 0; step < 400 && window.__player!.isPlaying(); step += 1) {
+      nowMs += 10;
+      raf.step(10);
+    }
+
+    const states = posted.filter((m) => m["type"] === "state");
+    expect(states.at(-1)).toMatchObject({ isPlaying: false, ended: true, frame });
+    expect(window.__player!.getDuration()).toBeCloseTo(seconds, 9);
+    const timeline = posted.filter((m) => m["type"] === "timeline").at(-1);
+    expect(timeline?.["durationSeconds"]).toBeCloseTo(seconds, 9);
+  });
+
   it("keeps asking for animation frames while playing", () => {
     mount();
     initSandboxRuntimeModular();
@@ -173,6 +338,62 @@ describe("parked transport loop", () => {
     expect(after - before).toBe(3);
     // Still parked: the heartbeat is a timer, not a frame.
     expect(raf.pending()).toBe(0);
+  });
+
+  const setIdleHeartbeat = (slow: boolean) =>
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: window.parent,
+        data: { source: "hf-parent", type: "control", action: "set-idle-heartbeat", slow },
+      }),
+    );
+  const states = () => posted.filter((m) => m["type"] === "state").length;
+
+  it("slows the parked heartbeat to once a second when the host asks, and back when it stops", () => {
+    mount();
+    initSandboxRuntimeModular();
+    quiesce();
+
+    setIdleHeartbeat(true);
+    quiesce();
+    const slow = states();
+    vi.advanceTimersByTime(3000);
+    expect(states() - slow).toBe(3);
+    expect(raf.pending()).toBe(0);
+
+    // Turned off mid-interval, the 80 ms beat resumes without waiting out the second.
+    vi.advanceTimersByTime(500);
+    setIdleHeartbeat(false);
+    settle();
+    const resumed = states();
+    for (let beat = 0; beat < 3; beat += 1) vi.advanceTimersByTime(PARK_HEARTBEAT_MS);
+    expect(states() - resumed).toBe(3);
+  });
+
+  it("keeps the fast heartbeat under a slow request until a timeline is bound", () => {
+    mount();
+    window.__timelines = {};
+    initSandboxRuntimeModular();
+    document.getElementById("root")!.removeAttribute("data-duration");
+    setIdleHeartbeat(true);
+    quiesce();
+
+    // A composition that registers its timeline late (after fonts load) must still be seen at once.
+    window.__timelines!["main"] = createMockTimeline(12);
+    vi.advanceTimersByTime(PARK_HEARTBEAT_MS);
+    settle();
+    expect(window.__player!.getDuration()).toBeCloseTo(12, 3);
+  });
+
+  it("keeps the fast heartbeat under a slow request while a sub-composition is unbound", () => {
+    mount('<div data-composition-id="child"></div>');
+    initSandboxRuntimeModular();
+    setIdleHeartbeat(true);
+    quiesce();
+
+    const before = states();
+    for (let beat = 0; beat < 3; beat += 1) vi.advanceTimersByTime(PARK_HEARTBEAT_MS);
+    expect(states() - before).toBe(3);
   });
 
   it("delivers a live data-duration edit while parked", async () => {
@@ -224,6 +445,8 @@ describe("parked transport loop", () => {
 
   it("delivers media metadata that arrives after the loop parked", async () => {
     mount(`<video id="v" data-start="0" src="a.mp4"></video>`);
+    // A declared length would hold the film at 5 s; only an inferred one can grow.
+    document.getElementById("root")!.removeAttribute("data-duration");
     initSandboxRuntimeModular();
     quiesce();
 
@@ -332,7 +555,7 @@ describe("parked transport loop", () => {
     expect(posted.filter((m) => m["type"] === "state")).toHaveLength(0);
   });
 
-  it("keeps the manifest on its frame cadence while playing, whatever the DOM does", () => {
+  it("rate-limits the manifest while playing, whatever the DOM does", () => {
     mount();
     initSandboxRuntimeModular();
     quiesce();
@@ -355,6 +578,85 @@ describe("parked transport loop", () => {
     const posts = posted.filter((m) => m["type"] === "timeline").length - before;
     // Main's cadence over 30 frames is one post per 20 frames, so at most two.
     expect(posts).toBeLessThanOrEqual(2);
+  });
+
+  it("does not re-post the manifest while playing a film that is not changing", () => {
+    mount();
+    initSandboxRuntimeModular();
+    quiesce();
+    window.__player!.play();
+    // Past the rebind policy's play hold, at 120 Hz.
+    for (let i = 0; i < 300; i += 1) frame120Hz();
+    const before = posted.filter((m) => m["type"] === "timeline").length;
+    for (let i = 0; i < 250; i += 1) frame120Hz();
+    expect(posted.filter((m) => m["type"] === "timeline").length - before).toBe(0);
+  });
+
+  it("posts a playing clip's new track, label and z-index on the next poll", async () => {
+    mount(
+      '<div id="clip" data-start="0" data-duration="5" data-track-index="0" data-timeline-label="Before" style="z-index: 1"></div>',
+    );
+    initSandboxRuntimeModular();
+    quiesce();
+    window.__player!.play();
+    for (let i = 0; i < 300; i += 1) frame120Hz();
+    const clip = document.getElementById("clip")!;
+    clip.setAttribute("data-track-index", "7");
+    clip.setAttribute("data-timeline-label", "After");
+    clip.style.zIndex = "9";
+    await flushObservers();
+    for (let i = 0; i < 130; i += 1) frame120Hz();
+    const clips = (posted.filter((m) => m["type"] === "timeline").at(-1)?.["clips"] ?? []) as Array<
+      Record<string, unknown>
+    >;
+    const clip_ = clips.find((c) => c["id"] === "clip");
+    expect([clip_?.["track"], clip_?.["timelineLabel"], clip_?.["zIndex"]]).toEqual([
+      7,
+      "After",
+      9,
+    ]);
+  });
+
+  it("posts a label edited while playing and paused before the next poll", async () => {
+    mount('<div id="clip" data-start="0" data-duration="5" data-timeline-label="Before"></div>');
+    initSandboxRuntimeModular();
+    quiesce();
+    window.__player!.play();
+    for (let i = 0; i < 300; i += 1) frame120Hz();
+    document.getElementById("clip")!.setAttribute("data-timeline-label", "After");
+    await flushObservers();
+    for (let i = 0; i < 12; i += 1) frame120Hz();
+    window.__player!.pause();
+    for (let i = 0; i < 300; i += 1) frame120Hz();
+    const clips = (posted.filter((m) => m["type"] === "timeline").at(-1)?.["clips"] ?? []) as Array<
+      Record<string, unknown>
+    >;
+    expect(clips.find((c) => c["id"] === "clip")?.["timelineLabel"]).toBe("After");
+  });
+
+  it("applies a data-width change while playing", async () => {
+    mount();
+    initSandboxRuntimeModular();
+    quiesce();
+    window.__player!.play();
+    for (let i = 0; i < 300; i += 1) frame120Hz();
+    const root = document.getElementById("root")!;
+    root.setAttribute("data-width", "640");
+    await flushObservers();
+    for (let i = 0; i < 60; i += 1) frame120Hz();
+    expect(root.style.width).toBe("640px");
+  });
+
+  it("applies a data-height change while parked", async () => {
+    mount();
+    initSandboxRuntimeModular();
+    quiesce();
+    const root = document.getElementById("root")!;
+    root.setAttribute("data-height", "360");
+    await flushObservers();
+    vi.advanceTimersByTime(PARK_HEARTBEAT_MS);
+    settle();
+    expect(root.style.height).toBe("360px");
   });
 
   it("does not park when the manifest post throws with a change still pending", async () => {
@@ -407,6 +709,7 @@ describe("parked transport loop", () => {
 
   it("delivers an adapter duration that grows while parked, with no DOM mutation and no event", () => {
     mount();
+    document.getElementById("root")!.removeAttribute("data-duration");
     initSandboxRuntimeModular();
     quiesce();
     const before = window.__player!.getDuration();
@@ -419,5 +722,124 @@ describe("parked transport loop", () => {
 
     expect(before).toBeLessThan(20);
     expect(window.__player!.getDuration()).toBeCloseTo(20, 3);
+  });
+
+  it("stops a media element that starts playing while parked and the clock is paused", () => {
+    // Nothing may run while the clock is paused. `play` does not bubble, so the
+    // wake comes from a capture-phase listener; without it the enforcement is
+    // unreachable exactly when it is needed, because a parked loop runs no ticks.
+    mount(`<video id="rogue" data-start="0" data-duration="5"></video>`);
+    const media = stubMediaPlayback(document.getElementById("rogue") as HTMLVideoElement, 5);
+    initSandboxRuntimeModular();
+    quiesce();
+    expect(window.__player!.isPlaying()).toBe(false);
+    expect(raf.pending()).toBe(0);
+
+    // Autoplay, a composition script, a restored bfcache state.
+    media.start();
+    settle();
+
+    expect(media.isPaused()).toBe(true);
+  });
+
+  it("stops hosted media with no data-start of its own, which the transport also drives", () => {
+    // A clip inside a composition inherits its timing from the host. It is the
+    // transport's to play, so it is the transport's to stop; a probe keyed on
+    // data-start alone could not see it.
+    mount(`
+      <div data-composition-id="host" data-start="0" data-duration="10">
+        <video id="hosted" data-duration="5"></video>
+      </div>`);
+    const media = stubMediaPlayback(document.getElementById("hosted") as HTMLVideoElement, 5);
+    initSandboxRuntimeModular();
+    quiesce();
+
+    media.start();
+    settle();
+
+    expect(media.isPaused()).toBe(true);
+  });
+
+  it("leaves a LEASED element alone while paused, and stops it once released", () => {
+    // The colour-grading preview and the Studio's scrub audition both play media
+    // on purpose with the clock stopped. They borrow the element first; the
+    // enforcement is for anything that plays without borrowing.
+    mount(`<video id="grade" data-start="0" data-duration="5"></video>`);
+    const video = document.getElementById("grade") as HTMLVideoElement;
+    const media = stubMediaPlayback(video, 5);
+    initSandboxRuntimeModular();
+    quiesce();
+
+    window.__hf!.leasePausedMedia!(video);
+    media.start();
+    settle();
+    // Several more ticks: a lease must survive more than the frame it was taken on.
+    for (let i = 0; i < 5; i += 1) {
+      window.__player!.seek(window.__player!.getTime());
+      settle();
+    }
+    expect(media.isPaused()).toBe(false);
+
+    window.__hf!.releasePausedMedia!(video);
+    media.start();
+    settle();
+    expect(media.isPaused()).toBe(true);
+  });
+
+  it("does not stop the colour-grading preview, which plays on purpose while paused", () => {
+    // The end-to-end wiring, not the lease in isolation: init constructs the
+    // grading runtime with the lease, so startPreviewPlayback borrows before the
+    // play() whose own event wakes the transport that would otherwise stop it.
+    mount(`<video id="graded" data-start="0" data-duration="5"></video>`);
+    const video = document.getElementById("graded") as HTMLVideoElement;
+    const media = stubMediaPlayback(video, 5);
+    let currentTime = 0;
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      get: () => currentTime,
+      set: (next: number) => {
+        currentTime = next;
+      },
+    });
+    initSandboxRuntimeModular();
+    quiesce();
+
+    const stop = window.__hf!.colorGrading!.startPreviewPlayback("graded");
+    expect(typeof stop).toBe("function");
+    settle();
+    for (let beat = 0; beat < 5; beat += 1) {
+      vi.advanceTimersByTime(PARK_HEARTBEAT_MS);
+      settle();
+    }
+    expect(media.isPaused()).toBe(false);
+
+    stop!();
+    expect(media.isPaused()).toBe(true);
+    // The stop closure must RELEASE, not just pause: a restart after it is an
+    // unleased play while paused, and the transport has to stop it.
+    media.start();
+    settle();
+    expect(media.isPaused()).toBe(true);
+  });
+
+  it("reclaims a leased element the moment the transport plays", () => {
+    // A lease is an exemption from the PAUSED-side enforcement only. Once the
+    // clock runs the transport owns every element again, so a leased clip that is
+    // outside the playhead's window is stopped like any other.
+    mount(`<video id="late" data-start="10" data-duration="5"></video>`);
+    const video = document.getElementById("late") as HTMLVideoElement;
+    const media = stubMediaPlayback(video, 5);
+    initSandboxRuntimeModular();
+    quiesce();
+
+    window.__hf!.leasePausedMedia!(video);
+    media.start();
+    settle();
+    expect(media.isPaused()).toBe(false);
+
+    window.__player!.play();
+    settle();
+    expect(window.__player!.isPlaying()).toBe(true);
+    expect(media.isPaused()).toBe(true);
   });
 });

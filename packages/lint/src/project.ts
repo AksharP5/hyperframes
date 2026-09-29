@@ -14,10 +14,19 @@ import {
   maskNonScannableRanges,
   resolveExistingLocalAsset,
   resolveLocalAssetCandidates,
+  resolveProjectRelativeSrc,
 } from "@hyperframes/parsers/asset-resolution";
-import { collectLocalVideoCandidates, lintHevcPreviewCodec } from "./hevcPreviewLint.js";
+import {
+  collectLocalVideoCandidates,
+  lintHevcPreviewCodec,
+  lintVideoMediaStartPastEof,
+} from "./hevcPreviewLint.js";
 import { lintHyperframeHtml } from "./hyperframeLinter.js";
-import type { HyperframeLintFinding, HyperframeLintResult } from "./types.js";
+import type {
+  HyperframeLintFinding,
+  HyperframeLintResult,
+  HyperframeLinterOptions,
+} from "./types.js";
 import type { ParsableDocumentLike } from "@hyperframes/parsers/sub-composition-validity";
 import { mediaSrcTagRe } from "./utils";
 
@@ -25,6 +34,10 @@ import { mediaSrcTagRe } from "./utils";
 function parseSubCompHtml(html: string): ParsableDocumentLike {
   return parseHTML(html).document as unknown as ParsableDocumentLike;
 }
+
+/** The file a source was read from, as per-file findings carry it. */
+const sourceFile = (projectDir: string, compSrcPath?: string) =>
+  resolve(projectDir, compSrcPath ?? "index.html");
 
 interface HtmlSource {
   html: string;
@@ -102,11 +115,15 @@ function collectExternalStyles(
   projectDir: string,
   html: string,
   compSrcPath?: string,
-): Array<{ href: string; content: string }> {
-  const styles: Array<{ href: string; content: string }> = [];
+): Array<{ href: string; content: string; file?: string }> {
+  const styles: Array<{ href: string; content: string; file?: string }> = [];
   const { document } = parseHTML(html);
-  for (const { href, content } of collectLocalStylesheets(projectDir, document, compSrcPath)) {
-    styles.push({ href, content });
+  for (const { href, content, rootRelativePath } of collectLocalStylesheets(
+    projectDir,
+    document,
+    compSrcPath,
+  )) {
+    styles.push({ href, content, file: join(projectDir, rootRelativePath) });
   }
   return styles;
 }
@@ -158,6 +175,7 @@ function resolveCssAssetCandidates(
 export async function lintProject(
   projectDir: string,
   entryFile?: string,
+  hostOptions: Pick<HyperframeLinterOptions, "host"> = {},
 ): Promise<ProjectLintResult> {
   const indexPath = entryFile ? resolve(entryFile) : resolve(projectDir, "index.html");
   if (entryFile && !isWithinProjectRoot(projectDir, indexPath)) {
@@ -172,6 +190,7 @@ export async function lintProject(
 
   const rootHtml = readFileSync(indexPath, "utf-8");
   const rootResult = await lintHyperframeHtml(rootHtml, {
+    ...hostOptions,
     filePath: indexPath,
     externalStyles: collectExternalStyles(projectDir, rootHtml, rootCompSrcPath),
   });
@@ -211,6 +230,7 @@ export async function lintProject(
       // inlines snippet markup (or mentions the token in text) is still linted.
       if (isSnippetFragment(html)) continue;
       const result = await lintHyperframeHtml(html, {
+        ...hostOptions,
         filePath,
         isSubComposition: true,
         externalStyles: collectExternalStyles(projectDir, html, compSrcPath),
@@ -235,22 +255,24 @@ export async function lintProject(
     ...(!entryFile ? lintBlankRootWithStandaloneComposition(rootHtml, allHtmlSources) : []),
     ...lintDuplicateAudioTracks(allHtmlSources),
     ...lintMissingOrEmptySubComposition(projectDir, rootHtml),
+    ...(await lintVideoMediaStartPastEof(projectDir, allHtmlSources)),
     ...(await lintHevcPreviewCodec(collectLocalVideoCandidates(projectDir, allHtmlSources))),
   ];
-  if (projectFindings.length > 0) {
-    for (const finding of projectFindings) {
-      rootResult.findings.push(finding);
-      if (finding.severity === "error") {
-        rootResult.errorCount++;
-        rootResult.ok = false;
-        totalErrors++;
-      } else if (finding.severity === "warning") {
-        rootResult.warningCount++;
-        totalWarnings++;
-      } else {
-        rootResult.infoCount++;
-        totalInfos++;
-      }
+  for (const finding of projectFindings) {
+    const ownFile = finding.file && resolve(projectDir, finding.file);
+    const owner =
+      results.find((entry) => resolve(projectDir, entry.file) === ownFile)?.result ?? rootResult;
+    owner.findings.push(finding);
+    if (finding.severity === "error") {
+      owner.errorCount++;
+      owner.ok = false;
+      totalErrors++;
+    } else if (finding.severity === "warning") {
+      owner.warningCount++;
+      totalWarnings++;
+    } else {
+      owner.infoCount++;
+      totalInfos++;
     }
   }
 
@@ -340,7 +362,7 @@ function lintAudioSrcNotFound(
 
   const audioSrcRe = mediaSrcTagRe("audio");
 
-  const missingSrcs: string[] = [];
+  const missingByFile = new Map<string, Set<string>>();
   for (const { html, compSrcPath } of htmlSources) {
     let match: RegExpExecArray | null;
     while ((match = audioSrcRe.exec(html)) !== null) {
@@ -350,17 +372,19 @@ function lintAudioSrcNotFound(
       const rootRelative = compSrcPath
         ? rewriteAssetPath(compSrcPath, src, (path) => existsSync(join(projectDir, path)))
         : src;
-      if (!resolveLocalAssetCandidates(projectDir, rootRelative).some(existsSync)) {
-        missingSrcs.push(src);
+      if (!existsSync(resolveProjectRelativeSrc(rootRelative, projectDir))) {
+        const file = sourceFile(projectDir, compSrcPath);
+        missingByFile.set(file, (missingByFile.get(file) ?? new Set()).add(src));
       }
     }
   }
 
-  if (missingSrcs.length > 0) {
-    const unique = [...new Set(missingSrcs)];
+  for (const [file, srcs] of missingByFile) {
+    const unique = [...srcs];
     findings.push({
       code: "audio_src_not_found",
       severity: "error",
+      file,
       message: `<audio> element references file(s) not found in the project: ${unique.join(", ")}. The rendered video will be silent.`,
       fixHint:
         unique.length === 1
@@ -381,7 +405,10 @@ function lintMissingLocalAsset(
 
   const localAssetSrcRe = mediaSrcTagRe("video|img|source");
 
-  const missingByTag = new Map<string, Map<string, string>>();
+  const missingByTag = new Map<
+    string,
+    { file: string; tagName: string; byResolved: Map<string, string> }
+  >();
 
   for (const { html, compSrcPath } of htmlSources) {
     const scannable = maskNonScannableRanges(html);
@@ -402,20 +429,23 @@ function lintMissingLocalAsset(
       if (resolvedAsset) continue;
 
       const resolvedKey = resolve(projectDir, rootRelative);
-      let bucket = missingByTag.get(tagName);
+      const file = sourceFile(projectDir, compSrcPath);
+      const bucketKey = `${file}\0${tagName}`;
+      let bucket = missingByTag.get(bucketKey);
       if (!bucket) {
-        bucket = new Map<string, string>();
-        missingByTag.set(tagName, bucket);
+        bucket = { file, tagName, byResolved: new Map<string, string>() };
+        missingByTag.set(bucketKey, bucket);
       }
-      if (!bucket.has(resolvedKey)) bucket.set(resolvedKey, src);
+      if (!bucket.byResolved.has(resolvedKey)) bucket.byResolved.set(resolvedKey, src);
     }
   }
 
-  for (const [tagName, byResolved] of missingByTag) {
+  for (const { file, tagName, byResolved } of missingByTag.values()) {
     const unique = [...byResolved.values()];
     findings.push({
       code: "missing_local_asset",
       severity: "error",
+      file,
       message:
         `<${tagName}> element references local file(s) not found in the project: ${unique.join(", ")}. ` +
         "The renderer will silently skip these and produce a video with missing visuals.",
@@ -436,9 +466,10 @@ function lintTextureMaskAssetNotFound(
   projectDir: string,
   htmlSources: HtmlSource[],
 ): HyperframeLintFinding[] {
-  const missing = new Map<string, string>();
+  const missingByFile = new Map<string, Set<string>>();
 
   for (const { html, compSrcPath } of htmlSources) {
+    const file = sourceFile(projectDir, compSrcPath);
     for (const cssSource of collectCssSources(projectDir, html, compSrcPath)) {
       let match: RegExpExecArray | null;
       const pattern = new RegExp(MASK_IMAGE_URL_RE.source, MASK_IMAGE_URL_RE.flags);
@@ -456,24 +487,24 @@ function lintTextureMaskAssetNotFound(
           cssSource.rootRelativePath,
         );
         if (candidates.some(existsSync)) continue;
-        missing.set(url, candidates[0] ?? resolve(projectDir, url));
+        missingByFile.set(file, (missingByFile.get(file) ?? new Set()).add(url));
       }
     }
   }
 
-  if (missing.size === 0) return [];
-  const urls = [...missing.keys()];
-  return [
-    {
+  return [...missingByFile].map(([file, found]): HyperframeLintFinding => {
+    const urls = [...found];
+    return {
       code: "texture_mask_asset_not_found",
       severity: "error",
+      file,
       message: `CSS mask-image references file(s) not found in the project: ${urls.join(", ")}.`,
       fixHint:
         urls.length === 1
           ? `Add "${urls[0]}" to the project, or update the mask-image URL to point to an existing texture mask.`
           : "Add the missing texture mask files to the project, or update the mask-image URLs to point to existing files.",
-    },
-  ];
+    };
+  });
 }
 
 function lintMultipleRootCompositions(projectDir: string): HyperframeLintFinding[] {

@@ -33,6 +33,7 @@ import {
   readGsapPositionFromIframe,
 } from "./gsapPositionDetection";
 import { hasNonHoldTweenForElement } from "./gsapRuntimeKeyframes";
+import { getAnimationsForElement } from "./gsapElementMatch";
 import {
   animationWritesAnyProperty,
   directEditOutcomeForProperties,
@@ -133,17 +134,28 @@ export type { GsapDragCommitCallbacks };
  * Returns an explicit persisted/blocked outcome. Callers must reject blocked
  * outcomes so the gesture layer restores its runtime and overlay drafts.
  */
-// fallow-ignore-next-line complexity
 async function preflightGsapDragIntercept(
   selection: DomEditSelection,
   animations: GsapAnimation[],
   iframe: HTMLIFrameElement | null,
   fetchFallbackAnimations?: () => Promise<GsapAnimation[]>,
+  group?: boolean,
 ): Promise<GsapEditOutcome> {
+  const fetchedAnimations = fetchFallbackAnimations ? await fetchFallbackAnimations() : [];
+  return dragEditOutcome(selection, animations, iframe, fetchedAnimations, group);
+}
+
+/** The move commit's refusal rule, also run ahead of time to hide the move handles. */
+// fallow-ignore-next-line complexity
+export function dragEditOutcome(
+  selection: DomEditSelection,
+  animations: GsapAnimation[],
+  iframe: HTMLIFrameElement | null,
+  fetchedAnimations: GsapAnimation[] = [],
+  group = false,
+): GsapEditOutcome {
   const selector = selectorFromSelection(selection);
   if (!selector) return { status: "blocked", reason: "no-selector" };
-
-  const fetchedAnimations = fetchFallbackAnimations ? await fetchFallbackAnimations() : [];
   // The fallback API currently represents both a definitive empty parse and an
   // exhausted fetch failure as `[]`. Keep the selected cache in the preflight
   // set as well: ignoring it would let a transient fetch failure bypass helper /
@@ -152,11 +164,22 @@ async function preflightGsapDragIntercept(
   const editability = directEditOutcomeForProperties(allKnownAnimations, POSITION_CHANNEL_SET);
   if (editability.status === "blocked") return editability;
   const sourceAnimations = fetchedAnimations.length > 0 ? fetchedAnimations : animations;
-  const posAnim = findGsapPositionAnimation(sourceAnimations, selector);
+  // In a group only a tween naming this member by id or by its own selector counts,
+  // so a class tween shared with id-selected members cannot take one member's write.
+  const positionSources = group
+    ? getAnimationsForElement(sourceAnimations, { id: selection.id ?? null, selector })
+    : sourceAnimations;
+  const posAnim = findGsapPositionAnimation(positionSources, selector);
   const hasLivePosition = hasNonHoldTweenForElement(iframe, selector, undefined, POSITION_CHANNELS);
 
   if (hasLivePosition && !posAnim) {
-    return { status: "blocked", reason: "source-uneditable" };
+    // GSAP is visibly moving this element but the parser found no position
+    // tween for it — a source-match gap, not necessarily computed source.
+    return {
+      status: "blocked",
+      reason: "source-uneditable",
+      detail: "live-position-no-source-tween",
+    };
   }
   if (!posAnim && !writeTargetSelector(selection)) {
     return { status: "blocked", reason: "no-selector" };
@@ -171,7 +194,12 @@ export async function tryGsapDragIntercept(
   iframe: HTMLIFrameElement | null,
   commitMutation: GsapDragCommitCallbacks["commitMutation"],
   fetchFallbackAnimations?: () => Promise<GsapAnimation[]>,
-  options?: { altKey?: boolean; preflightOnly?: boolean; preflightPassed?: boolean },
+  options?: {
+    altKey?: boolean;
+    preflightOnly?: boolean;
+    preflightPassed?: boolean;
+    group?: boolean;
+  },
 ): Promise<GsapEditOutcome> {
   if (!options?.preflightPassed) {
     const preflight = await preflightGsapDragIntercept(
@@ -179,6 +207,7 @@ export async function tryGsapDragIntercept(
       animations,
       iframe,
       fetchFallbackAnimations,
+      options?.group,
     );
     if (preflight.status === "blocked" || options?.preflightOnly) return preflight;
   }
@@ -268,7 +297,7 @@ export async function tryGsapDragIntercept(
   }
 
   if (!posAnim) {
-    return { status: "blocked", reason: "source-uneditable" };
+    return { status: "blocked", reason: "source-uneditable", detail: "no-position-tween" };
   }
 
   // Verify the anim ID is still valid in the current file. The React-state
@@ -306,6 +335,41 @@ export { readGsapProperty, readAllAnimatedProperties };
 
 // ── Identity-prop synthesis ───────────────────────────────────────────────
 
+/** The rotation commit's refusal rule, also run ahead of time to hide the rotate handle. */
+export function preflightGsapRotationIntercept(
+  selection: DomEditSelection,
+  animations: GsapAnimation[],
+  iframe: HTMLIFrameElement | null,
+  fetchedAnimations: GsapAnimation[] = [],
+): GsapEditOutcome {
+  const liveSelector = selectorFromSelection(selection);
+  if (!(liveSelector ?? writeTargetSelector(selection))) {
+    return { status: "blocked", reason: "no-selector" };
+  }
+  const editability = directEditOutcomeForProperties(
+    [...animations, ...fetchedAnimations],
+    ROTATION_CHANNEL_SET,
+  );
+  if (editability.status === "blocked") return editability;
+  const workingAnimations = animations.length > 0 ? animations : fetchedAnimations;
+  const hasSourceTween = workingAnimations.some((a) =>
+    animationWritesAnyProperty(a, ROTATION_CHANNEL_SET),
+  );
+  if (
+    !hasSourceTween &&
+    liveSelector &&
+    hasNonHoldTweenForElement(iframe, liveSelector, undefined, ROTATION_CHANNELS)
+  ) {
+    // Rotation twin of the position case above: live tween, no source match.
+    return {
+      status: "blocked",
+      reason: "source-uneditable",
+      detail: "live-rotation-no-source-tween",
+    };
+  }
+  return { status: "persisted" };
+}
+
 export async function tryGsapRotationIntercept(
   selection: DomEditSelection,
   angle: number,
@@ -314,16 +378,11 @@ export async function tryGsapRotationIntercept(
   commitMutation: GsapDragCommitCallbacks["commitMutation"],
   fetchFallbackAnimations?: () => Promise<GsapAnimation[]>,
 ): Promise<GsapEditOutcome> {
-  const selector = selectorFromSelection(selection) ?? writeTargetSelector(selection);
-  if (!selector) return { status: "blocked", reason: "no-selector" };
-
   const fetchedAnimations = fetchFallbackAnimations ? await fetchFallbackAnimations() : [];
+  const outcome = preflightGsapRotationIntercept(selection, animations, iframe, fetchedAnimations);
+  if (outcome.status === "blocked") return outcome;
+  const selector = (selectorFromSelection(selection) ?? writeTargetSelector(selection))!;
   const workingAnimations = animations.length > 0 ? animations : fetchedAnimations;
-  const editability = directEditOutcomeForProperties(
-    [...animations, ...fetchedAnimations],
-    ROTATION_CHANNEL_SET,
-  );
-  if (editability.status === "blocked") return editability;
   const postSplitFetch = workingAnimations.some((animation) => !animation.propertyGroup)
     ? fetchFallbackAnimations
     : undefined;
@@ -346,14 +405,6 @@ export async function tryGsapRotationIntercept(
   if (!anim) {
     anim =
       workingAnimations.find((a) => animationWritesAnyProperty(a, ROTATION_CHANNEL_SET)) ?? null;
-  }
-
-  const liveSelector = selectorFromSelection(selection);
-  const hasLiveRotationTween = liveSelector
-    ? hasNonHoldTweenForElement(iframe, liveSelector, undefined, ROTATION_CHANNELS)
-    : false;
-  if (!anim && hasLiveRotationTween) {
-    return { status: "blocked", reason: "source-uneditable" };
   }
 
   // `angle` is the ABSOLUTE target rotation resolved by the gesture (gsap base +

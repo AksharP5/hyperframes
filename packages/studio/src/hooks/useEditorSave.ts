@@ -1,6 +1,5 @@
 import { useCallback, useRef } from "react";
 import { saveProjectFilesWithHistory } from "../utils/studioFileHistory";
-import type { EditHistoryKind } from "../utils/editHistory";
 import {
   StudioFileConflictError,
   buildStudioSaveFailureProperties,
@@ -12,7 +11,6 @@ const FAILURE_BURST_MS = 5_000;
 
 interface RecordEditInput {
   label: string;
-  kind: EditHistoryKind;
   coalesceKey?: string;
   files: Record<string, { before: string; after: string }>;
 }
@@ -23,7 +21,6 @@ interface UseEditorSaveOptions {
   readProjectFile: (path: string) => Promise<string>;
   writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>;
   recordEdit: (input: RecordEditInput) => Promise<void>;
-  domEditSaveTimestampRef: React.MutableRefObject<number>;
   setRefreshKey: React.Dispatch<React.SetStateAction<number>>;
   showToast: (message: string, tone?: "error" | "info") => void;
 }
@@ -53,7 +50,6 @@ export function useEditorSave({
   readProjectFile,
   writeProjectFile,
   recordEdit,
-  domEditSaveTimestampRef,
   setRefreshKey,
   showToast,
 }: UseEditorSaveOptions): EditorSaveHandle {
@@ -110,9 +106,8 @@ export function useEditorSave({
       const task = saveProjectFilesWithHistory({
         projectId: candidate.projectId,
         label: "Edit source",
-        kind: "source",
         coalesceKey: `source:${candidate.path}`,
-        files: { [candidate.path]: candidate.content },
+        files: { [candidate.path]: () => candidate.content },
         readFile: readProjectFile,
         writeFile: writeProjectFile,
         recordEdit,
@@ -156,11 +151,10 @@ export function useEditorSave({
       if (saveRafRef.current != null) cancelAnimationFrame(saveRafRef.current);
       saveRafRef.current = requestAnimationFrame(() => {
         saveRafRef.current = null;
-        domEditSaveTimestampRef.current = Date.now();
         void persistCandidate(candidate);
       });
     },
-    [domEditSaveTimestampRef, editingPathRef, projectIdRef, persistCandidate],
+    [editingPathRef, projectIdRef, persistCandidate],
   );
 
   const flushPendingSave = useCallback(async (): Promise<EditorSaveDrainResult> => {
@@ -173,11 +167,10 @@ export function useEditorSave({
       return inFlightRef.current;
     }
     if (candidate) {
-      domEditSaveTimestampRef.current = Date.now();
       return persistCandidate(candidate);
     }
     return (await inFlightRef.current) ?? { status: "clean" };
-  }, [domEditSaveTimestampRef, persistCandidate]);
+  }, [persistCandidate]);
 
   const discardPendingSave = useCallback(() => {
     if (saveRafRef.current != null) cancelAnimationFrame(saveRafRef.current);

@@ -56,6 +56,7 @@ import {
   type RenderJob,
 } from "../../renderOrchestrator.js";
 import { materializeExtractedFramesForCompiledDir, type CompositionMetadata } from "../shared.js";
+import { resolveRenderFpsConfig } from "../../fileServer.js";
 import type { ProducerLogger } from "../../../logger.js";
 import { encoderFailureError } from "../encoderInterruption.js";
 import {
@@ -496,6 +497,7 @@ export async function runExtractVideosStage(
         fps: job.config.fps,
         outputDir: join(compiledDir, "__hyperframes_video_frames"),
         format: job.config.videoFrameFormat ?? "auto",
+        toneMapHdrToSdr: job.config.hdrMode === "force-sdr",
         timelineEnd: composition.duration,
         maxTransientRetries: extractionPolicy.maxTransientRetries,
         collectProbeFailures: extractionPolicy.failureMode === "enforce",
@@ -515,7 +517,11 @@ export async function runExtractVideosStage(
     });
 
     if (extractionResult.extracted.length > 0) {
-      frameLookup = createFrameLookupTable(composition.videos, extractionResult.extracted);
+      frameLookup = createFrameLookupTable(
+        composition.videos,
+        extractionResult.extracted,
+        resolveRenderFpsConfig(job.config.fps).value,
+      );
     }
     videoReadinessSkipIds = collectVideoReadinessSkipIds(
       nativeHdrVideoIds,
