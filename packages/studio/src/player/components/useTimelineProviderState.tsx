@@ -10,7 +10,7 @@ import { useTimelineClipDrag } from "./useTimelineClipDrag";
 import type { ClipContextMenuState, TimelineContextValue } from "./TimelineProvider";
 import {
   buildTimelineMeta,
-  resolveRenderClipContent,
+  resolveMultiDragPreview,
   resolveResizingElementIds,
   shouldIgnoreTimelinePointerDown,
 } from "./timelineProviderStateBuilders";
@@ -19,8 +19,11 @@ import { useTimelineEditPinning } from "./useTimelineEditPinning";
 import { useTimelineStackingSync } from "./useTimelineStackingSync";
 import { useTimelineGeometry } from "./useTimelineGeometry";
 import { useAutoExpandKeyframedClips } from "./useAutoExpandKeyframedClips";
-import { GUTTER, LABEL_COL_W, TRACKS_LEFT_PAD } from "./timelineLayout";
+import { GUTTER, LABEL_COL_W } from "./timelineLayout";
+import { useTimelineLabelColumn } from "./useTimelineLabelColumn";
+import { useTimelineKeyframeData } from "./useTimelineKeyframeData";
 import { useTimelineScrollViewport } from "./useTimelineScrollViewport";
+import { ClipContentOnceShown } from "./timelineClipChildren";
 import { useResolvedTimelineEditCallbacks } from "./useResolvedTimelineEditCallbacks";
 import type { TimelineProps } from "./TimelineTypes";
 import {
@@ -30,13 +33,9 @@ import {
 } from "./useTimelineTrackLayout";
 import { useTimelineKeyframeHandlers } from "./useTimelineKeyframeHandlers";
 import { useTimelineGapHighlights } from "./useTimelineGapHighlights";
-import { TimelineRazorGuide, useTimelineRazorInteraction } from "./TimelineRazorInteraction";
+import { TimelineRazorGuideOverlay, useTimelineRazorInteraction } from "./TimelineRazorInteraction";
 import { useTimelinePerformanceTelemetry } from "./useTimelinePerformanceTelemetry";
-import {
-  getEffectiveTimelineDuration,
-  getTimelinePreviewElement,
-  timelineNeedsLabelColumn,
-} from "./timelineViewModel";
+import { getEffectiveTimelineDuration, getTimelinePreviewElement } from "./timelineViewModel";
 import { useTimelineShiftModifier } from "./useTimelineShiftModifier";
 import { useTimelineTicks } from "./useTimelineTicks";
 import { getTimelineElementIdentity } from "../lib/timelineElementHelpers";
@@ -44,6 +43,8 @@ import { useTimelineClipRenderWindow } from "./useTimelineClipRenderWindow";
 import { useTimelineActiveClips } from "./useTimelineActiveClips";
 import { useTimelineLaneMoveRefresh } from "./useTimelineLaneMoveRefresh";
 import { useTimelineLogicalFocus } from "./useTimelineLogicalFocus";
+import { useTimelineEditContextOptional } from "../../contexts/TimelineEditContext";
+import { resolveSnapGuide } from "./timelineSnapping";
 export function useTimelineProviderState({
   onSeek,
   onDrillDown,
@@ -67,7 +68,11 @@ export function useTimelineProviderState({
   onDuplicateClip,
   canPasteClip,
   theme: themeOverrides,
+  showAudioEffects = true,
+  showKeyframes = true,
   sessionEpoch = 0,
+  previewIframeRef,
+  onZIndexReorder,
 }: TimelineProps = {}): TimelineContextValue {
   const {
     onMoveElement,
@@ -90,10 +95,10 @@ export function useTimelineProviderState({
     onSplitElement: onSplitElementOverride,
   });
   const theme = useMemo(() => ({ ...defaultTimelineTheme, ...themeOverrides }), [themeOverrides]);
+  const editContext = useTimelineEditContextOptional();
   const refreshAfterLaneMove = useTimelineLaneMoveRefresh();
   useMusicBeatAnalysis();
-  const rawElements = usePlayerStore((s) => s.elements);
-  const timelineElements = rawElements;
+  const timelineElements = usePlayerStore((s) => s.elements);
   const adjustedBeatAnalysis = useAdjustedBeatAnalysis();
   const duration = usePlayerStore((s) => s.duration);
   const timeDisplayMode = usePlayerStore((s) => s.timeDisplayMode);
@@ -101,14 +106,9 @@ export function useTimelineProviderState({
   const selectedElementId = usePlayerStore((s) => s.selectedElementId);
   const selectedElementIds = usePlayerStore((s) => s.selectedElementIds);
   const focusedEaseSegment = usePlayerStore((s) => s.focusedEaseSegment);
-  const gsapAnimations = usePlayerStore((s) => s.gsapAnimations);
-  const labelMode = useMemo(
-    () => timelineNeedsLabelColumn(gsapAnimations, timelineElements),
-    [gsapAnimations, timelineElements],
-  );
-  // The label column provides pre-t=0 space; otherwise keep TRACKS_LEFT_PAD after the gutter.
-  const contentOrigin = labelMode ? LABEL_COL_W + GUTTER : GUTTER + TRACKS_LEFT_PAD;
-  const contentGutter = labelMode ? GUTTER : 0;
+  const { gsapAnimations, keyframeCache } = useTimelineKeyframeData(showKeyframes);
+  const namedAnimations = usePlayerStore((s) => s.gsapAnimations);
+  const { labelMode, contentOrigin } = useTimelineLabelColumn(namedAnimations, timelineElements);
   const setSelectedElementId = usePlayerStore((s) => s.setSelectedElementId);
   const currentTime = usePlayerStore((s) => s.currentTime);
   const beatDragging = usePlayerStore((s) => s.beatDragging);
@@ -130,10 +130,9 @@ export function useTimelineProviderState({
   }, []);
   const lastScrollLeftRef = useRef(0);
   const effectiveDuration = useMemo(
-    () => getEffectiveTimelineDuration(duration, rawElements),
-    [duration, rawElements],
+    () => getEffectiveTimelineDuration(duration, timelineElements),
+    [duration, timelineElements],
   );
-  const keyframeCache = usePlayerStore((s) => s.keyframeCache);
   useAutoExpandKeyframedClips(gsapAnimations);
   const {
     tracks,
@@ -182,6 +181,8 @@ export function useTimelineProviderState({
   });
   const { readClipZIndex, applyStackingPatches, zSyncEnabled } = useTimelineStackingSync({
     expandedElementsRef: timelineElementsRef,
+    previewIframeRef,
+    onZIndexReorder,
   });
   const {
     draggedClip,
@@ -406,7 +407,6 @@ export function useTimelineProviderState({
     handlePointerCancel,
   } = overlaysProps;
   const { rangeSelection, setRangeSelection } = overlays;
-
   const laneGapStrips = useTimelineGapHighlights({
     gapHighlight,
     tracks,
@@ -416,25 +416,24 @@ export function useTimelineProviderState({
     dragActive: draggedClip?.started === true || resizingClip != null,
     displayDuration,
   });
-
   const { major, minor, majorTickInterval } = useTimelineTicks(
     displayDuration,
     pps,
     timeDisplayMode,
     timelineFocus.rowVirtualizationActive ? renderTimeRange : undefined,
   );
-
   const getPreviewElement = useCallback(
     (element: TimelineElement): TimelineElement => getTimelinePreviewElement(element, resizingClip),
     [resizingClip],
   );
-
+  const draggedElement = draggedClip?.element ?? null;
+  const multiDragPreview = resolveMultiDragPreview(draggedClip, selectedElementIds);
   const canvasProps = {
     major,
     minor,
     pps,
     contentOrigin,
-    contentGutter,
+    contentGutter: labelMode ? GUTTER : 0,
     trackContentWidth: displayContentWidth,
     totalH: displayLayout.totalH,
     effectiveDuration,
@@ -444,6 +443,7 @@ export function useTimelineProviderState({
     laneGapStrips,
     dropPreview: assetDrop.dropPreview,
     theme,
+    showAudioEffects,
     displayTrackOrder: displayLayout.displayTrackOrder,
     rowHeights: displayLayout.displayRowHeights,
     rowGeometry: displayLayout.rowGeometry,
@@ -501,11 +501,24 @@ export function useTimelineProviderState({
     onResizeElement,
     onMoveElement,
     beatDragging,
+    draggedElement,
+    snapGuide: resolveSnapGuide(draggedClip, resizingClip),
+    multiDragPreview,
+    onToggleTrackHidden: editContext.onToggleTrackHidden,
+    onTogglePropertyGroupKeyframe: editContext.onTogglePropertyGroupKeyframe,
+    onRazorSplit: editContext.onRazorSplit,
+    onRazorSplitAll: editContext.onRazorSplitAll,
   };
-  const timelineRenderClipContent = resolveRenderClipContent(
-    timelineFocus.rowVirtualizationActive,
-    viewport.isScrolling,
-    renderClipContent,
+  const holdNewClipContent = timelineFocus.rowVirtualizationActive && viewport.isScrolling;
+  const timelineRenderClipContent = useMemo<typeof renderClipContent>(
+    () =>
+      renderClipContent &&
+      ((element, style, context) => (
+        <ClipContentOnceShown hold={holdNewClipContent}>
+          {renderClipContent(element, style, context)}
+        </ClipContentOnceShown>
+      )),
+    [holdNewClipContent, renderClipContent],
   );
   const timelineMeta = buildTimelineMeta({
     emptyState: {
@@ -559,7 +572,7 @@ export function useTimelineProviderState({
     labelColumnWidth: LABEL_COL_W,
     razorGuide:
       activeTool === "razor" && razorGuideX !== null ? (
-        <TimelineRazorGuide x={razorGuideX} />
+        <TimelineRazorGuideOverlay x={razorGuideX} />
       ) : null,
   });
   const contextValue: TimelineContextValue = {

@@ -4,7 +4,26 @@ import type {
   TimelineViewportProps,
 } from "./TimelineProvider";
 import type { ResizingClipState } from "./useTimelineClipDrag";
-import type { TimelineLaneBaseProps } from "./timelineLaneProps";
+import type { DraggedClipState } from "./timelineClipDragTypes";
+import type { MultiDragPreviewInput } from "./timelineMultiDragPreview";
+import { getTimelineElementIdentity } from "../lib/timelineElementHelpers";
+
+export function resolveMultiDragPreview(
+  draggedClip: DraggedClipState | null,
+  selectedKeys: ReadonlySet<string>,
+): MultiDragPreviewInput | null {
+  // The dragged clip is a free ghost; selected companions follow the same
+  // clamped delta so the formation stays rigid at the lane boundary.
+  if (!draggedClip?.started) return null;
+  const draggedKey = getTimelineElementIdentity(draggedClip.element);
+  return {
+    dragStarted: true,
+    draggedKey,
+    draggedOriginStart: draggedClip.element.start,
+    draggedPreviewStart: draggedClip.previewStart,
+    selectedKeys,
+  };
+}
 
 export function resolveResizingElementIds(
   resizingClip: ResizingClipState | null,
@@ -12,14 +31,6 @@ export function resolveResizingElementIds(
   if (resizingClip?.groupPreview) return resizingClip.groupPreview.map((change) => change.key);
   if (resizingClip) return [resizingClip.element.key ?? resizingClip.element.id];
   return undefined;
-}
-
-export function resolveRenderClipContent(
-  rowVirtualizationActive: boolean,
-  isScrolling: boolean,
-  renderClipContent: TimelineLaneBaseProps["renderClipContent"],
-): TimelineLaneBaseProps["renderClipContent"] {
-  return rowVirtualizationActive && isScrolling ? undefined : renderClipContent;
 }
 
 export function shouldIgnoreTimelinePointerDown(target: EventTarget | null): boolean {

@@ -41,11 +41,13 @@ import {
   buildVariablesByCompScript,
   inlineSubCompositions as inlineSubCompositionsShared,
   ensureExternalScriptTag,
+  emitMountedModuleScripts,
   prepareFlattenedInnerRoot,
   emitRootCompositionVariableStyles,
   readDeclaredDefaults,
   parseHostVariableValues,
   inlineScriptRuns,
+  insertBeforeCloseTag,
 } from "@hyperframes/core/compiler";
 import {
   checkSubCompositionUsability,
@@ -124,9 +126,7 @@ export function injectSdkPositionEditsRenderScript(html: string): string {
   }
   const scriptBody = getPositionEditsRenderScript().replace(/<\/script/gi, "<\\/script");
   const script = `<script>${scriptBody}</script>`;
-  const bodyClose = html.search(/<\/body\s*>/i);
-  if (bodyClose < 0) return `${html}${script}`;
-  return `${html.slice(0, bodyClose)}${script}${html.slice(bodyClose)}`;
+  return insertBeforeCloseTag(html, "body", script) ?? `${html}${script}`;
 }
 
 /**
@@ -163,7 +163,7 @@ class EmptyCompositionError extends Error {
       `${problems.length} composition file${problems.length === 1 ? "" : "s"} referenced by ` +
         `data-composition-src cannot be rendered:\n${lines.join("\n")}\n\n` +
         "Check that each file referenced by data-composition-src contains valid HTML with a " +
-        "<template> or <body> containing a [data-composition-id] element. If a scene-authoring " +
+        "[data-composition-id] element in a <template>, <body>, or bare fragment. If a scene-authoring " +
         "step is still running, wait for it to finish before referencing the file.",
     );
     this.name = "EmptyCompositionError";
@@ -1056,12 +1056,16 @@ function inlineSubCompositions(
     head.appendChild(styleEl);
   }
 
-  // Inject external CDN scripts before inline scripts so plugins (e.g.
-  // TextPlugin, ScrollTrigger) are registered before composition code runs.
-  // Deduplicate against scripts already present in the document.
+  // CDN and integrity-pinned scripts go first so plugins (e.g. TextPlugin,
+  // ScrollTrigger) register before composition code, as in htmlBundler. A local
+  // src script keeps its authored place among the inline scripts (see below).
+  const isHoisted = (item: { src: string; integrity?: string }) =>
+    Boolean(item.integrity?.trim()) || isNonRelativeUrl(item.src);
   if (body) {
     for (const item of result.scriptItems) {
-      if (item.kind === "external") ensureExternalScriptTag(document, item.src, item);
+      if (item.kind === "external" && isHoisted(item)) {
+        ensureExternalScriptTag(document, item.src, item);
+      }
     }
   }
 
@@ -1074,13 +1078,31 @@ function inlineSubCompositions(
   // text (issue #2064). Same shared builder as the bundler so they stay in
   // lockstep.
   const variablesByCompScript = buildVariablesByCompScript(result.variablesByComp);
-  const inlineScripts = variablesByCompScript
-    ? [variablesByCompScript, ...result.scripts]
-    : result.scripts;
-  if (inlineScripts.length && body) {
-    const scriptEl = document.createElement("script");
-    scriptEl.textContent = inlineScripts.join("\n;\n");
-    body.appendChild(scriptEl);
+  if (body) {
+    let pending = variablesByCompScript ? [variablesByCompScript] : [];
+    const flushInline = () => {
+      if (!pending.length) return;
+      const scriptEl = document.createElement("script");
+      scriptEl.textContent = pending.join("\n;\n");
+      body.appendChild(scriptEl);
+      pending = [];
+    };
+    for (const item of result.scriptItems) {
+      if (item.kind === "inline") {
+        pending.push(item.content);
+      } else if (!isHoisted(item)) {
+        flushInline();
+        ensureExternalScriptTag(document, item.src, item);
+      }
+    }
+    flushInline();
+  }
+  if (body) {
+    emitMountedModuleScripts(
+      document as unknown as Document,
+      result.importMaps,
+      result.moduleScripts,
+    );
   }
 
   // Compile-time CSS custom properties (mirrors the preview bundler): root
@@ -2012,10 +2034,11 @@ export async function compileForRender(
   ];
   const hasPositionEdits = HF_POSITION_ATTRS.some((attr) => assembledHtml.includes(attr));
   const htmlWithPositionScript = hasPositionEdits
-    ? assembledHtml.replace(
-        /<\/body>/i,
-        `<script>${createStudioPositionSeekReapplyScript()}</script></body>`,
-      )
+    ? (insertBeforeCloseTag(
+        assembledHtml,
+        "body",
+        `<script>${createStudioPositionSeekReapplyScript()}</script>`,
+      ) ?? assembledHtml)
     : assembledHtml;
   const htmlWithSdkPositionScript = injectSdkPositionEditsRenderScript(htmlWithPositionScript);
 
@@ -2097,32 +2120,33 @@ export async function compileForRender(
 
   // Advisory video checks (sparse keyframes, VFR). Fire-and-forget — these spawn
   // ffprobe subprocesses and should not block compilation since they only produce warnings.
+  // The two probes run in sequence rather than in parallel: the keyframe analysis needs
+  // the video stream's own duration to classify a single-keyframe (single-GOP) file.
   for (const video of videos) {
     if (isHttpUrl(video.src)) continue;
     const videoPath = resolve(projectDir, video.src);
     const reencode = `ffmpeg -i "${video.src}" -c:v libx264 -r 30 -g 30 -keyint_min 30 -movflags +faststart -c:a copy output.mp4`;
-    Promise.all([
-      withMediaProbeSlot(() => analyzeKeyframeIntervals(videoPath)),
-      withMediaProbeSlot(() => extractMediaMetadata(videoPath)),
-    ])
-      .then(([analysis, metadata]) => {
-        if (analysis.isProblematic) {
-          defaultLogger.warn(
-            `[Compiler] WARNING: Video "${video.id}" has sparse keyframes (max interval: ${analysis.maxIntervalSeconds}s). ` +
-              `This causes seek failures and frame freezing. Re-encode with: ${reencode}`,
-          );
-        }
-        if (metadata.isVFR) {
-          // defaultLogger (stderr), not console.info (stdout) — matches the sibling
-          // warning above; a stdout line here corrupts `check --json` / `validate --json`.
-          defaultLogger.warn(
-            `[Compiler] Video "${video.id}" is variable frame rate (VFR); ` +
-              `the engine will normalize it to CFR before frame extraction. ` +
-              `If rendering feels slow on this video, pre-encode once with: ${reencode}`,
-          );
-        }
-      })
-      .catch(() => {});
+    (async () => {
+      const metadata = await withMediaProbeSlot(() => extractMediaMetadata(videoPath));
+      const analysis = await withMediaProbeSlot(() =>
+        analyzeKeyframeIntervals(videoPath, metadata),
+      );
+      if (analysis.isProblematic) {
+        defaultLogger.warn(
+          `[Compiler] WARNING: Video "${video.id}" has sparse keyframes (max interval: ${analysis.maxIntervalSeconds}s). ` +
+            `This causes seek failures and frame freezing. Re-encode with: ${reencode}`,
+        );
+      }
+      if (metadata.isVFR) {
+        // defaultLogger (stderr), not console.info (stdout) — matches the sibling
+        // warning above; a stdout line here corrupts `check --json` / `validate --json`.
+        defaultLogger.warn(
+          `[Compiler] Video "${video.id}" is variable frame rate (VFR); ` +
+            `the engine will normalize it to CFR before frame extraction. ` +
+            `If rendering feels slow on this video, pre-encode once with: ${reencode}`,
+        );
+      }
+    })().catch(() => {});
   }
 
   // Read dimensions from root composition element using DOM parser

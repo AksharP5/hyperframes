@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isClipVisibleAt } from "@hyperframes/core";
 import { describe, expect, it } from "vitest";
 
 const cliEntry = resolve(fileURLToPath(import.meta.url), "..", "..", "cli.ts");
@@ -101,6 +102,135 @@ describe("timeline edit command", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  const meeting = (aStart: string, aDuration: string, bStart: string, fps = "") =>
+    `<div data-composition-id="main"${fps} data-duration="40"><div id="a" data-hf-id="a" data-start="${aStart}" data-duration="${aDuration}" data-track-index="0"></div><div id="b" data-hf-id="b" data-start="${bStart}" data-duration="2" data-track-index="0"></div></div>`;
+  const clip = (html: string, id: string) => {
+    const tag = new RegExp(`<div[^>]*\\sid="${id}"[^>]*>`).exec(html)?.[0] ?? "";
+    const attr = (name: string) => new RegExp(`${name}="([^"]+)"`).exec(tag)?.[1];
+    return { start: attr("data-start"), duration: attr("data-duration") };
+  };
+  const endOf = (html: string, id: string) =>
+    Number(clip(html, id).start) + Number(clip(html, id).duration);
+  const visibleAt = (html: string, time: number, ids: string[]) =>
+    ids.filter((id) => isClipVisibleAt(time, Number(clip(html, id).start), endOf(html, id), 40));
+
+  const composition = (fps: string, ...clips: [string, string, string][]) =>
+    `<div data-composition-id="main"${fps} data-duration="40">${clips
+      .map(
+        ([id, start, duration]) =>
+          `<div id="${id}" data-hf-id="${id}" data-start="${start}" data-duration="${duration}" data-track-index="0"></div>`,
+      )
+      .join("")}</div>`;
+
+  it.each([
+    [
+      "move",
+      ["#b", "20f"],
+      composition(' data-fps="24"', ["a", "0", String(20 / 24 + 5e-7)], ["b", "2", "0.25"]),
+    ],
+    ["duplicate", ["#c", "--at", "1"], composition("", ["a", "0", "1.0000005"], ["c", "3", "1"])],
+  ])("refuses a %s that lands half a microsecond inside another clip", (verb, args, html) => {
+    const dir = project();
+    try {
+      writeFileSync(join(dir, "index.html"), html);
+      expect(run(dir, verb, ...args).status).not.toBe(0);
+      expect(readFileSync(join(dir, "index.html"), "utf8")).toBe(html);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [
+      "a clip wholly before the insertion point",
+      ["#x", "--at", "5"],
+      composition("", ["x", "0", "1"], ["t", "4.9999995", "0.0000002"]),
+      4.9999995,
+    ],
+    [
+      "a clip half a microsecond after it",
+      ["#a"],
+      composition("", ["a", "0", "1"], ["t", "1.0000005", "1"]),
+      1.0000005 + 1,
+    ],
+  ])("duplicates without snapping %s to the copy", (_, args, html, tStart) => {
+    const dir = project();
+    try {
+      writeFileSync(join(dir, "index.html"), html);
+      expect(run(dir, "duplicate", ...args).status).toBe(0);
+      expect(Number(clip(readFileSync(join(dir, "index.html"), "utf8"), "t").start)).toBe(tStart);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("trims a clip that only meets the one before it, ending where asked", () => {
+    const dir = project();
+    try {
+      writeFileSync(join(dir, "index.html"), meeting("19.8", "6.4", "26.2"));
+      expect(run(dir, "trim", "#b", "--end", "29").status).toBe(0);
+      const html = readFileSync(join(dir, "index.html"), "utf8");
+      expect(clip(html, "b")).toEqual({ start: "26.2", duration: "2.8000000000000007" });
+      expect(endOf(html, "b")).toBe(29);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("trims up to the next clip's start without ending past it, where no duration lands exactly", () => {
+    const dir = project();
+    try {
+      writeFileSync(join(dir, "index.html"), meeting("4.74", "10", "25.74"));
+      expect(run(dir, "trim", "#a", "--end", "25.74").status).toBe(0);
+      const html = readFileSync(join(dir, "index.html"), "utf8");
+      expect(endOf(html, "a")).toBeLessThanOrEqual(25.74);
+      expect(visibleAt(html, 25.74, ["a", "b"])).toEqual(["b"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("trims to frame 20 at 30 fps so that frame shows the next clip and not this one", () => {
+    const dir = project();
+    try {
+      writeFileSync(join(dir, "index.html"), meeting("0", "2", "2", ' data-fps="30"'));
+      expect(run(dir, "trim", "#a", "--end", "20f").status).toBe(0);
+      expect(run(dir, "trim", "#b", "--start", "20f").status).toBe(0);
+      const html = readFileSync(join(dir, "index.html"), "utf8");
+      expect([clip(html, "a").duration, clip(html, "b").start]).toEqual([
+        "0.6666666666666666",
+        "0.6666666666666666",
+      ]);
+      expect(visibleAt(html, 19 / 30, ["a", "b"])).toEqual(["a"]);
+      expect(visibleAt(html, 20 / 30, ["a", "b"])).toEqual(["b"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["19.8", "6.4", "26.2"],
+    ["0", "0.6666666666666666", "0.6666666666666666"],
+    ["0.1", "1.1", "1.2"],
+  ])(
+    "duplicates a clip at %s lasting %s up against the clip at %s, each boundary exact",
+    (aStart, aDuration, bStart) => {
+      const dir = project();
+      try {
+        writeFileSync(join(dir, "index.html"), meeting(aStart, aDuration, bStart));
+        expect(run(dir, "duplicate", "#a").status).toBe(0);
+        const html = readFileSync(join(dir, "index.html"), "utf8");
+        const ids = ["a", "a-copy", "b"];
+        expect(Number(clip(html, "a-copy").start)).toBe(endOf(html, "a"));
+        expect(Number(clip(html, "b").start)).toBe(endOf(html, "a-copy"));
+        expect(visibleAt(html, endOf(html, "a"), ids)).toEqual(["a-copy"]);
+        expect(visibleAt(html, endOf(html, "a-copy"), ids)).toEqual(["b"]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("refuses an ambiguous reference", () => {
     const dir = project();
@@ -211,6 +341,143 @@ describe("timeline edit command", () => {
     } finally {
       rmSync(plannedDir, { recursive: true, force: true });
       rmSync(appliedDir, { recursive: true, force: true });
+    }
+  });
+
+  it("stamps stable ids with ids", () => {
+    const dir = project();
+    try {
+      const indexPath = join(dir, "index.html");
+      writeFileSync(indexPath, readFileSync(indexPath, "utf8").replace(/ data-hf-id="[^"]+"/g, ""));
+      const result = run(dir, "ids");
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(indexPath, "utf8")).toMatch(/data-hf-id=/);
+      const output = JSON.parse(result.stdout) as { after: Array<{ ref: string }> };
+      expect(output.after.some((row) => row.ref === "#clip")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sets clip attributes", () => {
+    const dir = project();
+    try {
+      const result = run(dir, "set", "#clip", "volume=0.4", "rate=1.5", "track=2");
+      expect(result.status, result.stderr).toBe(0);
+      const html = readFileSync(join(dir, "index.html"), "utf8");
+      expect(html).toContain('data-volume="0.4"');
+      expect(html).toContain('data-playback-rate="1.5"');
+      expect(html).toContain('data-track-index="2"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("duplicates with insert-and-ripple", () => {
+    const dir = project();
+    try {
+      const result = run(dir, "duplicate", "#clip", "--at", "3");
+      expect(result.status, result.stderr).toBe(0);
+      const html = readFileSync(join(dir, "index.html"), "utf8");
+      expect(html).toContain('id="clip-copy"');
+      expect(html.match(/data-hf-id=/g)).toHaveLength(4);
+      expect(html).toContain('id="neighbour" data-hf-id="neighbour" data-start="7"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a trim that would leave a clip one float rounding step long", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-timeline-cli-"));
+    try {
+      const indexPath = join(dir, "index.html");
+      writeFileSync(indexPath, meeting("19.8", "6.4", "26.2"));
+      const result = run(dir, "trim", "#b", "--end", "26.200000000000003");
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("trim duration must be positive");
+      expect(clip(readFileSync(indexPath, "utf8"), "b").duration).toBe("2");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("moves a clip over pending media, whose unknown length counts as zero", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-timeline-cli-"));
+    try {
+      const indexPath = join(dir, "index.html");
+      writeFileSync(
+        indexPath,
+        `<div data-composition-id="main" data-duration="12"><div id="a" data-hf-id="a" data-start="3" data-duration="1" data-track-index="0"></div><video id="pending" data-hf-id="pending" src="https://example.com/v.mp4" data-start="1" data-track-index="0"></video></div>`,
+      );
+      const result = run(dir, "move", "#a", "0.5");
+      expect(result.status, result.stderr).toBe(0);
+      expect(clip(readFileSync(indexPath, "utf8"), "a").start).toBe("0.5");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses duplicate insertion inside a spanning clip", () => {
+    const dir = project();
+    try {
+      const indexPath = join(dir, "index.html");
+      writeFileSync(
+        indexPath,
+        readFileSync(indexPath, "utf8").replace('data-duration="2"', 'data-duration="4"'),
+      );
+      const result = run(dir, "duplicate", "#clip", "--at", "3");
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("split the spanning clip first");
+      expect(readFileSync(indexPath, "utf8")).not.toContain('id="clip-copy"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("revalidates each apply edit against the previous edit's source", () => {
+    const dir = project();
+    try {
+      const indexPath = join(dir, "index.html");
+      writeFileSync(
+        indexPath,
+        readFileSync(indexPath, "utf8").replace('data-start="5"', 'data-start="7"'),
+      );
+      const planPath = join(dir, "edits.json");
+      writeFileSync(
+        planPath,
+        JSON.stringify([
+          { verb: "move", ref: "#clip", time: "+1" },
+          { verb: "move", ref: "#clip", time: "+2" },
+        ]),
+      );
+      const result = run(dir, "apply", planPath);
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(indexPath, "utf8")).toContain('data-start="4"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("applies a JSON plan atomically and undoes its receipt", () => {
+    const dir = project();
+    try {
+      const planPath = join(dir, "edits.json");
+      writeFileSync(planPath, JSON.stringify([{ verb: "set", ref: "#clip", volume: "0.25" }]));
+      const before = readFileSync(join(dir, "index.html"), "utf8");
+      const planned = run(dir, "apply", planPath, "--plan");
+      expect(planned.status, planned.stderr).toBe(0);
+      expect(JSON.parse(planned.stdout)).toMatchObject({ ok: true, planned: true });
+      expect(readFileSync(join(dir, "index.html"), "utf8")).toBe(before);
+
+      const applied = run(dir, "apply", planPath);
+      expect(applied.status, applied.stderr).toBe(0);
+      const appliedJson = JSON.parse(applied.stdout) as { receipt: Array<Record<string, unknown>> };
+      expect(readFileSync(join(dir, "index.html"), "utf8")).toContain('data-volume="0.25"');
+      const undone = run(dir, "undo", JSON.stringify(appliedJson.receipt[0]));
+      expect(undone.status, undone.stderr).toBe(0);
+      expect(readFileSync(join(dir, "index.html"), "utf8")).toBe(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

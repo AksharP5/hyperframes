@@ -188,51 +188,7 @@
       "type": "hyperframes:block"
     },
     {
-      "name": "code-snippet-apple-terminal-basic",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-clear-dark",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-clear-light",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-grass",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-homebrew",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-man-page",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-novel",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-ocean",
-      "type": "hyperframes:block"
-    },
-    {
       "name": "code-snippet-apple-terminal-pro",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-red-sands",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-silver-aerogel",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-apple-terminal-solid-colors",
       "type": "hyperframes:block"
     },
     {
@@ -241,50 +197,6 @@
     },
     {
       "name": "code-snippet-dark-modern",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-dark-plus",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-flight",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-high-contrast",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-high-contrast-light",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-light-2026",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-light-modern",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-light-plus",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-monokai",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-solarized-light",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-visual-studio-dark",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "code-snippet-visual-studio-light",
       "type": "hyperframes:block"
     },
     {
@@ -400,14 +312,6 @@
       "type": "hyperframes:block"
     },
     {
-      "name": "liquid-glass-context-menu",
-      "type": "hyperframes:block"
-    },
-    {
-      "name": "liquid-glass-media-controls",
-      "type": "hyperframes:block"
-    },
-    {
       "name": "liquid-glass-notification",
       "type": "hyperframes:block"
     },
@@ -417,6 +321,10 @@
     },
     {
       "name": "logo-outro",
+      "type": "hyperframes:block"
+    },
+    {
+      "name": "lottie-character-walk",
       "type": "hyperframes:block"
     },
     {
@@ -900,10 +808,6 @@
       "type": "hyperframes:component"
     },
     {
-      "name": "caret-swap",
-      "type": "hyperframes:component"
-    },
-    {
       "name": "char-slam-explode",
       "type": "hyperframes:component"
     },
@@ -925,6 +829,10 @@
     },
     {
       "name": "code-terminal-run",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "colorama-wipe",
       "type": "hyperframes:component"
     },
     {
@@ -985,6 +893,10 @@
     },
     {
       "name": "echo-trail",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "extended-keyframe",
       "type": "hyperframes:component"
     },
     {
@@ -1368,10 +1280,6 @@
       "type": "hyperframes:component"
     },
     {
-      "name": "simulated-cursor",
-      "type": "hyperframes:component"
-    },
-    {
       "name": "skeleton-reveal",
       "type": "hyperframes:component"
     },
@@ -1493,6 +1401,10 @@
     },
     {
       "name": "testimonial-proof-card",
+      "type": "hyperframes:component"
+    },
+    {
+      "name": "text-match-cut",
       "type": "hyperframes:component"
     },
     {
@@ -1664,15 +1576,11 @@
       "type": "hyperframes:example"
     },
     {
-      "name": "vscode-theme-visualizer",
-      "type": "hyperframes:example"
-    },
-    {
       "name": "warm-grain",
       "type": "hyperframes:example"
     }
   ],
   "catalogArtifact": {
-    "revision": "fc655a7cbb3bd455b9c6cb55df3fdf6b35da2cbcb25474068ec796fddd3c8b55"
+    "revision": "973eda0eef98aed0e928080d20a64acacd8054e83611df7ed8b30ea96b25bf5b"
   }
 }

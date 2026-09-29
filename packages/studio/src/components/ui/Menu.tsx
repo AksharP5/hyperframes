@@ -27,15 +27,28 @@ const SIDE_OFFSET = 6;
 const VIEWPORT_MARGIN = 8;
 
 /**
- * Chrome shared by every floating panel (`Popover` too); callers add their own shadow token.
+ * Enter and exit shared by menus, popovers, dropdowns, and tooltips.
+ * The open duration class differs; the shape does not.
  * `data-starting-style`/`data-ending-style` are Base UI's transition attributes.
+ */
+export function floatingMotion(openDuration: "duration-open" | "duration-tooltip") {
+  return cn(
+    "origin-[var(--transform-origin)] outline-hidden",
+    "transition-[opacity,transform] ease-out-quint",
+    openDuration,
+    "data-[ending-style]:duration-close data-[ending-style]:ease-in",
+    "data-[starting-style]:[opacity:var(--popup-enter-opacity)]",
+    "data-[starting-style]:[scale:var(--popup-enter-scale)]",
+    "data-[ending-style]:opacity-0",
+  );
+}
+
+/**
+ * Chrome shared by every floating panel (`Popover` too); callers add their own shadow token.
  */
 export const popupSurface = cn(
   "rounded-lg border border-border-input bg-surface",
-  "origin-[var(--transform-origin)] outline-hidden",
-  "transition-[opacity,transform] ease-out-quint duration-open",
-  "data-[starting-style]:opacity-0 data-[starting-style]:scale-95",
-  "data-[ending-style]:opacity-0 data-[ending-style]:scale-95",
+  floatingMotion("duration-open"),
   "data-[preview-state=open]:opacity-100 data-[preview-state=open]:scale-100",
 );
 
@@ -204,6 +217,22 @@ export function MenuRadioItem({ className, children, ...props }: MenuRadioItemPr
         <BaseMenu.RadioItemIndicator className="size-1.5 rounded-full bg-accent" />
       </span>
     </BaseMenu.RadioItem>
+  );
+}
+
+/** An on/off row; the tick renders only while `checked`. */
+export function MenuCheckboxItem({
+  className,
+  children,
+  ...props
+}: StyledProps<typeof BaseMenu.CheckboxItem>) {
+  return (
+    <BaseMenu.CheckboxItem className={cn(itemBase, className)} {...props}>
+      <span className="truncate">{children}</span>
+      <span className="flex size-3 shrink-0 items-center justify-center text-accent">
+        <BaseMenu.CheckboxItemIndicator>✓</BaseMenu.CheckboxItemIndicator>
+      </span>
+    </BaseMenu.CheckboxItem>
   );
 }
 

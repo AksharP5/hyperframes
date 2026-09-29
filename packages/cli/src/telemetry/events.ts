@@ -6,6 +6,7 @@ import type { CatalogUsage } from "../utils/catalogUsage.js";
 import { flush, shouldTrack, trackEvent } from "./client.js";
 import { readConfig } from "./config.js";
 import { getPowerState } from "./system.js";
+import { CliRuntimeError } from "../utils/commandResult.js";
 
 // Power state is volatile (a laptop docks/undocks mid-session), so it is
 // sampled per render event rather than cached with SystemMeta. Attached to
@@ -384,6 +385,15 @@ export function trackRenderComplete(
     hasLut?: boolean;
     rootBodyMismatch?: boolean;
     rootBodyDeltaPxBucket?: string;
+    // `data-vfx-chain` facts from the same static scan (Task 1.5's kernel-cost
+    // measurement's producer-side counterpart). Undefined on render paths
+    // with no capture session, same as the composition-element fields above.
+    /** Host count — one per `data-vfx-chain` attribute occurrence, regardless of its chain's node count. */
+    vfxHostCount?: number;
+    /** Strongest enabled node's capture across every host ("none" | "self" | "backdrop", max). */
+    vfxCapture?: string;
+    /** Sorted unique def ids across every enabled node in every chain, comma-joined. */
+    vfxTypes?: string;
     deShortBand?: string;
     deParallelRouter?: string;
     dePreRouterWorkers?: number;
@@ -503,6 +513,9 @@ export function trackRenderComplete(
       begin_frame_no_damage_frames: props.beginFrameNoDamageFrames,
       begin_frame_has_damage_frames: props.beginFrameHasDamageFrames,
       de_capture_mode: props.deCaptureMode,
+      vfx_host_count: props.vfxHostCount,
+      vfx_capture: props.vfxCapture,
+      vfx_types: props.vfxTypes,
       de_compile_gate: props.deCompileGate,
       de_clamp_reason: props.deClampReason,
       de_worker_inversion: directOrCapture(props.deWorkerInversion, props.captureDeWorkerInversion),
@@ -781,11 +794,13 @@ export function trackRegistryItemAdded(props: {
   item: string;
   itemType: string;
   requested: boolean;
+  source: "cli" | "studio";
 }): void {
   trackEvent("registry_item_added", {
     item: props.item,
     item_type: props.itemType,
     requested: props.requested,
+    source: props.source,
   });
 }
 
@@ -910,18 +925,30 @@ export function trackFigmaImport(props: {
   });
 }
 
-// Report why a command failed before it exits non-zero. cli_command_result
-// records the failure but not the reason; this fills that gap via cli_error so
-// command failures are diagnosable. Enqueues synchronously — the process `exit`
-// handler flushes it. Drop this into any command's failure path.
-export function trackCommandFailure(command: string, err: unknown): void {
-  const error = err instanceof Error ? err : new Error(String(err));
+const reportedFailures = new WeakSet<object>();
+
+// Report why a command failed: cli_command_result records the failure, not the reason. Every
+// command-failure report goes through here. Enqueues synchronously; the `exit` handler flushes it.
+export function trackCommandFailure(
+  command: string,
+  err: unknown,
+  overrides: { error_name?: string; endpoint?: string } = {},
+): void {
+  // A CliRuntimeError wraps the failure it presented; report that failure, and only once.
+  let failure = err;
+  while (failure instanceof CliRuntimeError && failure.cause !== undefined) failure = failure.cause;
+  if (typeof failure === "object" && failure !== null) {
+    if (reportedFailures.has(failure)) return;
+    reportedFailures.add(failure);
+  }
+  const error = failure instanceof Error ? failure : new Error(String(failure));
   trackCliError({
-    error_name: error.name,
+    error_name: overrides.error_name ?? error.name,
     error_message: error.message,
     stack_trace: error.stack,
     command,
     kind: "command_error",
+    endpoint: overrides.endpoint,
   });
 }
 
@@ -950,6 +977,10 @@ export function trackCompareSheet(props: {
     total: props.total,
     render_ready_timed_out: props.renderReadyTimedOut,
   });
+}
+
+export function trackHistoryAction(props: { action: string; via: "preview" | "direct" }): void {
+  trackEvent("cli_history", props);
 }
 
 // A skills install was skipped because a required prerequisite binary is

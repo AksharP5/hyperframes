@@ -1,6 +1,7 @@
 import { memo } from "react";
-import { TimelineRuler } from "./TimelineRuler";
+import { TimelineRulerPart } from "./TimelineRulerPart";
 import { PlayheadIndicator } from "./PlayheadIndicator";
+import { TimelinePlayheadLayer } from "./TimelinePlayheadLayer";
 import {
   RULER_H,
   CLIP_Y,
@@ -8,16 +9,12 @@ import {
   TRACKS_BOTTOM_PAD,
   TRACK_H,
   PLAYHEAD_HEAD_W,
-  getTimelinePlayheadLeft,
   getTimelineRowTop,
   getTimelineRowHeight,
 } from "./timelineLayout";
-import { type MultiDragPreviewInput } from "./timelineMultiDragPreview";
-import { useTimelineEditContextOptional } from "../../contexts/TimelineEditContext";
+import { getTimelinePlayheadTransform } from "./timelinePlayheadTransform";
 import { TimelineLanes } from "./TimelineLanes";
-import { getTimelineElementIdentity } from "../lib/timelineElementHelpers";
 import { TimelineGestureOverlay } from "./TimelineGestureOverlay";
-import { resolveSnapGuide } from "./timelineSnapping";
 import { useTimelineContext } from "./TimelineProvider";
 
 // A dropped clip's length is unknown until it lands; the preview shows a default.
@@ -26,8 +23,7 @@ const DROP_PREVIEW_SECONDS = 3;
 export const TimelineCanvas = memo(function TimelineCanvas() {
   const { state, actions } = useTimelineContext();
   const props = state.canvas;
-  const { draggedClip, resizingClip, scrollRef, selectedElementIds, displayTrackOrder } = props;
-  const snapGuide = resolveSnapGuide(draggedClip, resizingClip);
+  const { draggedClip, scrollRef, displayTrackOrder } = props;
   const draggedRowIndex =
     draggedClip?.started === true ? displayTrackOrder.indexOf(draggedClip.previewTrack) : -1;
   const dropTrackIndex = props.dropPreview
@@ -43,55 +39,14 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
   // ghost and drop placeholder must clamp to it or they stretch to the full
   // expanded row height and stop matching the clip being dragged.
   const draggedClipHeight = Math.min(draggedRowHeight, TRACK_H) - CLIP_Y * 2;
-  const {
-    onResizeElement,
-    onMoveElement,
-    onToggleTrackHidden,
-    onTogglePropertyGroupKeyframe,
-    onRazorSplit,
-    onRazorSplitAll,
-  } = useTimelineEditContextOptional();
   const beatDragging = props.beatDragging;
-  const draggedElement = draggedClip?.element ?? null;
-  const draggedElementIdentity = draggedElement ? getTimelineElementIdentity(draggedElement) : null;
-  // The drag ghost follows the cursor freely (both axes) — CapCut-style. The
-  // "magnetic" affordance is a highlight on the destination lane (draggedRowIndex),
-  // which flips at the MAGNETIC_TRACK_THRESHOLD point; the clip drops into it.
-  // Live multi-selection drag: while a selected clip is dragged, ALL selected
-  // clips move together as one rigid formation. The GRABBED clip is the free
-  // ghost below; its co-selected "passengers" slide by the SAME group-clamped
-  // delta (cheap translateX, no re-layout) — the delta is derived from the
-  // grabbed clip's ALREADY-clamped previewStart, so the whole formation stops at
-  // the wall together and never deforms. Matches what the commit will do — see
-  // timelineMultiDragPreview + commit.
-  const multiDragPreview: MultiDragPreviewInput | null =
-    draggedClip?.started === true && draggedElement && draggedElementIdentity
-      ? {
-          dragStarted: true,
-          draggedKey: draggedElementIdentity,
-          draggedOriginStart: draggedElement.start,
-          draggedPreviewStart: draggedClip.previewStart,
-          selectedKeys: selectedElementIds,
-        }
-      : null;
+  const { draggedElement, snapGuide, multiDragPreview } = props;
   return (
     <div
       className="relative"
       style={{ height: props.totalH, width: props.contentOrigin + props.trackContentWidth }}
     >
-      <TimelineRuler
-        major={props.major}
-        minor={props.minor}
-        pps={props.pps}
-        trackContentWidth={props.trackContentWidth}
-        totalH={props.totalH}
-        effectiveDuration={props.effectiveDuration}
-        majorTickInterval={props.majorTickInterval}
-        theme={props.theme}
-        beatAnalysis={props.beatAnalysis}
-        contentOrigin={props.contentOrigin}
-        renderTimeRange={props.rowsVirtualized ? props.renderTimeRange : undefined}
-      />
+      <TimelineRulerPart />
 
       {/* Breathing room between the sticky ruler and the first track lane — the
           top half of the CapCut-style padding (see TRACKS_TOP_PAD). */}
@@ -104,12 +59,12 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
         snapGuide={snapGuide}
         draggedElement={draggedElement}
         multiDragPreview={multiDragPreview}
-        onToggleTrackHidden={onToggleTrackHidden}
-        onTogglePropertyGroupKeyframe={onTogglePropertyGroupKeyframe}
-        onResizeElement={onResizeElement}
-        onMoveElement={onMoveElement}
-        onRazorSplit={onRazorSplit}
-        onRazorSplitAll={onRazorSplitAll}
+        onToggleTrackHidden={props.onToggleTrackHidden}
+        onTogglePropertyGroupKeyframe={props.onTogglePropertyGroupKeyframe}
+        onResizeElement={props.onResizeElement}
+        onMoveElement={props.onMoveElement}
+        onRazorSplit={props.onRazorSplit}
+        onRazorSplitAll={props.onRazorSplitAll}
       />
 
       {/* Breathing room below the last track lane (~1.5 track heights) — a real
@@ -140,7 +95,7 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
               left: props.contentOrigin + gap.start * props.pps,
               width: Math.max((gap.end - gap.start) * props.pps, 2),
               height: TRACK_H - CLIP_Y * 2,
-              background: loud ? "rgba(60,230,172,0.18)" : "rgba(60,230,172,0.055)",
+              background: loud ? "var(--timeline-accent-soft)" : "var(--timeline-accent-faint)",
               borderRadius: 4,
               zIndex: 25,
             }}
@@ -158,8 +113,8 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
             left: props.contentOrigin + draggedClip.previewStart * props.pps,
             width: Math.max(draggedClip.element.duration * props.pps, 4),
             height: draggedClipHeight,
-            border: "1px solid color-mix(in srgb, var(--color-accent) 55%, transparent)",
-            background: "color-mix(in srgb, var(--color-accent) 12%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--timeline-accent) 55%, transparent)",
+            background: "color-mix(in srgb, var(--timeline-accent) 12%, transparent)",
             borderRadius: 4,
             zIndex: 30,
           }}
@@ -178,8 +133,8 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
             left: props.contentOrigin + props.dropPreview.start * props.pps,
             width: DROP_PREVIEW_SECONDS * props.pps,
             height: TRACK_H - CLIP_Y * 2,
-            border: "1px solid color-mix(in srgb, var(--color-accent) 55%, transparent)",
-            background: "color-mix(in srgb, var(--color-accent) 12%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--timeline-accent) 55%, transparent)",
+            background: "color-mix(in srgb, var(--timeline-accent) 12%, transparent)",
             borderRadius: 4,
             zIndex: 30,
           }}
@@ -197,8 +152,8 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
             left: props.contentOrigin,
             width: props.trackContentWidth,
             height: 1,
-            background: "#3CE6AC",
-            boxShadow: "0 0 3px rgba(60,230,172,0.5)",
+            background: "var(--timeline-accent)",
+            boxShadow: "0 0 3px var(--timeline-accent-glow)",
             zIndex: 55,
           }}
         />
@@ -213,11 +168,14 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
             top: RULER_H,
             bottom: 0,
             width: 1,
-            background: snapGuide.type === "playhead" ? "#3CE6AC" : "rgba(255,255,255,0.6)",
+            background:
+              snapGuide.type === "playhead"
+                ? "var(--timeline-accent)"
+                : "var(--timeline-snap-guide)",
             boxShadow:
               snapGuide.type === "playhead"
-                ? "0 0 6px rgba(60,230,172,0.5)"
-                : "0 0 6px rgba(255,255,255,0.4)",
+                ? "0 0 6px var(--timeline-accent-glow)"
+                : "0 0 6px var(--timeline-text-dim)",
             zIndex: 60,
           }}
         />
@@ -247,8 +205,8 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
             top: props.marqueeRect.top,
             width: props.marqueeRect.width,
             height: props.marqueeRect.height,
-            background: "rgba(60,230,172,0.10)",
-            border: "1px dashed rgba(60,230,172,0.7)",
+            background: "var(--timeline-accent-fill)",
+            border: "1px dashed var(--timeline-accent-border)",
             borderRadius: 2,
             zIndex: 70,
           }}
@@ -266,9 +224,9 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
             width: Math.abs(props.rangeSelection.end - props.rangeSelection.start) * props.pps,
             top: RULER_H,
             bottom: 0,
-            backgroundColor: "rgba(59, 130, 246, 0.12)",
-            borderLeft: "1px solid rgba(59, 130, 246, 0.4)",
-            borderRight: "1px solid rgba(59, 130, 246, 0.4)",
+            backgroundColor: "var(--timeline-info-bg)",
+            borderLeft: "1px solid var(--timeline-info-border)",
+            borderRight: "1px solid var(--timeline-info-border)",
             zIndex: 50,
           }}
         />
@@ -276,21 +234,24 @@ export const TimelineCanvas = memo(function TimelineCanvas() {
 
       {/* Playhead — hidden while dragging a beat so its guideline doesn't
           track the scrub and clutter the beat being moved. Explicit width +
-          the half-head offset baked into getTimelinePlayheadLeft keep the
+          the half-head offset baked into getTimelinePlayheadTransform keep the
           inner 1px line's CENTER exactly on contentOrigin + t * pps (the ruler
           ticks' center), instead of relying on shrink-wrap sizing. */}
-      <div
-        ref={props.playheadRef}
-        className="absolute top-0 bottom-0 pointer-events-none"
-        style={{
-          left: `${getTimelinePlayheadLeft(0, 0, props.contentOrigin)}px`,
-          width: PLAYHEAD_HEAD_W,
-          zIndex: 100,
-          display: beatDragging ? "none" : undefined,
-        }}
-      >
-        <PlayheadIndicator scrubbing={props.isScrubbing} />
-      </div>
+      <TimelinePlayheadLayer scrollRef={props.scrollRef} contentOrigin={props.contentOrigin}>
+        <div
+          ref={props.playheadRef}
+          className="absolute top-0 bottom-0 pointer-events-none"
+          style={{
+            left: 0,
+            transform: getTimelinePlayheadTransform(0, 0, props.contentOrigin, true),
+            willChange: "transform",
+            width: PLAYHEAD_HEAD_W,
+            display: beatDragging ? "none" : undefined,
+          }}
+        >
+          <PlayheadIndicator scrubbing={props.isScrubbing} />
+        </div>
+      </TimelinePlayheadLayer>
     </div>
   );
 });

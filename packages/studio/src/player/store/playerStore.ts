@@ -23,6 +23,7 @@ import { createRangeSelectionSlice, type RangeSelectionSlice } from "./rangeSele
 import { createTimelineResetState } from "./timelineResetState";
 export type { KeyframeCacheEntry } from "./keyframeSlice";
 export { liveTime } from "./liveTime";
+import { liveTime } from "./liveTime";
 export { createTimelineResetState };
 
 import type {
@@ -96,6 +97,8 @@ interface PlayerState extends PlayerStoreSlices {
 
   activeTool: TimelineTool;
   setActiveTool: (tool: TimelineTool) => void;
+  selectLeftward: () => void;
+  selectRightward: () => void;
 
   /** Tween-relative percentage of the last-clicked keyframe diamond. Operations
    *  (drag, resize, rotate) target this instead of recomputing from playhead. */
@@ -250,6 +253,17 @@ interface BeatHistoryEntry {
   label: string;
 }
 
+/** Selects like the marquee: the primary first, so its resets run, then the whole set. */
+function selectAroundPlayhead(
+  state: PlayerState,
+  keep: (start: number, playhead: number) => boolean,
+): void {
+  const playhead = state.isPlaying ? liveTime.latest() : state.currentTime;
+  const ids = state.elements.filter((el) => keep(el.start, playhead)).map((el) => el.key ?? el.id);
+  state.setSelectedElementId(ids[0] ?? null);
+  state.setSelectedElementIds(new Set(ids));
+}
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   isPlaying: false,
   currentTime: 0,
@@ -273,6 +287,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   activeTool: "select",
   setActiveTool: (tool) => set({ activeTool: tool }),
+  selectLeftward: () => selectAroundPlayhead(get(), (start, playhead) => start < playhead),
+  selectRightward: () => selectAroundPlayhead(get(), (start, playhead) => start >= playhead),
 
   ...createKeyframeSlice(set, () => ({
     timelineProjectId: get().timelineProjectId,
@@ -551,3 +567,32 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 }));
 
 attachPlayerStoreDevHandle(usePlayerStore);
+
+export function isPreviewBooted(projectId: string): boolean {
+  const { previewBooted, timelineProjectId } = usePlayerStore.getState();
+  return previewBooted && timelineProjectId === projectId;
+}
+
+/** True once projectId's live preview has booted, false once another project replaces it.
+ * Open-time work the first frame does not need (server parses, lint) waits on it. */
+export function whenPreviewBooted(projectId: string): Promise<boolean> {
+  const openedFrom = usePlayerStore.getState().timelineProjectId;
+  let seen = false;
+  const settle = (state: PlayerState): boolean | null => {
+    if (state.timelineProjectId === projectId) {
+      seen = true;
+      return state.previewBooted ? true : null;
+    }
+    return seen || state.timelineProjectId !== openedFrom ? false : null;
+  };
+  return new Promise((resolve) => {
+    const now = settle(usePlayerStore.getState());
+    if (now !== null) return resolve(now);
+    const stop = usePlayerStore.subscribe((state) => {
+      const result = settle(state);
+      if (result === null) return;
+      stop();
+      resolve(result);
+    });
+  });
+}

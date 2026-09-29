@@ -1,12 +1,6 @@
 import type { SerializedDockview } from "dockview-react";
 import { parseDockLayout } from "../components/dock/dockLayoutSchema";
 
-export interface StoredPreviewZoomState {
-  zoomPercent: number;
-  panX: number;
-  panY: number;
-}
-
 export type TimelineTimeDisplayMode = "time" | "frame";
 
 export interface StudioUiPreferences {
@@ -15,7 +9,6 @@ export interface StudioUiPreferences {
   audioMuted?: boolean;
   audioVolume?: number;
   thumbnailMode?: "adaptive" | "hidden";
-  previewZoom?: StoredPreviewZoomState;
   recentBlocks?: string[];
   snapEnabled?: boolean;
   gridVisible?: boolean;
@@ -25,6 +18,8 @@ export interface StudioUiPreferences {
   snapToGrid?: boolean;
   /** Timeline magnet: snap clip drags/trims/drops to playhead, clip edges, and beats. */
   timelineSnapEnabled?: boolean;
+  /** Audio level meters at the timeline's right edge; hidden unless enabled here. */
+  audioMetersVisible?: boolean;
   /** Keeps the main track gapless: deleting a clip closes the gap. Distinct
    *  from `timelineSnapEnabled` ("Magnet", drag/trim snapping). */
   rippleEditEnabled?: boolean;
@@ -101,19 +96,6 @@ function readStorage(storage: Storage | null, key: string): StudioUiPreferences 
     } else if (typeof parsed.thumbnailsEnabled === "boolean") {
       preferences.thumbnailMode = parsed.thumbnailsEnabled ? "adaptive" : "hidden";
     }
-    if (isRecord(parsed.previewZoom)) {
-      const { zoomPercent, panX, panY } = parsed.previewZoom;
-      if (
-        typeof zoomPercent === "number" &&
-        Number.isFinite(zoomPercent) &&
-        typeof panX === "number" &&
-        Number.isFinite(panX) &&
-        typeof panY === "number" &&
-        Number.isFinite(panY)
-      ) {
-        preferences.previewZoom = { zoomPercent, panX, panY };
-      }
-    }
     if (Array.isArray(parsed.recentBlocks)) {
       preferences.recentBlocks = parsed.recentBlocks.filter(
         (v: unknown): v is string => typeof v === "string",
@@ -139,6 +121,9 @@ function readStorage(storage: Storage | null, key: string): StudioUiPreferences 
     }
     if (typeof parsed.timelineSnapEnabled === "boolean") {
       preferences.timelineSnapEnabled = parsed.timelineSnapEnabled;
+    }
+    if (typeof parsed.audioMetersVisible === "boolean") {
+      preferences.audioMetersVisible = parsed.audioMetersVisible;
     }
     if (typeof parsed.rippleEditEnabled === "boolean") {
       preferences.rippleEditEnabled = parsed.rippleEditEnabled;

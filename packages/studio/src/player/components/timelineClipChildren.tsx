@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import type { TimelineTimeRange } from "../lib/timelineClipIndex";
 import type { TrackVisualStyle } from "./timelineIcons";
@@ -29,6 +29,16 @@ function ClipLintDot({ element }: { element: TimelineElement }) {
   );
 }
 
+/**
+ * Mounts a clip's content only once the timeline is at rest, then keeps it through later scrolls,
+ * so a scroll never blanks a picture already on screen and never mounts a screenful of new ones.
+ */
+export function ClipContentOnceShown({ hold, children }: { hold: boolean; children: ReactNode }) {
+  const [shown, setShown] = useState(!hold);
+  if (!shown && !hold) setShown(true);
+  return shown ? children : null;
+}
+
 export function renderClipChildren(
   element: TimelineElement,
   clipStyle: TrackVisualStyle,
@@ -47,10 +57,13 @@ export function renderClipChildren(
       {renderClipOverlay?.(element)}
       {!renderClipContent && <ClipLintDot element={element} />}
       {renderClipContent && (
-        // borderRadius: inherit — the clip itself is overflow-visible (keyframe
-        // diamonds hang outside its bounds), so the thumbnail layer must clip
-        // itself to the clip's rounded corners or sharp corners poke out.
-        <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: "inherit" }}>
+        // The picture can paint above the trim handles, so it takes no input and presses reach them.
+        // borderRadius: inherit clips it to the clip's rounded corners; the clip itself is
+        // overflow-visible because keyframe diamonds hang outside its bounds.
+        <div
+          className="absolute inset-0 overflow-hidden"
+          style={{ borderRadius: "inherit", pointerEvents: "none" }}
+        >
           {renderClipContent(element, clipStyle, context)}
         </div>
       )}

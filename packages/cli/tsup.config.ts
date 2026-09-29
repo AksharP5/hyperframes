@@ -16,6 +16,8 @@ export default defineConfig({
     fontLocalizeCli: "src/fontLocalizeCli.ts",
     runtimeVersion: "src/runtimeVersion.ts",
     renderSetupWorker: "src/renderSetupWorker.ts",
+    backgroundChecksWorker: "src/backgroundChecksWorker.ts",
+    sherpaWorker: "src/whisper/sherpaWorker.ts",
     shaderTransitionWorker: "../producer/src/services/shaderTransitionWorker.ts",
   },
   format: ["esm"],
@@ -23,7 +25,7 @@ export default defineConfig({
   target: "node22",
   platform: "node",
   bundle: true,
-  splitting: false,
+  splitting: true,
   sourcemap: false,
   clean: true,
   banner: {

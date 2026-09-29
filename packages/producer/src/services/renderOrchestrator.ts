@@ -34,7 +34,6 @@
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -49,8 +48,12 @@ import {
   type CanvasResolution,
   type Fps,
   type FpsInput,
+  type HfVfxCapture,
+  chainCapture,
   fpsToNumber,
   HF_COLOR_GRADING_ATTR,
+  HF_VFX_ATTR,
+  parseVfxChain,
   redactTelemetryString,
   toFps,
 } from "@hyperframes/core";
@@ -135,6 +138,7 @@ import {
   buildArtifactExpectation,
   commitArtifactTransaction,
 } from "./render/artifactTransaction.js";
+import { createRenderWorkDir } from "./render/renderDirOwner.js";
 import {
   capturePathForPlanKind,
   createCapturePlan,
@@ -601,6 +605,12 @@ export interface RenderPerfSummary {
     /** Authored root data-width/height vs. the scaffold's html/body CSS size; absent when either is undetectable. */
     rootBodyMismatch?: boolean;
     rootBodyDeltaPxBucket?: "0" | "1-10" | "11-50" | "51+";
+    /** `data-vfx-chain` host count from the same static scan. Only set when the source above is "static". */
+    vfxHostCount?: number;
+    /** Strongest enabled node's capture across every `data-vfx-chain` host (`chainCapture`, max: backdrop > self > none). Undefined when vfxHostCount is 0. */
+    vfxCapture?: HfVfxCapture;
+    /** Sorted unique def ids across every enabled node in every chain, comma-joined ("" when vfxHostCount is 0). */
+    vfxTypes?: string;
     /** Short-comp band attribution: "applied" | "skipped_elements" | "unmeasured"; unset when the frame count made the band irrelevant. */
     shortBand?: "applied" | "skipped_elements" | "unmeasured";
     /** DE parallel-router outcome: "routed" (fired, held), "reverted" (fired, self-verify retry rolled back), "none". Mutually exclusive with workerInversion. */
@@ -1584,9 +1594,17 @@ export interface ElementTagScan {
   /** Authored root data-width/height vs. the scaffold's html/body CSS size; absent when either is undetectable. */
   rootBodyMismatch?: boolean;
   rootBodyDeltaPxBucket?: "0" | "1-10" | "11-50" | "51+";
+  /** `data-vfx-chain` host count — each occurrence of the attribute is one host, regardless of how many nodes its chain has. */
+  vfxHostCount: number;
+  /** Strongest enabled node's capture across every host (`chainCapture`, max: backdrop > self > none). Undefined when vfxHostCount is 0. */
+  vfxCapture?: HfVfxCapture;
+  /** Sorted unique def ids across every enabled node in every chain, comma-joined ("" when vfxHostCount is 0). */
+  vfxTypes: string;
 }
 
 const MAX_REPORTED_ELEMENT_TAGS = 50;
+/** none < self < backdrop — mirrors @hyperframes/core vfx.ts's internal CAPTURE_RANK, duplicated here (not exported) to combine per-host captures across an entire composition's static scan. */
+const VFX_CAPTURE_RANK: Record<HfVfxCapture, number> = { none: 0, self: 1, backdrop: 2 };
 
 /** First element carrying data-composition-id, the same root marker other `[data-composition-id]` queries here use. */
 const ROOT_COMPOSITION_TAG_RE =
@@ -1743,6 +1761,31 @@ export function scanElementTags(html: string): ElementTagScan {
     // JSON parse stops running for every element after the first hit.
     if (!hasLut) hasLut = colorGradingValueHasLut(m[1] ?? m[2] ?? "");
   }
+  let vfxHostCount = 0;
+  let vfxCapture: HfVfxCapture | undefined;
+  const vfxTypeSet = new Set<string>();
+  for (const m of markup.matchAll(new RegExp(`\\b${HF_VFX_ATTR}=(?:"([^"]*)"|'([^']*)')`, "gi"))) {
+    vfxHostCount++;
+    // A chain the runtime would refuse (bad JSON, unknown type, wrong
+    // version) is skipped rather than thrown here: this scan is
+    // observational telemetry, and the runtime already reports the bad
+    // chain loudly at paint time (interface spec's failure modes).
+    try {
+      const chain = parseVfxChain(decodeHtmlAttrJson(m[1] ?? m[2] ?? ""));
+      for (const node of chain.nodes) {
+        if (node.enabled === false) continue;
+        vfxTypeSet.add(node.type);
+      }
+      const capture = chainCapture(chain);
+      if (vfxCapture === undefined || VFX_CAPTURE_RANK[capture] > VFX_CAPTURE_RANK[vfxCapture]) {
+        vfxCapture = capture;
+      }
+    } catch {
+      // Unparsable — not counted toward vfxCapture/vfxTypes, but the host
+      // itself still counts toward vfxHostCount (it IS a data-vfx-chain host).
+    }
+  }
+  const vfxTypes = [...vfxTypeSet].sort().join(",");
   return {
     total,
     byTag,
@@ -1754,17 +1797,25 @@ export function scanElementTags(html: string): ElementTagScan {
     audioGroupCount,
     colorGradingCount,
     hasLut,
+    vfxHostCount,
+    vfxCapture,
+    vfxTypes,
     ...detectRootBodySizeMismatch(html),
   };
 }
 
 /** `data-color-grading`'s JSON `lut` field means "has a LUT" (see `HF_COLOR_GRADING_ATTR`).
  * Decode is load-bearing: linkedom re-serializes this `&quot;`-escaped, or `JSON.parse` throws. */
-function colorGradingValueHasLut(rawAttributeValue: string): boolean {
-  const decoded = rawAttributeValue
+/** Undoes the HTML-entity escaping compiled markup applies to an attribute value with embedded quotes, so it can be `JSON.parse`d. Shared by every attribute-value-is-JSON static scan in this file. */
+function decodeHtmlAttrJson(rawAttributeValue: string): string {
+  return rawAttributeValue
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, "&");
+}
+
+function colorGradingValueHasLut(rawAttributeValue: string): boolean {
+  const decoded = decodeHtmlAttrJson(rawAttributeValue);
   try {
     const parsed: unknown = JSON.parse(decoded);
     if (typeof parsed !== "object" || parsed === null || !("lut" in parsed)) return false;
@@ -1820,6 +1871,9 @@ export async function resolveCompositionElementCount(
   hasLut?: boolean;
   rootBodyMismatch?: boolean;
   rootBodyDeltaPxBucket?: ElementTagScan["rootBodyDeltaPxBucket"];
+  vfxHostCount?: number;
+  vfxCapture?: HfVfxCapture;
+  vfxTypes?: string;
 }> {
   if (probeSession?.isInitialized) {
     try {
@@ -1855,6 +1909,9 @@ export async function resolveCompositionElementCount(
     hasLut: scan.hasLut,
     rootBodyMismatch: scan.rootBodyMismatch,
     rootBodyDeltaPxBucket: scan.rootBodyDeltaPxBucket,
+    vfxHostCount: scan.vfxHostCount,
+    vfxCapture: scan.vfxCapture,
+    vfxTypes: scan.vfxTypes,
   };
 }
 
@@ -2768,6 +2825,14 @@ function deVerifyFallbackTelemetry(err: unknown): {
   };
 }
 
+/** Where `--debug` renders keep their work dirs, one per job id. */
+export function resolveRenderDebugDir(): string {
+  const producerRoot = process.env.PRODUCER_RENDERS_DIR
+    ? resolve(process.env.PRODUCER_RENDERS_DIR, "..")
+    : resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  return join(producerRoot, ".debug");
+}
+
 /**
  * Render a `RenderJob` end-to-end: compile → probe → extract videos →
  * audio → capture → encode → assemble. The function body is a thin
@@ -2789,16 +2854,12 @@ export async function executeRenderJob(
   // Ahead of the work dir / log file / execution context: a config the format
   // cannot honor must fail before anything is written to disk.
   validateHlsRenderConfig(job.config);
-  const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const producerRoot = process.env.PRODUCER_RENDERS_DIR
-    ? resolve(process.env.PRODUCER_RENDERS_DIR, "..")
-    : resolve(moduleDir, "../..");
-  const debugDir = join(producerRoot, ".debug");
+  const debugDir = resolveRenderDebugDir();
   const outputDir = dirname(outputPath);
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
   const workDir = job.config.debug
     ? join(debugDir, job.id)
-    : mkdtempSync(resolveRenderWorkDirPrefix(outputPath, job.id));
+    : createRenderWorkDir(resolveRenderWorkDirPrefix(outputPath, job.id), outputDir);
   const pipelineStart = Date.now();
   const baseLog = job.config.logger ?? defaultLogger;
   const logPath = job.config.debug ? join(workDir, "render.log") : null;
@@ -3437,6 +3498,7 @@ async function executeRenderPipeline(input: {
     const framesDir = join(workDir, "captured-frames");
     if (!existsSync(framesDir)) mkdirSync(framesDir, { recursive: true });
 
+    updateJobStatus(job, "rendering", "Checking browser GPU", 25, onProgress);
     const resolvedBrowserGpuMode = await resolveBrowserGpuMode(cfg.browserGpuMode, {
       chromePath: resolveHeadlessShellPath(cfg),
       browserTimeout: cfg.browserTimeout,
@@ -3621,6 +3683,9 @@ async function executeRenderPipeline(input: {
       hasLut,
       rootBodyMismatch,
       rootBodyDeltaPxBucket,
+      vfxHostCount,
+      vfxCapture,
+      vfxTypes,
     } = await resolveCompositionElementCount(probeSession, compiled.html);
     const adaptersUsed = await resolveAdaptersUsed(probeSession, compiled.html);
     // HF_DE_SHORT_MAX_ELEMENTS=0 is the documented kill switch (symmetric
@@ -3833,6 +3898,7 @@ async function executeRenderPipeline(input: {
       !deInversionEligible &&
       !deParallelRouterEligible
     ) {
+      updateJobStatus(job, "rendering", "Measuring capture speed", 25, onProgress);
       const outcome = await observeRenderStage(
         observability,
         "capture_calibration",
@@ -5119,6 +5185,9 @@ async function executeRenderPipeline(input: {
         hasLut,
         rootBodyMismatch,
         rootBodyDeltaPxBucket,
+        vfxHostCount,
+        vfxCapture,
+        vfxTypes,
         shortBand: deShortBand,
         parallelRouter: deParallelRouter,
         preRouterWorkers: deParallelRouter ? preRoutingWorkerCount : undefined,
