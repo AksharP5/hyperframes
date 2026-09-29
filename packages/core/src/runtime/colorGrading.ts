@@ -249,6 +249,7 @@ export interface RuntimeColorGradingApi {
     rawCompare: unknown,
   ) => boolean;
   setSourceVisibility: (target: Element, visible: boolean) => boolean;
+  isGraded: (target: Element) => boolean;
   getStatus: (
     target: HfColorGradingTarget | string | null | undefined,
   ) => RuntimeColorGradingStatus;
@@ -3480,7 +3481,13 @@ function makeCanvas(element: ColorGradingMediaElement): HTMLCanvasElement {
   return attachCanvas(document.createElement("canvas"), element);
 }
 
-export function createColorGradingRuntime(): RuntimeColorGradingApi {
+/** `pausedMediaLease` borrows an element's playback while the transport clock is
+ *  stopped. Optional so this module stays constructible alone; without it the
+ *  runtime's paused-side enforcement stops the preview. */
+export function createColorGradingRuntime(pausedMediaLease?: {
+  lease: (el: HTMLMediaElement) => void;
+  release: (el: HTMLMediaElement) => void;
+}): RuntimeColorGradingApi {
   const entries = new WeakMap<ColorGradingMediaElement, ColorGradingEntry>();
   const trackedElements = new Set<ColorGradingMediaElement>();
   const idleRenderers: ColorGradingRenderer[] = [];
@@ -3702,6 +3709,9 @@ export function createColorGradingRuntime(): RuntimeColorGradingApi {
     return true;
   };
 
+  const isGraded = (target: Element): boolean =>
+    isColorGradingMediaElement(target) && entries.has(target);
+
   // fallow-ignore-next-line complexity
   const getStatus = (
     target: HfColorGradingTarget | string | null | undefined,
@@ -3781,8 +3791,12 @@ export function createColorGradingRuntime(): RuntimeColorGradingApi {
     if (element.ended || (Number.isFinite(element.duration) && time >= element.duration)) {
       element.currentTime = 0;
     }
+    // Borrowed before play(): the runtime stops anything running under a paused
+    // clock, and the capture-phase `play` listener makes that immediate.
+    pausedMediaLease?.lease(element);
     void element.play().catch(() => undefined);
     return () => {
+      pausedMediaLease?.release(element);
       element.pause();
       element.loop = loop;
       element.muted = muted;
@@ -3822,6 +3836,7 @@ export function createColorGradingRuntime(): RuntimeColorGradingApi {
     setGrading,
     setCompare,
     setSourceVisibility,
+    isGraded,
     getStatus,
     renderPreviews,
     startPreviewPlayback,

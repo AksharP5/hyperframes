@@ -52,9 +52,15 @@ export {
   injectScriptsAtHeadStart,
   injectTagsAtHeadStart,
   injectScriptsIntoHtml,
+  insertBeforeCloseTag,
   parseHTMLContent,
   stripEmbeddedRuntimeScripts,
 } from "./htmlDocument";
+
+export { addScenePartsManifest } from "./scenePartsManifest";
+
+// Script ordering shared by the bundler and the producer coalescers
+export { inlineScriptRuns, type InlineScriptRun } from "./scriptRuns";
 
 // Static guard
 export {
@@ -97,3 +103,4 @@ export {
 } from "./mediaRenderIds";
 
 export { ensureExternalScriptTag } from "./externalScripts";
+export { emitMountedModuleScripts } from "./importMaps";

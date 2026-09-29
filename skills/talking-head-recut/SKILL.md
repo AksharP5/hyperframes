@@ -3,6 +3,8 @@ name: talking-head-recut
 description: Package an existing talking-head / interview / podcast video with timed, designed GRAPHIC OVERLAY cards — kinetic titles, lower-thirds, data callouts, quotes, side panels, picture-in-picture — synced to the transcript, on a 16:9 / 9:16 / 4:5 canvas of your choice; the clip plays untouched underneath. Trigger on "graphic overlays", "on-screen graphics", "package / dress up my video". Not plain subtitles (/embedded-captions). Unclear → /hyperframes.
 ---
 
+**Plugin installs:** Before setup or freshness commands, follow [plugin execution rules](../hyperframes/references/plugin-installation.md) when this skill is inside a HyperFrames plugin. Standalone installs keep the update instructions below.
+
 > **First, keep this skill fresh — confirm with the user before running:** `npx hyperframes skills update talking-head-recut`. A fast no-op when everything is current; otherwise it refreshes this skill plus the core domain skills it depends on before you rely on them.
 
 # Talking Head Recut
@@ -298,7 +300,7 @@ Rules that apply to every channel:
 - If the user has already pre-approved defaults ("just use defaults",
   "no need to ask", "auto-pick everything"), asked you not to ask, or the
   run carries an ongoing autonomous signal ("surprise me" / "decide for me" —
-  `../hyperframes-core/references/brief-contract.md` § 1) — **skip
+  `../hyperframes/references/brief-contract.md` § 1) — **skip
   the question entirely** and use: `recommendedRatio`, `layout="stack"`
   (safest cross-ratio default), `style` chosen from transcript tone in
   the most neutral group (editorial/data), `autoCount`. Tell the user

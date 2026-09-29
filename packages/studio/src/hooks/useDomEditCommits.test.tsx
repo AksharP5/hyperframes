@@ -209,7 +209,6 @@ function renderDomEditCommits(
   const recordEdit = vi.fn(async () => {});
   const previewIframeRef: MutableRefObject<HTMLIFrameElement | null> = { current: iframe };
   const projectIdRef: MutableRefObject<string | null> = options.projectIdRef ?? { current: "p1" };
-  const domEditSaveTimestampRef: MutableRefObject<number> = { current: 0 };
   const reloadPreview = vi.fn();
 
   function Probe() {
@@ -219,7 +218,6 @@ function renderDomEditCommits(
       showToast,
       queueDomEditSave: options.queueDomEditSave ?? (async (save) => save()),
       writeProjectFile: options.writeProjectFile ?? (async () => {}),
-      domEditSaveTimestampRef,
       editHistory: { recordEdit },
       fileTree: [],
       importedFontAssetsRef: { current: options.importedFontAssets ?? [] },
@@ -232,6 +230,7 @@ function renderDomEditCommits(
       refreshDomEditSelectionFromPreview: vi.fn(),
       buildDomSelectionFromTarget: vi.fn(async () => null),
       onTrySdkPersist: options.onTrySdkPersist,
+      readOnlyPreview: false,
     });
     return null;
   }
@@ -341,7 +340,6 @@ describe("useDomEditCommits z-index reorder persistence", () => {
       expect(rendered.recordEdit).toHaveBeenCalledTimes(1);
       expect(rendered.recordEdit).toHaveBeenCalledWith({
         label: "Reorder layers",
-        kind: "manual",
         coalesceKey: "z-reorder:test",
         // Unbounded per-gesture fold window (keys are unique per gesture):
         // the z entry and its mirror/lane counterpart fold across the server
@@ -1254,8 +1252,15 @@ describe("useDomEditCommits style persist handling", () => {
 
       const secondCommit = rendered.hook.handleDomStyleCommit("color", "green");
       await flushAsyncWork();
-      expect(patchCount).toBe(2);
+      // The newer commit waits for the older one in the file's queue.
+      expect(patchCount).toBe(1);
 
+      firstPatch.reject(new Error("server rejected blue"));
+      await firstCommit;
+      expect(element.style.getPropertyValue("color")).toBe("green");
+
+      await flushAsyncWork();
+      expect(patchCount).toBe(2);
       secondPatch.resolve(
         jsonResponse({
           ok: true,
@@ -1265,10 +1270,6 @@ describe("useDomEditCommits style persist handling", () => {
         }),
       );
       await secondCommit;
-      expect(element.style.getPropertyValue("color")).toBe("green");
-
-      firstPatch.reject(new Error("server rejected blue"));
-      await firstCommit;
 
       expect(element.style.getPropertyValue("color")).toBe("green");
     } finally {
@@ -1700,15 +1701,16 @@ describe("useDomEditCommits attribute persist handling", () => {
     try {
       // Older commit's persist stays pending (captures previousValue=null); the
       // newer commit captures previousValue="first-value" (the older commit's
-      // optimistic apply) and succeeds before the older one rejects. Without the
+      // optimistic apply) and is still queued when the older one rejects. Without the
       // per-key version guard, the stale rejection would revert to the older
       // commit's own previousValue (null) and stomp the newer commit's value.
       const firstCommit = rendered.hook.handleDomHtmlAttributeCommit("muted", "first-value");
       await act(async () => {
-        await rendered.hook.handleDomHtmlAttributeCommit("muted", "second-value");
+        const secondCommit = rendered.hook.handleDomHtmlAttributeCommit("muted", "second-value");
+        first.reject(new Error("stale request failed"));
+        await firstCommit;
+        await secondCommit;
       });
-      first.reject(new Error("stale request failed"));
-      await firstCommit;
 
       expect(element.getAttribute("muted")).toBe("second-value");
     } finally {
