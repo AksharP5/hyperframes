@@ -1,3 +1,5 @@
+import { observeGsapGesture } from "../../hooks/gsapGestureOutcome";
+import { trackPreviewEditResult } from "../../utils/previewFeatureUsage";
 import { scopedElementKey } from "../../hooks/gsapKeyframeCacheHelpers";
 import { memo, useEffect, useRef, useState, type RefObject } from "react";
 import type { DomEditSelection } from "./domEditing";
@@ -127,7 +129,11 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
   // just in render, after the early returns) so the park-timer cleanup can key on
   // it: a pending park seek belongs to the OLD animation, so firing it after the
   // active animation changed would jump the playhead onto a stale keyframe.
-  const animId = editableAnimationId(selectedGsapAnimations ?? [], geometry?.kind ?? "linear");
+  const animId = editableAnimationId(
+    selectedGsapAnimations ?? [],
+    geometry?.kind ?? "linear",
+    selection,
+  );
   // Clear the debounced park timer on unmount AND whenever the active animation id
   // changes — not unmount-only, or a queued seek from the previous selection still
   // fires against the new one.
@@ -378,15 +384,18 @@ export const MotionPathOverlay = memo(function MotionPathOverlay({
       selection &&
       !usePlayerStore.getState().autoKeyframeEnabled
     ) {
+      const writes = observeGsapGesture((_sel, mutation, options) =>
+        commitMutation(mutation, options),
+      );
       void commitWholePropertyOffset(
         selection,
         anim,
         { x, y },
         d.ref.pct,
         iframeRef.current,
-        { commitMutation: (_sel, mutation, options) => commitMutation(mutation, options) },
+        { commitMutation: writes.commit! },
         "Move animation path",
-      );
+      ).then(() => trackPreviewEditResult("motion_path", "drag", writes.finish()));
     } else {
       void commitNode(d.ref, x, y, animId, commitMutation);
     }

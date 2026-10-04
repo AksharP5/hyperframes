@@ -1,10 +1,12 @@
 import type { TimelineElement } from "../player";
+import { toAuthoredStart } from "../player/store/timelineElement";
 import type { RecordEditInput } from "../hooks/timelineEditingHelpers";
 import { buildPatchTarget } from "./timelineElementSplit";
 import { serializeStudioFileMutations } from "./studioFileMutationCoordinator";
 import { buildProjectApiPath } from "./projectRouting";
 import { markStudioWriteToken } from "./studioFileVersion";
 import { resolveElementTrack } from "./studioHelpers";
+import { studioApiFetch } from "./studioApiFetch";
 
 type ProjectFileWriter = (path: string, content: string, expectedContent?: string) => Promise<void>;
 
@@ -61,12 +63,11 @@ function buildCutTarget(
   target: CutTarget["target"],
   splitTime: number,
 ): CutTarget {
-  const basis = element.expandedParentStart;
   return {
     target,
     ...(element.domId ? { originalId: element.domId } : {}),
-    splitTime: basis === undefined ? splitTime : Math.max(0, splitTime - basis),
-    elementStart: basis === undefined ? element.start : element.start - basis,
+    splitTime: Math.max(0, toAuthoredStart(element, splitTime)),
+    elementStart: toAuthoredStart(element, element.start),
     elementDuration: element.duration,
     ...(element.playbackStart != null ? { playbackStart: element.playbackStart } : {}),
     ...(element.playbackRate != null ? { playbackRate: element.playbackRate } : {}),
@@ -101,7 +102,7 @@ export function buildAtomicCutIntents(
 }
 
 async function readFileVersion(projectId: string, path: string): Promise<string> {
-  const response = await fetch(
+  const response = await studioApiFetch(
     buildProjectApiPath(projectId, `/files/${encodeURIComponent(path)}`),
   );
   if (!response.ok) throw new Error(`Failed to read ${path} before cut (${response.status})`);
@@ -124,14 +125,17 @@ async function requestAtomicCut(
   }
   const transactionToken = `cut:${crypto.randomUUID()}`;
   markStudioWriteToken(transactionToken);
-  const response = await fetch(buildProjectApiPath(projectId, "/file-mutations/split-batch"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Hyperframes-Write-Token": transactionToken,
+  const response = await studioApiFetch(
+    buildProjectApiPath(projectId, "/file-mutations/split-batch"),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Hyperframes-Write-Token": transactionToken,
+      },
+      body: JSON.stringify({ files, transactionToken }),
     },
-    body: JSON.stringify({ files, transactionToken }),
-  });
+  );
   const body = (await response.json().catch(() => null)) as
     | (Partial<CutBatchResponse> & { error?: string; outcome?: string })
     | null;

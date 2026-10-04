@@ -3,7 +3,8 @@ import { memo, useMemo, useRef, useState } from "react";
 import { Move } from "../../icons/SystemIcons";
 import { InspectorHeaderActions } from "./InspectorHeaderActions";
 import { useStudioShellContext } from "../../contexts/StudioContext";
-import { readStudioBoxSize, readStudioPathOffset, readStudioRotation } from "./manualEdits";
+import { readStudioBoxSize } from "./manualEdits";
+import { readMoveOffset, readShownRotation } from "./plainTranslate";
 import {
   buildElementInfoText,
   EMPTY_STYLES,
@@ -57,7 +58,6 @@ export {
 export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelProps) {
   const {
     projectId,
-    projectDir,
     assets,
     element,
     multiSelectCount = 0,
@@ -71,8 +71,6 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
     onSetAttribute,
     onSetAttributeLive,
     onApplyColorGradingScope,
-    onSetHtmlAttribute,
-    onRemoveBackground,
     onSetManualOffset,
     onSetManualSize,
     onSetManualRotation,
@@ -121,18 +119,7 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
   const selectedElementId = usePlayerStore((s) => s.selectedElementId);
   const selectedElementHidden = isSelectedElementHidden(timelineElements, selectedElementId);
   const visibilityToggleLabel = selectedElementHidden ? "Show element" : "Hide element";
-  /**
-   * An audio element gets no hide control here.
-   *
-   * On an audio track "hidden" and "muted" are not similar operations, they are
-   * the SAME operation with two names (groups doc §2.1) — which is why the
-   * timeline's eye became the mute rather than growing a sibling. A second copy
-   * in the panel, still called "Hide element", is precisely the thing that step
-   * removed: "Two controls that silence a track, sitting next to each other,
-   * differing only in a distinction the author cannot see." An
-   * `<hf-audio-group>` has no visual to hide at all, and its mute lives on its
-   * own row.
-   */
+  // Audio gets no visibility toggle in this classic panel; the timeline and the flat panel offer it as a mute.
   const audioSelection = isAudioDomElement(element?.element);
   // Live during playback, the store's when paused — see the hook. Shared with the
   // audio FX panel, which follows the playhead for the same reason: a value the
@@ -177,8 +164,9 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
     transformPerspective: 0,
   };
   // Unconditional like the hooks above: must not sit behind the `!element` return below.
+  const manualOffset = element ? readMoveOffset(element.element) : { x: 0, y: 0 };
   const { manualOffsetEditingDisabled, manualSizeEditingDisabled, manualRotationEditingDisabled } =
-    useManualEditDisabledFlags(element?.capabilities);
+    useManualEditDisabledFlags(element?.capabilities, manualOffset);
 
   if (!element) {
     return (
@@ -199,7 +187,6 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
   // selection) so the Timing section shows for pure-GSAP elements with no data-start.
   const sections = resolveEditingSections(domEditSelectionToFacts(element, gsapAnimations.length));
   const showEditableSections = element.capabilities.canEditStyles && sections.style;
-  const manualOffset = readStudioPathOffset(element.element);
   const manualSize = readStudioBoxSize(element.element);
   const resolvedWidth =
     manualSize.width > 0
@@ -209,8 +196,7 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
     manualSize.height > 0
       ? manualSize.height
       : (parsePxMetricValue(styles.height ?? "") ?? element.boundingBox.height);
-
-  const manualRotation = readStudioRotation(element.element);
+  const manualRotation = readShownRotation(element.element);
 
   const elStart = Number.parseFloat(element?.dataAttributes?.start ?? "0") || 0;
   const elDuration = Number.parseFloat(element?.dataAttributes?.duration ?? "1") || 0;
@@ -374,17 +360,7 @@ export const PropertyPanel = memo(function PropertyPanel(props: PropertyPanelPro
           />
         )}
 
-        {sections.media && (
-          <MediaSection
-            projectDir={projectDir}
-            element={element}
-            styles={styles}
-            onSetStyle={onSetStyle}
-            onSetAttribute={onSetAttribute}
-            onSetHtmlAttribute={onSetHtmlAttribute}
-            onRemoveBackground={onRemoveBackground}
-          />
-        )}
+        {sections.media && <MediaSection {...props} element={element} styles={styles} />}
 
         {sections.layout && (
           <Section title="Layout" icon={<Move size={15} />}>

@@ -11,6 +11,7 @@ import {
   type BundleOptions,
 } from "@hyperframes/core/compiler";
 import { STUDIO_PREVIEW_MARK_META } from "@hyperframes/core/studio-preview-mark";
+import { gsapCdnDist, motionPathPluginUrl } from "@hyperframes/core/gsap-cdn";
 import { injectTagsAtHeadStart } from "@hyperframes/core/compiler/html-document";
 import { isWithinProjectRoot } from "@hyperframes/parsers/asset-resolution";
 import type { ResolvedProject, StudioApiAdapter } from "../types.js";
@@ -63,10 +64,9 @@ import { requestSubPath } from "../helpers/requestSubPath.js";
 import { lazyPreviewImages } from "../helpers/lazyPreviewImages.js";
 
 const PROJECT_SIGNATURE_META = "hyperframes-project-signature";
-const GSAP_CDN_VERSION = "3.15.0";
-const GSAP_CDN_SCRIPT = `<script src="https://cdn.jsdelivr.net/npm/gsap@${GSAP_CDN_VERSION}/dist/gsap.min.js"></script>`;
-const GSAP_CUSTOM_EASE_CDN_SCRIPT = `<script src="https://cdn.jsdelivr.net/npm/gsap@${GSAP_CDN_VERSION}/dist/CustomEase.min.js"></script>`;
-const GSAP_MOTION_PATH_CDN_SCRIPT = `<script src="https://cdn.jsdelivr.net/npm/gsap@${GSAP_CDN_VERSION}/dist/MotionPathPlugin.min.js"></script>`;
+const GSAP_CDN_SCRIPT = `<script src="${gsapCdnDist()}gsap.min.js"></script>`;
+const GSAP_CUSTOM_EASE_CDN_SCRIPT = `<script src="${gsapCdnDist()}CustomEase.min.js"></script>`;
+const GSAP_MOTION_PATH_CDN_SCRIPT = `<script src="${motionPathPluginUrl()}"></script>`;
 
 function injectProjectSignature(html: string, signature: string): string {
   const tag = `<meta name="${PROJECT_SIGNATURE_META}" content="${signature}">`;
@@ -157,10 +157,8 @@ function injectMotionPathPluginIfNeeded(html: string): string {
   const gsapScript = /<script\b[^>]*\bsrc=["'][^"']*\/gsap(\.min)?\.js["'][^>]*>\s*<\/script>/i;
   const match = html.match(gsapScript);
   if (match) {
-    // Match the plugin version to the composition's own gsap so the plugin
-    // registers cleanly (a minor-version skew triggers a GSAP compatibility warning).
-    const version = match[0].match(/gsap@([\d.]+)/)?.[1] ?? GSAP_CDN_VERSION;
-    const pluginTag = `<script src="https://cdn.jsdelivr.net/npm/gsap@${version}/dist/MotionPathPlugin.min.js"></script>`;
+    const version = match[0].match(/gsap@([\d.]+)/)?.[1];
+    const pluginTag = `<script src="${motionPathPluginUrl(version)}"></script>`;
     const end = html.indexOf(match[0]) + match[0].length;
     return html.slice(0, end) + "\n" + pluginTag + html.slice(end);
   }
@@ -199,7 +197,7 @@ function injectStudioMotionScript(
 const GSAP_FALLBACK_ATTR = "data-hf-gsap-fallback";
 const GSAP_CDN_FALLBACK_SCRIPT = `<script ${GSAP_FALLBACK_ATTR}>
 (function(){
-  var cdnBase="https://cdn.jsdelivr.net/npm/gsap@${GSAP_CDN_VERSION}/dist/";
+  var cdnBase="${gsapCdnDist()}";
   var loaded={};
   function loadFallback(file){
     if(loaded[file])return loaded[file];
@@ -344,6 +342,14 @@ export const PREVIEW_BUNDLE_OPTIONS = {
   sceneParts: true,
 } as const satisfies BundleOptions;
 
+const previewBaseHref = (projectId: string) =>
+  `/api/projects/${encodeURIComponent(projectId)}/preview/`;
+
+const withPreviewBase = (html: string, projectId: string) =>
+  hasBaseElement(html)
+    ? html
+    : injectTagsAtHeadStart(html, `<base href="${previewBaseHref(projectId)}">`);
+
 export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): void {
   const previewCacheHeaders = (etag: string) => ({
     "Cache-Control": "private, no-cache",
@@ -406,10 +412,7 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
       }
 
       // Inject <base> for relative asset resolution
-      const baseHref = `/api/projects/${project.id}/preview/`;
-      if (!hasBaseElement(bundled)) {
-        bundled = bundled.replace(/<head>/i, `<head><base href="${baseHref}">`);
-      }
+      bundled = withPreviewBase(bundled, project.id);
 
       // Also covers elements the adapter injected; ids already present are kept.
       bundled = injectStudioPreviewAugmentations(
@@ -438,7 +441,7 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
       // not the pre-request snapshot that may have been saved over.
       const fallback = resolveProjectMainHtml(project.dir, project.id);
       if (fallback) {
-        const fallbackHtml = ensureHfIds(fallback.html);
+        const fallbackHtml = withPreviewBase(ensureHfIds(fallback.html), project.id);
         let fallbackAugmented = injectStudioPreviewAugmentations(
           await transformPreviewHtml(fallbackHtml, adapter, project, fallback.compositionPath),
           adapter,
@@ -549,7 +552,7 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
     const stamped = pinSubCompHfIds(compFile, compPath);
     if (stamped === null) return c.text("not found", 404); // file removed between stat and read
 
-    const baseHref = `/api/projects/${project.id}/preview/`;
+    const baseHref = previewBaseHref(project.id);
     let html = buildSubCompositionHtml(
       project.dir,
       compPath,

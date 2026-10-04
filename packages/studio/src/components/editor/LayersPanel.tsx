@@ -458,7 +458,7 @@ export const LayersPanel = memo(function LayersPanel() {
                 isDragged
                   ? "opacity-40"
                   : selected
-                    ? "bg-panel-accent/14 text-panel-accent"
+                    ? "bg-panel-accent/14 text-accent-ink"
                     : "text-panel-text-2 hover:bg-panel-hover/40 hover:text-panel-text-1"
               } ${dragKey ? "cursor-grabbing" : "cursor-pointer"}`}
               style={{ paddingLeft: 8 + layer.depth * 16 }}
@@ -494,9 +494,9 @@ export const LayersPanel = memo(function LayersPanel() {
               <span
                 className={`flex h-5 w-5 shrink-0 items-center justify-center rounded text-[8px] font-bold uppercase ${
                   selected
-                    ? "bg-panel-accent/18 text-panel-accent"
+                    ? "bg-panel-accent/18 text-accent-ink"
                     : isCompHost
-                      ? "bg-panel-accent/40 text-panel-accent"
+                      ? "bg-on text-accent-ink"
                       : "bg-panel-hover text-panel-text-4"
                 }`}
               >

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { replaceFileAtomically } from "./atomicFile.js";
+import { replaceFileAtomically } from "@hyperframes/core/atomic-file";
 import { mkdirWithinProject } from "./safePath.js";
 import type { PreviewDocumentStore } from "./mediaProxyPreview.js";
 

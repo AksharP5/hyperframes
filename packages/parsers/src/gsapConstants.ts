@@ -5,6 +5,8 @@
  * without pulling in gsapParser (which depends on recast / @babel/parser).
  */
 
+import type { GsapAnimation } from "./gsapSerialize.js";
+
 export const SUPPORTED_PROPS = [
   // 2D Transforms
   "x",
@@ -69,6 +71,24 @@ for (const [group, props] of Object.entries(PROPERTY_GROUPS) as [
   for (const p of props) PROP_TO_GROUP.set(p, group);
 }
 
+type PositionWrite = Pick<
+  GsapAnimation,
+  "propertyGroup" | "properties" | "fromProperties" | "keyframes"
+>;
+
+function writesProperty(animation: PositionWrite, property: string): boolean {
+  return (
+    property in animation.properties ||
+    (!!animation.fromProperties && property in animation.fromProperties) ||
+    !!animation.keyframes?.keyframes.some((k) => property in k.properties)
+  );
+}
+
+/** A position write that sets x or y. An xPercent/yPercent centring set never duplicates one. */
+export function isXYPositionWrite(a: PositionWrite): boolean {
+  return a.propertyGroup === "position" && (writesProperty(a, "x") || writesProperty(a, "y"));
+}
+
 export function classifyPropertyGroup(prop: string): PropertyGroupName {
   return PROP_TO_GROUP.get(prop) ?? "other";
 }
@@ -87,6 +107,46 @@ export function classifyTweenPropertyGroup(
   }
   if (groups.size === 1) return groups.values().next().value;
   return undefined;
+}
+
+function knownStart(animation: GsapAnimation): number | undefined {
+  if (animation.resolvedStart !== undefined) return animation.resolvedStart;
+  return typeof animation.position === "number" ? animation.position : undefined;
+}
+
+/**
+ * What a Studio hold pins from t=0 before a later keyframed tween: its first keyframe's position props,
+ * minus those an earlier timeline tween on the target writes (a global `gsap.set` is a base value).
+ */
+export function positionHoldForAnimation(
+  animation: GsapAnimation,
+  animations: readonly GsapAnimation[],
+): Record<string, number> | null {
+  if (!animation.keyframes) return null;
+  const start = knownStart(animation) ?? 0;
+  if (!(start > 0.001)) return null;
+  const first = [...animation.keyframes.keyframes].sort(
+    (left, right) => left.percentage - right.percentage,
+  )[0];
+  if (!first) return null;
+  // A tween whose start the parser could not resolve (a label, say) is not known to come first.
+  const earlier = animations.filter((other) => {
+    const otherStart = knownStart(other);
+    return (
+      other !== animation &&
+      !other.global &&
+      other.targetSelector === animation.targetSelector &&
+      otherStart !== undefined &&
+      otherStart < start - 0.001
+    );
+  });
+  const position: Record<string, number> = {};
+  for (const [property, value] of Object.entries(first.properties)) {
+    if (classifyPropertyGroup(property) !== "position" || typeof value !== "number") continue;
+    if (earlier.some((other) => writesProperty(other, property))) continue;
+    position[property] = value;
+  }
+  return Object.keys(position).length > 0 ? position : null;
 }
 
 export const SUPPORTED_EASES = [

@@ -23,6 +23,8 @@ export interface ThumbnailRequest {
   priority: ThumbnailPriority;
   /** Rich work is paused while the timeline is fast-scrolling. */
   rich?: boolean;
+  /** For work whose result nobody reads: it is dropped, not cached, once its last lease ends. */
+  discardWhenReleased?: boolean;
   load: (signal: AbortSignal) => Promise<ThumbnailLoadedResult>;
 }
 
@@ -115,6 +117,7 @@ export class ThumbnailScheduler {
   private nextSequence = 1;
   private scrolling = false;
   private previewReloading = false;
+  private pageHidden = false;
   private cacheBytes = 0;
   private waveformCacheBytes = 0;
   private readonly activeByBucket = { video: 0, composition: 0, general: 0 };
@@ -214,10 +217,7 @@ export class ThumbnailScheduler {
     if (!scrolling) this.pump();
   }
 
-  /**
-   * Hold server-rendered composition thumbnails while the preview loads a new document: both
-   * are served by the same Studio server, and the preview is what the person is waiting for.
-   */
+  /** Holds composition renders while the preview loads: same server, and the preview is what the person awaits. */
   setPreviewReloading(reloading: boolean): void {
     if (this.previewReloading === reloading) return;
     this.previewReloading = reloading;
@@ -227,9 +227,25 @@ export class ThumbnailScheduler {
     }
     for (const entry of this.entries.values()) {
       if (entry.state !== "loading" || entry.request.kind !== "composition") continue;
-      entry.preempted = true;
-      entry.controller?.abort();
+      this.preempt(entry);
     }
+  }
+
+  setPageHidden(hidden: boolean): void {
+    if (this.pageHidden === hidden) return;
+    this.pageHidden = hidden;
+    if (!hidden) {
+      this.pump();
+      return;
+    }
+    for (const entry of this.entries.values()) {
+      if (entry.state === "loading") this.preempt(entry);
+    }
+  }
+
+  private preempt(entry: ThumbnailEntry): void {
+    entry.preempted = true;
+    entry.controller?.abort();
   }
 
   /** Evict project cache entries that are no longer owned by mounted consumers. */
@@ -270,6 +286,7 @@ export class ThumbnailScheduler {
   }
 
   private pump(): void {
+    if (this.pageHidden) return;
     const queued = Array.from(this.entries.values())
       .filter((entry) => entry.state === "queued" && entry.leases.size > 0)
       .sort((left, right) => {
@@ -293,6 +310,15 @@ export class ThumbnailScheduler {
     entry.controller = controller;
     this.activeByBucket[bucket]++;
     this.activeByKind[entry.request.kind]++;
+    let slotFree = false;
+    const freeSlot = () => {
+      if (slotFree) return;
+      slotFree = true;
+      this.activeByBucket[bucket]--;
+      this.activeByKind[entry.request.kind]--;
+      this.pump();
+    };
+    controller.signal.addEventListener("abort", freeSlot, { once: true });
     this.notify(entry);
 
     const pending = this.loadWithTimeout(entry, controller);
@@ -314,8 +340,7 @@ export class ThumbnailScheduler {
       })
       .finally(() => {
         if (entry.controller === controller) entry.controller = null;
-        this.activeByBucket[bucket]--;
-        this.activeByKind[entry.request.kind]--;
+        freeSlot();
         this.pump();
       });
   }
@@ -362,7 +387,7 @@ export class ThumbnailScheduler {
     const byteBudget = isWaveform
       ? this.budgets.waveformCacheBytes
       : this.budgets.thumbnailCacheBytes;
-    entry.cached = entry.weight <= byteBudget;
+    entry.cached = !entry.request.discardWhenReleased && entry.weight <= byteBudget;
     if (!entry.cached) return;
     if (isWaveform) this.waveformCacheBytes += entry.weight;
     else this.cacheBytes += entry.weight;

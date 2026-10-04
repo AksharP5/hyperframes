@@ -9,6 +9,7 @@ import {
   stopScrubPreviewAudio,
 } from "./timelineIframeHelpers";
 import type { IframeWindow } from "./playbackTypes";
+import { findTimelineElementInIframe } from "../../hooks/timelineEditingHelpers";
 
 function makeDoc(html: string): Document {
   const d = document.implementation.createHTMLDocument();
@@ -40,6 +41,20 @@ describe("buildMissingCompositionElements — hfId (R7)", () => {
       10,
     );
     expect([patched, updatedEls[0]?.compositionSrc]).toEqual([true, "compositions/scene.html"]);
+  });
+
+  it("adds a host the lookup finds in its preview, as a composition", () => {
+    const doc = makeDoc(`
+      <div data-composition-id="root">
+        <div id="benefit-fresh" data-composition-id="benefit-fresh" data-composition-src="compositions/benefit-fresh.html"
+          data-start="0" data-duration="3"></div>
+      </div>
+    `);
+    const { missing } = buildMissingCompositionElements(doc, window as IframeWindow, [], 10);
+    const iframe = { contentDocument: doc } as unknown as HTMLIFrameElement;
+    expect(findTimelineElementInIframe(iframe, { ...missing[0]!, kind: "composition" })).toBe(
+      doc.getElementById("benefit-fresh"),
+    );
   });
 
   it("harvests hfId from data-hf-id on composition host elements", () => {
@@ -100,6 +115,42 @@ describe("buildMissingCompositionElements — hfId (R7)", () => {
     expect(entry).toBeDefined();
     expect(entry?.track).toBe(2);
     expect(entry?.authoredTrack).toBe(2);
+  });
+});
+
+describe("buildMissingCompositionElements — nested master time", () => {
+  it("places hosts two and three levels deep at their master time", () => {
+    const doc = makeDoc(`
+      <div data-composition-id="main" data-start="0" data-duration="20">
+        <div id="intro" data-composition-id="intro" data-start="2" data-duration="10">
+          <div data-composition-id="intro">
+            <div id="logo" data-composition-id="logo" data-start="3" data-duration="5">
+              <div data-composition-id="logo">
+                <div id="badge" data-composition-id="badge" data-start="1" data-duration="2"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `);
+    const { missing } = buildMissingCompositionElements(doc, window as IframeWindow, [], 20);
+    expect(missing.map((e) => [e.domId, e.start, e.duration, e.parentCompositionStart])).toEqual([
+      ["intro", 2, 10, 0],
+      ["logo", 5, 5, 2],
+      ["badge", 6, 2, 5],
+    ]);
+  });
+
+  it("starts a host after a referenced scene's authored length", () => {
+    const doc = makeDoc(`
+      <div data-composition-id="main" data-start="0" data-duration="20">
+        <div id="s1" data-composition-id="s1" data-start="0" data-hf-authored-duration="8"></div>
+        <div id="s2" data-composition-id="s2" data-start="s1 + 1" data-duration="4"></div>
+      </div>
+    `);
+    const win = { __timelines: { s1: { duration: () => 6 } } } as unknown as IframeWindow;
+    const { missing } = buildMissingCompositionElements(doc, win, [], 20);
+    expect(missing.find((e) => e.domId === "s2")?.start).toBe(9);
   });
 });
 

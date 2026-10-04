@@ -1486,7 +1486,7 @@ async function constructCaptureSession(
 
   // Transparent-background setup is intentionally NOT done here. Chrome resets
   // the default-background-color override on navigation, and the
-  // `[data-composition-id]{background:transparent}` stylesheet that
+  // `html,body{background:transparent}` stylesheet that
   // `initTransparentBackground` injects must land in a real `document.head`.
   // See `initializeSession()` below — it calls `initTransparentBackground` for
   // PNG captures after `page.goto(...)` and the `window.__hf` readiness poll.
@@ -2638,7 +2638,10 @@ async function captureFrameErrorDiagnostics(
     const diagnosticsDir = join(session.outputDir, "diagnostics");
     if (!existsSync(diagnosticsDir)) mkdirSync(diagnosticsDir, { recursive: true });
     const base = join(diagnosticsDir, `frame-error-${frameIndex}`);
-    await session.page.screenshot({ path: `${base}.png`, type: "png", fullPage: true });
+    const pageScreenshotCanResolve = session.launchCaptureMode !== "beginframe";
+    if (pageScreenshotCanResolve) {
+      await session.page.screenshot({ path: `${base}.png`, type: "png", fullPage: true });
+    }
     const html = await session.page.content();
     writeFileSync(`${base}.html`, html, "utf-8");
     writeFileSync(

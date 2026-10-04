@@ -118,3 +118,30 @@ export function attachIframeAdapter(
   attachIframeWindow(api, win);
   return adapter;
 }
+
+export function makePreview(body: string, query = ""): HTMLIFrameElement {
+  const iframe = makeFakeIframe(makeAdapterWindow().win);
+  iframe.src = `http://localhost/api/projects/demo/preview${query}`;
+  iframe.contentDocument!.body.innerHTML = body;
+  return iframe;
+}
+
+export function mountPlayerWithPreview(live: HTMLIFrameElement) {
+  const harness = renderTimelinePlayerHarness();
+  act(() => {
+    harness.getApi().iframeRef.current = live;
+    harness.getApi().onIframeLoad();
+  });
+  return harness;
+}
+
+export async function paintShadow(getApi: () => TimelinePlayerApi, shadow: HTMLIFrameElement) {
+  const slot = getApi().previewSlots.find((s) => s.role === "shadow");
+  if (!slot) throw new Error("no shadow reload is pending");
+  act(() => getApi().setShadowIframeNode(shadow));
+  await act(async () => {
+    getApi().onShadowIframeLoad(slot.gen);
+    getApi().onShadowReadyChange(slot.gen, true);
+  });
+  return slot.gen;
+}

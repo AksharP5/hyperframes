@@ -62,7 +62,9 @@ import { killOrphanedProcesses, killProcessTree } from "../utils/orphanCleanup.j
 import { resolveProject, resolveProjectOrThrow } from "../utils/project.js";
 import { resolveAutoProxy } from "../utils/projectConfig.js";
 import { studioProxyEnv } from "../utils/studioProxyEnv.js";
+import { PreviewServerPortMismatchError } from "../utils/studioSelectionClient.js";
 import {
+  PreviewPortUnavailableError,
   listBackgroundPreviewStatuses,
   readBackgroundPreviewStatus,
   startBackgroundPreview,
@@ -100,9 +102,11 @@ interface EmbeddedStudioOptions extends StudioLaunchOptions {
 }
 
 type StudioChildProcess = ChildProcessByStdio<null, Readable, Readable>;
+const STUDIO_CHILD_SHUTDOWN_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+type StudioShutdownSignal = (typeof STUDIO_CHILD_SHUTDOWN_SIGNALS)[number];
 interface StudioSignalTarget {
-  once(event: "SIGINT" | "SIGTERM", listener: () => void): unknown;
-  off(event: "SIGINT" | "SIGTERM", listener: () => void): unknown;
+  once(event: StudioShutdownSignal, listener: () => void): unknown;
+  off(event: StudioShutdownSignal, listener: () => void): unknown;
 }
 type ContextField = "server" | "selection" | "lint" | "capabilities";
 type CompactSelectionPayload = Pick<
@@ -121,6 +125,14 @@ type CompactSelectionPayload = Pick<
 >;
 
 const DEFAULT_CONTEXT_FIELDS: ContextField[] = ["server", "selection", "lint", "capabilities"];
+
+const PREVIEW_PORT_MISMATCH_CODE = "preview-port-mismatch";
+
+export function backgroundStartFailureCode(error: unknown): string {
+  if (error instanceof PreviewServerPortMismatchError) return PREVIEW_PORT_MISMATCH_CODE;
+  if (error instanceof PreviewPortUnavailableError) return "preview-port-unavailable";
+  return "preview-start-failed";
+}
 
 export default defineCommand({
   meta: {
@@ -297,7 +309,7 @@ export default defineCommand({
     if (args["browser-gpu"] === true) process.env.PRODUCER_BROWSER_GPU_MODE = "hardware";
     if (args["browser-gpu"] === false) process.env.PRODUCER_BROWSER_GPU_MODE = "software";
     const startPort = parseInt(args.port ?? "3002", 10);
-    const preferredContextPort = hasExplicitPreviewPort(process.argv) ? startPort : undefined;
+    const explicitPort = hasExplicitPreviewPort(process.argv) ? startPort : undefined;
 
     if (args.status || args.stop) {
       try {
@@ -386,18 +398,13 @@ export default defineCommand({
         json: Boolean(args.json),
         fields: args["context-fields"] as string | undefined,
         detail: args["context-detail"] as string | undefined,
-        ...(preferredContextPort === undefined ? {} : { preferredPort: preferredContextPort }),
+        preferredPort: explicitPort,
       });
     }
 
     if (args.selection) {
       const project = resolveProject(args.dir);
-      return printCurrentSelection(
-        project.dir,
-        startPort,
-        Boolean(args.json),
-        preferredContextPort,
-      );
+      return printCurrentSelection(project.dir, startPort, Boolean(args.json), explicitPort);
     }
 
     const rawArg = args.dir;
@@ -500,11 +507,14 @@ export default defineCommand({
           // the existing managed server resolved earlier. Only an explicit
           // --browser-gpu/--no-browser-gpu request authorizes replacement.
           browserGpuMode: args["browser-gpu"] === undefined ? undefined : browserGpuMode,
+          preferredPort: explicitPort,
         });
       } catch (error) {
         const message = errorMessage(error);
         if (args.json) {
-          writeLifecycleJson(lifecycleFailurePayload("start", "preview-start-failed", message));
+          writeLifecycleJson(
+            lifecycleFailurePayload("start", backgroundStartFailureCode(error), message),
+          );
         } else {
           clack.log.error(message);
         }
@@ -921,7 +931,7 @@ async function printCurrentSelection(
       return;
     }
     if (err instanceof PreviewServerPortMismatchError) {
-      printSelectionFailure("preview-port-mismatch", err.message, json);
+      printSelectionFailure(PREVIEW_PORT_MISMATCH_CODE, err.message, json);
       return;
     }
     throw err;
@@ -1043,7 +1053,7 @@ async function printCurrentContext(
       return;
     }
     if (err instanceof PreviewServerPortMismatchError) {
-      printSelectionFailure("preview-port-mismatch", err.message, options.json);
+      printSelectionFailure(PREVIEW_PORT_MISMATCH_CODE, err.message, options.json);
       return;
     }
     throw err;
@@ -1337,8 +1347,7 @@ export function waitForStudioChildClose(
   const shutdown = (): void => {
     if (child.pid) killProcessTree(child.pid);
   };
-  signalTarget.once("SIGINT", shutdown);
-  signalTarget.once("SIGTERM", shutdown);
+  for (const signal of STUDIO_CHILD_SHUTDOWN_SIGNALS) signalTarget.once(signal, shutdown);
 
   // A short-lived Vite child can exit before launch setup reaches this point.
   // ChildProcess does not replay lifecycle events to listeners attached later,
@@ -1355,8 +1364,7 @@ export function waitForStudioChildClose(
   return closed.finally(() => {
     // Signal listeners keep Bun's event loop alive even after Vite exits. Leaving
     // them registered makes `preview --stop` close the port but leak the wrapper.
-    signalTarget.off("SIGINT", shutdown);
-    signalTarget.off("SIGTERM", shutdown);
+    for (const signal of STUDIO_CHILD_SHUTDOWN_SIGNALS) signalTarget.off(signal, shutdown);
   });
 }
 
@@ -1422,7 +1430,7 @@ export function reportPreviewShutdown(json: boolean): void {
 /**
  * Dev mode: spawn the studio dev server from the monorepo.
  */
-async function runDevMode(dir: string, options?: StudioLaunchOptions): Promise<void> {
+export async function runDevMode(dir: string, options?: StudioLaunchOptions): Promise<void> {
   // Find monorepo root by navigating from packages/cli/src/commands/
   const thisFile = fileURLToPath(import.meta.url);
   const repoRoot = resolve(dirname(thisFile), "..", "..", "..", "..");
@@ -1442,6 +1450,7 @@ async function runDevMode(dir: string, options?: StudioLaunchOptions): Promise<v
   const child = spawn("bun", ["run", "dev", "--", ...previewViteArgs(options?.port)], {
     cwd: studioPkgDir,
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
     env: studioProxyEnv(options?.autoProxy ?? true, process.env, {
       projectDir: dir,
       projectName: pName,
@@ -1487,7 +1496,10 @@ function hasLocalStudio(dir: string): boolean {
  * Local studio mode: spawn Vite using a locally installed @hyperframes/studio.
  * Provides full Vite HMR and the complete studio experience.
  */
-async function runLocalStudioMode(dir: string, options?: StudioLaunchOptions): Promise<void> {
+export async function runLocalStudioMode(
+  dir: string,
+  options?: StudioLaunchOptions,
+): Promise<void> {
   const req = createRequire(join(dir, "package.json"));
   const studioPkgPath = dirname(req.resolve("@hyperframes/studio/package.json"));
   const pName = options?.projectName ?? basename(dir);
@@ -1504,6 +1516,7 @@ async function runLocalStudioMode(dir: string, options?: StudioLaunchOptions): P
   const child = spawn(viteCommand.command, viteCommand.args, {
     cwd: studioPkgPath,
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
     env: studioProxyEnv(options?.autoProxy ?? true, process.env, {
       projectDir: dir,
       projectName: pName,

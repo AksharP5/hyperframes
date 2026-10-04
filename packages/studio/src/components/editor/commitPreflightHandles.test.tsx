@@ -182,7 +182,10 @@ async function settle() {
 
 const fire = (target: Element, type: string, init: MouseEventInit = {}) => {
   act(() => {
-    target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, ...init }));
+    const buttons = type === "pointerdown" || type === "pointermove" ? 1 : 0;
+    target.dispatchEvent(
+      new MouseEvent(type, { bubbles: true, cancelable: true, buttons, ...init }),
+    );
   });
 };
 
@@ -284,7 +287,7 @@ describe("handles follow what Studio would commit", () => {
       { x: 0, y: 0 },
       commitList,
       preview,
-      vi.fn(),
+      vi.fn(async () => undefined),
       undefined,
       preflightOnly,
     );
@@ -377,45 +380,32 @@ describe("handles follow what Studio would commit", () => {
     expect(flags(seen.selection)[0]).toBe(true);
   });
 
-  it("refuses a group move carried by one shared tween, while a single member stays movable", async () => {
+  // The per-element left/top channel supersedes the old refusal: each member saves its own move.
+  it("lets a group move carried by one shared tween through as each member's own offset", async () => {
     const dots = [element("dot-1", "dot"), element("dot-2", "dot")];
     const preview = livePreview(dots, { y: 40 });
     const stagger = tween({ y: 40 }, { targetSelector: ".dot", method: "from" } as never);
     const [a, b] = dots.map(resolved);
-    const { seen, overlay, spies, render } = await select([stagger], {
+    const { seen, overlay, spies } = await select([stagger], {
       selection: a!,
       groups: [a!, b!],
       preview,
     });
 
-    expect(seen.groups.map((s) => flags(s)[0])).toEqual([false, false]);
-    expect(seen.groups[0]?.capabilities.reasonIfDisabled).toBe(
-      GSAP_EDIT_BLOCK_COPY["source-uneditable"],
-    );
+    expect(seen.groups.map((s) => flags(s)[0])).toEqual([true, true]);
     fire(overlay().querySelector(BOX)!, "pointerdown", { clientX: 150, clientY: 150 });
-    expect(spies.onBlockedMove).toHaveBeenCalledTimes(1);
-    const commitList = getAnimationsForElement(
-      [stagger],
-      { id: "dot-1", selector: "#dot-1" },
-      dots[0],
-    );
+    expect(spies.onBlockedMove).not.toHaveBeenCalled();
     const groupPreflight = { preflightOnly: true, group: true };
     const commit = tryGsapDragIntercept(
       a!,
       { x: 0, y: 0 },
-      commitList,
+      [stagger],
       preview,
-      vi.fn(),
+      vi.fn(async () => undefined),
       undefined,
       groupPreflight,
     );
-    expect(await commit).toMatchObject({
-      status: "blocked",
-      detail: "live-position-no-source-tween",
-    });
-
-    render({ selection: a!, preview });
-    expect(flags(seen.selection)[0]).toBe(true);
+    expect(await commit).toEqual({ status: "element-offset" });
   });
 
   it("toasts once on the primary press of a blocked element, before any travel", async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@hyperframes/core",
-  "version": "0.8.90",
+  "version": "0.8.119",
   "description": "",
   "repository": {
     "type": "git",
@@ -58,6 +58,12 @@
       "import": "./src/safePath.ts",
       "types": "./src/safePath.ts"
     },
+    "./atomic-file": {
+      "bun": "./src/atomicFile.ts",
+      "node": "./dist/atomicFile.js",
+      "import": "./src/atomicFile.ts",
+      "types": "./src/atomicFile.ts"
+    },
     "./asset-paths": {
       "bun": "./src/compiler/rewriteSubCompPaths.ts",
       "node": "./dist/compiler/rewriteSubCompPaths.js",
@@ -87,6 +93,12 @@
       "node": "./dist/studioPreviewMark.js",
       "import": "./src/studioPreviewMark.ts",
       "types": "./src/studioPreviewMark.ts"
+    },
+    "./gsap-cdn": {
+      "bun": "./src/gsapCdn.ts",
+      "node": "./dist/gsapCdn.js",
+      "import": "./src/gsapCdn.ts",
+      "types": "./src/gsapCdn.ts"
     },
     "./media-timing": {
       "bun": "./src/mediaTiming.ts",
@@ -208,6 +220,12 @@
       "import": "./src/audioCarve.ts",
       "types": "./src/audioCarve.ts"
     },
+    "./media-link": {
+      "bun": "./src/mediaLink.ts",
+      "node": "./dist/mediaLink.js",
+      "import": "./src/mediaLink.ts",
+      "types": "./src/mediaLink.ts"
+    },
     "./audio-groups": {
       "bun": "./src/audioGroups.ts",
       "node": "./dist/audioGroups.js",
@@ -225,6 +243,12 @@
       "node": "./dist/clipFacts.js",
       "import": "./src/clipFacts.ts",
       "types": "./src/clipFacts.ts"
+    },
+    "./audible-video": {
+      "bun": "./src/audibleVideo.ts",
+      "node": "./dist/audibleVideo.js",
+      "import": "./src/audibleVideo.ts",
+      "types": "./src/audibleVideo.ts"
     },
     "./audio-gain": {
       "bun": "./src/audioGain.ts",
@@ -274,6 +298,12 @@
       "node": "./dist/runtime/clipTree.js",
       "import": "./src/runtime/clipTree.ts",
       "types": "./src/runtime/clipTree.ts"
+    },
+    "./runtime/dom-realm": {
+      "bun": "./src/runtime/domRealm.ts",
+      "node": "./dist/runtime/domRealm.js",
+      "import": "./src/runtime/domRealm.ts",
+      "types": "./src/runtime/domRealm.ts"
     },
     "./runtime/custom-ease": {
       "bun": "./src/runtime/customEase.ts",
@@ -492,6 +522,10 @@
         "import": "./dist/safePath.js",
         "types": "./dist/safePath.d.ts"
       },
+      "./atomic-file": {
+        "import": "./dist/atomicFile.js",
+        "types": "./dist/atomicFile.d.ts"
+      },
       "./asset-paths": {
         "import": "./dist/compiler/rewriteSubCompPaths.js",
         "types": "./dist/compiler/rewriteSubCompPaths.d.ts"
@@ -511,6 +545,10 @@
       "./studio-preview-mark": {
         "import": "./dist/studioPreviewMark.js",
         "types": "./dist/studioPreviewMark.d.ts"
+      },
+      "./gsap-cdn": {
+        "import": "./dist/gsapCdn.js",
+        "types": "./dist/gsapCdn.d.ts"
       },
       "./media-timing": {
         "import": "./dist/mediaTiming.js",
@@ -592,6 +630,10 @@
         "import": "./dist/audioCarve.js",
         "types": "./dist/audioCarve.d.ts"
       },
+      "./media-link": {
+        "import": "./dist/mediaLink.js",
+        "types": "./dist/mediaLink.d.ts"
+      },
       "./audio-groups": {
         "import": "./dist/audioGroups.js",
         "types": "./dist/audioGroups.d.ts"
@@ -603,6 +645,10 @@
       "./clip-facts": {
         "import": "./dist/clipFacts.js",
         "types": "./dist/clipFacts.d.ts"
+      },
+      "./audible-video": {
+        "import": "./dist/audibleVideo.js",
+        "types": "./dist/audibleVideo.d.ts"
       },
       "./audio-gain": {
         "import": "./dist/audioGain.js",
@@ -636,6 +682,10 @@
       "./runtime/clipTree": {
         "import": "./dist/runtime/clipTree.js",
         "types": "./dist/runtime/clipTree.d.ts"
+      },
+      "./runtime/dom-realm": {
+        "import": "./dist/runtime/domRealm.js",
+        "types": "./dist/runtime/domRealm.d.ts"
       },
       "./runtime/custom-ease": {
         "import": "./dist/runtime/customEase.js",

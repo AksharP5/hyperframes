@@ -1,12 +1,7 @@
 import type { TimelineElement } from "../store/playerStore";
 import type { DragCommitDeps } from "./timelineClipDragCommit";
-import type { DraggedClipState } from "./timelineClipDragTypes";
 import { classifyZone, normalizeToZones } from "./timelineZones";
-import { resolveMainTrackDropStart } from "./timelineCollision";
-import { isAudioTimelineElement } from "../../utils/timelineInspector";
-import { resolveExpandedHostAlias } from "./timelineAuthoredMoveTarget";
 import { sameSourceFile } from "./timelineAuthoredTrack";
-import { round3 } from "./timelineGaps";
 
 const keyOf = (e: TimelineElement) => e.key ?? e.id;
 
@@ -29,7 +24,7 @@ export function layoutAfterTrackInsert(
     keys: ReadonlySet<string>;
     movedStart: (e: TimelineElement) => number;
   } | null,
-  deps: Pick<DragCommitDeps, "elements" | "trackOrder">,
+  deps: Pick<DragCommitDeps, "elements" | "trackOrder" | "trackInsertLayout">,
 ): {
   normalized: TimelineElement[];
   targetTrack: number;
@@ -42,63 +37,33 @@ export function layoutAfterTrackInsert(
   const writableZone = classifyZone(element);
   const writable = (src: TimelineElement): boolean =>
     sameSourceFile(src, element) && classifyZone(src) === writableZone;
-  const topologyOrder = [...new Set(elements.filter(writable).map((e) => e.track))].sort(
+  let topologyOrder = [...new Set(elements.filter(writable).map((e) => e.track))].sort(
     (a, b) => a - b,
   );
-  const topologyInsertRow = topologyOrder.filter((track) => track < targetTrack).length;
-  const topologyTargetTrack = insertTrackValue(topologyOrder, topologyInsertRow);
+  let topologyInsertRow = topologyOrder.filter((track) => track < targetTrack).length;
+  const grouped = deps.trackInsertLayout;
+  let ranks: Map<number, number> | undefined;
+  if (grouped) {
+    const writableTracks = new Set(topologyOrder);
+    topologyOrder = grouped.trackOrder.filter((track) => writableTracks.has(track));
+    topologyInsertRow = grouped.trackOrder
+      .slice(0, grouped.topologyRows[insertRow])
+      .filter((track) => writableTracks.has(track)).length;
+    ranks = new Map(topologyOrder.map((track, index) => [track, index]));
+  }
+  const topologyTargetTrack = ranks
+    ? topologyInsertRow - 0.5
+    : insertTrackValue(topologyOrder, topologyInsertRow);
   const normalized = normalizeToZones(
     elements.filter(writable).map((e) => {
       if (keyOf(e) === editKey) {
         return { ...e, start: previewStart, track: topologyTargetTrack };
       }
-      if (multi?.keys.has(keyOf(e))) return { ...e, start: multi.movedStart(e) };
-      return e;
+      const track = ranks ? ranks.get(e.track) : e.track;
+      if (track === undefined) throw new Error("Writable track missing from insertion topology");
+      const start = multi?.keys.has(keyOf(e)) ? multi.movedStart(e) : e.start;
+      return track === e.track && start === e.start ? e : { ...e, start, track };
     }),
   );
   return { normalized, targetTrack, writable };
-}
-
-/** The start a solo clip lands at, for both the ghost and the commit: 0 on an empty
- *  main track, judged on the final lane (after the renumber and the host alias).
- *  Returned in the dragged clip's own frame. */
-export function resolveDragLandingStart(
-  drag: DraggedClipState,
-  deps: Pick<DragCommitDeps, "elements" | "trackOrder" | "selectedKeys">,
-): number {
-  const alias = resolveExpandedHostAlias(drag, deps);
-  const target = alias?.drag ?? drag;
-  const keys = alias?.selectedKeys ?? deps.selectedKeys;
-  const element = target.element;
-  const key = keyOf(element);
-  if (keys && keys.size > 1 && keys.has(key)) return drag.previewStart;
-
-  let landingTrack = target.previewTrack;
-  let renumbered = new Map<string, number>();
-  if (target.insertRow != null) {
-    const layout = layoutAfterTrackInsert(
-      element,
-      target.previewStart,
-      target.insertRow,
-      null,
-      deps,
-    );
-    if (layout) {
-      renumbered = new Map(layout.normalized.map((n) => [keyOf(n), n.track]));
-      landingTrack = renumbered.get(key) ?? layout.targetTrack;
-    }
-  }
-  const others = deps.elements
-    .filter((e) => keyOf(e) !== key)
-    .map((e) => (renumbered.has(keyOf(e)) ? { ...e, track: renumbered.get(keyOf(e))! } : e));
-  const snapped = resolveMainTrackDropStart(
-    others,
-    element.track,
-    landingTrack,
-    isAudioTimelineElement(element),
-    target.previewStart,
-  );
-  return snapped === target.previewStart
-    ? drag.previewStart
-    : round3(drag.previewStart + snapped - target.previewStart);
 }

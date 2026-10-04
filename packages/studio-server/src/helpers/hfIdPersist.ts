@@ -2,7 +2,7 @@ import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { replaceFileAtomically } from "./atomicFile.js";
+import { replaceFileAtomically } from "@hyperframes/core/atomic-file";
 import { isInHiddenOrVendorDir, mkdirWithinProject, walkDir } from "./safePath.js";
 
 export const isCompositionSource = (html: string): boolean => /data-composition-id\s*=/.test(html);

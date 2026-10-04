@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
+import { JSDOM } from "jsdom";
 import {
   buildVariablesByCompScript,
   dedupeFontFaceRules,
@@ -1290,5 +1291,134 @@ describe("dedupeFontFaceRules", () => {
     const a = `@font-face { font-family: "Brand"; src: url(a.woff2),\n      url(b.woff); }`;
     const b = `@font-face { font-family: "Brand"; src: url(a.woff2), url(b.woff); }`;
     expect(dedupeFontFaceRules([a, b])[0]).not.toContain("@font-face");
+  });
+});
+
+describe("composition scoping – renamed-id selector runtime", () => {
+  // Real jsdom windows: the shim patches Element.prototype, which a plain
+  // object window cannot exercise.
+  function bootWindow(html: string, script: string, compId: string, gsap?: unknown) {
+    const dom = new JSDOM(html, { runScripts: "outside-only" });
+    const window = dom.window as unknown as Window & typeof globalThis & Record<string, unknown>;
+    window.__captured = {};
+    if (gsap) window.gsap = gsap;
+    window.eval(wrapScopedCompositionScript(script, compId));
+    return { window, captured: window.__captured as Record<string, unknown> };
+  }
+
+  const TWO_INSTANCES = `
+    <div data-composition-id="other"><svg><path id="shape"/></svg></div>
+    <div data-composition-id="scene">
+      <svg class="art"><path id="scene--shape" data-hf-authored-id="shape"/><rect class="r"/></svg>
+    </div>`;
+
+  it("leaves Element.prototype untouched when no id was renamed", () => {
+    const { window, captured } = bootWindow(
+      `<div data-composition-id="scene"><svg><path id="shape"/></svg></div>`,
+      `window.__captured.hit = document.querySelector("svg").querySelector("#shape");`,
+      "scene",
+    );
+    expect(window.__hfRenamedIdSelectorShim).toBeUndefined();
+    expect(captured.hit).toBe(window.document.querySelector("path"));
+  });
+
+  it("rewrites #authoredId to match a renamed element from element and document lookups", () => {
+    const { window, captured } = bootWindow(
+      TWO_INSTANCES,
+      `var svg = document.querySelector("svg.art");
+       window.__captured.viaElement = svg.querySelector("#shape");
+       window.__captured.viaElementAll = svg.querySelectorAll("#shape, #shape.x, path#shape").length;
+       window.__captured.viaDocument = document.querySelector("#shape");
+       window.__captured.viaDocumentAll = document.querySelectorAll("#shape").length;
+       window.__captured.byId = document.getElementById("shape");
+       window.__captured.notAnId = svg.querySelector('[data-x="#shape"]');`,
+      "scene",
+    );
+    const renamed = window.document.querySelector('[data-hf-authored-id="shape"]');
+    const other = window.document.querySelector('[data-composition-id="other"] path');
+    expect(window.__hfRenamedIdSelectorShim).toBe(true);
+    expect(captured.viaElement).toBe(renamed);
+    expect(captured.viaElementAll).toBe(1);
+    expect(captured.viaDocument).toBe(renamed);
+    expect(captured.viaDocumentAll).toBe(1);
+    expect(captured.byId).toBe(renamed);
+    expect(captured.notAnId).toBeNull();
+    // The rewrite is `:is(#shape, [data-hf-authored-id="shape"])` — a
+    // superset — so an Element lookup inside the OTHER instance, whose id
+    // was never renamed, still finds its own element.
+    expect(other!.id).toBe("shape");
+    expect(
+      window.document.querySelector('[data-composition-id="other"] svg')!.querySelector("#shape"),
+    ).toBe(other);
+  });
+
+  it("resolves GSAP array targets through the scoped lookup", () => {
+    const { window, captured } = bootWindow(
+      TWO_INSTANCES,
+      `window.__captured.targets = gsap.to(["#shape", ".r", document.querySelector("svg.art")], {});
+       window.__captured.toArray = gsap.utils.toArray("#shape");`,
+      "scene",
+      { to: (targets: unknown) => targets, utils: { toArray: (targets: unknown) => targets } },
+    );
+    const scene = window.document.querySelector('[data-composition-id="scene"]')!;
+    expect(captured.targets).toEqual([
+      scene.querySelector("path"),
+      scene.querySelector("rect"),
+      scene.querySelector("svg"),
+    ]);
+    expect(captured.toArray).toEqual([scene.querySelector("path")]);
+  });
+
+  it("matches an escaped authored id spelled with CSS escapes in a script selector", () => {
+    const { captured, window } = bootWindow(
+      `<div data-composition-id="other"><svg><filter id="fx.1"/></svg></div>
+       <div data-composition-id="scene"><svg class="art"><filter id="scene--fx.1" data-hf-authored-id="fx.1"/></svg></div>`,
+      `window.__captured.viaDocument = document.querySelector("#fx\\\\.1");
+       window.__captured.viaElement = document.querySelector("svg.art").querySelector("#fx\\\\.1");`,
+      "scene",
+    );
+    const renamed = window.document.querySelector('[data-hf-authored-id="fx.1"]');
+    expect(captured.viaDocument).toBe(renamed);
+    expect(captured.viaElement).toBe(renamed);
+  });
+  it("distinguishes compound selectors from escaped literal ids", () => {
+    const { captured } = bootWindow(
+      `<div data-composition-id="scene"><svg>
+        <path id="foo" class="bar"/><path id="scene--foo.bar" data-hf-authored-id="foo.bar"/>
+      </svg></div>`,
+      String.raw`var svg = document.querySelector("svg");
+        window.__captured.compound = svg.querySelector("#foo.bar").id;
+        window.__captured.literal = svg.querySelector("#foo\\.bar").id;
+        window.__captured.hex = svg.querySelector("#foo\\2e bar").id;
+        window.__captured.suffix = svg.querySelector("#foo\\.bar2");`,
+      "scene",
+    );
+    expect(captured.compound).toBe("foo");
+    expect(captured.literal).toBe("scene--foo.bar");
+    expect(captured.hex).toBe("scene--foo.bar");
+    expect(captured.suffix).toBeNull();
+  });
+
+  it("refreshes renamed ids after a scene is replaced and its script runs again", () => {
+    const { window } = bootWindow(TWO_INSTANCES, "", "scene");
+    window.document.querySelector('[data-composition-id="scene"]')!.innerHTML =
+      '<svg><path id="scene--new" data-hf-authored-id="new"/></svg>';
+    window.eval(
+      wrapScopedCompositionScript(
+        'window.__captured.hit = document.querySelector("svg").querySelector("#new").id;',
+        "scene",
+      ),
+    );
+    expect((window.__captured as Record<string, unknown>).hit).toBe("scene--new");
+  });
+  it("preserves escaped hashes and brackets in runtime class selectors", () => {
+    const { captured } = bootWindow(
+      `<div data-composition-id="scene"><svg><path id="scene--shape" data-hf-authored-id="shape"/><rect class="foo#shape"/><circle class="foo[bar"/></svg></div>`,
+      String.raw`window.__captured.hash = document.querySelector("svg").querySelector(".foo\\#shape").tagName;
+        window.__captured.bracket = document.querySelector("svg").querySelector(".foo\\[bar").tagName;`,
+      "scene",
+    );
+    expect(captured.hash).toBe("rect");
+    expect(captured.bracket).toBe("circle");
   });
 });

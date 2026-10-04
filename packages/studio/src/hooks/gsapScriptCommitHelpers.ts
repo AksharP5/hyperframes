@@ -4,6 +4,7 @@ import type { DomEditSelection } from "../components/editor/domEditingTypes";
 export { PROPERTY_DEFAULTS } from "./gsapShared";
 import { idSelector, matchesExactlyOne } from "./gsapShared";
 import { studioWriteHeaders } from "../utils/studioFileVersion";
+import { studioApiFetch } from "../utils/studioApiFetch";
 
 /**
  * The selector to author a NEW tween against, minting an id on the element when
@@ -116,7 +117,7 @@ export async function assignGsapTargetAutoIdIfNeeded({
     showToast?.("Couldn't assign element id because the patch contains invalid values", "error");
     return false;
   }
-  const res = await fetch(
+  const res = await studioApiFetch(
     `/api/projects/${encodeURIComponent(projectId)}/file-mutations/patch-element/${encodeURIComponent(targetPath)}`,
     {
       method: "POST",

@@ -3,6 +3,7 @@ import type { TimelineElement } from "../store/playerStore";
 import type { TimelineTimeRange } from "../store/rangeSelectionSlice";
 import type { TimelineDropCallbacks } from "./timelineCallbacks";
 import type { TimelineTheme } from "./timelineTheme";
+import type { TimelineTrackPadding } from "./timelineLayout";
 import type { TimelineEditOverrides } from "./useResolvedTimelineEditCallbacks";
 import type { TimelineStackingSyncProps } from "./useTimelineStackingSync";
 
@@ -11,11 +12,20 @@ export interface TimelineClipRenderContext {
   rich: boolean;
 }
 
+export interface TimelineClipMenuItem {
+  id: string;
+  label: string;
+  icon?: ReactNode;
+  shortcut?: string;
+  disabled?: boolean;
+  onSelect: () => void;
+}
+
 export interface TimelineProps
   extends TimelineDropCallbacks, TimelineEditOverrides, TimelineStackingSyncProps {
   /** Project-scoped reset boundary; soft source refreshes retain the same epoch. */
   sessionEpoch?: number;
-  onSeek?: (time: number, options?: { keepPlaying?: boolean }) => void;
+  onSeek?: (time: number, options?: { keepPlaying?: boolean; follow?: boolean }) => void;
   onDrillDown?: (element: TimelineElement) => void;
   /** Picture only: takes no pointer input. Interactive content goes in renderClipOverlay. */
   renderClipContent?: (
@@ -32,7 +42,11 @@ export interface TimelineProps
   onPasteClip?: () => Promise<void>;
   onDuplicateClip?: () => Promise<boolean>;
   canPasteClip?: () => boolean;
+  clipMenuItems?: (element: TimelineElement) => readonly TimelineClipMenuItem[];
   theme?: Partial<TimelineTheme>;
   showAudioEffects?: boolean;
   showKeyframes?: boolean;
+  trackPadding?: TimelineTrackPadding;
+  readOnly?: boolean;
+  onReadOnlyPress?: () => void;
 }

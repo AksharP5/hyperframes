@@ -12,6 +12,7 @@ import {
   isUnresolvedAssetPlaceholder,
   isWithinProjectRoot,
   maskNonScannableRanges,
+  readProjectFile,
   resolveExistingLocalAsset,
   resolveLocalAssetCandidates,
   resolveProjectRelativeSrc,
@@ -28,7 +29,7 @@ import type {
   HyperframeLinterOptions,
 } from "./types.js";
 import type { ParsableDocumentLike } from "@hyperframes/parsers/sub-composition-validity";
-import { mediaSrcTagRe } from "./utils";
+import { isAudibleVideoTag, mediaSrcTagRe } from "./utils";
 
 /** Adapts linkedom's `parseHTML` to the `checkSubCompositionUsability` contract. */
 function parseSubCompHtml(html: string): ParsableDocumentLike {
@@ -338,8 +339,11 @@ function lintProjectAudioFiles(
   if (audioFiles.length === 0) return findings;
 
   const hasAudioElement = htmlSources.some(({ html }) => /<audio\b/i.test(html));
+  const hasAudibleVideo = htmlSources.some(({ html }) =>
+    (html.match(/<video\b[^>]*>/gi) ?? []).some(isAudibleVideoTag),
+  );
 
-  if (!hasAudioElement) {
+  if (!hasAudioElement && !hasAudibleVideo) {
     findings.push({
       code: "audio_file_without_element",
       severity: "warning",
@@ -548,10 +552,11 @@ function lintDuplicateAudioTracks(htmlSources: HtmlSource[]): HyperframeLintFind
   const seen = new Set<string>();
 
   for (const { html } of htmlSources) {
-    const audioTagRe = /<audio\b[^>]*>/gi;
+    const soundTagRe = /<(?:audio|video)\b[^>]*>/gi;
     let match: RegExpExecArray | null;
-    while ((match = audioTagRe.exec(html)) !== null) {
+    while ((match = soundTagRe.exec(html)) !== null) {
       const tag = match[0];
+      if (/^<video/i.test(tag) && !isAudibleVideoTag(tag)) continue;
       const trackStr = extractAttr(tag, "data-track-index");
       const startStr = extractAttr(tag, "data-start");
       const durStr = extractAttr(tag, "data-duration");
@@ -578,7 +583,7 @@ function lintDuplicateAudioTracks(htmlSources: HtmlSource[]): HyperframeLintFind
         findings.push({
           code: "duplicate_audio_track",
           severity: "warning",
-          message: `Multiple <audio> elements on track ${a.trackIndex} overlap (${a.src} at ${a.start}-${Number.isFinite(a.end) ? a.end.toFixed(1) : "end"}s, ${b.src} at ${b.start}-${Number.isFinite(b.end) ? b.end.toFixed(1) : "end"}s). This causes layered audio playback.`,
+          message: `Multiple audible <audio>/<video> elements on track ${a.trackIndex} overlap (${a.src} at ${a.start}-${Number.isFinite(a.end) ? a.end.toFixed(1) : "end"}s, ${b.src} at ${b.start}-${Number.isFinite(b.end) ? b.end.toFixed(1) : "end"}s). This causes layered audio playback.`,
           fixHint: "Use non-overlapping time windows or different track indices.",
         });
       }
@@ -615,7 +620,7 @@ function lintMissingOrEmptySubComposition(
   rootHtml: string,
 ): HyperframeLintFinding[] {
   // Dedup by src path — the same reference can appear from nested sub-comps.
-  const checked = new Map<string, { srcPath: string; problem: string }>();
+  const checked = new Map<string, { srcPath: string; problem: string; folder?: true }>();
   const visited = new Set<string>();
 
   // fallow-ignore-next-line complexity
@@ -636,14 +641,25 @@ function lintMissingOrEmptySubComposition(
       if (visited.has(filePath)) continue;
       visited.add(filePath);
 
-      if (!existsSync(filePath)) {
+      const read = readProjectFile(filePath);
+      if (read.kind === "missing") {
         if (!checked.has(srcPath)) {
           checked.set(srcPath, { srcPath, problem: "the file does not exist" });
         }
         continue;
       }
+      if (read.kind === "folder") {
+        if (!checked.has(srcPath)) {
+          checked.set(srcPath, {
+            srcPath,
+            problem: "it is a folder, not an HTML file",
+            folder: true,
+          });
+        }
+        continue;
+      }
 
-      const fileHtml = readFileSync(filePath, "utf-8");
+      const fileHtml = read.text;
       const validity = checkSubCompositionUsability(fileHtml, parseSubCompHtml);
       if (!validity.ok) {
         if (!checked.has(srcPath)) {
@@ -664,17 +680,18 @@ function lintMissingOrEmptySubComposition(
   walk(rootHtml);
 
   const findings: HyperframeLintFinding[] = [];
-  for (const { srcPath, problem } of checked.values()) {
+  for (const { srcPath, problem, folder } of checked.values()) {
     findings.push({
       code: "missing_or_empty_sub_composition",
       severity: "error",
       message: `data-composition-src references "${srcPath}", but ${problem}.`,
-      fixHint:
-        `Fix this before rendering — the render pre-flight rejects unusable sub-compositions. ` +
-        `Write valid HTML into "${srcPath}" — it needs a <template> or <body> containing an element with ` +
-        `data-composition-id, data-width, and data-height. Preview/studio still tolerates and skips the ` +
-        "scene while you author it. If a scene-authoring step is still running, wait for it to finish " +
-        "before referencing the file, or re-run the step that generates it.",
+      fixHint: folder
+        ? `Point data-composition-src at the HTML file inside the folder, such as "${srcPath}/index.html".`
+        : `Fix this before rendering — the render pre-flight rejects unusable sub-compositions. ` +
+          `Write valid HTML into "${srcPath}" — it needs a <template> or <body> containing an element with ` +
+          `data-composition-id, data-width, and data-height. Preview/studio still tolerates and skips the ` +
+          "scene while you author it. If a scene-authoring step is still running, wait for it to finish " +
+          "before referencing the file, or re-run the step that generates it.",
     });
   }
 

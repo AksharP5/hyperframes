@@ -15,6 +15,10 @@ import { trackRegistryItemAdded } from "../telemetry/events.js";
 import { createStudioServer, type StudioServer } from "./studioServer.js";
 
 vi.mock("../telemetry/events.js", () => ({ trackRegistryItemAdded: vi.fn() }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync) };
+});
 
 const SCHEMA = "https://hyperframes.heygen.com/schema/registry-item.json";
 // Names no other test uses: the registry cache is shared by every test in a run.
@@ -194,6 +198,20 @@ describe("Studio catalog install", () => {
     writeFileSync(file, "my own edit");
     expect((await install("studio-drop-block")).written).toEqual([]);
     expect(readFileSync(file, "utf-8")).toBe("my own edit");
+  });
+
+  it("fits a block to the project by replacing its file whole, never rewriting it in place", async () => {
+    const { link, real } = projectWithRegistry();
+    vi.mocked(writeFileSync).mockClear();
+
+    await installer(link)("studio-drop-block");
+
+    const block = join("scenes", "studio-drop-block.html");
+    expect(readFileSync(join(real, block), "utf-8")).toContain('content="width=1920, height=1080"');
+    const inPlace = vi
+      .mocked(writeFileSync)
+      .mock.calls.filter(([path]) => String(path).endsWith(block));
+    expect(inPlace).toEqual([]);
   });
 
   it("keeps an edit to one block when another block is installed", async () => {

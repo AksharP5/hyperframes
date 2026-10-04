@@ -20,7 +20,7 @@ import { DockStripActions } from "./DockStripActions";
 import { DockTab } from "./DockTab";
 import { installTabFill } from "./dockTabFill";
 import { addRegisteredPanel, applySideMinimums, buildEditLayout } from "./dockLayout";
-import { DOCK_PANEL_COMPONENT } from "./dockLayoutSchema";
+import { DOCK_PANEL_COMPONENT, parseDockLayout } from "./dockLayoutSchema";
 import { useDockLayoutStore, type DockController, type DockSnapshot } from "./dockLayoutStore";
 import {
   PANEL_DEFINITIONS,
@@ -31,6 +31,7 @@ import {
   type PanelId,
 } from "./panelRegistry";
 import "./dock.css";
+import { menuClasses } from "../ui/menuStyle";
 
 const PERSIST_DEBOUNCE_MS = 250;
 
@@ -85,10 +86,20 @@ function snapshot(api: DockviewApi): DockSnapshot {
   };
 }
 
-function createController(api: DockviewApi): DockController {
+interface DockOptions {
+  panels: readonly PanelId[];
+  storageKey?: string | undefined;
+  dockWidth: () => number;
+}
+
+function createController(api: DockviewApi, options: DockOptions): DockController {
   const open = (id: PanelId) => {
     if (api.getPanel(id)) return;
-    const { zone, reopen } = PANEL_DEFINITIONS[id];
+    const { zone, reopen: preferred } = PANEL_DEFINITIONS[id];
+    const reopen: PanelDefinition["reopen"] =
+      zone === "center" || options.panels.includes(preferred.near)
+        ? preferred
+        : { near: "preview", direction: zone };
     // Side columns are tab groups; preview and timeline are separate groups in the centre.
     const sibling =
       zone === "center"
@@ -114,12 +125,13 @@ function createController(api: DockviewApi): DockController {
     },
     setTitle: (id, title) => api.getPanel(id)?.api.setTitle(title),
     setGroupVisible: (id, visible) => api.getPanel(id)?.group.api.setVisible(visible),
-    reset: () => buildEditLayout(api, window.innerWidth),
+    reset: () => buildEditLayout(api, options.dockWidth(), options.panels),
   };
 }
 
-function restoreOrBuild(api: DockviewApi, projectId: string | null) {
-  const stored = readStudioUiPreferences(undefined, projectId).dockLayout;
+function restoreOrBuild(api: DockviewApi, projectId: string | null, options: DockOptions) {
+  const { dockLayout } = readStudioUiPreferences(undefined, projectId, options.storageKey);
+  const stored = parseDockLayout(dockLayout, options.panels);
   if (stored) {
     try {
       api.fromJSON(stored);
@@ -128,10 +140,24 @@ function restoreOrBuild(api: DockviewApi, projectId: string | null) {
       /* a layout the schema accepted but dockview cannot load: start over */
     }
   }
-  buildEditLayout(api, window.innerWidth);
+  buildEditLayout(api, options.dockWidth(), options.panels);
 }
 
-function Root({ projectId, children }: { projectId: string | null; children: ReactNode }) {
+const windowWidth = () => window.innerWidth;
+
+function Root({
+  projectId,
+  panels = PANEL_IDS,
+  storageKey,
+  dockWidth = windowWidth,
+  children,
+}: {
+  projectId: string | null;
+  panels?: readonly PanelId[];
+  storageKey?: string;
+  dockWidth?: () => number;
+  children: ReactNode;
+}) {
   const [slots, setSlots] = useState<Slots>({});
   const registerSlot = useCallback((id: PanelId, element: HTMLElement | null) => {
     setSlots((prev) => {
@@ -149,16 +175,17 @@ function Root({ projectId, children }: { projectId: string | null; children: Rea
   const onReady = useCallback(
     ({ api }: DockviewReadyEvent) => {
       disposeRef.current();
-      restoreOrBuild(api, projectId);
-      applySideMinimums(api);
+      const options = { panels, storageKey, dockWidth };
+      restoreOrBuild(api, projectId, options);
+      applySideMinimums(api, dockWidth());
       const root = api.groups[0]?.element.closest<HTMLElement>(".hf-dock");
       const disposeAccessibility = root ? installDockAccessibility(api, root) : () => {};
       const disposeTabFill = root ? installTabFill(api, root) : () => {};
-      // The dock spans the window (buildEditLayout sizes against it too); its own box lags a resize.
-      const resizeObserver = new ResizeObserver(() => applySideMinimums(api, window.innerWidth));
+      // Sides size against dockWidth, the window by default; the dock's own box lags a resize.
+      const resizeObserver = new ResizeObserver(() => applySideMinimums(api, dockWidth()));
       if (root) resizeObserver.observe(root);
       const store = useDockLayoutStore.getState();
-      store.attach(createController(api));
+      store.attach(createController(api, options), panels);
       store.sync(snapshot(api));
       const pending = store.takePendingActivation();
       if (pending) api.getPanel(pending)?.api.setActive();
@@ -167,7 +194,7 @@ function Root({ projectId, children }: { projectId: string | null; children: Rea
       const persist = () => {
         clearTimeout(timer);
         timer = setTimeout(() => {
-          writeStudioUiPreferences({ dockLayout: api.toJSON() }, undefined, projectId);
+          writeStudioUiPreferences({ dockLayout: api.toJSON() }, undefined, projectId, storageKey);
         }, PERSIST_DEBOUNCE_MS);
       };
       // dockview does not fire onDidLayoutChange for add/remove/activate,
@@ -178,11 +205,11 @@ function Root({ projectId, children }: { projectId: string | null; children: Rea
       };
       const subscriptions = [
         api.onDidAddPanel(() => {
-          applySideMinimums(api);
+          applySideMinimums(api, dockWidth());
           onDockChange();
         }),
         api.onDidMovePanel(() => {
-          applySideMinimums(api);
+          applySideMinimums(api, dockWidth());
           onDockChange();
         }),
         api.onDidRemovePanel(onDockChange),
@@ -198,7 +225,7 @@ function Root({ projectId, children }: { projectId: string | null; children: Rea
         useDockLayoutStore.getState().detach();
       };
     },
-    [projectId],
+    [projectId, panels, storageKey, dockWidth],
   );
 
   return (
@@ -235,6 +262,7 @@ function Panel({ id, title, children }: { id: PanelId; title?: string; children:
 
 function WindowMenu() {
   const openPanels = useDockLayoutStore((state) => state.openPanels);
+  const panels = useDockLayoutStore((state) => state.panels);
   const togglePanel = useDockLayoutStore((state) => state.togglePanel);
   const resetLayout = useDockLayoutStore((state) => state.resetLayout);
   const [open, setOpen] = useState(false);
@@ -261,24 +289,21 @@ function WindowMenu() {
         Window
       </button>
       {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-8 z-50 w-44 rounded-md border border-neutral-800 bg-neutral-900 py-1 shadow-lg"
-        >
-          {PANEL_IDS.map((id) => (
+        <div role="menu" className={`${menuClasses.panel} absolute right-0 top-8 z-50 w-44`}>
+          {panels.map((id) => (
             <button
               key={id}
               type="button"
               role="menuitemcheckbox"
               aria-checked={openPanels.has(id)}
               onClick={() => togglePanel(id)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-neutral-300 hover:bg-neutral-800"
+              className={`${menuClasses.row} ${menuClasses.rowEnabled} flex items-center gap-2`}
             >
-              <span className="w-3 text-panel-accent">{openPanels.has(id) ? "✓" : ""}</span>
+              <span className="w-3 text-accent-ink">{openPanels.has(id) ? "✓" : ""}</span>
               {PANEL_DEFINITIONS[id].title}
             </button>
           ))}
-          <div className="my-1 border-t border-neutral-800" />
+          <div className={menuClasses.divider} />
           <button
             type="button"
             role="menuitem"
@@ -286,7 +311,7 @@ function WindowMenu() {
               resetLayout();
               setOpen(false);
             }}
-            className="w-full px-3 py-1.5 text-left text-[11px] text-neutral-300 hover:bg-neutral-800"
+            className={`${menuClasses.row} ${menuClasses.rowEnabled}`}
           >
             Reset layout
           </button>

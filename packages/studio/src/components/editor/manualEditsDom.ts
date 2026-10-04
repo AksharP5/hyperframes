@@ -32,23 +32,79 @@ import {
   STUDIO_ORIGINAL_TRANSFORM_DISPLAY_ATTR,
   STUDIO_ROTATION_TRANSFORM_ORIGIN,
 } from "./manualEditsTypes";
-import { roundRotationAngle } from "./manualEditsParsing";
-import { gsapAnimatesProperty } from "./gsapAnimatesProperty";
+import { gsapWritesChannels } from "../../hooks/gsapRuntimeKeyframes";
 import { splitTopLevelWhitespace } from "./manualEditsStyleHelpers";
+import { roundTo3, roundToLayoutPx } from "../../utils/rounding";
+import { BOX_SIZE_STYLE_PROPS } from "./manualEditsDomPatches";
 
 /* ── Gesture tracking ─────────────────────────────────────────────── */
 let studioManualEditGestureId = 0;
 
-export function beginStudioManualEditGesture(element: HTMLElement): string {
+export type StudioGestureDraws = "move" | "resize" | "rotate" | "edit";
+const MOVE_DRAWS = ["translate", STUDIO_OFFSET_X_PROP, STUDIO_OFFSET_Y_PROP];
+const GESTURE_DRAWS: Record<StudioGestureDraws, readonly string[]> = {
+  move: MOVE_DRAWS,
+  resize: [...MOVE_DRAWS, STUDIO_WIDTH_PROP, STUDIO_HEIGHT_PROP, ...BOX_SIZE_STYLE_PROPS],
+  rotate: ["rotate", "transform", "transform-origin", "display", STUDIO_ROTATION_PROP],
+  edit: [],
+};
+
+export function beginStudioManualEditGesture(
+  element: HTMLElement,
+  draws: StudioGestureDraws,
+): string {
   studioManualEditGestureId += 1;
-  const token = `gesture-${studioManualEditGestureId}`;
+  const token = `gesture-${studioManualEditGestureId}:${draws}`;
   element.setAttribute(STUDIO_MANUAL_EDIT_GESTURE_ATTR, token);
   return token;
 }
 
+const GESTURE_ENDED = "hf-manual-edit-gesture-ended";
+
 export function endStudioManualEditGesture(element: HTMLElement, token?: string): void {
   if (token && element.getAttribute(STUDIO_MANUAL_EDIT_GESTURE_ATTR) !== token) return;
+  if (!element.hasAttribute(STUDIO_MANUAL_EDIT_GESTURE_ATTR)) return;
   element.removeAttribute(STUDIO_MANUAL_EDIT_GESTURE_ATTR);
+  const doc = element.ownerDocument;
+  doc.dispatchEvent(new (doc.defaultView?.Event ?? Event)(GESTURE_ENDED));
+}
+
+export function isStudioManualEditGestureLiveIn(doc: Document): boolean {
+  return doc.querySelector(`[${STUDIO_MANUAL_EDIT_GESTURE_ATTR}]`) !== null;
+}
+
+/** Runs `run` once the last gesture in `doc` ends; the returned function stops waiting. */
+export function afterStudioManualEditGestures(doc: Document, run: () => void): () => void {
+  const onEnded = () => {
+    if (isStudioManualEditGestureLiveIn(doc)) return;
+    stop();
+    run();
+  };
+  const stop = () => doc.removeEventListener(GESTURE_ENDED, onEnded);
+  doc.addEventListener(GESTURE_ENDED, onEnded);
+  return stop;
+}
+
+const gestureSaves = new WeakMap<Document, number>();
+
+export function studioManualEditSavesIn(doc: Document): number {
+  return gestureSaves.get(doc) ?? 0;
+}
+
+/** Runs a gesture's save, counted as it starts and as it settles: a reload requested before shows the old file. */
+export function countStudioManualEditSave<R>(element: HTMLElement, save: () => R): R {
+  const doc = element.ownerDocument;
+  const count = () => void gestureSaves.set(doc, studioManualEditSavesIn(doc) + 1);
+  count();
+  const result = save();
+  void Promise.resolve(result).then(count, count);
+  return result;
+}
+
+export function studioGestureDraws(element: Element): readonly string[] | null {
+  const token = element.getAttribute(STUDIO_MANUAL_EDIT_GESTURE_ATTR);
+  if (token === null) return null;
+  return GESTURE_DRAWS[token.split(":")[1] as StudioGestureDraws] ?? [];
 }
 
 function isStudioManualEditGestureActive(element: HTMLElement): boolean {
@@ -203,8 +259,8 @@ function writeStudioPathOffsetVars(
 ): void {
   prepareStudioPathOffsetBase(element, options.updateBase ?? true);
   element.setAttribute(STUDIO_PATH_OFFSET_ATTR, "true");
-  element.style.setProperty(STUDIO_OFFSET_X_PROP, `${Math.round(offset.x)}px`);
-  element.style.setProperty(STUDIO_OFFSET_Y_PROP, `${Math.round(offset.y)}px`);
+  element.style.setProperty(STUDIO_OFFSET_X_PROP, `${roundTo3(offset.x)}px`);
+  element.style.setProperty(STUDIO_OFFSET_Y_PROP, `${roundTo3(offset.y)}px`);
 }
 
 /* ── Path offset apply ────────────────────────────────────────────── */
@@ -253,15 +309,15 @@ function stripGsapTranslateFromTransform(element: HTMLElement): void {
 // — as the non-GSAP path does — composes ON TOP of GSAP's transform, and the
 // subsequent strip/reapply math compounds into a runaway matrix that flings the
 // element off-canvas. So for GSAP-animated elements we keep `translate: none`
-// and push the offset straight into GSAP's x/y via gsap.set; the var() offset is
-// still persisted (buildPathOffsetPatches), and GSAP re-reads it at init on
-// reload. Returns true when handled as GSAP (caller must skip the CSS path).
+// and push the offset straight into GSAP's x/y via gsap.set; the var() offset an
+// older Studio saved stays in the file, and GSAP re-reads it at init on reload.
+// Returns true when handled as GSAP (caller must skip the CSS path).
 // fallow-ignore-next-line complexity
 function applyStudioPathOffsetViaGsap(
   element: HTMLElement,
   offset: { x: number; y: number },
 ): boolean {
-  if (!gsapAnimatesProperty(element, "x", "y")) return false;
+  if (!gsapWritesChannels(element, ["x", "y"])) return false;
   element.style.setProperty("translate", "none");
   const win = element.ownerDocument.defaultView as
     | (Window & {
@@ -325,7 +381,7 @@ export function applyStudioPathOffsetDraft(
   // Non-GSAP elements: use CSS translate as before.
   element.style.setProperty(
     "translate",
-    composeTranslateValue(element, `${Math.round(offset.x)}px`, `${Math.round(offset.y)}px`),
+    composeTranslateValue(element, `${roundTo3(offset.x)}px`, `${roundTo3(offset.y)}px`),
   );
   stripGsapTranslateFromTransform(element);
 }
@@ -342,7 +398,7 @@ function readParentFlexBasisPixels(
   if (display !== "flex" && display !== "inline-flex") return null;
 
   const direction = readStyleOrComputed(parent, "flex-direction").trim();
-  return Math.round(Math.max(1, direction.startsWith("column") ? size.height : size.width));
+  return roundToLayoutPx(Math.max(1, direction.startsWith("column") ? size.height : size.width));
 }
 
 function restoreStaleStudioScaleResize(element: HTMLElement): void {
@@ -417,8 +473,8 @@ function writeStudioBoxSizeVars(
   }
 
   element.setAttribute(STUDIO_BOX_SIZE_ATTR, "true");
-  element.style.setProperty(STUDIO_WIDTH_PROP, `${Math.round(Math.max(1, size.width))}px`);
-  element.style.setProperty(STUDIO_HEIGHT_PROP, `${Math.round(Math.max(1, size.height))}px`);
+  element.style.setProperty(STUDIO_WIDTH_PROP, `${roundToLayoutPx(Math.max(1, size.width))}px`);
+  element.style.setProperty(STUDIO_HEIGHT_PROP, `${roundToLayoutPx(Math.max(1, size.height))}px`);
 }
 
 function applyStudioBoxSizeDimensions(
@@ -428,8 +484,8 @@ function applyStudioBoxSizeDimensions(
   writeStudioBoxSizeVars(element, size);
   restoreStaleStudioScaleResize(element);
 
-  const width = Math.round(Math.max(1, size.width));
-  const height = Math.round(Math.max(1, size.height));
+  const width = roundToLayoutPx(Math.max(1, size.width));
+  const height = roundToLayoutPx(Math.max(1, size.height));
   element.style.setProperty("box-sizing", "border-box");
   element.style.setProperty("width", `${width}px`);
   element.style.setProperty("height", `${height}px`);
@@ -457,10 +513,26 @@ export function applyStudioBoxSize(
   applyStudioBoxSizeDimensions(element, size);
 }
 
+// The element's box before a resize draft first changed it; gone once the resize saves or is restored.
+const boxSizeDraftBases = new WeakMap<HTMLElement, { width: number; height: number }>();
+
+export function readStudioBoxSizeDraftBase(
+  element: HTMLElement,
+): { width: number; height: number } | null {
+  return boxSizeDraftBases.get(element) ?? null;
+}
+
+export function forgetStudioBoxSizeDraftBase(element: HTMLElement): void {
+  boxSizeDraftBases.delete(element);
+}
+
 export function applyStudioBoxSizeDraft(
   element: HTMLElement,
   size: { width: number; height: number },
 ): void {
+  if (!boxSizeDraftBases.has(element)) {
+    boxSizeDraftBases.set(element, { width: element.offsetWidth, height: element.offsetHeight });
+  }
   promoteInlineForTransform(element);
   applyStudioBoxSizeDimensions(element, size);
 }
@@ -509,7 +581,7 @@ function writeStudioRotationVars(
 ): void {
   prepareStudioRotationBase(element, options.updateBase ?? true);
   element.setAttribute(STUDIO_ROTATION_ATTR, "true");
-  element.style.setProperty(STUDIO_ROTATION_PROP, `${roundRotationAngle(rotation.angle)}deg`);
+  element.style.setProperty(STUDIO_ROTATION_PROP, `${roundTo3(rotation.angle)}deg`);
   element.style.setProperty("transform-origin", STUDIO_ROTATION_TRANSFORM_ORIGIN);
 }
 
@@ -520,15 +592,5 @@ export function applyStudioRotation(element: HTMLElement, rotation: { angle: num
   element.style.setProperty(
     "rotate",
     composeStudioRotationValue(element, `var(${STUDIO_ROTATION_PROP}, 0deg)`),
-  );
-}
-
-export function applyStudioRotationDraft(element: HTMLElement, rotation: { angle: number }): void {
-  promoteInlineForTransform(element);
-  writeStudioRotationVars(element, rotation, { updateBase: false });
-  element.setAttribute(STUDIO_ROTATION_DRAFT_ATTR, "true");
-  element.style.setProperty(
-    "rotate",
-    composeStudioRotationValue(element, `${roundRotationAngle(rotation.angle)}deg`),
   );
 }

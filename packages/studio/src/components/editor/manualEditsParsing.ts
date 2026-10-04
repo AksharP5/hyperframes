@@ -3,10 +3,6 @@ export function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-export function roundRotationAngle(angle: number): number {
-  return Math.round(angle * 10) / 10;
-}
-
 /* ── File path utilities ──────────────────────────────────────────── */
 function normalizeStudioFileChangePath(path: string): string {
   return path
@@ -46,4 +42,11 @@ export function readFileChangeAffectedCompositions(payload: unknown): readonly s
   const value = asPayloadRecord(payload)?.affectedCompositions;
   if (!Array.isArray(value) || !value.every((path) => typeof path === "string")) return null;
   return value.map(normalizeStudioFileChangePath);
+}
+
+export function mergeFileChangeAffectedCompositions(waiting: unknown, incoming: unknown): unknown {
+  const before = readFileChangeAffectedCompositions(waiting);
+  const after = readFileChangeAffectedCompositions(incoming);
+  const merged = before && after ? [...new Set([...before, ...after])] : null;
+  return { ...asPayloadRecord(incoming), affectedCompositions: merged };
 }

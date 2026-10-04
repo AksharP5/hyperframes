@@ -51,6 +51,7 @@ export interface TimelineMoveInput {
   originScrollLeft?: number;
   currentScrollLeft?: number;
   pixelsPerSecond: number;
+  minStart?: number;
   maxStart: number;
   trackOrder: number[];
   layerOrder?: TimelineLayerId[];
@@ -127,7 +128,7 @@ export function resolveTimelineMove(
   const deltaTrack = Math.round(trackDeltaRaw);
   const nextStart = clamp(
     roundToCentiseconds(input.start + deltaTime),
-    0,
+    input.minStart ?? 0,
     Math.max(0, input.maxStart),
   );
 
@@ -247,7 +248,9 @@ export interface TimelinePromptElement {
   track: number;
 }
 
-export type BlockedTimelineEditIntent = "move" | "resize-start" | "resize-end";
+export type BlockedTimelineEditIntent = "move" | "edit-many" | "resize-start" | "resize-end";
+
+export const MAX_HAND_EDIT_CLIPS = 3;
 
 export interface TimelineRangeSelection {
   start: number;
@@ -381,17 +384,6 @@ export function resolveBlockedTimelineEditIntent(input: {
   return "move";
 }
 
-export function buildClipRangeSelection(
-  clip: { start: number; duration: number },
-  anchor: { anchorX: number; anchorY: number },
-): TimelineRangeSelection {
-  return {
-    start: clip.start,
-    end: clip.start + clip.duration,
-    anchorX: anchor.anchorX,
-    anchorY: anchor.anchorY,
-  };
-}
 export function buildTimelineAgentPrompt({
   rangeStart,
   rangeEnd,

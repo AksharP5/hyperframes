@@ -1,7 +1,9 @@
 import { useState, useCallback, useEffect, useId, useRef, memo } from "react";
 import { formatTime, frameToSeconds } from "../lib/time";
 import { Tooltip } from "../../components/ui";
+import { flatActive, flatIdle } from "../../components/timelineToolbarStyles";
 import { useContextMenuDismiss } from "../../hooks/useContextMenuDismiss";
+import { usePlayerStore } from "../store/playerStore";
 import { DEFAULT_SHORTCUT_SECTIONS, type ShortcutSection } from "./studioShortcuts";
 
 interface ShortcutsPanelProps {
@@ -76,9 +78,7 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
           ref={triggerRef}
           type="button"
           onClick={() => setShowShortcuts((v) => !v)}
-          className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-            showShortcuts ? "text-neutral-200" : "text-neutral-600 hover:text-neutral-300"
-          }`}
+          className={showShortcuts ? flatActive : flatIdle}
           aria-label="Shortcuts and tools"
           aria-expanded={showShortcuts}
           aria-controls={shortcutsPanelId}
@@ -109,10 +109,8 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
           // Deliberately NOT aria-modal. This is a non-modal disclosure: focus is
           // not trapped and the rest of the editor stays operable, so claiming
           // modality would make assistive tech treat the whole app as inert.
-          className="absolute bottom-full right-0 mb-2 z-50 rounded-lg shadow-xl min-w-[220px] overflow-y-auto outline-hidden"
+          className="absolute bottom-full right-0 mb-2 z-50 rounded-lg border border-border bg-raised shadow-popover min-w-[220px] overflow-y-auto outline-hidden"
           style={{
-            background: "#161618",
-            border: "1px solid rgba(255,255,255,0.08)",
             maxHeight: "min(280px, calc(100vh - 80px))",
           }}
         >
@@ -144,7 +142,7 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
               </Tooltip>
             </form>
           </div>
-          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />
+          <div className="border-t border-border" />
           <div className="px-3 pt-2.5 pb-2">
             <p className="text-[9px] font-medium text-neutral-500 uppercase tracking-wider mb-1.5">
               Work area
@@ -152,10 +150,7 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span
-                    className="font-mono text-[10px] rounded-sm border border-neutral-700 px-1.5 py-0.5 text-neutral-300 min-w-[20px] text-center"
-                    style={{ background: "rgba(255,255,255,0.05)" }}
-                  >
+                  <span className="font-mono text-[10px] rounded-sm border border-neutral-700 px-1.5 py-0.5 text-neutral-300 min-w-[20px] text-center bg-hover">
                     I
                   </span>
                   <span className="text-[10px] text-neutral-400">In-point</span>
@@ -193,10 +188,7 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
               </div>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <span
-                    className="font-mono text-[10px] rounded-sm border border-neutral-700 px-1.5 py-0.5 text-neutral-300 min-w-[20px] text-center"
-                    style={{ background: "rgba(255,255,255,0.05)" }}
-                  >
+                  <span className="font-mono text-[10px] rounded-sm border border-neutral-700 px-1.5 py-0.5 text-neutral-300 min-w-[20px] text-center bg-hover">
                     O
                   </span>
                   <span className="text-[10px] text-neutral-400">Out-point</span>
@@ -234,7 +226,7 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
               </div>
             </div>
           </div>
-          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />
+          <div className="border-t border-border" />
           <div className="px-3 pt-2.5 pb-3 flex flex-col gap-3">
             {sections.map((section, sectionIndex) => (
               <div key={sectionIndex}>
@@ -244,10 +236,7 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
                 <div className="flex flex-col gap-1">
                   {section.hints.map((hint, hintIndex) => (
                     <div key={hintIndex} className="flex items-center gap-3">
-                      <span
-                        className="font-mono text-[10px] rounded-sm border border-neutral-700 px-1.5 py-0.5 text-neutral-300 min-w-[36px] text-center"
-                        style={{ background: "rgba(255,255,255,0.05)" }}
-                      >
+                      <span className="font-mono text-[10px] rounded-sm border border-neutral-700 px-1.5 py-0.5 text-neutral-300 min-w-[36px] text-center bg-hover">
                         {hint.key}
                       </span>
                       <span className="text-[10px] text-neutral-400">{hint.label}</span>
@@ -262,3 +251,28 @@ export const ShortcutsPanel = memo(function ShortcutsPanel({
     </div>
   );
 });
+
+export interface ShortcutsButtonProps {
+  sections?: readonly ShortcutSection[];
+  disabled?: boolean;
+  onSeek?: (time: number) => void;
+}
+
+export function ShortcutsButton({ sections, disabled = false, onSeek }: ShortcutsButtonProps) {
+  const duration = usePlayerStore((s) => s.duration);
+  const inPoint = usePlayerStore((s) => s.inPoint);
+  const outPoint = usePlayerStore((s) => s.outPoint);
+  const { setInPoint, setOutPoint, requestSeek } = usePlayerStore.getState();
+  return (
+    <ShortcutsPanel
+      disabled={disabled}
+      duration={duration}
+      inPoint={inPoint}
+      outPoint={outPoint}
+      setInPoint={setInPoint}
+      setOutPoint={setOutPoint}
+      onSeek={onSeek ?? requestSeek}
+      sections={sections}
+    />
+  );
+}

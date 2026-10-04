@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -648,4 +649,49 @@ describe("upload collision races", () => {
     raceDuringRead("upload.txt", () => renameSync(project, `${project}-renamed`));
     await expectProjectGone(await upload(app), project);
   });
+});
+
+describe("rename reference updates", () => {
+  const renameInside = (app: Hono) =>
+    app.request(fileUrl("inside.txt"), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ newPath: "moved.txt" }),
+    });
+
+  // Windows and root read every folder, so the rename never meets one it may not read there.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "a rename past an unreadable folder or file still answers ok and updates what it can read",
+    async () => {
+      const { app, project } = fixture();
+      writeFileSync(join(project, "index.html"), '<img src="inside.txt">');
+      mkdirSync(join(project, "private"));
+      writeFileSync(join(project, "locked.html"), '<img src="inside.txt">');
+      chmodSync(join(project, "private"), 0o000);
+      chmodSync(join(project, "locked.html"), 0o000);
+      try {
+        expect(() => readdirSync(join(project, "private"))).toThrow(/EACCES|EPERM/);
+        const rename = await renameInside(app);
+        expect(rename.status).toBe(200);
+        expect(existsSync(join(project, "inside.txt"))).toBe(false);
+        expect(readFileSync(join(project, "moved.txt"), "utf8")).toBe("inside");
+        expect(readFileSync(join(project, "index.html"), "utf8")).toBe('<img src="moved.txt">');
+      } finally {
+        chmodSync(join(project, "private"), 0o755);
+        chmodSync(join(project, "locked.html"), 0o644);
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "a rename whose reference scan fails for another reason still says so",
+    async () => {
+      const { app, project } = fixture();
+      // A link named like a text file that leads to a folder: reading it fails, and not for want of permission.
+      mkdirSync(join(project, "folder"));
+      symlinkSync(join(project, "folder"), join(project, "link.html"), "dir");
+      const rename = await renameInside(app);
+      expect(rename.status).toBe(500);
+    },
+  );
 });

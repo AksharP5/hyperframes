@@ -6,6 +6,8 @@ import type { useTimelinePlayer } from "./useTimelinePlayer";
 import {
   attachIframeAdapter,
   attachIframeWindow,
+  makeAdapterWindow,
+  makeFakeIframe,
   renderTimelinePlayerHarness,
   resetPlayerStore,
 } from "./timelinePlayerTestHarness";
@@ -263,6 +265,48 @@ describe("useTimelinePlayer audio controls (#835)", () => {
 });
 
 describe("useTimelinePlayer seek keepPlaying option (#834)", () => {
+  it("publishes a seek as a person's seek, so a paused timeline follows it", () => {
+    const { root, api } = renderAttachedTimelinePlayer();
+    const before = liveTime.seekCount();
+    seekWithAct(api, 5);
+    expect(liveTime.seekCount()).toBe(before + 1);
+    expect(liveTime.latest()).toBe(5);
+    unmountWithAct(root);
+  });
+
+  it("does not count a reload's hand-over as a person's seek", () => {
+    const { getApi, root } = renderTimelinePlayerHarness();
+    act(() => {
+      getApi().iframeRef.current = makeFakeIframe(makeAdapterWindow().win);
+      getApi().onIframeLoad();
+    });
+    seekWithAct(getApi(), 7);
+    act(() => getApi().refreshPlayer());
+    const seeks = liveTime.seekCount();
+    const gen = getApi().previewSlots.find((s) => s.role === "shadow")!.gen;
+    const shadow = makeFakeIframe(makeAdapterWindow().win);
+    shadow.src = "http://localhost/api/projects/demo/preview?_t=1";
+    act(() => {
+      getApi().setShadowIframeNode(shadow);
+      getApi().onShadowIframeLoad(gen);
+      getApi().onShadowReadyChange(gen, true);
+    });
+    expect(getApi().iframeRef.current).toBe(shadow);
+    expect(liveTime.latest()).toBe(7);
+    expect(liveTime.seekCount()).toBe(seeks);
+    unmountWithAct(root);
+  });
+
+  it("does not count the audition's return to the paused time as a person's seek", () => {
+    const { api, root } = renderAttachedTimelinePlayer();
+    seekWithAct(api, 4);
+    const seeks = liveTime.seekCount();
+    act(() => usePlayerStore.getState().requestPlayback(false, 2));
+    expect(liveTime.latest()).toBe(2);
+    expect(liveTime.seekCount()).toBe(seeks);
+    unmountWithAct(root);
+  });
+
   it("default seek() clears isPlaying when the store reports playing", () => {
     const { api, root } = renderAttachedTimelinePlayer();
     setStorePlaying();
@@ -309,7 +353,11 @@ describe("useTimelinePlayer seek keepPlaying option (#834)", () => {
 describe("useTimelinePlayer RAF loop wrap-around", () => {
   type SeekCall = { time: number; options?: { keepPlaying?: boolean } };
 
-  function attachInstrumentedAdapter(api: ReturnType<typeof useTimelinePlayer>, duration = 30) {
+  function attachInstrumentedAdapter(
+    api: ReturnType<typeof useTimelinePlayer>,
+    duration = 30,
+    hooks: object = {},
+  ) {
     let currentTime = 0;
     let playing = false;
     const seekCalls: SeekCall[] = [];
@@ -333,6 +381,7 @@ describe("useTimelinePlayer RAF loop wrap-around", () => {
     };
     attachIframeWindow(api, {
       __player: adapter,
+      __hf: hooks,
       postMessage: () => {},
       scrollTo: () => {},
       addEventListener: () => {},
@@ -396,6 +445,29 @@ describe("useTimelinePlayer RAF loop wrap-around", () => {
       expect(adapter.play).toHaveBeenCalled();
       expect(usePlayerStore.getState().isPlaying).toBe(true);
 
+      unmountWithAct(root);
+    } finally {
+      raf.restore();
+    }
+  });
+
+  it("tells the preview where the loop wraps to while it plays, and that it stopped looping", () => {
+    const raf = installRafCapture();
+    try {
+      const { api, root } = renderTimelinePlayerHarness();
+      const setLoopStart = vi.fn();
+      const { adapter } = attachInstrumentedAdapter(api, 30, { setLoopStart });
+      act(() => {
+        usePlayerStore.getState().setInPoint(2);
+        usePlayerStore.getState().setOutPoint(5);
+        api.play();
+      });
+      adapter.setTime(3);
+      act(() => void raf.flushOne());
+      expect(setLoopStart).toHaveBeenLastCalledWith(2);
+      act(() => usePlayerStore.getState().setLoopEnabled(false));
+      act(() => void raf.flushOne());
+      expect(setLoopStart).toHaveBeenLastCalledWith(null);
       unmountWithAct(root);
     } finally {
       raf.restore();

@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react";
 import { EXCLUDED_TAGS, mintHfId, walkCompositionDescendants } from "@hyperframes/parsers/hf-ids";
 import type { TimelineElement } from "../player";
 import { usePlayerStore } from "../player";
+import { toAuthoredStart } from "../player/store/timelineElement";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import {
   type ClipboardPayload,
@@ -10,6 +11,7 @@ import {
   deduplicateIds,
   insertAsSibling,
 } from "../utils/clipboardPayload";
+import { carryLook, renamedIds } from "../utils/clipboardLook";
 import { collectHtmlIds } from "../utils/studioHelpers";
 import { insertTimelineAssetIntoSource } from "../utils/timelineAssetDrop";
 import { extendRootDurationInSource } from "../utils/rootDuration";
@@ -27,6 +29,26 @@ import {
   parseSavedSource,
 } from "../utils/authoredSource";
 import { serializeStudioFileMutations } from "../utils/studioFileMutationCoordinator";
+
+type InPlace = { inPlace?: boolean };
+
+const pasteStart = (
+  payload: Extract<ClipboardPayload, { kind: "timeline-clip" }>,
+  targetPath: string,
+  playhead: number,
+  options?: InPlace,
+) =>
+  options?.inPlace && payload.copiedInComposition === targetPath
+    ? Math.min(...payload.clips.map((clip) => clip.start))
+    : playhead;
+
+const pasteWords = (payload: ClipboardPayload) =>
+  payload.kind === "timeline-clip"
+    ? {
+        label: clipLabel("Paste", payload.clips.length),
+        toast: clipToast("Pasted", payload.clips.length),
+      }
+    : { label: "Paste element", toast: "Pasted element" };
 
 interface RecordEditInput {
   label: string;
@@ -158,21 +180,29 @@ const hfIdsInFile = (content: string) =>
 export function pasteElementHtml(
   content: string,
   payload: { html: string; originSelector?: string; originSelectorIndex?: number },
+  fromThisFile = false,
 ): string {
   const reminted = remintHfIds(payload.html, new DOMParser(), hfIdsInFile(content));
   const deduped = deduplicateIds(reminted, collectHtmlIds(content));
-  return insertAsSibling(content, deduped, payload.originSelector, payload.originSelectorIndex);
+  const result = insertAsSibling(
+    content,
+    deduped,
+    payload.originSelector,
+    payload.originSelectorIndex,
+  );
+  return fromThisFile ? carryLook(result, renamedIds(reminted, deduped), 0) : result;
 }
 
-/** Shared insertion path for paste and duplicate, anchored at the playhead or
- *  the selection's end respectively. Returns the final ids so the caller can
- *  select what it just placed, and the furthest end any clip lands at so the
- *  caller can grow the root composition's duration to cover it. */
+/** Shared insertion path for paste and duplicate, anchored at the playhead or the selection's end. Returns the
+ *  final ids so the caller can select what it placed, and the furthest end any clip lands at so it can grow the
+ *  root duration to cover it. `fromThisFile`: the clips came from `content`, so a renamed copy takes its
+ *  original's look. */
 export function pasteTimelineClips(
   content: string,
   clips: readonly TimelineClipboardClip[],
   anchorTime: number,
   liveElements: readonly TimelineElement[],
+  fromThisFile = false,
 ): { content: string; ids: string[]; requiredEnd: number } {
   const groupMinStart = Math.min(...clips.map((c) => c.start));
   let existingIds = collectHtmlIds(content);
@@ -208,6 +238,11 @@ export function pasteTimelineClips(
       .replace(/data-track-index="[^"]*"/, `data-track-index="${newTrack}"`);
     const withPatched = patchedRootTag + deduped.slice(rootTagEnd + 1);
     result = insertTimelineAssetIntoSource(result, withPatched);
+    if (fromThisFile) {
+      const authored = Number(rootTag.match(/data-start="([^"]*)"/)?.[1]);
+      const authoredStart = Number.isFinite(authored) ? authored : clip.start;
+      result = carryLook(result, renamedIds(reminted, deduped), newStart - authoredStart);
+    }
 
     const id = patchedRootTag.match(ID_ATTR_RE)?.[1];
     if (id) ids.push(id);
@@ -293,7 +328,13 @@ export function useClipboard({
     const sourceFile = targets.elements[0]?.sourceFile || activeCompPath || "index.html";
     return readClips(targets).then((clips) => {
       showToast(clips.length > 1 ? `Copied ${clips.length} clips` : "Copied clip", "info");
-      return { kind: "timeline-clip", clips, sourceFile };
+      return {
+        kind: "timeline-clip",
+        clips,
+        sourceFile,
+        projectId: projectIdRef.current ?? undefined,
+        copiedInComposition: activeCompPath || "index.html",
+      };
     });
   }, [activeCompPath, findSelectedClips, readClips, showToast]);
 
@@ -311,6 +352,7 @@ export function useClipboard({
           kind: "dom-element",
           html: savedMarkupElseLive(parseSavedSource(content), live, sourceFile),
           sourceFile,
+          projectId: projectIdRef.current ?? undefined,
           originSelector: domSelection.selector,
           originSelectorIndex: domSelection.selectorIndex,
         };
@@ -348,120 +390,136 @@ export function useClipboard({
 
   // Two independent paste modes (timeline clip vs DOM element) behind one guarded save.
   // fallow-ignore-next-line complexity
-  const handlePaste = useCallback(async () => {
-    const payload = await clipboardRef.current;
-    if (!payload) {
-      showToast("Nothing to paste.", "info");
-      return;
-    }
-    const pid = projectIdRef.current;
-    if (!pid) return;
-
-    const targetPath = activeCompPath || "index.html";
-    try {
-      let pastedIds: string[] = [];
-      const paste = (originalContent: string) => {
-        if (payload.kind !== "timeline-clip") return pasteElementHtml(originalContent, payload);
-        const { currentTime, elements } = usePlayerStore.getState();
-        const pasted = pasteTimelineClips(originalContent, payload.clips, currentTime, elements);
-        pastedIds = pasted.ids;
-        // A clip pasted past the current composition end would exist in the
-        // file but never appear on the timeline or in playback/export (the
-        // root's data-duration is what actually bounds the render).
-        return extendRootDurationInSource(pasted.content, pasted.requiredEnd);
-      };
-
-      const label =
-        payload.kind === "timeline-clip"
-          ? clipLabel("Paste", payload.clips.length)
-          : "Paste element";
-
-      await saveProjectFilesWithHistory({
-        projectId: pid,
-        label,
-        files: { [targetPath]: paste },
-        readFile: (path) => readFileContent(pid, path),
-        writeFile: writeProjectFile,
-        recordEdit,
-      });
-
-      // CapCut: the pasted clip(s) become the selection; the playhead does not
-      // move. reloadPreview is a bare refresh-key bump with no selection
-      // snapshot of its own; calling setSelection before it is what makes the
-      // post-reload store state land on the pasted ids instead of stale ones.
-      if (pastedIds.length > 0) {
-        usePlayerStore.getState().setSelection(pastedIds.map((id) => elementKey(id, targetPath)));
+  const handlePaste = useCallback(
+    async (options?: InPlace) => {
+      const payload = await clipboardRef.current;
+      if (!payload) {
+        showToast("Nothing to paste.", "info");
+        return;
       }
-      reloadPreview();
-      showToast(
-        payload.kind === "timeline-clip"
-          ? clipToast("Pasted", payload.clips.length)
-          : "Pasted element",
-        "info",
+      const pid = projectIdRef.current;
+      if (!pid) return;
+
+      const targetPath = activeCompPath || "index.html";
+      try {
+        let pastedIds: string[] = [];
+        const fromThisFile = payload.sourceFile === targetPath && payload.projectId === pid;
+        const paste = (originalContent: string) => {
+          if (payload.kind !== "timeline-clip")
+            return pasteElementHtml(originalContent, payload, fromThisFile);
+          const { currentTime, elements } = usePlayerStore.getState();
+          const pasted = pasteTimelineClips(
+            originalContent,
+            payload.clips,
+            pasteStart(payload, targetPath, currentTime, options),
+            elements,
+            fromThisFile,
+          );
+          pastedIds = pasted.ids;
+          // A clip pasted past the current composition end would exist in the
+          // file but never appear on the timeline or in playback/export (the
+          // root's data-duration is what actually bounds the render).
+          return extendRootDurationInSource(pasted.content, pasted.requiredEnd);
+        };
+
+        const { label, toast } = pasteWords(payload);
+
+        await saveProjectFilesWithHistory({
+          projectId: pid,
+          label,
+          files: { [targetPath]: paste },
+          readFile: (path) => readFileContent(pid, path),
+          writeFile: writeProjectFile,
+          recordEdit,
+        });
+
+        // CapCut: the pasted clip(s) become the selection; the playhead does not
+        // move. reloadPreview is a bare refresh-key bump with no selection
+        // snapshot of its own; calling setSelection before it is what makes the
+        // post-reload store state land on the pasted ids instead of stale ones.
+        if (pastedIds.length > 0) {
+          usePlayerStore.getState().setSelection(pastedIds.map((id) => elementKey(id, targetPath)));
+        }
+        reloadPreview();
+        showToast(toast, "info");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to paste";
+        showToast(message);
+      }
+    },
+    [activeCompPath, recordEdit, reloadPreview, showToast, writeProjectFile],
+  );
+
+  // Duplicates the selection right after it, or with `inPlace` at its own time on a track of its own,
+  // without touching the clipboard — a pending copy must survive a Cmd+D. Shares
+  // pasteTimelineClips with handlePaste; only the anchor and clip source differ (the
+  // selection's end or start here, the playhead or the copy's own time there).
+  const handleDuplicate = useCallback(
+    async (options?: InPlace): Promise<boolean> => {
+      const targets = findSelectedClips();
+      if (!targets) return false;
+      const pid = projectIdRef.current;
+      if (!pid) return false;
+
+      const { elements } = targets;
+      const pathOf = (el: TimelineElement) => el.sourceFile || activeCompPath || "index.html";
+      const targetPath = pathOf(elements[0]!);
+      // The copy lands in targetPath's own clock, so anchor and lane check are local to it.
+      const anchorTime = toAuthoredStart(
+        elements[0]!,
+        options?.inPlace
+          ? Math.min(...elements.map((el) => el.start))
+          : Math.max(...elements.map((el) => el.start + el.duration)),
       );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to paste";
-      showToast(message);
-    }
-  }, [activeCompPath, recordEdit, reloadPreview, showToast, writeProjectFile]);
 
-  // Duplicates the current selection in place, immediately after it, without
-  // touching the clipboard — a pending copy must survive a Cmd+D. Shares
-  // pasteTimelineClips with handlePaste; only the anchor and clip source
-  // differ (the selection's own end here, the playhead there).
-  const handleDuplicate = useCallback(async (): Promise<boolean> => {
-    const targets = findSelectedClips();
-    if (!targets) return false;
-    const pid = projectIdRef.current;
-    if (!pid) return false;
+      try {
+        const clips = await readClips(targets);
+        let ids: string[] = [];
+        const duplicate = (originalContent: string) => {
+          const liveElements = usePlayerStore
+            .getState()
+            .elements.filter((el) => pathOf(el) === targetPath)
+            .map((el) => ({ ...el, start: toAuthoredStart(el, el.start) }));
+          const pasted = pasteTimelineClips(originalContent, clips, anchorTime, liveElements, true);
+          ids = pasted.ids;
+          return extendRootDurationInSource(pasted.content, pasted.requiredEnd);
+        };
 
-    const { elements } = targets;
-    const targetPath = elements[0]?.sourceFile || activeCompPath || "index.html";
-    const anchorTime = Math.max(...elements.map((el) => el.start + el.duration));
+        await saveProjectFilesWithHistory({
+          projectId: pid,
+          label: clipLabel("Duplicate", clips.length),
+          files: { [targetPath]: duplicate },
+          readFile: (path) => readFileContent(pid, path),
+          writeFile: writeProjectFile,
+          recordEdit,
+        });
 
-    try {
-      const clips = await readClips(targets);
-      let ids: string[] = [];
-      const duplicate = (originalContent: string) => {
-        const liveElements = usePlayerStore.getState().elements;
-        const pasted = pasteTimelineClips(originalContent, clips, anchorTime, liveElements);
-        ids = pasted.ids;
-        return extendRootDurationInSource(pasted.content, pasted.requiredEnd);
-      };
-
-      await saveProjectFilesWithHistory({
-        projectId: pid,
-        label: clipLabel("Duplicate", clips.length),
-        files: { [targetPath]: duplicate },
-        readFile: (path) => readFileContent(pid, path),
-        writeFile: writeProjectFile,
-        recordEdit,
-      });
-
-      // The duplicate becomes the selection, mirroring CapCut's own paste
-      // convention — there is no CapCut Duplicate to match directly (Cmd+D is
-      // a no-op there); this is our own choice for consistency with paste.
-      // Select before reloading, same reason as handlePaste above.
-      if (ids.length > 0) {
-        usePlayerStore.getState().setSelection(ids.map((id) => elementKey(id, targetPath)));
+        // The duplicate becomes the selection, mirroring CapCut's own paste
+        // convention — there is no CapCut Duplicate to match directly (Cmd+D is
+        // a no-op there); this is our own choice for consistency with paste.
+        // Select before reloading, same reason as handlePaste above.
+        if (ids.length > 0) {
+          usePlayerStore.getState().setSelection(ids.map((id) => elementKey(id, targetPath)));
+        }
+        reloadPreview();
+        showToast(clipToast("Duplicated", clips.length), "info");
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to duplicate";
+        showToast(message);
+        return false;
       }
-      reloadPreview();
-      showToast(clipToast("Duplicated", clips.length), "info");
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to duplicate";
-      showToast(message);
-      return false;
-    }
-  }, [
-    activeCompPath,
-    findSelectedClips,
-    readClips,
-    recordEdit,
-    reloadPreview,
-    showToast,
-    writeProjectFile,
-  ]);
+    },
+    [
+      activeCompPath,
+      findSelectedClips,
+      readClips,
+      recordEdit,
+      reloadPreview,
+      showToast,
+      writeProjectFile,
+    ],
+  );
 
   const handleCut = useCallback(async (): Promise<boolean> => {
     const selected = getSelectedElements();

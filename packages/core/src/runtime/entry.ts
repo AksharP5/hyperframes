@@ -1,5 +1,6 @@
 import { initSandboxRuntimeModular, installAuthoredMediaCapture } from "./init";
 import { installAuthoredOpacityCapture } from "./colorGrading";
+import { deferMediaUntilDue } from "./preloadMedia";
 import { hideTimedClipsUntilFirstPass } from "./timedClipHide";
 import { fitTextFontSize } from "../text/fitTextFontSize";
 import { pretext } from "../text/pretext";
@@ -31,6 +32,7 @@ installAuthoredOpacityCapture();
 installAuthoredMediaCapture();
 
 hideTimedClipsUntilFirstPass();
+deferMediaUntilDue();
 
 // Expose runtime helpers immediately so composition scripts can use them
 // before DOMContentLoaded (font sizing runs during script evaluation, and

@@ -1,5 +1,11 @@
 import { readExternalScriptAttributes, type ExternalScriptAttributes } from "./externalScripts";
 import { parseImportMap, type ImportMap } from "./importMaps";
+import {
+  compositionStyle,
+  cssStyleMergeKey,
+  hasSameLink,
+  type CompositionStyle,
+} from "./scriptRuns";
 /**
  * Shared sub-composition inlining logic.
  *
@@ -24,6 +30,11 @@ import {
   scopedModulePrelude,
   wrapScopedCompositionScript,
 } from "./compositionScoping";
+import {
+  namespaceCollidingSvgIds,
+  rewriteSvgIdReferencesInCss,
+  type SvgIdScope,
+} from "./svgIdNamespacing";
 import {
   checkSubCompositionUsability,
   resolveSubCompositionContent,
@@ -229,8 +240,31 @@ export interface InlineSubCompositionsOptions {
   tagScenes?: boolean;
 }
 
+export interface ExternalLink {
+  href: string;
+  rel: string;
+  crossorigin?: string;
+  media?: string;
+  title?: string;
+  type?: string;
+  disabled?: true;
+}
+
+/** Appends a hoisted link unless the document already has a live one it would duplicate. */
+export function ensureExternalLinkTag(doc: Document, link: ExternalLink): void {
+  const el = doc.createElement("link");
+  el.setAttribute("rel", link.rel);
+  el.setAttribute("href", link.href);
+  for (const name of ["crossorigin", "media", "title", "type"] as const) {
+    const value = link[name];
+    if (value != null) el.setAttribute(name, value);
+  }
+  if (link.disabled) el.setAttribute("disabled", "");
+  if (!hasSameLink(doc, el)) doc.head.appendChild(el);
+}
+
 export interface InlineSubCompositionsResult {
-  styles: string[];
+  styles: CompositionStyle[];
   /** With `tagScenes`: the scene each entry of `styles` belongs to. */
   styleScenes: string[];
   scripts: string[];
@@ -239,7 +273,8 @@ export interface InlineSubCompositionsResult {
     | { kind: "inline"; content: string; scene?: string }
     | ({ kind: "external"; src: string; scene?: string } & ExternalScriptAttributes)
   >;
-  externalLinks: { href: string; rel: string; crossorigin?: string }[];
+  /** May list one link more than once; `ensureExternalLinkTag` dedupes. */
+  externalLinks: ExternalLink[];
   variablesByComp: Record<string, Record<string, unknown>>;
   /** Mounted files' import maps, addresses rebased; emit with `emitMountedModuleScripts`. */
   importMaps: ImportMap[];
@@ -297,16 +332,16 @@ export function inlineSubCompositions(
     tagScenes = false,
   } = options;
 
-  const styles: string[] = [];
+  const styles: CompositionStyle[] = [];
   const styleScenes: string[] = [];
   const scripts: string[] = [];
   const externalScriptSrcs: string[] = [];
   const scriptItems: InlineSubCompositionsResult["scriptItems"] = [];
   const importMaps: ImportMap[] = [];
   const moduleScripts: string[] = [];
-  const externalLinks: { href: string; rel: string; crossorigin?: string }[] = [];
-  const seenLinkHrefs = new Set<string>();
+  const externalLinks: ExternalLink[] = [];
   const variablesByComp: Record<string, Record<string, unknown>> = {};
+  const svgIdScopes: Array<SvgIdScope & { styleStart: number; styleEnd: number }> = [];
 
   const sceneHosts = new Map<string, Element>();
   const queue = hosts.map((element) => ({
@@ -441,24 +476,30 @@ export function inlineSubCompositions(
     // composition's font from the render while preview kept it.
     for (const link of plan.linkSources) {
       const href = resolveSubAssetPath(link.getAttribute("href"));
-      if (href && !seenLinkHrefs.has(href)) {
-        seenLinkHrefs.add(href);
+      if (href) {
         const rel = (link.getAttribute("rel") || "").trim();
         const crossorigin = link.hasAttribute("crossorigin")
           ? link.getAttribute("crossorigin") || ""
           : undefined;
-        externalLinks.push({ href, rel, crossorigin });
+        const media = link.getAttribute("media") ?? undefined;
+        const title = link.getAttribute("title") ?? undefined;
+        const type = link.getAttribute("type") ?? undefined;
+        const disabled = link.hasAttribute("disabled") ? true : undefined;
+        externalLinks.push({ href, rel, crossorigin, media, title, type, disabled });
       }
     }
 
     // Head-sourced assets come first: a non-templated sub-composition's <head>
     // carries its backgrounds, positioning and fonts, and a <head> library tag
     // (GSAP from a CDN) has to run before the content scripts calling into it.
+    const styleStart = styles.length;
     for (const styleEl of plan.styleSources) {
-      styles.push(scopeSubStyle(styleEl.textContent || ""));
+      if (cssStyleMergeKey(styleEl) === undefined) continue;
+      styles.push(compositionStyle(styleEl, scopeSubStyle(styleEl.textContent || "")));
       if (scene) styleScenes.push(scene);
       styleEl.remove();
     }
+    const styleEnd = styles.length;
 
     // Head- and content-sourced scripts take the same branch.
     for (const scriptEl of plan.scriptSources) {
@@ -612,7 +653,45 @@ export function inlineSubCompositions(
     for (const nestedHost of nested.hosts) {
       queue.push({ element: nestedHost.host, ancestry: nestedAncestry, scene });
     }
+
+    // Remember this instance for the SVG id pass below. Keyed on the
+    // document-unique runtime id (falling back to the authored id for an
+    // anonymous host with no duplicate instances) — the same identity CSS
+    // scoping and script scoping already key on. Nested hosts are excluded
+    // because each of them is recorded as its own scope when dequeued.
+    svgIdScopes.push({
+      root: hostEl,
+      namespace: runtimeCompId || scopeCompId,
+      exclude: nested.hosts.map((nestedHost) => nestedHost.host),
+      styleStart,
+      styleEnd,
+    });
   }
+
+  // SVG ids (`<clipPath id="clip">`, `<symbol id="shape">`, `<filter
+  // id="fx">`, …) are namespaced only once EVERY instance is in the document:
+  // whether an id collides is a property of the assembled document, not of one
+  // composition file, and an id that stays unique must stay untouched so the
+  // author's own `#id` lookups keep working. Each instance's extracted
+  // `<style>` text gets the same substitution its DOM just received. See
+  // svgIdNamespacing.ts for why this is a rename, unlike the sibling
+  // getElementById/media-id fixes.
+  const svgIdMaps = namespaceCollidingSvgIds(
+    document,
+    svgIdScopes.map(({ root, namespace, exclude, styleStart, styleEnd }) => ({
+      root,
+      namespace,
+      exclude,
+      cssTexts: styles.slice(styleStart, styleEnd).map((style) => style.css),
+    })),
+  );
+  svgIdMaps.forEach((idMap, index) => {
+    if (idMap.size === 0) return;
+    const { styleStart, styleEnd } = svgIdScopes[index]!;
+    for (let i = styleStart; i < styleEnd; i += 1) {
+      styles[i]!.css = rewriteSvgIdReferencesInCss(styles[i]!.css, idMap);
+    }
+  });
 
   return {
     styles,

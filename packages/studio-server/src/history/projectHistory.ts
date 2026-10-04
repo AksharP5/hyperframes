@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { replaceFileAtomically } from "../helpers/atomicFile.js";
+import { replaceFileAtomically } from "@hyperframes/core/atomic-file";
 import {
   DELETED_VERSION,
   fileContentVersion,
@@ -257,6 +257,8 @@ const blocks = (removed: string, added: string) =>
   added.startsWith(`${removed}/`) || removed.startsWith(`${added}/`);
 
 /** A window takes a write within idleMs of its last one; past that it has ended, even before its timer commits it. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
 const takesWrite = (window: Group, at: number) =>
   window.idleMs === undefined || at - (window.lastWriteAt ?? at) <= window.idleMs;
 
@@ -440,7 +442,7 @@ class Engine {
   }
 
   async firstOpen(): Promise<void> {
-    const sweptAt = Date.now();
+    const sweptAt = this.now();
     for (const file of listProjectFiles(this.dir)) {
       const hash = await this.storeIfPresent(file.path);
       if (this.whereFolder() !== "here") throw this.replaced();
@@ -477,7 +479,7 @@ class Engine {
   async sweep(): Promise<void> {
     // A folder moved or removed was not emptied, and another project at its path is none of this history's.
     if (this.whereFolder() !== "here") return;
-    const sweptAt = Date.now();
+    const sweptAt = this.now();
     const changedAt = (file: { mtimeMs: number; ctimeMs: number }) =>
       Math.min(sweptAt, Math.max(file.mtimeMs, file.ctimeMs));
     const seen = listProjectFiles(this.dir);
@@ -820,7 +822,7 @@ class Engine {
       await this.settle();
       const window = { ...this.newGroup(who, label), idleMs };
       this.windows.push(window);
-      this.touch(window, Date.now());
+      this.touch(window, this.now());
       const close = () => this.queue(() => this.sweepAndEnd(window));
       return { id: window.id, startedAt: window.startedAt, close };
     });
@@ -829,11 +831,20 @@ class Engine {
   /** A window with no write for its idleMs ends, so a close that never comes cannot hold every later write. */
   touch(window: Group, at: number): void {
     window.lastWriteAt = Math.max(window.lastWriteAt ?? at, at);
+    this.endWhenIdle(window, window.idleMs);
+  }
+
+  endWhenIdle(window: Group, delay: number | undefined): void {
     clearTimeout(window.idleTimer);
-    if (window.idleMs === undefined || !Number.isFinite(window.idleMs)) return;
+    if (window.idleMs === undefined || !Number.isFinite(window.idleMs) || delay === undefined)
+      return;
     window.idleTimer = setTimeout(
-      () => this.background(() => this.sweepAndEnd(window)),
-      window.idleMs,
+      () => {
+        const left = window.idleMs! - (this.now() - (window.lastWriteAt ?? this.now()));
+        if (left > 0) this.endWhenIdle(window, left);
+        else this.background(() => this.sweepAndEnd(window));
+      },
+      Math.min(delay, MAX_TIMER_MS),
     );
     window.idleTimer.unref?.();
   }

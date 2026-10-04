@@ -4,9 +4,32 @@ import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
 import { describe, expect, it } from "vitest";
 import {
   removeElementFromHtml,
+  removeElementsFromHtml,
   patchElementInHtml,
   probeElementInSource,
+  probeElementsInSource,
 } from "./sourceMutation.js";
+
+describe("removeElementsFromHtml", () => {
+  const html = `<!doctype html><html><body><div data-composition-id="main"><div id="parent"><span id="child"></span></div><div id="a"></div><div id="b"></div><div id="keep"></div></div></body></html>`;
+
+  it("matches removing the targets one at a time", () => {
+    const targets = [{ id: "a" }, { id: "b" }];
+    const oneByOne = targets.reduce(
+      (source, target) => removeElementFromHtml(source, target),
+      html,
+    );
+    expect(removeElementsFromHtml(html, targets)).toBe(oneByOne);
+    expect(oneByOne).toContain(`id="keep"`);
+  });
+
+  it("treats a target nested in an already removed one as done, and an unknown id as a no-op", () => {
+    const updated = removeElementsFromHtml(html, [{ id: "parent" }, { id: "child" }, { id: "x" }]);
+    expect(updated).not.toContain(`id="child"`);
+    expect(updated).toContain(`id="keep"`);
+    expect(removeElementsFromHtml(html, [{ id: "x" }])).toBe(html);
+  });
+});
 
 describe("removeElementFromHtml", () => {
   it("removes a self-closing element by id", () => {
@@ -458,6 +481,12 @@ describe("probeElementInSource", () => {
 
   it("returns true for an element found by id", () => {
     expect(probeElementInSource(FIXTURE, { id: "hero" })).toBe(true);
+  });
+
+  it("answers every target of a batch in order from one parse", () => {
+    expect(
+      probeElementsInSource(FIXTURE, [{ id: "hero" }, { id: "gone" }, { selector: ".brand" }, {}]),
+    ).toEqual([true, false, true, false]);
   });
 
   it("returns true for an element found by class selector", () => {

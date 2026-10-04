@@ -2,15 +2,22 @@
 
 import React, { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
+import { parseGsapScript, type GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { DomEditSelection } from "../components/editor/domEditingTypes";
 import { usePlayerStore } from "../player/store/playerStore";
 import { useAnimatedPropertyCommit } from "./useAnimatedPropertyCommit";
-import { mountReactHarness } from "./domSelectionTestHarness";
+import { mountReactHarness, withInlineLayoutBox } from "./domSelectionTestHarness";
+import { writeSizeWithCrop } from "../components/editor/cropResize";
+import { trackStudioEvent } from "../utils/studioTelemetry";
+import { trackKeyframeCommit } from "../utils/keyframeUsage";
+import type { CommitMutationOptions, CommitMutation } from "./gsapScriptCommitTypes";
+
+vi.mock("../utils/studioTelemetry", () => ({ trackStudioEvent: vi.fn() }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => {
+  vi.clearAllMocks();
   document.body.innerHTML = "";
   usePlayerStore.setState({ autoKeyframeEnabled: true, currentTime: 0 });
 });
@@ -41,7 +48,11 @@ type Commit = (
 /** Renders the hook and hands its commit function to the caller via a ref callback. */
 function renderHookWith(
   animations: GsapAnimation[],
-  onMutation: (mutation: Record<string, unknown>, label: string) => unknown | Promise<unknown>,
+  onMutation: (
+    mutation: Record<string, unknown>,
+    label: string,
+    options: CommitMutationOptions,
+  ) => unknown | Promise<unknown>,
   onReady: (commit: Commit) => void,
   bumpGsapCache = vi.fn(),
   onBatch?: (
@@ -54,9 +65,9 @@ function renderHookWith(
       async (
         _sel: DomEditSelection,
         mutation: Record<string, unknown>,
-        options: { label: string },
+        options: CommitMutationOptions,
       ) => {
-        await onMutation(mutation, options.label);
+        await onMutation(mutation, options.label, options);
       },
       onBatch
         ? {
@@ -361,4 +372,73 @@ describe("commitStaticSet group routing", () => {
     expect(committed).toHaveLength(0);
     act(() => root.unmount());
   });
+});
+
+describe("useAnimatedPropertyCommit — a size write and its crop are one undo step", () => {
+  it.each([[{ width: 450 }], [{ x: 10, width: 450 }]])("%o on a static element", async (props) => {
+    const element = withInlineLayoutBox(document.createElement("div"));
+    element.id = "box";
+    element.style.cssText = "width: 300px; height: 200px; clip-path: inset(0px 60px 0px 0px)";
+    document.body.append(element);
+    const sel = { ...selection, element } as DomEditSelection;
+    const keys: unknown[] = [];
+    const land = async (options: { coalesceKey?: string }) => {
+      keys.push(options.coalesceKey);
+      element.style.width = "450px";
+    };
+    const mutation: CommitMutation = (_s, _m, options) => land(options);
+    mutation.batch = (_calls, options) => land(options);
+    let raw!: ReturnType<typeof useAnimatedPropertyCommit>["commitAnimatedProperties"];
+    function Harness() {
+      raw = useAnimatedPropertyCommit({
+        selectedGsapAnimations: [],
+        gsapCommitMutation: mutation,
+        addGsapAnimation: vi.fn(),
+        convertToKeyframes: vi.fn(),
+        previewIframeRef: { current: null },
+        bumpGsapCache: vi.fn(),
+      }).commitAnimatedProperties;
+      return null;
+    }
+    const root = mountReactHarness(<Harness />);
+    const patch = vi.fn().mockResolvedValue(undefined);
+    await writeSizeWithCrop(sel, props, mutation, patch, (keyed) => raw(sel, props, keyed));
+
+    const cropKey = patch.mock.calls[0]![2].coalesceKey;
+    expect(patch.mock.calls[0]![1][0]).toMatchObject({ value: "inset(0px 90px 0px 0px)" });
+    expect(keys).toEqual([cropKey]);
+    act(() => root.unmount());
+  });
+});
+
+it("counts one add when an inspector edit first converts a flat animation", async () => {
+  usePlayerStore.setState({ autoKeyframeEnabled: true, currentTime: 1 });
+  const flat = parseGsapScript(
+    'const tl = gsap.timeline(); tl.to("#box", { rotationX: 0, duration: 2 }, 0);',
+  ).animations[0]!;
+  const mutations: Record<string, unknown>[] = [];
+  let commit!: Commit;
+  const root = renderHookWith(
+    [flat, keyframedAnim],
+    (mutation, _label, options) => {
+      mutations.push(mutation);
+      trackKeyframeCommit([mutation], { ok: true, changed: true }, options);
+    },
+    (value) => {
+      commit = value;
+    },
+  );
+  try {
+    await act(async () => {
+      await commit(selection, { rotationX: 20 });
+    });
+    expect(mutations.map((mutation) => mutation.type)).toEqual([
+      "convert-to-keyframes",
+      "add-keyframe",
+    ]);
+    expect(trackStudioEvent).toHaveBeenCalledTimes(1);
+    expect(trackStudioEvent).toHaveBeenCalledWith("keyframe", { action: "add" });
+  } finally {
+    act(() => root.unmount());
+  }
 });

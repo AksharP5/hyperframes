@@ -41,7 +41,6 @@ export function useGsapAnimationsForElement(
   const [multipleTimelines, setMultipleTimelines] = useState(false);
   const [unsupportedTimelinePattern, setUnsupportedTimelinePattern] = useState(false);
   const lastFetchKeyRef = useRef("");
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Re-run the per-element cache populate when sub-comp DOM children appear, so a
   // sub-comp element gets its host-relative keyframe percentages (not elDuration=1).
   const domClipChildrenKey = usePlayerStore((s) =>
@@ -53,11 +52,6 @@ export function useGsapAnimationsForElement(
     const fetchKey = `${projectId}:${sourceFile}:${version}:${targetKey}`;
     if (fetchKey === lastFetchKeyRef.current) return;
     lastFetchKeyRef.current = fetchKey;
-
-    if (retryTimerRef.current) {
-      clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = null;
-    }
 
     if (!projectId) {
       setAllAnimations([]);
@@ -80,28 +74,10 @@ export function useGsapAnimationsForElement(
       setAllAnimations(parsed.animations);
       setMultipleTimelines(parsed.multipleTimelines === true);
       setUnsupportedTimelinePattern(parsed.unsupportedTimelinePattern === true);
-
-      // Retry once if initial fetch returned 0 animations — handles
-      // cold-load race where the sourceFile isn't resolved yet.
-      if (parsed.animations.length === 0 && targetKey) {
-        retryTimerRef.current = setTimeout(() => {
-          if (cancelled) return;
-          fetchParsedAnimations(projectId, sourceFile).then((retryParsed) => {
-            if (cancelled) return;
-            if (retryParsed && retryParsed.animations.length > 0) {
-              setAllAnimations(retryParsed.animations);
-            }
-          });
-        }, 800);
-      }
     });
 
     return () => {
       cancelled = true;
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current);
-        retryTimerRef.current = null;
-      }
     };
   }, [projectId, sourceFile, version, target?.id, target?.selector]);
 
@@ -314,17 +290,15 @@ export function usePopulateKeyframeCacheForFile(
   const domClipChildrenKey = usePlayerStore((s) =>
     s.domClipChildren.map((c) => `${c.id}<${c.hostId}`).join("|"),
   );
-  const lastFetchKeyRef = useRef("");
+  const loadedRef = useRef<{ dataKey: string; files: Set<string> }>({
+    dataKey: "",
+    files: new Set(),
+  });
 
   const runtimeScanDoneRef = useRef("");
-  const astFetchDoneRef = useRef("");
 
   useEffect(() => {
-    const fetchKey = `kf-cache:${projectId}:${sourceFile}:${version}:${elementCount}:${domClipChildrenKey}:${compositionSrcKey}`;
-    if (fetchKey === lastFetchKeyRef.current) return;
-    lastFetchKeyRef.current = fetchKey;
-    runtimeScanDoneRef.current = "";
-    astFetchDoneRef.current = "";
+    const dataKey = `kf-cache:${projectId}:${version}:${elementCount}:${domClipChildrenKey}:${compositionSrcKey}`;
     if (!projectId) return;
 
     // The active file first: it owns the selection, and each file clears only
@@ -333,13 +307,21 @@ export function usePopulateKeyframeCacheForFile(
     const files = Array.from(
       new Set([sourceFile, ...(compositionSrcKey ? compositionSrcKey.split("|") : [])]),
     );
-    const doc = iframeRef?.current?.contentDocument;
+    const sameData = loadedRef.current.dataKey === dataKey;
+    const stale = sameData ? files.filter((sf) => !loadedRef.current.files.has(sf)) : files;
+    const covered = sameData ? new Set([...loadedRef.current.files, ...files]) : new Set(files);
+    loadedRef.current = { dataKey, files: covered };
     // Everything the previous scan cached for a file this one no longer covers
     // (the composition just switched away from) has no owner left to clear it.
-    pruneKeyframeCacheToFiles(files);
-    Promise.all(files.map((sf) => populateKeyframeCacheFromAst(projectId, sf, doc))).then(() => {
-      astFetchDoneRef.current = fetchKey;
-    });
+    if (!sameData) pruneKeyframeCacheToFiles(files);
+    if (stale.length === 0) return;
+    runtimeScanDoneRef.current = "";
+    const doc = iframeRef?.current?.contentDocument;
+    for (const sf of stale) {
+      void populateKeyframeCacheFromAst(projectId, sf, doc).then((loaded) => {
+        if (!loaded && loadedRef.current.dataKey === dataKey) loadedRef.current.files.delete(sf);
+      });
+    }
     // elementCount is in the deps because new timeline elements (e.g. after a
     // sub-composition expand) need their keyframe cache populated immediately;
     // without it the effect won't re-run when elements appear/disappear.
@@ -360,8 +342,7 @@ export function usePopulateKeyframeCacheForFile(
     // fallow-ignore-next-line complexity
     const tryRuntimeScan = () => {
       if (runtimeScanDoneRef.current === `kf-cache:${projectId}:${sf}:${version}`) return true;
-      const iframe =
-        iframeRef?.current ?? document.querySelector<HTMLIFrameElement>("iframe[src*='/preview/']");
+      const iframe = iframeRef?.current;
       if (!iframe) return false;
       // Clip dims per element so the scan converts tween-relative keyframes to
       // clip-relative (matching the static path) instead of timeline-relative.

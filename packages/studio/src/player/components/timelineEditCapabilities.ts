@@ -2,6 +2,7 @@ export interface TimelineEditCapabilities {
   canMove: boolean;
   canTrimStart: boolean;
   canTrimEnd: boolean;
+  readOnly?: boolean;
 }
 
 function isDeterministicTimelineWindow(input: {

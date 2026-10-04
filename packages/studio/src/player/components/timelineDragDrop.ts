@@ -5,12 +5,13 @@ import {
   TIMELINE_COMPOSITION_MIME,
 } from "../../utils/timelineCompositionDrop";
 import {
-  getTimelineInsertBoundaryBand,
-  getTimelineRowPositionFromY,
+  getTimelineRowFromY,
   resolveTimelineAssetDrop,
   type TimelineRowGeometry,
 } from "./timelineLayout";
 import { resolveInsertRow } from "./timelineCollision";
+import { usePlayerStore, type TimelineElement } from "../store/playerStore";
+import { collectTimelineSnapTargets, snapTimelineTime, TIMELINE_SNAP_PX } from "./timelineSnapping";
 import type { TimelineDropCallbacks, TimelineDropPlacement } from "./timelineCallbacks";
 import {
   applyTimelineAutoScrollStep,
@@ -21,9 +22,11 @@ interface UseTimelineAssetDropOptions extends TimelineDropCallbacks {
   scrollRef: RefObject<HTMLDivElement | null>;
   ppsRef: RefObject<number>;
   trackOrderRef: RefObject<number[]>;
+  elementsRef: RefObject<readonly TimelineElement[]>;
   rowGeometryRef: RefObject<TimelineRowGeometry>;
   contentOrigin: number;
   sessionEpoch: number;
+  readOnlyPress?: (() => void) | null;
 }
 
 /**
@@ -52,33 +55,49 @@ function canInsertTrackFor(types: readonly string[]): boolean {
   return types.includes("Files") || types.includes(TIMELINE_ASSET_MIME);
 }
 
-/** The row boundary a pointer at `contentY` arms for a new track, or null over a lane's middle. */
+/** The row boundary a pointer at `contentY` opens a new track at, or null over a row. */
 export function resolveDropInsertRow(
   contentY: number,
   rowHeights: readonly number[] | undefined,
   trackCount: number,
 ): number | null {
   if (trackCount === 0) return null;
-  const { rowFloat, rowHeight } = getTimelineRowPositionFromY(contentY, rowHeights);
+  const rowFloat = getTimelineRowFromY(contentY, rowHeights);
   // Past the last lane the drop already appends a track (getDefaultDroppedTrack).
   if (rowFloat >= trackCount) return null;
-  return resolveInsertRow(rowFloat, trackCount, getTimelineInsertBoundaryBand(rowHeight));
+  return resolveInsertRow(rowFloat, trackCount);
+}
+
+function alignDropStart(
+  placement: TimelineDropPlacement,
+  elements: readonly TimelineElement[],
+  pixelsPerSecond: number,
+): TimelineDropPlacement {
+  const laneHasClips =
+    placement.insertRow == null && elements.some((el) => el.track === placement.track);
+  if (!laneHasClips) return { ...placement, start: 0 };
+  if (!usePlayerStore.getState().timelineSnapEnabled) return placement;
+  const targets = collectTimelineSnapTargets({ elements, playheadTime: null, beatTimes: [] });
+  const threshold = TIMELINE_SNAP_PX / Math.max(pixelsPerSecond, 1);
+  return { ...placement, start: snapTimelineTime(placement.start, targets, threshold).time };
 }
 
 function placeDrop(
   geometry: Parameters<typeof resolveTimelineAssetDrop>[0],
+  elements: readonly TimelineElement[],
   clientX: number,
   clientY: number,
   // Blocks and compositions are written by their own installers, which only take a track.
   canInsertTrack: boolean,
 ): TimelineDropPlacement {
   const placement = resolveTimelineAssetDrop(geometry, clientX, clientY);
-  if (!canInsertTrack) return placement;
   const contentY = clientY - geometry.rectTop + geometry.scrollTop;
-  const insertRow = resolveDropInsertRow(contentY, geometry.rowHeights, geometry.trackOrder.length);
-  return insertRow == null
-    ? placement
-    : { ...placement, insertRow, trackOrder: geometry.trackOrder };
+  const insertRow = canInsertTrack
+    ? resolveDropInsertRow(contentY, geometry.rowHeights, geometry.trackOrder.length)
+    : null;
+  const aimed =
+    insertRow == null ? placement : { ...placement, insertRow, trackOrder: geometry.trackOrder };
+  return alignDropStart(aimed, elements, geometry.pixelsPerSecond);
 }
 
 function invokeDropCallback(callback: () => Promise<void> | void): void {
@@ -118,15 +137,15 @@ function applyTypedJsonDrop(
 }
 
 /**
- * Dropping an asset/file/block/composition onto the timeline places it at the
- * exact time and track it was dropped on, like CapCut (pointer placement on
- * every track but the magnetic main track). Supersedes the prior playhead
- * decision (#2291); playhead adds stay available, see useAddAssetAtPlayhead.
+ * Dropping an asset/file/block/composition places it on the row at 0 on an empty lane, else at
+ * the pointer snapped to a near clip edge; an asset moves to that row's nearest free time.
+ * Supersedes the prior playhead decision (#2291); see useAddAssetAtPlayhead.
  */
 export function useTimelineAssetDrop({
   scrollRef,
   ppsRef,
   trackOrderRef,
+  elementsRef,
   rowGeometryRef,
   contentOrigin,
   onFileDrop,
@@ -134,6 +153,7 @@ export function useTimelineAssetDrop({
   onBlockDrop,
   onCompositionDrop,
   sessionEpoch,
+  readOnlyPress,
 }: UseTimelineAssetDropOptions) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropPreview, setDropPreview] = useState<TimelineDropPlacement | null>(null);
@@ -142,6 +162,7 @@ export function useTimelineAssetDrop({
   );
   const autoScrollRafRef = useRef(0);
   const activeDropEpochRef = useRef<number | null>(null);
+  const refusedDragRef = useRef(false);
 
   const stopAutoScroll = useCallback(() => {
     dragPointerRef.current = null;
@@ -196,12 +217,13 @@ export function useTimelineAssetDrop({
           rowHeights: rowGeometryRef.current.rowHeights,
           trackOrder: trackOrderRef.current,
         },
+        elementsRef.current,
         clientX,
         clientY,
         canInsertTrack,
       );
     },
-    [scrollRef, ppsRef, trackOrderRef, rowGeometryRef, contentOrigin],
+    [scrollRef, ppsRef, trackOrderRef, elementsRef, rowGeometryRef, contentOrigin],
   );
 
   const handleAssetDragOver = useCallback(
@@ -212,6 +234,12 @@ export function useTimelineAssetDrop({
       const hasBlock = types.includes(TIMELINE_BLOCK_MIME);
       const hasComposition = types.includes(TIMELINE_COMPOSITION_MIME);
       if (!hasFiles && !hasAsset && !hasBlock && !hasComposition) return;
+      if (readOnlyPress) {
+        e.dataTransfer.dropEffect = "none";
+        if (!refusedDragRef.current) readOnlyPress();
+        refusedDragRef.current = true;
+        return;
+      }
       e.preventDefault();
       e.dataTransfer.dropEffect = "copy";
       activeDropEpochRef.current = sessionEpoch;
@@ -224,11 +252,12 @@ export function useTimelineAssetDrop({
       );
       syncAutoScroll(e.clientX, e.clientY);
     },
-    [resolveDropPlacement, sessionEpoch, syncAutoScroll],
+    [readOnlyPress, resolveDropPlacement, sessionEpoch, syncAutoScroll],
   );
 
   const clearDropPreview = useCallback(() => {
     activeDropEpochRef.current = null;
+    refusedDragRef.current = false;
     stopAutoScroll();
     setIsDragOver(false);
     setDropPreview(null);
