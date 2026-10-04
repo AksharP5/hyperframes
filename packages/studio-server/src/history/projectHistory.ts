@@ -24,7 +24,11 @@ import {
   recordFileWriteReceipt,
 } from "../helpers/fileVersion.js";
 import { realFilePath } from "../helpers/safePath.js";
-import { affectsProjectSignature, listProjectFiles } from "../helpers/projectSignature.js";
+import {
+  STUDIO_SIGNATURE_MANIFEST_PATHS,
+  affectsProjectSignature,
+  listProjectFiles,
+} from "../helpers/projectSignature.js";
 import { openBlobStore, type BlobStore } from "./blobStore.js";
 import { pruneGoneProjectHistoriesDaily } from "./pruneHistories.js";
 import {
@@ -198,6 +202,25 @@ const statKey = (file: { size: number; mtimeMs: number; ctimeMs: number }, swept
   sweptAt - Math.max(file.mtimeMs, file.ctimeMs) < RACY_MS
     ? ""
     : `${file.size}:${file.mtimeMs}:${file.ctimeMs}`;
+
+const MEDIA_LEDGER = ".media/manifest.jsonl";
+const KEPT_HIDDEN_PATHS = new Set<string>([...STUDIO_SIGNATURE_MANIFEST_PATHS, MEDIA_LEDGER]);
+
+/** A hidden name anywhere in a path (a tool's own record, .DS_Store) is nobody's work, except the kept ones above. */
+function isHistoryPath(path: string): boolean {
+  if (KEPT_HIDDEN_PATHS.has(path)) return true;
+  return !path.split("/").some((segment) => segment.startsWith("."));
+}
+
+function withoutHiddenPaths(log: HistoryLog): HistoryLog {
+  for (const path of log.baseline.keys()) if (!isHistoryPath(path)) log.baseline.delete(path);
+  for (const entry of log.entries)
+    entry.files = entry.files.filter((file) => isHistoryPath(file.path));
+  return log;
+}
+
+const historyFiles = (dir: string) =>
+  listProjectFiles(dir).filter((file) => isHistoryPath(file.path));
 
 const sameWho = (a: HistoryWho, b: HistoryWho) => a.kind === b.kind && a.name === b.name;
 
@@ -382,7 +405,8 @@ class Engine {
       ),
     );
     if (!log) return this.firstOpen();
-    this.log = log;
+    this.log = withoutHiddenPaths(log);
+    if (!this.log.keepsLedger) await this.takeInUnnamedLedger();
     const cache = this.readStatCache();
     const last = this.log.entries.at(-1)?.id ?? START;
     for (const [path, hash] of manifestAt(this.log, last) ?? []) {
@@ -402,6 +426,7 @@ class Engine {
       const replaced = hashOfVersion(fileContentVersion(bytes));
       if (!replaced || replaced === after) return;
       const path = relative(realDir, absPath).split(sep).join("/");
+      if (!isHistoryPath(path)) return;
       // One chain per file, a new Map per write (forgetWritesBefore checks identity); off-chain notes were overwritten.
       this.overwritten.set(
         path,
@@ -441,14 +466,28 @@ class Engine {
     this.windows.push({ id, who, label, startedAt, lastWriteAt, idleMs, changes: new Map() });
   }
 
+  async takeInUnnamedLedger(): Promise<void> {
+    const named = (path: string) =>
+      this.log.entries.some((entry) => entry.files.some((file) => file.path === path));
+    const listed = () => historyFiles(this.dir).some((file) => file.path === MEDIA_LEDGER);
+    const hash =
+      this.log.baseline.has(MEDIA_LEDGER) || named(MEDIA_LEDGER) || !listed()
+        ? null
+        : await this.storeIfPresent(MEDIA_LEDGER);
+    if (hash !== null) this.log.baseline.set(MEDIA_LEDGER, hash);
+    this.log.keepsLedger = true;
+    this.persistLog();
+  }
+
   async firstOpen(): Promise<void> {
     const sweptAt = this.now();
-    for (const file of listProjectFiles(this.dir)) {
+    for (const file of historyFiles(this.dir)) {
       const hash = await this.storeIfPresent(file.path);
       if (this.whereFolder() !== "here") throw this.replaced();
       if (hash !== null) this.tracked.set(file.path, { hash, stat: statKey(file, sweptAt) });
     }
     this.log.baseline = this.manifest();
+    this.log.keepsLedger = true;
     this.persistLog();
     this.saveStatCache();
   }
@@ -482,7 +521,7 @@ class Engine {
     const sweptAt = this.now();
     const changedAt = (file: { mtimeMs: number; ctimeMs: number }) =>
       Math.min(sweptAt, Math.max(file.mtimeMs, file.ctimeMs));
-    const seen = listProjectFiles(this.dir);
+    const seen = historyFiles(this.dir);
     const heard = new Map(this.overwritten);
     const present = new Set(seen.map((file) => file.path));
     const removed = [...this.tracked.keys()]
@@ -737,7 +776,9 @@ class Engine {
   }
 
   async commit(group: Group, extra: Partial<HistoryEntry> = {}): Promise<HistoryEntry | null> {
-    if (!group.changes.size) return null;
+    const undoesEmptied =
+      this.log.entries.find((entry) => entry.id === extra.undoes)?.files.length === 0;
+    if (!group.changes.size && !undoesEmptied) return null;
     const pending = this.pendingEntry(group);
     const endedAt = Math.max(pending.endedAt, this.log.entries.at(-1)?.endedAt ?? 0);
     const entry: HistoryEntry = { ...pending, endedAt, ...extra };
@@ -802,7 +843,9 @@ class Engine {
 
   /** A watcher saw a write: one sweep per burst takes it in (a deleted folder is reported by its name alone). */
   noteChange(path: string): void {
-    if (this.notedTimer || !affectsProjectSignature(this.dir, resolve(this.dir, path))) return;
+    const absolute = resolve(this.dir, path);
+    if (this.notedTimer || !affectsProjectSignature(this.dir, absolute)) return;
+    if (!isHistoryPath(relative(this.dir, absolute).split(sep).join("/"))) return;
     this.notedTimer = setTimeout(() => {
       this.notedTimer = null;
       this.background(() => this.sweep());
@@ -995,7 +1038,7 @@ class Engine {
     return stepTarget(
       this.log.entries,
       direction,
-      (entry) => mine(entry.who) || (everyone && !ofOpenTurn(entry)),
+      (entry) => entry.files.length > 0 && (mine(entry.who) || (everyone && !ofOpenTurn(entry))),
     );
   }
 

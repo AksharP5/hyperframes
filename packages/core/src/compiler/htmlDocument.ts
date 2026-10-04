@@ -300,6 +300,35 @@ function findOuterTemplateClose(html: string): number {
   return -1;
 }
 
+const COMPOSITION_ID_ATTR = /\sdata-composition-id\s*=/;
+
+const isDocumentWrapper = (lowered: string, open: number): boolean =>
+  isTagAt(lowered, open, "<html") || isTagAt(lowered, open, "<body");
+
+function carriesCompositionId(lowered: string, open: number): boolean {
+  const end = findTagEnd(lowered, open + 1);
+  return end !== -1 && COMPOSITION_ID_ATTR.test(lowered.slice(open, end));
+}
+
+export function hasCompositionOutsideTemplates(html: string): boolean {
+  const lowered = lowerAscii(html);
+  let depth = 0;
+  let idOnWrapper = false;
+  let idInTemplate = false;
+  for (const open of markupStarts(lowered)) {
+    if (isTagAt(lowered, open, "<template")) {
+      depth++;
+      if (carriesCompositionId(lowered, open)) idInTemplate = true;
+    } else if (isTagAt(lowered, open, "</template")) depth = Math.max(0, depth - 1);
+    else if (/[a-z]/.test(lowered.charAt(open + 1)) && carriesCompositionId(lowered, open)) {
+      if (depth > 0) idInTemplate = true;
+      else if (isDocumentWrapper(lowered, open)) idOnWrapper = true;
+      else return true;
+    }
+  }
+  return idOnWrapper && !idInTemplate;
+}
+
 function insertBeforeDocumentTag(html: string, tag: DocumentTag, markup: string): string | null {
   const at = tag === "</template" ? findOuterTemplateClose(html) : findDocumentTag(html, tag);
   return at === -1 ? null : html.slice(0, at) + markup + html.slice(at);

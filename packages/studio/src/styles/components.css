@@ -308,6 +308,22 @@
   }
 }
 
+/* A video's sound strip is too short for the peak readout: only the mark stays, on a chip clear of the clip's
+   rounded corner and above the waveform canvas layer (z 10), below the fade handles (z 30). */
+.audible-video-wave [data-peak-text] {
+  display: none;
+}
+
+.audible-video-wave [data-peak-badge] {
+  top: 50%;
+  right: var(--timeline-clip-radius);
+  translate: 0 -50%;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: var(--timeline-clip-chip-audio-bg);
+  z-index: 20;
+}
+
 .timeline-clip.is-audio.is-hovered {
   background-color: var(--timeline-clip-audio-bg-hover);
 }
@@ -350,7 +366,6 @@
   position: absolute;
   top: 5px;
   left: 6px;
-  z-index: 6;
   width: fit-content;
   max-width: calc(100% - 22px);
   overflow: hidden;
@@ -411,6 +426,7 @@
 .timeline-clip.is-audio .timeline-clip__label {
   top: 11px;
   left: 9px;
+  z-index: 11;
   background: var(--timeline-clip-chip-audio-bg);
 }
 
@@ -933,5 +949,70 @@
   }
   50% {
     transform: scaleY(1);
+  }
+}
+
+/* Framey on the header's "Edit with Framey" (OpenInDesktopButton.tsx): a pulse as the page opens, a wiggle
+ * on hover, a flight towards the app while it opens. The eye follows the pointer from script. */
+@keyframes hf-framey-wiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-14deg);
+  }
+  60% {
+    transform: rotate(10deg);
+  }
+}
+
+@keyframes hf-framey-fly {
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(48px, -28px) rotate(25deg) scale(0.6);
+    opacity: 0;
+  }
+}
+
+@keyframes hf-framey-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--color-accent) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+
+.hf-framey-trigger {
+  animation: hf-framey-pulse 1.6s ease-out 3;
+}
+
+.hf-framey {
+  transform-origin: 30% 30%;
+}
+
+.hf-framey-eye {
+  transition: transform 80ms linear;
+}
+
+.hf-framey-trigger:hover .hf-framey {
+  animation: hf-framey-wiggle 0.5s ease-in-out;
+}
+
+.hf-framey-trigger[data-opening] .hf-framey {
+  animation: hf-framey-fly 0.9s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hf-framey-trigger,
+  .hf-framey-trigger:hover .hf-framey,
+  .hf-framey-trigger[data-opening] .hf-framey {
+    animation: none;
+  }
+  .hf-framey-eye {
+    transition: none;
   }
 }

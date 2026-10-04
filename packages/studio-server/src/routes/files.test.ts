@@ -643,6 +643,94 @@ describe("registerFileRoutes", () => {
     expect(readFileSync(join(projectDir, "index.html"), "utf-8")).toContain("After");
   });
 
+  it("reports the id ensure-id leaves on the element, saved or already there", async () => {
+    const projectDir = createProjectDir();
+    writeFileSync(
+      join(projectDir, "index.html"),
+      '<div data-hf-id="hf-a" id="div"></div><div data-hf-id="hf-b"></div>',
+    );
+    const app = new Hono();
+    registerFileRoutes(app, createAdapter(projectDir));
+    const ensureId = async (hfId: string) => {
+      const response = await app.request(
+        "http://localhost/projects/demo/file-mutations/patch-element/index.html",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target: { hfId },
+            operations: [{ type: "ensure-id", property: "id", value: "div" }],
+          }),
+        },
+      );
+      const { changed, elementId } = (await response.json()) as Record<string, unknown>;
+      return { changed, elementId };
+    };
+
+    expect(await ensureId("hf-b")).toEqual({ changed: true, elementId: "div-2" });
+    expect(await ensureId("hf-a")).toEqual({ changed: false, elementId: "div" });
+    expect(readFileSync(join(projectDir, "index.html"), "utf-8")).toContain('id="div-2"');
+  });
+
+  it("never lets ensure-id save an id another composition file in the preview holds", async () => {
+    const projectDir = createProjectDir();
+    writeFileSync(join(projectDir, "index.html"), '<div data-hf-id="hf-a"></div>');
+    mkdirSync(join(projectDir, "compositions"));
+    writeFileSync(join(projectDir, "compositions/b.html"), '<div data-hf-id="hf-b"></div>');
+    const app = new Hono();
+    registerFileRoutes(app, createAdapter(projectDir));
+    // Both adds proposed "div": neither preview knew of the other's write.
+    const ensureId = async (file: string, hfId: string) => {
+      const response = await app.request(
+        `http://localhost/projects/demo/file-mutations/patch-element/${file}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target: { hfId },
+            operations: [{ type: "ensure-id", property: "id", value: "div" }],
+          }),
+        },
+      );
+      return ((await response.json()) as Record<string, unknown>).elementId;
+    };
+
+    expect(await ensureId("compositions/b.html", "hf-b")).toBe("div");
+    expect(await ensureId("index.html", "hf-a")).toBe("div-2");
+    expect(readFileSync(join(projectDir, "index.html"), "utf-8")).toContain('id="div-2"');
+  });
+
+  it("counts another file's ids after a quote-ended string and with no space before id", async () => {
+    const projectDir = createProjectDir();
+    writeFileSync(
+      join(projectDir, "index.html"),
+      '<div data-hf-id="hf-a"></div><p data-hf-id="hf-b"></p>',
+    );
+    writeFileSync(
+      join(projectDir, "b.html"),
+      '<script>var u = "/id=" + x;</script><div id="div"></div><p class="c"id="p"></p>',
+    );
+    const app = new Hono();
+    registerFileRoutes(app, createAdapter(projectDir));
+    const ensureId = async (hfId: string, value: string) => {
+      const response = await app.request(
+        "http://localhost/projects/demo/file-mutations/patch-element/index.html",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target: { hfId },
+            operations: [{ type: "ensure-id", property: "id", value }],
+          }),
+        },
+      );
+      return ((await response.json()) as Record<string, unknown>).elementId;
+    };
+
+    expect(await ensureId("hf-a", "div")).toBe("div-2");
+    expect(await ensureId("hf-b", "p")).toBe("p-2");
+  });
+
   it("writes the font an edit uses in the same write as the edit", async () => {
     const projectDir = createProjectDir();
     const original = '<html><head></head><body><div id="title">Before</div></body></html>';
@@ -1861,11 +1949,40 @@ const tl = gsap.timeline({ paused: true });
     expect(html).not.toContain("<body");
   });
 
-  it("a first animation in a <body> file lands before </body>, outside its template", async () => {
+  // The registry-block shape: the loader mounts the template's content, so a script outside it never runs.
+  it("a first animation in a full-document sub-composition lands inside its template", async () => {
     const html = await addFirstAnimation(
-      '<body><template><div data-composition-id="sub"><div id="card"></div></div></template></body>\n',
+      '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><template id="sub-template"><div data-composition-id="sub"><div id="card"></div></div></template></body></html>\n',
     );
-    expect(html.indexOf("<script")).toBeGreaterThan(html.indexOf("</template>"));
+    const close = html.indexOf("</template>");
+    expect(html.indexOf('window.__timelines["sub"]')).toBeGreaterThan(-1);
+    expect(html.lastIndexOf("</script>")).toBeLessThan(close);
+    expect(html.slice(close)).toBe("</template></body></html>\n");
+  });
+
+  it("a first animation lands inside the template when <html> carries the composition id", async () => {
+    const html = await addFirstAnimation(
+      '<!DOCTYPE html><html data-composition-id="sub"><body><template><div data-composition-id="sub"><div id="card"></div></div></template></body></html>\n',
+    );
+    const close = html.indexOf("</template>");
+    expect(html.lastIndexOf("</script>")).toBeLessThan(close);
+    expect(html.slice(close)).toBe("</template></body></html>\n");
+  });
+
+  it("a first animation lands inside the template when the <template> tag carries the composition id", async () => {
+    const html = await addFirstAnimation(
+      '<!DOCTYPE html><html data-composition-id="sub"><body><template data-composition-id="sub"><div id="card"></div></template></body></html>\n',
+    );
+    const close = html.indexOf("</template>");
+    expect(html.lastIndexOf("</script>")).toBeLessThan(close);
+    expect(html.slice(close)).toBe("</template></body></html>\n");
+  });
+
+  it("a first animation in a file whose composition is in <body> lands before </body>", async () => {
+    const html = await addFirstAnimation(
+      '<body><div data-composition-id="main"><div id="card"></div></div><template id="other-template"><div data-composition-id="other"></div></template></body>\n',
+    );
+    expect(html.indexOf('window.__timelines["main"]')).toBeGreaterThan(html.indexOf("</template>"));
     expect(html.lastIndexOf("</script>")).toBeLessThan(html.indexOf("</body>"));
   });
 
