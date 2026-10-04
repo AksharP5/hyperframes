@@ -1,6 +1,7 @@
 // fallow-ignore-file code-duplication
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import { parseHTML } from "linkedom";
 import {
   closeSync,
   ftruncateSync,
@@ -21,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
 import { STUDIO_PREVIEW_MARK_META } from "@hyperframes/core/studio-preview-mark";
+import { AFTER_FONTS_SCRIPT_TYPE } from "@hyperframes/core/compiler";
 import { PREVIEW_BUNDLE_OPTIONS, PREVIEW_CAPTURE_PARAM, registerPreviewRoutes } from "./preview";
 import { registerFileRoutes } from "./files";
 import { createPreviewDocumentStore } from "../helpers/previewDocumentStore";
@@ -194,7 +196,11 @@ describe("registerPreviewRoutes", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("__hfStudioMotionApply");
+    const motionScript = [...parseHTML(html).document.querySelectorAll("script")].find((el) =>
+      el.textContent?.includes("__hfStudioMotionApply"),
+    );
+    // Deferred with the composition scripts, so it still runs after them.
+    expect(motionScript?.getAttribute("type")).toBe(AFTER_FONTS_SCRIPT_TYPE);
     expect(html).toContain("studio-motion");
     expect(html).toContain("gsap@3.15.0/dist/gsap.min.js");
   });
@@ -249,6 +255,138 @@ describe("registerPreviewRoutes", () => {
     expect(html).toContain("gsap@3/dist/MotionPathPlugin.min.js");
     // Plugin must load AFTER the core gsap script so it can register onto it.
     expect(html.indexOf("gsap.min.js")).toBeLessThan(html.indexOf("MotionPathPlugin.min.js"));
+    const plugin = parseHTML(html).document.querySelector('script[src*="MotionPathPlugin"]');
+    expect(plugin?.hasAttribute("type")).toBe(false);
+  });
+
+  it("defers the MotionPathPlugin with a body gsap script, so it still runs right after gsap", async () => {
+    const projectDir = createProjectDir();
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!doctype html><html><head></head><body><div id="card" class="clip"></div>
+        <script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
+        <script>
+          const tl = gsap.timeline({ paused: true });
+          tl.to("#card", { motionPath: { path: [{ x: 0, y: 0 }, { x: 100, y: 50 }] }, duration: 1 }, 0);
+          window.__timelines = { index: tl };
+        </script>
+      </body></html>`,
+    );
+    const { bundleToSingleHtml } = await import("@hyperframes/core/compiler");
+    const app = new Hono();
+    registerPreviewRoutes(
+      app,
+      createAdapter(projectDir, {
+        bundle: (dir, options) =>
+          bundleToSingleHtml(dir, { ...PREVIEW_BUNDLE_OPTIONS, ...options }),
+      }),
+    );
+
+    const html = await (await app.request("http://localhost/projects/demo/preview")).text();
+
+    const scripts = [...parseHTML(html).document.querySelectorAll("script[src]")];
+    const gsapAt = scripts.findIndex((el) => el.getAttribute("src")?.endsWith("/gsap.min.js"));
+    expect(scripts[gsapAt]?.getAttribute("type")).toBe(AFTER_FONTS_SCRIPT_TYPE);
+    const plugin = scripts[gsapAt + 1];
+    expect(plugin?.getAttribute("src")).toContain("gsap@3/dist/MotionPathPlugin.min.js");
+    expect(plugin?.getAttribute("type")).toBe(AFTER_FONTS_SCRIPT_TYPE);
+  });
+
+  async function previewScriptSrcs(bodyGsapTag: string) {
+    const projectDir = createProjectDir();
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!doctype html><html><head></head><body><div id="card" class="clip"></div>
+        ${bodyGsapTag}
+        <script>
+          window.__timelines = { index: gsap.timeline({ paused: true }).to("#card", { motionPath: { path: [{ x: 100, y: 50 }] } }) };
+        </script>
+      </body></html>`,
+    );
+    const app = new Hono();
+    registerPreviewRoutes(app, createAdapter(projectDir));
+    const html = await (await app.request("http://localhost/projects/demo/preview")).text();
+    return [...parseHTML(html).document.querySelectorAll("script[src]")];
+  }
+
+  it.each([
+    ["a query string", "https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js?v=1"],
+    ["a hash", "https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.js#core"],
+  ])("puts the MotionPathPlugin right after a body gsap whose URL has %s", async (_, src) => {
+    const scripts = await previewScriptSrcs(`<script src="${src}"></script>`);
+    const gsapAt = scripts.findIndex((el) => el.getAttribute("src") === src);
+    expect(gsapAt).toBeGreaterThan(-1);
+    expect(scripts[gsapAt + 1]?.getAttribute("src")).toContain(
+      "gsap@3/dist/MotionPathPlugin.min.js",
+    );
+  });
+
+  it("defers the MotionPathPlugin with a deferred body gsap, so it runs after gsap", async () => {
+    const scripts = await previewScriptSrcs(
+      `<script defer src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>`,
+    );
+    const gsapAt = scripts.findIndex((el) => el.getAttribute("src")?.endsWith("/gsap.min.js"));
+    const plugin = scripts[gsapAt + 1];
+    expect(plugin?.getAttribute("src")).toContain("MotionPathPlugin.min.js");
+    expect(plugin?.hasAttribute("defer")).toBe(true);
+  });
+
+  it("does not read defer out of another attribute value", async () => {
+    const scripts = await previewScriptSrcs(
+      `<script data-note="do not defer this" src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>`,
+    );
+    const plugin = scripts.find((el) => el.getAttribute("src")?.includes("MotionPathPlugin"));
+    expect(plugin?.hasAttribute("defer")).toBe(false);
+  });
+
+  it("finds no gsap tag in a long run of gsap-like src text without stalling", async () => {
+    const scripts = await previewScriptSrcs(`<script src="${"/gsap.js#".repeat(50_000)}`);
+    expect(scripts.some((el) => el.getAttribute("src")?.includes("MotionPathPlugin"))).toBe(true);
+  });
+
+  it.each([
+    ["a style block", `<style>/* <script src="x"></script> */ .a { color: red; }</style>`],
+    ["an empty comment", `<!--> <p>text</p>`],
+    ["a comment start inside an attribute", `<div title="<!--"></div>`],
+  ])("still finds the live gsap tag after %s", async (_, before) => {
+    const live = "https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js";
+    const scripts = await previewScriptSrcs(`${before}\n  <script src="${live}"></script>`);
+    const liveAt = scripts.findIndex((el) => el.getAttribute("src") === live);
+    expect(scripts[liveAt + 1]?.getAttribute("src")).toContain("MotionPathPlugin");
+  });
+
+  it("ignores a gsap-named file that is not gsap core", async () => {
+    const scripts = await previewScriptSrcs(
+      `<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js.map"></script>`,
+    );
+    const plugin = scripts.findIndex((el) => el.getAttribute("src")?.includes("MotionPathPlugin"));
+    const map = scripts.findIndex((el) => el.getAttribute("src")?.endsWith(".map"));
+    expect(plugin).toBeLessThan(map);
+  });
+
+  it("reads DEFER and TYPE written in capitals", async () => {
+    const scripts = await previewScriptSrcs(
+      `<script TYPE="text/javascript" DEFER SRC="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>`,
+    );
+    const plugin = scripts.find((el) => el.getAttribute("src")?.includes("MotionPathPlugin"));
+    expect(plugin?.hasAttribute("defer")).toBe(true);
+    expect(plugin?.getAttribute("type")).toBe("text/javascript");
+  });
+
+  it.each([
+    [
+      "a comment",
+      `<!-- a > b <script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script> -->`,
+    ],
+    [
+      "a template",
+      `<template><template></template><script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script></template>`,
+    ],
+  ])("skips a gsap tag inside %s and follows the live one", async (_, inert) => {
+    const live = "https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js?live";
+    const scripts = await previewScriptSrcs(`${inert}\n  <script src="${live}"></script>`);
+    const liveAt = scripts.findIndex((el) => el.getAttribute("src") === live);
+    expect(scripts[liveAt + 1]?.getAttribute("src")).toContain("MotionPathPlugin");
   });
 
   it("does NOT inject MotionPathPlugin when the composition has no motionPath", async () => {

@@ -5,6 +5,7 @@ import {
   injectScriptsIntoHtml,
   injectTagsAtHeadStart,
   insertBeforeCloseTag,
+  hasCompositionOutsideTemplates,
   isFullHtmlDocument,
   parseHTMLContent,
   stripEmbeddedRuntimeScripts,
@@ -270,5 +271,49 @@ describe("injectTagsAtHeadStart on long adversarial input", () => {
     const started = performance.now();
     injectTagsAtHeadStart(html, "<meta>");
     expect(performance.now() - started).toBeLessThan(1500);
+  });
+});
+
+describe("hasCompositionOutsideTemplates", () => {
+  it.each([
+    ["a root in <body>", '<body><div data-composition-id="main"></div></body>', true],
+    [
+      "a root in <body> beside an inline template",
+      '<body><div data-composition-id="main"></div><template><div data-composition-id="x"></div></template></body>',
+      true,
+    ],
+    [
+      "a full document whose composition is in its template",
+      '<html><body><template id="s-template"><div data-composition-id="s"></div></template></body></html>',
+      false,
+    ],
+    ["a bare template", '<template><div data-composition-id="s"></div></template>', false],
+    [
+      "an id on <html> and on the <template> tag itself",
+      '<html data-composition-id="s"><body><template data-composition-id="s"><div></div></template></body></html>',
+      false,
+    ],
+    [
+      "a root id on <html> beside a template with no composition",
+      '<html data-composition-id="main"><body><template><p>clone me</p></template></body></html>',
+      true,
+    ],
+    [
+      "a full document whose <html> carries the id",
+      '<html data-composition-id="s"><body data-composition-id="s"><template><div data-composition-id="s"></div></template></body></html>',
+      false,
+    ],
+    [
+      "the attribute only in a comment or text",
+      '<body><!-- <div data-composition-id="a"> --><p>data-composition-id="b"</p></body>',
+      false,
+    ],
+    [
+      "a nested template",
+      '<template><template></template><div data-composition-id="s"></div></template>',
+      false,
+    ],
+  ])("%s", (_name, html, expected) => {
+    expect(hasCompositionOutsideTemplates(html)).toBe(expected);
   });
 });
