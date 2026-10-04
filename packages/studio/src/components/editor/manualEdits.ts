@@ -10,6 +10,7 @@ export {
 } from "./manualEditsTypes";
 
 export {
+  mergeFileChangeAffectedCompositions,
   readFileChangeAffectedCompositions,
   readFileChangeAffectsPreview,
   readFileChangeField,
@@ -29,7 +30,6 @@ export {
   applyStudioBoxSize,
   applyStudioBoxSizeDraft,
   applyStudioRotation,
-  applyStudioRotationDraft,
 } from "./manualEditsDom";
 
 export { reapplyPositionEditsAfterSeek } from "./manualEditsSeekReapply";

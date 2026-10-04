@@ -1,4 +1,5 @@
 import type { TimelineEditOutcome } from "../../hooks/timelineEditPermission";
+import { trackKeyframeUsage } from "../../utils/keyframeUsage";
 import { useCallback, useMemo } from "react";
 import type { GsapAnimation } from "@hyperframes/core/gsap-parser";
 import type { TimelineElement } from "../../player";
@@ -53,6 +54,9 @@ export interface TimelineEditCallbackDeps {
   handleTimelineElementSplit: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   handleRazorSplit: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   handleRazorSplitAll: (splitTime: number) => Promise<void> | void;
+  handleFreezeFrame?: (element: TimelineElement, time: number) => Promise<void> | void;
+  handleLinkEdit?: TimelineEditCallbacks["onLinkEdit"];
+  handleTimelineElementDeleteOnly?: TimelineEditCallbacks["onDeleteElementOnly"];
   /** C1's ungrouped-track FX pointer — same auto-grouping write B6's carve uses. */
   handleGroupClips?: (
     clipIds: readonly string[],
@@ -69,6 +73,7 @@ export interface TimelineEditCallbackDeps {
       value: string | null,
       label: string,
     ) => Promise<TimelineEditOutcome | void>;
+    setMany?: TimelineEditCallbacks["onSetElementsAttributeQuiet"];
   };
 }
 
@@ -132,6 +137,9 @@ export function useTimelineEditCallbacks({
   handleTimelineElementSplit,
   handleRazorSplit,
   handleRazorSplitAll,
+  handleFreezeFrame,
+  handleLinkEdit,
+  handleTimelineElementDeleteOnly,
   handleGroupClips,
   setElementFxAttribute,
 }: TimelineEditCallbackDeps): TimelineEditCallbacks {
@@ -222,11 +230,15 @@ export function useTimelineEditCallbacks({
       onGroupClips: handleGroupClips,
       onSetElementAttributeLive: setElementFxAttribute?.setLive,
       onSetElementAttributeQuiet: setElementFxAttribute?.setQuiet,
+      onSetElementsAttributeQuiet: setElementFxAttribute?.setMany,
       onRevertElementAttributeLive: setElementFxAttribute?.revertLive,
       onBlockedEditAttempt: handleBlockedTimelineEdit,
       onSplitElement: handleTimelineElementSplit,
       onRazorSplit: handleRazorSplit,
       onRazorSplitAll: handleRazorSplitAll,
+      onFreezeFrame: handleFreezeFrame,
+      onLinkEdit: handleLinkEdit,
+      onDeleteElementOnly: handleTimelineElementDeleteOnly,
       onDeleteAllKeyframes: (element, animationId) => {
         // Hold the element where it is (collapse keyframes to a static set) rather
         // than deleting the whole animation — deleting strands a stale GSAP base
@@ -248,7 +260,12 @@ export function useTimelineEditCallbacks({
           if (!selection) return;
           // Serial: each removal rewrites the same source file, so dispatching
           // them together would have the later writes read a pre-edit document.
-          for (const anim of anims) await handleGsapRemoveAllKeyframes(anim.id, selection);
+          let changed = false;
+          for (const anim of anims) {
+            const result = await handleGsapRemoveAllKeyframes(anim.id, selection, false);
+            changed = result || changed;
+          }
+          if (changed) trackKeyframeUsage("remove_all");
         });
       },
       onDeleteKeyframe: (elId, keyframe) => {
@@ -423,6 +440,9 @@ export function useTimelineEditCallbacks({
       handleTimelineElementSplit,
       handleRazorSplit,
       handleRazorSplitAll,
+      handleFreezeFrame,
+      handleLinkEdit,
+      handleTimelineElementDeleteOnly,
       handleGsapRemoveAllKeyframes,
       resolveElementAnimations,
       resolveKeyframeTarget,

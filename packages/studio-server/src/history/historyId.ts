@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { replaceFileAtomically } from "../helpers/atomicFile.js";
+import { replaceFileAtomically } from "@hyperframes/core/atomic-file";
 import { mkdirWithinProject } from "../helpers/safePath.js";
 
 export const ID_PATH = join(".hyperframes", "history-id");

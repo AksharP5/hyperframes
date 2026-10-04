@@ -5,10 +5,8 @@ import { dragEditOutcome, preflightGsapRotationIntercept } from "./gsapRuntimeBr
 import { preflightGsapResizeIntercept } from "./gsapResizePreflight";
 import { GSAP_EDIT_BLOCK_COPY, type GsapEditOutcome } from "./gsapEditOutcome";
 import { fetchParsedAnimations, parseCacheKey } from "./keyframeCacheAstLoad";
-import {
-  gsapSourceFileForSelection,
-  selectElementAnimationsOrRetry,
-} from "./useGsapAnimationFetchFallback";
+import { getAnimationsForElement } from "./gsapElementMatch";
+import { gsapSourceFileForSelection } from "./useGsapAnimationFetchFallback";
 
 interface CommitPreflight {
   offset: GsapEditOutcome;
@@ -23,13 +21,7 @@ function runCommitPreflights(
   group: boolean,
 ): CommitPreflight {
   const target = { id: selection.id ?? null, selector: selection.selector ?? null };
-  const matched = selectElementAnimationsOrRetry(
-    { animations: fileAnimations },
-    target,
-    selection.element,
-  );
-  // A file the server parsed with no tweens at all is a definitive answer here.
-  const animations = matched.kind === "resolved" ? matched.animations : [];
+  const animations = getAnimationsForElement(fileAnimations, target, selection.element);
   return {
     offset: dragEditOutcome(selection, animations, iframe, [], group),
     size: preflightGsapResizeIntercept(selection, animations, iframe),
@@ -51,8 +43,8 @@ const MANUAL_FLAGS = [
 /** Null when the commit would go through; "" while the check is still running. */
 function refusal(preflight: CommitPreflight | null, check: keyof CommitPreflight): string | null {
   const outcome = preflight?.[check];
-  if (outcome?.status === "persisted") return null;
-  return outcome ? GSAP_EDIT_BLOCK_COPY[outcome.reason] : "";
+  if (!outcome) return "";
+  return outcome.status === "blocked" ? GSAP_EDIT_BLOCK_COPY[outcome.reason] : null;
 }
 
 /** Closes each manual flag whose commit Studio would refuse, and says why. */

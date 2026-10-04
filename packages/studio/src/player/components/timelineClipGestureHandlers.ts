@@ -8,6 +8,11 @@ import {
 import type { TimelineEditCapabilities } from "./timelineEditCapabilities";
 import type { TimelineEditCallbacks } from "./timelineCallbacks";
 import { CLIP_HANDLE_W } from "./timelineLayout";
+import {
+  exceedsHandEditLimit,
+  selectClipWithLinks,
+  toggleClipWithLinks,
+} from "./timelineLinkSelection";
 import { SPLIT_BOUNDARY_EPSILON_S } from "../../utils/timelineElementSplit";
 
 export interface ClipGestureDeps {
@@ -17,11 +22,6 @@ export interface ClipGestureDeps {
   onRazorSplit?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplitAll?: (splitTime: number) => Promise<void> | void;
   blockedClipRef: React.RefObject<BlockedClipState | null>;
-  shiftClickClipRef: React.RefObject<{
-    element: TimelineElement;
-    anchorX: number;
-    anchorY: number;
-  } | null>;
   suppressClickRef: React.RefObject<boolean>;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   setShowPopover(v: boolean): void;
@@ -44,9 +44,11 @@ function canStartResize(
   return capabilities.canTrimEnd;
 }
 
+const isAdditiveClick = (e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) =>
+  e.shiftKey || e.metaKey || e.ctrlKey;
+
 type PointerDownAction =
   | { kind: "ignore" }
-  | { kind: "arm-shift-click" }
   | { kind: "block"; intent: BlockedTimelineEditIntent; rect: DOMRect }
   | { kind: "move"; rect: DOMRect };
 
@@ -58,10 +60,12 @@ type PointerDownAction =
  */
 function isIntentBlocked(
   intent: BlockedTimelineEditIntent | null,
+  capabilities: TimelineEditCapabilities,
   onResizeElement: ClipGestureDeps["onResizeElement"],
   onMoveElement: ClipGestureDeps["onMoveElement"],
 ): intent is BlockedTimelineEditIntent {
   if (!intent) return false;
+  if (capabilities.readOnly) return true;
   return intent === "move" ? Boolean(onMoveElement) : Boolean(onResizeElement);
 }
 
@@ -73,13 +77,14 @@ function isIntentBlocked(
  */
 function resolvePointerDownAction(
   e: ReactPointerEvent,
+  grabbed: TimelineElement,
   capabilities: TimelineEditCapabilities,
   onResizeElement: ClipGestureDeps["onResizeElement"],
   onMoveElement: ClipGestureDeps["onMoveElement"],
 ): PointerDownAction {
   if (e.button !== 0) return { kind: "ignore" };
   if (usePlayerStore.getState().activeTool === "razor") return { kind: "ignore" };
-  if (e.shiftKey) return { kind: "arm-shift-click" };
+  if (isAdditiveClick(e)) return { kind: "ignore" };
 
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
   const intent = resolveBlockedTimelineEditIntent({
@@ -88,11 +93,13 @@ function resolvePointerDownAction(
     handleWidth: CLIP_HANDLE_W,
     capabilities,
   });
-  if (isIntentBlocked(intent, onResizeElement, onMoveElement)) {
+  if (isIntentBlocked(intent, capabilities, onResizeElement, onMoveElement)) {
     return { kind: "block", intent, rect };
   }
 
   if (!onMoveElement || !capabilities.canMove) return { kind: "ignore" };
+  if (exceedsHandEditLimit(grabbed, e.altKey, null))
+    return { kind: "block", intent: "edit-many", rect };
   return { kind: "move", rect };
 }
 
@@ -116,7 +123,6 @@ export function createClipGestureHandlers(
     onRazorSplit,
     onRazorSplitAll,
     blockedClipRef,
-    shiftClickClipRef,
     suppressClickRef,
     scrollRef,
     setShowPopover,
@@ -130,6 +136,17 @@ export function createClipGestureHandlers(
   const onResizeStart = (edge: "start" | "end", e: ReactPointerEvent): void => {
     if (!canStartResize(edge, e, capabilities, onResizeElement)) return;
     e.stopPropagation();
+    if (exceedsHandEditLimit(el, e.altKey, edge)) {
+      blockedClipRef.current = {
+        pointerId: e.pointerId,
+        element: el,
+        intent: "edit-many",
+        originClientX: e.clientX,
+        originClientY: e.clientY,
+        started: false,
+      };
+      return;
+    }
     blockedClipRef.current = null;
     setShowPopover(false);
     setRangeSelection(null);
@@ -143,17 +160,13 @@ export function createClipGestureHandlers(
       previewDuration: el.duration,
       previewPlaybackStart: el.playbackStart,
       started: false,
+      altKey: e.altKey,
     });
   };
 
   const onPointerDown = (e: ReactPointerEvent): void => {
-    const action = resolvePointerDownAction(e, capabilities, onResizeElement, onMoveElement);
+    const action = resolvePointerDownAction(e, el, capabilities, onResizeElement, onMoveElement);
     if (action.kind === "ignore") return;
-
-    if (action.kind === "arm-shift-click") {
-      shiftClickClipRef.current = { element: el, anchorX: e.clientX, anchorY: e.clientY };
-      return;
-    }
 
     if (action.kind === "block") {
       blockedClipRef.current = {
@@ -189,33 +202,38 @@ export function createClipGestureHandlers(
       snapTime: null,
       snapType: null,
       started: false,
+      altKey: e.altKey,
     });
+  };
+
+  const razorSplit = (e: ReactMouseEvent, split: NonNullable<typeof onRazorSplit>): void => {
+    const clipRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const splitTime = previewElement.start + (e.clientX - clipRect.left) / pps;
+    const clampedTime = Math.max(
+      previewElement.start + SPLIT_BOUNDARY_EPSILON_S,
+      Math.min(
+        previewElement.start + previewElement.duration - SPLIT_BOUNDARY_EPSILON_S,
+        splitTime,
+      ),
+    );
+    if (e.shiftKey && onRazorSplitAll) onRazorSplitAll(clampedTime);
+    else split(el, clampedTime);
   };
 
   const onClick = (e: ReactMouseEvent): void => {
     e.stopPropagation();
     if (suppressClickRef.current) return;
-    const { activeTool } = usePlayerStore.getState();
-    if (activeTool === "razor" && onRazorSplit) {
-      const clipRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const clickOffsetX = e.clientX - clipRect.left;
-      const splitTime = previewElement.start + clickOffsetX / pps;
-      const clampedTime = Math.max(
-        previewElement.start + SPLIT_BOUNDARY_EPSILON_S,
-        Math.min(
-          previewElement.start + previewElement.duration - SPLIT_BOUNDARY_EPSILON_S,
-          splitTime,
-        ),
-      );
-      if (e.shiftKey && onRazorSplitAll) {
-        onRazorSplitAll(clampedTime);
-      } else {
-        onRazorSplit(el, clampedTime);
-      }
+    if (usePlayerStore.getState().activeTool === "razor" && onRazorSplit) {
+      razorSplit(e, onRazorSplit);
+      return;
+    }
+    if (isAdditiveClick(e)) {
+      const primary = toggleClipWithLinks(elementKey, e.altKey);
+      onSelectElement?.(primary);
       return;
     }
     // Clip selection is idempotent; empty timeline space owns deselection.
-    setSelectedElementId(elementKey);
+    selectClipWithLinks(elementKey, e.altKey, setSelectedElementId);
     onSelectElement?.(el);
   };
 

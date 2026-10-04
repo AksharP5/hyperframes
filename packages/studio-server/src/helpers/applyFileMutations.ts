@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
-import { replaceFileAtomically } from "./atomicFile.js";
+import { replaceFileAtomically } from "@hyperframes/core/atomic-file";
 import { backupPathForResponse, snapshotBeforeWrite } from "./backupJournal.js";
 import {
   clearFileWriteReceipt,

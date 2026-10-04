@@ -3,7 +3,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import React, { act, useState } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { compile } from "tailwindcss";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { loadStylesheet, STYLES_DIR } from "../../styles/styleSources";
@@ -11,27 +10,11 @@ import { ContextMenu, Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparat
 import { Popover } from "./Popover";
 import { isTypingTarget } from "../../utils/typingTarget";
 import { shouldIgnorePlaybackShortcutTarget } from "../../player/lib/playbackShortcuts";
+import { cleanupMounted, mountHost as render } from "./mountHost.testHelpers";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-let mounted: { root: Root; host: HTMLElement } | null = null;
-
-function render(element: React.ReactElement): HTMLElement {
-  const host = document.createElement("div");
-  document.body.append(host);
-  const root = createRoot(host);
-  mounted = { root, host };
-  act(() => root.render(element));
-  return host;
-}
-
-afterEach(() => {
-  if (!mounted) return;
-  const { root, host } = mounted;
-  mounted = null;
-  act(() => root.unmount());
-  host.remove();
-});
+afterEach(cleanupMounted);
 
 /** Base UI moves focus into the popup one task after open, not synchronously. */
 async function settle(): Promise<void> {
@@ -297,6 +280,25 @@ describe("Popover", () => {
 
     expect(document.activeElement).toBe(input);
     expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("points at its trigger only when asked", async () => {
+    const renderOpen = (arrow: boolean) => {
+      render(
+        <Popover trigger={<button data-testid="trigger">Speed</button>} arrow={arrow} defaultOpen>
+          <span>1x</span>
+        </Popover>,
+      );
+    };
+    renderOpen(false);
+    await settle();
+    expect(one("[role=dialog]", "popup").querySelector("svg")).toBeNull();
+    cleanupMounted();
+
+    renderOpen(true);
+    await settle();
+    const arrow = one("[role=dialog] svg", "arrow").parentElement!;
+    expect(arrow.getAttribute("data-side")).toBe("bottom");
   });
 });
 

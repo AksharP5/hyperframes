@@ -143,7 +143,7 @@ function maxDefinedNumber(...values: Array<number | null>): number | null {
  * `parseInt(...) || fallback` silently replaced authored track 0 with the
  * synthetic fallback, so track-0 clips drifted to the bottom of the timeline.
  */
-function parseAuthoredTrack(el: Element, fallback: number): number {
+export function parseAuthoredTrack(el: Element, fallback: number): number {
   const raw = el.getAttribute("data-track-index") ?? el.getAttribute("data-track");
   if (raw == null) return fallback;
   const parsed = Number.parseInt(raw, 10);
@@ -209,6 +209,12 @@ function humanizeTimelineToken(value: string): string {
   return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function authoredCompositionId(node: Element): string | null {
+  return (
+    node.getAttribute("data-hf-original-composition-id") ?? node.getAttribute("data-composition-id")
+  );
+}
+
 function buildTimelineClipLabel(node: Element, kind: RuntimeTimelineClip["kind"], ordinal: number) {
   const explicit =
     node.getAttribute("data-timeline-label") ??
@@ -217,7 +223,7 @@ function buildTimelineClipLabel(node: Element, kind: RuntimeTimelineClip["kind"]
     null;
   if (explicit?.trim()) return explicit.trim();
 
-  const compositionId = node.getAttribute("data-composition-id");
+  const compositionId = authoredCompositionId(node);
   if (compositionId) return humanizeTimelineToken(compositionId);
 
   const id = (node as HTMLElement).id;
@@ -679,7 +685,10 @@ export function collectRuntimeTimelinePayload(params: {
     if (clampedDuration <= 0) continue;
     scenes.push({
       id: compositionId,
-      label: compositionNode.getAttribute("data-label") ?? compositionId,
+      label:
+        compositionNode.getAttribute("data-label") ??
+        authoredCompositionId(compositionNode) ??
+        compositionId,
       start,
       duration: clampedDuration,
       thumbnailUrl: toAbsoluteAssetUrl(compositionNode.getAttribute("data-thumbnail-url")),

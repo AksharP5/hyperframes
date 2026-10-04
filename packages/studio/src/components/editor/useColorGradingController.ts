@@ -29,6 +29,7 @@ import {
   type ColorGradingPresetPreviews,
   type ColorGradingPreviewOptions,
 } from "./useColorGradingPreviews";
+import { studioApiFetch } from "../../utils/studioApiFetch";
 
 export type { ColorGradingPresetPreviews, ColorGradingPreviewOptions };
 
@@ -284,13 +285,13 @@ export function useColorGradingController({
   useEffect(() => {
     setMediaMetadata(null);
     if (!selectedAssetPath) return;
-    const cacheKey = `${projectId}:${selectedAssetPath}`;
+    const cacheKey = mediaMetadataUrl(projectId, selectedAssetPath);
     if (MEDIA_METADATA_CACHE.has(cacheKey)) {
       setMediaMetadata(MEDIA_METADATA_CACHE.get(cacheKey) ?? null);
       return;
     }
     const controller = new AbortController();
-    fetch(mediaMetadataUrl(projectId, selectedAssetPath), { signal: controller.signal })
+    studioApiFetch(cacheKey, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) return { ok: false as const };
         const data: MediaMetadataResponse | null = await response.json();

@@ -5,11 +5,12 @@ import {
   resolveTimelineMinDuration,
 } from "./timelineGroupEditing";
 import type { TimelineElement } from "../store/playerStore";
+import { clampToHostStart } from "../store/timelineElement";
 import {
-  getTimelineInsertBoundaryBand,
-  getTimelineRowFromY,
-  getTimelineRowHeight,
-  getTimelineRowPositionFromY,
+  CLIP_Y,
+  TRACK_H,
+  getTimelineRowGeometry,
+  type TimelineRowGeometry,
 } from "./timelineLayout";
 import { isMusicTrack, isAudioTimelineElement } from "../../utils/timelineInspector";
 import {
@@ -24,10 +25,10 @@ import {
   applyTimelineGroupResizePreview,
   type TimelineGroupResizeSession,
 } from "./timelineGroupEditing";
-import { clampGroupMoveDelta } from "./timelineMultiDragPreview";
+import { groupMoveFloor, resolveGroupMovers } from "./timelineMultiDragPreview";
 import type { DraggedClipState, ResizingClipState } from "./timelineClipDragTypes";
-import { resolveDragLandingStart } from "./timelineDragLanding";
 import { STUDIO_PREVIEW_FPS } from "../lib/time";
+import { heldAudioShiftRange, heldPartnerVideoBounds } from "./audioClipLink";
 
 /** Snap-target builder closure supplied by the hook (closes over refs + store). */
 type BuildSnapTargets = (
@@ -42,6 +43,9 @@ export interface DragPreviewContext {
   duration: number;
   trackOrder: number[];
   rowHeights?: readonly number[];
+  rowGeometry?: TimelineRowGeometry;
+  allowedInsertRows?: ReadonlySet<number>;
+  groupTracks?: ReadonlyMap<number, readonly number[]>;
   elements: TimelineElement[];
   selectedKeys: ReadonlySet<string>;
   buildSnapTargets: BuildSnapTargets;
@@ -52,6 +56,33 @@ export interface DragPreviewContext {
    * on demand from `elements`, so the result is identical either way.
    */
   audioTracks?: ReadonlySet<number>;
+}
+
+export function createKeyboardClipDrag(
+  element: TimelineElement,
+  insertRow: number,
+  scrollLeft: number,
+  scrollTop: number,
+): DraggedClipState {
+  return {
+    pointerId: null,
+    element,
+    insertRow,
+    started: true,
+    previewStart: element.start,
+    previewTrack: element.track,
+    desiredTrack: element.track,
+    originClientX: 0,
+    originClientY: 0,
+    originScrollLeft: scrollLeft,
+    originScrollTop: scrollTop,
+    pointerClientX: 0,
+    pointerClientY: 0,
+    pointerOffsetX: 0,
+    pointerOffsetY: 0,
+    snapTime: null,
+    snapType: null,
+  };
 }
 
 /** Content-space position for the stable viewport drag actor. */
@@ -77,73 +108,97 @@ function resolveDragMaxStart(scroll: HTMLDivElement | null, pps: number, duratio
   return Math.max(duration, scroll && pps > 0 ? scroll.scrollWidth / pps : duration);
 }
 
-/**
- * Rigid group move: when the grabbed clip is part of a multi-selection, the
- * WHOLE formation shifts by its delta on commit (see timelineClipDragCommit).
- * Clamp that delta here — against every selected member's start — so the
- * grabbed clip can't out-run the group: it STOPS the instant any member would
- * cross 0, exactly as it lands on commit. Lane changes still apply to the
- * grabbed clip only, so only the start (x) is constrained.
- */
-function resolveGroupClampedStart(
-  snapStart: number,
-  element: TimelineElement,
-  dragKey: string,
-  elements: TimelineElement[],
-  selectedKeys: ReadonlySet<string>,
-): number {
-  if (selectedKeys.size <= 1 || !selectedKeys.has(dragKey)) return snapStart;
-  const memberStarts = elements.filter((e) => selectedKeys.has(e.key ?? e.id)).map((e) => e.start);
-  const clampedDelta = clampGroupMoveDelta(snapStart - element.start, memberStarts);
-  return element.start + clampedDelta;
+const INSERT_SEAM_PX = CLIP_Y;
+
+function physicalInsertRow(
+  rowFloat: number,
+  y: number,
+  ctx: Pick<DragPreviewContext, "trackOrder" | "allowedInsertRows">,
+  geometry: TimelineRowGeometry,
+) {
+  const boundary = Math.round(rowFloat);
+  const nearSeam = Math.abs(y - geometry.getRowTop(boundary)) <= INSERT_SEAM_PX;
+  const row = nearSeam
+    ? Math.max(0, Math.min(ctx.trackOrder.length, boundary))
+    : resolveInsertRow(rowFloat, ctx.trackOrder.length);
+  if (row !== null && ctx.allowedInsertRows && !ctx.allowedInsertRows.has(row)) return null;
+  return row;
 }
 
-/**
- * The whole drop decision (no same-track overlap, zone-respecting, relocate or
- * create) — one tested pure function, so what runs here is what's verified.
- */
-function resolveDropPlacement(
+function dragRowAim(
   drag: DraggedClipState,
   clientY: number,
+  ctx: DragPreviewContext,
+  geometry: TimelineRowGeometry,
+) {
+  let y = clientY - (ctx.scroll?.getBoundingClientRect().top ?? 0) + (ctx.scroll?.scrollTop ?? 0);
+  if (drag.started && drag.insertRow !== null) {
+    const top = geometry.getRowTop(drag.insertRow);
+    if (y >= top - INSERT_SEAM_PX && y <= top + TRACK_H + INSERT_SEAM_PX)
+      return { rowFloat: drag.insertRow, insertRow: drag.insertRow };
+    if (y > top + TRACK_H) y -= TRACK_H;
+  }
+  const rowFloat = geometry.getRowFromY(y);
+  return { rowFloat, insertRow: physicalInsertRow(rowFloat, y, ctx, geometry) };
+}
+
+/** The drop decision for the pointer's row (see resolveZoneDropPlacement). */
+function resolveDropPlacement(
+  drag: DraggedClipState,
+  aim: ReturnType<typeof dragRowAim>,
   previewStart: number,
   desiredTrack: number,
   ctx: DragPreviewContext,
-): { track: number; insertRow: number | null } {
-  const { scroll, trackOrder, rowHeights, elements } = ctx;
-  // rowFloat = the pointer's position in track-heights from the top lane; a
-  // near-boundary hover requests a deliberate new-track insert. Uses the
-  // shared row→y inverse so the top breathing pad is subtracted consistently.
-  const rowPosition = scroll
-    ? getTimelineRowPositionFromY(
-        clientY - scroll.getBoundingClientRect().top + scroll.scrollTop,
-        rowHeights,
-      )
-    : { rowFloat: 0, row: 0, fraction: 0, rowHeight: getTimelineRowHeight(0, rowHeights) };
-  // Geometry-exact band (the clip inset divided by this row's actual height) so
-  // an insert only arms in the visible gutter between clip bodies.
-  const rawInsertRow = resolveInsertRow(
-    rowPosition.rowFloat,
-    trackOrder.length,
-    getTimelineInsertBoundaryBand(rowPosition.rowHeight),
-  );
-  // Pointer sub-row half: when a drop must auto-create a track (aimed span
-  // occupied, no free lane), open it on the side the pointer is nearer.
-  const preferInsertAbove = rowPosition.fraction < 0.5;
+  group: GroupDrag,
+): { track: number; insertRow: number | null; start: number } {
+  const { trackOrder, elements } = ctx;
+  const dragKey = drag.element.key ?? drag.element.id;
   const audioTracks =
     ctx.audioTracks ?? new Set(elements.filter(isAudioTimelineElement).map((e) => e.track));
   return resolveZoneDropPlacement({
     order: trackOrder,
     audioTracks,
-    elements,
+    elements: group.obstacles,
     desiredTrack,
-    deliberateInsertRow: rawInsertRow,
+    deliberateInsertRow: aim.insertRow,
+    allowedInsertRows: ctx.allowedInsertRows,
+    groupTracks: ctx.groupTracks,
     start: previewStart,
     duration: drag.element.duration,
-    dragKey: drag.element.key ?? drag.element.id,
+    dragKey,
     isAudio: isAudioTimelineElement(drag.element),
-    preferInsertAbove,
+    minStart: group.floor,
+    origin: { track: drag.element.track, start: drag.element.start },
   });
 }
+
+interface GroupDrag {
+  /** Clips the grabbed clip may not overlap: everything but the clips that move with it. */
+  obstacles: TimelineElement[];
+  /** Lowest start the grabbed clip may take (see groupMoveFloor). */
+  floor: number;
+  moving: ReadonlySet<string>;
+}
+
+function resolveGroupDrag(drag: DraggedClipState, ctx: DragPreviewContext): GroupDrag {
+  const movers = resolveGroupMovers(
+    ctx.elements,
+    ctx.selectedKeys,
+    drag.element.key ?? drag.element.id,
+  );
+  if (!movers) {
+    const moving = new Set([drag.element.key ?? drag.element.id]);
+    return { obstacles: ctx.elements, floor: groupMoveFloor(drag.element, []), moving };
+  }
+  const moving = new Set(movers.map((e) => e.key ?? e.id));
+  return {
+    obstacles: ctx.elements.filter((e) => !moving.has(e.key ?? e.id)),
+    floor: groupMoveFloor(drag.element, movers),
+    moving,
+  };
+}
+
+const SHIFT_EPSILON_S = 1e-6;
 
 /** Recompute the dragged-clip preview (move + snap + group clamp + drop placement). */
 export function computeDragPreview(
@@ -152,15 +207,14 @@ export function computeDragPreview(
   clientY: number,
   ctx: DragPreviewContext,
 ): DraggedClipState {
-  const { scroll, pps, duration, trackOrder, elements, selectedKeys, buildSnapTargets } = ctx;
+  const { scroll, pps, duration, trackOrder, buildSnapTargets } = ctx;
   const dragMaxStart = resolveDragMaxStart(scroll, pps, duration);
-  const scrollTop = scroll?.scrollTop ?? drag.originScrollTop;
   const scrollRectTop = scroll?.getBoundingClientRect().top ?? 0;
-  const originRow = getTimelineRowFromY(
-    drag.originClientY - scrollRectTop + drag.originScrollTop,
-    ctx.rowHeights,
-  );
-  const currentRow = getTimelineRowFromY(clientY - scrollRectTop + scrollTop, ctx.rowHeights);
+  const geometry =
+    ctx.rowGeometry ?? getTimelineRowGeometry(ctx.rowHeights ?? ctx.trackOrder.map(() => TRACK_H));
+  const originRow = geometry.getRowFromY(drag.originClientY - scrollRectTop + drag.originScrollTop);
+  const aim = dragRowAim(drag, clientY, ctx, geometry);
+  const currentRow = aim.rowFloat;
   // resolveTimelineMove's vertical axis is row indices, which is why the pointer
   // and scroll pixels are folded into originRow/currentRow above.
   const nextMove = resolveTimelineMove(
@@ -173,6 +227,7 @@ export function computeDragPreview(
       originScrollLeft: drag.originScrollLeft,
       currentScrollLeft: scroll?.scrollLeft ?? drag.originScrollLeft,
       pixelsPerSecond: pps,
+      minStart: clampToHostStart(drag.element, 0),
       maxStart: dragMaxStart,
       trackOrder,
     },
@@ -194,40 +249,36 @@ export function computeDragPreview(
     // rendered extent (see dragMaxStart) — the composition grows on commit.
     dragMaxStart + drag.element.duration,
   );
+  // A group moves rigidly: the grabbed clip stops where any mover would cross its host's start.
+  const group = resolveGroupDrag(drag, ctx);
   const dragKey = drag.element.key ?? drag.element.id;
-  const previewStart = resolveGroupClampedStart(
-    snap.start,
-    drag.element,
-    dragKey,
-    elements,
-    selectedKeys,
+  const passengers = ctx.elements.filter(
+    (el) => (el.key ?? el.id) !== dragKey && group.moving.has(el.key ?? el.id),
   );
-  const { track: previewTrack, insertRow } = resolveDropPlacement(
-    drag,
-    clientY,
-    previewStart,
-    nextMove.track,
-    ctx,
-  );
-  const placed = { ...drag, previewStart, previewTrack, insertRow };
-  const snappedStart = resolveDragLandingStart(placed, {
-    elements,
-    trackOrder,
-    selectedKeys,
-  });
+  const movers = [drag.element, ...passengers];
+  const shift = heldAudioShiftRange(movers, ctx.elements, group.moving);
+  const origin = drag.element.start;
+  const floored = Math.max(snap.start, group.floor);
+  const previewStart = origin + Math.max(shift.min, Math.min(floored - origin, shift.max));
+  const placement = resolveDropPlacement(drag, aim, previewStart, nextMove.track, ctx, group);
+  const placedShift = placement.start - origin;
+  if (placedShift < shift.min - SHIFT_EPSILON_S || placedShift > shift.max + SHIFT_EPSILON_S) {
+    return { ...drag, started: true };
+  }
+  const { track: previewTrack, insertRow } = placement;
   return {
     ...drag,
     started: true,
-    pointerClientX: clientX,
+    pointerClientX: clientX - (floored - previewStart) * pps,
     pointerClientY: clientY,
-    previewStart: snappedStart,
+    previewStart: placement.start,
     previewTrack,
-    // The lane the POINTER aims at (pre-collision): the commit reads it to tell a
-    // deliberate vertical lane change from a horizontal drag merely bumped sideways.
+    // The lane the POINTER aims at (before the zone clamp): the commit reads it to
+    // tell a deliberate vertical lane change from a horizontal drag.
     desiredTrack: nextMove.track,
     insertRow,
-    snapTime: snap.snapTime,
-    snapType: snap.snapType,
+    snapTime: placement.start === snap.start ? snap.snapTime : null,
+    snapType: placement.start === snap.start ? snap.snapType : null,
   };
 }
 
@@ -243,6 +294,8 @@ export interface ResizePreviewContext {
   scroll: HTMLDivElement | null;
   pps: number;
   buildSnapTargets: BuildSnapTargets;
+  elements?: readonly TimelineElement[];
+  gestureKeys?: ReadonlySet<string>;
 }
 
 export interface ResizePreviewResult {
@@ -286,14 +339,18 @@ export function computeResizePreview(
   // rightward and, after a far move, collapsed a clip to the sliver between its
   // start and the comp end (the 8s→0.95s audio incident). Images/text/shapes
   // have no source, so they extend freely.
-  const maxEnd = resize.element.start + sourceRemaining;
+  const video = ctx.elements
+    ? heldPartnerVideoBounds(resize.element, ctx.elements, ctx.gestureKeys ?? new Set())
+    : null;
+  const minStart = Math.max(clampToHostStart(resize.element, 0), video?.start ?? 0);
+  const maxEnd = Math.min(resize.element.start + sourceRemaining, video?.end ?? Infinity);
   let nextResize = resolveTimelineResize(
     {
       start: resize.element.start,
       duration: resize.element.duration,
       originClientX: resize.originClientX,
       pixelsPerSecond: pps,
-      minStart: 0,
+      minStart,
       maxEnd,
       playbackStart:
         resize.edge === "start" && canSeedPlaybackStart
@@ -336,7 +393,7 @@ export function computeResizePreview(
       const { time: snapped, target } = snapTimelineTime(nextResize.start, trimTargets, snapSecs);
       const clip = { ...nextResize, playbackRate: resize.element.playbackRate };
       const delta = snapped - nextResize.start;
-      const bounds = clipStartTrimDeltaBounds(clip, 0, resolveTimelineMinDuration());
+      const bounds = clipStartTrimDeltaBounds(clip, minStart, resolveTimelineMinDuration());
       if (target && delta >= bounds.minDelta - 1e-6 && delta <= bounds.maxDelta + 1e-6) {
         if (snapped !== nextResize.start) nextResize = applyClipStartTrimDelta(clip, delta);
         snap = target;

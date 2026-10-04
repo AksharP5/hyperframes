@@ -7,6 +7,7 @@ import { StudioSaveHttpError, trackStudioSaveFailure } from "../utils/studioSave
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { fontFamilyFromAssetPath, type ImportedFontAsset } from "../components/editor/fontAssets";
 import type { CommitDomEditPatchBatches } from "./domEditCommitTypes";
+import type { ResolveDomSelectionOptions } from "./useDomSelectionTypes";
 import type { PatchOperation } from "../utils/sourcePatcher";
 import { DomEditPersistUnsafeValueError } from "./domEditPersistFailure";
 import { useDomEditPersist, type RecordEditInput } from "./useDomEditPersist";
@@ -46,7 +47,7 @@ export interface UseDomEditCommitsParams {
   refreshDomEditSelectionFromPreview: (selection: DomEditSelection) => void;
   buildDomSelectionFromTarget: (
     target: HTMLElement,
-    options?: { preferClipAncestor?: boolean },
+    options?: ResolveDomSelectionOptions,
   ) => Promise<DomEditSelection | null>;
   /** Resync the in-memory SDK session after a SERVER-side write (NOT the SDK
    * path, whose session is already current) so a later SDK edit doesn't
@@ -238,6 +239,7 @@ export function useDomEditCommits({
     handleDomAttributeQuietCommit,
     handleDomHtmlAttributeCommit,
     handleDomAttributesCommit,
+    handleDomAttributeBatchCommit,
     handleDomTextCommit,
     handleDomTextCommitForSelection,
     handleDomRichTextCommit,
@@ -269,12 +271,11 @@ export function useDomEditCommits({
   // ── Geometry commits (path offset, box size, rotation) ──
 
   const {
-    handleDomPathOffsetCommit,
+    stageElementPositionOffset,
     handleDomBoxSizeCommit,
     handleDomRotationCommit,
     handleDomManualEditsReset,
   } = useDomGeometryCommits({
-    previewIframeRef,
     showToast,
     commitPositionPatchToHtml,
     readOnlyPreview,
@@ -305,6 +306,7 @@ export function useDomEditCommits({
     handleDomAttributeQuietCommit,
     handleDomHtmlAttributeCommit,
     handleDomAttributesCommit,
+    handleDomAttributeBatchCommit,
     handleDomTextCommit,
     handleDomTextCommitForSelection,
     handleDomRichTextCommit,
@@ -312,7 +314,8 @@ export function useDomEditCommits({
     handleDomTextFieldStyleCommit,
     handleDomAddTextField,
     handleDomRemoveTextField,
-    handleDomPathOffsetCommit,
+    stageElementPositionOffset,
+    commitPositionPatchToHtml,
     handleDomBoxSizeCommit,
     handleDomRotationCommit,
     handleDomManualEditsReset,

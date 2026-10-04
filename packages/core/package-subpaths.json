@@ -44,6 +44,12 @@
       "types": "./dist/safePath.d.ts",
       "environments": ["bun", "node"]
     },
+    "./atomic-file": {
+      "source": "./src/atomicFile.ts",
+      "runtime": "./dist/atomicFile.js",
+      "types": "./dist/atomicFile.d.ts",
+      "environments": ["bun", "node"]
+    },
     "./asset-paths": {
       "source": "./src/compiler/rewriteSubCompPaths.ts",
       "runtime": "./dist/compiler/rewriteSubCompPaths.js",
@@ -72,6 +78,12 @@
       "source": "./src/studioPreviewMark.ts",
       "runtime": "./dist/studioPreviewMark.js",
       "types": "./dist/studioPreviewMark.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
+    "./gsap-cdn": {
+      "source": "./src/gsapCdn.ts",
+      "runtime": "./dist/gsapCdn.js",
+      "types": "./dist/gsapCdn.d.ts",
       "environments": ["browser", "bun", "node"]
     },
     "./media-timing": {
@@ -194,6 +206,12 @@
       "types": "./dist/audioCarve.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./media-link": {
+      "source": "./src/mediaLink.ts",
+      "runtime": "./dist/mediaLink.js",
+      "types": "./dist/mediaLink.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./audio-groups": {
       "source": "./src/audioGroups.ts",
       "runtime": "./dist/audioGroups.js",
@@ -210,6 +228,12 @@
       "source": "./src/clipFacts.ts",
       "runtime": "./dist/clipFacts.js",
       "types": "./dist/clipFacts.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
+    "./audible-video": {
+      "source": "./src/audibleVideo.ts",
+      "runtime": "./dist/audibleVideo.js",
+      "types": "./dist/audibleVideo.d.ts",
       "environments": ["browser", "bun", "node"]
     },
     "./audio-gain": {
@@ -264,6 +288,12 @@
       "source": "./src/runtime/clipTree.ts",
       "runtime": "./dist/runtime/clipTree.js",
       "types": "./dist/runtime/clipTree.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
+    "./runtime/dom-realm": {
+      "source": "./src/runtime/domRealm.ts",
+      "runtime": "./dist/runtime/domRealm.js",
+      "types": "./dist/runtime/domRealm.d.ts",
       "environments": ["browser", "bun", "node"]
     },
     "./runtime/custom-ease": {

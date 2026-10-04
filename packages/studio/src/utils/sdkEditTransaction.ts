@@ -11,7 +11,7 @@ import {
 
 export type CutoverResult =
   | { status: "declined"; reason: string }
-  | { status: "committed"; version: string }
+  | { status: "committed"; version: string; before: string; after: string }
   | { status: "failed"; error: Error };
 
 export interface SdkSessionPublication {
@@ -143,7 +143,9 @@ export function failedCutover(
 }
 
 /** Only an explicit decline may enter the legacy mutation backend. */
-export function cutoverCommittedOrThrow(result: CutoverResult): boolean {
+export function cutoverCommittedOrThrow(
+  result: CutoverResult,
+): result is Extract<CutoverResult, { status: "committed" }> {
   if (result.status === "failed") throw result.error;
   return result.status === "committed";
 }
@@ -300,7 +302,12 @@ async function commitCandidateEdit(
     });
   }
   if (refreshTarget) refreshCommittedEdit(edit.after, deps, options);
-  return { status: "committed", version: hashContent(edit.after) };
+  return {
+    status: "committed",
+    version: hashContent(edit.after),
+    before: originalContent,
+    after: edit.after,
+  };
 }
 
 export async function persistSdkCandidateMutation(

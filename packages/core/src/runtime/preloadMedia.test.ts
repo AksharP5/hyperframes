@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { preloadMedia } from "./preloadMedia";
+import { preloadMedia, releaseMedia } from "./preloadMedia";
 
 function media(tagName = "VIDEO", networkState = 2, readyState = 0) {
   return { tagName, networkState, readyState, preload: "metadata", load: vi.fn() };
@@ -32,5 +32,30 @@ describe("initial media preload", () => {
     preloadMedia(element);
     expect(element.preload).toBe("auto");
     expect(element.load).not.toHaveBeenCalled();
+  });
+});
+
+describe("releasing a clip's download", () => {
+  it("reloads a src clip with its src dropped, then puts the src back", () => {
+    const video = document.createElement("video");
+    video.setAttribute("src", "a.mp4");
+    const atLoad: (string | null)[] = [];
+    video.load = () => atLoad.push(video.getAttribute("src"));
+
+    releaseMedia(video);
+    expect(atLoad).toEqual([null]);
+    expect(video.getAttribute("src")).toBe("a.mp4");
+  });
+
+  it("leaves a clip on <source> children, their order and its markup untouched", () => {
+    const video = document.createElement("video");
+    video.innerHTML =
+      '\n  <track kind="captions">\n  <source src="b.webm">\n  <source src="b.mp4">\n';
+    const markup = video.innerHTML;
+    video.load = vi.fn();
+
+    releaseMedia(video);
+    expect(video.load).not.toHaveBeenCalled();
+    expect(video.innerHTML).toBe(markup);
   });
 });

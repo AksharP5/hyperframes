@@ -7,6 +7,7 @@ import { buildProjectApiPath } from "../utils/projectRouting";
 import type { DomEditPatchBatch } from "./domEditCommitTypes";
 import { formatFieldsSuffix } from "./gsapScriptCommitHelpers";
 import { studioWriteHeaders } from "../utils/studioFileVersion";
+import { studioApiFetch } from "../utils/studioApiFetch";
 
 export function formatUnsafeFieldList(fields: Array<{ path: string }>): string {
   return fields.map((field) => field.path).join(", ");
@@ -99,7 +100,7 @@ function isAtomicElementPatchFile(value: unknown): value is AtomicElementPatchFi
 export async function patchElementBatches(projectId: string, batches: DomEditPatchBatch[]) {
   const body = JSON.stringify({ batches });
   try {
-    const response = await fetch(
+    const response = await studioApiFetch(
       `/api/projects/${encodeURIComponent(projectId)}/file-mutations/patch-element-batches`,
       {
         method: "POST",
@@ -178,7 +179,7 @@ export async function postPatchElement(
   body: unknown,
   showToast: ShowToast,
 ): Promise<PatchElementResponse> {
-  const response = await fetch(
+  const response = await studioApiFetch(
     buildProjectApiPath(
       projectId,
       `/file-mutations/patch-element/${encodeURIComponent(targetPath)}`,
@@ -198,25 +199,23 @@ export async function postPatchElement(
   return (await response.json()) as PatchElementResponse;
 }
 
-/** Writes `prepare`'s embellishment over the server's patch; returns what the file ends up holding. */
 export async function writePreparedContent(
   targetPath: string,
   patchedContent: string,
   prepare: (html: string, sourceFile: string) => string,
   writeProjectFile: (path: string, content: string, expectedContent?: string) => Promise<void>,
   showToast: ShowToast,
-): Promise<string> {
+): Promise<{ content: string; failed: boolean }> {
   const preparedContent = prepare(patchedContent, targetPath);
-  if (preparedContent === patchedContent) return patchedContent;
+  if (preparedContent === patchedContent) return { content: patchedContent, failed: false };
   try {
     await writeProjectFile(targetPath, preparedContent, patchedContent);
-    return preparedContent;
+    return { content: preparedContent, failed: false };
   } catch (error) {
-    // The patch already landed on disk; keep it rather than revert a committed change.
     showToast(
       `Saved, but couldn't finish updating ${targetPath}: ${getErrorDetail(error)}`,
       "error",
     );
-    return patchedContent;
+    return { content: patchedContent, failed: true };
   }
 }

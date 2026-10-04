@@ -583,6 +583,22 @@ function resolveTargetSelector(
   return null;
 }
 
+function hasUnresolvedArrayPart(
+  node: any,
+  ancestors: any[],
+  scope: ScopeBindings,
+  bindings: TargetBindings,
+): boolean {
+  return (
+    node?.type === "ArrayExpression" &&
+    node.elements.some(
+      (el: any) =>
+        !resolveTargetSelector(el, ancestors, scope, bindings) ||
+        hasUnresolvedArrayPart(el, ancestors, scope, bindings),
+    )
+  );
+}
+
 /**
  * Classify an otherwise-unresolved tween target that is a plain object literal
  * (`tl.to({}, …)`) or a proxy object (`tl.to(s, {onUpdate})`). Returns a
@@ -864,6 +880,7 @@ export interface TweenCallInfo {
   ancestors: any[];
   method: GsapMethod;
   selector: string;
+  selectorPartial?: boolean;
   varsArg: any;
   fromArg?: any;
   positionArg?: any;
@@ -929,6 +946,9 @@ function findAllTweenCalls(
             ? (resolveTargetSelector(args[0], nodeAncestors, scope, targetBindings) ??
               "__unresolved__")
             : "__unresolved__";
+        const partial = hasUnresolvedArrayPart(args[0], nodeAncestors, scope, targetBindings)
+          ? { selectorPartial: true }
+          : {};
 
         if (method === "fromTo" && args.length >= 3) {
           results.push({
@@ -936,6 +956,7 @@ function findAllTweenCalls(
             ancestors: nodeAncestors,
             method: "fromTo",
             selector: selectorValue,
+            ...partial,
             fromArg: args[1],
             varsArg: args[2],
             positionArg: args[3],
@@ -946,6 +967,7 @@ function findAllTweenCalls(
             ancestors: nodeAncestors,
             method: method as GsapMethod,
             selector: selectorValue,
+            ...partial,
             varsArg: args[1],
             positionArg: args[2],
             ...(isGlobalSet ? { global: true } : {}),
@@ -1403,6 +1425,7 @@ function tweenCallToAnimation(
   if (hasUnresolvedKeyframes) anim.hasUnresolvedKeyframes = true;
   if (durationUnresolved) anim.durationUnresolved = true;
   if (selector === "__unresolved__") anim.hasUnresolvedSelector = true;
+  if (call.selectorPartial) anim.hasPartialSelector = true;
   if (provenance) anim.provenance = provenance;
   return anim;
 }
@@ -1880,7 +1903,7 @@ export function parseGsapScriptAcornForWrite(script: string): ParsedGsapAcornFor
       tweenCallToAnimation(call, scope, script, identifierBindings),
     );
     applyTimelineDefaults(rawAnims, detection.defaults);
-    resolveTimelinePositions(rawAnims);
+    resolveTimelinePositions(rawAnims, collectAddLabelDefs(ast, ref, scope, calls));
     const animations = assignStableIds(rawAnims);
     const located = calls.map((call, i) => ({
       id: animations[i]!.id,
@@ -1903,6 +1926,18 @@ const parseMemo = new Map<string, ParsedGsap>();
  * Browser-safe equivalent of `parseGsapScript` (gsapParser.ts).
  * Uses acorn + acorn-walk instead of recast + @babel/parser.
  */
+/** The script that holds a file's timeline: the first to declare one, else the first with tween calls. */
+export function findTimelineScript<T extends { textContent: string | null }>(
+  scripts: readonly T[],
+): T | null {
+  const text = (script: T) => script.textContent ?? "";
+  return (
+    scripts.find((script) => text(script).includes("gsap.timeline")) ??
+    scripts.find((script) => /\.(set|to)\(/.test(text(script))) ??
+    null
+  );
+}
+
 export function parseGsapScriptAcorn(script: string): ParsedGsap {
   const parsed = parseMemo.get(script) ?? parseGsapScriptAcornUncached(script);
   parseMemo.delete(script);

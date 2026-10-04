@@ -8,6 +8,7 @@ import {
 } from "@hyperframes/core";
 import { stripEmbeddedRuntimeScripts } from "@hyperframes/core/compiler";
 import { isFullHtmlDocument } from "@hyperframes/core/compiler/html-document";
+import { gsapCdnDist } from "@hyperframes/core/gsap-cdn";
 
 /**
  * Rewrite relative asset paths in a parsed DOM tree. Shared across all
@@ -236,6 +237,10 @@ function tagRootCompositionFile(bodyHtml: string, compPath: string): string {
   );
 }
 
+export function rootHeadContent(rootHtml: string): string {
+  return rootHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
+}
+
 /**
  * Build a standalone HTML page for a sub-composition.
  *
@@ -318,11 +323,7 @@ export function buildSubCompositionHtml(
   const indexPath = join(projectDir, "index.html");
   let headContent = "";
 
-  if (existsSync(indexPath)) {
-    const indexHtml = readFileSync(indexPath, "utf-8");
-    const headMatch = indexHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
-    headContent = headMatch?.[1] ?? "";
-  }
+  if (existsSync(indexPath)) headContent = rootHeadContent(readFileSync(indexPath, "utf-8"));
 
   // Inject <base> for relative asset resolution (before other tags)
   if (baseHref && !hasBaseElement(headContent)) {
@@ -349,7 +350,7 @@ export function buildSubCompositionHtml(
 
   // Fallback: if no index.html head was found, add minimal deps
   if (!headContent.includes("gsap")) {
-    headContent += `\n<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>`;
+    headContent += `\n<script src="${gsapCdnDist()}gsap.min.js"></script>`;
   }
 
   const htmlOpen = htmlAttrs ? `<html ${htmlAttrs}>` : "<html>";

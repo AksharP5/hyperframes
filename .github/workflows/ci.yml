@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -74,17 +74,18 @@ jobs:
       codex_plugin: ${{ steps.filter.outputs.codex_plugin }}
       gcp_beginframe: ${{ steps.filter.outputs.gcp_beginframe }}
       studio: ${{ steps.filter.outputs.studio }}
+      edit_accuracy: ${{ steps.filter.outputs.edit_accuracy }}
     steps:
       # Force git-based change detection instead of the pull_request REST API.
       # The API path can fail the whole workflow on transient listFiles
       # timeouts before any real CI work starts.
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Reject accidental file deletions
         if: github.event_name == 'pull_request'
         run: node scripts/check-no-main-deletions.mjs --base origin/main
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         id: filter
         with:
           token: ""
@@ -114,6 +115,7 @@ jobs:
               - "tsconfig*.json"
               - "Dockerfile*"
               - ".github/workflows/**"
+              - ".github/actions/**"
             cli:
               - "packages/cli/**"
               - "package.json"
@@ -133,6 +135,7 @@ jobs:
               - "scripts/check-skill-mirror.mjs"
               - "package.json"
               - ".github/workflows/ci.yml"
+              - ".github/actions/install-ffmpeg-linux/**"
             codex_plugin:
               - "skills-manifest.json"
               - "packages/cli/package.json"
@@ -156,6 +159,38 @@ jobs:
               - "packages/studio-server/**"
               - "bun.lock"
               - ".github/workflows/ci.yml"
+            edit_accuracy:
+              - "packages/studio/src/**"
+              - "packages/studio-server/src/**"
+              - "packages/core/src/**"
+              - "packages/core/scripts/**"
+              - "packages/cli/src/**"
+              - "packages/player/src/**"
+              - "packages/parsers/src/**"
+              - "packages/producer/src/**"
+              - "packages/engine/src/**"
+              - "packages/lint/src/**"
+              - "packages/sdk/src/**"
+              - "packages/studio/index.html"
+              - "packages/studio/vite.config.ts"
+              - "packages/studio/public/**"
+              - "packages/cli/scripts/**"
+              - "packages/cli/tsup.config.ts"
+              - "packages/studio/package.json"
+              - "packages/cli/package.json"
+              - "packages/core/package.json"
+              - "packages/producer/package.json"
+              - "packages/engine/package.json"
+              - "packages/parsers/package.json"
+              - "packages/lint/package.json"
+              - "packages/sdk/package.json"
+              - "packages/studio-server/package.json"
+              - "packages/player/package.json"
+              - "packages/*/package-subpaths.json"
+              - "scripts/package-subpaths.mjs"
+              - "packages/studio/tests/e2e/edit-accuracy/**"
+              - "bun.lock"
+              - ".github/workflows/ci.yml"
             gcp_beginframe:
               - "packages/gcp-cloud-run/Dockerfile"
               - "packages/aws-lambda/scripts/probe-beginframe.ts"
@@ -171,15 +206,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
-      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build BeginFrame contract image
         # A hung bun install (Dockerfile.test, run 35468046055) would
         # otherwise eat the whole job timeout instead of failing at this step.
         timeout-minutes: 10
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: packages/gcp-cloud-run/Dockerfile
@@ -201,7 +236,7 @@ jobs:
         run: |
           echo "::error::Change detection did not succeed, so this required check cannot pass."
           exit 1
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -214,6 +249,14 @@ jobs:
       - run: bash scripts/ci/install-workspace-dependencies.sh
       - run: bun run build
       - run: bun run verify:packed-manifests
+      - name: Share the built CLI with the edit accuracy shards
+        if: github.event_name == 'pull_request' && needs.changes.outputs.edit_accuracy == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: edit-accuracy-cli
+          path: packages/cli/dist
+          if-no-files-found: error
+          retention-days: 1
 
   lint:
     name: Lint
@@ -222,7 +265,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
           fetch-depth: 0
@@ -245,7 +288,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -298,7 +341,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # Full history so `--base origin/main` can diff against the merge
           # base on stacked PRs, not just the shallow tip.
@@ -356,7 +399,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -380,7 +423,7 @@ jobs:
         run: |
           echo "::error::Change detection did not succeed, so this required check cannot pass."
           exit 1
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -400,7 +443,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
           fetch-depth: 0
@@ -424,7 +467,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -446,7 +489,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
           fetch-depth: 0
@@ -514,7 +557,7 @@ jobs:
       matrix:
         lane: [unit, integration]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -546,7 +589,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -579,7 +622,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -602,7 +645,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -618,7 +661,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Verify skills-manifest.json matches skills/
         run: bun packages/cli/scripts/gen-skills-manifest.ts --check
@@ -635,7 +678,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Lint SKILL.md files across skills/, .claude/skills/, .agents/skills/
         run: bun scripts/lint-skills.ts
@@ -649,7 +692,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
@@ -673,7 +716,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -693,7 +736,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - run: bash scripts/ci/install-workspace-dependencies.sh
       # Build workspace deps so the sdk's @hyperframes/parsers + core subpath
@@ -715,7 +758,7 @@ jobs:
         run: |
           echo "::error::Change detection did not succeed, so this required check cannot pass."
           exit 1
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -736,7 +779,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -782,7 +825,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 18
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -803,17 +846,16 @@ jobs:
             packages/studio/data/projects/timeline-virtualization
           cp -R packages/studio/tests/e2e/fixtures/studio-open \
             packages/studio/data/projects/studio-open
+          cp -R packages/studio/tests/e2e/fixtures/fade-handles \
+            packages/studio/data/projects/fade-handles
+          cp -R packages/studio/tests/e2e/fixtures/inline-text-caret \
+            packages/studio/data/projects/inline-text-caret
+          cp -R packages/studio/tests/e2e/fixtures/undo-socket-pool \
+            packages/studio/data/projects/undo-socket-pool
       - name: Read the base branch's work-count ceilings
         # A ceiling may not disappear, or rise without a new reason, against the branch this PR merges into.
         if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          git fetch --no-tags --depth=1 origin "$BASE_REF"
-          if ! git show FETCH_HEAD:packages/studio/tests/e2e/perf-ceilings.json > /tmp/base-perf-ceilings.json; then
-            rm -f /tmp/base-perf-ceilings.json
-            echo "The base branch has no perf-ceilings.json yet"
-          fi
+        run: bash scripts/ci/base-file.sh packages/studio/tests/e2e/perf-ceilings.json /tmp/base-perf-ceilings.json
       - name: Run both arms of the timeline viewport gate
         run: |
           set -euo pipefail
@@ -880,6 +922,14 @@ jobs:
             echo "### Timeline viewport gate"
             echo "- Default arm exit: ${DEFAULT_STATUS}"
             echo "- Explicitly disabled arm exit: ${DISABLED_STATUS}"
+            for arm in default disabled; do
+              node -e '
+                const e = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+                const b = e.environment.appliedBudgets;
+                for (const a of e.attempts)
+                  console.log(`- ${process.argv[2]} attempt ${a.attempt}: interaction p95 ${a.interactionP95Ms.toFixed(1)}/${b.interactionP95Ms} ms, frame p95 ${a.frameIntervalP95Ms.toFixed(1)}/${b.frameIntervalP95Ms} ms, ${a.passingRuns}/${a.runs.length} runs, ${a.passed ? "pass" : "fail"}`);
+              ' "/tmp/timeline-gate-${arm}.json" "$arm" || echo "- ${arm}: no evidence"
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
           if (( DEFAULT_STATUS != 0 || DISABLED_STATUS != 0 )); then
@@ -910,6 +960,70 @@ jobs:
           node packages/studio/tests/e2e/perf-ratchet.mjs check \
             packages/studio/tests/e2e/perf-ceilings.json studio-open /tmp/studio-open-counts.json \
             /tmp/base-perf-ceilings.json
+      - name: Check fade handles, render selects and thumbnail connection release
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          NODE_ENV=production bun run --cwd packages/studio dev -- --port 5316 --strictPort &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -sf "http://localhost:5316/" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          if ! curl -sf "http://localhost:5316/" >/dev/null 2>&1; then
+            echo "FAIL: studio dev server did not start on port 5316"
+            exit 1
+          fi
+          # All checks run even when an earlier one fails.
+          rc=0
+          STUDIO_URL="http://localhost:5316/#project/fade-handles" \
+            node packages/studio/tests/e2e/fade-handles.mjs || rc=1
+          STUDIO_URL="http://localhost:5316/#project/fade-handles?tab=renders" \
+            node packages/studio/tests/e2e/render-selects.mjs || rc=1
+          STUDIO_URL="http://localhost:5316/" \
+            node packages/studio/tests/e2e/thumbnail-save.mjs || rc=1
+          exit "$rc"
+      - name: Measure the caret of a text edited in place
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          NODE_ENV=production bun run --cwd packages/studio dev -- --port 5317 --strictPort &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -sf "http://localhost:5317/" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          if ! curl -sf "http://localhost:5317/" >/dev/null 2>&1; then
+            echo "FAIL: studio dev server did not start on port 5317"
+            exit 1
+          fi
+          STUDIO_URL="http://localhost:5317/#project/inline-text-caret" \
+            EVIDENCE_DIR=/tmp/inline-text-caret \
+            node packages/studio/tests/e2e/inline-text-caret.mjs
+      - name: Install ffmpeg for the paused-video fixture
+        if: success() || failure()
+        uses: ./.github/actions/install-ffmpeg-linux
+      - name: Undo while paused videos hold the preview's sockets
+        # Counts the undo's wait for a socket, not its total time: unpinned it is 0 ms.
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          NODE_ENV=production bun run --cwd packages/studio dev -- --port 5318 --strictPort &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -sf "http://localhost:5318/" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          if ! curl -sf "http://localhost:5318/" >/dev/null 2>&1; then
+            echo "FAIL: studio dev server did not start on port 5318"
+            exit 1
+          fi
+          STUDIO_URL="http://localhost:5318/#project/undo-socket-pool" \
+            STUDIO_PROJECT_DIR="$PWD/packages/studio/data/projects/undo-socket-pool" \
+            node packages/studio/tests/e2e/undo-socket-pool.mjs | tee /tmp/undo-socket-pool.json
       - name: Upload gate evidence
         # The gate's whole output is machine-readable evidence, and a red run is
         # exactly when someone needs to read it. Keep it on failure too.
@@ -920,7 +1034,110 @@ jobs:
           path: |
             /tmp/timeline-gate-*.json
             /tmp/studio-open-counts.json
+            /tmp/inline-text-caret/*.png
+            /tmp/undo-socket-pool.json
           if-no-files-found: error
+
+  # Manual editing accuracy in the built Studio, gated against the base branch's baseline.json.
+  studio-edit-accuracy:
+    name: "Studio: edit accuracy (${{ matrix.shard }}/20)"
+    needs: [changes, build]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.edit_accuracy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-ffmpeg-bin
+      - run: bash scripts/ci/install-workspace-dependencies.sh
+      # The bench imports producer and engine source, which need core's generated runtime files.
+      - run: bun run --cwd packages/core build
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: edit-accuracy-cli
+          path: packages/cli/dist
+      # Studio and the producer both run in the engine's pinned headless shell.
+      - run: node packages/cli/dist/cli.js browser ensure
+      - name: Read the base branch's edit accuracy baseline
+        run: |
+          bash scripts/ci/base-file.sh packages/studio/tests/e2e/edit-accuracy/baseline.json /tmp/base-edit-accuracy.json
+          [ -f /tmp/base-edit-accuracy.json ] || echo '{"cases":{}}' > /tmp/base-edit-accuracy.json
+      - name: Run this shard, then re-run twice each case whose verdict differs from the base branch
+        run: |
+          set -euo pipefail
+          bench() { bun run --cwd packages/studio test:edit-accuracy -- --grid full --jobs 2 "$@"; }
+          bench --shard "${{ matrix.shard }}/20" --out /tmp/edit-accuracy/run1
+          mapfile -t FLIPPED < <(node packages/studio/tests/e2e/edit-accuracy/ratchet.mjs flipped \
+            /tmp/base-edit-accuracy.json /tmp/edit-accuracy/run1/results.json)
+          if (( ${#FLIPPED[@]} > 0 )); then
+            FILTER="^($(IFS='|'; echo "${FLIPPED[*]}"))$"
+            for run in 2 3; do bench --filter "$FILTER" --rerun --out "/tmp/edit-accuracy/run${run}"; done
+          fi
+      - name: Upload shard evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: edit-accuracy-shard-${{ matrix.shard }}
+          path: /tmp/edit-accuracy
+          if-no-files-found: error
+
+  studio-edit-accuracy-gate:
+    name: "Studio: edit accuracy gate"
+    needs: [changes, studio-edit-accuracy]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.edit_accuracy == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Read the base branch's edit accuracy baseline
+        run: |
+          bash scripts/ci/base-file.sh packages/studio/tests/e2e/edit-accuracy/baseline.json /tmp/base-edit-accuracy.json
+          [ -f /tmp/base-edit-accuracy.json ] || echo '{"cases":{}}' > /tmp/base-edit-accuracy.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: edit-accuracy-shard-*
+          path: /tmp/edit-accuracy-shards
+      - name: Compare every run with the base branch
+        id: gate
+        # Smoothness is reported, not gated; a case fails only if it fails 2 of its 3 runs.
+        run: |
+          set +e
+          mapfile -t RESULTS < <(find /tmp/edit-accuracy-shards -name results.json | sort)
+          node packages/studio/tests/e2e/edit-accuracy/ratchet.mjs gate /tmp/base-edit-accuracy.json \
+            packages/studio/tests/e2e/edit-accuracy/baseline.json /tmp/edit-accuracy-gate "${RESULTS[@]}"
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          cat /tmp/edit-accuracy-gate/comment.md >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Post sticky comment
+        # Fork PRs get a read-only token; the gate below still fires.
+        continue-on-error: true
+        uses: marocchino/sticky-pull-request-comment@773744901bac0e8cbb5a0dc842800d45e9b2b405 # v2.9.4
+        with:
+          header: edit-accuracy
+          path: /tmp/edit-accuracy-gate/comment.md
+      - name: Upload the gate report and a baseline.json to bank
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: edit-accuracy-gate
+          path: /tmp/edit-accuracy-gate
+      - name: Fail if the gate failed
+        if: steps.gate.outputs.exit_code != '0'
+        run: |
+          echo "::error::Edit accuracy fell against the base branch; see the PR comment."
+          exit 1
 
   smoke-global-install:
     name: "Smoke: global install"
@@ -929,7 +1146,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -1001,7 +1218,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -1126,7 +1343,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Check file sizes (max 600 lines)
@@ -1188,7 +1405,7 @@ jobs:
         with:
           types: ${{ env.PR_TITLE_TYPES }}
       - if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - if: github.event_name == 'workflow_dispatch'
@@ -1197,7 +1414,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
       - if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: amannn/action-semantic-pull-request
           ref: e32d7e603df1aa1ba07e981f2a23455dee596825 # v5

@@ -2,6 +2,7 @@ import type { SerializedDockview } from "dockview-react";
 import { parseDockLayout } from "../components/dock/dockLayoutSchema";
 
 export type TimelineTimeDisplayMode = "time" | "frame";
+export type StudioTheme = "light" | "dark";
 
 export interface StudioUiPreferences {
   timelineVisible?: boolean;
@@ -41,8 +42,11 @@ export interface StudioUiPreferences {
    * intentionally scoped to one mount.
    */
   agentToolsEnabled?: boolean;
+  theme?: StudioTheme;
   /** The dock's serialized panel tree; parsed by `parseDockLayout` on read. */
   dockLayout?: SerializedDockview;
+  linkedSelectionEnabled?: boolean;
+  syncIndicatorsVisible?: boolean;
 }
 
 const STUDIO_UI_PREFERENCES_KEY = "hf-studio-ui-preferences";
@@ -60,8 +64,8 @@ function getBrowserStorage(): Storage | null {
   }
 }
 
-function storageKeyFor(projectId: string | null): string {
-  return projectId ? `${STUDIO_UI_PREFERENCES_KEY}:${projectId}` : STUDIO_UI_PREFERENCES_KEY;
+function storageKeyFor(projectId: string | null, key: string): string {
+  return projectId ? `${key}:${projectId}` : key;
 }
 
 // fallow-ignore-next-line complexity
@@ -128,6 +132,7 @@ function readStorage(storage: Storage | null, key: string): StudioUiPreferences 
     if (typeof parsed.rippleEditEnabled === "boolean") {
       preferences.rippleEditEnabled = parsed.rippleEditEnabled;
     }
+    if (parsed.theme === "light" || parsed.theme === "dark") preferences.theme = parsed.theme;
     if (parsed.timeDisplayMode === "time" || parsed.timeDisplayMode === "frame") {
       preferences.timeDisplayMode = parsed.timeDisplayMode;
     }
@@ -143,6 +148,12 @@ function readStorage(storage: Storage | null, key: string): StudioUiPreferences 
     if (typeof parsed.agentToolsEnabled === "boolean") {
       preferences.agentToolsEnabled = parsed.agentToolsEnabled;
     }
+    if (typeof parsed.linkedSelectionEnabled === "boolean") {
+      preferences.linkedSelectionEnabled = parsed.linkedSelectionEnabled;
+    }
+    if (typeof parsed.syncIndicatorsVisible === "boolean") {
+      preferences.syncIndicatorsVisible = parsed.syncIndicatorsVisible;
+    }
     const dockLayout = parseDockLayout(parsed.dockLayout);
     if (dockLayout) preferences.dockLayout = dockLayout;
     return preferences;
@@ -157,24 +168,26 @@ function readStorage(storage: Storage | null, key: string): StudioUiPreferences 
 export function readStudioUiPreferences(
   storage: Storage | null = getBrowserStorage(),
   projectId: string | null = null,
+  key: string = STUDIO_UI_PREFERENCES_KEY,
 ): StudioUiPreferences {
-  const scoped = readStorage(storage, storageKeyFor(projectId));
+  const scoped = readStorage(storage, storageKeyFor(projectId, key));
   if (!projectId || Object.keys(scoped).length > 0) return scoped;
-  return readStorage(storage, STUDIO_UI_PREFERENCES_KEY);
+  return readStorage(storage, key);
 }
 
 export function writeStudioUiPreferences(
   patch: StudioUiPreferences,
   storage: Storage | null = getBrowserStorage(),
   projectId: string | null = null,
+  key: string = STUDIO_UI_PREFERENCES_KEY,
 ) {
   if (!storage) return;
   try {
     const next = {
-      ...readStudioUiPreferences(storage, projectId),
+      ...readStudioUiPreferences(storage, projectId, key),
       ...patch,
     };
-    storage.setItem(storageKeyFor(projectId), JSON.stringify(next));
+    storage.setItem(storageKeyFor(projectId, key), JSON.stringify(next));
   } catch {
     /* localStorage may be unavailable or full */
   }

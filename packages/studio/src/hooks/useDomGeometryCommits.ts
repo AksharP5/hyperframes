@@ -1,9 +1,9 @@
+import type { DomEditPersistOutcome } from "./domEditCommitTypes";
+import type { RotationCommit } from "../components/editor/rotationDraft";
 import { useCallback } from "react";
 import { getDomEditTargetKey, type DomEditSelection } from "../components/editor/domEditing";
 import {
-  applyStudioPathOffset,
   applyStudioBoxSize,
-  applyStudioRotation,
   captureStudioPathOffset,
   captureStudioBoxSize,
   captureStudioRotation,
@@ -14,70 +14,56 @@ import {
   clearStudioBoxSize,
   clearStudioRotation,
 } from "../components/editor/manualEdits";
+import { stageElementOffset } from "./elementOffsetStager";
+import { savePlainRotation } from "./plainRotation";
+import { prepareCropResize } from "../components/editor/cropResize";
+import { writePlainMove } from "../components/editor/plainTranslate";
 import {
-  buildPathOffsetPatches,
   buildBoxSizePatches,
-  buildRotationPatches,
   buildClearPathOffsetPatches,
   buildClearBoxSizePatches,
   buildClearRotationPatches,
 } from "../components/editor/manualEditsDomPatches";
 import type { PatchOperation } from "../utils/sourcePatcher";
-import { isElementGsapTargeted } from "./gsapTargetCache";
-
-const GSAP_CSS_FALLBACK_BLOCKED_MESSAGE =
-  "This element is GSAP-animated — dragging via CSS would corrupt keyframes";
-
-function rejectGsapCssFallback(
-  selection: DomEditSelection,
-  previewIframeRef: React.MutableRefObject<HTMLIFrameElement | null>,
-  showToast: (message: string, tone?: "error" | "info") => void,
-): Promise<never> | null {
-  if (!isElementGsapTargeted(previewIframeRef.current, selection.element)) return null;
-  const error = new Error(GSAP_CSS_FALLBACK_BLOCKED_MESSAGE);
-  showToast(error.message, "error");
-  return Promise.reject(error);
-}
 
 // ── Hook ──
 
 export interface UseDomGeometryCommitsParams {
-  previewIframeRef: React.MutableRefObject<HTMLIFrameElement | null>;
   showToast: (message: string, tone?: "error" | "info") => void;
   commitPositionPatchToHtml: (
     selection: DomEditSelection,
     patches: PatchOperation[],
-    options: { label: string; coalesceKey: string; skipRefresh?: boolean },
-  ) => Promise<void>;
+    options: {
+      label: string;
+      coalesceKey: string;
+      coalesceMs?: number;
+      skipRefresh?: boolean;
+      deferRender?: boolean;
+    },
+  ) => Promise<DomEditPersistOutcome | undefined>;
   readOnlyPreview: boolean;
 }
 
 export function useDomGeometryCommits({
-  previewIframeRef,
   showToast,
   commitPositionPatchToHtml,
   readOnlyPreview,
 }: UseDomGeometryCommitsParams) {
-  const handleDomPathOffsetCommit = useCallback(
-    (selection: DomEditSelection, next: { x: number; y: number }) => {
-      if (readOnlyPreview) return Promise.resolve();
-      // ponytail: GSAP-targeted elements are blocked (no SDK position-in-script op); CSS-path
-      // elements fall through to commitPositionPatchToHtml → persistDomEditOperations →
-      // onTrySdkPersist and are already SDK-cut-over as setStyle/setAttribute (§3.3 done).
-      // Upgrade path for GSAP: add a moveElementGsap SDK op in a separate SDK PR.
-      const gsapFallback = rejectGsapCssFallback(selection, previewIframeRef, showToast);
-      if (gsapFallback) return gsapFallback;
-      const before = captureStudioPathOffset(selection.element);
-      applyStudioPathOffset(selection.element, next);
-      return commitPositionPatchToHtml(selection, buildPathOffsetPatches(selection.element), {
-        label: "Move layer",
-        coalesceKey: `path-offset:${getDomEditTargetKey(selection)}`,
-      }).catch((error) => {
-        restoreStudioPathOffset(selection.element, before);
-        throw error;
-      });
-    },
-    [commitPositionPatchToHtml, previewIframeRef, showToast, readOnlyPreview],
+  const stageElementPositionOffset = useCallback(
+    (
+      selection: DomEditSelection,
+      next: { x: number; y: number },
+      plainTranslate: boolean,
+      coalesceKey?: string,
+    ) =>
+      stageElementOffset(
+        { commitPositionPatchToHtml, showToast, readOnlyPreview },
+        selection,
+        next,
+        plainTranslate,
+        coalesceKey,
+      ),
+    [commitPositionPatchToHtml, readOnlyPreview, showToast],
   );
 
   const handleDomBoxSizeCommit = useCallback(
@@ -85,52 +71,41 @@ export function useDomGeometryCommits({
       selection: DomEditSelection,
       next: { width: number; height: number },
       offset?: { x: number; y: number },
+      restore?: () => void,
+      undoKey?: string,
     ) => {
-      if (readOnlyPreview) return Promise.resolve();
-      const gsapFallback = rejectGsapCssFallback(selection, previewIframeRef, showToast);
-      if (gsapFallback) return gsapFallback;
-      const beforeSize = captureStudioBoxSize(selection.element);
-      const beforeOffset = offset ? captureStudioPathOffset(selection.element) : null;
-      applyStudioBoxSize(selection.element, next);
-      // Anchored-corner resize (NW/NE/SW) also moves the element to keep the
-      // opposite corner fixed. Apply the offset and emit BOTH patch sets in a
-      // SINGLE commit: one persist = one undo entry, and there is no
-      // intermediate re-stamp where the new size is in source but the anchor
-      // offset is not (that frame was the release "jump"). Both builders read
-      // the already-mutated live element, so concatenation is safe.
-      const patches = buildBoxSizePatches(selection.element);
-      if (offset) {
-        applyStudioPathOffset(selection.element, offset);
-        patches.push(...buildPathOffsetPatches(selection.element));
-      }
+      if (readOnlyPreview) return Promise.resolve(undefined);
+      const element = selection.element;
+      const beforeSize = captureStudioBoxSize(element);
+      const beforeOffset = captureStudioPathOffset(element);
+      const stageCrop = prepareCropResize(element);
+      applyStudioBoxSize(element, next);
+      const crop = stageCrop();
+      // One commit, one undo entry: the size, the crop that follows it, and the translate
+      // (as a move writes it) that keeps the centre planted.
+      const patches = buildBoxSizePatches(element);
+      if (crop) patches.push(crop.patch);
+      if (offset) patches.push(...writePlainMove(element, offset));
       return commitPositionPatchToHtml(selection, patches, {
         label: "Resize layer box",
-        coalesceKey: `box-size:${getDomEditTargetKey(selection)}`,
+        ...(undoKey
+          ? { coalesceKey: undoKey, coalesceMs: Number.POSITIVE_INFINITY, deferRender: true }
+          : { coalesceKey: `box-size:${getDomEditTargetKey(selection)}` }),
       }).catch((error) => {
-        restoreStudioBoxSize(selection.element, beforeSize);
-        if (beforeOffset) restoreStudioPathOffset(selection.element, beforeOffset);
+        restoreStudioBoxSize(element, beforeSize);
+        if (offset) restoreStudioPathOffset(element, beforeOffset);
+        crop?.revert();
+        restore?.();
         throw error;
       });
     },
-    [commitPositionPatchToHtml, previewIframeRef, showToast, readOnlyPreview],
+    [commitPositionPatchToHtml, readOnlyPreview],
   );
 
   const handleDomRotationCommit = useCallback(
-    (selection: DomEditSelection, next: { angle: number }) => {
-      if (readOnlyPreview) return Promise.resolve();
-      const gsapFallback = rejectGsapCssFallback(selection, previewIframeRef, showToast);
-      if (gsapFallback) return gsapFallback;
-      const before = captureStudioRotation(selection.element);
-      applyStudioRotation(selection.element, next);
-      return commitPositionPatchToHtml(selection, buildRotationPatches(selection.element), {
-        label: "Rotate layer",
-        coalesceKey: `rotation:${getDomEditTargetKey(selection)}`,
-      }).catch((error) => {
-        restoreStudioRotation(selection.element, before);
-        throw error;
-      });
-    },
-    [commitPositionPatchToHtml, previewIframeRef, showToast, readOnlyPreview],
+    (selection: DomEditSelection, next: RotationCommit) =>
+      savePlainRotation({ commitPositionPatchToHtml, readOnlyPreview }, selection, next),
+    [commitPositionPatchToHtml, readOnlyPreview],
   );
 
   const handleDomManualEditsReset = useCallback(
@@ -163,7 +138,7 @@ export function useDomGeometryCommits({
   );
 
   return {
-    handleDomPathOffsetCommit,
+    stageElementPositionOffset,
     handleDomBoxSizeCommit,
     handleDomRotationCommit,
     handleDomManualEditsReset,

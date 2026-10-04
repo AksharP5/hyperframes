@@ -30,6 +30,10 @@ export function isTextBearingTag(tagName: string): boolean {
   return ["div", "span", "p", "strong", "h1", "h2", "h3", "h4", "h5", "h6"].includes(tagName);
 }
 
+export function isEditableTextLeaf(el: HTMLElement): boolean {
+  return isTextBearingTag(el.tagName.toLowerCase()) && el.children.length === 0;
+}
+
 /** Does this node render AT ALL, ignoring what it inherits? Sole owner of the
  *  rule; the walk below only decides which nodes to ask it about. */
 function elementRendersItself(win: Window, el: HTMLElement): boolean {
@@ -312,7 +316,8 @@ function getPreferredClassSelector(el: HTMLElement): string | undefined {
 
 // fallow-ignore-next-line complexity
 export function buildElementLabel(el: HTMLElement): string {
-  const compositionId = el.getAttribute("data-composition-id");
+  const compositionId =
+    el.getAttribute("data-hf-original-composition-id") ?? el.getAttribute("data-composition-id");
   if (compositionId && compositionId !== "main") {
     return humanizeIdentifier(compositionId);
   }

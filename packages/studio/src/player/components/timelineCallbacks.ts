@@ -1,8 +1,10 @@
 // fallow-ignore-file code-duplication
-// fallow-ignore-file dead-code
 import type { TimelineEditOutcome } from "../../hooks/timelineEditPermission";
 import type { TimelineElement } from "../store/playerStore";
-import type { TimelineMoveOperation } from "../../hooks/timelineMoveAdapter";
+import type {
+  TimelineMoveOperation,
+  TimelineAtomicMoveUpdates,
+} from "../../hooks/timelineMoveAdapter";
 import type { BlockedTimelineEditIntent } from "./timelineEditing";
 import type { PropertyGroupName } from "@hyperframes/core/gsap-parser";
 import type { TimelineKeyframeTarget } from "./timelineKeyframeIdentity";
@@ -39,10 +41,18 @@ export interface TimelineDropCallbacks {
   ) => Promise<void> | void;
 }
 
+export type TimelineLinkEdit =
+  | { kind: "unlink"; elements: readonly TimelineElement[] }
+  | { kind: "link"; elements: readonly TimelineElement[] }
+  | { kind: "detach"; element: TimelineElement }
+  | { kind: "merge"; video: TimelineElement; audio: TimelineElement }
+  | { kind: "move-into-sync"; element: TimelineElement; start: number }
+  | { kind: "slip-into-sync"; element: TimelineElement; mediaStart: number };
+
 export interface TimelineEditCallbacks {
   onMoveElement?: (
     element: TimelineElement,
-    updates: Pick<TimelineElement, "start" | "track">,
+    updates: TimelineAtomicMoveUpdates,
   ) => Promise<void> | void;
   /** Atomic multi-clip move (single undo) for main-track ripple + track-insert.
    *  `coalesceKey` (drag-commit gesture id) merges the move history entry with a
@@ -50,7 +60,7 @@ export interface TimelineEditCallbacks {
    *  widens that entry's fold window when a server round-trip separates the
    *  gesture's records (per-gesture-unique keys keep the fold gesture-scoped). */
   onMoveElements?: (
-    edits: Array<{ element: TimelineElement; updates: Pick<TimelineElement, "start" | "track"> }>,
+    edits: Array<{ element: TimelineElement; updates: TimelineAtomicMoveUpdates }>,
     coalesceKey?: string,
     operation?: TimelineMoveOperation,
     coalesceMs?: number,
@@ -114,10 +124,21 @@ export interface TimelineEditCallbacks {
     value: string | null,
     label: string,
   ) => Promise<TimelineEditOutcome | void>;
+  /** One attribute on several clips, saved as one undo step. */
+  onSetElementsAttributeQuiet?: (
+    edits: ReadonlyArray<{ element: TimelineElement; value: string | null }>,
+    attr: string,
+    label: string,
+  ) => Promise<TimelineEditOutcome | void>;
   onBlockedEditAttempt?: (element: TimelineElement, intent: BlockedTimelineEditIntent) => void;
+  onLinkEdit?: (edit: TimelineLinkEdit) => Promise<void> | void;
+  onDeleteElementOnly?: (element: TimelineElement) => Promise<void> | void;
   onSplitElement?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplit?: (element: TimelineElement, splitTime: number) => Promise<void> | void;
   onRazorSplitAll?: (splitTime: number) => Promise<void> | void;
+  onFreezeFrame?: (element: TimelineElement, time: number) => Promise<void> | void;
+  clipMenuTools?: boolean;
+  onNotice?: (message: string, tone?: "error" | "info") => void;
   onDeleteKeyframe?: (elementId: string, keyframe: TimelineKeyframeTarget) => void;
   onDeleteAllKeyframes?: (element: TimelineElement, animationId?: string) => void;
   onMoveKeyframeToPlayhead?: (element: TimelineElement, keyframe: TimelineKeyframeTarget) => void;

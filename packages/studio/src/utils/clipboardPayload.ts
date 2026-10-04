@@ -12,11 +12,18 @@ export interface TimelineClipboardClip {
 }
 
 export type ClipboardPayload =
-  | { kind: "timeline-clip"; clips: TimelineClipboardClip[]; sourceFile: string }
+  | {
+      kind: "timeline-clip";
+      clips: TimelineClipboardClip[];
+      sourceFile: string;
+      projectId?: string;
+      copiedInComposition?: string;
+    }
   | {
       kind: "dom-element";
       html: string;
       sourceFile: string;
+      projectId?: string;
       originSelector?: string;
       originSelectorIndex?: number;
     };
@@ -56,7 +63,16 @@ export function deserializeClipboardPayload(json: string): ClipboardPayload | nu
       );
     });
     if (clips.length === 0) return null;
-    return { kind: "timeline-clip", clips, sourceFile: obj.sourceFile };
+    const projectId = typeof obj.projectId === "string" ? obj.projectId : undefined;
+    const copiedInComposition =
+      typeof obj.copiedInComposition === "string" ? obj.copiedInComposition : undefined;
+    return {
+      kind: "timeline-clip",
+      clips,
+      sourceFile: obj.sourceFile,
+      projectId,
+      copiedInComposition,
+    };
   }
   if (obj.kind === "dom-element") {
     if (typeof obj.html !== "string") return null;
@@ -64,6 +80,7 @@ export function deserializeClipboardPayload(json: string): ClipboardPayload | nu
       kind: "dom-element",
       html: obj.html,
       sourceFile: obj.sourceFile,
+      projectId: typeof obj.projectId === "string" ? obj.projectId : undefined,
       originSelector: typeof obj.originSelector === "string" ? obj.originSelector : undefined,
       originSelectorIndex:
         typeof obj.originSelectorIndex === "number" ? obj.originSelectorIndex : undefined,

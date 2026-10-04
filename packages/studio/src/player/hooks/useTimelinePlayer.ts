@@ -28,6 +28,7 @@ export {
 import type { PlaybackAdapter, IframeWindow } from "../lib/playbackTypes";
 import { releaseStaticSeekCache, type StaticSeekCacheEntry } from "../lib/playbackAdapter";
 import { mergeTimelineElementsPreservingDowngrades } from "../lib/timelineDOM";
+import { findTimelineElementInIframe } from "../../hooks/timelineEditingHelpers";
 import { normalizeToZones } from "../components/timelineZones";
 import { applyPreviewAudioFlags, setPreviewPlaybackRate } from "../lib/timelineIframeHelpers";
 import { scrubMusicAtSeek, stopScrubPreviewAudio } from "../lib/playbackScrub";
@@ -35,6 +36,7 @@ import { hasTimelinePerformanceFixtureLease } from "../lib/timelinePerformanceFi
 import { applyCachedSourceDurations, probeMissingSourceDurations } from "../lib/mediaProbe";
 import { shouldResumeForwardPlaybackAfterSeek, shouldStopAfterSeek } from "../lib/playbackSeek";
 import { applyPreviewVariablesToUrl } from "../../hooks/previewVariablesStore";
+import { isStudioManualEditGestureLiveIn } from "../../components/editor/manualEditsDom";
 import { createPreviewMessageHandler } from "./previewMessageRouter";
 import { timelineElementsChanged } from "./timelinePlayerSync";
 import { safeContentDocument } from "./timelineSyncHydration";
@@ -46,6 +48,9 @@ export interface UseTimelinePlayerOptions {
   /** A reload was abandoned (cause in the message); the previous preview is still showing. */
   onPreviewReloadFailed?: (message: string) => void;
 }
+
+const publishSeek = (time: number, options?: { follow?: boolean }) =>
+  options?.follow === false ? liveTime.notify(time) : liveTime.notifySeek(time);
 
 export function useTimelinePlayer({
   onShadowPromoted,
@@ -89,6 +94,11 @@ export function useTimelinePlayer({
             elements,
             state.duration,
             resolvedDuration,
+            (element) =>
+              findTimelineElementInIframe(iframeRef.current, {
+                ...element,
+                kind: "composition",
+              }) !== null,
           ),
           state.timelineProjectId,
         ),
@@ -149,12 +159,18 @@ export function useTimelinePlayer({
     [],
   );
 
+  const setLoopStart = useCallback((seconds: number | null) => {
+    try {
+      (iframeRef.current?.contentWindow as IframeWindow | null)?.__hf?.setLoopStart?.(seconds);
+    } catch {}
+  }, []);
   const { startRAFLoop, stopRAFLoop, stopReverseLoop } = useTimelinePlayerLoop({
     rafRef,
     reverseRafRef,
     getAdapter,
     setCurrentTime,
     setIsPlaying,
+    setLoopStart,
   });
 
   const applyPlaybackRate = useCallback((rate: number) => {
@@ -276,7 +292,7 @@ export function useTimelinePlayer({
     stopRAFLoop();
   }, [getAdapter, setCurrentTime, setIsPlaying, stopRAFLoop, stopReverseLoop]);
   const seek = useCallback(
-    (time: number, options?: { keepPlaying?: boolean }) => {
+    (time: number, options?: { keepPlaying?: boolean; follow?: boolean }) => {
       const wasReverseShuttle = shuttleDirectionRef.current === "backward";
       stopReverseLoop();
       const adapter = getAdapter();
@@ -295,7 +311,7 @@ export function useTimelinePlayer({
         nextTime,
       });
       adapter.seek(nextTime, options);
-      liveTime.notify(nextTime); // Direct DOM updates (playhead, timecode, progress) — no re-render
+      publishSeek(nextTime, options); // Direct DOM updates (playhead, timecode, progress) — no re-render
       setCurrentTime(nextTime); // sync store so Split/Delete have accurate time
       if (!shouldResumeAfterSeek && !keepPlaying) scrubMusicAtSeek(iframeRef.current, nextTime);
       if (shouldResumeAfterSeek) {
@@ -344,7 +360,7 @@ export function useTimelinePlayer({
         if (request.playing) play();
         else {
           pause();
-          if (request.returnTo !== null) seek(request.returnTo);
+          if (request.returnTo !== null) seek(request.returnTo, { follow: false });
         }
         usePlayerStore.getState().clearPlaybackRequest();
       }
@@ -409,7 +425,7 @@ export function useTimelinePlayer({
     onReloadFailed: onPreviewReloadFailed,
     handOverPlayback: (time, playing) => {
       // keepPlaying: move the playhead without the paused-seek audio scrub.
-      seek(time, { keepPlaying: true });
+      seek(time, { keepPlaying: true, follow: false });
       const adapter = getAdapter();
       // An edit that cut the film short of the live time stops it at the new end, as playback does.
       if (playing && adapter && adapter.getTime() < adapter.getDuration()) play();
@@ -471,7 +487,10 @@ export function useTimelinePlayer({
     // A newer edit, or anything replacing the live preview (a reload, a composition switch), wins.
     const isCurrent = () => gen === refreshGenRef.current && slot === previewGeneration();
     const swap = sceneSwapFor(iframe);
-    if (!swap || isRefreshingRef.current) return reloadWholeFilm(url.toString());
+    const swapWouldReplaceGestureNode =
+      !!iframe.contentDocument && isStudioManualEditGestureLiveIn(iframe.contentDocument);
+    if (!swap || isRefreshingRef.current || swapWouldReplaceGestureNode)
+      return reloadWholeFilm(url.toString());
     swap(url.toString(), isCurrent, cancel.signal).catch((error: unknown) => {
       if (!isCurrent()) return;
       logReload("scene-swap-refused", { reason: String(error) });

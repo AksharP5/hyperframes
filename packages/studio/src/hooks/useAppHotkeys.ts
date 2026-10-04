@@ -3,23 +3,19 @@ import { usePlayerStore } from "../player";
 import type { TimelineElement } from "../player";
 import type { DomEditSelection } from "../components/editor/domEditing";
 import { isTypingTarget } from "../utils/typingTarget";
+import { dispatchLinkShortcut, type LinkShortcutCallbacks } from "./linkShortcuts";
 import { useCaptionStore } from "../captions/store";
 import {
   applyCaptionModelToIframe,
   isCaptionPreviewVisible,
 } from "../captions/components/CaptionOverlayUtils";
-import { shouldIgnoreHistoryShortcut } from "../utils/studioHelpers";
-import {
-  type HotkeyCallbacks,
-  dispatchModifierKey,
-  dispatchPlainKey,
-  handleUndoRedoKey,
-} from "./appHotkeysDispatch";
+import { type HotkeyCallbacks, dispatchModifierKey, dispatchPlainKey } from "./appHotkeysDispatch";
 import {
   useEditHistoryActions,
   type EditHistoryHandle,
   type UseEditHistoryActionsOptions,
 } from "./useEditHistoryActions";
+import { useStableHandlers } from "./useStableHandlers";
 
 function iframeContentWindow(iframe: HTMLIFrameElement | null): Window | null {
   try {
@@ -36,9 +32,14 @@ function safeAddListener(t: EventTarget | null, type: string, h: EventListener, 
     /* cross-origin */
   }
 }
-function safeRemoveListener(t: EventTarget | null, type: string, h: EventListener) {
+function safeRemoveListener(
+  t: EventTarget | null,
+  type: string,
+  h: EventListener,
+  capture = false,
+) {
   try {
-    t?.removeEventListener(type, h);
+    t?.removeEventListener(type, h, capture);
   } catch {
     /* cross-origin */
   }
@@ -72,7 +73,10 @@ function tryApplyBeatHistory(
 // ── Types ──
 
 interface UseAppHotkeysParams {
+  projectId?: string | null;
   handleTimelineElementsDelete: (elements: TimelineElement[]) => Promise<void>;
+  handleLinkEdit?: LinkShortcutCallbacks["handleLinkEdit"];
+  handleTimelineElementDeleteOnly?: LinkShortcutCallbacks["handleTimelineElementDeleteOnly"];
   handleTimelineElementSplit: (element: TimelineElement, splitTime: number) => Promise<void>;
   handleDomEditElementDelete: (
     selection: DomEditSelection,
@@ -86,7 +90,8 @@ interface UseAppHotkeysParams {
   writeProjectFile: (path: string, content: string) => Promise<void>;
   showToast: (message: string, tone?: "error" | "info") => void;
   syncHistoryPreviewAfterApply: UseEditHistoryActionsOptions["syncHistoryPreviewAfterApply"];
-  waitForPendingDomEditSaves: () => Promise<void>;
+  showHistoryRestoreNow?: UseEditHistoryActionsOptions["showHistoryRestoreNow"];
+  settlePendingEdits: () => Promise<void>;
   handleCopy: () => boolean;
   handlePaste: () => Promise<void>;
   handleCut: () => Promise<boolean>;
@@ -114,7 +119,10 @@ interface UseAppHotkeysParams {
 // ── Hook ──
 
 export function useAppHotkeys({
+  projectId,
   handleTimelineElementsDelete,
+  handleLinkEdit,
+  handleTimelineElementDeleteOnly,
   handleTimelineElementSplit,
   handleDomEditElementDelete,
   domEditSelectionRef,
@@ -124,7 +132,8 @@ export function useAppHotkeys({
   writeProjectFile,
   showToast,
   syncHistoryPreviewAfterApply,
-  waitForPendingDomEditSaves,
+  showHistoryRestoreNow,
+  settlePendingEdits,
   handleCopy,
   handlePaste,
   handleCut,
@@ -150,7 +159,8 @@ export function useAppHotkeys({
     writeProjectFile,
     showToast,
     syncHistoryPreviewAfterApply,
-    waitForPendingDomEditSaves,
+    showHistoryRestoreNow,
+    waitForPendingDomEditSaves: settlePendingEdits,
     onAfterUndoRedo,
     activeCompPath,
     forceReloadSdkSession,
@@ -191,6 +201,8 @@ export function useAppHotkeys({
   const cbRef = useRef<HotkeyCallbacks>(null!);
   cbRef.current = {
     handleTimelineElementsDelete,
+    handleLinkEdit,
+    handleTimelineElementDeleteOnly,
     handleTimelineElementSplit,
     handleDomEditElementDelete,
     handleUndo,
@@ -214,11 +226,12 @@ export function useAppHotkeys({
   const handleAppKeyDown = useCallback((event: KeyboardEvent) => {
     const cb = cbRef.current;
     const key = event.key.toLowerCase();
+    if (!isTypingTarget(event.target) && dispatchLinkShortcut(event, cb)) return;
     if (event.metaKey || event.ctrlKey) {
       dispatchModifierKey(event, key, cb);
       return;
     }
-    if (!isTypingTarget(event.target)) dispatchPlainKey(event, key, cb);
+    dispatchPlainKey(event, key, cb);
   }, []);
 
   // eslint-disable-next-line no-restricted-syntax
@@ -229,52 +242,23 @@ export function useAppHotkeys({
 
   // ── Preview iframe forwarding ──
 
-  const handleHistoryHotkey = useCallback((event: KeyboardEvent) => {
-    if (!(event.metaKey || event.ctrlKey) || shouldIgnoreHistoryShortcut(event.target)) return;
-    handleUndoRedoKey(
-      event,
-      () => void cbRef.current.handleUndo(),
-      () => void cbRef.current.handleRedo(),
-    );
-  }, []);
-
   /**
-   * Give the preview iframe the app's hotkeys, because a keypress lands in
-   * whichever document has focus and clicking the canvas puts focus in there.
-   *
-   * Must run on every iframe LOAD, not once when the element mounts: a reload
-   * keeps the same element (so no ref callback) and the same WindowProxy (so an
-   * identity check sees no change) while replacing the inner window that holds
-   * the listeners. Attaching once left Delete dead in the canvas after the first
-   * reload — press it with a selection and nothing happened, no toast, nothing
-   * to explain it — while undo/redo kept working because they re-attached here.
+   * Give the preview iframe the app's hotkeys: clicking the canvas puts focus in there.
+   * Runs on every iframe LOAD: a reload keeps the element and WindowProxy but replaces the
+   * inner window holding the listeners, which once left Delete dead after the first reload.
    */
   const syncPreviewHotkeys = useCallback(
     (iframe: HTMLIFrameElement | null) => {
       previewHistoryCleanupRef.current?.();
       previewHistoryCleanupRef.current = null;
       const win = iframeContentWindow(iframe);
-      let doc: Document | null = null;
-      try {
-        doc = iframe?.contentDocument ?? null;
-      } catch {
-        doc = null;
-      }
-      if (!win && !doc) return;
-      const handler = handleHistoryHotkey as EventListener;
+      if (!win) return;
       const appHandler = handleAppKeyDown as EventListener;
-      safeAddListener(win, "keydown", handler, true);
-      // Window only: the history pair also listens on the document, and a
-      // capture listener on both would run the app handler twice per press.
+      // Window only: a capture listener on the document too would run it twice per press.
       safeAddListener(win, "keydown", appHandler, true);
-      doc?.addEventListener("keydown", handleHistoryHotkey, true);
-      previewHistoryCleanupRef.current = () => {
-        safeRemoveListener(win, "keydown", handler);
-        safeRemoveListener(win, "keydown", appHandler);
-        doc?.removeEventListener("keydown", handleHistoryHotkey, true);
-      };
+      previewHistoryCleanupRef.current = () => safeRemoveListener(win, "keydown", appHandler, true);
     },
-    [handleAppKeyDown, handleHistoryHotkey],
+    [handleAppKeyDown],
   );
 
   useEffect(
@@ -285,9 +269,12 @@ export function useAppHotkeys({
     [],
   );
 
-  return {
-    handleUndo,
-    handleRedo,
-    syncPreviewHotkeys,
-  };
+  return useStableHandlers(
+    {
+      handleUndo,
+      handleRedo,
+      syncPreviewHotkeys,
+    },
+    projectId,
+  );
 }

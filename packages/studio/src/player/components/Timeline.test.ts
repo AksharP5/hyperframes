@@ -16,7 +16,6 @@ import {
   getTimelineScrollLeftForZoomAnchor,
   getTimelineScrollLeftForZoomTransition,
   shouldShowTimelineShortcutHint,
-  shouldHandleTimelineDeleteKey,
   shouldAutoScrollTimeline,
   getTimelineVisibleTimeRange,
   getTimelineScrollTopForGeometryChange,
@@ -35,6 +34,7 @@ import {
   getTimelineDisplayContentWidth,
   getTimelineFitPps,
   getTimelineLaneTop,
+  getTimelineRowTop,
   createTimelineRowGeometry,
 } from "./timelineLayout";
 import { AUTOMATION_LANE_H } from "./automationLaneHeight";
@@ -69,6 +69,21 @@ describe("timeline viewport geometry", () => {
     const next = createTimelineRowGeometry([1, 2, 3], [104, 48, 48]);
     const scrollTop = previous.getRowTop(2) - RULER_H + 6;
     expect(getTimelineScrollTopForGeometryChange(previous, next, scrollTop)).toBe(scrollTop + 56);
+  });
+
+  it("keeps a row added above the top row in view while the list sits at the top", () => {
+    // No top padding (trackPadding { top: 0 }), so the first row sits right under the ruler.
+    const previous = createTimelineRowGeometry([1, 2, 3], [48, 48, 48], { top: 0 });
+    const next = createTimelineRowGeometry([9, 1, 2, 3], [48, 48, 48, 48], { top: 0 });
+    expect(getTimelineScrollTopForGeometryChange(previous, next, 0)).toBe(0);
+  });
+
+  it("leaves scrollTop to edge auto-scroll while a clip drag adds a row above", () => {
+    const previous = createTimelineRowGeometry([1, 2, 3], [48, 48, 48]);
+    const next = createTimelineRowGeometry([9, 1, 2, 3], [48, 48, 48, 48]);
+    const scrollTop = previous.getRowTop(1) - RULER_H + 6;
+    expect(getTimelineScrollTopForGeometryChange(previous, next, scrollTop, true)).toBe(scrollTop);
+    expect(getTimelineScrollTopForGeometryChange(previous, next, scrollTop)).toBe(scrollTop + 48);
   });
 });
 
@@ -481,6 +496,54 @@ describe("Timeline provider boundary", () => {
     }
     expect(trackContent.style.opacity).toBe("0.35");
 
+    act(() => root.unmount());
+  });
+
+  // An agent writes music alternatives muted; the author unmutes one and must be
+  // able to mute it again from the same row.
+  it("mutes, unmutes and mutes an audio track again from its header", () => {
+    const host = createSizedTimelineHost(640);
+    usePlayerStore.setState({
+      duration: 4,
+      timelineReady: true,
+      elements: [{ id: "music-b", tag: "audio", start: 0, duration: 4, track: 0, hidden: true }],
+    });
+    const onToggleTrackHidden = vi.fn((track: number, hidden: boolean) => {
+      usePlayerStore.setState({
+        elements: usePlayerStore
+          .getState()
+          .elements.map((el) => (el.track === track ? { ...el, hidden } : el)),
+      });
+    });
+    const root = createRoot(host);
+    act(() => {
+      root.render(
+        React.createElement(
+          TimelineEditProvider,
+          { value: { onToggleTrackHidden } },
+          React.createElement(Timeline),
+        ),
+      );
+    });
+    act(() => {});
+
+    const press = (label: string) => {
+      const button = host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+      if (!button) throw new Error(`Expected a "${label}" button`);
+      act(() => button.click());
+    };
+    press("Unmute track 1");
+    press("Mute track 1");
+    press("Unmute track 1");
+    press("Mute track 1");
+
+    expect(onToggleTrackHidden.mock.calls.map((call) => call[1])).toEqual([
+      false,
+      true,
+      false,
+      true,
+    ]);
+    expect(usePlayerStore.getState().elements[0]?.hidden).toBe(true);
     act(() => root.unmount());
   });
 
@@ -1247,26 +1310,6 @@ describe("shouldShowTimelineShortcutHint", () => {
   });
 });
 
-describe("shouldHandleTimelineDeleteKey", () => {
-  it("handles Delete and Backspace when focus is not in an editor", () => {
-    expect(shouldHandleTimelineDeleteKey({ key: "Delete" })).toBe(true);
-    expect(shouldHandleTimelineDeleteKey({ key: "Backspace" })).toBe(true);
-  });
-
-  it("ignores modifier shortcuts", () => {
-    expect(shouldHandleTimelineDeleteKey({ key: "Delete", metaKey: true })).toBe(false);
-    expect(shouldHandleTimelineDeleteKey({ key: "Backspace", ctrlKey: true })).toBe(false);
-  });
-
-  it("ignores input and editable targets", () => {
-    const input = { tagName: "INPUT", isContentEditable: false };
-    const editable = { tagName: "DIV", isContentEditable: true };
-
-    expect(shouldHandleTimelineDeleteKey({ key: "Delete", target: input })).toBe(false);
-    expect(shouldHandleTimelineDeleteKey({ key: "Delete", target: editable })).toBe(false);
-  });
-});
-
 describe("getDefaultDroppedTrack", () => {
   it("defaults to track 0 when there are no rows yet", () => {
     expect(getDefaultDroppedTrack([])).toBe(0);
@@ -1292,9 +1335,8 @@ describe("resolveTimelineAssetDrop", () => {
           trackOrder: [0, 3, 7],
         },
         432, // rectLeft(100) + GUTTER(32) + 3s*100pps  (contentOrigin = GUTTER)
-        // clientY: rectTop(200) + RULER_H(24) + TRACKS_TOP_PAD(72) + TRACK_H(48)
-        // + TRACK_H/2(24) = 368 → row 1 → track 3.
-        368,
+        // clientY: rectTop(200) + the middle of row 1 → track 3.
+        200 + getTimelineRowTop(1) + TRACK_H / 2,
       ),
     ).toEqual({ start: 3, track: 3 });
   });

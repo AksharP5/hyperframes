@@ -1,6 +1,8 @@
 import { COLOR_GRADING_SOURCE_HIDDEN_ATTR } from "@hyperframes/core/color-grading";
-import { findAuthoredElement, parseSavedSource } from "./authoredSource";
+import { motionPathPluginUrl } from "@hyperframes/core/gsap-cdn";
+import { findAuthoredElement } from "./authoredSource";
 import { applyAuthoredInlineOpacity, readStampedAuthoredOpacity } from "./authoredOpacity";
+import { authoringFile, collectResetTargets, compositionFile, fileDocs } from "./softReloadTargets";
 
 type IframeWindow = Window & {
   __timelines?: Record<string, { kill?: () => void; pause?: () => void }>;
@@ -13,6 +15,7 @@ type IframeWindow = Window & {
   // re-flash the iframe. Cleared once the plugin loads or errors.
   __hfMotionPathPluginLoading?: boolean;
   gsap?: {
+    version?: string;
     timeline?: (...args: unknown[]) => unknown;
     registerPlugin?: (...plugins: unknown[]) => unknown;
     set?: (targets: Element | Element[], vars: Record<string, unknown>) => void;
@@ -20,14 +23,6 @@ type IframeWindow = Window & {
   };
   MotionPathPlugin?: unknown;
 };
-
-/**
- * CDN URL for the GSAP MotionPathPlugin. Shared between the one-time preview
- * bootstrap (ensureMotionPathPluginLoaded) and the soft-reload fallback so the
- * version is pinned in a single place.
- */
-const MOTION_PATH_PLUGIN_CDN =
-  "https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/MotionPathPlugin.min.js";
 
 /**
  * Pre-load + register MotionPathPlugin ONCE in the preview iframe so
@@ -65,7 +60,7 @@ export function ensureMotionPathPluginLoaded(iframe: HTMLIFrameElement | null): 
   try {
     win.__hfMotionPathPluginLoading = true;
     const pluginScript = doc.createElement("script");
-    pluginScript.src = MOTION_PATH_PLUGIN_CDN;
+    pluginScript.src = motionPathPluginUrl(win.gsap?.version);
     const finalize = () => {
       win.__hfMotionPathPluginLoading = false;
       try {
@@ -91,7 +86,7 @@ function isGsapScript(text: string): boolean {
   );
 }
 
-export function findGsapScriptElements(doc: Document): HTMLScriptElement[] {
+export function findGsapScriptElements(doc: ParentNode): HTMLScriptElement[] {
   const results: HTMLScriptElement[] = [];
   const scripts = doc.querySelectorAll<HTMLScriptElement>("script:not([src])");
   for (const script of scripts) {
@@ -129,6 +124,32 @@ function verifyTimelinesPopulated(win: IframeWindow, targetKeys: string[]): bool
     return targetKeys.every((key) => timelines[key] != null);
   }
   return Object.keys(timelines).filter((k) => k !== "__proxied").length > 0;
+}
+
+// GSAP masks a folded CSS translate/rotate/scale with `none`, and a tween writes what it animates
+// inline; a fresh load has only what the file authors. Opacity has its own restore.
+function restoreAuthoredStyle(
+  style: CSSStyleDeclaration,
+  authored: CSSStyleDeclaration | null,
+  tweened: Set<string>,
+) {
+  style.transform = authored?.transform ?? "";
+  if (!authored) return;
+  for (const prop of ["translate", "rotate", "scale", ...tweened]) {
+    if (prop === "opacity") continue;
+    style.setProperty(prop, authored.getPropertyValue(prop), authored.getPropertyPriority(prop));
+  }
+}
+
+function runSuppressed(win: IframeWindow, reload: () => void): boolean {
+  try {
+    if (win.__hfSuppressSceneMutations) win.__hfSuppressSceneMutations(reload);
+    else reload();
+    return true;
+  } catch (error) {
+    console.error("[Studio] GSAP soft reload threw; falling back to a full reload", error);
+    return false;
+  }
 }
 
 /**
@@ -181,8 +202,10 @@ export interface SoftReloadOptions {
   onAsyncFailure?: () => void;
   /** Seek target for the rebuilt timeline; defaults to the iframe player time. */
   currentTimeOverride?: number;
-  /** After-write file HTML — the primary source for authored-opacity restore. */
+  /** After-write file HTML — the primary source for the authored opacity and transform restore. */
   authoredHtml?: string;
+  /** Other composition files a reset element is written in, by path; null when one could not be read. */
+  nestedFiles?: Map<string, string> | null;
 }
 
 /**
@@ -234,6 +257,12 @@ export function applySoftReloadFinalization(
   }
 }
 
+function timelineKeys(scriptText: string): string[] {
+  return [...scriptText.matchAll(/__timelines\s*\[\s*["'`]([^"'`]+)["'`]\s*\]/g)]
+    .map((m) => m[1]!)
+    .filter((key) => key !== "__proxied");
+}
+
 export function applySoftReload(
   iframe: HTMLIFrameElement | null,
   scriptText: string,
@@ -246,6 +275,8 @@ export function applySoftReload(
   const doc = iframe.contentDocument;
   if (!win || !doc) return "cannot-soft-reload";
   if (!win.gsap || !win.__hfForceTimelineRebind) return "cannot-soft-reload";
+  // Without the file an element is written in, only a full load restores it.
+  if (options.nestedFiles === null) return "cannot-soft-reload";
 
   // Which composition(s) does this script rebuild? A soft reload re-runs ONE
   // composition's GSAP script, which re-registers its own window.__timelines[key].
@@ -254,9 +285,7 @@ export function applySoftReload(
   // of the global timeline — so tearing down ALL of them (or the global timeline's
   // children) and re-running a single script wipes every OTHER composition,
   // reverting its edits. Scope the teardown to the keys THIS script re-registers.
-  const targetKeys = [...scriptText.matchAll(/__timelines\s*\[\s*["'`]([^"'`]+)["'`]\s*\]/g)]
-    .map((m) => m[1]!)
-    .filter((key) => key !== "__proxied");
+  const targetKeys = timelineKeys(scriptText);
   if (targetKeys.length === 0) return "cannot-soft-reload"; // can't scope safely → full reload
   const gsapScripts = findGsapScriptElements(doc);
   if (gsapScripts.length === 0) return "cannot-soft-reload";
@@ -289,6 +318,7 @@ export function applySoftReload(
   // once the plugin loads; the alternative (returning false) would trigger a
   // full iframe reload that destroys the very WebGL context we're preserving.
   let deferredToAsync = false;
+  let builtDom = false;
 
   // Authored-opacity resolution for the restore loop below. Three-state:
   //   "0.98" — the element's authored inline opacity
@@ -298,93 +328,51 @@ export function applySoftReload(
   // The just-written file (`authoredHtml`) is the current truth; the runtime's
   // parse-time stamp (data-hf-authored-opacity, installAuthoredOpacityCapture)
   // covers elements the file lookup can't resolve. Parsed lazily, at most once.
-  let authoredDoc: Document | null | undefined;
-  const findAuthoredSource = (el: HTMLElement): Element | null => {
-    if (authoredDoc === undefined) {
-      try {
-        authoredDoc = authoredHtml ? parseSavedSource(authoredHtml) : null;
-      } catch {
-        authoredDoc = null;
-      }
-    }
-    return authoredDoc ? findAuthoredElement(authoredDoc, el) : null;
+  const docFor = fileDocs(compositionFile(doc, targetKeys), authoredHtml, options.nestedFiles);
+  const findAuthoredStyle = (el: HTMLElement): CSSStyleDeclaration | null => {
+    const fileDoc = docFor(authoringFile(el));
+    const source = fileDoc ? findAuthoredElement(fileDoc, el) : null;
+    // The parsed file lives in this realm, so instanceof holds here, unlike for the iframe nodes below.
+    return source instanceof HTMLElement || source instanceof SVGElement ? source.style : null;
   };
-  const readAuthoredOpacity = (el: HTMLElement): string | null => {
-    const source = findAuthoredSource(el);
-    if (source instanceof HTMLElement) return source.style.opacity;
-    return readStampedAuthoredOpacity(el);
-  };
+  const readAuthoredOpacity = (el: HTMLElement): string | null =>
+    findAuthoredStyle(el)?.opacity ?? readStampedAuthoredOpacity(el);
 
   // fallow-ignore-next-line complexity
   const doReload = () => {
     const timelines = win.__timelines;
-    const allTargets: Element[] = [];
+    const targets = collectResetTargets(win, doc, targetKeys);
 
     // Kill ONLY the target composition's timeline(s) — leaving every other
     // composition's timeline (and its children on the global timeline) intact.
     if (timelines) {
       for (const key of targetKeys) {
-        const tl = timelines[key] as
-          | {
-              kill?: () => void;
-              getChildren?: (deep: boolean) => Array<{ targets?: () => Element[] }>;
-            }
-          | undefined;
+        const tl = timelines[key] as { kill?: () => void; clear?: () => void } | undefined;
         if (!tl) continue;
-        if (tl.getChildren) {
-          try {
-            for (const child of tl.getChildren(true)) {
-              if (typeof child.targets === "function") {
-                for (const t of child.targets()) allTargets.push(t);
-              }
-            }
-          } catch {}
-        }
         try {
+          // kill() keeps the children, and the finalize seek renders this timeline until the rebind swaps it.
+          tl.clear?.();
           tl.kill?.();
         } catch {}
         delete timelines[key];
       }
     }
 
-    // Also reset elements carrying a GSAP-applied inline `transform` that the
-    // timeline-children sweep above missed — a dragged element whose position
-    // was a standalone `gsap.set` (never a timeline child), or one whose
-    // keyframes were just removed (no longer in any timeline). Their last
-    // `gsap.set` transform is otherwise orphaned: the re-run won't re-set it
-    // and the sweep above can't see it, so the element renders offset from its
-    // source position (matching the overlay) until a full reload. The clear
-    // below runs BEFORE the re-run, which re-applies the transform for any
-    // element the new script still animates.
-    const seenTargets = new Set<Element>(allTargets);
-    for (const el of doc.querySelectorAll<HTMLElement>("[style*='transform']")) {
-      // Gate on the GSAP cache (`_gsap`) so we only reset transforms GSAP owns —
-      // never strip an authored, non-GSAP inline transform.
-      if (el.style.transform && "_gsap" in el && !seenTargets.has(el)) {
-        seenTargets.add(el);
-        allTargets.push(el);
-      }
-    }
-
     // Reset GSAP's internal transform cache so from() tweens don't read stale
     // end values. `clearProps: "all"` is needed to flush the cache, but it also
     // nukes the element's CSS base (position, width, height, etc.) from the
-    // HTML `style=""` attribute. Save → clear → restore → strip `transform`.
+    // HTML `style=""` attribute. Save → clear → restore → what GSAP wrote, from the file.
+    const allTargets = [...targets.keys()];
     if (allTargets.length > 0 && win.gsap?.set) {
-      const saved: Array<[HTMLElement, string]> = [];
-      for (const el of allTargets) {
-        // Iframe-realm node: instanceof HTMLElement fails across realms, and
-        // gsap targets() only yields elements here — style access is duck-typed.
-        const styled = el as HTMLElement;
-        if (styled.style?.cssText != null) saved.push([styled, styled.style.cssText]);
-      }
-      try {
-        win.gsap.set(allTargets, { clearProps: "all" });
-      } catch {}
+      // Iframe-realm nodes: instanceof HTMLElement fails across realms, so style access is duck-typed.
+      const saved = allTargets.map(
+        (el) => [el as HTMLElement, (el as HTMLElement).style.cssText] as const,
+      );
+      win.gsap.set(allTargets, { clearProps: "all" });
       for (const [el, css] of saved) {
         const s = el.style;
         s.cssText = css;
-        s.removeProperty("transform");
+        restoreAuthoredStyle(s, findAuthoredStyle(el), targets.get(el)!);
         // The restored cssText carries RUNTIME opacity, not authored opacity:
         // a mid-flight tween's interpolated value, or the color-grading hide
         // (`opacity: 0 !important`). The re-run script's tweens re-initialize
@@ -415,7 +403,14 @@ export function applySoftReload(
       }
       const s = doc.createElement("script");
       s.textContent = `(function(){${scriptText}\n})();`;
+      const ownScriptNode = 1;
+      const before = doc.body.querySelectorAll("*").length + ownScriptNode;
       doc.body.appendChild(s);
+      // A script that builds DOM builds it again on every run; only a full load starts from the file.
+      // Not seen: text-only writes, nodes put in the head or a shadow root, nodes added
+      // later, and a builder that removes its old nodes first (which needs no full load).
+      builtDom = doc.body.querySelectorAll("*").length > before;
+      if (builtDom && deferredToAsync) onAsyncFailure?.();
       finalizeSoftReload(win, currentTime);
     };
 
@@ -444,7 +439,7 @@ export function applySoftReload(
       }
       win.__hfMotionPathPluginLoading = true;
       const pluginScript = doc.createElement("script");
-      pluginScript.src = MOTION_PATH_PLUGIN_CDN;
+      pluginScript.src = motionPathPluginUrl(win.gsap?.version);
       pluginScript.onload = () => {
         win.__hfMotionPathPluginLoading = false;
         executeScript();
@@ -464,23 +459,47 @@ export function applySoftReload(
     executeScript();
   };
 
-  try {
-    if (win.__hfSuppressSceneMutations) {
-      win.__hfSuppressSceneMutations(doReload);
-    } else {
-      doReload();
-    }
-    // When MotionPath needs async loading, the script hasn't executed yet —
-    // skip the __timelines check and report success optimistically (the script
-    // WILL run on plugin load; onAsyncFailure covers the CDN-error case).
-    if (deferredToAsync) return "applied";
-    // The re-run executed. If the target keys read back, we're done; otherwise
-    // it's the TRANSIENT empty-timeline window (live state is correct) — surfaced
-    // as "verify-failed" so callers know NOT to escalate.
-    return verifyTimelinesPopulated(win, targetKeys) ? "applied" : "verify-failed";
-  } catch {
-    // The synchronous re-run threw — the preview is now genuinely broken (target
-    // timeline killed, script not re-registered). Escalate to a full reload.
-    return "cannot-soft-reload";
-  }
+  const run = () => runSuppressed(win, doReload);
+  // The synchronous re-run threw or built DOM a second time: the preview is now
+  // genuinely broken (no timeline, or duplicated nodes). Escalate to a full reload.
+  if (!run() || builtDom) return "cannot-soft-reload";
+  // When MotionPath needs async loading, the script hasn't executed yet —
+  // skip the __timelines check and report success optimistically (the script
+  // WILL run on plugin load; onAsyncFailure covers the CDN-error case).
+  if (deferredToAsync) return "applied";
+  // The re-run executed. If the target keys read back, we're done; otherwise
+  // it's the TRANSIENT empty-timeline window (live state is correct) — surfaced
+  // as "verify-failed" so callers know NOT to escalate.
+  return verifyTimelinesPopulated(win, targetKeys) ? "applied" : "verify-failed";
+}
+
+/** Other composition files for a soft reload: undefined when none are needed, null when a read failed. */
+export type NestedFiles = Map<string, string> | null | undefined;
+
+export async function settleNestedReads(
+  reads: Promise<Map<string, string>> | null,
+): Promise<NestedFiles> {
+  return reads ? reads.catch(() => null) : undefined;
+}
+
+/**
+ * Reads the composition files, other than the reloaded one, that the elements `scriptText`'s
+ * re-run resets are written in; null when there are none. Read them before the soft reload.
+ */
+export function readNestedFiles(
+  iframe: HTMLIFrameElement | null,
+  scriptText: string,
+  readFile: (path: string) => Promise<string>,
+): Promise<Map<string, string>> | null {
+  const win = iframe?.contentWindow as IframeWindow | null;
+  const doc = iframe?.contentDocument;
+  if (!win || !doc) return null;
+  const keys = timelineKeys(scriptText);
+  const own = compositionFile(doc, keys);
+  const files = [...collectResetTargets(win, doc, keys).keys()].map(authoringFile);
+  const paths = [...new Set(files)].filter((file): file is string => file !== null && file !== own);
+  if (paths.length === 0) return null;
+  return Promise.all(paths.map((path) => readFile(path))).then(
+    (texts) => new Map(paths.map((path, i) => [path, texts[i]!])),
+  );
 }
