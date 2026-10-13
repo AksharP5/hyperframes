@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it, mock } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RateSpec } from "@hyperframes/core";
 
 const workDir = mkdtempSync(join(tmpdir(), "hf-stage-test-"));
 afterAll(() => rmSync(workDir, { recursive: true, force: true }));
@@ -463,6 +464,99 @@ describe("runProbeStage — forceScreenshot threading", () => {
   });
 
   // Scene in-point 5 and clip trim 1: the collector starts picture and sound at source 6.
+  it.each([
+    { tagName: "video", existing: false },
+    { tagName: "audio", existing: false },
+    { tagName: "video", existing: true },
+    { tagName: "audio", existing: true },
+  ])("retains a runtime $tagName rate (existing: $existing)", async ({ tagName, existing }) => {
+    resetRetryMocks();
+    browserMediaResults = [
+      {
+        id: "clip",
+        tagName,
+        src: "clip.mp4",
+        start: 0,
+        end: 3,
+        duration: 3,
+        mediaStart: 0.5,
+        playbackRate: 1.5,
+        loop: false,
+        hasAudio: true,
+        volume: 1,
+        muted: false,
+      },
+    ];
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({});
+    const clip = {
+      id: "clip",
+      src: "clip.mp4",
+      start: 0,
+      end: 3,
+      mediaStart: 0.5,
+      playbackRate: 1,
+    };
+    if (existing && tagName === "video") {
+      input.composition.videos.push({ ...clip, loop: false, hasAudio: true });
+      input.composition.audios.push({ ...clip, id: "clip-audio", layer: 0, type: "video" });
+    }
+    if (existing && tagName === "audio") {
+      input.composition.audios.push({ ...clip, layer: 0, type: "audio" });
+    }
+
+    await runProbeStage(input);
+
+    const media = tagName === "video" ? input.composition.videos : input.composition.audios;
+    expect(media[0]).toMatchObject({ playbackRate: 1.5, mediaStart: 0.5 });
+    if (existing && tagName === "video") {
+      expect(input.composition.audios[0]).toMatchObject({ playbackRate: 1.5, mediaStart: 0.5 });
+    }
+  });
+
+  it("preserves a collected speed ramp during scalar browser reconciliation", async () => {
+    resetRetryMocks();
+    browserMediaResults = [
+      {
+        id: "clip",
+        tagName: "video",
+        src: "clip.mp4",
+        start: 0,
+        end: 3,
+        duration: 3,
+        mediaStart: 0,
+        playbackRate: 1,
+        loop: false,
+        hasAudio: false,
+        volume: 1,
+        muted: false,
+      },
+    ];
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({});
+    const playbackRate = {
+      target: "rate",
+      points: [
+        { t: 0, v: 1 },
+        { t: 3, v: 2 },
+      ],
+    } satisfies RateSpec;
+    input.composition.videos.push({
+      id: "clip",
+      src: "clip.mp4",
+      start: 0,
+      end: 3,
+      mediaStart: 0,
+      playbackRate,
+      loop: false,
+      hasAudio: false,
+    });
+
+    await runProbeStage(input);
+
+    expect(input.composition.videos[0]?.playbackRate).toEqual(playbackRate);
+  });
+
   it.each([
     { pageStart: 1, expected: 6 },
     { pageStart: 3, expected: 8 },
