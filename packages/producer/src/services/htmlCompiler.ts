@@ -37,6 +37,7 @@ import {
 } from "@hyperframes/core";
 import { MAX_AUDIO_GAIN } from "@hyperframes/core/audio-gain";
 import { readPlaybackRate } from "@hyperframes/parsers/media-duration";
+import { resolveRateSpec } from "@hyperframes/core/speed-ramp";
 import { gsapCdnDist } from "@hyperframes/core/gsap-cdn";
 import {
   assignBundledRuntimeCompositionIds,
@@ -2277,7 +2278,7 @@ export interface BrowserMediaElement {
   /** True when compilation inferred duration from the fallback source. */
   durationInferred: boolean;
   mediaStart: number;
-  playbackRate: number;
+  playbackRate: RateSpec;
   loop: boolean;
   hasAudio: boolean;
   volume: number;
@@ -2304,6 +2305,7 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
       playbackStartRaw: string | null;
       mediaStartRaw: string | null;
       playbackRateRaw: string | null;
+      automationRaw: string | null;
       defaultPlaybackRate: number;
       loop: boolean;
       hasAudio: boolean;
@@ -2359,6 +2361,7 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
       const playbackStartRaw = htmlEl.getAttribute("data-playback-start");
       const mediaStartRaw = htmlEl.getAttribute("data-media-start");
       const playbackRateRaw = htmlEl.getAttribute("data-playback-rate");
+      const automationRaw = htmlEl.getAttribute("data-automation");
       // playbackRate can include the transport speed; defaultPlaybackRate is the clip's own rate.
       const defaultPlaybackRate = isImage
         ? 1
@@ -2382,6 +2385,7 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
         playbackStartRaw,
         mediaStartRaw,
         playbackRateRaw,
+        automationRaw,
         defaultPlaybackRate,
         loop,
         hasAudio,
@@ -2401,6 +2405,7 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
       playbackStartRaw,
       mediaStartRaw,
       playbackRateRaw,
+      automationRaw,
       defaultPlaybackRate,
       ...element
     }) => ({
@@ -2417,9 +2422,12 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
           return null;
         },
       }),
-      playbackRate: readPlaybackRate(
-        (name) => (name === "data-playback-rate" ? playbackRateRaw : null),
-        defaultPlaybackRate,
+      playbackRate: resolveRateSpec(
+        automationRaw,
+        readPlaybackRate(
+          (name) => (name === "data-playback-rate" ? playbackRateRaw : null),
+          defaultPlaybackRate,
+        ),
       ),
     }),
   );

@@ -192,6 +192,10 @@ function authoredMediaStarts(html: string): Map<string, number> {
   return starts;
 }
 
+function isVideoAudio(audio: CompositionMetadata["audios"][number], videoId: string): boolean {
+  return audio.type === "video" && audio.id === `${videoId}-audio`;
+}
+
 /**
  * Take a start point the page changed by moving the collected one by the same amount, so the
  * in-point its scene added survives, and a video's sound track moves with its picture.
@@ -207,9 +211,7 @@ function adoptRuntimeMediaStart(
     el.tagName === "video"
       ? [
           ...composition.videos.filter((video) => video.id === el.id),
-          ...composition.audios.filter(
-            (audio) => audio.type === "video" && audio.id === `${el.id}-audio`,
-          ),
+          ...composition.audios.filter((audio) => isVideoAudio(audio, el.id)),
         ]
       : composition.audios.filter((audio) => audio.type !== "video" && audio.id === el.id);
   for (const entry of entries) entry.mediaStart += shift;
@@ -604,11 +606,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
                 if (typeof existing.playbackRate !== "object") {
                   existing.playbackRate = el.playbackRate;
                   for (const audio of composition.audios) {
-                    if (
-                      audio.type === "video" &&
-                      audio.id === `${el.id}-audio` &&
-                      typeof audio.playbackRate !== "object"
-                    ) {
+                    if (isVideoAudio(audio, el.id) && typeof audio.playbackRate !== "object") {
                       audio.playbackRate = el.playbackRate;
                     }
                   }
