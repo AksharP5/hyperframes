@@ -51,6 +51,9 @@ const DESIGN_NOTES_REASON =
 const INSPECTOR_TOOLS_REASON =
   "the inspector ships the capability, not agent tools; each harness defines its own tool names, descriptions and schemas";
 
+const FALLOW_PRUNE_REASON =
+  "fallow 3 reuses one audit snapshot per checkout and the hook prunes with `fallow audit-cache prune`, replacing this script";
+
 export const ALLOWED_DELETIONS = new Map([
   [
     "packages/cli/src/beats/headlessAnalyzer.ts",
@@ -1179,6 +1182,8 @@ export const ALLOWED_DELETIONS = new Map([
     "packages/engine/src/services/frameCapture-wslFullChrome.test.ts",
     "tests the WSL full-Chrome GPU fallback, replaced by the probe without WAYLAND_DISPLAY (frameCapture-wslWayland.test.ts)",
   ],
+  ["scripts/prune-fallow-audit-caches.mjs", FALLOW_PRUNE_REASON],
+  ["scripts/prune-fallow-audit-caches.test.mjs", FALLOW_PRUNE_REASON],
 ]);
 
 export function parseBase(argv, fallback = "origin/main") {

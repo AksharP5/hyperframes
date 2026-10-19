@@ -30,8 +30,9 @@ pre-commit:
       # Unset git worktree env vars: fallow creates a temp worktree internally and
       # GIT_DIR/GIT_INDEX_FILE (set by git in worktree hook context) break that.
       # env -u is safe in non-worktree contexts (no-op when var is unset).
-      # The prune keeps one audit base cache per checkout; the commit gets the audit's own status.
-      run: env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE sh -c 'bunx fallow audit --base origin/main --fail-on-issues; status=$?; bun scripts/prune-fallow-audit-caches.mjs origin/main; exit $status'
+      # fallow reuses one base-snapshot cache per checkout; `audit-cache prune` drops caches unused for a day,
+      # including those of removed checkouts. The commit gets the audit's own status.
+      run: env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE sh -c 'node_modules/.bin/fallow audit --base origin/main --fail-on-issues; status=$?; node_modules/.bin/fallow audit-cache prune --max-age-days 1 > /dev/null; exit $status'
     largefiles:
       # Rejects staged binaries over the limit that are not LFS pointers; see
       # the script header. CI runs the same script with --range.
