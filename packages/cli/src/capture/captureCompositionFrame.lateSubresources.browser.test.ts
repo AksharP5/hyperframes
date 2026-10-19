@@ -3,9 +3,10 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { openSettledCompositionPage } from "./captureCompositionFrame.js";
 
-// An image, then a fetched asset after the load event, both inside the old 1.5 s settle.
-const IMAGE_MS = 800;
-const FETCH_MS = 1_100;
+// An image, then a fetched asset after the load event, both well inside the 1.5 s settle cap: with the
+// asset at 1.1 s a busy Windows runner settled at up to 1.48 s, 18 ms from the cap.
+const IMAGE_MS = 300;
+const FETCH_MS = 500;
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
   "base64",
