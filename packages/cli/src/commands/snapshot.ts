@@ -463,6 +463,10 @@ export function computeSnapshotTimes(
   return { times: times.map(round), appendedTail: false };
 }
 
+export function serveCapturePage(projectDir: string, html: string, proxy: boolean | undefined) {
+  return serveStaticProjectHtml(projectDir, html, undefined, [], proxy === true);
+}
+
 /**
  * Render key frames from a composition as PNG screenshots.
  * The agent can Read these to verify its output visually.
@@ -506,7 +510,7 @@ async function captureSnapshots(
   // Localize fonts (embed remote @font-face as data URIs, matching the render
   // path) so snapshots render the real font instead of a fallback sans.
   const html = await bundleWithLocalizedFonts(projectDir);
-  const server = await serveStaticProjectHtml(projectDir, html, undefined, [], opts.autoProxy);
+  const server = await serveCapturePage(projectDir, html, opts.autoProxy);
 
   const savedPaths: string[] = [];
 
@@ -1052,7 +1056,7 @@ export default defineCommand({
     proxy: {
       type: "boolean",
       description:
-        "Auto-transcode browser-hostile video codecs for snapshots (default: on; overrides hyperframes.json media.autoProxy)",
+        "Serve browser-playable copies of hostile video codecs to the snapshot page (default: off; frames come from FFmpeg, and each copy transcodes the whole clip)",
       default: undefined,
     },
     "browser-gpu": {
