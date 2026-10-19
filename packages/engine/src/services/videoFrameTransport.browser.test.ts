@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Browser, Page } from "puppeteer-core";
 import { resolveHeadlessShellPath } from "./browserManager.js";
 import { injectVideoFramesBatch } from "./screenshotService.js";
-import { listenOnLoopback, launchTestChrome } from "./__fixtures__/loopback.js";
+import { closeTestChrome, listenOnLoopback, launchTestChrome } from "./__fixtures__/loopback.js";
 
 const chromePath = resolveHeadlessShellPath();
 const hasBrowser = chromePath !== undefined && spawnSync(chromePath, ["--version"]).status === 0;
@@ -45,7 +45,7 @@ describe.skipIf(!hasBrowser)("video frame transport in Chrome", () => {
     unexpectedFrameRequests = 0;
   });
   afterAll(async () => {
-    await browser?.close();
+    await closeTestChrome(browser);
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });

@@ -8,7 +8,7 @@ import {
   releasableVideoIds,
   releaseInjectedVideoMedia,
 } from "./frameCapture.js";
-import { listenOnLoopback, launchTestChrome } from "./__fixtures__/loopback.js";
+import { closeTestChrome, listenOnLoopback, launchTestChrome } from "./__fixtures__/loopback.js";
 
 const chromePath = resolveHeadlessShellPath();
 const hasBrowser = chromePath !== undefined && spawnSync(chromePath, ["--version"]).status === 0;
@@ -50,7 +50,7 @@ describe.skipIf(!hasBrowser)("releaseInjectedVideoMedia in Chrome", () => {
   });
   afterAll(async () => {
     for (const res of openMedia) res.destroy();
-    await browser?.close();
+    await closeTestChrome(browser);
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
