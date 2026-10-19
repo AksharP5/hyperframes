@@ -46,9 +46,8 @@ The Lambda handler is a thin dispatch: parse the Step Functions event, download 
 |------|-----|---------|
 | AWS credentials | The CLI and the deploy step both call AWS APIs. | Env vars, `~/.aws/credentials`, SSO, or IMDS — any chain the AWS SDK for JavaScript v3 would resolve. |
 | AWS SAM CLI | `hyperframes lambda deploy/destroy` shells out to `sam deploy`/`sam delete`. | [Install guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) |
-| `bun` | Used to build `packages/aws-lambda/dist/handler.zip` at deploy time. | `npm install -g bun` or [bun.sh](https://bun.sh) |
-| Lambda adapter | The published CLI loads the AWS adapter only for Lambda commands. | `npm install -g @hyperframes/aws-lambda` alongside the CLI |
-| HyperFrames repo checkout | `lambda deploy` builds the Lambda handler ZIP from source. Adopters who deploy outside a checkout can set `HYPERFRAMES_REPO_ROOT` to point at one. | `git clone https://github.com/heygen-com/hyperframes` |
+| Lambda adapter | The published CLI loads the AWS adapter only for Lambda commands. Each release pins a prebuilt Lambda handler ZIP (a GitHub release asset); `lambda deploy` downloads it, checks its SHA-256 and deploys it with the adapter's SAM template. No repo checkout needed. | `npm install -g @hyperframes/aws-lambda` alongside the CLI, at the same version |
+| HyperFrames repo checkout (optional) | Inside a checkout, or with `HYPERFRAMES_REPO_ROOT` pointing at one, `lambda deploy` builds the handler ZIP from source instead (needs `bun`). Use it to deploy unreleased changes, `--chrome-source=chrome-headless-shell`, or an adapter release older than the prebuilt handler. | `git clone https://github.com/heygen-com/hyperframes`, and `npm install -g bun` or [bun.sh](https://bun.sh) |
 
 ## Three deployment paths
 

@@ -9,6 +9,7 @@
   },
   "files": [
     "dist/",
+    "prebuilt/",
     "scripts/",
     "README.md"
   ],

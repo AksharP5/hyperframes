@@ -1,5 +1,6 @@
 /**
- * `hyperframes lambda deploy` — build the handler ZIP, sam-deploy the
+ * `hyperframes lambda deploy` — build the handler ZIP (or, outside a
+ * checkout, fetch the adapter's pinned prebuilt one), sam-deploy the
  * Phase 6a SAM template, and persist the stack outputs locally so the
  * other lambda subcommands don't need re-derive them.
  *
@@ -9,8 +10,9 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { c } from "../../ui/colors.js";
+import { stagePrebuiltHandler } from "./prebuiltHandler.js";
 import { fetchStackOutputs, locateSamTemplate, samDeploy } from "./sam.js";
 import { repoRoot } from "./repoRoot.js";
 import { DEFAULT_STACK_NAME, writeStackOutputs } from "./state.js";
@@ -41,26 +43,11 @@ export async function runDeploy(args: Partial<DeployArgs> = {}): Promise<void> {
     skipBuild: args.skipBuild ?? false,
   };
 
-  const root = repoRoot();
-  // Locate the SAM template up-front so users get a fast, clear error
-  // (not an opaque `sam deploy` failure) when this isn't a checkout.
-  locateSamTemplate(root);
-
-  if (!resolved.skipBuild) {
-    console.log(c.dim("→ Building handler ZIP"));
-    buildHandlerZip(root);
-  } else {
-    const zip = join(root, "packages", "aws-lambda", "dist", "handler.zip");
-    if (!existsSync(zip)) {
-      throw new Error(
-        `--skip-build set but ${zip} does not exist. Run \`bun run --cwd packages/aws-lambda build:zip\` first or drop --skip-build.`,
-      );
-    }
-  }
+  const samDir = await prepareSamDir(repoRoot(), resolved);
 
   console.log(c.dim(`→ sam deploy (stack=${resolved.stackName} region=${resolved.region})`));
   samDeploy({
-    repoRoot: root,
+    samDir,
     stackName: resolved.stackName,
     region: resolved.region,
     awsProfile: resolved.awsProfile,
@@ -112,6 +99,31 @@ export async function runDeploy(args: Partial<DeployArgs> = {}): Promise<void> {
   console.log(`  ${c.dim("State file:")}     ${resolve(statePath)}`);
   console.log();
   console.log(c.dim(`Render with: hyperframes lambda render <project-dir>`));
+}
+
+/** Checkout: build the ZIP from source. Otherwise: stage the adapter's pinned prebuilt ZIP. */
+async function prepareSamDir(root: string | undefined, args: DeployArgs): Promise<string> {
+  if (!root) {
+    if (args.chromeSource !== "sparticuz") {
+      throw new Error(
+        "[lambda deploy] The prebuilt handler bundles sparticuz Chrome; --chrome-source=chrome-headless-shell needs a hyperframes checkout.",
+      );
+    }
+    return stagePrebuiltHandler();
+  }
+  const samDir = dirname(locateSamTemplate(root));
+  if (!args.skipBuild) {
+    console.log(c.dim("→ Building handler ZIP"));
+    buildHandlerZip(root);
+  } else {
+    const zip = join(root, "packages", "aws-lambda", "dist", "handler.zip");
+    if (!existsSync(zip)) {
+      throw new Error(
+        `--skip-build set but ${zip} does not exist. Run \`bun run --cwd packages/aws-lambda build:zip\` first or drop --skip-build.`,
+      );
+    }
+  }
+  return samDir;
 }
 
 function buildHandlerZip(root: string): void {

@@ -45,8 +45,8 @@ function assertAwsCliAvailable(): void {
 }
 
 export interface DeployOptions {
-  /** Repository root — the SAM template lives at `examples/aws-lambda/template.yaml` underneath. */
-  repoRoot: string;
+  /** Directory holding the `template.yaml` to deploy; SAM runs from here. */
+  samDir: string;
   /** CloudFormation stack name. */
   stackName: string;
   region: string;
@@ -60,8 +60,8 @@ export interface DeployOptions {
 }
 
 /**
- * Resolve the SAM template path relative to `repoRoot`. No installed-package fallback: the
- * template's `CodeUri` is relative to the monorepo, so it only works inside a checkout.
+ * Resolve the checkout's SAM template. Its `CodeUri` is relative to the monorepo; outside a
+ * checkout deploy uses the adapter's packaged template instead (see prebuiltHandler.ts).
  */
 export function locateSamTemplate(repoRoot: string): string {
   const candidate = join(repoRoot, "examples", "aws-lambda", "template.yaml");
@@ -116,8 +116,7 @@ export function samDeploy(opts: DeployOptions): void {
   if (opts.awsProfile) {
     args.push("--profile", opts.awsProfile);
   }
-  const samDir = join(opts.repoRoot, "examples", "aws-lambda");
-  const result = spawnSync("sam", args, { cwd: samDir, stdio: opts.stdio ?? "inherit" });
+  const result = spawnSync("sam", args, { cwd: opts.samDir, stdio: opts.stdio ?? "inherit" });
   if (result.status !== 0) {
     throw new Error(
       `[lambda] sam deploy exited with code ${result.status ?? "unknown"}\n` +
@@ -132,7 +131,7 @@ export function samDeploy(opts: DeployOptions): void {
 
 /** Run `sam delete` non-interactively. */
 export function samDelete(opts: {
-  repoRoot: string;
+  samDir: string;
   stackName: string;
   region: string;
   awsProfile?: string;
@@ -143,8 +142,7 @@ export function samDelete(opts: {
   if (opts.awsProfile) {
     args.push("--profile", opts.awsProfile);
   }
-  const samDir = join(opts.repoRoot, "examples", "aws-lambda");
-  const result = spawnSync("sam", args, { cwd: samDir, stdio: opts.stdio ?? "inherit" });
+  const result = spawnSync("sam", args, { cwd: opts.samDir, stdio: opts.stdio ?? "inherit" });
   if (result.status !== 0) {
     throw new Error(`[lambda] sam delete exited with code ${result.status ?? "unknown"}`);
   }

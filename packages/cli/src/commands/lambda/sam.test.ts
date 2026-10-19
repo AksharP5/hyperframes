@@ -47,12 +47,12 @@ describe("samDeploy", () => {
 
   // An omitted override makes SAM send UsePreviousValue, so a redeploy keeps an existing cap.
   it("sends no ReservedConcurrency when --concurrency is omitted", () => {
-    samDeploy({ repoRoot: "/repo", stackName: "s", region: "us-east-2" });
+    samDeploy({ samDir: "/repo", stackName: "s", region: "us-east-2" });
     expect(overrides()).not.toContain("ReservedConcurrency");
   });
 
   it("forwards an explicit --concurrency", () => {
-    samDeploy({ repoRoot: "/repo", stackName: "s", region: "us-east-2", reservedConcurrency: 8 });
+    samDeploy({ samDir: "/repo", stackName: "s", region: "us-east-2", reservedConcurrency: 8 });
     expect(overrides()).toContain("ReservedConcurrency=8");
   });
 });
@@ -84,7 +84,7 @@ describe("parseReservedConcurrency", () => {
     for (const bad of ["abc", "0", "-1", "2.5"]) {
       expect(() => parseReservedConcurrency(bad)).toThrow('positive integer or "none"');
     }
-    samDeploy({ repoRoot: "/repo", stackName: "s", region: "r", reservedConcurrency: -1 });
+    samDeploy({ samDir: "/repo", stackName: "s", region: "r", reservedConcurrency: -1 });
     expect(vi.mocked(spawnSync).mock.lastCall?.[1]).toContain("ReservedConcurrency=-1");
   });
 });

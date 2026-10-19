@@ -9,6 +9,8 @@
  * rather than re-implementing the empty-and-delete dance here.
  */
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { c } from "../../ui/colors.js";
 import { deleteStackOutputs, requireStack } from "./state.js";
 import { samDelete } from "./sam.js";
@@ -22,11 +24,12 @@ export interface DestroyArgs {
 export async function runDestroy(args: DestroyArgs): Promise<void> {
   const stack = requireStack(args.stackName);
   console.log(c.dim(`→ sam delete (stack=${stack.stackName} region=${stack.region})`));
+  const root = repoRoot();
   // Mirror deploy.ts's AWS_PROFILE env fallback — `AWS_PROFILE=prod
   // hyperframes lambda destroy` should hit the same account `deploy`
   // did, not the default credentials chain.
   samDelete({
-    repoRoot: repoRoot(),
+    samDir: root ? join(root, "examples", "aws-lambda") : tmpdir(),
     stackName: stack.stackName,
     region: stack.region,
     awsProfile: args.awsProfile ?? process.env.AWS_PROFILE,
