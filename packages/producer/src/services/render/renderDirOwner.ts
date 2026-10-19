@@ -10,13 +10,11 @@ import {
 } from "node:fs";
 import { hostname, uptime } from "node:os";
 import { dirname, join } from "node:path";
+import { RENDER_TEMP_DIR } from "@hyperframes/core/project-folders";
 
 const OWNER_FILE = "owner.json";
 /** Where a staging dir parks the previous output while swapping in the new one. */
 export const TRANSACTION_BACKUP = "backup";
-// The names mkdtemp gives a render's temp dirs: work-<job uuid>-, hf-render- (Windows) and .<output>.hf-transaction-.
-const RENDER_TEMP_DIR =
-  /^(work-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}|hf-render|\..+\.hf-transaction)-[A-Za-z0-9]{6}$/;
 /** A `--debug` render's work dir, named by its job id. */
 export const RENDER_JOB_DIR = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 

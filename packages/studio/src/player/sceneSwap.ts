@@ -71,6 +71,9 @@ export function markScenesStale(iframe: HTMLIFrameElement | null, files: readonl
   meta.content = JSON.stringify(parts);
 }
 
+export const supersededByNewerEdit = () =>
+  new DOMException("superseded by a newer edit", "AbortError");
+
 /** Null when the preview cannot swap; rejects when superseded, cancelled or a full reload is needed. */
 export function sceneSwapFor(
   iframe: HTMLIFrameElement,
