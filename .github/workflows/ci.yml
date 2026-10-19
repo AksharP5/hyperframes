@@ -1522,9 +1522,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
+      # A pull request checks out its merge commit, whose first parent is the base: two commits are the whole diff.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
+          fetch-depth: 2
       - name: Check file sizes (max 600 lines)
         # Scoped to files THIS PR changed under packages/studio. Walking the
         # whole tree blamed every unrelated PR for pre-existing offenders.
@@ -1535,7 +1536,7 @@ jobs:
           if [ -n "${{ github.base_ref }}" ]; then
             mapfile -t files < <(
               git diff --name-only --diff-filter=ACMR \
-                "origin/${{ github.base_ref }}...HEAD" -- \
+                HEAD^1 HEAD -- \
                 'packages/studio/**/*.ts' 'packages/studio/**/*.tsx' \
                 | grep -vE '\.(test|spec)\.(ts|tsx)$|\.generated\.' || true
             )
