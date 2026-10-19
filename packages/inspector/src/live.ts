@@ -14,7 +14,12 @@ import {
 } from "./engine";
 import { liveGenerationPage, type PageRunner } from "./pageQueries";
 import { assertGeneration, validateInspectRequest, validateTimelineRequest } from "./requests";
-import { Sources, authoredHtml, fingerprint, type AuthoredHtml } from "./sources";
+import {
+  Sources,
+  authoredHtml,
+  fingerprint as sourceFingerprint,
+  type AuthoredHtml,
+} from "./sources";
 import type { InspectRequest, Snippet } from "./types";
 
 export interface LiveInspection {
@@ -103,7 +108,9 @@ export function previewGeneration(runner: PageRunner): Promise<string | null> {
   return runner.run(liveGenerationPage, undefined);
 }
 
-export { fingerprint } from "./sources";
+export function fingerprint(project: string) {
+  return sourceFingerprint(project, { ignoreHfIds: true });
+}
 export type {
   ComponentReport,
   ElementMapReport,

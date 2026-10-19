@@ -55,11 +55,16 @@ function sourceFiles(project: string) {
   visit(project);
   return files.sort();
 }
-export function fingerprint(project: string) {
+const HF_ID_ATTRIBUTE = /\sdata-hf-id\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/g;
+export function fingerprint(project: string, { ignoreHfIds = false } = {}) {
   const hash = createHash("sha256");
   for (const path of sourceFiles(project)) {
     hash.update(relative(project, path));
-    hash.update(readFileSync(path));
+    hash.update(
+      ignoreHfIds && extname(path) === ".html"
+        ? readFileSync(path, "utf8").replace(HF_ID_ATTRIBUTE, "")
+        : readFileSync(path),
+    );
   }
   return hash.digest("hex");
 }

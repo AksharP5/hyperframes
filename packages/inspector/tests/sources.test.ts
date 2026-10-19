@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Sources, mergeSnippets, fingerprint } from "../src/sources";
+import { fingerprint as liveFingerprint } from "../src/live";
 import { PREVIEW_IGNORED_DIRS } from "../../core/src/projectFolders";
 import {
   bundleToSingleHtml,
@@ -22,6 +23,25 @@ describe("source records", () => {
       expect(fingerprint(dir)).toBe(before);
       writeFileSync(join(dir, "data.json"), "{}");
       expect(fingerprint(dir)).not.toBe(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not change when only data-hf-id stamps are added to the html", () => {
+    const dir = mkdtempSync(join(tmpdir(), "inspect-source-"));
+    try {
+      writeFileSync(join(dir, "index.html"), '<div class="a"><p>Hi</p></div>');
+      const before = liveFingerprint(dir);
+      const standaloneBefore = fingerprint(dir);
+      writeFileSync(
+        join(dir, "index.html"),
+        '<div class="a" data-hf-id="hf-1a2b"><p data-hf-id=\'hf-3c4d\'>Hi</p></div>',
+      );
+      expect(liveFingerprint(dir)).toBe(before);
+      expect(fingerprint(dir)).not.toBe(standaloneBefore);
+      writeFileSync(join(dir, "index.html"), '<div class="b" data-hf-id="hf-1a2b"><p>Hi</p></div>');
+      expect(liveFingerprint(dir)).not.toBe(before);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
