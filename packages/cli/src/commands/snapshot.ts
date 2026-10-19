@@ -17,6 +17,7 @@ import {
   type ArtifactCapture,
 } from "@hyperframes/studio-server/history";
 import { pngDimensions } from "../utils/pngDimensions.js";
+import { runWithConcurrencyLimit } from "../utils/concurrency.js";
 import { failCommand } from "../utils/commandResult.js";
 // fallow-ignore-file complexity
 import { defineCommand } from "citty";
@@ -97,6 +98,8 @@ function orbitStageSource(): string {
  * clip (corrupt media, stalled network mount, codec edge case) cannot wedge
  * `hyperframes snapshot` indefinitely. */
 const FFMPEG_EXTRACT_TIMEOUT_MS = 30_000;
+/** Each 4K decode is already multi-threaded, so a few at once fill the cores without exhausting memory. */
+const VIDEO_FRAME_EXTRACT_CONCURRENCY = 4;
 
 /** Keep millisecond-level snapshot timing proof without leaking floating-point noise. */
 export function formatSnapshotTimestamp(time: number): string {
@@ -355,6 +358,7 @@ export async function extractVideoFrameToBuffer(
   timeSeconds: number,
   useVp9AlphaDecoder = false,
   holdLastFrame = false,
+  displayedPixels = 0,
 ): Promise<Buffer | null> {
   const tmp = mkdtempSync(join(tmpdir(), "hf-snapshot-frame-"));
   const outPath = join(tmp, "frame.png");
@@ -370,7 +374,15 @@ export async function extractVideoFrameToBuffer(
     if (useVp9AlphaDecoder) args.push("-c:v", "libvpx-vp9");
     if (seek.seek !== undefined) args.push("-ss", String(seek.seek));
     args.push("-i", videoPath, "-map", "0:v:0");
-    if (seek.select !== undefined) args.push("-vf", `select=gte(t-start_t\\,${seek.select})`);
+    const filters: string[] = [];
+    if (seek.select !== undefined) filters.push(`select=gte(t-start_t\\,${seek.select})`);
+    // Shrink so the short side still covers the displayed box at any rotation or fit; never enlarge.
+    if (displayedPixels > 0) {
+      filters.push(
+        `scale='min(iw,${displayedPixels})':'min(ih,${displayedPixels})':force_original_aspect_ratio=increase`,
+      );
+    }
+    if (filters.length > 0) args.push("-vf", filters.join(","));
     args.push("-frames:v", "1", "-q:v", "2", "-y", outPath);
     const result = await runFfmpegOnce(ffmpegPath, args, FFMPEG_EXTRACT_TIMEOUT_MS);
     if (result.code !== 0 || result.timedOut || !existsSync(outPath)) return null;
@@ -708,6 +720,7 @@ async function captureSnapshots(
             };
             return Array.from(document.querySelectorAll("video")).map((el) => {
               const v = el as HTMLVideoElement;
+              const box = v.getBoundingClientRect();
               const authoredStart = parseFloat(v.dataset.start ?? "0") || 0;
               const runtimeResolvedStart = runtimeWindow.__hfResolveMediaStartSeconds?.(v);
               const mediaStart =
@@ -730,6 +743,8 @@ async function captureSnapshots(
                 srcDuration: srcDur,
                 mediaStart,
                 loop: v.loop,
+                displayedSize: Math.max(box.width, box.height),
+                devicePixelRatio: window.devicePixelRatio,
               };
             });
           });
@@ -769,51 +784,49 @@ async function captureSnapshots(
               : [{ ...candidate, start, playbackRate, duration, relTime: frameTime }];
           });
 
-          const updates: Array<{ videoId: string; dataUri: string }> = [];
-          for (const v of active) {
-            // Resolve the <video> src to an FFmpeg input. Prefer a project-local
-            // file (fast, sandboxed); fall back to the absolute http(s) URL for
-            // remote assets (e.g. an S3-hosted clip embedded by an upstream agent)
-            // — FFmpeg reads http(s) input directly, and Chrome-headless can't seek
-            // it either, so without this those videos render blank in snapshots.
-            let ffmpegInput: string | null = null;
-            let inputIsLocal = false;
-            try {
-              const url = new URL(v.src);
-              const decodedPath = decodeURIComponent(url.pathname).replace(/^\//, "");
-              const candidate = resolve(projectDir, decodedPath);
-              const rel = relative(projectDir, candidate);
-              if (!rel.startsWith("..") && !isAbsolute(rel) && existsSync(candidate)) {
-                ffmpegInput = candidate;
-                inputIsLocal = true;
-              } else if (url.protocol === "http:" || url.protocol === "https:") {
-                ffmpegInput = url.href;
+          const extracted = await runWithConcurrencyLimit(
+            active,
+            VIDEO_FRAME_EXTRACT_CONCURRENCY,
+            async (v) => {
+              // Prefer the project-local file; remote http(s) clips go to FFmpeg directly,
+              // since headless Chrome can't seek them and they would render blank.
+              let ffmpegInput: string | null = null;
+              let inputIsLocal = false;
+              try {
+                const url = new URL(v.src);
+                const decodedPath = decodeURIComponent(url.pathname).replace(/^\//, "");
+                const candidate = resolve(projectDir, decodedPath);
+                const rel = relative(projectDir, candidate);
+                if (!rel.startsWith("..") && !isAbsolute(rel) && existsSync(candidate)) {
+                  ffmpegInput = candidate;
+                  inputIsLocal = true;
+                } else if (url.protocol === "http:" || url.protocol === "https:") {
+                  ffmpegInput = url.href;
+                }
+              } catch {
+                /* unresolvable src (e.g. blob:, data:) — skip */
               }
-            } catch {
-              /* unresolvable src (e.g. blob:, data:) — skip */
-            }
-            if (!ffmpegInput) continue;
-            // VP9-alpha detection shells out to ffprobe, which has no timeout.
-            // Only probe local files (filesystem-bounded); for remote URLs skip it
-            // (pass false) so a stalled host can't wedge snapshot in ffprobe before
-            // the bounded extractVideoFrameToBuffer below ever runs. Remote
-            // VP9-alpha overlays aren't a current path — revisit with a bounded
-            // ffprobe if one appears.
-            const useVp9AlphaDecoder = inputIsLocal
-              ? await shouldUseVp9AlphaDecoder(ffmpegInput)
-              : false;
-            const png = await extractVideoFrameToBuffer(
-              ffmpegInput,
-              Math.max(0, v.relTime),
-              useVp9AlphaDecoder,
-              v.srcDuration > 0 && v.relTime >= v.srcDuration - 1,
-            );
-            if (!png) continue;
-            updates.push({
-              videoId: v.id,
-              dataUri: `data:image/png;base64,${png.toString("base64")}`,
-            });
-          }
+              if (!ffmpegInput) return null;
+              // The VP9-alpha probe has no timeout, so only local files get it;
+              // a stalled remote host must not wedge snapshot before the bounded extract.
+              const useVp9AlphaDecoder = inputIsLocal
+                ? await shouldUseVp9AlphaDecoder(ffmpegInput)
+                : false;
+              const png = await extractVideoFrameToBuffer(
+                ffmpegInput,
+                Math.max(0, v.relTime),
+                useVp9AlphaDecoder,
+                v.srcDuration > 0 && v.relTime >= v.srcDuration - 1,
+                Math.ceil(
+                  v.displayedSize *
+                    (opts.zoom ? (opts.zoomScale ?? DEFAULT_ZOOM_SCALE) : v.devicePixelRatio),
+                ),
+              );
+              if (!png) return null;
+              return { videoId: v.id, dataUri: `data:image/png;base64,${png.toString("base64")}` };
+            },
+          );
+          const updates = extracted.filter((update) => update !== null);
 
           if (active.length > 0 && updates.length < active.length) {
             const missed = active.length - updates.length;
