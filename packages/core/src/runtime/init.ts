@@ -67,6 +67,7 @@ import {
 import {
   handleErrorForProxy,
   handleMetadataForProxy,
+  isRenderMode,
   maybeProxyProactively,
   setProxyDisplayScale,
 } from "./mediaProxy";
@@ -2532,6 +2533,13 @@ export function initSandboxRuntimeModular(): void {
       handleMetadataForProxy(event.currentTarget);
     }
   };
+  const onMediaLoadedMetadataForPlayhead = (event: Event) => {
+    const el = event.currentTarget;
+    if (state.tornDown || clock.isPlaying() || !isMediaElement(el) || isRenderMode(el)) return;
+    lastSyncedMediaTimeSeconds = null;
+    state.mediaForceSyncNextTick = true;
+    syncMediaForCurrentState();
+  };
   const onMediaErrorForProxy = (event: Event) => {
     if (isMediaElement(event.currentTarget)) {
       handleErrorForProxy(event.currentTarget);
@@ -2561,6 +2569,7 @@ export function initSandboxRuntimeModular(): void {
     mediaEl.removeEventListener("loadedmetadata", scheduleMetadataDurationHydration);
     mediaEl.removeEventListener("durationchange", scheduleMetadataDurationHydration);
     mediaEl.removeEventListener("loadedmetadata", onMediaLoadedMetadataForProxy);
+    mediaEl.removeEventListener("loadedmetadata", onMediaLoadedMetadataForPlayhead);
     mediaEl.removeEventListener("loadedmetadata", onMediaLoadedMetadataForRoute);
     mediaEl.removeEventListener("error", onMediaErrorForProxy);
     metadataBoundMedia.delete(mediaEl);
@@ -2614,6 +2623,7 @@ export function initSandboxRuntimeModular(): void {
       // triggers. Inert in render mode / when the codec map is absent /
       // for <audio> — all guarded inside mediaProxy.ts itself.
       mediaEl.addEventListener("loadedmetadata", onMediaLoadedMetadataForProxy);
+      mediaEl.addEventListener("loadedmetadata", onMediaLoadedMetadataForPlayhead);
       mediaEl.addEventListener("error", onMediaErrorForProxy);
 
       // Proactive proxy-fallback trigger: consult the codec map and swap
