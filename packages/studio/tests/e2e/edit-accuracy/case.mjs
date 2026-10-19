@@ -242,11 +242,13 @@ const STILL_MS = process.env.EDIT_ACCURACY_STILL_MS
   : null;
 export const STILL_FRAMES = 3;
 
-// The server's event stream stays open for the page's life; timeline thumbnails are rendered by the server
-// for the timeline strip, can take seconds, and never change the preview.
-const backgroundRequest = (request) =>
+// The server's event stream stays open for the page's life; timeline thumbnails and the background lint
+// behind the lint badge run on the server, can take seconds (lint over 15 s on a busy runner), and never
+// change the preview. A blob: load is page memory (a thumbnail's image) and can end with no event at all.
+export const backgroundRequest = (request) =>
   request.resourceType() === "eventsource" ||
-  /\/api\/projects\/[^/]+\/thumbnail\//.test(request.url());
+  request.url().startsWith("blob:") ||
+  /\/api\/projects\/[^/]+\/(thumbnail\/|lint(\?|$))/.test(request.url());
 
 /**
  * The Studio page's network, for the stillness check: requests in flight, a counter bumped by any request or
