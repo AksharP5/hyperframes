@@ -15,7 +15,7 @@
  * inside the regression harness (`bun run --cwd packages/producer docker:test`).
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, mock } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -46,11 +46,13 @@ import {
   ChunkExceedsWorkerTimeoutError,
   DEFAULT_CHUNK_SIZE,
   DEFAULT_MAX_PARALLEL_CHUNKS,
+  chunkSizingUsesFrameCost,
   estimateChunkSeconds,
   MIN_CHUNK_SIZE,
   plan,
   resolveDistributedEngineConfig,
   resolveChunkPlan,
+  planNeedsFrameCostMeasurement,
   resolveMaxParallelChunks,
 } from "./plan.js";
 import { buildSyntheticRenderJob } from "./shared.js";
@@ -284,6 +286,45 @@ describe("resolveMaxParallelChunks", () => {
     expect(resolveChunkPlan(1800, 30, maxParallel).chunkCount).toBe(60);
     const args = [THIRTY_MIN_30FPS, MP_1080P] as const;
     expect(resolveMaxParallelChunks({ ...worker, targetChunkFrames: 300 }, ...args)).toBe(256);
+  });
+
+  it("sizes chunks from a measured frame cost so expensive frames fit the limit", () => {
+    // 45 s of 1080x1920 at 24 fps whose frames measured ~10.5 s each (a graded video on software GL).
+    const frames = 45 * 24;
+    const mp = (1080 * 1920) / 1e6;
+    const worker = { workerTimeoutSeconds: LAMBDA_LIMIT, workerConcurrency: 8 };
+    const { log } = recordingLog();
+    const priced = resolveChunkPlan(
+      frames,
+      undefined,
+      resolveMaxParallelChunks(worker, frames, mp),
+    );
+    expect(estimateChunkSeconds(priced.effectiveChunkSize, mp, 10.5)).toBeGreaterThan(LAMBDA_LIMIT);
+
+    const measured = resolveChunkPlan(
+      frames,
+      undefined,
+      resolveMaxParallelChunks(worker, frames, mp, log, 10.5),
+    );
+    expect(estimateChunkSeconds(measured.effectiveChunkSize, mp, 10.5)).toBeLessThanOrEqual(
+      LAMBDA_LIMIT * 0.75,
+    );
+    // A cheap measured frame keeps the per-pixel plan.
+    expect(resolveMaxParallelChunks(worker, frames, mp, log, 0.07)).toBe(
+      resolveMaxParallelChunks(worker, frames, mp, log),
+    );
+  });
+
+  it("measures frame cost only for graded media and only when sizing uses it", () => {
+    expect(planNeedsFrameCostMeasurement('<video data-color-grading=\'{"preset":"x"}\'>')).toBe(
+      true,
+    );
+    expect(planNeedsFrameCostMeasurement("<video src=a.mp4>")).toBe(false);
+    expect(chunkSizingUsesFrameCost({ workerTimeoutSeconds: LAMBDA_LIMIT })).toBe(true);
+    expect(chunkSizingUsesFrameCost({ workerTimeoutSeconds: LAMBDA_LIMIT, chunkSize: 48 })).toBe(
+      false,
+    );
+    expect(chunkSizingUsesFrameCost({})).toBe(false);
   });
 
   it("fails fast with a typed error when even 256 chunks cannot fit the limit", () => {
@@ -523,6 +564,38 @@ describe("plan() defaults", () => {
     );
     expect(fixed.chunkCount).toBe(3);
     expect(sized.chunkCount).toBe(1);
+  }, 30_000);
+
+  it("splits graded media into more chunks from its measured frame cost", async () => {
+    const measuredFor: string[] = [];
+    mock.module("./planFrameCost.js", () => ({
+      measurePlanSecondsPerFrame: async (input: { html: string }) => {
+        measuredFor.push(input.html);
+        return 10;
+      },
+    }));
+    const graded = join(runRoot, "project-graded");
+    mkdirSync(graded, { recursive: true });
+    writeFileSync(
+      join(graded, "index.html"),
+      FIXTURE_HTML.replace("<p>", `<p data-color-grading='{"exposure":0.2}'>`),
+      "utf-8",
+    );
+    const config = {
+      fps: 30,
+      width: 320,
+      height: 240,
+      format: "mp4",
+      workerTimeoutSeconds: 900,
+      workerConcurrency: 8,
+    } as const;
+    const cheap = await plan(projectDir, config, join(runRoot, "plan-cheap"));
+    expect(measuredFor).toHaveLength(0);
+    const costly = await plan(graded, config, join(runRoot, "plan-graded"));
+    expect(measuredFor).toHaveLength(1);
+    expect(cheap.chunkCount).toBe(1);
+    // 30 frames at 10 s each split as far as the 10-frame chunk floor allows.
+    expect(costly.chunkCount).toBe(3);
   }, 30_000);
 
   it("rejects at plan time when no chunk can finish inside the worker limit", async () => {

@@ -583,6 +583,8 @@ describe("resolveLockedVp9CpuUsed", () => {
 });
 
 describe("extractDeferredVideoFramesForChunk", () => {
+  const frameSpan = (start: number, end: number) =>
+    Array.from({ length: end - start }, (_, i) => start + i);
   const root = mkdtempSync(join(tmpdir(), "hf-deferred-chunk-"));
   const planDir = join(root, "plan");
   const range = {
@@ -657,7 +659,7 @@ describe("extractDeferredVideoFramesForChunk", () => {
     const [chunk] = await extractDeferredVideoFramesForChunk({
       planDir,
       planVideos: planVideos(false),
-      slice: { index: 1, startFrame: 30, endFrame: 45 },
+      frames: frameSpan(30, 45),
       fps: { num: 30, den: 1 },
       outputRoot: join(root, "chunk-1"),
       cfg: {},
@@ -673,7 +675,7 @@ describe("extractDeferredVideoFramesForChunk", () => {
     const [chunk] = await extractDeferredVideoFramesForChunk({
       planDir,
       planVideos: { ...planVideos(false), videos: [{ ...planVideos(false).videos[0]!, end: 1 }] },
-      slice: { index: 2, startFrame: 60, endFrame: 90 },
+      frames: frameSpan(60, 90),
       fps: { num: 30, den: 1 },
       outputRoot: join(root, "chunk-2"),
       cfg: {},
@@ -685,7 +687,7 @@ describe("extractDeferredVideoFramesForChunk", () => {
     const [chunk] = await extractDeferredVideoFramesForChunk({
       planDir,
       planVideos: planVideos(true),
-      slice: { index: 3, startFrame: 70, endFrame: 80 },
+      frames: frameSpan(70, 80),
       fps: { num: 30, den: 1 },
       outputRoot: join(root, "chunk-3"),
       cfg: {},
@@ -706,7 +708,7 @@ describe("extractDeferredVideoFramesForChunk", () => {
       await extractDeferredVideoFramesForChunk({
         planDir,
         planVideos: missing,
-        slice: { index: 0, startFrame: 0, endFrame: 5 },
+        frames: frameSpan(0, 5),
         fps: { num: 30, den: 1 },
         outputRoot: join(root, "chunk-missing"),
         cfg: {},

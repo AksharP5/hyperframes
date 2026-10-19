@@ -38,7 +38,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { extname, isAbsolute, join, relative, sep } from "node:path";
-import { type CanvasResolution, type DistributedFps, fpsToNumber } from "@hyperframes/core";
+import {
+  type CanvasResolution,
+  type DistributedFps,
+  fpsToNumber,
+  HF_COLOR_GRADING_ATTR,
+} from "@hyperframes/core";
 import {
   type EngineConfig,
   type VideoFrameFormat,
@@ -54,6 +59,7 @@ import {
   type RenderStrictness,
 } from "../renderOrchestrator.js";
 import { closeFileServerSafely } from "../fileServer.js";
+import { measurePlanSecondsPerFrame } from "./planFrameCost.js";
 import { constrainAacTruePeak } from "../render/audioPadTrim.js";
 import { encoderFailureError } from "../render/encoderInterruption.js";
 import { runAudioStage } from "../render/stages/audioStage.js";
@@ -417,10 +423,44 @@ const ESTIMATED_CHUNK_OVERHEAD_SECONDS = 60;
 /** Share of the worker time limit a chunk's predicted time may use. */
 const WORKER_TIMEOUT_MARGIN = 0.75;
 
+/** Seconds one frame is priced at: the per-pixel estimate, or the measured cost when it is higher. */
+function estimateFrameSeconds(megapixels: number, measuredSecondsPerFrame = 0): number {
+  return Math.max(ESTIMATED_SECONDS_PER_MEGAPIXEL_FRAME * megapixels, measuredSecondsPerFrame);
+}
+
 /** Predicted seconds for one chunk of `frames` frames at `megapixels` output pixels per frame. */
-export function estimateChunkSeconds(frames: number, megapixels: number): number {
+export function estimateChunkSeconds(
+  frames: number,
+  megapixels: number,
+  measuredSecondsPerFrame?: number,
+): number {
   return (
-    ESTIMATED_CHUNK_OVERHEAD_SECONDS + frames * ESTIMATED_SECONDS_PER_MEGAPIXEL_FRAME * megapixels
+    ESTIMATED_CHUNK_OVERHEAD_SECONDS +
+    frames * estimateFrameSeconds(megapixels, measuredSecondsPerFrame)
+  );
+}
+
+/** Graded media runs a full-frame shader per frame, which the per-pixel estimate cannot see. */
+export function planNeedsFrameCostMeasurement(html: string): boolean {
+  return new RegExp(`\\b${HF_COLOR_GRADING_ATTR}=`, "i").test(html);
+}
+
+/** Whether {@link resolveMaxParallelChunks} sizes chunks from what a frame costs. */
+export function chunkSizingUsesFrameCost(
+  config: Pick<
+    DistributedRenderConfig,
+    | "maxParallelChunks"
+    | "chunkSize"
+    | "targetChunkFrames"
+    | "workerTimeoutSeconds"
+    | "workerConcurrency"
+  >,
+): boolean {
+  return (
+    config.maxParallelChunks === undefined &&
+    config.chunkSize === undefined &&
+    config.targetChunkFrames === undefined &&
+    (config.workerTimeoutSeconds !== undefined || config.workerConcurrency !== undefined)
   );
 }
 
@@ -460,6 +500,8 @@ export function resolveMaxParallelChunks(
   /** Output pixels per frame, after supersampling. */
   megapixels: number,
   log: ProducerLogger = defaultLogger,
+  /** Measured capture seconds per frame; frames are priced at it when it beats the estimate. */
+  measuredSecondsPerFrame?: number,
 ): number {
   if (config.maxParallelChunks !== undefined) return config.maxParallelChunks;
   const { workerTimeoutSeconds, workerConcurrency } = config;
@@ -467,11 +509,8 @@ export function resolveMaxParallelChunks(
     workerConcurrency ?? DEFAULT_MAX_PARALLEL_CHUNKS,
     MAX_PARALLEL_CHUNKS_CEILING,
   );
-  const pinsChunking = config.chunkSize !== undefined || config.targetChunkFrames !== undefined;
-  if (pinsChunking || (workerTimeoutSeconds === undefined && workerConcurrency === undefined)) {
-    return wave;
-  }
-  const secondsPerFrame = ESTIMATED_SECONDS_PER_MEGAPIXEL_FRAME * megapixels;
+  if (!chunkSizingUsesFrameCost(config)) return wave;
+  const secondsPerFrame = estimateFrameSeconds(megapixels, measuredSecondsPerFrame);
   const minFramesPerChunk = Math.ceil(ESTIMATED_CHUNK_OVERHEAD_SECONDS / secondsPerFrame);
   const wide = Math.max(1, Math.min(wave, Math.floor(totalFrames / minFramesPerChunk)));
   if (workerTimeoutSeconds === undefined) return wide;
@@ -484,7 +523,7 @@ export function resolveMaxParallelChunks(
   if (needed > MAX_PARALLEL_CHUNKS_CEILING) {
     const framesAtCeiling = Math.ceil(totalFrames / MAX_PARALLEL_CHUNKS_CEILING);
     throw new ChunkExceedsWorkerTimeoutError(
-      Math.ceil(estimateChunkSeconds(framesAtCeiling, megapixels)),
+      Math.ceil(estimateChunkSeconds(framesAtCeiling, megapixels, measuredSecondsPerFrame)),
       workerTimeoutSeconds,
     );
   }
@@ -1228,20 +1267,12 @@ export async function buildLocalExecutionPlan(
     }
   }
 
-  // ── Chunking decisions ── (before extraction so an impossible plan fails fast)
-  const maxParallel = resolveMaxParallelChunks(
-    config,
-    totalFrames,
-    (compileResult.outputWidth * compileResult.outputHeight) / 1e6,
-    log,
-  );
-  const { chunkCount, effectiveChunkSize } = resolveChunkPlan(
-    totalFrames,
-    config.chunkSize,
-    maxParallel,
-    config.targetChunkFrames,
-  );
-  const chunks = buildChunkSlices(totalFrames, chunkCount, effectiveChunkSize);
+  // ── Chunking decisions ── (before extraction so an impossible plan fails fast; graded
+  // media is re-sized from its measured frame cost once its video frames exist)
+  const megapixels = (compileResult.outputWidth * compileResult.outputHeight) / 1e6;
+  let maxParallel = resolveMaxParallelChunks(config, totalFrames, megapixels, log);
+  const measureFrameCost =
+    chunkSizingUsesFrameCost(config) && planNeedsFrameCostMeasurement(compiled.html);
 
   // The compiled tree is now stable. If it already exceeds the final plan
   // budget, extraction/audio/freeze can only add retained bytes, so fail before
@@ -1352,7 +1383,7 @@ export async function buildLocalExecutionPlan(
   // encode; the assembler pads or trims the track of any other plan.
   const audioSeconds = chunksCarryAudio ? totalFrames / config.fps : probeResult.duration;
   stageStarted = Date.now();
-  const [audioOutcome, overlapOutcome] = await Promise.allSettled([
+  const [audioOutcome, overlapOutcome, frameCostOutcome] = await Promise.allSettled([
     runAudioStage({
       projectDir,
       workDir,
@@ -1376,9 +1407,45 @@ export async function buildLocalExecutionPlan(
         logPlanStage(log, "prepublish", prepublishStarted);
       }
     })(),
+    measureFrameCost
+      ? measurePlanSecondsPerFrame({
+          planDir,
+          workDir,
+          html: compiled.html,
+          planVideos: planVideosJson,
+          totalFrames,
+          fps: config.fps,
+          width,
+          height,
+          format: config.format,
+          quality: config.quality ?? "standard",
+          deviceScaleFactor,
+          variables: config.variables,
+          cfg: { ...cfg, forceScreenshot, forceScreenshotExplicitlyOptedOut: !forceScreenshot },
+          log,
+        }).finally(() => logPlanStage(log, "frame-cost", stageStarted))
+      : undefined,
   ]);
   if (audioOutcome.status === "rejected") throw audioOutcome.reason;
   if (overlapOutcome.status === "rejected") throw overlapOutcome.reason;
+  if (frameCostOutcome.status === "rejected") throw frameCostOutcome.reason;
+  if (frameCostOutcome.value !== undefined) {
+    log.info("[plan] measured frame cost", { secondsPerFrame: frameCostOutcome.value });
+    maxParallel = resolveMaxParallelChunks(
+      config,
+      totalFrames,
+      megapixels,
+      log,
+      frameCostOutcome.value,
+    );
+  }
+  const { chunkCount, effectiveChunkSize } = resolveChunkPlan(
+    totalFrames,
+    config.chunkSize,
+    maxParallel,
+    config.targetChunkFrames,
+  );
+  const chunks = buildChunkSlices(totalFrames, chunkCount, effectiveChunkSize);
   const audioResult = audioOutcome.value;
   if (audioResult.audioError) {
     applyDistributedAudioWarningPolicy(job, audioResult.audioError, audioResult.audioFailures, log);
