@@ -254,6 +254,22 @@ describe("renderToLambda", () => {
       expect(sfn.starts).toHaveLength(1);
     });
 
+    it("refuses when the project dir's copy differs or is gone, uploading nothing", async () => {
+      const s3 = new FakeS3();
+      const sfn = new FakeSFN();
+      const { site } = await deployThenExpire(s3);
+      writeFileSync(join(projectDir, "index.html"), "<html>edited</html>");
+      await expect(renderWith(s3, sfn, site, projectDir)).rejects.toMatchObject({
+        name: "SITE_FILES_MISSING",
+      });
+      rmSync(join(projectDir, "index.html"));
+      await expect(renderWith(s3, sfn, site, projectDir)).rejects.toMatchObject({
+        name: "SITE_FILES_MISSING",
+      });
+      expect(s3.ops.filter((op) => op.kind === "put")).toHaveLength(0);
+      expect(sfn.starts).toHaveLength(0);
+    });
+
     it("without a project dir, refuses with the missing-file count before starting", async () => {
       const s3 = new FakeS3();
       const sfn = new FakeSFN();

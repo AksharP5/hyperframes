@@ -226,7 +226,10 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
   // Deploy the site once and reuse it across every entry. --site-id and
   // --dry-run both skip the deploy via a synthesised handle.
   let siteHandle: SiteHandle;
-  const { deploySite, siteHandleFromId } = await loadSDK();
+  const { assertStackReadsSites, deploySite, siteHandleFromId } = await loadSDK();
+  if (!args.dryRun) {
+    await assertStackReadsSites({ stateMachineArn: stack.stateMachineArn, region: stack.region });
+  }
   if (args.siteId) {
     siteHandle = siteHandleFromId(stack.bucketName, args.siteId);
   } else if (args.dryRun) {

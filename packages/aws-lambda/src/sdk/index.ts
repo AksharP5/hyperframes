@@ -14,7 +14,12 @@ export {
   type SiteHandle,
   siteHandleFromId,
 } from "./deploySite.js";
-export { renderToLambda, type RenderHandle, type RenderToLambdaOptions } from "./renderToLambda.js";
+export {
+  assertStackReadsSites,
+  renderToLambda,
+  type RenderHandle,
+  type RenderToLambdaOptions,
+} from "./renderToLambda.js";
 export {
   getRenderProgress,
   type GetRenderProgressOptions,

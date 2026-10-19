@@ -11,7 +11,7 @@
  * where `siteId` is derived from a SHA-256 over the project files.
  */
 
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -104,15 +104,16 @@ export async function ensureSiteStored(
         await ensureContentStoreObject(s3, bucket, sha256, sizeBytes);
       } catch (error) {
         if ((error as Error).name !== "PLAN_ARTIFACT_MISSING") throw error;
-        if (!projectDir) return void missing.push(path);
-        await putContentStoreFile(s3, join(projectDir, path), bucket, sha256);
+        const localPath = projectDir && join(projectDir, path);
+        if (!localPath || !(await hasContent(localPath, sha256))) return void missing.push(path);
+        await putContentStoreFile(s3, localPath, bucket, sha256);
       }
     });
     if (missing.length > 0) {
       const error = new Error(
         `[deploySite] SITE_FILES_MISSING: ${missing.length} of ${files.length} files of site ` +
           `${site.siteId} are no longer stored (unused for ${CONTENT_STORE_RETENTION_DAYS} days). ` +
-          "Run `hyperframes lambda sites create`, or pass projectDir to re-upload them.",
+          "Run `hyperframes lambda sites create`, or render from the project directory that has them.",
       );
       error.name = "SITE_FILES_MISSING";
       throw error;
@@ -121,6 +122,10 @@ export async function ensureSiteStored(
   } finally {
     rmSync(workdir, { recursive: true, force: true });
   }
+}
+
+async function hasContent(localPath: string, sha256: string): Promise<boolean> {
+  return existsSync(localPath) && (await sha256File(localPath)) === sha256;
 }
 
 async function tarballSite(site: SiteHandle, s3: S3Client, bucket: string): Promise<SiteHandle> {

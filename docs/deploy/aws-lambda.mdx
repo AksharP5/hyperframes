@@ -75,6 +75,8 @@ CLI versions reserved 8 by default, so they stay at 8 until you pass
 `--concurrency=N`. Pass `--concurrency=none` to remove the reservation so each
 render sizes itself to the account.
 
+`deploy` records the stack's bucket and state machine in `.hyperframes/lambda-stack-<stack-name>.json` under the current directory. Every other `lambda` command reads that file, so run them from the same directory with the same `--stack-name`, or they stop with "no stack state". Redeploying to upgrade rewrites the same file.
+
 After `deploy`, render anything with:
 
 ```bash
@@ -99,7 +101,7 @@ hyperframes lambda render ./my-project --site-id=a1b2c3d4e5f6g7h8 \
 
 The `siteId` is content-addressed via a SHA-256 of the project tree. A site is a small `sites/<siteId>/files.json` that lists each file's path and SHA-256. The files themselves live once per bucket under `cas/sha256/`, shared by every site and render, so a file another project already uploaded is never uploaded again. Pass the same `--site-id` to as many `lambda render` calls as you like.
 
-The stack's bucket expires objects under `cas/sha256/` 30 days after they were last written (the `ExpireSharedContent` lifecycle rule). Each render or `sites create` that reuses a file at least 7 days old rewrites it in place, so files in use never expire. If a site's files did expire, `lambda render --site-id` re-uploads them from the project directory. `renderToLambda` given a `siteHandle` but no `projectDir` stops with `SITE_FILES_MISSING` before starting; run `sites create` again to restore them.
+The stack's bucket expires objects under `cas/sha256/` 30 days after they were last written (the `ExpireSharedContent` lifecycle rule). Each render or `sites create` that reuses a file at least 7 days old rewrites it in place, so files in use never expire. If a site's files did expire, `lambda render --site-id` re-uploads them from the project directory, if its copies still match. Otherwise, or when `renderToLambda` gets a `siteHandle` but no `projectDir`, the render stops with `SITE_FILES_MISSING` before starting; run `sites create` again to restore them.
 
 #### Upgrading from a version before shared content storage
 
@@ -236,7 +238,7 @@ The stack was deployed by an earlier version that cannot read this version's sit
 
 ### `SITE_FILES_MISSING` or `SITE_NOT_FOUND`
 
-`SITE_FILES_MISSING`: some of the site's files expired from `cas/sha256/` after 30 days unused. Pass the project directory to `lambda render`, or run `sites create` again. `SITE_NOT_FOUND`: the bucket has no site under that id in either format; run `sites create` again and use the id it prints.
+`SITE_FILES_MISSING`: some of the site's files expired from `cas/sha256/` after 30 days unused. Render from the project directory the site was created from, or run `sites create` again. `SITE_NOT_FOUND`: the bucket has no site under that id in either format; run `sites create` again and use the id it prints.
 
 ## Current limits
 
