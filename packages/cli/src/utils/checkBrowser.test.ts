@@ -271,6 +271,42 @@ it("takes no contrast screenshot at a sample with no text to measure", async () 
   expect(page.screenshot).not.toHaveBeenCalled();
 });
 
+it("measures text on its own opaque fill without a contrast screenshot", async () => {
+  vi.spyOn(Date, "now").mockReturnValue(100);
+  mountCanvasFixture(`<div id="headline">Readable copy</div>`);
+  const headline = document.querySelector("#headline");
+  if (!headline) throw new Error("Contrast fixture failed to mount");
+  vi.spyOn(headline, "getBoundingClientRect").mockReturnValue(new DOMRect(50, 50, 300, 40));
+  vi.spyOn(window, "getComputedStyle").mockImplementation(
+    () =>
+      ({
+        display: "block",
+        visibility: "visible",
+        opacity: "1",
+        color: "rgb(255,255,255)",
+        fill: "",
+        backgroundColor: "rgb(0,0,0)",
+        backgroundImage: "none",
+        fontSize: "32px",
+        fontWeight: "700",
+      }) as unknown as CSSStyleDeclaration,
+  );
+  const page = fakePage();
+  page.screenshot = vi.fn(async () => "c3R1Yg==");
+  installSessionMock(page);
+
+  const result = await runBrowserCheck(
+    PROJECT,
+    { ...DEFAULT_CHECK_OPTIONS, samples: 1, contrast: true },
+    { kind: "none" },
+    runAuditGrid,
+  );
+
+  expect(result.contrastChecked).toBeGreaterThan(0);
+  expect(result.contrastFindings).toEqual([]);
+  expect(page.screenshot).not.toHaveBeenCalled();
+});
+
 it("uses check --timeout for both navigation and render-ready settling", async () => {
   mountCanvasFixture();
   const page = fakePage();

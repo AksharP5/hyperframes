@@ -17,6 +17,7 @@ import {
   seekCompositionTimeline,
   waitForPreferredSeekTarget,
   seekInPage,
+  type PrelaunchedBrowser,
 } from "../capture/captureCompositionFrame.js";
 import {
   auditClipDurations,
@@ -106,6 +107,7 @@ interface PreparedContrast {
   // what it sends back. `candidate` is the parsed copy for Node-side reporting.
   raw: unknown;
   candidate: ContrastCandidate;
+  knownBackdrop: boolean;
   anchor: CheckAnchor;
 }
 
@@ -205,6 +207,7 @@ export async function runBrowserCheck(
   motion: MotionSpecResolution,
   runGrid: RunAuditGrid,
   deadline?: CheckDeadline,
+  prelaunched?: PrelaunchedBrowser,
 ): Promise<CheckBrowserResult> {
   const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
   const html = await bundleWithLocalizedFonts(project.dir);
@@ -239,6 +242,7 @@ export async function runBrowserCheck(
       navigationTimeoutMs: options.timeout,
       renderReadyTimeoutMs: options.timeout,
       renderReadyWarningSuffix: "checking the current page state",
+      prelaunched,
       browserGpuMode: options.browserGpuMode ?? resolveCliChromeGpuMode(),
       signal: deadline?.signal,
       onBrowser: deadline?.ownBrowser,
@@ -1108,20 +1112,13 @@ async function collectContrast(
   try {
     prepared = parsePreparedContrast(await prepareContrast(page, time));
     if (prepared.length === 0 && !snapshotAnnotations) return { entries: [] };
-    const region = textRegion(prepared, page.viewport());
     // This screenshot is the one contrast math is sampled from below — it must
     // stay untouched by the annotation overlay (finishContrast reads real
     // painted pixels), so annotation only ever happens on a SECOND shot.
-    const measurementShot = await page.screenshot({
-      encoding: "base64",
-      type: "png",
-      omitBackground: true,
-      ...(region ? { clip: region.clip, captureBeyondViewport: false } : {}),
-    });
-    if (typeof measurementShot !== "string") throw new Error("Contrast screenshot was not base64");
+    const { shot, region } = await measurementShot(page, prepared);
     const raw = await finishContrast(
       page,
-      measurementShot,
+      shot,
       time,
       prepared.map((entry) => entry.raw),
       region,
@@ -1152,6 +1149,27 @@ async function collectContrast(
       })
       .catch(() => undefined);
   }
+}
+
+async function measurementShot(
+  page: Page,
+  prepared: PreparedContrast[],
+): Promise<{ shot: string | null; region: TextRegion | undefined }> {
+  const frame = plainFrame(page.viewport());
+  const sampled = prepared.filter((entry) => !entry.knownBackdrop);
+  if (frame && sampled.length === 0) {
+    const clip = { x: 0, y: 0, ...frame };
+    return { shot: null, region: { clip, frameWidth: frame.width, frameHeight: frame.height } };
+  }
+  const region = textRegion(sampled, frame);
+  const shot = await page.screenshot({
+    encoding: "base64",
+    type: "png",
+    omitBackground: true,
+    ...(region ? { clip: region.clip, captureBeyondViewport: false } : {}),
+  });
+  if (typeof shot !== "string") throw new Error("Contrast screenshot was not base64");
+  return { shot, region };
 }
 
 function contrastFailureAnnotations(
@@ -1299,12 +1317,18 @@ interface TextRegion {
 }
 
 // The smallest whole-pixel rect holding every box contrast samples; undefined means the full frame.
+function plainFrame(
+  viewport: { width: number; height: number; deviceScaleFactor?: number } | null,
+): { width: number; height: number } | undefined {
+  if (!viewport || (viewport.deviceScaleFactor ?? 1) !== 1) return undefined;
+  return { width: viewport.width, height: viewport.height };
+}
+
 function textRegion(
   prepared: PreparedContrast[],
-  viewport: { width: number; height: number; deviceScaleFactor?: number } | null,
+  viewport: { width: number; height: number } | undefined,
 ): TextRegion | undefined {
-  if (!viewport || (viewport.deviceScaleFactor ?? 1) !== 1 || prepared.length === 0)
-    return undefined;
+  if (!viewport || prepared.length === 0) return undefined;
   const boxes = prepared.map((entry) => entry.candidate.bbox);
   const x = Math.max(0, Math.floor(Math.min(...boxes.map((box) => box.x))));
   const y = Math.max(0, Math.floor(Math.min(...boxes.map((box) => box.y))));
@@ -1320,14 +1344,14 @@ function textRegion(
 
 async function finishContrast(
   page: Page,
-  screenshot: string,
+  screenshot: string | null,
   time: number,
   candidates: unknown[],
   region: TextRegion | undefined,
 ): Promise<unknown[]> {
   return page.evaluate(
     async (payload: {
-      screenshot: string;
+      screenshot: string | null;
       time: number;
       candidates: unknown[];
       region: TextRegion | null;
@@ -1352,8 +1376,17 @@ function parsePreparedContrast(raw: unknown[]): PreparedContrast[] {
     const raw = Reflect.get(value, "candidate");
     const candidate = parseContrastCandidate(raw);
     const anchor = parseAnchor(Reflect.get(value, "anchor"));
-    return candidate && anchor ? [{ raw, candidate, anchor }] : [];
+    return candidate && anchor
+      ? [{ raw, candidate, anchor, knownBackdrop: knownBackdrop(raw) }]
+      : [];
   });
+}
+
+function knownBackdrop(raw: unknown): boolean {
+  if (!isRecord(raw)) return false;
+  const own = Reflect.get(raw, "ownBg");
+  const solid = Reflect.get(raw, "solidBg");
+  return Array.isArray(solid) || (Array.isArray(own) && own.length >= 4 && own[3] >= 0.99);
 }
 
 function parseContrastCandidate(value: unknown): ContrastCandidate | null {

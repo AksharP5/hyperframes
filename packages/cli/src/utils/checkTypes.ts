@@ -6,6 +6,7 @@ import type { MotionSpec } from "./motionSpec.js";
 import type { ProjectDir } from "./project.js";
 import type { BrowserGpuMode } from "../browser/gpuPolicy.js";
 import type { HdrAutoPromotion } from "@hyperframes/engine";
+import type { PrelaunchedBrowser } from "../capture/captureCompositionFrame.js";
 
 export interface CheckOptions {
   samples: number;
@@ -321,7 +322,12 @@ export interface CheckDependencies {
     options: CheckOptions,
     motion: MotionSpecResolution,
     deadline?: CheckDeadline,
+    prelaunched?: PrelaunchedBrowser,
   ): Promise<CheckBrowserResult>;
+  prelaunchBrowser?(
+    project: ProjectDir,
+    options: CheckOptions,
+  ): Promise<PrelaunchedBrowser | undefined>;
   writeSnapshot(
     projectDir: string,
     index: number,

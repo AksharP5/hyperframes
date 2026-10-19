@@ -1208,6 +1208,28 @@ describe("check pipeline", () => {
     expect(report.runtime.findings[0]?.code).toBe("check_lint_failure");
   });
 
+  it.each([
+    { lint: cleanLint(), handed: true },
+    { lint: lintWith("error", "lint_error", "Lint error."), handed: false },
+  ])(
+    "closes the browser started during lint unless the browser pass took it",
+    async ({ lint, handed }) => {
+      const prelaunched = {
+        launched: Promise.resolve(undefined),
+        take: vi.fn(async () => undefined),
+        discard: vi.fn(async () => undefined),
+      };
+      const { deps, runBrowserCheck } = dependencies(fakeDriver(), { lint });
+      deps.prelaunchBrowser = vi.fn(async () => prelaunched);
+      await runCheckPipeline(PROJECT, DEFAULT_CHECK_OPTIONS, deps);
+
+      expect(runBrowserCheck.mock.calls.map((call) => call[4])).toEqual(
+        handed ? [prelaunched] : [],
+      );
+      expect(prelaunched.discard).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("marks browserSkipped false once a browser session actually runs", async () => {
     const { report } = await runScenario(fakeDriver());
     expect(report.browserSkipped).toBe(false);

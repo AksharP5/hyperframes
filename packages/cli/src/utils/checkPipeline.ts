@@ -7,6 +7,8 @@ import {
 } from "./checkSnapshotDirectory.js";
 import { findingElementKey, groupSampledFindings } from "./checkFindings.js";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import type { PrelaunchedBrowser } from "../capture/captureCompositionFrame.js";
 import { join, relative } from "node:path";
 import { trackCheckReport, trackCommandFailure } from "../telemetry/events.js";
 import { trackLintRun } from "../telemetry/lintRun.js";
@@ -1305,6 +1307,7 @@ export async function runCheckPipeline(
   dependencies: CheckDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<CheckReport> {
   beginCheckSnapshots(project.dir);
+  const prelaunched = dependencies.prelaunchBrowser?.(project, options).catch(() => undefined);
   try {
     let lintResult: ProjectLintResult;
     const lintStartedAt = Date.now();
@@ -1363,8 +1366,9 @@ export async function runCheckPipeline(
     try {
       let browser: CheckBrowserResult;
       try {
+        const browserAhead = await prelaunched;
         browser = await deadline.run(() =>
-          dependencies.runBrowserCheck(project, options, motion, deadline),
+          dependencies.runBrowserCheck(project, options, motion, deadline, browserAhead),
         );
       } catch (error) {
         browser = emptyBrowserResult();
@@ -1415,6 +1419,7 @@ export async function runCheckPipeline(
     if (outcome.kind === "failed") throw outcome.error;
     return outcome.report;
   } finally {
+    await (await prelaunched)?.discard();
     await finishCheckSnapshots(project.dir).catch(() => undefined);
   }
 }
@@ -1868,11 +1873,23 @@ async function runBrowserCheck(
   options: CheckOptions,
   motion: MotionSpecResolution,
   deadline?: CheckDeadline,
+  prelaunched?: PrelaunchedBrowser,
 ): Promise<CheckBrowserResult> {
   const module = await import("./checkBrowser.js");
   // runAuditGrid is handed over as a callback so checkBrowser never imports
   // this module back (no import cycle).
-  return module.runBrowserCheck(project, options, motion, runAuditGrid, deadline);
+  return module.runBrowserCheck(project, options, motion, runAuditGrid, deadline, prelaunched);
+}
+
+// Chrome boots while lint, hdr and bundling run; the source index guesses the bundle's launch arguments.
+async function prelaunchBrowser(
+  project: ProjectDir,
+  options: CheckOptions,
+): Promise<PrelaunchedBrowser | undefined> {
+  const html = await readFile(project.indexPath, "utf8").catch(() => undefined);
+  if (html === undefined) return undefined;
+  const { prelaunchCompositionBrowser } = await import("../capture/captureCompositionFrame.js");
+  return prelaunchCompositionBrowser(html, options.browserGpuMode);
 }
 
 async function writeSnapshot(
@@ -1904,6 +1921,7 @@ const DEFAULT_DEPENDENCIES: CheckDependencies = {
   lintProject,
   resolveMotionSpec,
   runBrowserCheck,
+  prelaunchBrowser,
   writeSnapshot,
   captureFindingCrops,
   inspectHdrAutoPromotion,

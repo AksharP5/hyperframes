@@ -114,6 +114,59 @@ export interface OpenSettledCompositionPageOptions {
   // Runs after the page exists but before page.goto, so console/pageerror/
   // request listeners can attach without missing load-time events.
   beforeNavigate?: (page: Page) => void | Promise<void>;
+  // Started before the project was bundled; used only if it was launched with the same arguments.
+  prelaunched?: PrelaunchedBrowser;
+}
+
+interface LaunchedBrowser {
+  browser: Browser;
+  softwareWebGpu: boolean;
+}
+
+export interface PrelaunchedBrowser {
+  launched: Promise<LaunchedBrowser | undefined>;
+  take(key: string): Promise<LaunchedBrowser | undefined>;
+  discard(): Promise<void>;
+}
+
+type LaunchOptions = Pick<
+  OpenSettledCompositionPageOptions,
+  "browserGpuMode" | "signal" | "onBrowser"
+>;
+
+function launchKey(html: string, noListen: boolean, options: LaunchOptions): string {
+  const viewport = resolveCompositionViewportFromHtml(html);
+  const gpuMode = options.browserGpuMode ?? resolveCliChromeGpuMode();
+  return JSON.stringify([viewport, compositionRequiresWebGpu(html), noListen, gpuMode]);
+}
+
+export function prelaunchCompositionBrowser(
+  html: string,
+  browserGpuMode?: BrowserGpuMode,
+): PrelaunchedBrowser {
+  const abort = new AbortController();
+  const options = { browserGpuMode, signal: abort.signal };
+  const key = launchKey(html, false, options);
+  const launched = launchCompositionBrowser(html, false, options).catch(() => undefined);
+  let taken = false;
+  const discard = async () => {
+    if (taken) return;
+    taken = true;
+    abort.abort();
+    await (await launched)?.browser.close().catch(() => undefined);
+  };
+  return {
+    launched,
+    take: async (wanted) => {
+      if (wanted !== key) return discard().then(() => undefined);
+      taken = true;
+      const result = await launched;
+      if (result?.browser.connected) return result;
+      await result?.browser.close().catch(() => undefined);
+      return undefined;
+    },
+    discard,
+  };
 }
 
 export interface FfmpegRunResult {
@@ -250,67 +303,17 @@ export async function openSettledCompositionPage(
   options: OpenSettledCompositionPageOptions,
 ): Promise<SettledCompositionPage> {
   const viewport = resolveCompositionViewportFromHtml(html);
-  const { ensureBrowser, findSystemBrowser } = await import("../browser/manager.js");
-  const browser = await ensureBrowser({ signal: options.signal });
-  const puppeteer = await import("puppeteer-core");
-  const { buildChromeArgs } = await import("@hyperframes/engine");
-  const requestedGpuMode = options.browserGpuMode ?? resolveCliChromeGpuMode();
+  const requiresWebGpu = compositionRequiresWebGpu(html);
   // Nothing may listen (a sandbox refused it): DevTools over a pipe, one process, pages answered in-process.
   const answer = (await import("../utils/staticProjectServer.js")).inProcessAnswer(url);
-  const requiresWebGpu = compositionRequiresWebGpu(html);
-  let softwareWebGpu = false;
-  const launch = async (executablePath: string): Promise<Browser> => {
-    options.signal?.throwIfAborted();
-    const resolvedGpuMode = await resolveManagedGpuMode(requestedGpuMode, executablePath, {
-      signal: options.signal,
-      onBrowser: options.onBrowser,
-      noListen: answer !== undefined,
-    });
-    options.signal?.throwIfAborted();
-    const webGpu = resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu);
-    softwareWebGpu = webGpu.softwareWebGpu;
-    const args = buildChromeArgs(
-      { ...viewport, captureMode: "screenshot", requiresWebGpu },
-      webGpu.gpuConfig,
-    );
-    return launchManagedBrowser(puppeteer.default, {
-      headless: true,
-      signal: options.signal,
-      executablePath,
-      ...(answer ? oneProcessOverPipe({ args }) : { args }),
-    });
-  };
-
+  const noListen = answer !== undefined;
   let chromeBrowser: Browser | undefined;
   try {
-    try {
-      chromeBrowser = await launch(browser.executablePath);
-    } catch (launchError) {
-      const message = normalizeErrorMessage(launchError);
-      const remediation = windowsChromeCrashRemediation(message);
-      if (!remediation) throw launchError;
-
-      const systemBrowser =
-        browser.source === "cache" || browser.source === "download"
-          ? findSystemBrowser()
-          : undefined;
-      if (!systemBrowser || systemBrowser.executablePath === browser.executablePath) {
-        throw new Error(`${message}\n\n${remediation}`, { cause: launchError });
-      }
-
-      console.warn(
-        `[hyperframes] Managed chrome-headless-shell crashed at launch; retrying once with system Chrome at ${systemBrowser.executablePath}.`,
-      );
-      try {
-        chromeBrowser = await launch(systemBrowser.executablePath);
-      } catch (fallbackError) {
-        throw new Error(
-          `System Chrome fallback also failed: ${normalizeErrorMessage(fallbackError)}\n\n${remediation}`,
-          { cause: fallbackError },
-        );
-      }
-    }
-
+    const launched =
+      (await options.prelaunched?.take(launchKey(html, noListen, options))) ??
+      (await launchCompositionBrowser(html, noListen, options));
+    chromeBrowser = launched.browser;
+    const softwareWebGpu = launched.softwareWebGpu;
     options.onBrowser?.(chromeBrowser);
     options.onBrowserReady?.();
     const page = await chromeBrowser.newPage();
@@ -325,6 +328,70 @@ export async function openSettledCompositionPage(
   } catch (err) {
     return rethrowAfterBrowserCleanup(chromeBrowser, err);
   }
+}
+
+async function launchCompositionBrowser(
+  html: string,
+  noListen: boolean,
+  options: LaunchOptions,
+): Promise<LaunchedBrowser> {
+  const viewport = resolveCompositionViewportFromHtml(html);
+  const { ensureBrowser, findSystemBrowser } = await import("../browser/manager.js");
+  const browser = await ensureBrowser({ signal: options.signal });
+  const puppeteer = await import("puppeteer-core");
+  const { buildChromeArgs } = await import("@hyperframes/engine");
+  const requestedGpuMode = options.browserGpuMode ?? resolveCliChromeGpuMode();
+  const requiresWebGpu = compositionRequiresWebGpu(html);
+  let softwareWebGpu = false;
+  const launch = async (executablePath: string): Promise<Browser> => {
+    options.signal?.throwIfAborted();
+    const resolvedGpuMode = await resolveManagedGpuMode(requestedGpuMode, executablePath, {
+      signal: options.signal,
+      onBrowser: options.onBrowser,
+      noListen,
+    });
+    options.signal?.throwIfAborted();
+    const webGpu = resolveLocalWebGpu(resolvedGpuMode, requiresWebGpu);
+    softwareWebGpu = webGpu.softwareWebGpu;
+    const args = buildChromeArgs(
+      { ...viewport, captureMode: "screenshot", requiresWebGpu },
+      webGpu.gpuConfig,
+    );
+    return launchManagedBrowser(puppeteer.default, {
+      headless: true,
+      signal: options.signal,
+      executablePath,
+      ...(noListen ? oneProcessOverPipe({ args }) : { args }),
+    });
+  };
+
+  let chromeBrowser: Browser;
+  try {
+    chromeBrowser = await launch(browser.executablePath);
+  } catch (launchError) {
+    const message = normalizeErrorMessage(launchError);
+    const remediation = windowsChromeCrashRemediation(message);
+    if (!remediation) throw launchError;
+
+    const systemBrowser =
+      browser.source === "cache" || browser.source === "download" ? findSystemBrowser() : undefined;
+    if (!systemBrowser || systemBrowser.executablePath === browser.executablePath) {
+      throw new Error(`${message}\n\n${remediation}`, { cause: launchError });
+    }
+
+    console.warn(
+      `[hyperframes] Managed chrome-headless-shell crashed at launch; retrying once with system Chrome at ${systemBrowser.executablePath}.`,
+    );
+    try {
+      chromeBrowser = await launch(systemBrowser.executablePath);
+    } catch (fallbackError) {
+      throw new Error(
+        `System Chrome fallback also failed: ${normalizeErrorMessage(fallbackError)}\n\n${remediation}`,
+        { cause: fallbackError },
+      );
+    }
+  }
+  return { browser: chromeBrowser, softwareWebGpu };
 }
 
 // Serialized into the page; the seek-target cascade must stay one function.
