@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { planFileSha256, recomputePlanHashFromPlanDir } from "../render/stages/freezePlan.js";
 import { canonicalJsonStringify, sha256Hex } from "../render/stages/planHash.js";
+import { chunkAudioSlicePath } from "./chunkAudio.js";
 import { buildLocalExecutionPlan } from "./plan.js";
 import { CURRENT_PLAN_PROTOCOL } from "./planProtocol.js";
 import { FFMPEG_VERSION_MISMATCH, renderChunk, RenderChunkValidationError } from "./renderChunk.js";
@@ -28,6 +29,7 @@ import {
   PlanV2IntegrityError,
   publishPlanV2FromV1,
   publishPlanV2FromExecutionPlan,
+  type PlanV2Manifest,
   planV2WithPublisher,
   readPlanV2Manifest,
   readValidatedPlanV2Materialization,
@@ -194,6 +196,19 @@ function createV1Plan(
   );
   refreshV1PlanHash(planDir);
   return planDir;
+}
+
+const slicedAudioPaths = (chunkIndex: number) => [
+  chunkAudioSlicePath(chunkIndex),
+  "audio-chunks/frame.m4a",
+  "audio-chunks/layout.json",
+];
+
+function chunkAudioPaths(manifest: Readonly<PlanV2Manifest>, chunkIndex: number): string[] {
+  return listPlanV2ArtifactsForTarget(manifest, { role: "chunk", chunkIndex })
+    .map((artifact) => artifact.path)
+    .filter((path) => path.includes("audio"))
+    .sort();
 }
 
 describe("Plan v2 manifest", () => {
@@ -433,6 +448,24 @@ describe("Plan v2 manifest", () => {
     }
     const assembler = listPlanV2ArtifactsForTarget(manifest, { role: "assembler" });
     expect(assembler.some((artifact) => artifact.path === "audio.m4a")).toBe(false);
+  });
+
+  it("sends each chunk only its own audio slice when the plan cut one per chunk", () => {
+    const root = tempPath("hf-plan-v2-chunk-audio-slices-");
+    const v1 = createV1Plan(root, { audio: true, chunksCarryAudio: true });
+    mkdirSync(join(v1, "audio-chunks"));
+    writeFileSync(join(v1, "audio-chunks", "frame.m4a"), "moov");
+    writeFileSync(join(v1, "audio-chunks", "layout.json"), "{}");
+    for (const chunkIndex of [0, 1]) {
+      writeFileSync(join(v1, chunkAudioSlicePath(chunkIndex)), `slice ${chunkIndex}`);
+    }
+    refreshV1PlanHash(v1);
+    const manifest = readPlanV2Manifest(createPlanV2FromV1(v1, join(root, "v2")).planDir);
+    for (const chunkIndex of [0, 1]) {
+      expect(chunkAudioPaths(manifest, chunkIndex)).toEqual(slicedAudioPaths(chunkIndex));
+    }
+    const assembler = listPlanV2ArtifactsForTarget(manifest, { role: "assembler" });
+    expect(assembler.some((artifact) => artifact.path.includes("audio"))).toBe(false);
   });
 
   it("uses the runtime frame lookup to select exact video frames per chunk", () => {
@@ -1168,6 +1201,39 @@ describe("Plan v2 planning", () => {
           ...["freeze", "publication", "upload", "manifest"],
         ]),
       );
+    },
+    60_000,
+  );
+
+  it.skipIf(!HAS_FFMPEG)(
+    "cuts the audio into one slice per chunk when chunks carry their audio",
+    async () => {
+      const root = tempPath("hf-plan-v2-audio-slices-");
+      const projectDir = join(root, "project");
+      mkdirSync(projectDir);
+      // 2.1 s is not a whole number of 1024-sample AAC frames.
+      const tone = spawnSync("ffmpeg", [
+        ...["-nostdin", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"],
+        ...["-t", "2.1", "-c:a", "pcm_s16le", join(projectDir, "tone.wav")],
+      ]);
+      expect(tone.status).toBe(0);
+      writeFileSync(
+        join(projectDir, "index.html"),
+        `<!doctype html><html><head><meta charset="utf-8"></head><body>
+  <div data-composition-id="root" data-width="320" data-height="240" data-duration="2.1">
+    <audio id="tone" src="tone.wav" data-start="0" data-duration="2.1"></audio><p>slices</p>
+  </div></body></html>`,
+      );
+      const manifest = await planV2WithPublisher(
+        projectDir,
+        { fps: 30, width: 320, height: 240, format: "mp4", chunkSize: 30 },
+        new LocalPlanV2ArtifactPublisher(join(root, "v2")),
+        { stagingParentDir: root, chunksCarryAudio: true },
+      );
+      expect(manifest.chunkCount).toBe(3);
+      for (const chunkIndex of [0, 1, 2]) {
+        expect(chunkAudioPaths(manifest, chunkIndex)).toEqual(slicedAudioPaths(chunkIndex));
+      }
     },
     60_000,
   );

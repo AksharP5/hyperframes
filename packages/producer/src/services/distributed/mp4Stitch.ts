@@ -409,7 +409,7 @@ export function buildStitchedHeader(layouts: readonly Mp4Layout[]): Buffer {
   return Buffer.concat([ftyp, buildMoov(dataStart), mdat]);
 }
 
-function fileRange(path: string): ReadRange {
+export function fileRange(path: string): ReadRange {
   return async (start, end) => {
     // Read-only, so the mode never applies; an explicit one keeps CodeQL's temp-file rule quiet.
     const file = await open(path, "r", 0o600);
