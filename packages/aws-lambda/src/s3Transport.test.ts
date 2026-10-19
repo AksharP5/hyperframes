@@ -10,13 +10,17 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CONTENT_STORE_REFRESH_AFTER_DAYS, contentStoreUri } from "./contentStore.js";
+import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import {
   downloadS3ObjectToFileVerified,
   formatS3Uri,
   parseS3Uri,
+  presignVerifiedS3GetUrl,
   sha256File,
   tarDirectory,
   untarDirectory,
+  putContentStoreFile,
   uploadContentAddressedFileToS3,
 } from "./s3Transport.js";
 
@@ -176,6 +180,37 @@ describe("content-addressed v2 artifacts", () => {
     expect(s3.putCount).toBe(0);
   });
 
+  it("rewrites a reused object at the refresh age so its lifecycle expiry restarts", async () => {
+    const source = join(scratchRoot, "artifact-aging.bin");
+    writeFileSync(source, "aging bytes");
+    const digest = await sha256File(source);
+    const uri = contentStoreUri("bucket", digest);
+    const s3 = new ContentAddressedFakeS3();
+    const days = (n: number) => new Date(Date.now() - n * 86_400_000);
+    s3.objects.set(uri, {
+      bytes: Buffer.from("aging bytes"),
+      sha256: digest,
+      lastModified: days(CONTENT_STORE_REFRESH_AFTER_DAYS - 1),
+    });
+
+    expect(await putContentStoreFile(s3.asClient(), source, "bucket", digest)).toBe("reused");
+    expect(s3.copies).toEqual([]);
+
+    s3.objects.get(uri)!.lastModified = days(CONTENT_STORE_REFRESH_AFTER_DAYS);
+    expect(await putContentStoreFile(s3.asClient(), source, "bucket", digest)).toBe("reused");
+    expect(s3.copies).toEqual([
+      {
+        uri,
+        CopySource: `bucket/cas/sha256/${digest.slice(0, 2)}/${digest}`,
+        MetadataDirective: "REPLACE",
+        Metadata: { sha256: digest },
+        ChecksumAlgorithm: "SHA256",
+      },
+    ]);
+    expect(s3.objects.get(uri)).toMatchObject({ sha256: digest });
+    expect(s3.putCount).toBe(0);
+  });
+
   it("deletes a downloaded artifact when digest verification fails", async () => {
     const expectedSource = join(scratchRoot, "artifact-expected.bin");
     const destination = join(scratchRoot, "artifact-download.bin");
@@ -193,8 +228,57 @@ describe("content-addressed v2 artifacts", () => {
   });
 });
 
+describe("presignVerifiedS3GetUrl", () => {
+  const digest = "ab".repeat(32);
+  const uri = `s3://bucket/v2/artifacts/sha256/ab/${digest}`;
+  function clientHolding(head: { ChecksumSHA256?: string; ContentLength: number }): S3Client {
+    const client = new S3Client({
+      region: "us-east-2",
+      credentials: { accessKeyId: "AKIDTEST", secretAccessKey: "test-secret" },
+    });
+    client.send = (async (command: unknown) => {
+      expect(command).toBeInstanceOf(HeadObjectCommand);
+      expect((command as HeadObjectCommand).input.ChecksumMode).toBe("ENABLED");
+      return head;
+    }) as S3Client["send"];
+    return client;
+  }
+
+  it.each([
+    { uri, key: `/v2/artifacts/sha256/ab/${digest}` },
+    { uri: contentStoreUri("bucket", digest), key: `/cas/sha256/ab/${digest}` },
+  ])("signs an attested legacy or shared-content source at $key", async (source) => {
+    const checksum = Buffer.from(digest, "hex").toString("base64");
+    const url = new URL(
+      await presignVerifiedS3GetUrl(
+        clientHolding({ ChecksumSHA256: checksum, ContentLength: 42 }),
+        source.uri,
+        digest,
+        42,
+        600,
+      ),
+    );
+    expect(url.pathname).toBe(source.key);
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("600");
+  });
+
+  it("refuses an object whose stored checksum is not the pinned digest", async () => {
+    const other = Buffer.from("cd".repeat(32), "hex").toString("base64");
+    await expect(
+      presignVerifiedS3GetUrl(
+        clientHolding({ ChecksumSHA256: other, ContentLength: 42 }),
+        uri,
+        digest,
+        42,
+        600,
+      ),
+    ).rejects.toMatchObject({ name: "PLAN_ARTIFACT_DIGEST_MISMATCH" });
+  });
+});
+
 class ContentAddressedFakeS3 {
-  readonly objects = new Map<string, { bytes: Buffer; sha256: string }>();
+  readonly objects = new Map<string, { bytes: Buffer; sha256: string; lastModified?: Date }>();
+  readonly copies: Record<string, unknown>[] = [];
   putCount = 0;
   raceOnNextPut: { bytes: Buffer; sha256: string } | undefined;
 
@@ -213,10 +297,25 @@ class ContentAddressedFakeS3 {
         Key: string;
         Body?: NodeJS.ReadableStream;
         Metadata?: Record<string, string>;
+        CopySource?: string;
+        MetadataDirective?: string;
+        ChecksumAlgorithm?: string;
         ChecksumSHA256?: string;
       };
     };
     const uri = `s3://${value.input.Bucket}/${value.input.Key}`;
+    if (value.constructor.name === "CopyObjectCommand") {
+      const { CopySource, MetadataDirective, Metadata, ChecksumAlgorithm } = value.input;
+      this.copies.push({ uri, CopySource, MetadataDirective, Metadata, ChecksumAlgorithm });
+      const source = this.objects.get(`s3://${CopySource}`);
+      if (!source) throw new Error("missing copy source");
+      this.objects.set(uri, {
+        bytes: source.bytes,
+        sha256: Metadata?.sha256 ?? "",
+        lastModified: new Date(),
+      });
+      return {};
+    }
     if (value.constructor.name === "HeadObjectCommand") {
       const object = this.objects.get(uri);
       if (!object) {
@@ -230,6 +329,7 @@ class ContentAddressedFakeS3 {
       return {
         ContentLength: object.bytes.length,
         Metadata: { sha256: object.sha256 },
+        LastModified: object.lastModified,
       };
     }
     if (value.constructor.name === "GetObjectCommand") {

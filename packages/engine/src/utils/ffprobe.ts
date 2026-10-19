@@ -5,6 +5,7 @@ import { chunkCrc32 } from "./crc32.js";
 import { StringDecoder } from "node:string_decoder";
 import { basename } from "path";
 import { redactTelemetryString } from "@hyperframes/core";
+import { urlInputArgs } from "./urlInput.js";
 import { FFPROBE_PATH_ENV, getFfprobeBinary } from "./ffmpegBinaries.js";
 import { ManagedChildProcess } from "./managedChildProcess.js";
 import { trackChildProcess } from "./processTracker.js";
@@ -65,7 +66,15 @@ async function runFfprobe(
   }
 
   const command = getFfprobeBinary();
-  const proc = spawn(command, ["-v", "error", ...argsWithoutInput, "--", filePath], {
+  const args = [
+    "-v",
+    "error",
+    ...urlInputArgs(filePath, { tool: "ffprobe" }),
+    ...argsWithoutInput,
+    "--",
+    filePath,
+  ];
+  const proc = spawn(command, args, {
     // Nothing is ever written to the child's stdin; leaving it as a pipe is
     // what lets a stdin-reading invocation block indefinitely.
     stdio: ["ignore", "pipe", "pipe"],
@@ -769,7 +778,11 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
     // ffprobe ran at all, which is exactly the build it exists to cover: one
     // that reports gbr but does not decode cICP. An HDR PQ PNG then resolved
     // colorTransfer "" and graded SDR.
-    const cicp = colorTransfer && colorPrimaries && colorSpaceVal ? null : stillImage()?.colorSpace;
+    const isPng = output !== null && isPngImageProbe(output);
+    const cicp =
+      !isPng || (colorTransfer && colorPrimaries && colorSpaceVal)
+        ? null
+        : stillImage()?.colorSpace;
     const merged = {
       colorTransfer: colorTransfer || cicp?.colorTransfer || "",
       colorPrimaries: colorPrimaries || cicp?.colorPrimaries || "",

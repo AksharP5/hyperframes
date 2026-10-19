@@ -273,6 +273,26 @@ function collectPlanAssetShas(
   return { compositionHtml, assets };
 }
 
+/** Plan file left in remote storage: hashed and published by digest, never copied into the plan. */
+export interface PlanRemoteFile {
+  readonly path: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+}
+
+const PLAN_REMOTE_FILES_RELATIVE_PATH = "meta/remote-files.json";
+
+export function writePlanRemoteFiles(planDir: string, files: readonly PlanRemoteFile[]): void {
+  if (files.length === 0) return;
+  const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : 1));
+  writeFileSync(join(planDir, PLAN_REMOTE_FILES_RELATIVE_PATH), JSON.stringify(sorted), "utf-8");
+}
+
+export function readPlanRemoteFiles(planDir: string): PlanRemoteFile[] {
+  const path = join(planDir, PLAN_REMOTE_FILES_RELATIVE_PATH);
+  return existsSync(path) ? (JSON.parse(readFileSync(path, "utf-8")) as PlanRemoteFile[]) : [];
+}
+
 /**
  * Read a frozen plan directory back from disk and recompute its
  * content-addressed `planHash` over the actual on-disk bytes — including

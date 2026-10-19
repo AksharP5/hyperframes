@@ -58,7 +58,7 @@ import {
   resolveConfig,
 } from "@hyperframes/engine";
 import { defaultLogger } from "../../logger.js";
-import { applyRenderWarningPolicy } from "../renderOrchestrator.js";
+import { applyRenderWarningPolicy, collectVideoMetadataHints } from "../renderOrchestrator.js";
 import { runEncodeStage } from "../render/stages/encodeStage.js";
 import { runCaptureStage } from "../render/stages/captureStage.js";
 import { createCapturePlan } from "../render/capturePlan.js";
@@ -88,7 +88,7 @@ import {
 } from "./shared.js";
 import { muxChunkWithAudio } from "./chunkAudio.js";
 import { DISTRIBUTED_RENDER_CAPABILITIES, readPlanProtocolV1 } from "./planProtocol.js";
-import { validatePlanV2MaterializedTarget } from "./planV2.js";
+import { readValidatedPlanV2Materialization } from "./planV2.js";
 import {
   buildChunkCaptureOptions,
   createChunkVideoFrameInjectorFactory,
@@ -416,10 +416,12 @@ export async function renderChunk(
   const plan = JSON.parse(readFileSync(planJsonPath, "utf-8")) as PlanJson;
   readPlanProtocolV1(plan, DISTRIBUTED_RENDER_CAPABILITIES.roles.chunk);
   const planHashStarted = Date.now();
-  const v2Manifest = validatePlanV2MaterializedTarget(planDir, {
+  const v2Materialization = readValidatedPlanV2Materialization(planDir, {
     role: "chunk",
     chunkIndex,
   });
+  const v2Manifest = v2Materialization?.manifest ?? null;
+  const remoteSources = v2Materialization?.remoteSources ?? {};
   for (const required of [encoderJsonPath, chunksJsonPath]) {
     if (!existsSync(required)) {
       throw new RenderChunkValidationError(
@@ -575,6 +577,30 @@ export async function renderChunk(
     // its own injector hook because the hook remembers the last injected frame
     // per video; sharing that state across a fresh retry page can suppress the
     // first injection and produce a blank/stale frame.
+    const deferredVideoFrames = planVideos
+      ? await extractDeferredVideoFramesForChunk({
+          planDir,
+          planVideos,
+          frames: Array.from(
+            { length: slice.endFrame - slice.startFrame },
+            (_, i) => slice.startFrame + i,
+          ),
+          fps: { num: plan.dimensions.fpsNum, den: plan.dimensions.fpsDen },
+          outputRoot: videoFramesDir,
+          cfg,
+          remoteSources,
+        })
+      : [];
+    // The browser cannot load a source read by URL; size its <video> from the plan instead.
+    const remoteVideoIds = new Set(
+      planVideos?.extracted
+        .filter(
+          (video) =>
+            video.deferredRange && Object.hasOwn(remoteSources, video.deferredRange.sourcePath),
+        )
+        .map((video) => video.videoId),
+    );
+    const remoteVideos = deferredVideoFrames.filter((video) => remoteVideoIds.has(video.videoId));
     const videoFrameLookup =
       planVideos && planVideos.extracted.length > 0
         ? createFrameLookupTable(
@@ -585,17 +611,7 @@ export async function renderChunk(
                 planVideos.extracted.filter((video) => !video.deferredRange),
                 v2Manifest === null ? "dense-v1" : "sparse-v2",
               ),
-              ...(await extractDeferredVideoFramesForChunk({
-                planDir,
-                planVideos,
-                frames: Array.from(
-                  { length: slice.endFrame - slice.startFrame },
-                  (_, i) => slice.startFrame + i,
-                ),
-                fps: { num: plan.dimensions.fpsNum, den: plan.dimensions.fpsDen },
-                outputRoot: videoFramesDir,
-                cfg,
-              })),
+              ...deferredVideoFrames,
             ],
             resolveRenderFpsConfig(job.config.fps).value,
           )
@@ -620,6 +636,11 @@ export async function renderChunk(
       encoder,
       videoCount: planVideos?.videos.length ?? 0,
       html: readFileSync(join(compiledDir, "index.html"), "utf-8"),
+      // The plan ships a deferred source only to chunks that show it; don't wait on the rest.
+      skipReadinessVideoIds: deferredVideoFrames
+        .filter((video) => video.framePaths.size === 0 || remoteVideoIds.has(video.videoId))
+        .map((video) => video.videoId),
+      videoMetadataHints: collectVideoMetadataHints(remoteVideos),
     });
 
     // Resolve worker count up-front. Sequential capture reuses the initialized

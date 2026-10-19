@@ -26,6 +26,12 @@ import { join } from "node:path";
 import { App, Stack } from "aws-cdk-lib";
 import { Template } from "aws-cdk-lib/assertions";
 import { parse as parseYaml } from "yaml";
+import {
+  CONTENT_STORE_PREFIX,
+  CONTENT_STORE_REFRESH_AFTER_DAYS,
+  CONTENT_STORE_RETENTION_DAYS,
+} from "../contentStore.js";
+import { SITE_MANIFEST_INVALID } from "../siteManifest.js";
 import { HyperframesRenderStack } from "./HyperframesRenderStack.js";
 
 // CDK synth + Template.fromStack is slow on cold start in CI (~5-8s on
@@ -84,6 +90,7 @@ const EXPECTED_NON_RETRYABLE_ERRORS = new Set([
   "PLAN_ARTIFACT_DIGEST_MISMATCH",
   "FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED",
   "ChromeBinaryUnavailableError",
+  "SITE_MANIFEST_INVALID",
 ]);
 
 function doSynth(reservedConcurrency?: number): {
@@ -213,6 +220,16 @@ describe("HyperframesRenderStack — snapshot", () => {
     }
   });
 
+  it("lists the error the SDK checks for before rendering in every SAM and CDK plan task", () => {
+    for (const definition of [SYNTHED.definition, readSamDefinition()]) {
+      for (const plan of [getV1TaskStates(definition).Plan, getV2TaskStates(definition).PlanV2]) {
+        const errors = new Set<string>();
+        collectNonRetryableErrors(plan, errors);
+        expect(errors.has(SITE_MANIFEST_INVALID)).toBe(true);
+      }
+    }
+  });
+
   it("keeps SAM and CDK terminal classifiers identical for every v2 Lambda task", () => {
     const cdkTasks = getV2TaskStates(SYNTHED.definition);
     const samTasks = getV2TaskStates(readSamDefinition());
@@ -265,6 +282,26 @@ describe("HyperframesRenderStack — snapshot", () => {
     expect(v2).toContain("PlanV2ManifestS3Uri");
     expect(v2).toContain("PlanV2ArtifactS3Prefix");
     expect(v2).not.toContain("PlanS3Uri");
+  });
+
+  it("keeps the SAM bucket lifecycle identical to CDK's, shared content on the transport's terms", () => {
+    const cdkBucket = Object.values(SYNTHED.template.findResources("AWS::S3::Bucket"))[0] as {
+      Properties: { LifecycleConfiguration: unknown };
+    };
+    const samBucket = requireRecordProperty(readSamResources(), "RenderBucket", "SAM RenderBucket");
+    const samProperties = requireRecordProperty(samBucket, "Properties", "SAM bucket properties");
+    expect(samProperties.LifecycleConfiguration).toEqual(
+      cdkBucket.Properties.LifecycleConfiguration,
+    );
+    expect(CONTENT_STORE_REFRESH_AFTER_DAYS * 2).toBeLessThan(CONTENT_STORE_RETENTION_DAYS);
+    expect(cdkBucket.Properties.LifecycleConfiguration).toMatchObject({
+      Rules: expect.arrayContaining([
+        expect.objectContaining({
+          Prefix: `${CONTENT_STORE_PREFIX}/`,
+          ExpirationInDays: CONTENT_STORE_RETENTION_DAYS,
+        }),
+      ]),
+    });
   });
 
   it("sends the same payload from every Lambda task as the SAM template", () => {

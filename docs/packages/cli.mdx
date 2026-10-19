@@ -1983,8 +1983,9 @@ hyperframes lambda deploy \
 
 ### `lambda sites create <projectDir>`
 
-Tars and uploads the project to S3 under a content-addressed key, and returns a
-`siteId` you can reuse. A re-render of the same tree then skips the upload.
+Uploads the project's files to the bucket's shared content store, skipping any
+file already there, and returns a `siteId` you can reuse. A re-render of the
+same tree then skips the upload.
 
 ```bash
 hyperframes lambda sites create ./my-project

@@ -318,3 +318,26 @@ describe("ffprobe argv contract", () => {
     }
   });
 });
+
+describe("ffmpeg/ffprobe stderr has one owner", () => {
+  const SPAWNS_MEDIA_TOOL =
+    /\bspawn\(\s*(?:getFfmpegBinary\(\)|getFfprobeBinary\(\)|command\b|["'`]ff(?:mpeg|probe)["'`])/;
+  const runtimeSources = (dir: string): string[] =>
+    readdirSync(dir).flatMap((entry) => {
+      const abs = join(dir, entry);
+      if (statSync(abs).isDirectory()) return runtimeSources(abs);
+      return /\.ts$/.test(entry) && !/\.(?:test|d)\.ts$/.test(entry) ? [abs] : [];
+    });
+
+  it("every spawn hands its stderr to ManagedChildProcess, which redacts signed URLs", () => {
+    // Its stderr is what errors and logs quote; any other reader would need its own redaction.
+    const offenders = ["engine", "producer", "aws-lambda"]
+      .flatMap((pkg) => runtimeSources(join(REPO_ROOT, "packages", pkg, "src")))
+      .filter((abs) => {
+        const code = stripComments(readFileSync(abs, "utf8"));
+        return SPAWNS_MEDIA_TOOL.test(code) && !code.includes("new ManagedChildProcess(");
+      })
+      .map((abs) => relative(REPO_ROOT, abs));
+    expect(offenders).toEqual([]);
+  });
+});

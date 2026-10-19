@@ -25,6 +25,7 @@ import { LambdaClient } from "@aws-sdk/client-lambda";
 import { S3Client } from "@aws-sdk/client-s3";
 import {
   CURRENT_PLAN_PROTOCOL,
+  PLAN_V2_MATERIALIZATION_MARKER,
   PlanVideosMetadataError,
   type AssembleResult,
   type ChunkResult,
@@ -32,12 +33,14 @@ import {
   type PlanResult,
   type PlanV2ArtifactPublisher,
   type PlanV2Manifest,
+  type PlanV2WithPublisherOptions,
   publishPlanV2FromExecutionPlan,
 } from "@hyperframes/producer/distributed";
 import { resolveMaxParallelChunks } from "../../producer/src/services/distributed/plan.js";
 import { recomputePlanHashFromPlanDir } from "../../producer/src/services/render/stages/freezePlan.js";
 import type { AssembleEvent, LambdaEvent, PlanEvent, RenderChunkEvent } from "./events.js";
 import { handler as handleEvent, unwrapEvent } from "./handler.js";
+import { S3PlanV2ArtifactPublisher } from "./s3PlanV2Publisher.js";
 
 interface FakeS3Op {
   kind: "download" | "upload" | "copy";
@@ -55,6 +58,7 @@ class FakeS3Client {
   // Map S3 URIs → byte buffers the fake serves.
   objects = new Map<string, Buffer>();
   metadata = new Map<string, Record<string, string>>();
+  checksums = new Map<string, string>();
 
   // Methods called by the real S3 transport — minimal surface so the
   // handler's call sites don't need rewriting under test.
@@ -95,6 +99,7 @@ class FakeS3Client {
       return {
         ContentLength: bytes.length,
         Metadata: this.metadata.get(uri),
+        ChecksumSHA256: this.checksums.get(uri),
       };
     }
     if (cmdName === "PutObjectCommand") {
@@ -114,6 +119,8 @@ class FakeS3Client {
       this.objects.set(uri, bytes);
       const metadata = (command as { input: { Metadata?: Record<string, string> } }).input.Metadata;
       if (metadata) this.metadata.set(uri, metadata);
+      const checksum = (command as { input: { ChecksumSHA256?: string } }).input.ChecksumSHA256;
+      if (checksum) this.checksums.set(uri, checksum);
       return {};
     }
     if (cmdName === "CreateMultipartUploadCommand") return { UploadId: "upload-1" };
@@ -157,6 +164,15 @@ const accountUnreadable = {
 } as unknown as LambdaClient;
 const handler: typeof handleEvent = (event, deps) =>
   handleEvent(event, { lambda: accountUnreadable, ...deps });
+/** A real client (so it can pre-sign offline) whose requests go to the fake. */
+function presigningClient(fake: FakeS3Client): S3Client {
+  const client = new S3Client({
+    region: "us-east-2",
+    credentials: { accessKeyId: "AKIDTEST", secretAccessKey: "test-secret" },
+  });
+  client.send = fake.send.bind(fake) as S3Client["send"];
+  return client;
+}
 
 const tmpDirs: string[] = [];
 
@@ -866,7 +882,7 @@ describe("handler dispatch", () => {
     expect(planned).toMatchObject({
       PlanProtocol: "v2",
       PlanV2ManifestS3Uri: "s3://bucket/renders/v2/v2/manifest.json",
-      PlanV2ArtifactS3Prefix: "s3://bucket/renders/v2/v2/artifacts/sha256",
+      PlanV2ArtifactS3Prefix: "s3://bucket/cas/sha256",
     });
     expect("PlanS3Uri" in planned).toBe(false);
     if (!("PlanProtocol" in planned) || planned.PlanProtocol !== "v2") {
@@ -915,6 +931,85 @@ describe("handler dispatch", () => {
     expect(
       s3.ops.some((operation) => operation.kind === "download" && operation.uri === audioUri),
     ).toBe(true);
+  });
+
+  it("hands a chunk its deferred video as a pre-signed URL and downloads the rest", async () => {
+    const tmpRoot = makeTmpRoot();
+    const fake = new FakeS3Client();
+    const s3 = presigningClient(fake);
+    const v1Dir = join(tmpRoot, "v1");
+    makeMinimalV1PlanDir(v1Dir, true, { withDeferredVideo: true });
+    const publisher = new S3PlanV2ArtifactPublisher({
+      s3,
+      planOutputS3Prefix: "s3://bucket/renders/deferred/",
+      temporaryRoot: tmpRoot,
+    });
+    const manifest = await publishPlanV2FromExecutionPlan(v1Dir, publisher);
+    const video = manifest.artifacts.find((artifact) => artifact.path === "compiled/clip.mp4")!;
+    expect(video.chunks).toEqual([0]);
+    const blobUri = (digest: string) =>
+      `${publisher.artifactPrefix}/${digest.slice(0, 2)}/${digest}`;
+
+    let marker: { remoteSources?: Record<string, string> } = {};
+    const renderChunkMock = mock(
+      async (planDir: string, _chunkIndex: number, outputPath: string): Promise<ChunkResult> => {
+        expect(existsSync(join(planDir, "compiled", "clip.mp4"))).toBe(false);
+        marker = JSON.parse(readFileSync(join(planDir, PLAN_V2_MATERIALIZATION_MARKER), "utf-8"));
+        writeFileSync(outputPath, "CHUNK");
+        return {
+          outputPath,
+          outputKind: "file",
+          framesEncoded: 30,
+          sha256: "c".repeat(64),
+          durationMs: 1,
+          planHashMs: 0,
+          sessionBootMs: 0,
+          captureStageMs: 1,
+          encodeStageMs: 0,
+          workers: 1,
+          captureMode: "beginframe",
+          perfPath: `${outputPath}.perf.json`,
+        };
+      },
+    );
+    const beforeChunk = fake.ops.length;
+    await handler(
+      {
+        Action: "renderChunk",
+        PlanV2ManifestS3Uri: publisher.manifestUri,
+        PlanV2ArtifactS3Prefix: publisher.artifactPrefix,
+        PlanHash: manifest.planHash,
+        ChunkIndex: 0,
+        ChunkOutputS3Prefix: "s3://bucket/renders/deferred/",
+        Format: "mp4",
+      },
+      {
+        s3,
+        primitives: {
+          plan: mock() as unknown as typeof import("@hyperframes/producer/distributed").plan,
+          renderChunk:
+            renderChunkMock as unknown as typeof import("@hyperframes/producer/distributed").renderChunk,
+          assemble:
+            mock() as unknown as typeof import("@hyperframes/producer/distributed").assemble,
+        },
+        tmpRoot,
+        skipChromeResolution: true,
+      },
+    );
+
+    const downloads = fake.ops
+      .slice(beforeChunk)
+      .filter((operation) => operation.kind === "download")
+      .map((operation) => operation.uri);
+    const expectedDownloads = manifest.artifacts
+      .filter((artifact) => artifact.chunks === "all")
+      .map((artifact) => blobUri(artifact.sha256));
+    expect(new Set(downloads)).toEqual(new Set([publisher.manifestUri, ...expectedDownloads]));
+    const url = new URL(marker.remoteSources?.["compiled/clip.mp4"] ?? "");
+    expect(url.protocol).toBe("https:");
+    expect(url.pathname).toEndWith(`/${video.sha256}`);
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("3600");
+    expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
   });
 
   async function planStitched(chunkCount: number) {
@@ -1063,6 +1158,132 @@ describe("handler dispatch", () => {
   });
 });
 
+/** A real client (so it can pre-sign offline) whose requests go to the fake. */
+function presigningClient(fake: FakeS3Client): import("@aws-sdk/client-s3").S3Client {
+  const client = new S3Client({
+    region: "us-east-2",
+    credentials: { accessKeyId: "AKIDTEST", secretAccessKey: "test-secret" },
+  });
+  client.send = fake.send.bind(fake) as S3Client["send"];
+  return client;
+}
+
+describe("handler — plan from a deployed site", () => {
+  function storeSiteFile(s3: FakeS3Client, bytes: string): string {
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const uri = `s3://bucket/cas/sha256/${sha256.slice(0, 2)}/${sha256}`;
+    s3.objects.set(uri, Buffer.from(bytes));
+    s3.metadata.set(uri, { sha256 });
+    return sha256;
+  }
+
+  function planEvent(): PlanEvent {
+    return {
+      Action: "plan",
+      ProjectS3Uri: "s3://bucket/sites/site1/files.json",
+      PlanOutputS3Prefix: "s3://bucket/renders/r1/",
+      Config: { fps: 30, width: 640, height: 360, format: "mp4" },
+    };
+  }
+
+  it("plans a site's video in place: never downloads, never uploads its bytes", async () => {
+    const s3 = new FakeS3Client();
+    const html = storeSiteFile(s3, "<html></html>");
+    const media = storeSiteFile(s3, "VIDEO-BYTES");
+    s3.objects.set(
+      "s3://bucket/sites/site1/files.json",
+      Buffer.from(
+        JSON.stringify({
+          files: [
+            { path: "assets/bg.mp4", sha256: media, sizeBytes: 11 },
+            { path: "index.html", sha256: html, sizeBytes: 13 },
+          ],
+        }),
+      ),
+    );
+    const planV2WithPublisher = mock(
+      async (
+        projectDir: string,
+        _config: unknown,
+        publisher: PlanV2ArtifactPublisher,
+        options: PlanV2WithPublisherOptions,
+      ) => {
+        expect(readFileSync(join(projectDir, "index.html"), "utf-8")).toBe("<html></html>");
+        expect(existsSync(join(projectDir, "assets", "bg.mp4"))).toBe(false);
+        const remote = options.remoteFiles?.["assets/bg.mp4"];
+        expect(remote).toMatchObject({ sha256: media, sizeBytes: 11 });
+        expect(remote?.url).toContain(`/cas/sha256/${media.slice(0, 2)}/${media}?`);
+        expect(remote?.url).toContain("X-Amz-Signature=");
+        await publisher.referenceStoredBlob!({ sha256: media, sizeBytes: 11 });
+        const manifest = {
+          planHash: "c".repeat(64),
+          chunkCount: 1,
+          totalFrames: 30,
+          fps: 30,
+          width: 640,
+          height: 360,
+          format: "mp4",
+          ffmpegVersion: "test",
+          producerVersion: "test",
+          artifacts: [{ path: "compiled/assets/bg.mp4", sha256: media, sizeBytes: 11 }],
+        };
+        await publisher.commitManifest(JSON.stringify(manifest));
+        return manifest as unknown as PlanV2Manifest;
+      },
+    );
+
+    const result = await handler(planEvent(), {
+      s3: presigningClient(s3),
+      primitives: {
+        plan: mock() as unknown as typeof import("@hyperframes/producer/distributed").plan,
+        planV2WithPublisher:
+          planV2WithPublisher as unknown as typeof import("@hyperframes/producer/distributed").planV2WithPublisher,
+        renderChunk:
+          mock() as unknown as typeof import("@hyperframes/producer/distributed").renderChunk,
+        assemble: mock() as unknown as typeof import("@hyperframes/producer/distributed").assemble,
+      },
+      tmpRoot: makeTmpRoot(),
+      skipChromeResolution: true,
+    });
+
+    expect(result).toMatchObject({ PlanV2ArtifactS3Prefix: "s3://bucket/cas/sha256" });
+    expect(planV2WithPublisher).toHaveBeenCalledTimes(1);
+    expect(s3.ops.filter((op) => op.kind === "upload").map((op) => op.uri)).toEqual([
+      "s3://bucket/renders/r1/v2/manifest.json",
+    ]);
+    expect(s3.ops.some((op) => op.uri.endsWith(".tar.gz"))).toBe(false);
+    const mediaKey = `s3://bucket/cas/sha256/${media.slice(0, 2)}/${media}`;
+    expect(s3.ops.filter((op) => op.uri === mediaKey && op.kind === "download")).toEqual([]);
+  });
+
+  it("refuses a site manifest path that escapes the project", async () => {
+    const s3 = new FakeS3Client();
+    const sha256 = storeSiteFile(s3, "x");
+    s3.objects.set(
+      "s3://bucket/sites/site1/files.json",
+      Buffer.from(JSON.stringify({ files: [{ path: "../escape", sha256, sizeBytes: 1 }] })),
+    );
+    const planV2WithPublisher = mock();
+    await expect(
+      handler(planEvent(), {
+        s3: s3 as unknown as import("@aws-sdk/client-s3").S3Client,
+        primitives: {
+          plan: mock() as unknown as typeof import("@hyperframes/producer/distributed").plan,
+          planV2WithPublisher:
+            planV2WithPublisher as unknown as typeof import("@hyperframes/producer/distributed").planV2WithPublisher,
+          renderChunk:
+            mock() as unknown as typeof import("@hyperframes/producer/distributed").renderChunk,
+          assemble:
+            mock() as unknown as typeof import("@hyperframes/producer/distributed").assemble,
+        },
+        tmpRoot: makeTmpRoot(),
+        skipChromeResolution: true,
+      }),
+    ).rejects.toMatchObject({ name: "SITE_MANIFEST_INVALID" });
+    expect(planV2WithPublisher).not.toHaveBeenCalled();
+  });
+});
+
 describe("handler — S3 URI allowlist (security: F-004)", () => {
   let prevBucket: string | undefined;
 
@@ -1177,7 +1398,7 @@ async function makeMinimalPlanTar(): Promise<Buffer> {
 function makeMinimalV1PlanDir(
   dir: string,
   withAudio: boolean,
-  options: { chunkCount?: number; chunksCarryAudio?: boolean } = {},
+  options: { chunkCount?: number; chunksCarryAudio?: boolean; withDeferredVideo?: boolean } = {},
 ): void {
   const chunkCount = options.chunkCount ?? 1;
   mkdirSync(join(dir, "meta"), { recursive: true });
@@ -1208,6 +1429,54 @@ function makeMinimalV1PlanDir(
     options.chunksCarryAudio ? JSON.stringify({ chunksCarryAudio: true }) : "{}",
   );
   if (withAudio) writeFileSync(join(dir, "audio.m4a"), "AAC");
+  if (options.withDeferredVideo) writeDeferredVideo(dir);
   planJson.planHash = recomputePlanHashFromPlanDir(dir);
   writeFileSync(join(dir, "plan.json"), JSON.stringify(planJson));
+}
+
+/** One clip the chunk extracts from `compiled/clip.mp4` itself. */
+function writeDeferredVideo(dir: string): void {
+  writeFileSync(join(dir, "compiled", "clip.mp4"), "VIDEO-BYTES");
+  const metadata = {
+    durationSeconds: 1,
+    videoStreamDurationSeconds: 1,
+    width: 640,
+    height: 360,
+    fps: 30,
+    videoCodec: "h264",
+    hasAudio: false,
+    isVFR: false,
+    hasAlpha: false,
+    colorSpace: null,
+  };
+  const videos = {
+    videos: [
+      {
+        id: "clip",
+        src: "clip.mp4",
+        start: 0,
+        end: 1,
+        mediaStart: 0,
+        loop: false,
+        hasAudio: false,
+      },
+    ],
+    extracted: [
+      {
+        videoId: "clip",
+        srcPath: "/planner/clip.mp4",
+        framePattern: "frame_%05d.jpg",
+        fps: 30,
+        totalFrames: 30,
+        metadata,
+        deferredRange: {
+          sourcePath: "compiled/clip.mp4",
+          startTime: 0,
+          durationSeconds: 1,
+          format: "jpg",
+        },
+      },
+    ],
+  };
+  writeFileSync(join(dir, "meta", "videos.json"), JSON.stringify(videos));
 }

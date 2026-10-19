@@ -2,10 +2,11 @@
 /**
  * Build script for @hyperframes/aws-lambda (public OSS package).
  *
- * Bundles each subpath barrel via esbuild → dist/, then emits .d.ts via tsc.
+ * Bundles the subpath barrels in one esbuild pass → dist/, then emits .d.ts via tsc.
  *
  * Subpaths (each gets its own dist entry so adopters that import one path
- * don't load the others' transitive graphs at module-load time):
+ * don't load the others' transitive graphs at module-load time; code two
+ * entries share is emitted once, in dist/_chunks/):
  *
  *   .         (the umbrella barrel: handler + sdk + cdk types re-exported)
  *   ./handler (the Lambda runtime entry — what `scripts/build-zip.ts` ZIPs)
@@ -33,6 +34,7 @@ const sharedOpts = {
     "@aws-sdk/client-lambda",
     "@aws-sdk/client-s3",
     "@aws-sdk/client-sfn",
+    "@aws-sdk/s3-request-presigner",
     "@hyperframes/producer",
     "@hyperframes/producer/distributed",
     "@sparticuz/chromium",
@@ -45,12 +47,18 @@ const sharedOpts = {
   ],
 };
 
-await Promise.all([
-  build({ ...sharedOpts, entryPoints: ["src/index.ts"], outfile: "dist/index.js" }),
-  build({ ...sharedOpts, entryPoints: ["src/handler.ts"], outfile: "dist/handler.js" }),
-  build({ ...sharedOpts, entryPoints: ["src/sdk/index.ts"], outfile: "dist/sdk/index.js" }),
-  build({ ...sharedOpts, entryPoints: ["src/cdk/index.ts"], outfile: "dist/cdk/index.js" }),
-]);
+await build({
+  ...sharedOpts,
+  entryPoints: {
+    index: "src/index.ts",
+    handler: "src/handler.ts",
+    "sdk/index": "src/sdk/index.ts",
+    "cdk/index": "src/cdk/index.ts",
+  },
+  outdir: "dist",
+  splitting: true,
+  chunkNames: "_chunks/[name]-[hash]",
+});
 
 // esbuild doesn't emit .d.ts. tsc does, with a build-only tsconfig that
 // drops the workspace `paths` overrides so `@hyperframes/producer` resolves
@@ -62,4 +70,4 @@ execSync(
   { stdio: "inherit" },
 );
 
-console.log("[Build] Complete: dist/{index,handler,sdk/index,cdk/index}.js + .d.ts");
+console.log("[Build] Complete: dist/{index,handler,sdk/index,cdk/index}.js + dist/_chunks + .d.ts");

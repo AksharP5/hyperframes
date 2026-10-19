@@ -10,7 +10,7 @@ If you're already running a different framework that deploys a serverless video 
 | In your current framework you call... | In HyperFrames you call...                                       | Notes                                                                                        |
 | ------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | One-shot deploy command               | `hyperframes lambda deploy`                                      | Builds `packages/aws-lambda/dist/handler.zip` and runs `sam deploy`. Idempotent.             |
-| One-shot site upload                  | `hyperframes lambda sites create ./project`                      | Content-addressed S3 key — re-uploads of an unchanged tree are skipped via a HeadObject 200. |
+| One-shot site upload                  | `hyperframes lambda sites create ./project`                      | Content-addressed file list; files already in the bucket's shared store are skipped. |
 | Trigger a render                      | `hyperframes lambda render ./project --width 1920 --height 1080` | Returns immediately with a `renderId`; add `--wait` to stream per-chunk progress.            |
 | Poll render progress                  | `hyperframes lambda progress <renderId>`                         | Includes accrued cost in the same response.                                                  |
 | Tear down                             | `hyperframes lambda destroy`                                     | The S3 bucket is `Retain`'d — documented in the deploy guide.                                |

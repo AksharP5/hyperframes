@@ -130,6 +130,11 @@ Resources:
             # Users keep the final mp4 (different key prefix); the rest
             # can age out after a week to keep storage costs flat.
             ExpirationInDays: 7
+          - Id: ExpireSharedContent
+            Status: Enabled
+            Prefix: cas/sha256/
+            # Project files and plan artifacts by SHA-256, shared across renders.
+            ExpirationInDays: 30
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -283,6 +288,7 @@ Resources:
                   - PLAN_ARTIFACT_DIGEST_MISMATCH
                   - FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED
                   - CHUNK_EXCEEDS_WORKER_TIMEOUT
+                  - SITE_MANIFEST_INVALID
                 MaxAttempts: 0
               # Another render on the same function can still take the reserved slots; wait minutes.
               - ErrorEquals: [Lambda.TooManyRequestsException]
@@ -340,6 +346,7 @@ Resources:
                   - FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED
                   - CHUNK_EXCEEDS_WORKER_TIMEOUT
                   - ChromeBinaryUnavailableError
+                  - SITE_MANIFEST_INVALID
                 MaxAttempts: 0
               - ErrorEquals: [Lambda.TooManyRequestsException]
                 IntervalSeconds: 5

@@ -1182,6 +1182,10 @@ export const ALLOWED_DELETIONS = new Map([
     "packages/engine/src/services/frameCapture-wslFullChrome.test.ts",
     "tests the WSL full-Chrome GPU fallback, replaced by the probe without WAYLAND_DISPLAY (frameCapture-wslWayland.test.ts)",
   ],
+  [
+    "packages/producer/src/services/audioExtractor.ts",
+    "imported by nothing; its own ffmpeg spawn quoted stderr unredacted, outside ManagedChildProcess",
+  ],
   ["scripts/prune-fallow-audit-caches.mjs", FALLOW_PRUNE_REASON],
   ["scripts/prune-fallow-audit-caches.test.mjs", FALLOW_PRUNE_REASON],
 ]);

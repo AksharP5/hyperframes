@@ -87,7 +87,7 @@ See the [CLI reference](/packages/cli#hyperframes-lambda) for full flag document
 
 #### Pre-staging a project with `sites create`
 
-Re-rendering the same project tree on every `lambda render` call re-tars and re-uploads it each time. For tight inner loops (CI smoke jobs, prompt iteration in a demo flow), pre-stage the project once and reuse the upload:
+Every `lambda render` call without `--site-id` hashes the project tree and checks each file against the bucket. For tight inner loops (CI smoke jobs, prompt iteration in a demo flow), pre-stage the project once and reuse the upload:
 
 ```bash
 hyperframes lambda sites create ./my-project
@@ -97,7 +97,15 @@ hyperframes lambda render ./my-project --site-id=a1b2c3d4e5f6g7h8 \
   --width 1920 --height 1080 --wait
 ```
 
-The `siteId` is content-addressed via a SHA-256 of the project tree; re-running `sites create` on an unchanged tree skips the upload via a `HeadObject` short-circuit. Pass the same `--site-id` to as many `lambda render` calls as you like — they all reuse the one S3 PUT.
+The `siteId` is content-addressed via a SHA-256 of the project tree. A site is a small `sites/<siteId>/files.json` that lists each file's path and SHA-256. The files themselves live once per bucket under `cas/sha256/`, shared by every site and render, so a file another project already uploaded is never uploaded again. Pass the same `--site-id` to as many `lambda render` calls as you like.
+
+The stack's bucket expires objects under `cas/sha256/` 30 days after they were last written (the `ExpireSharedContent` lifecycle rule). Each render or `sites create` that reuses a file at least 7 days old rewrites it in place, so files in use never expire. If a site's files did expire, `lambda render --site-id` re-uploads them from the project directory. `renderToLambda` given a `siteHandle` but no `projectDir` stops with `SITE_FILES_MISSING` before starting; run `sites create` again to restore them.
+
+#### Upgrading from a version before shared content storage
+
+- **Redeploy the stack before upgrading the CLI or SDK that starts renders.** A stack from an earlier version cannot read `files.json` sites. The CLI and `renderToLambda` check the state machine first and stop with `STACK_TOO_OLD` before uploading anything; run `hyperframes lambda deploy` (or redeploy your SAM template or CDK construct from the same version) and render again.
+- **Existing site ids keep working.** When `sites/<siteId>/files.json` is missing, the render uses that site's `project.tar.gz` from the earlier version. If neither exists the render stops with `SITE_NOT_FOUND`, naming both keys; run `sites create` again.
+- **Every project uploads once more.** The site id scheme changed (it now also covers symlinked files), so `sites create` or the first `lambda render` of each project after the upgrade returns a new site id and uploads its files once.
 
 ### Path 2 — Direct SAM deploy
 
@@ -166,6 +174,8 @@ hyperframes lambda policies role
 hyperframes lambda policies validate ./infra/iam/hyperframes-deploy.json
 ```
 
+Code that calls the SDK's `renderToLambda` with its own role needs `states:DescribeStateMachine` on the state machine besides `states:StartExecution` and S3 read/write on the bucket: each render reads the definition to confirm the stack is new enough.
+
 The generated documents grant `Resource: "*"` for the CLI's required action set. After your first successful deploy you can narrow `Resource` to the deployed ARNs — predictable per the CloudFormation outputs above. Adopters running the CLI in CI typically check the policy doc into source control and run `policies validate` as a pre-deploy step to catch drift.
 
 ## Cost shape
@@ -220,6 +230,14 @@ If progress doesn't advance for >10 minutes, check the Step Functions execution 
 
 The render bucket is created with CloudFormation `Retain` on delete — `hyperframes lambda destroy` (or `sam delete`) tears the function + state machine down but the bucket survives. This is intentional: it protects final-rendered MP4s from being lost when you re-deploy. To fully reclaim storage, empty + delete the bucket via the AWS console / `aws s3 rb`.
 
+### `STACK_TOO_OLD`
+
+The stack was deployed by an earlier version that cannot read this version's sites. Redeploy it (`hyperframes lambda deploy`), then render again. See [Upgrading](#upgrading-from-a-version-before-shared-content-storage).
+
+### `SITE_FILES_MISSING` or `SITE_NOT_FOUND`
+
+`SITE_FILES_MISSING`: some of the site's files expired from `cas/sha256/` after 30 days unused. Pass the project directory to `lambda render`, or run `sites create` again. `SITE_NOT_FOUND`: the bucket has no site under that id in either format; run `sites create` again and use the id it prints.
+
 ## Current limits
 
 - There is no completion webhook. Poll with `hyperframes lambda progress` or
@@ -231,8 +249,8 @@ The render bucket is created with CloudFormation `Retain` on delete — `hyperfr
 - The distributed AWS path is SDR-only.
 - Each render chunk extracts only the video frames it shows, so the plan step
   no longer grows with video length. On a 10,240 MB function, a 26-minute
-  576×1024 24 fps H.264 clip plans in about 20 seconds. Each chunk downloads
-  the whole source file of every video it shows. Variable-frame-rate and HDR
+  576×1024 24 fps H.264 clip plans in about 20 seconds. Each chunk reads
+  only the byte ranges of each video it shows, straight from the bucket. Variable-frame-rate and HDR
   sources are the exception: the plan step still extracts every frame of those,
   inside Lambda's 15-minute limit, in 2-minute segments, so
   `FFMPEG_PROCESS_TIMEOUT_MS` applies to each segment, not to the whole clip.

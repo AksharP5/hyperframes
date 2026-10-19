@@ -18,6 +18,8 @@ import { resolveVideoCaptureBeyondViewport } from "../render/captureBeyondViewpo
 import { resolveCaptureJpegQuality } from "../render/captureImageFormat.js";
 import type { LockedRenderConfig } from "../render/stages/freezePlan.js";
 import { resolveRenderFpsConfig } from "../fileServer.js";
+import { defaultLogger } from "../../logger.js";
+import type { PlanV2RemoteSources } from "./planV2.js";
 import { type DistributedFormat, INVALID_VIDEO_METADATA, type PlanVideosJson } from "./shared.js";
 
 /** Distinct codes so adapters route retries per cause: a missing artifact may heal, a hash mismatch never. */
@@ -136,6 +138,8 @@ export function buildChunkCaptureOptions(input: {
   encoder: Pick<LockedRenderConfig, "quality" | "deviceScaleFactor" | "variables">;
   videoCount: number;
   html: string;
+  skipReadinessVideoIds?: string[];
+  videoMetadataHints?: CaptureOptions["videoMetadataHints"];
 }): CaptureOptions {
   const { dimensions, encoder } = input;
   const videoCaptureBeyondViewport = resolveVideoCaptureBeyondViewport(input.videoCount);
@@ -149,6 +153,8 @@ export function buildChunkCaptureOptions(input: {
     // The controller's snapshot, so the first capture sees the in-process renderer's `__hfVariables`.
     variables: encoder.variables,
     subTimelineWaitMemo: {},
+    skipReadinessVideoIds: input.skipReadinessVideoIds,
+    videoMetadataHints: input.videoMetadataHints,
     ...(videoCaptureBeyondViewport !== undefined
       ? { captureBeyondViewport: videoCaptureBeyondViewport }
       : {}),
@@ -166,8 +172,23 @@ export async function extractDeferredVideoFramesForChunk(input: {
   fps: { num: number; den: number };
   outputRoot: string;
   cfg: Pick<EngineConfig, "ffmpegProcessTimeout">;
+  remoteSources?: PlanV2RemoteSources;
 }): Promise<ExtractedFrames[]> {
   const deferred = input.planVideos.extracted.filter((video) => video.deferredRange);
+  const remoteSources = input.remoteSources ?? {};
+  for (const path of Object.keys(remoteSources)) {
+    if (!deferred.some((video) => video.deferredRange!.sourcePath === path)) {
+      throw new RenderChunkValidationError(
+        MISSING_PLAN_ARTIFACT,
+        `[renderChunk] ${path} is read by URL but no deferred video uses it`,
+      );
+    }
+    // The query carries the URL's signature; keep it out of logs.
+    defaultLogger.info("[renderChunk] reading video by URL", {
+      path,
+      url: remoteSources[path]!.split("?")[0],
+    });
+  }
   if (deferred.length === 0) return [];
   const table = createFrameLookupTable(
     input.planVideos.videos,
@@ -195,8 +216,9 @@ export async function extractDeferredVideoFramesForChunk(input: {
         return { ...video, outputDir, framePaths: new Map<number, string>(), ownedByLookup: false };
       }
       const range = video.deferredRange!;
-      const sourcePath = join(input.planDir, ...range.sourcePath.split("/"));
-      if (!existsSync(sourcePath)) {
+      const remoteUrl = remoteSources[range.sourcePath];
+      const sourcePath = remoteUrl ?? join(input.planDir, ...range.sourcePath.split("/"));
+      if (remoteUrl === undefined && !existsSync(sourcePath)) {
         throw new RenderChunkValidationError(
           MISSING_PLAN_ARTIFACT,
           `[renderChunk] planDir is missing the source for video ${JSON.stringify(video.videoId)}: ${range.sourcePath}`,

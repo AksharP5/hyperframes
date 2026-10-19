@@ -45,6 +45,7 @@ import {
   type VideoMetadata,
 } from "../utils/ffprobe.js";
 import { inputAlphaOpaqueWarning, probeInputAlphaPlane } from "../utils/alphaPlaneProbe.js";
+import { redactUrlQueriesInError, urlInputArgs } from "../utils/urlInput.js";
 import {
   analyzeCompositionHdr,
   isHdrColorSpace as isHdrColorSpaceUtil,
@@ -247,6 +248,7 @@ export interface ExtractionOptions {
   deferRangeExtraction?: boolean;
   /** Directories the caller rewrites on every render (downloaded media); their sources are cached by content. */
   contentKeyedDirs?: readonly string[];
+  urlByAbsentLocalPath?: ReadonlyMap<string, string>;
 }
 
 const DOWNLOAD_SUBDIR = "_downloads";
@@ -815,7 +817,9 @@ export function parseImageElements(html: string): ImageElement[] {
 
 /** The first shown frame's colour tags; see {@link firstFrameColourArgs}. */
 async function readFirstFrameColour(videoPath: string, signal?: AbortSignal) {
-  const result = await runFfmpeg(firstFrameColourArgs(videoPath), { signal });
+  const result = await runFfmpeg([...urlInputArgs(videoPath), ...firstFrameColourArgs(videoPath)], {
+    signal,
+  });
   return parseFirstFrameColour(result.stderr);
 }
 
@@ -936,6 +940,16 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
 }
 
 export async function extractVideoFramesRange(
+  ...args: Parameters<typeof extractVideoFramesRangeUnredacted>
+): Promise<ExtractedFrames> {
+  try {
+    return await extractVideoFramesRangeUnredacted(...args);
+  } catch (error) {
+    throw redactUrlQueriesInError(error);
+  }
+}
+
+async function extractVideoFramesRangeUnredacted(
   videoPath: string,
   videoId: string,
   startTime: number,
@@ -995,7 +1009,7 @@ export async function extractVideoFramesRange(
     throw new Error("frameRanges extraction needs a constant-frame-rate source");
   }
 
-  const args: string[] = [];
+  const args: string[] = urlInputArgs(videoPath);
   if (decodeWithVideoToolbox) {
     args.push("-hwaccel", "videotoolbox");
   }
@@ -1815,6 +1829,11 @@ export async function extractAllVideoFrames(
       let videoPath = video.src;
       if (!isHttpUrl(videoPath)) {
         videoPath = resolveProjectRelativeSrc(video.src, baseDir, compiledDir);
+      }
+      const remoteUrl = options.urlByAbsentLocalPath?.get(videoPath);
+      if (remoteUrl) {
+        resolvedVideos.push({ video, videoPath: remoteUrl });
+        continue;
       }
 
       if (isHttpUrl(videoPath)) {

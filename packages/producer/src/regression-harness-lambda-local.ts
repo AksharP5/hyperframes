@@ -46,6 +46,7 @@ import type {
   RenderChunkLambdaResult,
   SerializableDistributedRenderConfig,
 } from "@hyperframes/aws-lambda";
+import { listSiteFiles } from "./services/distributed/projectHash.js";
 
 export type {
   LambdaLocalRenderResult,
@@ -79,7 +80,7 @@ export async function runLambdaLocalRender(
   const projectKey = `sites/harness/${Date.now()}/project.tar.gz`;
   const projectS3Path = join(s3Root, projectKey);
   mkdirSync(dirname(projectS3Path), { recursive: true });
-  await tarDirectory(input.projectDir, projectS3Path);
+  await tarDirectory(input.projectDir, projectS3Path, listSiteFiles(input.projectDir));
 
   const fakeS3 = new FilesystemBackedFakeS3(s3Root);
   const deps: HandlerDeps = {

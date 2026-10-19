@@ -30,6 +30,7 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as sfn from "aws-cdk-lib/aws-stepfunctions";
 import * as tasks from "aws-cdk-lib/aws-stepfunctions-tasks";
 import { Construct } from "constructs";
+import { CONTENT_STORE_PREFIX, CONTENT_STORE_RETENTION_DAYS } from "../contentStore.js";
 
 /** Construction-time props for {@link HyperframesRenderStack}. */
 export interface HyperframesRenderStackProps {
@@ -92,6 +93,12 @@ export class HyperframesRenderStack extends Construct {
           enabled: true,
           prefix: "renders/",
           expiration: Duration.days(7),
+        },
+        {
+          id: "ExpireSharedContent",
+          enabled: true,
+          prefix: `${CONTENT_STORE_PREFIX}/`,
+          expiration: Duration.days(CONTENT_STORE_RETENTION_DAYS),
         },
       ],
     });
@@ -218,6 +225,7 @@ export class HyperframesRenderStack extends Construct {
       "FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED",
       "CHUNK_EXCEEDS_WORKER_TIMEOUT",
       "ChromeBinaryUnavailableError",
+      "SITE_MANIFEST_INVALID",
     ];
     const NON_RETRYABLE_CHUNK = [
       "FFMPEG_VERSION_MISMATCH",

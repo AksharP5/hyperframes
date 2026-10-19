@@ -74,6 +74,7 @@ import {
   type CompositionMetadataJson,
   freezePlan,
   type LockedRenderConfig,
+  writePlanRemoteFiles,
   type PlanFileDigests,
   prehashPlanFiles,
 } from "../render/stages/freezePlan.js";
@@ -309,15 +310,20 @@ export interface BuildLocalExecutionPlanOptions {
    * chunks write those frames into their own work directory.
    */
   readonly deferVideoExtraction?: boolean;
+  /** Project files absent locally: probe their URL and publish their existing digest. */
+  readonly remoteFiles?: Readonly<Record<string, RemoteProjectFile>>;
   /** Shared with the publisher so each plan file is hashed once. */
   readonly digests?: PlanFileDigests;
   /** Runs while the audio mixes, once `compiled/` and the video trees are final. */
   readonly whileAudioMixes?: () => Promise<void>;
-  /**
-   * mp4 chunks carry their own slice of the plan audio (renderChunk muxes it). Ignored for other
-   * formats and with `cfr`, which re-encodes.
-   */
+  /** mp4 chunks carry their plan-audio slice unless cfr re-encodes. */
   readonly chunksCarryAudio?: boolean;
+}
+
+export interface RemoteProjectFile {
+  readonly url: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
 }
 
 export function logPlanStage(log: ProducerLogger, stage: string, startedAt: number): void {
@@ -1034,6 +1040,7 @@ function createVideoSourceShipper(input: {
   projectDir: string;
   workCompiledDir: string;
   workVideoFramesDir: string;
+  isRemote: (srcPath: string) => boolean;
 }): (srcPath: string) => string {
   const shipped = new Map<string, string>();
   return (srcPath) => {
@@ -1045,7 +1052,10 @@ function createVideoSourceShipper(input: {
     let result: string | null = null;
     for (const root of stagedRel === null ? [input.workCompiledDir, input.projectDir] : []) {
       const rel = pathInside(root, srcPath);
-      if (rel !== null && existsSync(join(input.planDir, "compiled", rel))) {
+      if (
+        rel !== null &&
+        (existsSync(join(input.planDir, "compiled", rel)) || input.isRemote(srcPath))
+      ) {
         result = ["compiled", ...rel.split(sep)].join("/");
         break;
       }
@@ -1175,8 +1185,19 @@ export async function buildLocalExecutionPlan(
   const needsAlpha = outputNeedsAlpha(config.format);
 
   // ── Compile ──
+  const remoteFiles = Object.entries(options.remoteFiles ?? {});
+  const remoteLocalPath = (rel: string) => join(projectDir, ...rel.split("/"));
+  // Keyed by the path each file would have had, which is what every media resolver computes.
+  const urlByAbsentLocalPath = new Map(
+    remoteFiles.map(([rel, file]) => [remoteLocalPath(rel), file.url]),
+  );
+  const localPathByUrl = new Map(
+    remoteFiles.map(([rel, file]) => [file.url, remoteLocalPath(rel)]),
+  );
+
   stageStarted = Date.now();
   const compileResult = await runCompileStage({
+    urlByAbsentLocalPath,
     projectDir,
     workDir,
     htmlPath,
@@ -1299,6 +1320,7 @@ export async function buildLocalExecutionPlan(
     assertNotAborted,
     materializeSymlinks: true,
     deferRangeExtraction: options.deferVideoExtraction,
+    urlByAbsentLocalPath,
   });
   logPlanStage(log, "extract", stageStarted);
   if (extractResult.failureToEnforce) throw extractResult.failureToEnforce;
@@ -1345,6 +1367,7 @@ export async function buildLocalExecutionPlan(
     projectDir,
     workCompiledDir: compiledDir,
     workVideoFramesDir: stagedVideoFrames,
+    isRemote: (srcPath) => urlByAbsentLocalPath.has(srcPath),
   });
   // Staged frames live inside compiledDir, so they must match first.
   const sourceRoots: Array<[string, string]> = [
@@ -1355,19 +1378,30 @@ export async function buildLocalExecutionPlan(
   const planVideosJson: PlanVideosJson = buildPlanVideosJson({
     videos: composition.videos,
     compositionEnd: job.duration ?? Number.NaN,
-    extracted: (extractResult.extractionResult?.extracted ?? []).map((ext) => ({
-      videoId: ext.videoId,
-      srcPath: stableSourcePath(sourceRoots, ext.srcPath),
-      framePattern: ext.framePattern,
-      fps: ext.fps,
-      totalFrames: ext.totalFrames,
-      metadata: ext.metadata,
-      ...(ext.deferredRange
-        ? { deferredRange: { ...ext.deferredRange, sourcePath: shipVideoSource(ext.srcPath) } }
-        : {}),
-    })),
+    extracted: (extractResult.extractionResult?.extracted ?? []).map((ext) => {
+      const sourcePath = localPathByUrl.get(ext.srcPath) ?? ext.srcPath;
+      return {
+        videoId: ext.videoId,
+        srcPath: stableSourcePath(sourceRoots, sourcePath),
+        framePattern: ext.framePattern,
+        fps: ext.fps,
+        totalFrames: ext.totalFrames,
+        metadata: ext.metadata,
+        ...(ext.deferredRange
+          ? { deferredRange: { ...ext.deferredRange, sourcePath: shipVideoSource(sourcePath) } }
+          : {}),
+      };
+    }),
   });
   mkdirSync(join(planDir, "meta"), { recursive: true });
+  writePlanRemoteFiles(
+    planDir,
+    remoteFiles.map(([rel, { sha256, sizeBytes }]) => ({
+      path: `compiled/${rel}`,
+      sha256,
+      sizeBytes,
+    })),
+  );
   writeFileSync(
     join(planDir, PLAN_VIDEOS_META_RELATIVE_PATH),
     JSON.stringify(planVideosJson, null, 2),
@@ -1388,6 +1422,7 @@ export async function buildLocalExecutionPlan(
       projectDir,
       workDir,
       compiledDir: finalCompiledDir,
+      urlByAbsentLocalPath,
       duration: audioSeconds,
       ffmpegProcessTimeout: cfg.ffmpegProcessTimeout,
       audioGain: cfg.audioGain,

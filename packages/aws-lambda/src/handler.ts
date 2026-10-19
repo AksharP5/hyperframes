@@ -32,10 +32,12 @@ import {
   resolvePlanAudioPath,
   planV2WithPublisher,
   type PlanResult,
+  isPlanV2DeferredSourceArtifact,
   type PlanV2Artifact,
   type PlanV2Manifest,
   type PlanV2MaterializationTarget,
   readPlanV2Manifest,
+  type RemoteProjectFile,
   renderChunk,
 } from "@hyperframes/producer/distributed";
 import { resolveChromeExecutablePath } from "./chromium.js";
@@ -58,12 +60,15 @@ import type {
 import {
   downloadS3ObjectToFile,
   downloadS3ObjectToFileVerified,
+  mapConcurrent,
   parseS3Uri,
+  presignVerifiedS3GetUrl,
   tarDirectory,
   untarDirectory,
   uploadFileToS3,
 } from "./s3Transport.js";
 import { S3PlanV2ArtifactPublisher } from "./s3PlanV2Publisher.js";
+import { downloadSiteFiles, isSiteManifestUri } from "./siteManifest.js";
 
 /**
  * Lazily-constructed S3 client. Cached at module scope so warm Lambda
@@ -401,17 +406,10 @@ async function handlePlan(event: PlanEvent, deps?: HandlerDeps): Promise<PlanLam
   }
 
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-plan-"));
-  // We use `.tar.gz` (not `.zip`) as the project archive's on-the-wire
-  // format because Lambda's Amazon Linux base image ships GNU `tar` but
-  // not `unzip` in `/usr/bin`. The smoke script + future CLI both
-  // produce tar.gz uploads.
-  const projectArchive = join(work, "project.tar.gz");
-  const projectDir = join(work, "project");
   const planDir = join(work, "plan");
 
   try {
-    await downloadS3ObjectToFile(s3, event.ProjectS3Uri, projectArchive);
-    await untarDirectory(projectArchive, projectDir);
+    const { projectDir } = await fetchProject(s3, event.ProjectS3Uri, work);
 
     // Same chunk layout as v2, so both protocols produce the same chunks and output.
     const result: PlanResult = await primitive(projectDir, config, planDir, {
@@ -460,6 +458,31 @@ async function handlePlan(event: PlanEvent, deps?: HandlerDeps): Promise<PlanLam
   }
 }
 
+/**
+ * `ProjectS3Uri` is a site manifest from `deploySite`, or a `.tar.gz` of the project
+ * (hand-built uploads such as `examples/aws-lambda/scripts/smoke.sh`).
+ */
+async function fetchProject(
+  s3: S3Client,
+  projectS3Uri: string,
+  work: string,
+  leaveVideosRemote = false,
+): Promise<{ projectDir: string; remoteFiles: Record<string, RemoteProjectFile> }> {
+  const projectDir = join(work, "project");
+  if (isSiteManifestUri(projectS3Uri)) {
+    const remoteFiles = await downloadSiteFiles(s3, projectS3Uri, projectDir, leaveVideosRemote);
+    return { projectDir, remoteFiles };
+  }
+  const projectArchive = join(work, "project.tar.gz");
+  let stageStarted = Date.now();
+  await downloadS3ObjectToFile(s3, projectS3Uri, projectArchive);
+  logEvent({ event: "plan_stage", stage: "download", ms: Date.now() - stageStarted });
+  stageStarted = Date.now();
+  await untarDirectory(projectArchive, projectDir);
+  logEvent({ event: "plan_stage", stage: "untar", ms: Date.now() - stageStarted });
+  return { projectDir, remoteFiles: {} };
+}
+
 // Plan v2 orchestration is kept as one transactional boundary: stage, CAS upload,
 // and manifest-last publication must stay ordered and fail together.
 // fallow-ignore-next-line complexity
@@ -476,15 +499,8 @@ async function handlePlanV2(
   }
 
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-plan-v2-"));
-  const projectArchive = join(work, "project.tar.gz");
-  const projectDir = join(work, "project");
   try {
-    let stageStarted = Date.now();
-    await downloadS3ObjectToFile(s3, event.ProjectS3Uri, projectArchive);
-    logEvent({ event: "plan_stage", stage: "download", ms: Date.now() - stageStarted });
-    stageStarted = Date.now();
-    await untarDirectory(projectArchive, projectDir);
-    logEvent({ event: "plan_stage", stage: "untar", ms: Date.now() - stageStarted });
+    const { projectDir, remoteFiles } = await fetchProject(s3, event.ProjectS3Uri, work, true);
     const publisher = new S3PlanV2ArtifactPublisher({
       s3,
       planOutputS3Prefix: event.PlanOutputS3Prefix,
@@ -492,6 +508,7 @@ async function handlePlanV2(
     });
     const manifest: PlanV2Manifest = await primitive(projectDir, config, publisher, {
       stagingParentDir: work,
+      remoteFiles,
       chunksCarryAudio: true,
     });
 
@@ -828,15 +845,52 @@ async function downloadAndMaterializePlanV2(
     throwPlanHashMismatch(event.PlanHash, manifest.planHash);
   }
   const artifacts = listPlanV2ArtifactsForTarget(manifest, target);
+  const remoteSources = await presignDeferredSources(s3, event.PlanV2ArtifactS3Prefix, artifacts);
   const uniqueArtifacts = [
-    ...new Map(artifacts.map((artifact) => [artifact.sha256, artifact])).values(),
+    ...new Map(
+      artifacts
+        .filter((artifact) => !Object.hasOwn(remoteSources, artifact.path))
+        .map((artifact) => [artifact.sha256, artifact]),
+    ).values(),
   ];
   await mapConcurrent(uniqueArtifacts, 16, async (artifact) => {
     await downloadPlanV2Artifact(s3, event.PlanV2ArtifactS3Prefix, transportDir, artifact);
   });
   const planDir = join(work, "plan");
-  materializePlanV2Target(transportDir, target, planDir);
+  materializePlanV2Target(transportDir, target, planDir, { remoteSources });
   return { planDir, manifest };
+}
+
+/** Outlives the longest chunk (Lambda caps an invocation at 900 s) with margin. */
+const DEFERRED_SOURCE_URL_TTL_SECONDS = 3600;
+
+/**
+ * A chunk's ffmpeg reads a deferred video by byte range from a pre-signed URL
+ * instead of downloading it whole. The key is the content hash, written once.
+ */
+async function presignDeferredSources(
+  s3: S3Client,
+  artifactPrefix: string,
+  artifacts: readonly Readonly<PlanV2Artifact>[],
+): Promise<Record<string, string>> {
+  const entries = await Promise.all(
+    artifacts
+      .filter(isPlanV2DeferredSourceArtifact)
+      .map(
+        async (artifact) =>
+          [
+            artifact.path,
+            await presignVerifiedS3GetUrl(
+              s3,
+              planV2BlobUri(artifactPrefix, artifact.sha256),
+              artifact.sha256,
+              artifact.sizeBytes,
+              DEFERRED_SOURCE_URL_TTL_SECONDS,
+            ),
+          ] as const,
+      ),
+  );
+  return Object.fromEntries(entries);
 }
 
 async function downloadPlanV2Artifact(
@@ -867,30 +921,6 @@ function throwPlanHashMismatch(expected: string, actual: string): never {
   );
   error.name = "PLAN_HASH_MISMATCH";
   throw error;
-}
-
-async function mapConcurrent<T>(
-  values: readonly T[],
-  concurrency: number,
-  fn: (value: T) => Promise<void>,
-): Promise<void> {
-  let cursor = 0;
-  async function worker(): Promise<void> {
-    while (cursor < values.length) {
-      const index = cursor++;
-      await fn(values[index]!);
-    }
-  }
-  const results = await Promise.allSettled(
-    Array.from({ length: Math.min(concurrency, values.length) }, () => worker()),
-  );
-  const failure = results.find(
-    (result): result is PromiseRejectedResult => result.status === "rejected",
-  );
-  // Do not reject while sibling workers may still be writing into invocation
-  // scratch. The caller removes that directory in `finally`; draining the pool
-  // first prevents late S3 streams from racing cleanup after another GET fails.
-  if (failure) throw failure.reason;
 }
 
 async function downloadChunkObjects(
