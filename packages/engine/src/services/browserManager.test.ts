@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type { Browser, Page, PuppeteerNode } from "puppeteer-core";
 
 import type { CaptureMode } from "./browserLeasePool.js";
+import { managedChromeVersion } from "./chromeHostCeiling.js";
 
 import {
   _resetAutoBrowserGpuModeCacheForTests,
@@ -887,7 +888,7 @@ describe("resolveHeadlessShellPath", () => {
           ".cache",
           "puppeteer",
           "chrome-headless-shell",
-          "host-152.0.7928.2",
+          `host-${managedChromeVersion("linux", "24.0.0")}`,
         );
         const candidates = [
           ["chrome-headless-shell-linux64", "chrome-headless-shell"],
@@ -932,7 +933,7 @@ describe("resolveHeadlessShellPath", () => {
           ".cache",
           "puppeteer",
           "chrome-headless-shell",
-          "host-152.0.7928.2",
+          `host-${managedChromeVersion("linux", "24.0.0")}`,
         );
         for (const [directory, executable] of [
           ["chrome-headless-shell-linux64", "chrome-headless-shell"],
@@ -953,6 +954,96 @@ describe("resolveHeadlessShellPath", () => {
         });
 
         expect(stdout).toBe("");
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("never uses another tool's shell that does not start", () => {
+    // Field report: only mac_arm-121 in the shared cache, and that shell died at launch.
+    const home = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-shared-old-"));
+    try {
+      const old = join(home, ".cache", "puppeteer", "chrome-headless-shell", "linux-121.0.6167.85");
+      const binary = join(old, "chrome-headless-shell-linux64", "chrome-headless-shell");
+      mkdirSync(join(binary, ".."), { recursive: true });
+      writeFileSync(binary, "shell");
+      const env = { ...process.env, HOME: home, USERPROFILE: home };
+      delete env.PRODUCER_HEADLESS_SHELL_PATH;
+      delete env.HYPERFRAMES_BROWSER_PATH;
+
+      expect(resolveHeadlessShellInSubprocess(env, { platform: "linux", arch: "x64" })).toBe("");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers the managed build in the shared cache over an older build of ours", () => {
+    const home = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-shared-managed-"));
+    try {
+      const shell = (root: string, version: string) =>
+        join(
+          home,
+          ".cache",
+          ...root.split("/"),
+          `linux-${version}`,
+          "chrome-headless-shell-linux64",
+          "chrome-headless-shell",
+        );
+      const managed = shell(
+        "puppeteer/chrome-headless-shell",
+        managedChromeVersion("linux", "24.0.0"),
+      );
+      for (const binary of [
+        managed,
+        shell("puppeteer/chrome-headless-shell", "121.0.6167.85"),
+        shell("hyperframes/chrome/chrome-headless-shell", "150.0.7871.124"),
+      ]) {
+        mkdirSync(join(binary, ".."), { recursive: true });
+        writeFileSync(binary, "shell");
+      }
+      const env = { ...process.env, HOME: home, USERPROFILE: home };
+      delete env.PRODUCER_HEADLESS_SHELL_PATH;
+      delete env.HYPERFRAMES_BROWSER_PATH;
+
+      expect(resolveHeadlessShellInSubprocess(env, { platform: "linux", arch: "x64" })).toBe(
+        managed,
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  // Stand-in shells are shell scripts.
+  it.skipIf(process.platform === "win32")(
+    "keeps the newest shared shell that starts and skips one that dies",
+    () => {
+      const home = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-shared-starts-"));
+      try {
+        const shell = (version: string, script: string) => {
+          const binary = join(
+            home,
+            ".cache",
+            "puppeteer",
+            "chrome-headless-shell",
+            `linux-${version}`,
+            "chrome-headless-shell-linux64",
+            "chrome-headless-shell",
+          );
+          mkdirSync(join(binary, ".."), { recursive: true });
+          writeFileSync(binary, script, { mode: 0o755 });
+          return binary;
+        };
+        shell("149.0.7800.1", "#!/bin/sh\nkill -TRAP $$\n");
+        const working = shell("148.0.7778.97", "#!/bin/sh\nexit 0\n");
+        shell("99.0.6533.123", "#!/bin/sh\nexit 0\n");
+        const env = { ...process.env, HOME: home, USERPROFILE: home };
+        delete env.PRODUCER_HEADLESS_SHELL_PATH;
+        delete env.HYPERFRAMES_BROWSER_PATH;
+
+        expect(resolveHeadlessShellInSubprocess(env, { platform: "linux", arch: "x64" })).toBe(
+          working,
+        );
       } finally {
         rmSync(home, { recursive: true, force: true });
       }

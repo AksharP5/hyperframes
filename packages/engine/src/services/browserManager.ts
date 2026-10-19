@@ -12,7 +12,13 @@ import { execSync } from "child_process";
 import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import { chromeMajorCeiling, exceedsChromeCeiling } from "./chromeHostCeiling.js";
+import {
+  chromeMajorCeiling,
+  compareBrowserVersionsDescending,
+  exceedsChromeCeiling,
+  isManagedChromeDir,
+  pickSharedShell,
+} from "./chromeHostCeiling.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { getSystemTotalMb, LOW_MEMORY_TOTAL_MB_THRESHOLD } from "./systemMemory.js";
 import { describeWslGpuAccess, detectWsl, type WslHostFacts } from "./wslHost.js";
@@ -159,27 +165,6 @@ async function readWebGlInfo(browser: Browser): Promise<WebGlProbeInfo> {
 
 export type AcquiredBrowser = BrowserLease;
 
-function compareBrowserVersionsDescending(left: string, right: string): number {
-  const parse = (value: string): number[] => {
-    const version = value.slice(value.indexOf("-") + 1);
-    const segments: number[] = [];
-    for (const segment of version.split(".")) {
-      const parsed = Number.parseInt(segment, 10);
-      if (!Number.isFinite(parsed)) break;
-      segments.push(parsed);
-    }
-    return segments;
-  };
-  const leftSegments = parse(left);
-  const rightSegments = parse(right);
-  const length = Math.max(leftSegments.length, rightSegments.length);
-  for (let index = 0; index < length; index += 1) {
-    const difference = (rightSegments[index] ?? 0) - (leftSegments[index] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  return 0;
-}
-
 const CACHED_HEADLESS_SHELL_EXECUTABLES: Readonly<
   Record<string, readonly [directory: string, executable: string]>
 > = {
@@ -230,6 +215,31 @@ function findCachedHeadlessShell(baseDir: string): string | undefined {
   return undefined;
 }
 
+function findSharedHeadlessShell(baseDir: string): string | undefined {
+  const executable = cachedHeadlessShellExecutable();
+  if (!executable || !existsSync(baseDir)) return undefined;
+  try {
+    return pickSharedShell(readdirSync(baseDir), (version) => {
+      const binary = join(baseDir, version, ...executable);
+      return isNonEmptyFile(binary) ? binary : undefined;
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function findManagedHeadlessShell(baseDir: string): string | undefined {
+  const executable = cachedHeadlessShellExecutable();
+  if (!executable || !existsSync(baseDir)) return undefined;
+  try {
+    const version = readdirSync(baseDir).find(isManagedChromeDir);
+    const binary = version && join(baseDir, version, ...executable);
+    return binary && isNonEmptyFile(binary) ? binary : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Resolve chrome-headless-shell binary for deterministic BeginFrame rendering.
  * Checks config.chromePath, then PRODUCER_HEADLESS_SHELL_PATH env var,
@@ -261,11 +271,12 @@ export function resolveHeadlessShellPath(
     }
     return envPath;
   }
-  const home = homedir();
+  const ours = join(homedir(), ".cache", "hyperframes", "chrome", "chrome-headless-shell");
+  const shared = join(homedir(), ".cache", "puppeteer", "chrome-headless-shell");
   return (
-    findCachedHeadlessShell(
-      join(home, ".cache", "hyperframes", "chrome", "chrome-headless-shell"),
-    ) ?? findCachedHeadlessShell(join(home, ".cache", "puppeteer", "chrome-headless-shell"))
+    findManagedHeadlessShell(ours) ??
+    findSharedHeadlessShell(shared) ??
+    findCachedHeadlessShell(ours)
   );
 }
 
