@@ -19,9 +19,9 @@ import { mkdirWithinProject, realpath, realProjectRoot } from "./safePath.js";
  * project routes (U3/U4) to serve a `?hf-proxy=` request; never used on
  * the render path (render always sees the original file).
  *
- * A started ffmpeg child is never killed for one caller: every caller of a cache
- * key shares it (in-flight dedupe below). A caller's `signal` only detaches that
- * caller, and drops the copy while it is still queued with no caller left.
+ * Every caller of a cache key shares one ffmpeg child (in-flight dedupe below). A
+ * caller's `signal` detaches that caller; once no caller is left, the copy is
+ * dropped from the queue or its ffmpeg is killed.
  */
 
 export const PROXY_PARAMS_VERSION = "v5";
@@ -231,11 +231,12 @@ interface ProxyJob {
   callers: number;
   /** Set while the job waits for a slot. */
   queued?: { start: () => void; drop: () => void };
+  abandoned: AbortController;
 }
 
 class ProxyDroppedError extends ProxyTranscodeError {
   constructor() {
-    super("media proxy copy dropped: every caller left before it started", null, "");
+    super("media proxy copy dropped: every caller left", null, "");
     this.name = "ProxyDroppedError";
   }
 }
@@ -296,7 +297,13 @@ function prioritize(job: ProxyJob): void {
 
 function leave(job: ProxyJob): void {
   job.callers--;
-  if (job.callers === 0) job.queued?.drop();
+  if (job.callers > 0) return;
+  if (job.queued) {
+    job.queued.drop();
+    return;
+  }
+  forget(job);
+  job.abandoned.abort();
 }
 
 // --- per-key in-flight dedupe ----------------------------------------------
@@ -413,6 +420,7 @@ async function runFfmpeg(
   outputPath: string,
   variant: ProxyVariant,
   box: PreviewProxyBox | undefined,
+  signal: AbortSignal,
 ): Promise<void> {
   const metadata = await probeMediaMetadata(sourcePath);
   const ffmpegPath = findFfBinary("ffmpeg", { configuredMustExist: true });
@@ -493,10 +501,12 @@ async function runFfmpeg(
     // global transcode slots: the child is killed and the slot released via
     // the caller's finally. Generous because long assets transcode at
     // roughly real time; a healthy encode of any authoring asset fits.
+    signal.throwIfAborted();
     const proc = spawn(ffmpegPath, args, {
       stdio: ["ignore", "ignore", "pipe"],
       timeout: TRANSCODE_TIMEOUT_MS,
       killSignal: "SIGKILL",
+      signal,
       windowsHide: true,
     });
     let stderrTail = "";
@@ -504,6 +514,7 @@ async function runFfmpeg(
       stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_MAX_CHARS);
     });
     proc.on("error", (err) => {
+      if (signal.aborted) return;
       reject(new FfmpegUnavailableError(`failed to spawn ffmpeg: ${err.message}`, stderrTail));
     });
     proc.on("close", (code, signal) => {
@@ -547,7 +558,7 @@ async function transcodeToCache(
     mkdirWithinProject(projectDir, cacheDir);
     const tempPath = join(cacheDir, `.tmp-${randomUUID()}-${basename(cachePath)}`);
     try {
-      await runFfmpeg(absoluteSourcePath, tempPath, variant, box);
+      await runFfmpeg(absoluteSourcePath, tempPath, variant, box, job.abandoned.signal);
       renameSync(tempPath, cachePath);
       maintainProxyCache(cacheDir);
       return cachePath;
@@ -615,6 +626,7 @@ export async function resolveProxy(
       cachePath,
       priority: options.priority === true,
       callers: 0,
+      abandoned: new AbortController(),
     };
     const promise = transcodeToCache(
       job,
@@ -625,7 +637,9 @@ export async function resolveProxy(
       box,
     )
       .catch((err: unknown) => {
-        if (!(err instanceof ProxyDroppedError)) rememberFailure(cachePath, err);
+        if (!(err instanceof ProxyDroppedError) && !job.abandoned.signal.aborted) {
+          rememberFailure(cachePath, err);
+        }
         throw err;
       })
       .finally(() => {

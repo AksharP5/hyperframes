@@ -75,6 +75,8 @@ describe("injectMediaCodecMapIntoHtml pre-warm", () => {
       projectDir,
       resolve(projectDir, "videos/broll.mov"),
       "h264",
+      undefined,
+      { signal: undefined },
     );
     // Both entries still reach the client: the browser-side canPlayType check
     // owns whether a VP9 asset needs a proxy, and that contract is unchanged.

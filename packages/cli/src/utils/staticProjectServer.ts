@@ -208,6 +208,7 @@ async function serveProxyRequest(
   autoProxy: boolean,
   rangeHeader: string | undefined,
   res: ServerResponse,
+  signal: AbortSignal,
 ): Promise<void> {
   const contentType = getMimeType(filePath);
   if (!autoProxy || !contentType.startsWith("video/")) {
@@ -235,7 +236,7 @@ async function serveProxyRequest(
       return;
     }
     recordProxyRequest();
-    const proxyPath = await resolveProxy(projectDir, filePath, variant);
+    const proxyPath = await resolveProxy(projectDir, filePath, variant, undefined, { signal });
     // The await above can span a whole transcode; the client may be gone.
     if (res.writableEnded || res.destroyed) return;
     serveFileWithRange(proxyPath, rangeHeader, res, PROXY_VARIANT_CONFIG[variant].contentType);
@@ -260,7 +261,10 @@ export async function serveStaticProjectHtml(
   // this function inherit it in one place; computed once since `html` is
   // static for the lifetime of this server, not re-scanned per request.
   const autoProxy = resolveAutoProxy(projectDir, autoProxyOverride);
-  const servedHtml = autoProxy ? await injectMediaCodecMap(html, projectDir, [{ html }]) : html;
+  const copies = new AbortController();
+  const servedHtml = autoProxy
+    ? await injectMediaCodecMap(html, projectDir, [{ html }], undefined, true, copies.signal)
+    : html;
 
   // fallow-ignore-next-line complexity
   const server = createServer((req, res) => {
@@ -292,6 +296,7 @@ export async function serveStaticProjectHtml(
             autoProxy,
             req.headers.range,
             res,
+            copies.signal,
           );
         } else {
           serveFileWithRange(filePath, req.headers.range, res);
@@ -329,6 +334,7 @@ export async function serveStaticProjectHtml(
       url,
       port: 0,
       close: async () => {
+        copies.abort();
         inProcessAnswers.delete(new URL(url).origin);
       },
       answer,
@@ -340,6 +346,7 @@ export async function serveStaticProjectHtml(
     port,
     close: () =>
       new Promise<void>((resolveClose) => {
+        copies.abort();
         server.close(() => resolveClose());
       }),
   };

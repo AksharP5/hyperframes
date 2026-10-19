@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { EventEmitter } from "node:events";
+import { execFileSync, spawn as realSpawn, spawnSync, type ChildProcess } from "node:child_process";
+import { EventEmitter, once } from "node:events";
 import {
   existsSync,
   mkdtempSync,
@@ -59,7 +59,7 @@ function createFakeProc(): FakeProc {
   return proc;
 }
 
-type SpawnOptions = { windowsHide?: boolean };
+type SpawnOptions = { windowsHide?: boolean; signal?: AbortSignal };
 type SpawnCall = { command: string; args: string[]; options?: SpawnOptions; proc: FakeProc };
 type SpawnImpl = (command: string, args: string[], options?: SpawnOptions) => FakeProc;
 
@@ -821,7 +821,7 @@ describe("resolveProxy", () => {
       await thumb;
     });
 
-    it("lets a caller leave a started copy without stopping it", async () => {
+    it("stops a started copy once its last caller leaves, and starts afresh on the next ask", async () => {
       const { calls, resolveProxy, projectDir } = await oneSlot();
       const clip = clips(projectDir, ["running"]);
 
@@ -829,11 +829,51 @@ describe("resolveProxy", () => {
         resolveProxy(projectDir, clip.running!, "h264", undefined, { signal }),
       );
 
-      succeed(calls[0]!);
+      expect(calls[0]!.options?.signal?.aborted).toBe(true);
+      calls[0]!.proc.emit("close", null, "SIGKILL");
       await flush(12);
-      await expect(resolveProxy(projectDir, clip.running!)).resolves.toBeTruthy();
+      const again = resolveProxy(projectDir, clip.running!);
+      await flush();
+      expect(calls).toHaveLength(2);
+      succeed(calls[1]!);
+      await expect(again).resolves.toBeTruthy();
+    });
+
+    it("keeps a started copy while a caller without a signal still waits", async () => {
+      const { calls, resolveProxy, projectDir } = await oneSlot();
+      const clip = clips(projectDir, ["running"]);
+      const kept = resolveProxy(projectDir, clip.running!);
+
+      await askThenLeave((signal) =>
+        resolveProxy(projectDir, clip.running!, "h264", undefined, { signal }),
+      );
+
+      expect(calls[0]!.options?.signal?.aborted).not.toBe(true);
+      succeed(calls[0]!);
+      await expect(kept).resolves.toBeTruthy();
       expect(calls).toHaveLength(1);
     });
+
+    it.skipIf(process.platform === "win32")(
+      "kills the running ffmpeg when its last caller leaves",
+      async () => {
+        let child: ChildProcess | undefined;
+        const neverFinishes = (_command: string, _args: string[], options?: SpawnOptions) => {
+          child = realSpawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], options);
+          return child as unknown as FakeProc;
+        };
+        const { resolveProxy } = await loadModule(neverFinishes, FFMPEG_PATH);
+        const projectDir = tmpProject();
+        const clip = clips(projectDir, ["running"]);
+
+        await askThenLeave((signal) =>
+          resolveProxy(projectDir, clip.running!, "h264", undefined, { signal }),
+        );
+
+        const [, exitSignal] = child!.exitCode === null ? await once(child!, "exit") : [];
+        expect(exitSignal).toBe("SIGKILL");
+      },
+    );
   });
 
   it("honors bounded concurrency and queue environment overrides", async () => {
