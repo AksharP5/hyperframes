@@ -85,7 +85,7 @@ import {
   type PlanVideosJson,
   readFfmpegVersion,
 } from "./shared.js";
-import { chunkAudioSource, muxChunkWithAudio } from "./chunkAudio.js";
+import { chunkAudioSource, chunksWithSubRange, muxChunkWithAudio } from "./chunkAudio.js";
 import { DISTRIBUTED_RENDER_CAPABILITIES, readPlanProtocolV1 } from "./planProtocol.js";
 import { readValidatedPlanV2Materialization } from "./planV2.js";
 import {
@@ -95,6 +95,7 @@ import {
   MISSING_PLAN_ARTIFACT,
   PLAN_HASH_MISMATCH,
   FFMPEG_VERSION_MISMATCH,
+  CHUNK_FRAME_RANGE_INVALID,
   CHUNK_INDEX_OUT_OF_RANGE,
   MISSING_RUNTIME_ENV_SNAPSHOT,
   rebuildExtractedFramesFromPlanDir,
@@ -102,6 +103,7 @@ import {
 } from "./chunkFrames.js";
 
 export {
+  CHUNK_FRAME_RANGE_INVALID,
   CHUNK_INDEX_OUT_OF_RANGE,
   createChunkVideoFrameInjectorFactory,
   extractDeferredVideoFramesForChunk,
@@ -140,6 +142,7 @@ export interface ChunkResult {
   /** `"file"` for mp4/mov; `"frame-dir"` for png-sequence. */
   outputKind: "file" | "frame-dir";
   framesEncoded: number;
+  frameRange?: ChunkFrameRange;
   sha256: string;
   durationMs: number;
   /**
@@ -182,6 +185,49 @@ export interface ChunkResult {
 /** Result returned by the built-in renderer, which always observes its mode. */
 export interface EffectiveChunkResult extends ChunkResult {
   captureMode: CaptureMode;
+  frameRange: ChunkFrameRange;
+}
+
+/** Absolute composition frame indices, end exclusive, like a chunk's slice. */
+export interface ChunkFrameRange {
+  startFrame: number;
+  endFrame: number;
+}
+
+export interface RenderChunkOptions {
+  /**
+   * Render only these frames of the chunk, e.g. to retry a slow chunk as
+   * parts rendered in parallel. Must be a non-empty range inside the chunk's
+   * slice. Each part is a self-contained output (its own IDR keyframe, frame
+   * names from zero, the audio packets it owns); pass the parts of a chunk,
+   * in order, as one `chunkPaths` entry to `assemble`. Omitted renders the
+   * whole slice.
+   */
+  frameRange?: ChunkFrameRange;
+}
+
+/** The frames a chunk renders: its slice, or a validated sub-range of it. */
+export function resolveChunkFrameRange(
+  slice: ChunkSliceJson,
+  chunkIndex: number,
+  frameRange: ChunkFrameRange | undefined,
+): ChunkFrameRange {
+  if (frameRange === undefined) return { startFrame: slice.startFrame, endFrame: slice.endFrame };
+  const { startFrame, endFrame } = frameRange;
+  if (
+    !Number.isSafeInteger(startFrame) ||
+    !Number.isSafeInteger(endFrame) ||
+    startFrame < slice.startFrame ||
+    endFrame > slice.endFrame ||
+    endFrame <= startFrame
+  ) {
+    throw new RenderChunkValidationError(
+      CHUNK_FRAME_RANGE_INVALID,
+      `[renderChunk] frameRange ${JSON.stringify(frameRange)} must be a non-empty integer range ` +
+        `inside chunk ${chunkIndex}'s slice [${slice.startFrame}, ${slice.endFrame})`,
+    );
+  }
+  return { startFrame, endFrame };
 }
 
 /** Compatibility-safe adapter seam for built-in or injected chunk renderers. */
@@ -398,6 +444,7 @@ export async function renderChunk(
   planDir: string,
   chunkIndex: number,
   outputChunkPath: string,
+  options?: RenderChunkOptions,
 ): Promise<EffectiveChunkResult> {
   const start = Date.now();
   const log = defaultLogger;
@@ -460,13 +507,17 @@ export async function renderChunk(
   if (slice === undefined) {
     throw new RenderChunkValidationError(CHUNK_INDEX_OUT_OF_RANGE, "[renderChunk] missing slice");
   }
-  const framesInChunk = slice.endFrame - slice.startFrame;
-  if (framesInChunk <= 0) {
+  const sliceFrames = slice.endFrame - slice.startFrame;
+  if (sliceFrames <= 0) {
     throw new RenderChunkValidationError(
       CHUNK_INDEX_OUT_OF_RANGE,
-      `[renderChunk] chunk ${chunkIndex} has non-positive frame count: ${framesInChunk}`,
+      `[renderChunk] chunk ${chunkIndex} has non-positive frame count: ${sliceFrames}`,
     );
   }
+  // Every frame-bound below (capture, video frames, GOP, audio packets, perf)
+  // reads `range`, so a sub-range renders exactly as a chunk of its own would.
+  const range = resolveChunkFrameRange(slice, chunkIndex, options?.frameRange);
+  const framesInChunk = range.endFrame - range.startFrame;
 
   const compiledDir = join(planDir, "compiled");
   if (!existsSync(compiledDir)) {
@@ -580,10 +631,7 @@ export async function renderChunk(
       ? await extractDeferredVideoFramesForChunk({
           planDir,
           planVideos,
-          frames: Array.from(
-            { length: slice.endFrame - slice.startFrame },
-            (_, i) => slice.startFrame + i,
-          ),
+          frames: Array.from({ length: framesInChunk }, (_, i) => range.startFrame + i),
           fps: { num: plan.dimensions.fpsNum, den: plan.dimensions.fpsDen },
           outputRoot: videoFramesDir,
           cfg,
@@ -792,7 +840,7 @@ export async function renderChunk(
             createRenderVideoFrameInjector: createChunkVideoFrameInjector,
             abortSignal: undefined,
             assertNotAborted: () => {},
-            frameRange: { startFrame: slice.startFrame, endFrame: slice.endFrame },
+            frameRange: range,
           });
 
           const observedModes = new Set(capturePerfs.map((perf) => perf.captureMode));
@@ -907,12 +955,16 @@ export async function renderChunk(
       });
       if (encoder.chunksCarryAudio) {
         const audioScratchPath = `${outputChunkPath}.audio.m4a`;
+        // A sub-range muxes the packets it owns as if it were a chunk of its own.
+        const audioChunks = options?.frameRange
+          ? chunksWithSubRange(chunks, chunkIndex, range)
+          : { chunks, index: chunkIndex };
         await muxChunkWithAudio({
           videoPath: videoOnlyPath,
           audioPath: chunkAudioSource(planDir, chunkIndex, audioScratchPath),
           outputPath: outputChunkPath,
-          chunks,
-          chunkIndex,
+          chunks: audioChunks.chunks,
+          chunkIndex: audioChunks.index,
           fps: { num: plan.dimensions.fpsNum, den: plan.dimensions.fpsDen },
           timeoutMs: cfg.ffmpegProcessTimeout,
         });
@@ -947,8 +999,8 @@ export async function renderChunk(
     const perfPayload = {
       planHash: plan.planHash,
       chunkIndex,
-      startFrame: slice.startFrame,
-      endFrame: slice.endFrame,
+      startFrame: range.startFrame,
+      endFrame: range.endFrame,
       framesEncoded,
       durationMs,
       planHashMs,
@@ -980,6 +1032,7 @@ export async function renderChunk(
       outputPath: outputChunkPath,
       outputKind,
       framesEncoded,
+      frameRange: range,
       sha256,
       durationMs,
       planHashMs,

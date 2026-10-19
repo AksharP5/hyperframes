@@ -83,6 +83,8 @@ interface PlanJsonForAssemble {
   };
 }
 
+export type AssembleChunkPaths = readonly (string | readonly string[])[];
+
 type CfrRateControlSource = Partial<Pick<LockedRenderConfig, "quality" | "crf" | "bitrate">>;
 
 export function cfrRateControlArgs(locked: CfrRateControlSource): string[] {
@@ -99,7 +101,8 @@ export function cfrRateControlArgs(locked: CfrRateControlSource): string[] {
  * @param planDir — absolute path to the planDir produced by `plan()`.
  * @param chunkPaths — ordered chunk outputs, length === `chunks.json` length.
  *   For mp4/mov each entry is a path to an encoded chunk file; for
- *   png-sequence each entry is a path to a directory of frames.
+ *   png-sequence each entry is a path to a directory of frames. An entry
+ *   may instead be the ordered parts of that chunk (see {@link AssembleChunkPaths}).
  * @param audioPath — `<planDir>/<MIXED_AUDIO_FILENAME>` for mux'd formats. Pass `null`
  *   when the composition has no audio (or `assemble` is being called for a
  *   format whose audio is muxed elsewhere). `assemble` always normalizes
@@ -110,7 +113,7 @@ export function cfrRateControlArgs(locked: CfrRateControlSource): string[] {
  */
 export async function assemble(
   planDir: string,
-  chunkPaths: readonly string[],
+  chunkOutputs: AssembleChunkPaths,
   audioPath: string | null,
   outputPath: string,
   options?: {
@@ -136,7 +139,8 @@ export async function assemble(
   const log = options?.logger ?? defaultLogger;
   const cfr = options?.cfr === true;
 
-  const plan = readAssemblePlan(planDir, chunkPaths);
+  const plan = readAssemblePlan(planDir, chunkOutputs);
+  const chunkPaths = chunkOutputs.flat();
   if (plan.dimensions.format === "png-sequence") {
     // ── 2a. png-sequence: merge frame directories with global re-numbering
     return mergePngFrameDirs(chunkPaths, outputPath, plan.totalFrames, audioPath, start);
@@ -208,7 +212,7 @@ export async function assemble(
   };
 }
 
-function readAssemblePlan(planDir: string, chunkPaths: readonly string[]): PlanJsonForAssemble {
+function readAssemblePlan(planDir: string, chunkPaths: AssembleChunkPaths): PlanJsonForAssemble {
   // ── 1. Validate planDir manifest matches chunkPaths shape ──────────────
   const planJsonPath = join(planDir, "plan.json");
   const chunksJsonPath = join(planDir, "meta", "chunks.json");
@@ -229,7 +233,12 @@ function readAssemblePlan(planDir: string, chunkPaths: readonly string[]): PlanJ
         `per chunk, ordered by index.`,
     );
   }
-  for (const path of chunkPaths) {
+  for (const [index, entry] of chunkPaths.entries()) {
+    if (typeof entry !== "string" && entry.length === 0) {
+      throw new Error(`[assemble] chunk ${index} has an empty list of parts`);
+    }
+  }
+  for (const path of chunkPaths.flat()) {
     if (!existsSync(path)) {
       throw new Error(`[assemble] chunk path does not exist: ${path}`);
     }

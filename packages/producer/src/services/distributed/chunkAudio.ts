@@ -57,6 +57,24 @@ export function audioCutForChunk(
   return { seekSeconds, durationSeconds, firstPacket: first, packetCount: end - first };
 }
 
+/** Chunk `index` split around `range`, so `audioCutForChunk` treats `range` as a chunk. */
+export function chunksWithSubRange(
+  chunks: readonly ChunkSliceJson[],
+  index: number,
+  range: { startFrame: number; endFrame: number },
+): { chunks: ChunkSliceJson[]; index: number } {
+  const slice = chunks[index]!;
+  const parts = [
+    { startFrame: slice.startFrame, endFrame: range.startFrame },
+    range,
+    { startFrame: range.endFrame, endFrame: slice.endFrame },
+  ].filter((part) => part.endFrame > part.startFrame);
+  const split = [...chunks.slice(0, index), ...parts, ...chunks.slice(index + 1)].map(
+    (chunk, i) => ({ index: i, startFrame: chunk.startFrame, endFrame: chunk.endFrame }),
+  );
+  return { chunks: split, index: range.startFrame > slice.startFrame ? index + 1 : index };
+}
+
 interface FfprobeAudioGrid {
   streams?: { sample_rate?: string; time_base?: string; nb_frames?: string }[];
   packets?: { pts?: number; duration?: number }[];

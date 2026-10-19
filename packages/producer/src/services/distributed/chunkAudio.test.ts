@@ -7,6 +7,7 @@ import { assemble } from "./assemble.js";
 import {
   audioCutForChunk,
   chunkAudioSource,
+  chunksWithSubRange,
   muxChunkWithAudio,
   writeChunkAudioSlices,
 } from "./chunkAudio.js";
@@ -37,6 +38,49 @@ describe("audioCutForChunk", () => {
         packetCount: 188,
       },
     ]);
+  });
+});
+
+describe("chunksWithSubRange", () => {
+  const grid = { sampleRate: 48000, firstStart: -1024, packetSamples: 1024, packetCount: 564 };
+  const chunks = [0, 120, 240].map((startFrame, index) => ({
+    index,
+    startFrame,
+    endFrame: startFrame + 120,
+  }));
+  const packetsOf = (list: typeof chunks, index: number) => {
+    const cut = audioCutForChunk(grid, list, index, FPS);
+    return cut ? [cut.firstPacket, cut.firstPacket + cut.packetCount] : null;
+  };
+
+  it("splits only the chunk, and the range is a chunk of its own", () => {
+    expect(chunksWithSubRange(chunks, 1, { startFrame: 150, endFrame: 200 })).toEqual({
+      chunks: [
+        { index: 0, startFrame: 0, endFrame: 120 },
+        { index: 1, startFrame: 120, endFrame: 150 },
+        { index: 2, startFrame: 150, endFrame: 200 },
+        { index: 3, startFrame: 200, endFrame: 240 },
+        { index: 4, startFrame: 240, endFrame: 360 },
+      ],
+      index: 2,
+    });
+    expect(chunksWithSubRange(chunks, 1, { startFrame: 120, endFrame: 240 })).toEqual({
+      chunks,
+      index: 1,
+    });
+  });
+
+  it.each([0, 1, 2])("gives chunk %i's parts its packets, each once and in order", (index) => {
+    const slice = chunks[index]!;
+    const edges = [slice.startFrame, slice.startFrame + 7, slice.startFrame + 61, slice.endFrame];
+    const parts = edges.slice(1).map((endFrame, i) => {
+      const split = chunksWithSubRange(chunks, index, { startFrame: edges[i]!, endFrame });
+      return packetsOf(split.chunks, split.index);
+    });
+    const owned = parts.filter((part) => part !== null);
+    expect(owned[0]![0]).toBe(packetsOf(chunks, index)![0]);
+    expect(owned.at(-1)![1]).toBe(packetsOf(chunks, index)![1]);
+    for (let i = 1; i < owned.length; i++) expect(owned[i]![0]).toBe(owned[i - 1]![1]);
   });
 });
 
@@ -195,4 +239,110 @@ describe.skipIf(!hasFfmpeg)("chunks that carry their audio", () => {
     },
     60_000,
   );
+
+  // Chunks 0 and 1 rendered as parts (chunk 0's first part keeps the priming), chunk 2 whole.
+  it("chunks rendered as frame sub-ranges assemble into the same audio and joined frames", async () => {
+    const totalFrames = 91;
+    const CHUNKS = [0, 47, 90].map((startFrame, index) => ({
+      index,
+      startFrame,
+      endFrame: [47, 90, 91][index]!,
+    }));
+    const PARTS = [
+      [0, 20, 47],
+      [47, 60, 90],
+      [90, 91],
+    ];
+    const dir = join(root, "parts");
+    mkdirSync(dir, { recursive: true });
+    const audioPath = join(dir, "audio.m4a");
+    ffmpeg(
+      `-f lavfi -i aevalsrc=0.4*sin(2*PI*(220+40*t)*t):s=48000:d=${totalFrames / 30} -c:a aac -b:a 192k -y`
+        .split(" ")
+        .concat(audioPath),
+    );
+    const planDir = join(dir, "plan");
+    mkdirSync(join(planDir, "meta"), { recursive: true });
+    writeFileSync(
+      join(planDir, "plan.json"),
+      JSON.stringify({
+        planHash: "fake",
+        totalFrames,
+        hasAudio: true,
+        dimensions: { fpsNum: 30, fpsDen: 1, width: 160, height: 120, format: "mp4" },
+      }),
+    );
+    writeFileSync(join(planDir, "meta", "chunks.json"), JSON.stringify(CHUNKS));
+    const slicedPlanDir = join(dir, "sliced-plan");
+    await writeChunkAudioSlices({ audioPath, planDir: slicedPlanDir, chunks: CHUNKS, fps: FPS });
+
+    // Encode and mux one frame range of chunk `index`, as renderChunk does with `frameRange`.
+    const renderRange = async (index: number, startFrame: number, endFrame: number) => {
+      const name = `${index}-${startFrame}-${endFrame}`;
+      const videoPath = join(dir, `video-${name}.mp4`);
+      const n = String(endFrame - startFrame);
+      ffmpeg(
+        `-f lavfi -i testsrc2=size=160x120:rate=30,trim=start_frame=${startFrame}:end_frame=${endFrame} -c:v libx264 -preset veryfast -g ${n} -keyint_min ${n} -sc_threshold 0 -bf 0 -x264-params scenecut=0:open-gop=0:repeat-headers=1 -pix_fmt yuv420p -avoid_negative_ts make_zero -y`
+          .split(" ")
+          .concat(videoPath),
+      );
+      const chunkPath = join(dir, `chunk-${name}.mp4`);
+      const split = chunksWithSubRange(CHUNKS, index, { startFrame, endFrame });
+      await muxChunkWithAudio({
+        videoPath,
+        audioPath: chunkAudioSource(slicedPlanDir, index, join(dir, "rebuilt.m4a")),
+        outputPath: chunkPath,
+        chunks: split.chunks,
+        chunkIndex: split.index,
+        fps: FPS,
+        timeoutMs: 60_000,
+      });
+      return { videoPath, chunkPath };
+    };
+    const wholes = await Promise.all(
+      CHUNKS.map((slice) => renderRange(slice.index, slice.startFrame, slice.endFrame)),
+    );
+    const parts = await Promise.all(
+      PARTS.map((edges, index) =>
+        Promise.all(edges.slice(1).map((end, i) => renderRange(index, edges[i]!, end))),
+      ),
+    );
+
+    writeFileSync(
+      join(planDir, "meta", "encoder.json"),
+      JSON.stringify({ chunksCarryAudio: true }),
+    );
+    const fromWholes = join(dir, "from-wholes.mp4");
+    const fromParts = join(dir, "from-parts.mp4");
+    await assemble(
+      planDir,
+      wholes.map((whole) => whole.chunkPath),
+      audioPath,
+      fromWholes,
+    );
+    await assemble(
+      planDir,
+      parts.map((chunk) => chunk.map((part) => part.chunkPath)),
+      audioPath,
+      fromParts,
+    );
+    // The parts carry the same audio packets the whole chunks do, so the audio is unchanged.
+    expect(pcm(fromParts) === pcm(fromWholes)).toBe(true);
+    const audioPacketsOf = (path: string) =>
+      streams(path).find((stream) => stream.codec_type === "audio")!.nb_read_packets;
+    expect(audioPacketsOf(fromParts)).toBe(audioPacketsOf(fromWholes));
+    expect(audioPacketsOf(fromParts)).toBe(audioPacketsOf(audioPath));
+
+    // Frames are the parts' own frames in order: today's video-only join of the same encodes.
+    const videoOnly = join(dir, "parts-video-only.mp4");
+    writeFileSync(join(planDir, "meta", "encoder.json"), "{}");
+    await assemble(
+      planDir,
+      parts.map((chunk) => chunk.map((part) => part.videoPath)),
+      audioPath,
+      videoOnly,
+    );
+    expect(frames(fromParts)).toEqual(frames(videoOnly));
+    expect(frames(fromParts)).toHaveLength(totalFrames);
+  }, 60_000);
 });
