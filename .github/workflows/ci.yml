@@ -330,6 +330,7 @@ jobs:
       - run: bash scripts/ci/install-workspace-dependencies.sh
       - run: bun run build
       - run: bun run verify:packed-manifests
+      - run: bun run check:cli-lazy-deps
       - name: Share the built CLI with the edit accuracy shards
         if: needs.changes.outputs.edit_accuracy == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

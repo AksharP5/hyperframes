@@ -83,7 +83,6 @@
         "open": "^10.0.0",
         "postcss": "^8.5.8",
         "puppeteer-core": "^25.10.0",
-        "sharp": "^0.35.0",
         "yauzl": "^3.4.0",
       },
       "devDependencies": {
@@ -110,6 +109,9 @@
         "tsx": "^4.0.0",
         "typescript": "^5.0.0",
         "vitest": "^4.1.11",
+      },
+      "optionalDependencies": {
+        "sharp": "^0.35.0",
       },
     },
     "packages/core": {
@@ -403,7 +405,6 @@
         "linkedom": "^0.18.12",
         "postcss": "^8.5.8",
         "postcss-selector-parser": "^7.1.2",
-        "sharp": "^0.35.0",
       },
       "devDependencies": {
         "@types/node": "^25.0.10",
@@ -411,6 +412,9 @@
         "tsx": "^4.21.0",
         "typescript": "^5.0.0",
         "vitest": "^4.1.11",
+      },
+      "optionalDependencies": {
+        "sharp": "^0.35.0",
       },
     },
   },

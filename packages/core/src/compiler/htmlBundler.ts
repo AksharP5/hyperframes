@@ -41,7 +41,6 @@ import {
   splitUrlSuffix,
 } from "@hyperframes/parsers/asset-paths";
 import { CSS_URL_RE, isNonRelativeUrl } from "./assetPaths.js";
-import { transform } from "esbuild";
 import { compileHtml, type MediaDurationProber } from "./htmlCompiler";
 import {
   RUNTIME_BOOTSTRAP_ATTR,
@@ -833,6 +832,7 @@ async function stripJsCommentsParserSafe(
   provenance?: BundleOptions["scriptProvenance"],
 ): Promise<string> {
   if (!source) return source;
+  const { transform } = await import("esbuild");
   try {
     const result = await transform(source, {
       loader: "js",

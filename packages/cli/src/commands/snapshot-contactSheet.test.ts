@@ -81,7 +81,7 @@ describe("snapshot contact sheet failures", () => {
 
   afterEach(() => {
     vi.doUnmock("../capture/contactSheet.js");
-    vi.doUnmock("sharp");
+    vi.doUnmock("../utils/optionalPackages.js");
     vi.restoreAllMocks();
     rmSync(project, { recursive: true, force: true });
   });
@@ -97,8 +97,9 @@ describe("snapshot contact sheet failures", () => {
         throw new Error(message);
       });
       if (failure === "import") {
-        vi.doMock("sharp", () => ({
-          get default() {
+        vi.doMock("../utils/optionalPackages.js", async (importOriginal) => ({
+          ...(await importOriginal<typeof import("../utils/optionalPackages.js")>()),
+          loadSharp: async () => {
             throw new Error(message);
           },
         }));
@@ -191,6 +192,49 @@ describe("snapshot contact sheet failures", () => {
     } finally {
       historyDeps.ownerWaitMs = previousWait;
       await held.close();
+    }
+  });
+
+  it("describes frames without resizing when sharp is absent and installs are off", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("HYPERFRAMES_NO_OPTIONAL_INSTALL", "sharp");
+    const generateContent = vi.fn(async (_request: unknown) => ({ text: "a described frame" }));
+    const loadSharp = vi.fn(async () => {
+      throw new Error(
+        "sharp is not installed, and HYPERFRAMES_NO_OPTIONAL_INSTALL turns off installing it",
+      );
+    });
+    vi.doMock("../utils/optionalPackages.js", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../utils/optionalPackages.js")>()),
+      loadInstalledSharp: () => null,
+      loadSharp,
+      loadOptionalPackage: async () => ({
+        GoogleGenAI: class {
+          models = { generateContent };
+        },
+      }),
+    }));
+    const { default: command } = await import("./snapshot.js");
+
+    try {
+      await runCommand(command, {
+        rawArgs: [
+          project,
+          ...["--at", "0.5,1", "--no-end", "--describe", "true"],
+          ...["--output", join(project, "snapshots")],
+        ],
+      });
+
+      expect(generateContent).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(generateContent.mock.calls[0]?.[0])).toContain(
+        '"mimeType":"image/png"',
+      );
+      expect(readFileSync(join(project, "snapshots", "descriptions.md"), "utf8")).toContain(
+        "a described frame",
+      );
+      expect(loadSharp).not.toHaveBeenCalledWith("--describe");
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 });

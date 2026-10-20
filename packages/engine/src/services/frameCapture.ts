@@ -9,7 +9,6 @@
  */
 
 import {
-  CDPSession,
   type Browser,
   type Page,
   type Protocol,
@@ -1421,6 +1420,7 @@ async function constructCaptureSession(
   // Cap the existing session's inspection buffer; new sessions have separate buffers.
   const frame = page.mainFrame();
   // Frame.client is runtime-only, so keep capture working when it is absent.
+  const { CDPSession } = await import("puppeteer-core");
   if ("client" in frame && frame.client instanceof CDPSession) {
     await frame.client.send("Network.enable", {
       maxTotalBufferSize: 32 * 1024 * 1024,

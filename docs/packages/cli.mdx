@@ -442,7 +442,10 @@ after that. Peak inference RAM is about 1.5 GB.
 `--device auto` picks CoreML on Apple Silicon, CUDA where available, CPU
 otherwise. The first run installs the CPU build of `onnxruntime-node` into
 `~/.cache/hyperframes/optional/` (one line on stderr, once, no prompt); for CUDA, set
-`HYPERFRAMES_CUDA=1` and supply a GPU-enabled build.
+`HYPERFRAMES_CUDA=1` and supply a GPU-enabled build. With
+`HYPERFRAMES_NO_OPTIONAL_INSTALL=1` the CLI installs nothing on first use (this
+package, `@google/genai`, or a missing `sharp`) and the command fails, naming the package;
+a comma-separated list such as `HYPERFRAMES_NO_OPTIONAL_INSTALL=sharp` turns off only those.
 
 <Tip>
   Chrome's `<video>` only honours the alpha plane when the WebM is `yuva420p` with

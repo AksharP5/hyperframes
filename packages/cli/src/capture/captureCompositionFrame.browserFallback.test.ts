@@ -18,7 +18,10 @@ vi.mock("../browser/manager.js", () => ({
   findSystemBrowser: mocks.findSystemBrowser,
 }));
 
-vi.mock("puppeteer-core", () => ({ default: { launch: mocks.launch } }));
+vi.mock("puppeteer-core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("puppeteer-core")>()),
+  default: { launch: mocks.launch },
+}));
 
 // captureCompositionFrame.js imports these two from ../browser/gpuPolicy.js,
 // which re-exports them from this mocked module — unmocked here, they'd read

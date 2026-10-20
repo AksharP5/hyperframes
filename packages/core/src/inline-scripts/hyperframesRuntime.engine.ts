@@ -1,5 +1,5 @@
-import { buildSync } from "esbuild";
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +31,7 @@ export function buildHyperframesRuntimeScript(
   const entryPath = resolve(dirname(fileURLToPath(import.meta.url)), "../runtime/entry.ts");
   if (!existsSync(entryPath)) return null;
 
+  const { buildSync } = createRequire(import.meta.url)("esbuild") as typeof import("esbuild");
   const result = buildSync({
     entryPoints: [entryPath],
     bundle: true,

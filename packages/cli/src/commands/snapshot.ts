@@ -57,7 +57,7 @@ import { runCancellableProcess } from "../utils/cancellableProcess.js";
 import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg.js";
 import { parseAngle, type Camera } from "./motionShotLayout.js";
 import type { Example } from "./_examples.js";
-import { loadOptionalPackage } from "../utils/optionalPackages.js";
+import { loadInstalledSharp, loadOptionalPackage } from "../utils/optionalPackages.js";
 import { resolveLocalBrowserGpuMode, type BrowserGpuMode } from "../browser/gpuPolicy.js";
 
 // Runs IN THE BROWSER (serialized into page.evaluate). Tilt the whole stage so
@@ -1248,17 +1248,13 @@ export default defineCommand({
               ];
 
               // Scale down PNGs before sending to stay under Gemini's 4 MB inline
-              // limit. Full 1920×1080 PNGs are typically 3-6 MB. Use sharp if
-              // available; otherwise skip files over the limit.
-              type SharpFn = (buf: Buffer) => {
-                resize: (w: number) => { jpeg: () => { toBuffer: () => Promise<Buffer> } };
-              };
-              let sharpFn: SharpFn | null = null;
+              // limit. Full 1920×1080 PNGs are typically 3-6 MB. Use sharp if it is
+              // already there (never installed for this); otherwise skip files over the limit.
+              let sharp: ReturnType<typeof loadInstalledSharp> = null;
               try {
-                const s = await import("sharp");
-                sharpFn = (s.default ?? s) as unknown as SharpFn;
+                sharp = loadInstalledSharp("--describe");
               } catch {
-                /* sharp not installed — fall back to size check */
+                /* a copy that cannot load — fall back to size check */
               }
 
               const results = await Promise.allSettled(
@@ -1269,8 +1265,8 @@ export default defineCommand({
                   const raw = readFileSync(filePath);
                   let imageData: Buffer;
                   let mimeType = "image/png";
-                  if (sharpFn) {
-                    imageData = await sharpFn(raw).resize(960).jpeg().toBuffer();
+                  if (sharp) {
+                    imageData = await sharp(raw).resize(960).jpeg().toBuffer();
                     mimeType = "image/jpeg";
                   } else {
                     if (raw.length > 3_800_000)

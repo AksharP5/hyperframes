@@ -5,8 +5,9 @@
  * Saves 50-65% tokens vs. AI agents reading images individually.
  */
 
-import sharp, { type OverlayOptions } from "sharp";
+import type { OverlayOptions } from "sharp";
 import { readdirSync, readFileSync, unlinkSync, existsSync } from "node:fs";
+import { loadSharp } from "../utils/optionalPackages.js";
 import { writeCaptureFileSync } from "./captureFile.js";
 import { join, extname, basename, dirname } from "node:path";
 
@@ -46,6 +47,7 @@ export async function createContactSheet(
 
   const files = imagePaths.slice(0, maxImages);
   if (files.length === 0) return null;
+  const sharp = await loadSharp("contact sheets");
 
   // Read first image to determine aspect ratio
   const firstMeta = await sharp(files[0]!).metadata();
@@ -306,6 +308,7 @@ export async function createSvgContactSheet(
   }
 
   if (svgPaths.length === 0) return [];
+  const sharp = await loadSharp("contact sheets");
 
   const svgFileNames = svgPaths.map((p) => p.split("/").pop()!);
 

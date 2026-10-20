@@ -125,6 +125,8 @@ export interface StudioApiAdapter {
   getProjectSignature?: (projectDir: string) => string;
   invalidateProjectSignature?: (projectDir: string) => void;
 
+  loadSharp?: () => Promise<typeof import("sharp").default>;
+
   /** Lint a single HTML string. */
   lint(
     html: string,

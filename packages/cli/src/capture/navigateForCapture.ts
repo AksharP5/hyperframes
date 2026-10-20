@@ -1,4 +1,4 @@
-import { TimeoutError, type CDPSession, type HTTPResponse, type Page } from "puppeteer-core";
+import type { CDPSession, HTTPResponse, Page } from "puppeteer-core";
 import {
   isDegradableEvaluateTimeoutError,
   isNavigationTimeoutError,
@@ -140,6 +140,7 @@ export async function gotoWhenSent(
   timeoutMs: number,
   coldChromeFirstRequestTimeoutMs = PUPPETEER_LAUNCH_DEFAULT_TIMEOUT_MS,
 ): Promise<HTTPResponse | null> {
+  const { TimeoutError } = await import("puppeteer-core");
   const cdp = await page.createCDPSession();
   try {
     await cdp.send("Network.enable");

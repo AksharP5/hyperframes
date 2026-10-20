@@ -83,6 +83,7 @@ import {
   type BrowserGpuMode,
   type ResolvedBrowserGpuMode,
 } from "../browser/gpuPolicy.js";
+import { loadSharpInBackground } from "../utils/optionalPackages.js";
 
 const STUDIO_MANUAL_EDITS_PATH = ".hyperframes/studio-manual-edits.json";
 
@@ -490,6 +491,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
 
   const adapter: PreviewApiAdapter = {
     history: () => projectHistory(),
+    loadSharp: () => loadSharpInBackground("image thumbnails"),
     // Explicit option wins (preview's resolved --proxy/--no-proxy + config);
     // otherwise honor the project's hyperframes.json media.autoProxy so every
     // createStudioServer caller (e.g. the background preview child) gets the

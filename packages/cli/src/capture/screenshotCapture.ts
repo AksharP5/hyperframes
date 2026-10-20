@@ -8,7 +8,7 @@
 import { DEFAULT_MAX_SCREENSHOTS } from "./types.js";
 import { CaptureDirRefusedError } from "./captureErrors.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
-import { ConnectionClosedError, type Page } from "puppeteer-core";
+import type { Page } from "puppeteer-core";
 import { isDegradableEvaluateTimeoutError } from "./captureTimeout.js";
 import { waitForPageReady } from "./navigateForCapture.js";
 import { join } from "node:path";
@@ -60,7 +60,8 @@ function shotFailure(err: unknown, file: string, scrollY: number | null): Screen
   const message = normalizeErrorMessage(err);
   // puppeteer-core 25 exports no class for a closed page or session, only these messages.
   const closed =
-    err instanceof ConnectionClosedError || /\b(target|session) closed\b/i.test(message);
+    (err instanceof Error && err.constructor.name === "ConnectionClosedError") ||
+    /\b(target|session) closed\b/i.test(message);
   if (closed || err instanceof CaptureDirRefusedError || isDegradableEvaluateTimeoutError(err))
     throw err;
   return { file, scrollY, message };
