@@ -238,6 +238,17 @@ describe("serveStaticProjectHtml asset roots", () => {
     expect(await res.text()).toBe("PIXELS");
   });
 
+  it("labels the page and its scripts UTF-8 so text without a meta charset is not misread", async () => {
+    const projectDir = mk();
+    writeFileSync(join(projectDir, "scene.js"), 'document.title = "太阳系";');
+    server = await serveStaticProjectHtml(projectDir, "<h1>太阳系科普动画</h1>");
+
+    const page = await fetch(server.url);
+    const script = await fetch(`${server.url}scene.js`);
+    expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+  });
+
   it("prefers the project dir over an asset root for the same path", async () => {
     const projectDir = mk();
     const assetDir = mk();

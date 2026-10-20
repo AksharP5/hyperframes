@@ -889,7 +889,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
         (await loadRuntimeSource()) ?? readBundleFile(runtimePath)?.toString("utf-8") ?? null;
       if (!runtimeSource) return c.text("runtime not available", 404);
       return c.body(runtimeSource, 200, {
-        "Content-Type": "text/javascript",
+        "Content-Type": getMimeType("runtime.js"),
         "Cache-Control": "no-store",
       });
     };
