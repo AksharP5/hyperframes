@@ -35,7 +35,7 @@ function pidScope(): { host: string; boot?: string; pidns?: string } {
     // Without /proc (macOS, Windows) the boot time, to the minute, stands in for the boot id.
     boot:
       attempt(() => readFileSync("/proc/sys/kernel/random/boot_id", "utf-8").trim()) ??
-      String(Math.round(Date.now() / 60_000 - uptime() / 60)),
+      attempt(() => String(Math.round(Date.now() / 60_000 - uptime() / 60))),
     pidns: attempt(() => readlinkSync("/proc/self/ns/pid")),
   };
 }
@@ -59,9 +59,21 @@ function alive(pid: number): boolean {
 
 type OwnerRecord = { pid?: unknown; host?: unknown; boot?: unknown; pidns?: unknown };
 
-function inThisPidScope(owner: OwnerRecord): boolean {
+function knownPidScope(): ReturnType<typeof pidScope> | undefined {
   const scope = pidScope();
-  return owner.host === scope.host && owner.boot === scope.boot && owner.pidns === scope.pidns;
+  const unknown =
+    scope.boot === undefined || (process.platform === "linux" && scope.pidns === undefined);
+  return unknown ? undefined : scope;
+}
+
+function inThisPidScope(owner: OwnerRecord): boolean {
+  const scope = knownPidScope();
+  return (
+    scope !== undefined &&
+    owner.host === scope.host &&
+    owner.boot === scope.boot &&
+    owner.pidns === scope.pidns
+  );
 }
 
 /** "gone" only for an owner in this pid scope that has exited; "none" when there is no owner file, else "unknown". */
