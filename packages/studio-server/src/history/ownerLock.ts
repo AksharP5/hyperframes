@@ -12,6 +12,14 @@ export class HistoryBusyError extends Error {
   }
 }
 
+const WINDOWS_BUSY = new Set(["EPERM", "EBUSY", "EACCES"]);
+
+function busyOnWindows(error: unknown): boolean {
+  return (
+    process.platform === "win32" && WINDOWS_BUSY.has((error as NodeJS.ErrnoException).code ?? "")
+  );
+}
+
 function alive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -92,6 +100,17 @@ function servedBy(file: string, urlFile: string, pid: number): string | undefine
   }
 }
 
+type Attempt = "claimed" | "retry" | "wait";
+
+function attemptClaim(file: string, urlFile: string, deadline: number): Attempt {
+  if (claim(file)) return "claimed";
+  const pid = ownerOf(file);
+  if (pid === null) return "retry";
+  if (!alive(pid) && evictDeadOwner(file)) return "retry";
+  if (Date.now() >= deadline) throw new HistoryBusyError(pid, servedBy(file, urlFile, pid));
+  return "wait";
+}
+
 /**
  * One process at a time keeps a project's history open (a second opener would fork the log). Waits up to `waitMs`
  * for the owner to close, takes over a dead owner's lock. `url` is where this process serves the history's routes.
@@ -106,19 +125,20 @@ export async function takeHistoryOwnership(
   const deadline = Date.now() + waitMs;
   mkdirSync(home, { recursive: true });
   for (;;) {
-    if (claim(file)) {
-      advertise(urlFile, url);
-      let held = true;
-      return () => {
-        if (held && servedBy(file, urlFile, process.pid)) rmSync(urlFile, { force: true });
-        if (held) releaseOwn(file);
-        held = false;
-      };
+    let next: Attempt = "wait";
+    try {
+      next = attemptClaim(file, urlFile, deadline);
+    } catch (error) {
+      if (!busyOnWindows(error) || Date.now() >= deadline) throw error;
     }
-    const pid = ownerOf(file);
-    if (pid === null) continue;
-    if (!alive(pid) && evictDeadOwner(file)) continue;
-    if (Date.now() >= deadline) throw new HistoryBusyError(pid, servedBy(file, urlFile, pid));
-    await new Promise((settle) => setTimeout(settle, 50));
+    if (next === "claimed") break;
+    if (next === "wait") await new Promise((settle) => setTimeout(settle, 50));
   }
+  advertise(urlFile, url);
+  let held = true;
+  return () => {
+    if (held && servedBy(file, urlFile, process.pid)) rmSync(urlFile, { force: true });
+    if (held) releaseOwn(file);
+    held = false;
+  };
 }
