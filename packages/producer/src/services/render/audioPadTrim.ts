@@ -33,6 +33,7 @@ import {
   type AudioMetadata,
 } from "@hyperframes/engine";
 import { redactKnownPaths, redactTelemetryString } from "@hyperframes/core";
+import { measureTruePeakDbfs } from "./audioTruePeak.js";
 
 /**
  * Tolerance used to decide whether an audio file is already short enough to
@@ -306,7 +307,7 @@ export async function padOrTrimAudioToVideoFrameCount(
     (input.runFfmpeg
       ? undefined
       : (audioPath: string, signal?: AbortSignal) =>
-          defaultProbeAudioTruePeakDbfs(audioPath, timeoutMs, signal));
+          measureTruePeakDbfs(audioPath, { timeoutMs, signal }));
 
   // Probe video and audio in parallel — the two ffprobe invocations are
   // independent and account for most of this function's wall-clock time.
@@ -448,8 +449,11 @@ export async function constrainAacTruePeak(input: {
     audioPath: input.audioPath,
     targetDurationSeconds: input.targetDurationSeconds,
     signal: input.signal,
-    probeTruePeak: (audioPath, signal) =>
-      defaultProbeAudioTruePeakDbfs(audioPath, timeoutMs, signal),
+    probeTruePeak: async (audioPath, signal) => {
+      const { sampleRate } = await extractAudioMetadata(audioPath, { signal });
+      const segments = { durationSeconds: input.targetDurationSeconds, sampleRate };
+      return measureTruePeakDbfs(audioPath, { timeoutMs, signal, segments });
+    },
     runner: (args) => defaultRunFfmpeg(args, timeoutMs, input.signal),
   });
 }
@@ -639,27 +643,6 @@ async function defaultProbeAudioInfo(
     channels: metadata.channels,
     audioCodec: metadata.audioCodec,
   };
-}
-
-async function defaultProbeAudioTruePeakDbfs(
-  audioPath: string,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<number> {
-  const result = await runFfmpeg(
-    ["-i", audioPath, "-map", "0:a:0", "-vn", "-af", "ebur128=peak=true", "-f", "null", "-"],
-    { signal, timeout: timeoutMs },
-  );
-  if (!result.success) {
-    throw new Error(`[audioPadTrim] ${describeFfmpegFailure(result, timeoutMs)}`);
-  }
-  const matches = [...result.stderr.matchAll(/^\s*Peak:\s*([+-]?(?:[\d.]+|inf)) dBFS$/gim)];
-  const token = matches.at(-1)?.[1]?.toLowerCase();
-  const value = token === "-inf" ? Number.NEGATIVE_INFINITY : Number(token);
-  if (Number.isNaN(value) || value === Number.POSITIVE_INFINITY) {
-    throw new Error("[audioPadTrim] FFmpeg did not report AAC true peak");
-  }
-  return value;
 }
 
 async function defaultRunFfmpeg(
