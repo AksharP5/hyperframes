@@ -107,20 +107,29 @@
     return `${uniqueSelectorFor(parent)} > ${element.tagName.toLowerCase()}:nth-of-type(${index})`;
   }
 
+  // Color grading paints an <img>/<video> into a canvas the runtime inserts right after it; that canvas answers
+  // to the element the author wrote. ponytail: render-frame siblings sit between them only in render, not check.
+  const GRADED_STAND_IN = "[data-hf-color-grading-canvas]";
+  function authoredElement(element) {
+    return (element.matches(GRADED_STAND_IN) && element.previousElementSibling) || element;
+  }
+
   function hasIgnoreFlag(element) {
-    return !!element.closest("[data-layout-ignore], [data-layout-check='ignore']");
+    return !!authoredElement(element).closest("[data-layout-ignore], [data-layout-check='ignore']");
   }
 
   function hasAllowOverflowFlag(element) {
-    return !!element.closest("[data-layout-allow-overflow]");
+    return !!authoredElement(element).closest("[data-layout-allow-overflow]");
   }
 
   function hasAllowCaptionZoneFlag(element) {
-    return !!element.closest("[data-layout-allow-caption-zone]");
+    return !!authoredElement(element).closest("[data-layout-allow-caption-zone]");
   }
 
   function hasTextClipOptOut(element) {
-    return hasAllowOverflowFlag(element) || element.hasAttribute("data-layout-bleed");
+    return (
+      hasAllowOverflowFlag(element) || authoredElement(element).hasAttribute("data-layout-bleed")
+    );
   }
 
   function opacityChain(element) {
@@ -1935,6 +1944,8 @@
   function canvasEdgeIssues(root, rootRect, time, tolerance) {
     const issues = [];
     for (const canvas of Array.from(root.querySelectorAll("canvas"))) {
+      // A graded stand-in shows the author's media, not drawn art; the media itself is never read here.
+      if (canvas.matches(GRADED_STAND_IN)) continue;
       if (!isVisibleElement(canvas) || hasAllowOverflowFlag(canvas)) continue;
       if (!canvas.width || !canvas.height) continue;
       const rect = toRect(canvas.getBoundingClientRect());

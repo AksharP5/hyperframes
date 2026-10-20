@@ -1244,10 +1244,10 @@ describe("layout-audit.browser coordinate-frame findings", () => {
       return drawImage;
     }
 
-    function mountCanvas(canvasRect: DOMRect, attributes = ""): void {
+    function mountCanvas(canvasRect: DOMRect, attributes = "", before = ""): void {
       document.body.innerHTML = `
         <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
-          <canvas id="art" width="1920" height="1080" ${attributes}></canvas>
+          ${before}<canvas id="art" width="1920" height="1080" ${attributes}></canvas>
         </div>
       `;
       installGeometry({
@@ -1304,6 +1304,42 @@ describe("layout-audit.browser coordinate-frame findings", () => {
 
       expect(runAudit().some((issue) => issue.code === "canvas_content_at_edge")).toBe(false);
     });
+
+    it("reads a color-graded video's stand-in canvas as the video, not as drawn art", () => {
+      const drawImage = stubEdgeReads(CUT_TEXT);
+      mountCanvas(FULL_FRAME, "data-hf-color-grading-canvas", '<video id="clip"></video>');
+
+      expect(runAudit().some((issue) => issue.code === "canvas_content_at_edge")).toBe(false);
+      expect(drawImage).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["flags", "", true],
+      ["clears", "data-layout-allow-overflow", false],
+    ])(
+      "%s a graded video's canvas overflowing a clipping wrapper, per the video's own flag",
+      (_, flag, flagged) => {
+        document.body.innerHTML = `
+          <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
+            <div id="frame">
+              <video id="clip" ${flag}></video><canvas id="art" data-hf-color-grading-canvas></canvas>
+            </div>
+          </div>
+        `;
+        installGeometry(
+          {
+            root: FULL_FRAME,
+            frame: rect({ left: 0, top: 0, width: 960, height: 540 }),
+            art: rect({ left: -48, top: -27, width: 1056, height: 594 }),
+          },
+          { frame: { overflow: "hidden" } },
+        );
+        installAuditScript();
+
+        const overflow = runAudit().filter((issue) => issue.code === "container_overflow");
+        expect(overflow.map((issue) => issue.selector)).toEqual(flagged ? ["#art"] : []);
+      },
+    );
 
     it("never reads a canvas that sits inside the frame", () => {
       const drawImage = stubEdgeReads(CUT_TEXT);
