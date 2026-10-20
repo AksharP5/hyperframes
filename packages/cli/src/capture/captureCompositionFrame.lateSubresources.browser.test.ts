@@ -3,8 +3,8 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { openSettledCompositionPage } from "./captureCompositionFrame.js";
 
-// An image, then a fetched asset after the load event, both well inside the 1.5 s settle cap: with the
-// asset at 1.1 s a busy Windows runner settled at up to 1.48 s, 18 ms from the cap.
+// An image, then a fetched asset after the load event. The settle cap is lifted: a starved runner
+// has not even loaded the page by the default 1.5 s, and the test is about waiting, not the cap.
 const IMAGE_MS = 300;
 const FETCH_MS = 500;
 const PNG = Buffer.from(
@@ -45,6 +45,7 @@ it("returns only once images and fetched assets that land after DOMContentLoaded
   const { browser, page } = await openSettledCompositionPage(HTML, url, {
     renderReadyTimeoutMs: 5_000,
     renderReadyWarningSuffix: "test",
+    lateSubresourceTimeoutMs: 60_000,
     browserGpuMode: "software",
   });
   try {
