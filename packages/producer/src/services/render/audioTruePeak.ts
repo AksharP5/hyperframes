@@ -1,4 +1,9 @@
-import { aacSegmentCount, describeFfmpegFailure, runFfmpeg } from "@hyperframes/engine";
+import {
+  aacSegmentCount,
+  describeFfmpegFailure,
+  extractAudioMetadata,
+  runFfmpeg,
+} from "@hyperframes/engine";
 
 /** Peaks in dBFS as ffmpeg's ebur128 prints them (one decimal). */
 interface TruePeakScan {
@@ -56,25 +61,25 @@ async function scanTruePeak(
 
 /**
  * The true peak one `ebur128=peak=true` pass over the whole file reports, measured in parallel
- * segments when the length is known and the rate is 48 kHz: the same digit, not an estimate.
+ * segments when the file is 48 kHz with a known length: the same digit, not an estimate.
  */
 export async function measureTruePeakDbfs(
   audioPath: string,
-  options: {
-    timeoutMs: number;
-    signal?: AbortSignal;
-    segments?: { durationSeconds: number; sampleRate: number };
-  },
+  options: { timeoutMs: number; signal?: AbortSignal },
 ): Promise<number> {
-  const { timeoutMs, signal, segments } = options;
+  const { timeoutMs, signal } = options;
   const wholeFile = async () => (await scanTruePeak(audioPath, "", timeoutMs, signal)).peak;
+  const { durationSeconds, sampleRate } = await extractAudioMetadata(audioPath, { signal });
   // ebur128 resamples any other rate to 48 kHz, which would move samples near each cut.
   // It logs one peak per 100 ms block; its 4x oversampler reads 15 samples back, 16 ahead.
   const block = 4800;
-  const count = segments?.sampleRate === 48_000 ? aacSegmentCount(segments.durationSeconds) : 1;
-  if (!segments || count === 1) return wholeFile();
+  const count =
+    sampleRate === 48_000 && Number.isFinite(durationSeconds)
+      ? aacSegmentCount(durationSeconds)
+      : 1;
+  if (count === 1) return wholeFile();
 
-  const cut = (k: number) => k * Math.floor((segments.durationSeconds * 10) / count) * block;
+  const cut = (k: number) => k * Math.floor((durationSeconds * 10) / count) * block;
   const peers = new AbortController();
   const segmentSignal = signal ? AbortSignal.any([signal, peers.signal]) : peers.signal;
   const scans = await Promise.all(

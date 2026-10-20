@@ -449,11 +449,7 @@ export async function constrainAacTruePeak(input: {
     audioPath: input.audioPath,
     targetDurationSeconds: input.targetDurationSeconds,
     signal: input.signal,
-    probeTruePeak: async (audioPath, signal) => {
-      const { sampleRate } = await extractAudioMetadata(audioPath, { signal });
-      const segments = { durationSeconds: input.targetDurationSeconds, sampleRate };
-      return measureTruePeakDbfs(audioPath, { timeoutMs, signal, segments });
-    },
+    probeTruePeak: (audioPath, signal) => measureTruePeakDbfs(audioPath, { timeoutMs, signal }),
     runner: (args) => defaultRunFfmpeg(args, timeoutMs, input.signal),
   });
 }

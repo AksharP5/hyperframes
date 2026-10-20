@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,12 +49,14 @@ function monoWav(name: string, burstAt?: number): string {
 }
 
 async function bothWays(path: string): Promise<[number, number]> {
-  const timeoutMs = 60_000;
-  const segments = { durationSeconds: SECONDS, sampleRate: RATE };
-  return Promise.all([
-    measureTruePeakDbfs(path, { timeoutMs }),
-    measureTruePeakDbfs(path, { timeoutMs, segments }),
-  ]);
+  const { stderr } = spawnSync(
+    getFfmpegBinary(),
+    ["-nostdin", "-i", path, "-af", "ebur128=peak=true", "-f", "null", "-"],
+    { encoding: "utf8" },
+  );
+  const whole = [...stderr.matchAll(/^\s*Peak:\s*(\S+) dBFS$/gm)].at(-1)?.[1];
+  const segmented = await measureTruePeakDbfs(path, { timeoutMs: 60_000 });
+  return [whole === "-inf" ? Number.NEGATIVE_INFINITY : Number(whole), segmented];
 }
 
 describe.skipIf(!hasFfmpeg)("measureTruePeakDbfs in segments", () => {
