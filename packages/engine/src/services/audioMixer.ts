@@ -15,7 +15,7 @@ import {
 } from "../utils/urlDownloader.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { formatFfmpegError, runFfmpeg, type RunFfmpegResult } from "../utils/runFfmpeg.js";
-import { AAC_ARGS, aacSegmentCount, encodeAac } from "./aacEncode.js";
+import { encodeAac } from "./aacEncode.js";
 import { audioSubprocessEvidence } from "./audioFailureDiagnostic.js";
 import { unwrapTemplate } from "../utils/htmlTemplate.js";
 import { resolveMediaElementSrc, resolveProjectRelativeSrc } from "./videoFrameExtractor.js";
@@ -762,7 +762,6 @@ async function mixAudioTracks(
   totalDuration: number,
   signal?: AbortSignal,
   config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout" | "audioGain">>,
-  floatWav = false,
 ): Promise<MixResult> {
   const ffmpegProcessTimeout = config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
   const masterOutputGain = config?.audioGain ?? DEFAULT_CONFIG.audioGain;
@@ -828,7 +827,10 @@ async function mixAudioTracks(
       scriptPath,
       "-map",
       "[out]",
-      ...(floatWav ? ["-acodec", "pcm_f32le", "-ar", "48000"] : AAC_ARGS),
+      "-acodec",
+      "pcm_f32le",
+      "-ar",
+      "48000",
       "-t",
       String(totalDuration),
       "-y",
@@ -1073,7 +1075,7 @@ async function mixThroughFloatSum(
   config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout" | "audioGain">>,
 ): Promise<MixResult> {
   const sumPath = join(workDir, "master-sum.wav");
-  const sum = await mixAudioTracks(tracks, sumPath, totalDuration, signal, config, true);
+  const sum = await mixAudioTracks(tracks, sumPath, totalDuration, signal, config);
   if (!sum.success) return { ...sum, outputPath };
 
   const encoderInput = masterChain
@@ -1609,7 +1611,7 @@ export async function processCompositionAudio(
   let mixResult: MixResult;
   try {
     mixResult =
-      (masterChain || aacSegmentCount(totalDuration) > 1) && tracks.length > 0
+      tracks.length > 0
         ? await mixThroughFloatSum(
             tracks,
             masterChain,

@@ -41,6 +41,12 @@ vi.mock("../utils/runFfmpeg.js", async (importOriginal) => {
   return { ...actual, runFfmpeg: runFfmpegMock };
 });
 
+// The AAC encode is aacEncode.test.ts's subject; here the mix only has to hand it the float sum.
+vi.mock("./aacEncode.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./aacEncode.js")>()),
+  encodeAac: vi.fn(async () => ({ success: true, durationMs: 1, stderr: "", exitCode: 0 })),
+}));
+
 // The FX render drives a headless browser; the mix only needs to know the
 // processed file exists and how long a tail the chain asked for.
 const { applyAudioFxChainMock } = vi.hoisted(() => ({
