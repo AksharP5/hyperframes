@@ -1,20 +1,53 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import puppeteer, { type Browser, type Page } from "puppeteer-core";
+import puppeteer, { TimeoutError, type Browser, type Page } from "puppeteer-core";
 import { findSystemChrome } from "../vite.browser";
 
 const require = createRequire(import.meta.url);
 
-/** Headless Chrome with the e2e launcher's flags; the test's own timeout bounds the launch. */
-export async function launchTestChrome(): Promise<Browser> {
+const LAUNCH_TIMEOUT_MS = 20_000;
+
+/** Headless Chrome with the e2e launcher's flags. A launch stuck past 20 s (seen on Windows runners)
+ * is killed and tried once more. On Windows Puppeteer reports it as "already running", not a timeout. */
+export async function launchTestChrome(
+  launch: typeof puppeteer.launch = (options) => puppeteer.launch(options),
+): Promise<Browser> {
   const executablePath = findSystemChrome();
   if (!executablePath) throw new Error("no Chrome found: set HYPERFRAMES_BROWSER_PATH");
-  return puppeteer.launch({
+  const options = {
     executablePath,
     headless: true,
     args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
-    timeout: 0,
-  });
+    timeout: LAUNCH_TIMEOUT_MS,
+  };
+  const startedAt = Date.now();
+  try {
+    return await launch(options);
+  } catch (error) {
+    const stuck = error instanceof TimeoutError || Date.now() - startedAt >= LAUNCH_TIMEOUT_MS;
+    if (!stuck) throw error;
+    return launch(options);
+  }
+}
+
+/** Closes a test Chrome, killing it when close hangs (seen on Windows runners) so the test never times out. */
+export async function closeTestChrome(
+  browser: Browser | undefined,
+  timeoutMs = 5_000,
+): Promise<void> {
+  if (!browser) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const closed = await Promise.race([
+    browser.close().then(
+      () => true,
+      () => false,
+    ),
+    new Promise<boolean>((resolve) => (timer = setTimeout(resolve, timeoutMs, false))),
+  ]);
+  clearTimeout(timer);
+  if (closed) return;
+  browser.process()?.kill("SIGKILL");
+  await browser.disconnect().catch(() => undefined);
 }
 
 /** Shows `html` with the HyperFrames runtime; only its GSAP CDN script is served, nothing is fetched. */
