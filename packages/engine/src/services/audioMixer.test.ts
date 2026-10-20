@@ -84,6 +84,7 @@ vi.mock("../utils/ffprobe.js", async (importOriginal) => {
 import { RATE_RANGE } from "@hyperframes/core/audio-automation";
 import { AudioFxRenderError } from "./audioFxRender.js";
 import { parseAudioElements, processCompositionAudio } from "./audioMixer.js";
+import { encodeAac } from "./aacEncode.js";
 
 describe("parseAudioElements strict literal timing", () => {
   it.each(["", "   ", "0s", "0abc", "0px", "-1s", "Infinity", "NaN", "0x10"])(
@@ -1483,6 +1484,43 @@ describe("processCompositionAudio", () => {
 
     const prepareArgs = runFfmpegMock.mock.calls[0]?.[0];
     expect(prepareArgs).toContain(join(baseDir, "assets", filename));
+  });
+
+  it("keeps the float mix the AAC was encoded from when asked to", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
+    const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
+    tempDirs.push(baseDir, workDir);
+    writeFileSync(join(baseDir, "a.wav"), "stub");
+    writeFileSync(join(baseDir, "b.wav"), "stub");
+    runFfmpegMock.mockImplementation(async (args: string[]) => {
+      if (args.at(-1)?.endsWith("master-sum.wav")) writeFileSync(args.at(-1)!, "float mix");
+      return { success: true, durationMs: 1, stderr: "", exitCode: 0 };
+    });
+    const track = (id: string, layer: number) => ({
+      id,
+      src: `${id}.wav`,
+      start: 0,
+      end: 2,
+      mediaStart: 0,
+      layer,
+      volume: 1,
+      type: "audio" as const,
+    });
+    const kept = join(baseDir, "kept.wav");
+
+    const result = await processCompositionAudio(
+      [track("a", 0), track("b", 1)],
+      baseDir,
+      workDir,
+      join(baseDir, "out.m4a"),
+      2,
+      undefined,
+      { keepEncoderInputAt: kept },
+    );
+
+    expect(result.success).toBe(true);
+    expect(vi.mocked(encodeAac).mock.calls.at(-1)?.[0]).toBe(join(workDir, "master-sum.wav"));
+    expect(readFileSync(kept, "utf8")).toBe("float mix");
   });
 
   it("prepares browser root-absolute audio srcs from the project root", async () => {

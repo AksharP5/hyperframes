@@ -1,6 +1,15 @@
 // fallow-ignore-file complexity code-duplication
 import { isSelfOrAncestorHidden, memberGroupKey, isMemberGroupHidden } from "./mediaHidden.js";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from "fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { join, dirname, isAbsolute, relative } from "path";
 import { parseHTML } from "linkedom";
 import { extractAudioMetadata, type AudioMetadata } from "../utils/ffprobe.js";
@@ -1082,7 +1091,9 @@ async function mixThroughFloatSum(
   workDir: string,
   totalDuration: number,
   signal?: AbortSignal,
-  config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout" | "audioGain">>,
+  config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout" | "audioGain">> & {
+    keepEncoderInputAt?: string;
+  },
 ): Promise<MixResult> {
   const sumPath = join(workDir, "master-sum.wav");
   const sum = await mixAudioTracks(tracks, sumPath, totalDuration, signal, config);
@@ -1111,6 +1122,7 @@ async function mixThroughFloatSum(
       failures: [failure],
     };
   }
+  if (config?.keepEncoderInputAt) renameSync(encoderInput, config.keepEncoderInputAt);
   return { ...sum, outputPath, durationMs: sum.durationMs + encoded.durationMs };
 }
 
@@ -1125,6 +1137,7 @@ export async function processCompositionAudio(
     /** Serialised master bus chain, from `parseMasterFxChain`. */
     masterFxChain?: string;
     urlByAbsentLocalPath?: ReadonlyMap<string, string>;
+    keepEncoderInputAt?: string;
   },
   compiledDir?: string,
 ): Promise<MixResult> {

@@ -1,13 +1,19 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { extractAudioMetadata, runFfmpeg, type RunFfmpegResult } from "@hyperframes/engine";
-import { padOrTrimAudioToVideoFrameCount } from "./audioPadTrim.js";
+import {
+  encodeAac,
+  extractAudioMetadata,
+  runFfmpeg,
+  type RunFfmpegResult,
+} from "@hyperframes/engine";
+import { constrainAacTruePeak, padOrTrimAudioToVideoFrameCount } from "./audioPadTrim.js";
 import { measureTruePeakDbfs } from "./audioTruePeak.js";
 
 vi.mock("@hyperframes/engine", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@hyperframes/engine")>()),
+  encodeAac: vi.fn(),
   extractAudioMetadata: vi.fn(),
   runFfmpeg: vi.fn(),
 }));
@@ -36,7 +42,10 @@ const scanFilters = () =>
     .filter(Boolean);
 
 beforeEach(() => probed(180, 48_000));
-afterEach(() => vi.mocked(runFfmpeg).mockReset());
+afterEach(() => {
+  vi.mocked(runFfmpeg).mockReset();
+  vi.mocked(encodeAac).mockReset();
+});
 
 describe("measureTruePeakDbfs against ffmpeg's stderr", () => {
   it("throws when ffmpeg prints no true-peak summary", async () => {
@@ -98,5 +107,52 @@ describe("a local render's audio pad/trim", () => {
       "atrim=start_sample=2875200:end_sample=5760000,ebur128=peak=true",
       "atrim=start_sample=5755200,ebur128=peak=true",
     ]);
+  });
+});
+
+describe("the true-peak correction", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hf-peak-correct-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  async function correctHotAudio(sourcePath?: string) {
+    const scan = (dbfs: string) =>
+      ran(true, `${FRAME.replaceAll("-3.0", dbfs)}\n${SUMMARY.replace("-3.0", dbfs)}`);
+    vi.mocked(runFfmpeg).mockImplementation(async (args, opts) => {
+      const result = scan(args.some((arg) => arg.includes(".true-peak-")) ? "-1.6" : "-0.3");
+      opts?.onStderr?.(result.stderr);
+      return result;
+    });
+    vi.mocked(encodeAac).mockImplementation(async (_input, output) => {
+      writeFileSync(output, "corrected");
+      return ran(true, "");
+    });
+    const audioPath = join(dir, "audio.m4a");
+    writeFileSync(audioPath, "mixed");
+    const result = await constrainAacTruePeak({
+      audioPath,
+      ...(sourcePath ? { sourcePath } : {}),
+      targetDurationSeconds: 180,
+      timeoutMs: 1000,
+    });
+    expect(result).toEqual({ success: true, loweredDb: 1.2 });
+    expect(vi.mocked(encodeAac)).toHaveBeenCalledTimes(1);
+    return { audioPath, call: vi.mocked(encodeAac).mock.calls[0]! };
+  }
+
+  it("re-encodes the plan's PCM mix, not the AAC, in the encoder's parallel segments", async () => {
+    const sourcePath = join(dir, "mix.wav");
+    const { call } = await correctHotAudio(sourcePath);
+    expect(call[0]).toBe(sourcePath);
+    expect(call[3]).toEqual({
+      signal: undefined,
+      timeout: 1000,
+      filter: expect.stringMatching(/^volume=-1\.200dB,/),
+    });
+  });
+
+  it("re-encodes an AAC without its PCM in one encoder, not decoded again per segment", async () => {
+    const { audioPath, call } = await correctHotAudio();
+    expect(call[0]).toBe(audioPath);
+    expect(call[3]).toMatchObject({ segments: 1 });
   });
 });

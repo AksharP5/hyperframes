@@ -1419,6 +1419,7 @@ export async function buildLocalExecutionPlan(
   // Chunks cut their audio from this track, so it is mixed to the frames' exact length in its one
   // encode; the assembler pads or trims the track of any other plan.
   const audioSeconds = chunksCarryAudio ? totalFrames / config.fps : probeResult.duration;
+  const planMixPcmPath = join(workDir, "plan-mix.wav");
   stageStarted = Date.now();
   const [audioOutcome, overlapOutcome, frameCostOutcome] = await Promise.allSettled([
     runAudioStage({
@@ -1431,6 +1432,7 @@ export async function buildLocalExecutionPlan(
       audioGain: cfg.audioGain,
       audios: composition.audios,
       masterFxChain: composition.masterFxChain,
+      ...(chunksCarryAudio ? { keepEncoderInputAt: planMixPcmPath } : {}),
       abortSignal,
       assertNotAborted,
     }).finally(() => logPlanStage(log, "audio", stageStarted)),
@@ -1497,10 +1499,11 @@ export async function buildLocalExecutionPlan(
     stageStarted = Date.now();
     const peak = await constrainAacTruePeak({
       audioPath: planAudioPath,
+      ...(existsSync(planMixPcmPath) ? { sourcePath: planMixPcmPath } : {}),
       targetDurationSeconds: audioSeconds,
       signal: abortSignal,
       timeoutMs: cfg.ffmpegProcessTimeout,
-    });
+    }).finally(() => rmSync(planMixPcmPath, { force: true }));
     if (!peak.success) throw encoderFailureError("[plan] audio true-peak check failed", peak);
     logPlanStage(log, "audio-peak", stageStarted);
     if (options.sliceChunkAudio) {
