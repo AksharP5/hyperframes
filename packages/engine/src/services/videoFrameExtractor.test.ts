@@ -2082,6 +2082,44 @@ describe.skipIf(!HAS_FFMPEG)("frame sampling at the output frame rate", () => {
     60_000,
   );
 
+  it("keeps a run that outlasts the timeout while it still writes frames", async () => {
+    const source = join(FIXTURE_DIR, "paced-5s.mp4");
+    const synth = await runFfmpeg([
+      ...["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi"],
+      ...["-i", `testsrc=s=${WIDTH}x${HEIGHT}:r=30:d=5`, "-pix_fmt", "yuv420p", source],
+    ]);
+    if (!synth.success) throw new Error(`paced fixture synthesis failed: ${synth.stderr}`);
+    const { runFfmpeg: real } =
+      await vi.importActual<typeof import("../utils/runFfmpeg.js")>("../utils/runFfmpeg.js");
+    // Real-time pacing makes 5 s of source take 5 s against a 2 s timeout.
+    vi.mocked(runFfmpeg).mockImplementation((args, opts) =>
+      real(["-stats_period", "0.1", "-re", ...args], opts),
+    );
+    try {
+      const extracted = await extractVideoFramesRange(
+        source,
+        "paced-past-timeout",
+        0,
+        5,
+        { fps: 10, outputDir: FIXTURE_DIR, format: "png" },
+        undefined,
+        { ffmpegProcessTimeout: 2000 },
+      );
+      expect(extracted.totalFrames).toBe(50);
+    } finally {
+      vi.mocked(runFfmpeg).mockImplementation(real);
+    }
+  }, 30_000);
+
+  it("stops a run that writes no new frame for the stall timeout", async () => {
+    // stdin stays open and empty, so ffmpeg waits for its first frame forever.
+    const stalled = await runFfmpeg(
+      ["-f", "rawvideo", "-pix_fmt", "gray", "-s", "2x2", "-i", "pipe:0", "-f", "null", "-"],
+      { stallTimeout: 500 },
+    );
+    expect(stalled.terminationReason).toBe("inactivity");
+  }, 30_000);
+
   // A distributed chunk extracts only the frames it renders; they must be the full extraction's.
   describe("partial extraction", () => {
     const gopSource = join(FIXTURE_DIR, "gop-30fps.mp4");
@@ -3627,6 +3665,60 @@ describe.skipIf(!HAS_ZSCALE)("forced-SDR HDR extraction", () => {
     },
     60_000,
   );
+
+  it("probes each source's first frame once, however many cuts of it extract together", async () => {
+    const sources = ["a", "b"].map((name) => join(fixtureDir, `cuts-${name}.mp4`));
+    for (const source of sources) await synthesizeHlgClip(source);
+    const probes = () =>
+      vi.mocked(runFfmpeg).mock.calls.filter(([args]) => args.includes("showinfo")).length;
+    const before = probes();
+    await Promise.all(
+      Array.from({ length: 12 }, (_, cut) =>
+        extractVideoFramesRange(sources[cut % 2]!, `cut-${cut}`, 0, 1, {
+          fps: 1,
+          outputDir: join(fixtureDir, "cuts"),
+          format: "png",
+          toneMapHdrToSdr: true,
+        }),
+      ),
+    );
+    expect(probes() - before).toBe(2);
+  }, 60_000);
+
+  it("probes a source again after its first-frame probe failed", async () => {
+    const source = join(fixtureDir, "probe-retry.mp4");
+    await synthesizeHlgClip(source);
+    const probes = () =>
+      vi.mocked(runFfmpeg).mock.calls.filter(([args]) => args.includes("showinfo")).length;
+    const { runFfmpeg: real } =
+      await vi.importActual<typeof import("../utils/runFfmpeg.js")>("../utils/runFfmpeg.js");
+    vi.mocked(runFfmpeg).mockImplementation((args, opts) =>
+      args.includes("showinfo")
+        ? Promise.resolve({
+            success: false,
+            exitCode: 1,
+            stderr: "",
+            durationMs: 0,
+            terminationReason: "exit",
+          })
+        : real(args, opts),
+    );
+    const extract = (id: string) =>
+      extractVideoFramesRange(source, id, 0, 1, {
+        fps: 1,
+        outputDir: join(fixtureDir, "retry"),
+        format: "png",
+        toneMapHdrToSdr: true,
+      });
+    const before = probes();
+    try {
+      await extract("retry-failed");
+    } finally {
+      vi.mocked(runFfmpeg).mockImplementation(real);
+    }
+    await extract("retry-again");
+    expect(probes() - before).toBe(2);
+  }, 60_000);
 
   // One stream with HLG frames, then PQ frames: each is tone-mapped with its own transfer.
   it("tone-maps each frame of a mixed HLG and PQ stream with its own transfer", async () => {

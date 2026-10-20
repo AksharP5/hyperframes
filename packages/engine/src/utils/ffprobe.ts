@@ -158,7 +158,7 @@ const finalVideoFrameTimestampSignalCaches = new WeakMap<
   Map<string, MediaProbeCacheEntry<number>>
 >();
 const audioMetadataCache = new Map<string, MediaProbeCacheEntry<AudioMetadata>>();
-interface MediaProbeCacheEntry<T = FFProbeOutput> {
+export interface MediaProbeCacheEntry<T = FFProbeOutput> {
   identity: string | null;
   promise: Promise<T>;
 }
@@ -341,7 +341,7 @@ function isPngImageProbe(output: FFProbeOutput): boolean {
   );
 }
 
-function mediaFileIdentity(filePath: string): string | null {
+export function mediaFileIdentity(filePath: string): string | null {
   try {
     const stat = statSync(filePath, { bigint: true });
     return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":");
@@ -350,7 +350,7 @@ function mediaFileIdentity(filePath: string): string | null {
   }
 }
 
-function readMetadataCache<T>(
+export function readMetadataCache<T>(
   cache: Map<string, MediaProbeCacheEntry<T>>,
   key: string,
   identity: string | null,
@@ -359,7 +359,7 @@ function readMetadataCache<T>(
   return cached?.identity === identity ? cached.promise : undefined;
 }
 
-function writeMetadataCache<T>(
+export function writeMetadataCache<T>(
   cache: Map<string, MediaProbeCacheEntry<T>>,
   key: string,
   identity: string | null,
