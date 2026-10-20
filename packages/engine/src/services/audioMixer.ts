@@ -5,6 +5,7 @@ import { join, dirname, isAbsolute, relative } from "path";
 import { parseHTML } from "linkedom";
 import { extractAudioMetadata, type AudioMetadata } from "../utils/ffprobe.js";
 import { isNotMediaPayload } from "../utils/notMediaPayload.js";
+import { urlInputArgs } from "../utils/urlInput.js";
 import { clampAudioGain } from "@hyperframes/core/audio-gain";
 import { clampFadesToDuration, readElementFades } from "@hyperframes/core/audio-fade";
 import {
@@ -656,8 +657,14 @@ async function extractAudioSegment(
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
   const normalizedPlaybackRate = normalizeRateSpec(playbackRate);
   const sourceDuration = sourceTimeAt(normalizedPlaybackRate, duration);
-  // A failed probe keeps FFmpeg's default channel conversion and the input seek.
-  const metadata = await extractAudioMetadata(srcPath).catch(() => null);
+  // A failed local probe keeps FFmpeg's default channel conversion and the input seek; a URL probe
+  // is retried once, then fails: a blip must not change how the next, successful read is mixed.
+  const metadata = isHttpUrl(srcPath)
+    ? await extractAudioMetadata(srcPath, { signal }).catch((error: unknown) => {
+        if (signal?.aborted) throw error;
+        return extractAudioMetadata(srcPath, { signal });
+      })
+    : await extractAudioMetadata(srcPath).catch(() => null);
   const inputSeek = mediaStart >= (metadata?.latestStreamLeadSeconds ?? 0);
   const start = formatFilterNumber(mediaStart);
   const timestampTrim = inputSeek
@@ -670,9 +677,12 @@ async function extractAudioSegment(
     timestampTrim,
   );
 
-  const args = inputSeek
-    ? ["-ss", String(mediaStart), "-t", String(sourceDuration), "-i", srcPath]
-    : ["-i", srcPath];
+  const args = [
+    ...urlInputArgs(srcPath),
+    ...(inputSeek ? ["-ss", String(mediaStart), "-t", String(sourceDuration)] : []),
+    "-i",
+    srcPath,
+  ];
   args.push("-vn", "-acodec", "pcm_s16le", "-ar", "48000", ...outputArgs);
   if (normalizedPlaybackRate !== 1) args.push("-t", String(duration));
   args.push("-y", outputPath);
@@ -1166,13 +1176,18 @@ export async function processCompositionAudio(
       }
       try {
         let srcPath = element.src;
+        let readInPlace = false;
         if (!isHttpUrl(srcPath)) {
           // Same browser-URL path semantics as videos.
           srcPath = resolveProjectRelativeSrc(element.src, baseDir, compiledDir);
-          srcPath = config?.urlByAbsentLocalPath?.get(srcPath) ?? srcPath;
+          const remoteUrl = config?.urlByAbsentLocalPath?.get(srcPath);
+          if (remoteUrl) {
+            srcPath = remoteUrl;
+            readInPlace = true;
+          }
         }
 
-        if (isHttpUrl(srcPath)) {
+        if (isHttpUrl(srcPath) && !readInPlace) {
           try {
             srcPath = await downloadToTemp(
               srcPath,
@@ -1190,7 +1205,7 @@ export async function processCompositionAudio(
           }
         }
 
-        if (!existsSync(srcPath)) {
+        if (!readInPlace && !existsSync(srcPath)) {
           failures.push({
             stage: "source",
             reason: "source_not_found",
@@ -1226,7 +1241,10 @@ export async function processCompositionAudio(
         if (element.end - element.start <= 0) {
           let metadata;
           try {
-            metadata = await extractAudioMetadata(srcPath);
+            metadata = await extractAudioMetadata(
+              srcPath,
+              readInPlace ? { signal: effectiveSignal } : undefined,
+            );
           } catch (err: unknown) {
             failures.push(
               probeFailure(err instanceof Error ? err.message : String(err), element.id),

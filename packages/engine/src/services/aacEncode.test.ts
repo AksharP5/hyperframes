@@ -105,7 +105,7 @@ describe.skipIf(!HAS_FFMPEG)("encodeAac", () => {
   it("encodes a long mix in parallel segments that decode like one encoder's output", async () => {
     const source = join(dir, "mix.wav");
     ffmpeg([
-      ...["-f", "lavfi", "-i", "anoisesrc=d=150.5:c=pink:r=48000:a=0.2"],
+      ...["-f", "lavfi", "-i", "anoisesrc=d=150.5:c=pink:r=48000:a=0.2:seed=1"],
       ...["-f", "lavfi", "-i", "sine=f=330:d=150.5:r=48000"],
       ...["-filter_complex", "[0][1]amix=2:normalize=0,aformat=channel_layouts=stereo"],
       ...["-c:a", "pcm_f32le", "-y", source],
@@ -173,7 +173,16 @@ describe.skipIf(!HAS_FFMPEG)("encodeAac", () => {
 
   it("keeps a tempo-changed 44.1 kHz track at lag 0 against the same filter uncoded", async () => {
     const source = join(dir, "rate.wav");
-    ffmpeg(["-f", "lavfi", "-i", "anoisesrc=d=6:c=pink:r=44100:a=0.3", "-ac", "2", "-y", source]);
+    ffmpeg([
+      "-f",
+      "lavfi",
+      "-i",
+      "anoisesrc=d=6:c=pink:r=44100:a=0.3:seed=1",
+      "-ac",
+      "2",
+      "-y",
+      source,
+    ]);
     const output = join(dir, "rate.m4a");
     const encoded = await encodeAac(source, output, 4, { timeout: 60_000, filter: "atempo=1.5" });
     expect(encoded.success).toBe(true);
