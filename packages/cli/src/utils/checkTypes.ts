@@ -192,6 +192,7 @@ export type MotionSpecResolution =
 
 export interface CheckAuditDriver {
   initialize(contrast: boolean): Promise<void>;
+  markSamples?(phase: "start" | "end" | "drop"): void;
   matchComponents?(components: string[], findings: CheckFinding[]): Promise<boolean[]>;
   getDuration(): Promise<number>;
   /** True when the root composition explicitly declares that it is intentionally timeline-free. */
@@ -272,6 +273,7 @@ export type RunAuditGrid = (
   driver: CheckAuditDriver,
   options: CheckOptions,
   motion: MotionSpecResolution,
+  helpers?: Promise<CheckAuditDriver[]>,
 ) => Promise<CheckBrowserResult>;
 
 export interface CheckSection<T extends CheckFinding = CheckFinding> {

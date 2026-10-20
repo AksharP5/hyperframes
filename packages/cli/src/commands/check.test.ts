@@ -1635,6 +1635,117 @@ describe("check pipeline", () => {
     expect(checkExitCode(strict.report)).toBe(1);
   });
 
+  it("splits samples over a helper page and returns what one page seeking every sample returns", async () => {
+    const pageOfTime = () => {
+      let seeked = 0;
+      return fakeDriver({
+        seek: vi.fn(async (time: number) => {
+          seeked = time;
+        }),
+        collectLayout: vi.fn(async (time: number) => [layoutIssue("error", { time })]),
+        collectLayoutGeometry: vi.fn(async () => `geometry-${seeked}`),
+        collectContrast: vi.fn(async (time: number) => ({
+          entries: [contrastEntry({ ...anchor("#hero", time), ratio: 1 + time })],
+          pngBase64: `${PNG_BASE64}-${time}`,
+        })),
+      });
+    };
+    const options = { ...DEFAULT_CHECK_OPTIONS, contrast: true };
+    const { timings: _serialTimings, ...serial } = await runAuditGrid(
+      pageOfTime(),
+      options,
+      noMotion(),
+    );
+    const primary = pageOfTime();
+    const helper = pageOfTime();
+    const { timings: _splitTimings, ...split } = await runAuditGrid(
+      primary,
+      options,
+      noMotion(),
+      Promise.resolve([helper]),
+    );
+
+    expect(split).toEqual(serial);
+    expect(serial.layoutIssues.length).toBeGreaterThan(2);
+    expect(helper.initialize).toHaveBeenCalledWith(true);
+    const seeks = (driver: CheckAuditDriver) =>
+      vi.mocked(driver.seek).mock.calls.map(([time]) => time);
+    expect(seeks(helper).length).toBeGreaterThan(0);
+    expect(seeks(primary).filter((time) => seeks(helper).includes(time))).toEqual([]);
+  });
+
+  it("redoes a crashed helper page's samples on the first page and returns the serial result", async () => {
+    let helperSeeks = 0;
+    const pageOfTime = (crashOnSeek?: number) => {
+      let seeked = 0;
+      return fakeDriver({
+        markSamples: vi.fn(),
+        seek: vi.fn(async (time: number) => {
+          if (crashOnSeek !== undefined && ++helperSeeks === crashOnSeek)
+            throw new Error("Target closed");
+          await new Promise((resolve) => setImmediate(resolve));
+          seeked = time;
+        }),
+        collectLayout: vi.fn(async (time: number) => [layoutIssue("error", { time })]),
+        collectLayoutGeometry: vi.fn(async () => `geometry-${seeked}`),
+      });
+    };
+    const { timings: _serialTimings, ...serial } = await runAuditGrid(
+      pageOfTime(),
+      DEFAULT_CHECK_OPTIONS,
+      noMotion(),
+    );
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const primary = pageOfTime();
+    const helper = pageOfTime(2);
+    const { timings: _splitTimings, ...split } = await runAuditGrid(
+      primary,
+      DEFAULT_CHECK_OPTIONS,
+      noMotion(),
+      Promise.resolve([helper]),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    process.off("unhandledRejection", unhandled);
+
+    expect(split).toEqual(serial);
+    expect(helperSeeks).toBe(2);
+    expect(helper.markSamples).toHaveBeenLastCalledWith("drop");
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+
+  it("waits for the helper's sample in flight when the first page runs out of samples", async () => {
+    const pageOfTime = (onSeek?: () => Promise<void>) =>
+      fakeDriver({
+        seek: vi.fn(async () => onSeek?.()),
+        collectLayout: vi.fn(async (time: number) => [layoutIssue("error", { time })]),
+        collectLayoutGeometry: vi.fn(async () => "geometry"),
+      });
+    const serialPage = pageOfTime();
+    const { timings: _serialTimings, ...serial } = await runAuditGrid(
+      serialPage,
+      DEFAULT_CHECK_OPTIONS,
+      noMotion(),
+    );
+    const samples = vi.mocked(serialPage.seek).mock.calls.length;
+    let firstPageSeeks = 0;
+    let othersTaken!: () => void;
+    const allOthersTaken = new Promise<void>((resolve) => (othersTaken = resolve));
+    const primary = pageOfTime(async () => {
+      if (++firstPageSeeks === samples - 1) setImmediate(othersTaken);
+    });
+    const helper = pageOfTime(() => allOthersTaken);
+    const { timings: _splitTimings, ...split } = await runAuditGrid(
+      primary,
+      DEFAULT_CHECK_OPTIONS,
+      noMotion(),
+      Promise.resolve([helper]),
+    );
+
+    expect(vi.mocked(helper.seek).mock.calls).toHaveLength(1);
+    expect(split).toEqual(serial);
+  });
+
   it("fails clearly without samples when no timeline duration is available, without hanging", async () => {
     const driver = fakeDriver({ getDuration: vi.fn(async () => 0) });
     await expect(runAuditGrid(driver, DEFAULT_CHECK_OPTIONS, noMotion())).rejects.toThrow(

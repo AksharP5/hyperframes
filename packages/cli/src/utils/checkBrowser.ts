@@ -2,6 +2,7 @@ import type { CheckDeadline } from "./checkDeadline.js";
 import { BrowserCleanupError, closeManagedBrowser } from "../browser/launch.js";
 import { checkSnapshotDirectory } from "./checkSnapshotDirectory.js";
 import { mkdirSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import { join, resolve } from "node:path";
 import type { Browser, Page } from "puppeteer-core";
 import {
@@ -223,18 +224,18 @@ export async function runBrowserCheck(
     [],
     options.autoProxy,
   );
-  let stamp: RuntimeStamp = { time: 0 };
-  const clock: RuntimeClock = {
-    now: () => stamp,
-    at: (time) => {
-      stamp = { time };
-    },
-    during: (range) => {
-      stamp = { time: range[0], timeRange: range };
-    },
-  };
+  const clock = createRuntimeClock();
   let failure: { kind: "none" } | { kind: "failed"; error: unknown } = { kind: "none" };
   let chromeBrowser: import("puppeteer-core").Browser | undefined;
+  const helperSession =
+    samplingBrowserCount(options) > 1
+      ? startHelperSession(html, server.url, options, deadline)
+      : undefined;
+  const helperOpen = helperSession?.opened;
+  const helpers = helperOpen?.then(
+    (helper) => [helper.driver],
+    () => [],
+  );
 
   try {
     const launchSettleStart = Date.now();
@@ -271,14 +272,18 @@ export async function runBrowserCheck(
       const message = tweenTailMessage(tail);
       drafts.push({ code: "gsap_tween_tail", severity: "warning", message, time: tail.later.end });
     }
-    const driver = createPageDriver(page, clock);
-    const result = await runGrid(driver, options, motion);
-    const broken = await abortedImagesStillBroken(page, drafts);
+    const sampleLog = sampleWindow(drafts);
+    const driver = createPageDriver(page, clock, sampleLog);
+    const result = await runGrid(driver, options, motion, helpers);
+    helperSession?.stop();
+    const helper = await helperOpen?.catch(() => undefined);
+    const merged = helper ? mergeHelperDrafts(sampleLog, helper.sampleLog) : drafts;
+    const broken = await abortedImagesStillBroken(page, merged);
     return {
       ...result,
       timings: { ...result.timings, launchSettleMs },
       runtimeFindings: dropFailedProxyEchoes(
-        keepBrokenImageAborts(drafts, broken),
+        keepBrokenImageAborts(merged, broken),
         failedPaths,
       ).map((draft) => runtimeFinding(draft, rootAnchor)),
     };
@@ -286,8 +291,125 @@ export async function runBrowserCheck(
     failure = { kind: "failed", error };
     throw error;
   } finally {
-    await closeCheckResources(chromeBrowser, server, failure);
+    helperSession?.stop();
+    await helperOpen?.catch(() => undefined);
+    await closeCheckResources([chromeBrowser, helperSession?.browser()], server, failure);
   }
+}
+
+function createRuntimeClock(): RuntimeClock {
+  let stamp: RuntimeStamp = { time: 0 };
+  return {
+    now: () => stamp,
+    at: (time) => {
+      stamp = { time };
+    },
+    during: (range) => {
+      stamp = { time: range[0], timeRange: range };
+    },
+  };
+}
+
+const SAMPLING_BROWSER_BYTES = 250 * 1024 * 1024;
+
+/** Chromes the sample grid splits over: one per spare core and 250 MB free (a container's limit counts), at most 2. */
+export function samplingBrowserCount(
+  options: CheckOptions,
+  cores = os.availableParallelism(),
+  free = Math.min(os.freemem(), process.availableMemory()),
+): number {
+  if (options.at?.length === 1) return 1;
+  return Math.max(1, Math.min(2, cores - 1, Math.floor(free / SAMPLING_BROWSER_BYTES)));
+}
+
+interface SampleWindow {
+  drafts: RuntimeDraft[];
+  start: number;
+  end: number;
+}
+
+function sampleWindow(drafts: RuntimeDraft[]): SampleWindow {
+  return { drafts, start: Number.POSITIVE_INFINITY, end: Number.POSITIVE_INFINITY };
+}
+
+interface HelperSession {
+  driver: CheckAuditDriver;
+  sampleLog: SampleWindow;
+}
+
+/** Opens the helper Chrome; stop() cancels an open still in flight and closes it, once its pages are unused. */
+function startHelperSession(
+  html: string,
+  url: string,
+  options: CheckOptions,
+  deadline: CheckDeadline | undefined,
+) {
+  const abort = new AbortController();
+  let browser: Browser | undefined;
+  const opened = openHelperSession(html, url, options, deadline, {
+    signal: deadline ? AbortSignal.any([deadline.signal, abort.signal]) : abort.signal,
+    onBrowser: (launched) => {
+      browser = launched;
+      deadline?.ownBrowser(launched);
+    },
+  });
+  return {
+    opened,
+    browser: () => browser,
+    stop: () => {
+      abort.abort();
+      // The close is shared, so the check's cleanup awaits this same close and reports its error.
+      if (browser) void closeManagedBrowser(browser).catch(() => undefined);
+    },
+  };
+}
+
+async function openHelperSession(
+  html: string,
+  url: string,
+  options: CheckOptions,
+  deadline: CheckDeadline | undefined,
+  owner: { signal: AbortSignal; onBrowser: (browser: Browser) => void },
+): Promise<HelperSession> {
+  const sampleLog = sampleWindow([]);
+  const clock = createRuntimeClock();
+  const session = await openSettledCompositionPage(html, url, {
+    navigationTimeoutMs: options.timeout,
+    renderReadyTimeoutMs: options.timeout,
+    renderReadyWarningSuffix: "checking the current page state",
+    browserGpuMode: options.browserGpuMode ?? resolveCliChromeGpuMode(),
+    signal: owner.signal,
+    onBrowser: owner.onBrowser,
+    beforeNavigate: async (page) => {
+      wireRuntimeListeners(page, sampleLog.drafts, clock);
+      await deadline?.preparePage(page);
+    },
+  });
+  await waitForPreferredSeekTarget(session.page);
+  return {
+    driver: createPageDriver(session.page, clock, sampleLog),
+    sampleLog,
+  };
+}
+
+const draftKey = (draft: RuntimeDraft) => `${draft.code} ${draft.time} ${draft.message}`;
+
+/**
+ * The first page's drafts with the helper's sample-loop drafts merged in by time, as one page seeking every
+ * sample would have logged them; the helper's load is the first page's, and what both logged at one time counts once.
+ */
+export function mergeHelperDrafts(primary: SampleWindow, helper: SampleWindow): RuntimeDraft[] {
+  const window = ({ drafts, start, end }: SampleWindow) =>
+    drafts.slice(Math.min(start, drafts.length), Math.min(end, drafts.length));
+  const own = window(primary);
+  const seen = new Set(own.map(draftKey));
+  const extra = window(helper).filter((draft) => !seen.has(draftKey(draft)));
+  const start = Math.min(primary.start, primary.drafts.length);
+  return [
+    ...primary.drafts.slice(0, start),
+    ...[...own, ...extra].sort((a, b) => a.time - b.time),
+    ...primary.drafts.slice(start + own.length),
+  ];
 }
 
 /**
@@ -348,17 +470,17 @@ export async function captureFindingCrops(
     failure = { kind: "failed", error };
     throw error;
   } finally {
-    await closeCheckResources(chromeBrowser, server, failure);
+    await closeCheckResources([chromeBrowser], server, failure);
   }
 }
 
 async function closeCheckResources(
-  browser: Browser | undefined,
+  browsers: (Browser | undefined)[],
   server: { close(): Promise<void> },
   failure: { kind: "none" } | { kind: "failed"; error: unknown },
 ): Promise<void> {
   const cleanup = await Promise.allSettled([
-    browser ? closeManagedBrowser(browser) : Promise.resolve(),
+    ...browsers.map((browser) => (browser ? closeManagedBrowser(browser) : Promise.resolve())),
     server.close(),
   ]);
   const errors = cleanup
@@ -585,9 +707,18 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], clock: Runtime
   });
 }
 
-function createPageDriver(page: Page, clock: RuntimeClock): CheckAuditDriver {
+function createPageDriver(
+  page: Page,
+  clock: RuntimeClock,
+  sampleLog?: SampleWindow,
+): CheckAuditDriver {
   return {
     initialize: (contrast) => injectAuditScripts(page, contrast),
+    markSamples: (phase) => {
+      if (!sampleLog) return;
+      if (phase === "drop") sampleLog.start = sampleLog.end = Number.POSITIVE_INFINITY;
+      else sampleLog[phase] = sampleLog.drafts.length;
+    },
     matchComponents: (components, findings) =>
       page.evaluate(matchComponentFindings, { components, findings }),
     getDuration: () => getCompositionDuration(page),
