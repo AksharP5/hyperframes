@@ -578,11 +578,13 @@ describe("resolveProxy", () => {
     const projectDir = tmpProject();
     const sources = batchSources(projectDir);
 
-    const batch = resolveProxies(projectDir, sources);
+    let settled = 0;
+    const batch = resolveProxies(projectDir, sources, () => settled++);
     await answerUntilIdle(calls, (call) => succeed(call));
 
     const results = await batch;
     expect(results.map((result) => result.status)).toEqual(sources.map(() => "fulfilled"));
+    expect(settled).toBe(sources.length);
   });
 
   it("settles each request of a batch on its own when one of them fails", async () => {

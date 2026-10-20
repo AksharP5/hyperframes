@@ -658,6 +658,7 @@ export async function resolveProxy(
 export async function resolveProxies(
   projectDir: string,
   sources: ReadonlyArray<{ sourcePath: string; variant: ProxyVariant }>,
+  onSettled: () => void = () => {},
 ): Promise<PromiseSettledResult<string>[]> {
   const results: PromiseSettledResult<string>[] = [];
   let next = 0;
@@ -671,6 +672,7 @@ export async function resolveProxies(
         (value) => ({ status: "fulfilled", value }),
         (reason: unknown) => ({ status: "rejected", reason }),
       );
+      onSettled();
     }
   };
   const workers = Math.min(MAX_CONCURRENT_TRANSCODES, sources.length);

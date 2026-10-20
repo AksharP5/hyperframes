@@ -1,7 +1,7 @@
 import type { CheckDeadline } from "./checkDeadline.js";
 import { BrowserCleanupError, closeManagedBrowser } from "../browser/launch.js";
 import { checkSnapshotDirectory } from "./checkSnapshotDirectory.js";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join, resolve } from "node:path";
 import type { Browser, Page } from "puppeteer-core";
@@ -39,6 +39,7 @@ import {
 } from "@hyperframes/studio-server/media-codec-map";
 import {
   FfmpegUnavailableError,
+  getProxyCachePath,
   resolveProxies,
 } from "@hyperframes/studio-server/proxy-transcoder";
 import { rectToBbox } from "./checkTypes.js";
@@ -165,12 +166,22 @@ export async function preResolveHostileMediaProxies(
       variant: proxyVariantFor(facts),
     };
   });
-  const results = await resolveProxies(projectDir, sources);
+  const total = hostileEntries.length;
+  const toMake = sources.filter((source) => !proxyCached(projectDir, source)).length;
+  if (toMake > 0) {
+    console.error(
+      `[hyperframes] Making browser-playable copies of ${toMake} video${toMake === 1 ? "" : "s"} Chrome cannot decode. Only the first check of these files waits for this; later checks reuse the copies.`,
+    );
+  }
+  let settled = 0;
+  const results = await resolveProxies(projectDir, sources, () => {
+    settled += 1;
+    if (toMake > 0) console.error(`[hyperframes] browser-playable copies: ${settled}/${total}`);
+  });
   const failures = sources.flatMap((source, index) => {
     const result = results[index]!;
     return result.status === "rejected" ? [{ ...source, reason: result.reason }] : [];
   });
-  const total = hostileEntries.length;
   console.error(
     `[hyperframes] media proxy pre-resolve: ${total - failures.length}/${total} ready, ${failures.length} failed (${Date.now() - startedAt}ms)`,
   );
@@ -190,6 +201,17 @@ export async function preResolveHostileMediaProxies(
     );
   }
   return { findings, failedPaths: new Set(failures.map(({ pathname }) => pathname)) };
+}
+
+function proxyCached(
+  projectDir: string,
+  source: { sourcePath: string; variant: ReturnType<typeof proxyVariantFor> },
+): boolean {
+  try {
+    return existsSync(getProxyCachePath(projectDir, source.sourcePath, source.variant));
+  } catch {
+    return false;
+  }
 }
 
 interface ProxyPreResolution {

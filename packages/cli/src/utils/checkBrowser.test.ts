@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   resolveProxy:
     vi.fn<(projectDir: string, absoluteSourcePath: string, variant?: string) => Promise<string>>(),
   FfmpegUnavailableError: class FfmpegUnavailableError extends Error {},
+  getProxyCachePath: vi.fn((projectDir: string, sourcePath: string) => `${sourcePath}.proxy.mp4`),
   scanProjectMediaCodecMap: vi.fn<
     (...args: unknown[]) => Promise<
       Record<
@@ -84,9 +85,16 @@ vi.mock("@hyperframes/studio-server/media-codec-map", async (importOriginal) => 
 }));
 vi.mock("@hyperframes/studio-server/proxy-transcoder", () => ({
   FfmpegUnavailableError: mocks.FfmpegUnavailableError,
-  resolveProxies: (projectDir: string, sources: Array<{ sourcePath: string; variant: string }>) =>
+  getProxyCachePath: mocks.getProxyCachePath,
+  resolveProxies: (
+    projectDir: string,
+    sources: Array<{ sourcePath: string; variant: string }>,
+    onSettled: () => void = () => {},
+  ) =>
     Promise.allSettled(
-      sources.map(({ sourcePath, variant }) => mocks.resolveProxy(projectDir, sourcePath, variant)),
+      sources.map(({ sourcePath, variant }) =>
+        mocks.resolveProxy(projectDir, sourcePath, variant).finally(onSettled),
+      ),
     ),
 }));
 
@@ -1172,15 +1180,45 @@ describe("preResolveHostileMediaProxies", () => {
 
     await preResolveHostileMediaProxies(projectDir, "<html></html>");
 
-    expect(errorSpy).toHaveBeenCalledTimes(1);
-    expect(errorSpy).toHaveBeenCalledWith(
+    expect(errorSpy.mock.calls.map(([line]) => line)).toEqual([
+      expect.stringMatching(/^\[hyperframes\] Making browser-playable copies of 1 video /),
+      "[hyperframes] browser-playable copies: 1/1",
       expect.stringMatching(
         /^\[hyperframes\] media proxy pre-resolve: 1\/1 ready, 0 failed \(\d+ms\)$/,
       ),
-    );
+    ]);
     expect(infoSpy).not.toHaveBeenCalled();
     expect(logSpy).not.toHaveBeenCalled();
     expect(stdoutSpy).not.toHaveBeenCalled();
+  });
+
+  it("says it is making copies, and counts them, only when some are not made yet", async () => {
+    const projectDir = mkProjectDir();
+    const codec = {
+      codecName: "hevc",
+      browserHostile: true,
+      representativeMime: null,
+      hasAlpha: false,
+    };
+    mocks.scanProjectMediaCodecMap.mockResolvedValue({ "/a.mov": codec, "/b.mov": codec });
+    mocks.resolveProxy.mockResolvedValue("/cache/copy.mp4");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    writeFileSync(join(projectDir, "a.mov.proxy.mp4"), "");
+    await preResolveHostileMediaProxies(projectDir, "<html></html>");
+    expect(errorSpy.mock.calls.map(([line]) => String(line).slice(0, 48))).toEqual([
+      "[hyperframes] Making browser-playable copies of ",
+      "[hyperframes] browser-playable copies: 1/2",
+      "[hyperframes] browser-playable copies: 2/2",
+      "[hyperframes] media proxy pre-resolve: 2/2 ready",
+    ]);
+    expect(errorSpy.mock.calls[0]![0]).toContain("copies of 1 video Chrome");
+
+    errorSpy.mockClear();
+    writeFileSync(join(projectDir, "b.mov.proxy.mp4"), "");
+    await preResolveHostileMediaProxies(projectDir, "<html></html>");
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy.mock.calls[0]![0]).toMatch(/^\[hyperframes\] media proxy pre-resolve: 2\/2/);
   });
 
   it("writes a scan failure to stderr and leaves stdout untouched", async () => {
