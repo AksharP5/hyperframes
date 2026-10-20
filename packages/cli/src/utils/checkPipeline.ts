@@ -30,7 +30,9 @@ import {
 import {
   assertionTargets,
   collectSamplingTargets,
+  DEFAULT_MAX_STATIC_SEC,
   evaluateMotion,
+  frozenSpans,
   type Canvas,
   type MotionFrame,
 } from "./motionAudit.js";
@@ -712,6 +714,78 @@ function detectSweepStatic(
   return [];
 }
 
+// The signature reads DOM channels, which miss paint such as SVG mask and clip contents, stroke dashes and
+// canvas or WebGL pixels. Before calling a sweep still, the rendered frames get the last word. A change counts
+// only if the first time still renders its first frame: wall-clock paint (an unregistered rAF loop) is no seek.
+async function framesMoved(driver: CheckAuditDriver, times: number[]): Promise<boolean> {
+  const [firstTime, ...rest] = times;
+  if (firstTime === undefined) return false;
+  const first = await frameAt(driver, firstTime);
+  for (const time of rest) {
+    if (!(await driver.framesDiffer(first, await frameAt(driver, time)))) continue;
+    return !(await driver.framesDiffer(first, await frameAt(driver, firstTime)));
+  }
+  return false;
+}
+
+async function frameAt(driver: CheckAuditDriver, time: number, scope?: string): Promise<string> {
+  await driver.seek(time, true);
+  return driver.captureFrame(scope);
+}
+
+// keepsMoving reads the same liveness channels, so a span it calls frozen gets the frames' word too: one capture
+// every half maxStaticSec, compared with the last capture that differed; frames up to the next capture share its mark.
+async function withFrameMotion(
+  driver: CheckAuditDriver,
+  frames: MotionFrame[],
+  assertions: MotionAssertion[],
+): Promise<MotionFrame[]> {
+  const marked = frames.map((frame) => ({ ...frame, liveness: { ...frame.liveness } }));
+  for (const assertion of assertions) {
+    if (assertion.kind !== "keepsMoving") continue;
+    const scope = assertion.withinSelector ?? "*";
+    // A scope that matched nothing stays motion_selector_missing.
+    if (frames.every((frame) => !frame.liveness[scope])) continue;
+    const maxStaticSec = assertion.maxStaticSec ?? DEFAULT_MAX_STATIC_SEC;
+    for (const span of frozenSpans(frames, scope, maxStaticSec)) {
+      const held = frames.find((frame) => frame.time === span.start)?.liveness[scope];
+      // The frame that ends a span opens the next run, so only frames still holding the span's signature belong.
+      const inSpan = marked.filter(
+        (frame, index) =>
+          frame.time >= span.start &&
+          frame.time <= span.end &&
+          frames[index]?.liveness[scope] === held,
+      );
+      await markFrameChanges(driver, inSpan, assertion.withinSelector, maxStaticSec / 2);
+    }
+  }
+  return marked;
+}
+
+async function markFrameChanges(
+  driver: CheckAuditDriver,
+  frames: MotionFrame[],
+  within: string | undefined,
+  captureEverySec: number,
+): Promise<void> {
+  const scope = within ?? "*";
+  let reference: string | undefined;
+  let mark = 0;
+  let nextCapture = Number.NEGATIVE_INFINITY;
+  for (const frame of frames) {
+    if (frame.time >= nextCapture) {
+      nextCapture = frame.time + captureEverySec;
+      const capture = await frameAt(driver, frame.time, within);
+      if (reference === undefined) reference = capture;
+      else if (await driver.framesDiffer(reference, capture)) {
+        reference = capture;
+        mark++;
+      }
+    }
+    frame.liveness[scope] = `${frame.liveness[scope] ?? ""}|frame${mark}`;
+  }
+}
+
 function anAnimationIsStuck(samples: { clock: SeekClock[] }[]): boolean {
   const seenById = new Map<number, SeekClock[]>();
   for (const sample of samples) {
@@ -1314,22 +1388,34 @@ export async function runAuditGrid(
 
   let motionIssues = plan.preflightIssues;
   if (motion.kind === "valid" && plan.assertions.length > 0 && collected.motionFrames.length > 0) {
-    const evaluated = evaluateMotion(
-      collected.motionFrames,
-      plan.assertions,
-      await driver.getCanvas(),
-    );
+    const canvas = await driver.getCanvas();
+    let evaluated = evaluateMotion(collected.motionFrames, plan.assertions, canvas);
+    if (evaluated.some((issue) => issue.code === "motion_frozen")) {
+      const frames = await withFrameMotion(driver, collected.motionFrames, plan.assertions);
+      evaluated = evaluateMotion(frames, plan.assertions, canvas);
+    }
     motionIssues = [...motionIssues, ...(await driver.anchorMotionIssues(evaluated))];
   }
   const userPicked = new Set(grid.userPickedSamples);
-  const sweepFindings = options.range
+  const sweepSamples = collected.layoutStateSignatures.filter(
+    (sample) => !userPicked.has(sample.time),
+  );
+  const sweepVerdict = options.range
     ? []
     : detectSweepStatic(
         grid.duration,
-        collected.layoutStateSignatures.filter((sample) => !userPicked.has(sample.time)),
+        sweepSamples,
         motionIssues,
         await driver.hasNoTimelineDeclaration(),
       );
+  const sweepFindings =
+    sweepVerdict.length > 0 &&
+    (await framesMoved(
+      driver,
+      sweepSamples.map((sample) => sample.time),
+    ))
+      ? []
+      : sweepVerdict;
   const rotationFindings = detectRotationPivotDrift(
     collected.rotationSamples,
     await driver.getCanvas(),

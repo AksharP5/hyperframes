@@ -729,9 +729,9 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], clock: Runtime
   });
 }
 
-function createPageDriver(
+export function createPageDriver(
   page: Page,
-  clock: RuntimeClock,
+  clock: RuntimeClock = createRuntimeClock(),
   sampleLog?: SampleWindow,
 ): CheckAuditDriver {
   return {
@@ -771,6 +771,15 @@ function createPageDriver(
       return issues;
     },
     collectLayoutGeometry: () => collectLayoutGeometry(page),
+    captureFrame: (scope) => captureFrame(page, scope),
+    framesDiffer: (first, second) =>
+      page
+        .evaluate(
+          (a, b) => Reflect.apply(Reflect.get(window, "__hyperframesFramesDiffer"), window, [a, b]),
+          first,
+          second,
+        )
+        .then((differ) => differ === true),
     collectSeekClock: () => collectSeekClock(page),
     collectRotationSample: (time) => collectRotationSample(page, time),
     collectOffPivotRotationSample: (time) => collectOffPivotRotationSample(page, time),
@@ -997,6 +1006,45 @@ async function collectOverlapGrid(page: Page, times: number[]): Promise<Anchored
       })),
     ),
   );
+}
+
+async function captureFrame(page: Page, scope?: string): Promise<string> {
+  if (!scope) return page.screenshot({ encoding: "base64", type: "png" });
+  try {
+    const box = await page.evaluate(isolateScopePaint, scope);
+    if (!box || box.width < 1 || box.height < 1) return "";
+    return await page.screenshot({ encoding: "base64", type: "png", clip: box });
+  } finally {
+    await page.evaluate(restoreScopePaint);
+  }
+}
+
+// Liveness signs only the scope's subtree, so its frame must show only that paint: anything else behind or
+// over the box (a moving background, grain) would read as the scope moving. Hidden like the contrast pass's glyphs.
+function isolateScopePaint(
+  scope: string,
+): { x: number; y: number; width: number; height: number } | null {
+  let target: Element | null = null;
+  try {
+    target = document.querySelector(scope);
+  } catch {
+    return null;
+  }
+  if (!target) return null;
+  const visibility = getComputedStyle(target).visibility;
+  target.setAttribute("data-hf-capture-scope", "");
+  const style = document.createElement("style");
+  style.id = "__hf_capture_scope_style";
+  style.textContent = `:not([data-hf-capture-scope], [data-hf-capture-scope] *) { visibility: hidden !important; }
+    [data-hf-capture-scope] { visibility: ${visibility} !important; }`;
+  document.head.append(style);
+  const rect = target.getBoundingClientRect();
+  return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+}
+
+function restoreScopePaint(): void {
+  document.getElementById("__hf_capture_scope_style")?.remove();
+  document.querySelector("[data-hf-capture-scope]")?.removeAttribute("data-hf-capture-scope");
 }
 
 async function collectLayoutGeometry(page: Page): Promise<string> {
