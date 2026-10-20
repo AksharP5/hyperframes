@@ -260,7 +260,7 @@ describe("openSettledCompositionPage when nothing may listen", () => {
     const opened = fakeBrowser();
     mocks.launch.mockResolvedValue(opened.browser);
     await openSettledCompositionPage(HTML, "http://127.0.0.1:3000", OPTIONS);
-    expect(launched().pipe).toBeUndefined();
+    expect(launched().pipe).toBe(true);
     expect(launched().args).toEqual(["--headless"]);
     expect(opened.page.setRequestInterception).not.toHaveBeenCalled();
   });

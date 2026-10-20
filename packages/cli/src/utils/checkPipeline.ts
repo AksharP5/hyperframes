@@ -2043,10 +2043,23 @@ async function runBrowserCheck(
 }
 
 // Chrome boots while lint, hdr and bundling run; the source index guesses the bundle's launch arguments.
+let adoptedBrowser: PrelaunchedBrowser | undefined;
+
+export async function prelaunchBrowserForNextCheck(
+  project: ProjectDir,
+  options: CheckOptions,
+): Promise<PrelaunchedBrowser | undefined> {
+  adoptedBrowser = await prelaunchBrowser(project, options);
+  return adoptedBrowser;
+}
+
 async function prelaunchBrowser(
   project: ProjectDir,
   options: CheckOptions,
 ): Promise<PrelaunchedBrowser | undefined> {
+  const adopted = adoptedBrowser;
+  adoptedBrowser = undefined;
+  if (adopted) return adopted;
   const html = await readFile(project.indexPath, "utf8").catch(() => undefined);
   if (html === undefined) return undefined;
   const { prelaunchCompositionBrowser } = await import("../capture/captureCompositionFrame.js");

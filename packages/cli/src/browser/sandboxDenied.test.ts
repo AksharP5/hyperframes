@@ -68,7 +68,8 @@ describe("a browser inside an agent's macOS seatbelt", () => {
     vi.stubEnv("CODEX_SANDBOX", "");
     const { puppeteer, launches } = recordingPuppeteer([SEATBELT_LAUNCH_FAILURE]);
     await expect(launchManagedBrowser(puppeteer, { args: ["--headless"] })).resolves.toBeDefined();
-    expect(launches.map((options) => options.pipe ?? false)).toEqual([false, true]);
+    expect(launches.map((options) => options.pipe ?? false)).toEqual([true, true]);
+    expect(launches[0]!.args).toEqual(["--headless"]);
     expect(launches[1]!.args).toEqual([
       "--headless",
       "--single-process",

@@ -1,4 +1,4 @@
-import type { ChildProcess } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 
 export function testProcessIsAlive(pid: number): boolean {
@@ -27,20 +27,49 @@ export async function waitForTestCondition(check: () => boolean, timeoutMs: numb
   }
 }
 
-export function testProcessDescendants(parentPid: number): number[] {
-  const parents = new Map<number, number>();
-  for (const name of readdirSync("/proc")) {
-    if (!/^\d+$/.test(name)) continue;
-    try {
-      const stat = readFileSync(`/proc/${name}/stat`, "utf8");
-      parents.set(Number(name), Number(stat.slice(stat.lastIndexOf(") ") + 2).split(" ")[1]));
-    } catch {}
+function processTable(): Map<number, { parent: number; name: string }> {
+  const table = new Map<number, { parent: number; name: string }>();
+  if (process.platform === "linux") {
+    for (const name of readdirSync("/proc")) {
+      if (!/^\d+$/.test(name)) continue;
+      try {
+        const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+        table.set(Number(name), {
+          parent: Number(stat.slice(stat.lastIndexOf(") ") + 2).split(" ")[1]),
+          name: stat.slice(stat.indexOf("(") + 1, stat.lastIndexOf(")")),
+        });
+      } catch {}
+    }
+    return table;
   }
+  const listing =
+    process.platform === "win32"
+      ? execFileSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.Name)" }',
+          ],
+          { encoding: "utf8" },
+        )
+      : execFileSync("ps", ["-A", "-o", "pid=,ppid=,comm="], { encoding: "utf8" });
+  for (const line of listing.split("\n")) {
+    const [pid, parent, ...name] = line.trim().split(/\s+/);
+    if (Number(pid) > 0) table.set(Number(pid), { parent: Number(parent), name: name.join(" ") });
+  }
+  return table;
+}
+
+export function testProcessDescendants(parentPid: number, named?: RegExp): number[] {
+  const table = processTable();
   const owned = new Set([parentPid]);
   for (const pid of owned) {
-    for (const [child, parent] of parents) if (parent === pid) owned.add(child);
+    for (const [child, entry] of table) if (entry.parent === pid) owned.add(child);
   }
-  return [...owned].filter((pid) => pid !== parentPid);
+  return [...owned].filter(
+    (pid) => pid !== parentPid && (!named || named.test(table.get(pid)?.name ?? "")),
+  );
 }
 
 export async function stopTestProcesses(
