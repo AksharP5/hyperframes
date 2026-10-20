@@ -11,6 +11,7 @@ import { watchChromeTree, type ChromeWatchdog } from "./windowsChromeWatchdog.js
 import {
   inAgentSandbox,
   isOneProcessOverPipe,
+  pipeLaunchClosedOnMac,
   machServiceDenied,
   oneProcessOverPipe,
   sandboxDeniedRemediation,
@@ -89,7 +90,9 @@ export async function launchManagedBrowser(
   try {
     return await launchOwnedBrowser(puppeteer, sandboxed ? oneProcessOverPipe(options) : options);
   } catch (error) {
-    const unnamedSeatbelt = !sandboxed && machServiceDenied(normalizeErrorMessage(error));
+    const unnamedSeatbelt =
+      !sandboxed &&
+      (machServiceDenied(normalizeErrorMessage(error)) || pipeLaunchClosedOnMac(error));
     if (!unnamedSeatbelt) throw withRemediation(error);
     return launchOwnedBrowser(puppeteer, oneProcessOverPipe(options)).catch(
       (retryError: unknown) => {

@@ -251,6 +251,13 @@ async function waitForCompositionSettle(
     });
 
   await waitForLateSubresources(page, options.lateSubresourceTimeoutMs ?? CAPTURE_SETTLE_MS);
+  const { resolveConfig, waitForImagesReady } = await import("@hyperframes/engine");
+  const imageTimeoutMs = resolveConfig().playerReadyTimeout;
+  await waitForImagesReady(page, imageTimeoutMs, (sources) =>
+    console.warn(
+      `   ${c.warn("⚠")} Some images did not load within ${imageTimeoutMs}ms: ${sources}. They may show blank.`,
+    ),
+  );
   return runtimeReady;
 }
 

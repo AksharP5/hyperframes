@@ -2019,6 +2019,30 @@ export async function pollImagesReady(
   return check();
 }
 
+export async function waitForImagesReady(
+  page: Page,
+  timeoutMs: number,
+  onUnloaded: (sources: string) => void,
+): Promise<boolean> {
+  const ready = await pollImagesReady(page, timeoutMs);
+  if (!ready) {
+    onUnloaded(
+      await page.evaluate(() =>
+        Array.from(document.querySelectorAll("img"))
+          .filter((img) => {
+            const src = img.getAttribute("src") || "";
+            if (!src || src.startsWith("data:")) return false;
+            return !(img.complete && img.naturalWidth > 0);
+          })
+          .map((img) => img.src || img.getAttribute("src") || "(no src)")
+          .join(", "),
+      ),
+    );
+  }
+  await decodeAllImages(page);
+  return ready;
+}
+
 type MediaReadinessSnapshot = {
   pendingImages: string[];
   failedImages: string[];
@@ -2513,27 +2537,12 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
     const skipVideoIds = session.options.skipReadinessVideoIds ?? [];
     const [videosReady] = await Promise.all([
       pollVideosReady(page, skipVideoIds, pageReadyTimeout),
-      pollImagesReady(page, pageReadyTimeout).then(async (ready) => {
-        if (!ready) {
-          const failedImages = await page.evaluate(() => {
-            return Array.from(document.querySelectorAll("img"))
-              .filter((img) => {
-                const ie = img as HTMLImageElement;
-                const src = ie.getAttribute("src") || "";
-                if (!src || src.startsWith("data:")) return false;
-                return !(ie.complete && ie.naturalWidth > 0);
-              })
-              .map((img) => (img as HTMLImageElement).src || img.getAttribute("src") || "(no src)")
-              .join(", ");
-          });
-          console.warn(
-            `[FrameCapture] Some image elements did not load within ${pageReadyTimeout}ms: ${failedImages}. ` +
-              `Continuing render. Affected images may appear blank/missing in early frames.`,
-          );
-        }
-        await decodeAllImages(page);
-        return ready;
-      }),
+      waitForImagesReady(page, pageReadyTimeout, (failedImages) =>
+        console.warn(
+          `[FrameCapture] Some image elements did not load within ${pageReadyTimeout}ms: ${failedImages}. ` +
+            `Continuing render. Affected images may appear blank/missing in early frames.`,
+        ),
+      ),
       page.evaluate(`document.fonts?.ready`),
       waitForOptionalTailwindReady(page, pageReadyTimeout),
     ]);
@@ -2669,27 +2678,12 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
     const bfSkipVideoIds = session.options.skipReadinessVideoIds ?? [];
     const [bfVideosReady] = await Promise.all([
       pollVideosReady(page, bfSkipVideoIds, pageReadyTimeout),
-      pollImagesReady(page, pageReadyTimeout).then(async (ready) => {
-        if (!ready) {
-          const failedImages = await page.evaluate(() => {
-            return Array.from(document.querySelectorAll("img"))
-              .filter((img) => {
-                const ie = img as HTMLImageElement;
-                const src = ie.getAttribute("src") || "";
-                if (!src || src.startsWith("data:")) return false;
-                return !(ie.complete && ie.naturalWidth > 0);
-              })
-              .map((img) => (img as HTMLImageElement).src || img.getAttribute("src") || "(no src)")
-              .join(", ");
-          });
-          console.warn(
-            `[FrameCapture] Some image elements did not load within ${pageReadyTimeout}ms: ${failedImages}. ` +
-              `Continuing render. Affected images may appear blank/missing in early frames.`,
-          );
-        }
-        await decodeAllImages(page);
-        return ready;
-      }),
+      waitForImagesReady(page, pageReadyTimeout, (failedImages) =>
+        console.warn(
+          `[FrameCapture] Some image elements did not load within ${pageReadyTimeout}ms: ${failedImages}. ` +
+            `Continuing render. Affected images may appear blank/missing in early frames.`,
+        ),
+      ),
       page.evaluate(`document.fonts?.ready`),
       waitForOptionalTailwindReady(page, pageReadyTimeout),
     ]);

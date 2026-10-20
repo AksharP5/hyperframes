@@ -143,6 +143,7 @@ export {
   type DiscardWarmupInnerCapture,
   type StaticVerificationOutcome,
   VfxFailureError,
+  waitForImagesReady,
 } from "./services/frameCapture.js";
 export {
   CaptureFailure,
