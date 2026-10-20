@@ -9,13 +9,14 @@
  * exactly why it lives here rather than being copy-pasted per adapter.
  */
 
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readSync, realpathSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { PLAN_PROJECT_DIR_SKIP_SEGMENTS } from "./plan.js";
 
 // Bump when the hashed set changes so uploads cached under an older scheme are never reused.
 const SITE_ID_SCHEME = "site-v2\0";
+const READ_CHUNK_BYTES = 256 * 1024;
 
 /**
  * The files a site upload ships, as `/`-separated paths under `projectDir`. Symlinks are followed
@@ -62,20 +63,26 @@ export function listSiteFiles(projectDir: string): string[] {
  * same-bytes rename still yields a fresh id. We trim to 16 chars because the
  * full 64 isn't useful in an object key for legibility. Pass `files` when the
  * caller already listed them, so the hashed set is the shipped set.
- *
- * Reads are synchronous: project trees are typically tens of MB at most
- * (HTML/CSS/JS plus a few composition assets), so the simpler shape wins over
- * a streaming pipeline.
+ * Files are read in fixed-size chunks, so no file is ever held whole in memory.
  */
 export function hashProjectDir(
   projectDir: string,
   files: readonly string[] = listSiteFiles(projectDir),
 ): string {
   const hash = createHash("sha256").update(SITE_ID_SCHEME);
+  const chunk = Buffer.allocUnsafe(READ_CHUNK_BYTES);
   for (const rel of files) {
     hash.update(rel);
     hash.update("\0");
-    hash.update(readFileSync(join(projectDir, rel)));
+    const fd = openSync(join(projectDir, rel), "r");
+    try {
+      let read: number;
+      while ((read = readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+        hash.update(chunk.subarray(0, read));
+      }
+    } finally {
+      closeSync(fd);
+    }
   }
   return hash.digest("hex").slice(0, 16);
 }

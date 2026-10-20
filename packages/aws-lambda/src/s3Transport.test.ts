@@ -7,13 +7,15 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CONTENT_STORE_REFRESH_AFTER_DAYS, contentStoreUri } from "./contentStore.js";
 import { HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import {
   downloadS3ObjectToFileVerified,
+  ensureContentStoreObject,
+  MAX_SINGLE_PUT_BYTES,
   formatS3Uri,
   parseS3Uri,
   presignVerifiedS3GetUrl,
@@ -275,6 +277,184 @@ describe("presignVerifiedS3GetUrl", () => {
     ).rejects.toMatchObject({ name: "PLAN_ARTIFACT_DIGEST_MISMATCH" });
   });
 });
+
+describe("objects over the single-PUT limit", () => {
+  const bigSize = MAX_SINGLE_PUT_BYTES + 1;
+  // sha256 of bigSize zero bytes, computed outside this code.
+  const bigDigest = "edcddf01fc829bf06be2b5393a9793cdd43598a0fd483c57f41a9b58183f6e33";
+  function sparseFile(name: string): string {
+    const path = join(scratchRoot, name);
+    writeFileSync(path, "");
+    truncateSync(path, bigSize);
+    return path;
+  }
+
+  it("stores a file over 5 GB in checked parts, created only if the key is free", async () => {
+    const source = sparseFile("big-upload.bin");
+    const s3 = new MultipartFakeS3();
+    try {
+      expect(await putContentStoreFile(s3.asClient(), source, "bucket", bigDigest)).toBe(
+        "uploaded",
+      );
+    } finally {
+      rmSync(source);
+    }
+    const [create, complete] = [s3.calls[1]!, s3.calls.at(-1)!];
+    expect(s3.calls.map((c) => c.name)).not.toContain("PutObjectCommand");
+    expect(create).toMatchObject({
+      name: "CreateMultipartUploadCommand",
+      input: { Metadata: { sha256: bigDigest }, ChecksumAlgorithm: "SHA256" },
+    });
+    expect(complete).toMatchObject({
+      name: "CompleteMultipartUploadCommand",
+      input: { IfNoneMatch: "*", MpuObjectSize: bigSize },
+    });
+    expect(s3.partSizes.reduce((a, b) => a + b, 0)).toBe(bigSize);
+    expect(s3.partSizes.length).toBeLessThanOrEqual(10_000);
+    expect(s3.maxPartsInFlight).toBeGreaterThan(1);
+    expect(s3.maxPartsInFlight).toBeLessThanOrEqual(8);
+  }, 120_000);
+
+  it("resends a part from a fresh read after a dropped connection", async () => {
+    const source = sparseFile("big-retry.bin");
+    const s3 = new MultipartFakeS3();
+    s3.failNextPart = true;
+    try {
+      expect(await putContentStoreFile(s3.asClient(), source, "bucket", bigDigest)).toBe(
+        "uploaded",
+      );
+    } finally {
+      rmSync(source);
+    }
+    expect(s3.partSizes.reduce((a, b) => a + b, 0)).toBe(bigSize);
+    expect(s3.calls.at(-1)).toMatchObject({ name: "CompleteMultipartUploadCommand" });
+  }, 120_000);
+
+  it("aborts instead of completing when the file no longer has the digest it was stored under", async () => {
+    const source = sparseFile("big-changed.bin");
+    const s3 = new MultipartFakeS3();
+    try {
+      await expect(
+        putContentStoreFile(s3.asClient(), source, "bucket", "0".repeat(64)),
+      ).rejects.toMatchObject({ name: "PLAN_ARTIFACT_DIGEST_MISMATCH" });
+    } finally {
+      rmSync(source);
+    }
+    const names = s3.calls.map((c) => c.name);
+    expect(names).toContain("AbortMultipartUploadCommand");
+    expect(names).not.toContain("CompleteMultipartUploadCommand");
+  }, 120_000);
+
+  it("refreshes an aging object over 5 GB by copying it onto itself in parts", async () => {
+    const s3 = new MultipartFakeS3();
+    s3.head = {
+      ContentLength: bigSize,
+      Metadata: { sha256: bigDigest },
+      LastModified: new Date(Date.now() - CONTENT_STORE_REFRESH_AFTER_DAYS * 86_400_000),
+    };
+    await ensureContentStoreObject(s3.asClient(), "bucket", bigDigest, bigSize);
+    const copies = s3.calls.filter((c) => c.name === "UploadPartCopyCommand");
+    expect(copies.map((c) => c.input.CopySourceRange)).toEqual([
+      `bytes=0-${MAX_SINGLE_PUT_BYTES - 1}`,
+      `bytes=${MAX_SINGLE_PUT_BYTES}-${MAX_SINGLE_PUT_BYTES}`,
+    ]);
+    expect(s3.calls.at(-1)).toMatchObject({ name: "CompleteMultipartUploadCommand" });
+    expect(s3.calls[1]).toMatchObject({ input: { Metadata: { sha256: bigDigest } } });
+  });
+
+  it("signs a multipart object by its recorded digest only above the single-PUT limit", async () => {
+    const uri = contentStoreUri("bucket", bigDigest);
+    const head = {
+      ChecksumSHA256: "Y29tcG9zaXRl-2",
+      ChecksumType: "COMPOSITE",
+      Metadata: { sha256: bigDigest },
+    };
+    const holding = (ContentLength: number) => {
+      const s3 = new MultipartFakeS3();
+      s3.head = { ...head, ContentLength };
+      return s3.asClient();
+    };
+    expect(await presignVerifiedS3GetUrl(holding(bigSize), uri, bigDigest, bigSize, 60)).toContain(
+      bigDigest,
+    );
+    await expect(
+      presignVerifiedS3GetUrl(holding(42), uri, bigDigest, 42, 60),
+    ).rejects.toMatchObject({ name: "PLAN_ARTIFACT_DIGEST_MISMATCH" });
+  });
+});
+
+/** Behaves like S3 at the size limits and records part sizes instead of holding the bytes. */
+class MultipartFakeS3 {
+  readonly calls: { name: string; input: Record<string, unknown> }[] = [];
+  readonly partSizes: number[] = [];
+  head: Record<string, unknown> | undefined;
+  failNextPart = false;
+  maxPartsInFlight = 0;
+  #inFlight = 0;
+
+  asClient(): S3Client {
+    const client = new S3Client({
+      region: "us-east-2",
+      credentials: { accessKeyId: "AKIDTEST", secretAccessKey: "test-secret" },
+    });
+    client.send = ((command: { constructor: { name: string }; input: Record<string, unknown> }) =>
+      this.send(command)) as S3Client["send"];
+    return client;
+  }
+
+  async send(command: {
+    constructor: { name: string };
+    input: Record<string, unknown>;
+  }): Promise<unknown> {
+    const { name } = command.constructor;
+    const { Body, ...input } = command.input;
+    this.calls.push({ name, input });
+    if (name === "HeadObjectCommand") {
+      if (this.head) return this.head;
+      throw Object.assign(new Error("not found"), {
+        name: "NotFound",
+        $metadata: { httpStatusCode: 404 },
+      });
+    }
+    if (name === "PutObjectCommand" && Number(input.ContentLength) > MAX_SINGLE_PUT_BYTES) {
+      (Body as NodeJS.ReadableStream & { destroy(): void }).destroy();
+      throw Object.assign(new Error("EntityTooLarge"), { name: "EntityTooLarge" });
+    }
+    if (name === "CopyObjectCommand" && Number(this.head?.ContentLength) > MAX_SINGLE_PUT_BYTES) {
+      throw Object.assign(new Error("copy source too large"), { name: "InvalidRequest" });
+    }
+    if (name === "CreateMultipartUploadCommand") return { UploadId: "upload-1" };
+    if (name === "UploadPartCommand") {
+      this.maxPartsInFlight = Math.max(this.maxPartsInFlight, ++this.#inFlight);
+      try {
+        const hash = createHash("sha256");
+        let length = 0;
+        for await (const chunk of Body as AsyncIterable<Buffer>) {
+          hash.update(chunk);
+          length += chunk.length;
+        }
+        if (this.failNextPart) {
+          this.failNextPart = false;
+          throw Object.assign(new Error("connection reset"), { name: "ECONNRESET" });
+        }
+        if (length !== input.ContentLength || hash.digest("base64") !== input.ChecksumSHA256) {
+          throw Object.assign(new Error("part checksum mismatch"), { name: "BadDigest" });
+        }
+        this.partSizes.push(length);
+        return { ETag: `"part-${String(input.PartNumber)}"` };
+      } finally {
+        this.#inFlight -= 1;
+      }
+    }
+    if (name === "UploadPartCopyCommand") {
+      return { CopyPartResult: { ETag: `"copy-${String(input.PartNumber)}"` } };
+    }
+    if (name === "CompleteMultipartUploadCommand" || name === "AbortMultipartUploadCommand") {
+      return {};
+    }
+    throw new Error(`unexpected command ${name}`);
+  }
+}
 
 class ContentAddressedFakeS3 {
   readonly objects = new Map<string, { bytes: Buffer; sha256: string; lastModified?: Date }>();

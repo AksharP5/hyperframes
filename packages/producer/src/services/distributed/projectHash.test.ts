@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashProjectDir, listSiteFiles } from "./projectHash.js";
@@ -70,5 +70,20 @@ describe("listSiteFiles / hashProjectDir", () => {
       .digest("hex")
       .slice(0, 16);
     expect(hashProjectDir(dir)).not.toBe(unversioned);
+  });
+
+  it("hashes a file larger than a runtime can read in one call", () => {
+    const dir = project();
+    writeFileSync(join(dir, "big.mov"), "");
+    truncateSync(join(dir, "big.mov"), 2 ** 32 + 1);
+    // Same bytes hashed outside this code: "site-v2\0big.mov\0" + 4 GiB + 1 zero bytes + index.html.
+    expect(hashProjectDir(dir)).toBe("014f8f69f7633edb");
+  }, 60_000);
+
+  it("keeps the site id of a small project unchanged", () => {
+    const dir = project();
+    mkdirSync(join(dir, "assets"));
+    writeFileSync(join(dir, "assets", "clip.mp4"), Buffer.from([0, 1, 2, 255]));
+    expect(hashProjectDir(dir)).toBe("12972d522bd6829d");
   });
 });

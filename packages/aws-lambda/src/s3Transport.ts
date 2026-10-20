@@ -25,19 +25,34 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, type Hash } from "node:crypto";
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  type CompletedPart,
   CopyObjectCommand,
+  CreateMultipartUploadCommand,
+  type CreateMultipartUploadCommandInput,
   GetObjectCommand,
   HeadObjectCommand,
+  type HeadObjectCommandOutput,
   PutObjectCommand,
   type S3Client,
+  UploadPartCommand,
+  UploadPartCopyCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import * as tar from "tar";
 import { CONTENT_STORE_REFRESH_AFTER_DAYS, contentStoreUri } from "./contentStore.js";
+
+/** S3's largest PutObject or CopyObject; bigger objects go multipart. */
+export const MAX_SINGLE_PUT_BYTES = 5 * 1024 ** 3;
+const MAX_PARTS = 10_000;
+const MIN_FILE_PART_BYTES = 64 * 1024 * 1024;
+const FILE_PARTS_IN_FLIGHT = 8;
+const PART_ATTEMPTS = 3;
 
 /** Parsed `s3://bucket/key` URI. */
 export interface S3Location {
@@ -121,7 +136,9 @@ export async function presignVerifiedS3GetUrl(
     new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: "ENABLED" }),
   );
   const expectedChecksum = Buffer.from(expectedSha256, "hex").toString("base64");
-  if (head.ChecksumSHA256 !== expectedChecksum || head.ContentLength !== expectedSize) {
+  const attested =
+    head.ChecksumSHA256 === expectedChecksum || isDigestCheckedMultipart(head, expectedSha256);
+  if (!attested || head.ContentLength !== expectedSize) {
     const error = new Error(
       `[s3Transport] PLAN_ARTIFACT_DIGEST_MISMATCH: ${uri} expected ${expectedSha256} (${expectedSize} bytes), S3 holds checksum ${String(head.ChecksumSHA256)} (${String(head.ContentLength)} bytes)`,
     );
@@ -133,13 +150,17 @@ export async function presignVerifiedS3GetUrl(
   });
 }
 
-/**
- * Upload a local file's contents to an S3 URI using a streaming
- * `PutObjectCommand`. PutObject's 5 GB cap comfortably exceeds the
- * distributed pipeline's 2 GB planDir limit and the typical
- * chunk size (≤ 200 MB), so a single PUT works for every artifact this
- * adapter handles.
- */
+// S3 keeps only a checksum of part checksums for a multipart object; its uploader
+// checked the whole-file digest it records before completing (uploadFileInParts).
+function isDigestCheckedMultipart(head: HeadObjectCommandOutput, expectedSha256: string): boolean {
+  return (
+    head.ChecksumType === "COMPOSITE" &&
+    (head.ContentLength ?? 0) > MAX_SINGLE_PUT_BYTES &&
+    head.Metadata?.sha256 === expectedSha256
+  );
+}
+
+/** Upload a local file to an S3 URI, streamed: one PutObject up to S3's 5 GB cap, multipart above. */
 export async function uploadFileToS3(
   client: S3Client,
   localPath: string,
@@ -151,6 +172,14 @@ export async function uploadFileToS3(
   }
   const { bucket, key } = parseS3Uri(uri);
   const size = statSync(localPath).size;
+  if (size > MAX_SINGLE_PUT_BYTES) {
+    await uploadFileInParts(client, localPath, size, {
+      Bucket: bucket,
+      Key: key,
+      ContentType: contentType,
+    });
+    return;
+  }
   await client.send(
     new PutObjectCommand({
       Bucket: bucket,
@@ -183,7 +212,7 @@ async function putImmutableFile(
   uri: string,
   expectedSha256: string,
   contentType?: string,
-): Promise<{ outcome: "uploaded" | "reused"; lastModified?: Date }> {
+): Promise<{ outcome: "uploaded" | "reused"; lastModified?: Date; size?: number }> {
   assertSha256(expectedSha256);
   if (!existsSync(localPath)) {
     throw new Error(`[s3Transport] upload source missing: ${localPath}`);
@@ -192,9 +221,39 @@ async function putImmutableFile(
   const size = statSync(localPath).size;
   const existing = await inspectContentAddressedObject(client, bucket, key, size, expectedSha256);
   if (existing.state === "matching")
-    return { outcome: "reused", lastModified: existing.lastModified };
+    return { outcome: "reused", lastModified: existing.lastModified, size };
   if (existing.state === "conflict") throwImmutableObjectConflict(uri);
 
+  // HEAD followed by an unconditional PUT can overwrite a conflicting object published by a
+  // concurrent planner. Conditional create (IfNoneMatch) makes immutable CAS and fixed-key
+  // manifest publication race-safe.
+  try {
+    if (size > MAX_SINGLE_PUT_BYTES) {
+      const create = { Bucket: bucket, Key: key, ContentType: contentType };
+      await uploadFileInParts(client, localPath, size, create, expectedSha256);
+    } else {
+      await putImmutableBody(client, localPath, bucket, key, size, expectedSha256, contentType);
+    }
+    return { outcome: "uploaded" };
+  } catch (error) {
+    if (!isS3PreconditionFailed(error)) throw error;
+    const raced = await inspectContentAddressedObject(client, bucket, key, size, expectedSha256);
+    if (raced.state === "matching") return { outcome: "reused" };
+    if (raced.state === "conflict") throwImmutableObjectConflict(uri);
+    // No winner left to verify: rethrow the service error so the orchestrator may retry.
+    throw error;
+  }
+}
+
+async function putImmutableBody(
+  client: S3Client,
+  localPath: string,
+  bucket: string,
+  key: string,
+  size: number,
+  expectedSha256: string,
+  contentType?: string,
+): Promise<void> {
   const body = createReadStream(localPath);
   try {
     await client.send(
@@ -206,26 +265,155 @@ async function putImmutableFile(
         ContentLength: size,
         Metadata: { sha256: expectedSha256 },
         ChecksumSHA256: Buffer.from(expectedSha256, "hex").toString("base64"),
-        // HEAD followed by an unconditional PUT can overwrite a conflicting
-        // object published by a concurrent planner. Conditional create makes
-        // immutable CAS and fixed-key manifest publication race-safe.
         IfNoneMatch: "*",
       }),
     );
-    return { outcome: "uploaded" };
-  } catch (error) {
-    if (!isS3PreconditionFailed(error)) throw error;
-    const raced = await inspectContentAddressedObject(client, bucket, key, size, expectedSha256);
-    if (raced.state === "matching") return { outcome: "reused" };
-    if (raced.state === "conflict") throwImmutableObjectConflict(uri);
-    // The winning object was deleted between the conditional failure and
-    // verification. Preserve the service error so the orchestrator may retry.
-    throw error;
   } finally {
     // A failed conditional request may reject before consuming the stream.
     // Explicit teardown avoids retaining the source descriptor on a warm
     // Lambda planner.
     body.destroy();
+  }
+}
+
+export type MultipartTarget = { Bucket: string; Key: string; UploadId: string };
+
+/**
+ * Creates a multipart upload, lets `sendParts` fill it, then completes it. A failure aborts the
+ * upload so no parts linger; `sendParts` must settle every part before it rejects.
+ */
+export async function multipartUpload(
+  client: S3Client,
+  create: CreateMultipartUploadCommandInput & { Bucket: string; Key: string },
+  sendParts: (target: MultipartTarget) => Promise<CompletedPart[]>,
+  complete: { ifNoneMatch?: "*"; objectSize?: number } = {},
+): Promise<void> {
+  const created = await client.send(new CreateMultipartUploadCommand(create));
+  const uri = formatS3Uri({ bucket: create.Bucket, key: create.Key });
+  if (!created.UploadId) throw new Error(`[s3Transport] no multipart upload id for ${uri}`);
+  const target = { Bucket: create.Bucket, Key: create.Key, UploadId: created.UploadId };
+  try {
+    const parts = await sendParts(target);
+    await client.send(
+      new CompleteMultipartUploadCommand({
+        ...target,
+        MultipartUpload: { Parts: parts },
+        IfNoneMatch: complete.ifNoneMatch,
+        MpuObjectSize: complete.objectSize,
+      }),
+    );
+  } catch (error) {
+    await client.send(new AbortMultipartUploadCommand(target)).catch((abortError: unknown) => {
+      console.error(
+        `[s3Transport] abort failed for ${uri}; parts remain until a lifecycle rule removes them`,
+        abortError,
+      );
+    });
+    throw error;
+  }
+}
+
+// Hashes each part from disk in order, then streams it from disk, so memory stays flat; S3 checks
+// each part's SHA-256. With
+// `expectedSha256`, the object exists only if the whole file matches it and the key is free.
+async function uploadFileInParts(
+  client: S3Client,
+  localPath: string,
+  size: number,
+  create: CreateMultipartUploadCommandInput & { Bucket: string; Key: string },
+  expectedSha256?: string,
+): Promise<void> {
+  const partBytes = Math.max(MIN_FILE_PART_BYTES, Math.ceil(size / MAX_PARTS));
+  const sendParts = async (target: MultipartTarget): Promise<CompletedPart[]> => {
+    const whole = createHash("sha256");
+    const parts: Promise<CompletedPart>[] = [];
+    const inFlight = new Set<Promise<void>>();
+    let failure: { error: unknown } | undefined;
+    try {
+      for (let start = 0; start < size && !failure; start += partBytes) {
+        if (inFlight.size >= FILE_PARTS_IN_FLIGHT) await Promise.race(inFlight);
+        const range = { start, end: Math.min(start + partBytes, size) };
+        const checksum = await hashRange(localPath, range, whole);
+        const sent = sendFilePart(client, target, parts.length + 1, localPath, range, checksum);
+        parts.push(sent);
+        const slot: Promise<void> = sent.then(
+          () => void inFlight.delete(slot),
+          (error: unknown) => {
+            failure ??= { error };
+            inFlight.delete(slot);
+          },
+        );
+        inFlight.add(slot);
+      }
+    } finally {
+      await Promise.all(inFlight);
+    }
+    if (failure) throw failure.error;
+    const actual = whole.digest("hex");
+    if (expectedSha256 && actual !== expectedSha256) {
+      const error = new Error(
+        `[s3Transport] PLAN_ARTIFACT_DIGEST_MISMATCH: ${localPath} changed: expected ${expectedSha256}, read ${actual}`,
+      );
+      error.name = "PLAN_ARTIFACT_DIGEST_MISMATCH";
+      throw error;
+    }
+    return Promise.all(parts);
+  };
+  await multipartUpload(
+    client,
+    {
+      ...create,
+      Metadata: expectedSha256 ? { sha256: expectedSha256 } : undefined,
+      ChecksumAlgorithm: "SHA256",
+    },
+    sendParts,
+    { ifNoneMatch: expectedSha256 ? "*" : undefined, objectSize: size },
+  );
+}
+
+type ByteRange = { start: number; end: number };
+
+/** SHA-256 (base64) of `[start, end)` of the file, also fed to `whole`. */
+async function hashRange(path: string, { start, end }: ByteRange, whole: Hash): Promise<string> {
+  const part = createHash("sha256");
+  let read = 0;
+  for await (const chunk of createReadStream(path, { start, end: end - 1 })) {
+    whole.update(chunk as Buffer);
+    part.update(chunk as Buffer);
+    read += (chunk as Buffer).length;
+  }
+  if (read !== end - start) throw new Error(`[s3Transport] ${path} shrank while uploading`);
+  return part.digest("base64");
+}
+
+// A streamed body cannot be replayed by the SDK's own retry, so each attempt opens a fresh stream.
+async function sendFilePart(
+  client: S3Client,
+  target: MultipartTarget,
+  partNumber: number,
+  path: string,
+  { start, end }: ByteRange,
+  checksum: string,
+): Promise<CompletedPart> {
+  for (let attempt = 1; ; attempt++) {
+    const body = createReadStream(path, { start, end: end - 1 });
+    try {
+      const result = await client.send(
+        new UploadPartCommand({
+          ...target,
+          PartNumber: partNumber,
+          Body: body,
+          ContentLength: end - start,
+          ChecksumSHA256: checksum,
+        }),
+      );
+      if (!result.ETag) throw new Error(`[s3Transport] part ${partNumber} returned no ETag`);
+      return { ETag: result.ETag, PartNumber: partNumber, ChecksumSHA256: checksum };
+    } catch (error) {
+      if (attempt >= PART_ATTEMPTS) throw error;
+    } finally {
+      body.destroy();
+    }
   }
 }
 
@@ -301,8 +489,8 @@ export async function putContentStoreFile(
   sha256: string,
 ): Promise<"uploaded" | "reused"> {
   const uri = contentStoreUri(bucket, sha256);
-  const { outcome, lastModified } = await putImmutableFile(client, localPath, uri, sha256);
-  if (lastModified) await refreshAgingObject(client, uri, sha256, lastModified);
+  const { outcome, lastModified, size } = await putImmutableFile(client, localPath, uri, sha256);
+  if (lastModified) await refreshAgingObject(client, uri, sha256, lastModified, size ?? 0);
   return outcome;
 }
 
@@ -317,7 +505,9 @@ export async function ensureContentStoreObject(
   const { key } = parseS3Uri(uri);
   const existing = await inspectContentAddressedObject(client, bucket, key, sizeBytes, sha256);
   if (existing.state === "matching") {
-    if (existing.lastModified) await refreshAgingObject(client, uri, sha256, existing.lastModified);
+    if (existing.lastModified) {
+      await refreshAgingObject(client, uri, sha256, existing.lastModified, sizeBytes);
+    }
     return;
   }
   if (existing.state === "conflict") throwImmutableObjectConflict(uri);
@@ -345,10 +535,44 @@ async function refreshAgingObject(
   uri: string,
   sha256: string,
   lastModified: Date,
+  size: number,
 ): Promise<void> {
   const { bucket, key } = parseS3Uri(uri);
   const ageMs = Date.now() - lastModified.getTime();
   if (ageMs < CONTENT_STORE_REFRESH_AFTER_DAYS * 86_400_000) return;
+  if (size > MAX_SINGLE_PUT_BYTES) {
+    const create = {
+      Bucket: bucket,
+      Key: key,
+      Metadata: { sha256 },
+      ChecksumAlgorithm: "SHA256" as const,
+    };
+    await multipartUpload(client, create, async (target) => {
+      // ponytail: serial copies (a 6 GB object is two parts); parallel if refresh time matters.
+      const parts: CompletedPart[] = [];
+      for (let start = 0; start < size; start += MAX_SINGLE_PUT_BYTES) {
+        const end = Math.min(start + MAX_SINGLE_PUT_BYTES, size);
+        const PartNumber = parts.length + 1;
+        const { CopyPartResult } = await client.send(
+          new UploadPartCopyCommand({
+            ...target,
+            PartNumber,
+            CopySource: `${bucket}/${key}`,
+            CopySourceRange: `bytes=${start}-${end - 1}`,
+          }),
+        );
+        if (!CopyPartResult?.ETag)
+          throw new Error(`[s3Transport] copy part ${PartNumber} of ${uri} returned no ETag`);
+        parts.push({
+          ETag: CopyPartResult.ETag,
+          PartNumber,
+          ChecksumSHA256: CopyPartResult.ChecksumSHA256,
+        });
+      }
+      return parts;
+    });
+    return;
+  }
   await client.send(
     new CopyObjectCommand({
       Bucket: bucket,

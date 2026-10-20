@@ -2,16 +2,14 @@
 // chunk's mdat payload with UploadPartCopy, so almost no video byte passes through the function.
 
 import {
-  AbortMultipartUploadCommand,
-  CompleteMultipartUploadCommand,
-  CreateMultipartUploadCommand,
+  type CompletedPart,
   GetObjectCommand,
   type S3Client,
   UploadPartCommand,
   UploadPartCopyCommand,
 } from "@aws-sdk/client-s3";
 import { buildStitchedHeader, readMp4Layout } from "@hyperframes/producer/distributed";
-import { parseS3Uri } from "./s3Transport.js";
+import { multipartUpload, type MultipartTarget, parseS3Uri } from "./s3Transport.js";
 
 const MIN_PART_BYTES = 5 * 1024 * 1024;
 
@@ -64,9 +62,7 @@ async function getRange(s3: S3Client, uri: string, start: number, end: number): 
   return Buffer.from(await response.Body.transformToByteArray());
 }
 
-type UploadTarget = { Bucket: string; Key: string; UploadId: string };
-
-async function sendPart(s3: S3Client, part: Part, partNumber: number, target: UploadTarget) {
+async function sendPart(s3: S3Client, part: Part, partNumber: number, target: MultipartTarget) {
   if ("copy" in part) {
     const { uri, start, end } = part.copy;
     const source = parseS3Uri(uri);
@@ -90,7 +86,11 @@ async function sendPart(s3: S3Client, part: Part, partNumber: number, target: Up
 }
 
 /** Settles every part before failing, so an abort never races a part still in flight. */
-async function sendParts(s3: S3Client, parts: readonly Part[], target: UploadTarget) {
+async function sendParts(
+  s3: S3Client,
+  parts: readonly Part[],
+  target: MultipartTarget,
+): Promise<CompletedPart[]> {
   const settled = await Promise.allSettled(
     parts.map(async (part, index) => {
       const etag = await sendPart(s3, part, index + 1, target);
@@ -102,7 +102,10 @@ async function sendParts(s3: S3Client, parts: readonly Part[], target: UploadTar
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
   if (failure) throw failure.reason;
-  return settled.map((result) => (result as PromiseFulfilledResult<string>).value);
+  return settled.map((result, index) => ({
+    ETag: (result as PromiseFulfilledResult<string>).value,
+    PartNumber: index + 1,
+  }));
 }
 
 /** Writes `parts` in order to `destUri`; a failure aborts the upload so no parts linger. */
@@ -113,28 +116,9 @@ export async function uploadParts(
   contentType: string,
 ): Promise<void> {
   const { bucket, key } = parseS3Uri(destUri);
-  const created = await s3.send(
-    new CreateMultipartUploadCommand({ Bucket: bucket, Key: key, ContentType: contentType }),
+  await multipartUpload(s3, { Bucket: bucket, Key: key, ContentType: contentType }, (target) =>
+    sendParts(s3, parts, target),
   );
-  if (!created.UploadId) throw new Error(`[s3Stitch] no upload id for ${destUri}`);
-  const target = { Bucket: bucket, Key: key, UploadId: created.UploadId };
-  try {
-    const etags = await sendParts(s3, parts, target);
-    await s3.send(
-      new CompleteMultipartUploadCommand({
-        ...target,
-        MultipartUpload: { Parts: etags.map((ETag, index) => ({ ETag, PartNumber: index + 1 })) },
-      }),
-    );
-  } catch (error) {
-    await s3.send(new AbortMultipartUploadCommand(target)).catch((abortError: unknown) => {
-      console.error(
-        `[s3Stitch] abort failed for ${destUri}; parts remain until a lifecycle rule removes them`,
-        abortError,
-      );
-    });
-    throw error;
-  }
 }
 
 export interface StitchResult {
