@@ -1013,14 +1013,19 @@ async function captureFrame(page: Page, scope?: string): Promise<string> {
   try {
     const box = await page.evaluate(isolateScopePaint, scope);
     if (!box || box.width < 1 || box.height < 1) return "";
-    return await page.screenshot({ encoding: "base64", type: "png", clip: box });
+    return await page.screenshot({
+      encoding: "base64",
+      type: "png",
+      clip: box,
+      omitBackground: true,
+    });
   } finally {
     await page.evaluate(restoreScopePaint);
   }
 }
 
 // Liveness signs only the scope's subtree, so its frame must show only that paint: anything else behind or
-// over the box (a moving background, grain) would read as the scope moving. Hidden like the contrast pass's glyphs.
+// over the box (a moving background, grain, the page canvas) would read as the scope moving; the canvas stays clear.
 function isolateScopePaint(
   scope: string,
 ): { x: number; y: number; width: number; height: number } | null {
@@ -1036,6 +1041,7 @@ function isolateScopePaint(
   const style = document.createElement("style");
   style.id = "__hf_capture_scope_style";
   style.textContent = `:not([data-hf-capture-scope], [data-hf-capture-scope] *) { visibility: hidden !important; }
+    :root:not([data-hf-capture-scope]), body:not([data-hf-capture-scope]) { background: none !important; }
     [data-hf-capture-scope] { visibility: ${visibility} !important; }`;
   document.head.append(style);
   const rect = target.getBoundingClientRect();

@@ -150,6 +150,27 @@ describe.skipIf(!RUNS_CHROMIUM)("frozen-sweep guard in Chromium", () => {
     expect(result.frozen).toEqual([expect.stringContaining("nothing moves within #title")]);
   });
 
+  it("keeps a still title frozen under keepsMoving while the page's root background changes", async () => {
+    const html = film(
+      `<h1 id="title" style="position: absolute; left: 120px; top: 120px; margin: 0; padding: 40px;
+         color: #fff; font: 600 48px sans-serif">Still</h1>`,
+      `document.documentElement.style.background = "rgb(" + Math.round(t * 40) + ", 0, 80)";`,
+    );
+    const result = await findings(html, [{ kind: "keepsMoving", withinSelector: "#title" }]);
+    expect(result.frozen).toEqual([expect.stringContaining("nothing moves within #title")]);
+  });
+
+  it("sees dark paint revealed inside a scope, where only its alpha tells it from the cleared page", async () => {
+    const html = film(
+      `<svg id="scene" width="640" height="360"><defs><mask id="dark"><rect width="640" height="360" fill="black"/>
+        <circle id="hole" cx="320" cy="180" r="0" fill="white"/></mask></defs>
+        <rect width="640" height="360" fill="#000" mask="url(#dark)"/></svg>`,
+      `document.getElementById("hole").setAttribute("r", String(t * 60));`,
+    );
+    const result = await findings(html, [{ kind: "keepsMoving", withinSelector: "#scene" }]);
+    expect(result.frozen).toEqual([]);
+  });
+
   it("still warns on a canvas that animates by the wall clock, not by the seek", async () => {
     const html = film(
       `<canvas id="c" width="640" height="360"></canvas>

@@ -428,7 +428,8 @@
     return (
       Math.abs(a[i] - b[i]) > FRAME_CHANNEL_NOISE ||
       Math.abs(a[i + 1] - b[i + 1]) > FRAME_CHANNEL_NOISE ||
-      Math.abs(a[i + 2] - b[i + 2]) > FRAME_CHANNEL_NOISE
+      Math.abs(a[i + 2] - b[i + 2]) > FRAME_CHANNEL_NOISE ||
+      Math.abs(a[i + 3] - b[i + 3]) > FRAME_CHANNEL_NOISE
     );
   }
 
