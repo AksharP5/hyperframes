@@ -43,6 +43,7 @@ vi.mock("node:fs", async (importOriginal) => {
 import {
   assertDiskCaptureHeadroom,
   createDiskCaptureProjection,
+  diskCaptureRemedy,
   diskCaptureShortfallError,
   measureCaptureFrameBytes,
   estimateDiskCaptureBytes,
@@ -88,34 +89,14 @@ describe("disk capture capacity", () => {
 
   it("fails before capture when estimated frames exceed available headroom", () => {
     expect(() =>
-      assertDiskCaptureHeadroom("/render/captured-frames", 10, pngOptions, () => 800_000),
-    ).toThrow(/may need ~0\.8 MB.*0\.8 MB is free.*--low-memory-mode/s);
-  });
-
-  it("tells the user which routes still use disk capture, not a dead env var", () => {
-    const landscape = {
-      width: 1920,
-      height: 1080,
-      fps: { num: 30, den: 1 },
-      format: "png" as const,
-    };
-    let message = "";
-    try {
-      assertDiskCaptureHeadroom("/tmp/frames", 9000, landscape, () => 10 * 1e9);
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
-    expect(message).toContain("Disk capture may need");
-    expect(message).toContain("--workers 1");
-    expect(message).toContain("--low-memory-mode");
-    // Every override that can land an otherwise-streaming render here, so the
-    // message explains the case the reader is actually in. The duration cap
-    // matters because it sends even a --workers 1 render to disk, which the
-    // pre-Phase-1 wording told them to "fix" with --workers 1.
-    expect(message).toContain("HF_CAPTURE_PARALLEL_STREAM=true");
-    expect(message).toContain("PRODUCER_STREAMING_ENCODE_DURATION_CAP_ENABLED=true");
-    expect(message).toContain("png-sequence");
-    expect(message).not.toContain("PRODUCER_STREAMING_ENCODE_MAX_DURATION_SECONDS if streaming");
+      assertDiskCaptureHeadroom(
+        "/render/captured-frames",
+        10,
+        pngOptions,
+        "Free up disk space.",
+        () => 800_000,
+      ),
+    ).toThrow(/may need ~0\.8 MB.*0\.8 MB is free.*Free up disk space\./s);
   });
 
   it("exposes the same 90% headroom decision to fallback planning", () => {
@@ -161,6 +142,36 @@ describe("disk capture capacity", () => {
   });
 });
 
+describe("diskCaptureRemedy", () => {
+  it("offers --workers 1 when one worker would stream this render", () => {
+    const remedy = diskCaptureRemedy(DEFAULT_CONFIG, "mp4", 60, 4);
+    expect(remedy).toContain("captures with 4 workers");
+    expect(remedy).toContain("re-run this render with --workers 1");
+  });
+
+  it("never offers --workers 1 where one worker would still store every frame", () => {
+    const capped = { ...DEFAULT_CONFIG, streamingEncodeDurationCapEnabled: true };
+    const cases = [
+      [DEFAULT_CONFIG, "mp4", 60, 1, "Free up disk space."],
+      [DEFAULT_CONFIG, "png-sequence", 60, 4, "png-sequence output stores every frame"],
+      [DEFAULT_CONFIG, "gif", 60, 1, "gif output stores every frame"],
+      [
+        { ...DEFAULT_CONFIG, enableStreamingEncode: false },
+        "mp4",
+        60,
+        4,
+        "PRODUCER_ENABLE_STREAMING_ENCODE=false",
+      ],
+      [capped, "mp4", 600, 4, "--low-memory-mode, which streams past it"],
+    ] as const;
+    for (const [cfg, format, duration, workers, condition] of cases) {
+      const remedy = diskCaptureRemedy(cfg, format, duration, workers);
+      expect(remedy).toContain(condition);
+      expect(remedy).not.toContain("--workers 1");
+    }
+  });
+});
+
 describe("createDiskCaptureProjection", () => {
   it("throws a measured shortfall once ten frames show the remainder cannot fit", () => {
     const measure = vi.fn(() => 10e6);
@@ -168,6 +179,7 @@ describe("createDiskCaptureProjection", () => {
       framesDir: "/frames",
       totalFrames: 1010,
       measureBytes: measure,
+      remedy: "Free up disk space.",
       freeDiskBytes: () => 500e6,
     });
     check(9);
@@ -184,6 +196,7 @@ describe("createDiskCaptureProjection", () => {
       framesDir: "/frames",
       totalFrames: 1010,
       measureBytes: () => bytes,
+      remedy: "Free up disk space.",
       freeDiskBytes: () => 500e6,
     });
     expect(() => check(10)).not.toThrow();
@@ -214,6 +227,7 @@ describe("createDiskCaptureProjection", () => {
       framesDir: "/frames",
       totalFrames: 1010,
       measureBytes: () => 10e6,
+      remedy: "Free up disk space.",
       freeDiskBytes: () => 5000e6,
     });
     expect(() => check(10)).not.toThrow();
@@ -227,7 +241,7 @@ describe("runCaptureStage measured disk projection (both branches)", () => {
     fileServer: { url: "http://localhost:0" } as never,
     workDir,
     framesDir,
-    job: createRenderJob({ fps: { num: 30, den: 1 }, quality: "draft" }),
+    job: { ...createRenderJob({ fps: { num: 30, den: 1 }, quality: "draft" }), duration: 20 / 30 },
     totalFrames: 20,
     cfg: DEFAULT_CONFIG,
     plan: { workerCount, forceScreenshot: false },
@@ -277,15 +291,15 @@ describe("runCaptureStage measured disk projection (both branches)", () => {
       writeFileSync(join(framesDir, formatCaptureFrameName(index, "jpg")), oneMb);
     });
 
-    await expect(runCaptureStage(makeInput(1, workDir, framesDir))).rejects.toThrow(
-      /measured from the first 10 frames/,
-    );
+    const error = await runCaptureStage(makeInput(1, workDir, framesDir)).catch((e: Error) => e);
+    expect(String(error)).toMatch(/measured from the first 10 frames.*Free up disk space\./s);
+    expect(String(error)).not.toContain("--workers 1");
     expect(captureFrame).toHaveBeenCalledTimes(10);
     expect(createCaptureSession).toHaveBeenCalledTimes(1);
   });
 
   it("a measured shortfall is never classified as a retryable browser death", () => {
-    const shortfall = diskCaptureShortfallError(10e9, 1e9, "/frames", "measured");
+    const shortfall = diskCaptureShortfallError(10e9, 1e9, "/frames", "measured", "");
     const kind = classifyCaptureFailure(shortfall);
     expect(kind).not.toBe("transient_browser");
     expect(isTransientCaptureRetryEligible(kind, [{ startFrame: 10, endFrame: 20 }], 0)).toBe(
@@ -321,7 +335,7 @@ describe("runCaptureStage measured disk projection (both branches)", () => {
     );
 
     await expect(runCaptureStage(makeInput(2, workDir, framesDir))).rejects.toThrow(
-      /measured from the first 10 frames/,
+      /measured from the first 10 frames.*re-run this render with --workers 1/s,
     );
   });
 });

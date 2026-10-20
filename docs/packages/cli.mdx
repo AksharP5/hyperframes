@@ -1323,8 +1323,11 @@ path's.
 Renders still land on the disk path when the output is `png-sequence` or `gif`,
 when HDR or shader-transition layering is in play, and when streaming is
 switched off. If a render fails preflight asking for tens of GB of temporary
-frame storage, the message names which of those applied; the usual fixes are
-`--workers 1`, `--low-memory-mode`, or freeing disk.
+frame storage, the message names the condition that applied and what takes that
+render off disk. `--workers 1` is offered only for a multi-worker render that one
+worker would stream; it is slower, so it is a fix for that render, not a default.
+For `png-sequence` or `gif` output, or with streaming switched off, one worker
+stores frames too: free disk, render to mp4, or undo the switch.
 
 | Environment variable                             | Default | Effect                                                                                  |
 | ------------------------------------------------ | ------- | ----------------------------------------------------------------------------------------- |

@@ -207,6 +207,7 @@ mock.module("../../renderOrchestrator.js", () => ({
   closeHdrVideoFrameSource: () => {},
   createHdrPerfCollector: () => ({}),
   executeDiskCaptureWithAdaptiveRetry: async () => [],
+  explainStreamingEncodeGate: () => ({ enabled: true, reason: "single_worker" }),
   findMissingFrameRanges: () => [],
   isTransientCaptureRetryEligible: () => false,
   sampleDirectoryBytes: () => 0,

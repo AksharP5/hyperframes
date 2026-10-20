@@ -60,11 +60,13 @@ import type { FileServerHandle } from "../../fileServer.js";
 import type { ProducerLogger } from "../../../logger.js";
 import {
   executeDiskCaptureWithAdaptiveRetry,
+  explainStreamingEncodeGate,
   findMissingFrameRanges,
   isTransientCaptureRetryEligible,
   sampleDirectoryBytes,
   type CaptureAttemptSummary,
   type ProgressCallback,
+  type RenderConfig,
   type RenderJob,
 } from "../../renderOrchestrator.js";
 import { wrapCaptureStageError } from "../captureStageError.js";
@@ -199,11 +201,46 @@ export function inspectDiskCaptureHeadroom(
   return { available: false, estimatedBytes, freeBytes };
 }
 
+/**
+ * Why this render stores frames and what would take it off disk. `--workers 1`
+ * is offered only when a one-worker run of the same render would stream.
+ */
+export function diskCaptureRemedy(
+  cfg: EngineConfig,
+  outputFormat: NonNullable<RenderConfig["format"]>,
+  durationSeconds: number,
+  workerCount: number,
+): string {
+  const oneWorker = explainStreamingEncodeGate(cfg, outputFormat, 1, durationSeconds);
+  if (workerCount > 1 && oneWorker.enabled) {
+    return (
+      `This render stores frames because it captures with ${workerCount} workers. ` +
+      "Free up disk space, or re-run this render with --workers 1 to stream frames into the encoder instead. " +
+      "One worker is slower, so keep the default worker count for renders that fit on disk."
+    );
+  }
+  switch (oneWorker.reason) {
+    case "format_excluded":
+      return `${outputFormat} output stores every frame at any worker count. Free up disk space or render to mp4.`;
+    case "disabled_by_config":
+      return "PRODUCER_ENABLE_STREAMING_ENCODE=false sends every render to disk. Free up disk space or unset it.";
+    case "duration_cap":
+      return (
+        "The streaming duration cap (PRODUCER_STREAMING_ENCODE_DURATION_CAP_ENABLED=true) sends renders longer " +
+        "than PRODUCER_STREAMING_ENCODE_MAX_DURATION_SECONDS to disk at any worker count. Free up disk space, " +
+        "unset the cap, or use --low-memory-mode, which streams past it on one worker."
+      );
+    default:
+      return "Free up disk space.";
+  }
+}
+
 export function diskCaptureShortfallError(
   needBytes: number,
   freeBytes: number,
   framesDir: string,
   basis: "estimate" | "measured",
+  remedy: string,
 ): Error {
   const basisNote =
     basis === "measured"
@@ -212,16 +249,7 @@ export function diskCaptureShortfallError(
   return new Error(
     `Disk capture may need ~${(needBytes / 1e6).toFixed(1)} MB of temporary frame storage${basisNote}, ` +
       `but only ${(freeBytes / 1e6).toFixed(1)} MB is free at ${framesDir}. ` +
-      "Disk capture stores every frame as an image file (JPEG, or PNG for alpha). mp4/mov renders stream instead: " +
-      "always at --workers 1, and multi-worker on Linux BeginFrame capture. " +
-      "This render landed on disk because the output is png-sequence or gif, because it " +
-      "is multi-worker screenshot capture (opt in with HF_CAPTURE_PARALLEL_STREAM=true), " +
-      "or because streaming was switched off: HF_CAPTURE_PARALLEL_STREAM=false, " +
-      "PRODUCER_ENABLE_STREAMING_ENCODE=false, or the duration cap " +
-      "(PRODUCER_STREAMING_ENCODE_DURATION_CAP_ENABLED=true) on a render longer than " +
-      "PRODUCER_STREAMING_ENCODE_MAX_DURATION_SECONDS. HDR and shader-transition renders " +
-      "never reach this check; they run their own compositor. " +
-      "Re-run with --workers 1, use --low-memory-mode, or free up disk space.",
+      `Disk capture stores every frame as an image file (JPEG, or PNG for alpha). ${remedy}`,
   );
 }
 
@@ -229,6 +257,7 @@ export function assertDiskCaptureHeadroom(
   framesDir: string,
   totalFrames: number,
   captureOptions: CaptureOptions,
+  remedy: string,
   freeDiskBytes?: (path: string) => number | null,
 ): void {
   const headroom = inspectDiskCaptureHeadroom(
@@ -243,6 +272,7 @@ export function assertDiskCaptureHeadroom(
     headroom.freeBytes,
     framesDir,
     "estimate",
+    remedy,
   );
 }
 
@@ -269,9 +299,10 @@ export function createDiskCaptureProjection(input: {
   framesDir: string;
   totalFrames: number;
   measureBytes: () => number;
+  remedy: string;
   freeDiskBytes?: (path: string) => number | null;
 }): (capturedFrames: number) => void {
-  const { framesDir, totalFrames, measureBytes, freeDiskBytes = freeDiskBytesAt } = input;
+  const { framesDir, totalFrames, measureBytes, remedy, freeDiskBytes = freeDiskBytesAt } = input;
   let checked = false;
   return (capturedFrames) => {
     if (checked || capturedFrames < DISK_PROJECTION_SAMPLE_FRAMES) return;
@@ -283,7 +314,7 @@ export function createDiskCaptureProjection(input: {
     if (remaining <= 0 || freeBytes === null) return;
     const needBytes = Math.ceil((measured / capturedFrames) * remaining);
     if (needBytes > freeBytes * 0.9) {
-      throw diskCaptureShortfallError(needBytes, freeBytes, framesDir, "measured");
+      throw diskCaptureShortfallError(needBytes, freeBytes, framesDir, "measured", remedy);
     }
   };
 }
@@ -346,11 +377,13 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
   }
 
   const captureOptions = buildCaptureOptions();
-  assertDiskCaptureHeadroom(framesDir, totalFrames, captureOptions);
+  const remedy = diskCaptureRemedy(cfg, job.config.format ?? "mp4", job.duration ?? 0, workerCount);
+  assertDiskCaptureHeadroom(framesDir, totalFrames, captureOptions, remedy);
   const checkDiskProjection = createDiskCaptureProjection({
     framesDir,
     totalFrames,
     measureBytes: () => measureCaptureFrameBytes(workDir, framesDir),
+    remedy,
   });
 
   if (workerCount > 1) {
