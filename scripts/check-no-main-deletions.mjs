@@ -1188,6 +1188,10 @@ export const ALLOWED_DELETIONS = new Map([
   ],
   ["scripts/prune-fallow-audit-caches.mjs", FALLOW_PRUNE_REASON],
   ["scripts/prune-fallow-audit-caches.test.mjs", FALLOW_PRUNE_REASON],
+  [
+    "packages/engine/src/services/frameCapture-releaseInjectedVideoMedia.browser.test.ts",
+    "the revert of #5795 removes releaseInjectedVideoMedia, the only code this file tested",
+  ],
 ]);
 
 export function parseBase(argv, fallback = "origin/main") {
