@@ -518,12 +518,12 @@ export function syncRuntimeMedia(params: {
       const silencedByHidden =
         el.closest("[data-hidden]") !== null || isMemberGroupHidden(el.ownerDocument, el);
       const effectiveVolume = silencedByHidden ? 0 : clampVolume(authorVolume * userVol);
-      el.volume = effectiveVolume;
+      if (Math.abs(el.volume - effectiveVolume) > 1e-6) el.volume = effectiveVolume;
       lastRuntimeAppliedVolume.set(el, effectiveVolume);
       params.onElementVolume?.(el, effectiveVolume, authorVolume);
       // Mute only when force-muted or the transport owns this element; an unclaimed
       // track stays audible via the HTMLMedia fallback.
-      if (forceMuteAll || params.isWebAudioOwned?.(el)) el.muted = true;
+      if ((forceMuteAll || params.isWebAudioOwned?.(el)) && !el.muted) el.muted = true;
       // Ensure full preload for every active media element. Streaming
       // formats (MP3) may arrive with preload="metadata", which only
       // buffers the first few seconds and causes seeks to silently fail

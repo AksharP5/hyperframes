@@ -46,6 +46,7 @@ packages/producer/tests/parity/fixtures/hyperframe.runtime.iife.js
 
 # Player perf test results (generated each run, attached as CI artifact)
 packages/player/tests/perf/results/
+packages/player/tests/perf/fixtures/_media/
 
 # Rendered output (not test fixtures — those use git LFS)
 output/

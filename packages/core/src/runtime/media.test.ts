@@ -1387,6 +1387,46 @@ describe("syncRuntimeMedia", () => {
     expect(clip.el.volume).toBe(0.5);
   });
 
+  it("writes volume and muted only when they change, not on every tick", () => {
+    const clip = createMockClip({ start: 0, end: 10, volume: 0.7 });
+    const writes = { volume: 0, muted: 0 };
+    for (const prop of ["volume", "muted"] as const) {
+      const native = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, prop)!;
+      Object.defineProperty(clip.el, prop, {
+        configurable: true,
+        get() {
+          return native.get!.call(this);
+        },
+        set(value) {
+          writes[prop]++;
+          native.set!.call(this, value);
+        },
+      });
+    }
+    for (const timeSeconds of [1, 1.04, 1.08, 1.12]) {
+      syncRuntimeMedia({
+        clips: [clip],
+        timeSeconds,
+        playing: false,
+        playbackRate: 1,
+        outputMuted: true,
+      });
+    }
+    expect(clip.el.volume).toBe(0.7);
+    expect(clip.el.muted).toBe(true);
+    expect(writes).toEqual({ volume: 0, muted: 1 });
+
+    clip.el.muted = false;
+    syncRuntimeMedia({
+      clips: [clip],
+      timeSeconds: 1.16,
+      playing: false,
+      playbackRate: 1,
+      outputMuted: true,
+    });
+    expect(clip.el.muted).toBe(true);
+  });
+
   it("reports effective and author-only volume to external audio transports", () => {
     const clip = createMockClip({ start: 0, end: 10, volume: 0 });
     const onElementVolume = vi.fn();
