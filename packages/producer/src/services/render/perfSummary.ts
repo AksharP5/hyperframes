@@ -83,6 +83,8 @@ export function roundDb(value: number | undefined): number | undefined {
 export interface DrawElementPerfInput {
   compileGate?: string;
   clampReason?: string;
+  /** Engine init-time gate the pre-capture probe hit; its session may be closed before capture. */
+  probeGateReason?: string;
   workerInversion?: "inverted" | "reverted";
   /** Auto-resolved worker count before the inversion pinned it to 1 (set only when the inversion fired). */
   preInversionWorkers?: number;
@@ -145,7 +147,9 @@ function aggregateDrawElement(
   if (perfs.length === 0) return undefined;
   const modes = [...new Set(perfs.map((p) => p.captureMode).filter(Boolean))].sort();
   const gateReasons = [
-    ...new Set(perfs.map((p) => p.deGateReason).filter((r): r is string => !!r)),
+    ...new Set(
+      [de.probeGateReason, ...perfs.map((p) => p.deGateReason)].filter((r): r is string => !!r),
+    ),
   ].sort();
   const gpuRenderers = [
     ...new Set(perfs.map((p) => p.gpuRenderer).filter((r): r is string => !!r)),

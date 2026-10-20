@@ -68,6 +68,8 @@ import {
   type ExtractionPhaseBreakdown,
   type VideoFrameFormat,
   closeCaptureSession,
+  createCaptureSession,
+  initializeSession,
   type CaptureOptions,
   type CaptureVideoMetadataHint,
   type SubTimelineWaitMemo,
@@ -2155,6 +2157,11 @@ export function shouldPreferSingleWorkerDrawElement(args: {
   );
 }
 
+/** The session ran the engine's init-time drawElement gates and one refused it. */
+function isProbeDeGated(session: CaptureSession | null): session is CaptureSession {
+  return session !== null && session.captureMode !== "drawelement" && !session.deInitDeferred;
+}
+
 /**
  * Plan the self-verify retry for an inverted render: the inversion bet on
  * drawElement and lost, so the re-render returns to the pre-inversion parallel
@@ -3645,10 +3652,7 @@ async function executeRenderPipeline(input: {
       singleWorkerStreamingOk: shouldUseStreamingEncode(cfg, outputFormat, 1, job.duration),
       layeredOrEffectRoute: hasHdrContent || compiled.hasShaderTransitions,
       supersampling: deviceScaleFactor !== 1,
-      probeDeGated:
-        probeSession !== null &&
-        probeSession.captureMode !== "drawelement" &&
-        !probeSession.deInitDeferred,
+      probeDeGated: isProbeDeGated(probeSession),
       experimentalParallelDeOptIn:
         process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true" ||
         // Verified parallel DE streaming (opt-in) wants its parallelism kept.
@@ -3668,14 +3672,14 @@ async function executeRenderPipeline(input: {
     // inverted", and emitting it now is what establishes the DiD cohort
     // before the flip. Do not short-circuit this block behind
     // `deShortBandRoute` (review nit).
-    const deShortBand = resolveDeShortBand({
+    let deShortBand = resolveDeShortBand({
       invertAtBaseFloor,
       invertAtBandFloor,
       bandEnabled: deShortBandEnabled,
       bandOpen: deShortBandOpen,
       elementCountSource: compositionElementCountSource,
     });
-    const deInversionEligible =
+    let deInversionEligible =
       deShortBandRoute && deShortBand === "applied" ? invertAtBandFloor : invertAtBaseFloor;
     // The floor that actually decided this render — for the human-facing log
     // below, so it never claims e.g. "400 frames >= 900" for a band-routed
@@ -3727,7 +3731,7 @@ async function executeRenderPipeline(input: {
     const deParallelMinMemoryMb = Number.isFinite(deParallelMinMemNum)
       ? deParallelMinMemNum
       : 24576;
-    const deParallelRouterEligible = shouldPreferParallelDrawElement({
+    let deParallelRouterEligible = shouldPreferParallelDrawElement({
       workerCount: WOULD_RESOLVE_MULTI_WORKER,
       requestedWorkers: job.config.workers,
       useDrawElement: cfg.useDrawElement,
@@ -3738,10 +3742,7 @@ async function executeRenderPipeline(input: {
       minFrames: deParallelMinFrames,
       layeredOrEffectRoute: hasHdrContent || compiled.hasShaderTransitions,
       supersampling: deviceScaleFactor !== 1,
-      probeDeGated:
-        probeSession !== null &&
-        probeSession.captureMode !== "drawelement" &&
-        !probeSession.deInitDeferred,
+      probeDeGated: isProbeDeGated(probeSession),
       experimentalParallelDeOptIn:
         process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true" ||
         process.env.HF_DE_PARALLEL_STREAM === "true",
@@ -3759,6 +3760,40 @@ async function executeRenderPipeline(input: {
       totalMemoryMb: Math.round(totalmem() / (1024 * 1024)),
       minMemoryMb: deParallelMinMemoryMb,
     });
+    // The browser probe is conditional, so most renders arrive here without the engine's
+    // init-time drawElement gates having run. Run them before pinning 1 or 3 workers: a
+    // refused comp captures by screenshot and keeps the resolver's parallelism.
+    if (probeSession === null && (deInversionEligible || deParallelRouterEligible)) {
+      try {
+        probeSession = await createCaptureSession(
+          activeFileServer.url,
+          framesDir,
+          buildCaptureOptions(),
+          null,
+          { ...cfg, forceScreenshot: captureForceScreenshot },
+        );
+        await initializeSession(probeSession);
+      } catch (error) {
+        assertNotAborted();
+        if (probeSession) {
+          lastBrowserConsole = probeSession.browserConsoleBuffer;
+          await closeCaptureSession(probeSession).catch(() => {});
+          probeSession = null;
+        }
+        // The capture stage opens its own session and owns retrying or failing it.
+        log.warn("[Render] Fast capture gate check failed; routing without it.", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (isProbeDeGated(probeSession)) {
+        // What both predicates and the band answer for a gated probe.
+        deInversionEligible = false;
+        deParallelRouterEligible = false;
+        deShortBand = undefined;
+      }
+    }
+    // Workers capturing by screenshot report no gate of their own, so carry the probe's.
+    const deProbeGateReason = isProbeDeGated(probeSession) ? probeSession.deGateReason : undefined;
     // Declared ahead of resolution (assigned below, after calibration) so
     // captureStageObservationData can close over it for the calibration
     // stage itself — reads as undefined until resolveRenderWorkerCount runs.
@@ -3891,11 +3926,8 @@ async function executeRenderPipeline(input: {
     );
     // DE priority inversion — see shouldPreferSingleWorkerDrawElement for the
     // policy and benchmark rationale (eligibility resolved above, before
-    // calibration). Comps that pass every static check but hit an engine
-    // INIT-time gate at capture (css-effects / at-risk, ~1.5% of local
-    // renders) render single-worker screenshot streaming — slower than
-    // parallel would have been, accepted for the routing win everywhere else.
-    // `preRoutingWorkerCount` lets the self-verify retry return to the
+    // calibration; a comp the engine's init-time gates refuse is never
+    // eligible). `preRoutingWorkerCount` lets the self-verify retry return to the
     // parallel path when the drawElement bet loses — shared by both the
     // inversion and the router below, whichever fires (mutually exclusive).
     const preRoutingWorkerCount = workerCount;
@@ -5092,6 +5124,7 @@ async function executeRenderPipeline(input: {
       drawElement: {
         compileGate: deCompileGate,
         clampReason: deClampReason,
+        probeGateReason: deProbeGateReason,
         workerInversion: deWorkerInversion,
         preInversionWorkers: deWorkerInversion ? preRoutingWorkerCount : undefined,
         compositionElementCount,
