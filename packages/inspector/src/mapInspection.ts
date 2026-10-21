@@ -1,4 +1,4 @@
-import { Sources, markupSnippet, mergeSnippets } from "./sources";
+import { Sources, mergeSnippets } from "./sources";
 import type { InspectRequest, RuntimeResponse, Snippet } from "./types";
 const KEPT_FIRST_UNDER_BUDGET = [
   "animation creation",
@@ -41,6 +41,7 @@ export function mapInspection(
   const { sources, map, catalog, generation, sourceVersion, reused, start, visualState } = context;
   const maxBytes = request.maxBytes ?? 12000;
   const collected: Snippet[] = [];
+  const compositions: Snippet[] = [];
   const queriedRefs = new Set(raw.results.flatMap((result) => result.elements.map((el) => el.ref)));
   const results = raw.results.map((result, index) => {
     let unmappedAnimations = 0;
@@ -54,8 +55,11 @@ export function mapInspection(
         );
     }
     for (const el of result.elements) {
-      const snippet = markupSnippet(sources, el, index);
+      const tag = sources.markupTag(el);
+      if (!tag) continue;
+      const snippet = sources.slice(tag.file, tag.start, tag.end, "html opening tag", index);
       if (snippet) collected.push(snippet);
+      compositions.push(...sources.compositions(tag, index));
     }
     for (const id of result.css) {
       const rule = sources.cssRules.find((rule) => rule.id === id);
@@ -92,7 +96,7 @@ export function mapInspection(
       scopeTruncated: result.truncated,
     };
   });
-  const merged = mergeSnippets(collected, sources);
+  const merged = withCompositionsLast(mergeSnippets(collected, sources), compositions, sources);
   for (const snippet of merged) catalog.set(snippet.id, snippet);
   let selected = [...merged].sort((a, b) => priority(a) - priority(b));
   if (request.snippets)
@@ -101,6 +105,7 @@ export function mapInspection(
       if (!snippet) throw new Error(`unknown_snippet: ${id}`);
       return snippet;
     });
+  const candidateContext: { coverage?: string[] } = {};
   const response = {
     generation: generation,
     visualState,
@@ -111,6 +116,7 @@ export function mapInspection(
     omitted: [] as { id: string; bytes: number }[],
     omittedCount: 0,
     nextOffset: null as number | null,
+    ...candidateContext,
     recordLimitReached: raw.recordLimitReached,
     hooked: raw.hooked,
     debugAvailable: true,
@@ -135,8 +141,19 @@ export function mapInspection(
   const kept: Snippet[] = [];
   for (let i = offset; i < selected.length; i++) {
     response.snippets.push(shown(selected[i], targetCount));
+    const priorCoverage = response.coverage;
+    if (
+      response.coverage === undefined &&
+      selected[i].kind.some(
+        (kind) => kind.startsWith("composition ") && kind.endsWith(" candidate"),
+      )
+    )
+      response.coverage = [
+        "Composition candidates are alternative source mounts and their enclosing roots, not a verified runtime instance chain; all alternatives remain available within the snippet budget and pagination.",
+      ];
     if (size() > maxBytes - 700) {
       response.snippets.pop();
+      response.coverage = priorCoverage;
       response.omittedCount = selected.length - i;
       response.omitted = selected
         .slice(i, i + 8)
@@ -154,4 +171,15 @@ export function mapInspection(
     throw new Error("metadata_exceeds_budget: use fewer targets or increase maxBytes");
   if (request.debug) return { ...response, debug: raw };
   return response;
+}
+function withCompositionsLast(merged: Snippet[], compositions: Snippet[], sources: Sources) {
+  const covered = (s: Snippet) =>
+    merged.some((m) => m.file === s.file && m.startLine <= s.startLine && m.endLine >= s.endLine);
+  return [
+    ...merged,
+    ...mergeSnippets(
+      compositions.filter((s) => !covered(s)),
+      sources,
+    ),
+  ];
 }
