@@ -1380,3 +1380,156 @@ describe("component output membership", () => {
     );
   });
 });
+
+describe("motion blur findings in the check output (T6)", () => {
+  type Handler = (message: ReturnType<typeof fakeConsoleMessage>) => void;
+  const ACCELERATED = {
+    state: "off",
+    reason: "a WebGL canvas cannot be captured",
+    reasonCode: "accelerated-canvas",
+    movers: 0,
+  };
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, "__hfMotionBlur");
+  });
+
+  async function checkWith(
+    report: object,
+    options: { cores?: number; echo?: [string, string][]; mount?: () => void } = {},
+  ) {
+    vi.mocked(os.availableParallelism).mockReturnValue(options.cores ?? 1);
+    mountCanvasFixture(`<p id="copy" data-layout-name="copy">Hi</p>`);
+    options.mount?.();
+    const handlers: Handler[] = [];
+    const log = (type: string, text: string) =>
+      handlers.forEach((handler) => handler(fakeConsoleMessage(type, text)));
+    Reflect.set(window, "__hfMotionBlur", {
+      probe: () => {
+        for (const [type, text] of options.echo ?? []) log(type, text);
+        return report;
+      },
+      suspend: vi.fn(),
+    });
+    const browser = Object.assign(Object.create(null), {
+      close: vi.fn(async () => undefined),
+      process: () => ({ exitCode: 0, signalCode: null }),
+    });
+    let opened = 0;
+    vi.mocked(openSettledCompositionPage).mockImplementation(
+      async (_html: string, _url: string, settle: OpenSettledCompositionPageOptions) => {
+        const page = fakePage();
+        const first = ++opened === 1;
+        page.on = vi.fn((event: string, handler: Handler) => {
+          if (event === "console" && first) handlers.push(handler);
+        });
+        settle.onBrowser?.(browser);
+        await settle.beforeNavigate?.(page);
+        return { page, browser, renderReadyTimedOut: false };
+      },
+    );
+    const result = await runBrowserCheck(
+      PROJECT,
+      { ...DEFAULT_CHECK_OPTIONS, contrast: false },
+      { kind: "none" },
+      runAuditGrid,
+    );
+    return { findings: result.runtimeFindings, pages: opened };
+  }
+  const blurCodes = (findings: { code: string }[]) =>
+    findings.map((finding) => finding.code).filter((code) => code.startsWith("motion_blur"));
+
+  it("carries a blur finding, its fix and its anchor into the output", async () => {
+    const { findings } = await checkWith(ACCELERATED);
+    const [finding, ...rest] = findings.filter(({ code }) => code === "motion_blur_off");
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({
+      severity: "warning",
+      message: expect.stringContaining("a WebGL canvas cannot be captured"),
+      selector: expect.any(String),
+      fixHint: expect.stringMatching(/WebGL\/WebGPU.*sub-composition/),
+    });
+  });
+
+  it("anchors the finding on the root the runtime picks, not the first composition (W4)", async () => {
+    const mount = (): void => {
+      document.body.innerHTML = `
+        <div id="aux" data-composition-id="aux" data-duration="4"></div>
+        <div id="real" data-composition-id="main" data-root="true" data-duration="10"></div>`;
+      const rect = { x: 3, y: 4, width: 640, height: 360 } as DOMRect;
+      const real = document.getElementById("real");
+      if (real) real.getBoundingClientRect = () => rect;
+    };
+    const { findings } = await checkWith(ACCELERATED, { mount });
+    expect(findings.find(({ code }) => code === "motion_blur_off")).toMatchObject({
+      selector: '[data-composition-id][data-root="true"]',
+      dataAttributes: expect.objectContaining({
+        "data-root": "true",
+        "data-composition-id": "main",
+      }),
+      bbox: { x: 3, y: 4, width: 640, height: 360 },
+    });
+  });
+
+  it("still carries it, once, when a second Chrome shares the sampling", async () => {
+    const { findings, pages } = await checkWith(ACCELERATED, { cores: 4 });
+    expect(pages).toBe(2);
+    expect(blurCodes(findings)).toEqual(["motion_blur_off"]);
+  });
+
+  it("keeps an unrelated console warning and drops the runtime's duplicate of the finding", async () => {
+    const { findings } = await checkWith(ACCELERATED, {
+      echo: [
+        ["warn", "[motion-blur] off: a WebGL canvas cannot be captured"],
+        ["warn", "your own warning"],
+      ],
+    });
+    const warnings = findings.filter(({ code }) => code === "console_warning");
+    expect(warnings.map(({ message }) => message)).toEqual(["your own warning"]);
+    expect(blurCodes(findings)).toEqual(["motion_blur_off"]);
+  });
+
+  it("keeps the runtime's off-line when there is no finding to replace it", async () => {
+    const { findings } = await checkWith(
+      { state: "on", reason: null, reasonCode: null, movers: 2 },
+      { echo: [["warn", "[motion-blur] off: later, for a reason the probe did not see"]] },
+    );
+    expect(findings.map(({ code }) => code)).toContain("console_warning");
+    expect(blurCodes(findings)).toEqual([]);
+  });
+
+  it("does not drop an error that merely starts like the echo", async () => {
+    const { findings } = await checkWith(ACCELERATED, {
+      echo: [["error", "[motion-blur] off: thrown by the page itself"]],
+    });
+    expect(findings.map(({ code }) => code)).toContain("console_error");
+  });
+
+  it("says nothing moves only when the report says no mover, not when it says some", async () => {
+    const still = await checkWith({ state: "on", reason: null, reasonCode: null, movers: 0 });
+    expect(blurCodes(still.findings)).toEqual(["motion_blur_no_movers"]);
+    const moving = await checkWith({ state: "on", reason: null, reasonCode: null, movers: 3 });
+    expect(blurCodes(moving.findings)).toEqual([]);
+    const off = await checkWith(ACCELERATED);
+    expect(blurCodes(off.findings)).toEqual(["motion_blur_off"]);
+  });
+
+  it("treats a report without a mover count as no movers", async () => {
+    const { findings } = await checkWith({ state: "on", reason: null, reasonCode: null });
+    expect(blurCodes(findings)).toEqual(["motion_blur_no_movers"]);
+  });
+
+  it("adds nothing for a page that never opted in", async () => {
+    vi.mocked(os.availableParallelism).mockReturnValue(1);
+    mountCanvasFixture();
+    const page = fakePage();
+    installSessionMock(page);
+    const result = await runBrowserCheck(
+      PROJECT,
+      { ...DEFAULT_CHECK_OPTIONS, samples: 1, contrast: false },
+      { kind: "none" },
+      runAuditGrid,
+    );
+    expect(blurCodes(result.runtimeFindings)).toEqual([]);
+  });
+});
