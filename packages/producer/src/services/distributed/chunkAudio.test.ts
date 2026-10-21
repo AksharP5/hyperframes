@@ -236,6 +236,13 @@ describe.skipIf(!hasFfmpeg)("chunks that carry their audio", () => {
       expect(frames(withAudio)).toEqual(frames(videoOnly));
       expect(pcm(withAudio) === pcm(videoOnly)).toBe(true);
       expect(streams(withAudio)).toEqual(streams(videoOnly));
+
+      // Video-only chunks stitched with the whole plan audio as a separate file: the same packets.
+      const separate = join(dir, "separate-audio.mp4");
+      writeFileSync(join(planDir, "meta", "encoder.json"), JSON.stringify({ separateAudio: true }));
+      await assemble(planDir, videoPaths, audioPath, separate);
+      expect(packets(separate)).toEqual(packets(withAudio));
+      expect(streams(separate)).toEqual(streams(withAudio));
     },
     60_000,
   );

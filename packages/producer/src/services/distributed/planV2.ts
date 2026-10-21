@@ -150,6 +150,7 @@ export interface PlanV2WithPublisherOptions {
   /** See {@link BuildLocalExecutionPlanOptions.remoteFiles}; needs a publisher with `referenceStoredBlob`. */
   readonly remoteFiles?: BuildLocalExecutionPlanOptions["remoteFiles"];
   readonly chunksCarryAudio?: boolean;
+  readonly deferAudio?: boolean;
 }
 
 export interface PlanV2MaterializationResult {
@@ -772,6 +773,7 @@ export async function planV2WithPublisher(
         ),
       chunksCarryAudio: options.chunksCarryAudio,
       sliceChunkAudio: true,
+      deferAudio: options.deferAudio,
     });
     return await publishExecutionPlan(stagingRoot, publisher, { digests, log: config.logger });
   } catch (error) {

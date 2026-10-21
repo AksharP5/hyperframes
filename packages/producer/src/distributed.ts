@@ -38,6 +38,8 @@ export {
   plan,
   rejectUnsupportedDistributedFormat,
   resolveChunkPlan,
+  buildPlanAudio,
+  plansSeparateAudio,
   // Types
   type DistributedRenderConfig,
   type PlanResult,

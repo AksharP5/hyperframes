@@ -1,6 +1,6 @@
-// Assemble for chunks that carry their audio: one faststart header (ftyp, a moov indexing every
-// chunk's samples, a 64-bit mdat header); the chunks' mdat payloads follow it unchanged and in
-// order, so storage can copy them into place.
+// Assemble for mp4 chunks: one faststart header (ftyp, a moov indexing every chunk's samples, a
+// 64-bit mdat header); the payloads follow it unchanged and in order (a separate audio file's
+// first, then the chunks'), so storage can copy them into place.
 
 import {
   createReadStream,
@@ -270,6 +270,23 @@ function timescaleOf(buf: Buffer, header: Box): number {
   return buf.readUInt32BE(header.bodyStart + (buf[header.bodyStart] === 1 ? 20 : 12));
 }
 
+const TRACK_ID_AT: Record<string, [number, number]> = { tkhd: [12, 20], mvhd: [96, 108] };
+
+function idOf(buf: Buffer, target: Box): number {
+  return buf.readUInt32BE(
+    target.bodyStart + TRACK_ID_AT[target.type]![buf[target.bodyStart] === 1 ? 1 : 0],
+  );
+}
+
+function withId(boxBytes: Buffer, type: string, id: number): Buffer {
+  const header = boxAt(boxBytes, 0, 0, boxBytes.length);
+  boxBytes.writeUInt32BE(
+    id,
+    header.bodyStart + TRACK_ID_AT[type]![boxBytes[header.bodyStart] === 1 ? 1 : 0],
+  );
+  return boxBytes;
+}
+
 interface MergedTrack {
   durations: number[];
   sizes: number[];
@@ -330,28 +347,55 @@ function planTracksOf(tracks: readonly TrackTable[], plan: readonly TrackTable[]
   return matched;
 }
 
-// ftyp + moov + mdat header for the chunks' payloads placed in order after it. The moov is chunk
-// 0's with merged sample tables; chunk 0's audio priming skip stays in an edit list.
-export function buildStitchedHeader(layouts: readonly Mp4Layout[]): Buffer {
-  const plan = readTracks(layouts[0]!.moov);
-  const chunks = layouts.map((layout, i) => planTracksOf(readTracks(layout.moov), plan, i));
+function sourceTracks(layouts: readonly Mp4Layout[], audio: Mp4Layout | undefined) {
+  const chunkPlan = readTracks(layouts[0]!.moov);
+  const audioTracks = audio ? readTracks(audio.moov) : [];
+  if (audio && (audioTracks.length !== 1 || audioTracks[0]!.handler !== "soun")) {
+    throw new Error("[mp4Stitch] the separate audio file must hold one audio track");
+  }
+  const plan = [...chunkPlan, ...audioTracks];
+  const chunks = layouts.map((layout, i) => {
+    const tracks = readTracks(layout.moov);
+    if (audio && tracks.some((track) => track.handler === "soun")) {
+      throw new Error(`[mp4Stitch] chunk ${i} carries its own audio`);
+    }
+    return planTracksOf(tracks, plan, i);
+  });
+  return {
+    plan,
+    chunkTrackCount: chunkPlan.length,
+    sources: audio ? [[...chunkPlan.map(() => null), audioTracks[0]!], ...chunks] : chunks,
+  };
+}
+
+// ftyp + moov + mdat header for `audio`'s payload, then the chunks', after it. The moov is chunk 0's
+// with merged sample tables and `audio`'s track (new id); the audio priming stays in an edit list.
+export function buildStitchedHeader(layouts: readonly Mp4Layout[], audio?: Mp4Layout): Buffer {
+  const { plan, chunkTrackCount, sources } = sourceTracks(layouts, audio);
+  const sourceLayouts = audio ? [audio, ...layouts] : layouts;
   const payloadBases: number[] = [];
   let payloadBytes = 0;
-  for (const layout of layouts) {
+  for (const layout of sourceLayouts) {
     payloadBases.push(payloadBytes);
     payloadBytes += layout.payloadEnd - layout.payloadStart;
   }
   const template = layouts[0]!.moov;
   const root = boxAt(template, 0, 0, template.length);
-  const movieTimescale = timescaleOf(template, child(template, root, "mvhd"));
+  const mvhd = child(template, root, "mvhd");
+  const movieTimescale = timescaleOf(template, mvhd);
+  const chunkTrackIds = plan
+    .slice(0, chunkTrackCount)
+    .map((track) => idOf(template, child(template, track.trak, "tkhd")));
+  const audioTrackId = Math.max(...chunkTrackIds) + 1;
 
   const buildMoov = (dataStart: number): Buffer => {
     const traks = plan.map((track, t) => {
-      // The chunks that carry this track, with their place in the file.
-      const parts = chunks.flatMap((tracks, chunk) => {
+      // The sources that carry this track, with their place in the file.
+      const parts = sources.flatMap((tracks, chunk) => {
         const part = tracks[t];
         return part ? [{ ...part, chunk }] : [];
       });
+      const moov = t < chunkTrackCount ? template : audio!.moov;
       const merged: MergedTrack = {
         durations: parts.flatMap((part) => part.durations),
         sizes: parts.flatMap((part) => part.sizes),
@@ -362,9 +406,9 @@ export function buildStitchedHeader(layouts: readonly Mp4Layout[]): Buffer {
         chunkOffsets: parts.flatMap((part) =>
           part.chunkOffsets.map((offset) => {
             const i = part.chunk;
-            const { payloadStart, payloadEnd } = layouts[i]!;
+            const { payloadStart, payloadEnd } = sourceLayouts[i]!;
             if (offset < payloadStart || offset >= payloadEnd) {
-              throw new Error(`[mp4Stitch] chunk ${i} has samples outside its mdat`);
+              throw new Error(`[mp4Stitch] source ${i} has samples outside its mdat`);
             }
             return offset - payloadStart + payloadBases[i]! + dataStart;
           }),
@@ -382,21 +426,29 @@ export function buildStitchedHeader(layouts: readonly Mp4Layout[]): Buffer {
       // An edit list rounds the shown length to the movie timescale, so write one only to skip
       // leading samples (the AAC priming).
       const edts = track.mediaTime ? box("edts", fullBox("elst", 1, elst)) : Buffer.alloc(0);
-      const trak = rebuild(template, track.trak, {
-        tkhd: (tkhd) => Buffer.concat([withDuration(template, tkhd, shown), edts]),
+      const tkhdOf = (tkhd: Box) => {
+        const timed = withDuration(moov, tkhd, shown);
+        return t < chunkTrackCount ? timed : withId(timed, "tkhd", audioTrackId);
+      };
+      const trak = rebuild(moov, track.trak, {
+        tkhd: (tkhd) => Buffer.concat([tkhdOf(tkhd), edts]),
         edts: () => Buffer.alloc(0),
         mdia: (mdia) =>
-          rebuild(template, mdia, {
-            mdhd: (mdhd) => withDuration(template, mdhd, mediaDuration),
-            minf: (minf) => rebuild(template, minf, { stbl: () => buildStbl(track.stsd, merged) }),
+          rebuild(moov, mdia, {
+            mdhd: (mdhd) => withDuration(moov, mdhd, mediaDuration),
+            minf: (minf) => rebuild(moov, minf, { stbl: () => buildStbl(track.stsd, merged) }),
           }),
       });
       return { trak, shown };
     });
     let next = 0;
+    const movieHeader = withDuration(template, mvhd, Math.max(...traks.map((t) => t.shown)));
     return rebuild(template, root, {
-      mvhd: (mvhd) => withDuration(template, mvhd, Math.max(...traks.map((t) => t.shown))),
-      trak: () => traks[next++]!.trak,
+      mvhd: () => (audio ? withId(movieHeader, "mvhd", audioTrackId + 1) : movieHeader),
+      trak: () =>
+        ++next < chunkTrackCount
+          ? traks[next - 1]!.trak
+          : Buffer.concat(traks.slice(next - 1).map((t) => t.trak)),
     });
   };
 
@@ -435,20 +487,24 @@ async function copyPayload(path: string, layout: Mp4Layout, index: number, out: 
   }
 }
 
-/** Local join: the stitched header, then each chunk's mdat payload in order. Like the ffmpeg
- * join, it writes in a work folder beside `outputPath` and renames only a finished file there. */
+/** Local join: the header, then `audioPath`'s and each chunk's payload. Like the ffmpeg join, it
+ * writes in a work folder beside `outputPath` and renames only a finished file there. */
 export async function writeStitchedMp4(
   chunkPaths: readonly string[],
   outputPath: string,
+  audioPath?: string,
 ): Promise<void> {
-  const layouts = await Promise.all(chunkPaths.map((path) => readMp4Layout(fileRange(path))));
-  const header = buildStitchedHeader(layouts);
+  const sourcePaths = audioPath ? [audioPath, ...chunkPaths] : chunkPaths;
+  const layouts = await Promise.all(sourcePaths.map((path) => readMp4Layout(fileRange(path))));
+  const header = audioPath
+    ? buildStitchedHeader(layouts.slice(1), layouts[0])
+    : buildStitchedHeader(layouts);
   mkdirSync(dirname(outputPath), { recursive: true });
   const workDir = mkdtempSync(`${outputPath}.stitch-`);
   const out = createWriteStream(join(workDir, "out.mp4"));
   try {
     out.write(header);
-    for (const [i, path] of chunkPaths.entries()) await copyPayload(path, layouts[i]!, i, out);
+    for (const [i, path] of sourcePaths.entries()) await copyPayload(path, layouts[i]!, i, out);
     out.end();
     await finished(out);
     renameSync(join(workDir, "out.mp4"), outputPath);

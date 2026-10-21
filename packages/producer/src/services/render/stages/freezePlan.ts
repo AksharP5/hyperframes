@@ -96,6 +96,7 @@ export interface LockedRenderConfig {
   variables?: Record<string, unknown>;
 
   chunksCarryAudio?: true;
+  separateAudio?: true;
 }
 
 export interface CompositionMetadataJson {

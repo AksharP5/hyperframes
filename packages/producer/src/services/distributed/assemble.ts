@@ -147,7 +147,8 @@ export async function assemble(
   }
 
   if (chunksAreStitchedMp4(planDir, cfr)) {
-    await writeStitchedMp4(chunkPaths, outputPath);
+    const separateAudio = lockedAudio(planDir).separateAudio === true && audioPath !== null;
+    await writeStitchedMp4(chunkPaths, outputPath, separateAudio ? audioPath : undefined);
     return {
       outputPath,
       durationMs: Date.now() - start,
@@ -399,22 +400,22 @@ async function runAssembleFfmpeg(
   }
 }
 
-/** Chunks that carry their audio are stitched under one index, the same bytes as the S3 stitch. */
+/** Chunks carrying audio, or with it as a separate file, stitch under one index like S3's. */
 export function chunksAreStitchedMp4(planDir: string, cfr: boolean): boolean {
-  if (!chunksCarryAudio(planDir)) return false;
+  const { chunksCarryAudio, separateAudio } = lockedAudio(planDir);
+  if (!chunksCarryAudio && !separateAudio) return false;
   if (cfr) {
-    throw new Error("[assemble] cfr=true cannot re-encode a plan whose mp4 chunks carry audio");
+    throw new Error("[assemble] cfr=true cannot re-encode a plan whose mp4 chunks are stitched");
   }
   return true;
 }
 
-function chunksCarryAudio(planDir: string): boolean {
+function lockedAudio(
+  planDir: string,
+): Pick<LockedRenderConfig, "chunksCarryAudio" | "separateAudio"> {
   const encoderJsonPath = join(planDir, "meta", "encoder.json");
-  if (!existsSync(encoderJsonPath)) return false;
-  return (
-    (JSON.parse(readFileSync(encoderJsonPath, "utf-8")) as LockedRenderConfig).chunksCarryAudio ===
-    true
-  );
+  if (!existsSync(encoderJsonPath)) return {};
+  return JSON.parse(readFileSync(encoderJsonPath, "utf-8")) as LockedRenderConfig;
 }
 
 /**

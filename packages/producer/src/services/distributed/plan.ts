@@ -321,6 +321,8 @@ export interface BuildLocalExecutionPlanOptions {
   readonly chunksCarryAudio?: boolean;
   /** With `chunksCarryAudio`, also write each chunk's audio packets to their own file. Plan v2 only. */
   readonly sliceChunkAudio?: boolean;
+  /** Leave the audio to {@link buildPlanAudio}; chunks render video only. mp4 without `cfr` only. */
+  readonly deferAudio?: boolean;
 }
 
 export interface RemoteProjectFile {
@@ -882,6 +884,7 @@ function buildLockedRenderConfig(input: {
   chunkCount: number;
   runtimeEnv: Record<string, string>;
   chunksCarryAudio: boolean;
+  separateAudio: boolean;
 }): LockedRenderConfig {
   const { config, forceScreenshot, deviceScaleFactor, ffmpegVersion } = input;
   const { encoder, pixelFormat, preset } = resolveEncoderTriple(config);
@@ -917,6 +920,7 @@ function buildLockedRenderConfig(input: {
     runtimeEnv: input.runtimeEnv,
     variables: config.variables,
     ...(input.chunksCarryAudio ? { chunksCarryAudio: true } : {}),
+    ...(input.separateAudio ? { separateAudio: true } : {}),
   };
 }
 
@@ -1082,13 +1086,23 @@ function createVideoSourceShipper(input: {
  * Build the shared local execution representation used by both transport
  * protocols. See the module docstring for the directory layout.
  */
-export async function buildLocalExecutionPlan(
+/** Whether the plan leaves its audio to {@link buildPlanAudio}. */
+export function plansSeparateAudio(
+  config: Pick<DistributedRenderConfig, "format" | "cfr">,
+  options: Pick<BuildLocalExecutionPlanOptions, "deferAudio">,
+): boolean {
+  return options.deferAudio === true && config.format === "mp4" && config.cfr !== true;
+}
+
+// The plan's copy, compile and probe, shared by the plan and by buildPlanAudio so both see the
+// same composition.
+// fallow-ignore-next-line complexity
+async function compilePlanComposition(
   projectDir: string,
   config: DistributedRenderConfig,
-  executionPlanDir: string,
-  options: Readonly<BuildLocalExecutionPlanOptions> = {},
-): Promise<LocalExecutionPlan> {
-  const planDir = executionPlanDir;
+  planDir: string,
+  options: Pick<BuildLocalExecutionPlanOptions, "executionPlanSizeLimitBytes" | "remoteFiles">,
+) {
   // Plan-time validation. Rejections here surface as typed errors with
   // non-retryable codes so workflow adapters don't waste retry budget on
   // banned configs. Runs BEFORE any directory creation so a banned input
@@ -1290,6 +1304,121 @@ export async function buildLocalExecutionPlan(
       });
     }
   }
+  return {
+    projectDir,
+    log,
+    sizeLimitBytes,
+    abortSignal,
+    assertNotAborted,
+    cfg,
+    job,
+    workDir,
+    compiledDir,
+    finalCompiledDir,
+    remoteFiles,
+    urlByAbsentLocalPath,
+    localPathByUrl,
+    compileResult,
+    compiled,
+    composition,
+    deviceScaleFactor,
+    forceScreenshot,
+    width,
+    height,
+    probeResult,
+    totalFrames,
+  };
+}
+
+type PlanComposition = Awaited<ReturnType<typeof compilePlanComposition>>;
+
+/** The composition's mix at `seconds`, keeping the float mix at `pcmPath` when given. */
+function mixPlanAudio(c: PlanComposition, compiledDir: string, seconds: number, pcmPath?: string) {
+  return runAudioStage({
+    projectDir: c.projectDir,
+    workDir: c.workDir,
+    compiledDir,
+    urlByAbsentLocalPath: c.urlByAbsentLocalPath,
+    duration: seconds,
+    ffmpegProcessTimeout: c.cfg.ffmpegProcessTimeout,
+    audioGain: c.cfg.audioGain,
+    audios: c.composition.audios,
+    masterFxChain: c.composition.masterFxChain,
+    ...(pcmPath ? { keepEncoderInputAt: pcmPath } : {}),
+    abortSignal: c.abortSignal,
+    assertNotAborted: c.assertNotAborted,
+  });
+}
+
+/** Extracts the composition's videos and adds the sound of each that carries one to its audios. */
+async function extractPlanVideos(c: PlanComposition, deferRangeExtraction: boolean | undefined) {
+  const extractResult = await runExtractVideosStage({
+    projectDir: c.projectDir,
+    compiledDir: c.compiledDir,
+    job: c.job,
+    cfg: c.cfg,
+    composition: c.composition,
+    abortSignal: c.abortSignal,
+    assertNotAborted: c.assertNotAborted,
+    materializeSymlinks: true,
+    deferRangeExtraction,
+    urlByAbsentLocalPath: c.urlByAbsentLocalPath,
+  });
+  if (extractResult.failureToEnforce) throw extractResult.failureToEnforce;
+  if (extractResult.extractionResult) {
+    // A chunk cannot fall back to decoding a source the planner held: a missing frame set
+    // renders as a silent blank video, so every declared source must extract.
+    assertVideoExtractionSucceeded(extractResult.extractionResult);
+  }
+  return extractResult;
+}
+
+/** Holds the mixed track at `audioPath` to the delivery true-peak ceiling, from its float mix. */
+async function holdPlanAudioPeak(
+  c: PlanComposition,
+  audioPath: string,
+  pcmPath: string,
+  seconds: number,
+): Promise<void> {
+  const peak = await constrainAacTruePeak({
+    audioPath,
+    ...(existsSync(pcmPath) ? { sourcePath: pcmPath } : {}),
+    targetDurationSeconds: seconds,
+    signal: c.abortSignal,
+    timeoutMs: c.cfg.ffmpegProcessTimeout,
+  }).finally(() => rmSync(pcmPath, { force: true }));
+  if (!peak.success) throw encoderFailureError("[plan] audio true-peak check failed", peak);
+}
+
+export async function buildLocalExecutionPlan(
+  projectDir: string,
+  config: DistributedRenderConfig,
+  executionPlanDir: string,
+  options: Readonly<BuildLocalExecutionPlanOptions> = {},
+): Promise<LocalExecutionPlan> {
+  const planDir = executionPlanDir;
+  const c = await compilePlanComposition(projectDir, config, planDir, options);
+  const {
+    log,
+    sizeLimitBytes,
+    cfg,
+    job,
+    workDir,
+    compiledDir,
+    finalCompiledDir,
+    remoteFiles,
+    urlByAbsentLocalPath,
+    localPathByUrl,
+    compileResult,
+    compiled,
+    composition,
+    deviceScaleFactor,
+    forceScreenshot,
+    width,
+    height,
+    probeResult,
+    totalFrames,
+  } = c;
 
   // ── Chunking decisions ── (before extraction so an impossible plan fails fast; graded
   // media is re-sized from its measured frame cost once its video frames exist)
@@ -1312,29 +1441,9 @@ export async function buildLocalExecutionPlan(
   // ── Extract videos ──
   // `materializeSymlinks: true` recursively copies frames so the planDir is
   // self-contained (symlinks don't survive S3/GCS round-trips).
-  stageStarted = Date.now();
-  const extractResult = await runExtractVideosStage({
-    projectDir,
-    compiledDir,
-    job,
-    cfg,
-    composition,
-    abortSignal,
-    assertNotAborted,
-    materializeSymlinks: true,
-    deferRangeExtraction: options.deferVideoExtraction,
-    urlByAbsentLocalPath,
-  });
+  let stageStarted = Date.now();
+  const extractResult = await extractPlanVideos(c, options.deferVideoExtraction);
   logPlanStage(log, "extract", stageStarted);
-  if (extractResult.failureToEnforce) throw extractResult.failureToEnforce;
-  if (extractResult.extractionResult) {
-    // Distributed chunks cannot safely fall back to native remote decoding:
-    // the planner-local source may be unavailable on another worker, and a
-    // missing frame set otherwise renders as a silent blank video. Unlike the
-    // separately canaried in-process policy, distributed planning always
-    // requires every declared source to extract successfully.
-    assertVideoExtractionSucceeded(extractResult.extractionResult);
-  }
   // Skip `extractResult.frameLookup.cleanup()`: it would rm-rf each
   // video's outputDir, but in `plan()` those directories ARE the source
   // material the renames below move into `planDir/video-frames/`.
@@ -1415,27 +1524,22 @@ export async function buildLocalExecutionPlan(
   // Only the assembler reads the mix, so hashing and publishing the final
   // compiled and video trees run beside it instead of after it.
   const digests: PlanFileDigests = options.digests ?? new Map();
-  const chunksCarryAudio = carriesChunkAudio(config, options);
+  const separateAudio = plansSeparateAudio(config, options);
+  const chunksCarryAudio = !separateAudio && carriesChunkAudio(config, options);
   // Chunks cut their audio from this track, so it is mixed to the frames' exact length in its one
   // encode; the assembler pads or trims the track of any other plan.
   const audioSeconds = chunksCarryAudio ? totalFrames / config.fps : probeResult.duration;
   const planMixPcmPath = join(workDir, "plan-mix.wav");
   stageStarted = Date.now();
   const [audioOutcome, overlapOutcome, frameCostOutcome] = await Promise.allSettled([
-    runAudioStage({
-      projectDir,
-      workDir,
-      compiledDir: finalCompiledDir,
-      urlByAbsentLocalPath,
-      duration: audioSeconds,
-      ffmpegProcessTimeout: cfg.ffmpegProcessTimeout,
-      audioGain: cfg.audioGain,
-      audios: composition.audios,
-      masterFxChain: composition.masterFxChain,
-      ...(chunksCarryAudio ? { keepEncoderInputAt: planMixPcmPath } : {}),
-      abortSignal,
-      assertNotAborted,
-    }).finally(() => logPlanStage(log, "audio", stageStarted)),
+    separateAudio
+      ? null
+      : mixPlanAudio(
+          c,
+          finalCompiledDir,
+          audioSeconds,
+          chunksCarryAudio ? planMixPcmPath : undefined,
+        ).finally(() => logPlanStage(log, "audio", stageStarted)),
     (async () => {
       for (const dir of [finalCompiledDir, videoFramesDst, videoSourcesDir]) {
         await prehashPlanFiles(dir, digests);
@@ -1487,24 +1591,17 @@ export async function buildLocalExecutionPlan(
   );
   const chunks = buildChunkSlices(totalFrames, chunkCount, effectiveChunkSize);
   const audioResult = audioOutcome.value;
-  if (audioResult.audioError) {
+  if (audioResult?.audioError) {
     applyDistributedAudioWarningPolicy(job, audioResult.audioError, audioResult.audioFailures, log);
   }
 
   const planAudioPath = join(planDir, PLAN_AUDIO_RELATIVE_PATH);
-  if (audioResult.hasAudio && existsSync(audioResult.audioOutputPath)) {
+  if (audioResult?.hasAudio && existsSync(audioResult.audioOutputPath)) {
     renameSync(audioResult.audioOutputPath, planAudioPath);
   }
   if (chunksCarryAudio && existsSync(planAudioPath)) {
     stageStarted = Date.now();
-    const peak = await constrainAacTruePeak({
-      audioPath: planAudioPath,
-      ...(existsSync(planMixPcmPath) ? { sourcePath: planMixPcmPath } : {}),
-      targetDurationSeconds: audioSeconds,
-      signal: abortSignal,
-      timeoutMs: cfg.ffmpegProcessTimeout,
-    }).finally(() => rmSync(planMixPcmPath, { force: true }));
-    if (!peak.success) throw encoderFailureError("[plan] audio true-peak check failed", peak);
+    await holdPlanAudioPeak(c, planAudioPath, planMixPcmPath, audioSeconds);
     logPlanStage(log, "audio-peak", stageStarted);
     if (options.sliceChunkAudio) {
       stageStarted = Date.now();
@@ -1533,6 +1630,7 @@ export async function buildLocalExecutionPlan(
     chunkCount,
     runtimeEnv,
     chunksCarryAudio,
+    separateAudio,
   });
 
   // ── Freeze the plan ──
@@ -1601,7 +1699,7 @@ export async function buildLocalExecutionPlan(
     fontSnapshotSha,
     durationSeconds: job.duration ?? 0,
     totalFrames,
-    hasAudio: audioResult.hasAudio,
+    hasAudio: audioResult?.hasAudio ?? false,
     digests,
   });
   logPlanStage(log, "freeze", stageStarted);
@@ -1631,6 +1729,44 @@ export async function buildLocalExecutionPlan(
     ffmpegVersion,
     producerVersion,
   };
+}
+
+/**
+ * The audio of a plan made with `deferAudio`: the mix and true-peak hold that plan would have
+ * made, written to `outputPath` (on `workRoot`'s filesystem) at exactly the video's length.
+ */
+export async function buildPlanAudio(
+  projectDir: string,
+  config: DistributedRenderConfig,
+  workRoot: string,
+  outputPath: string,
+  options: Pick<BuildLocalExecutionPlanOptions, "remoteFiles"> = {},
+): Promise<{ hasAudio: boolean }> {
+  const c = await compilePlanComposition(projectDir, config, workRoot, {
+    ...options,
+    executionPlanSizeLimitBytes: Number.MAX_SAFE_INTEGER,
+  });
+  try {
+    const seconds = c.totalFrames / config.fps;
+    const pcmPath = join(c.workDir, "plan-mix.wav");
+    let stageStarted = Date.now();
+    await extractPlanVideos(c, true);
+    logPlanStage(c.log, "extract", stageStarted);
+    stageStarted = Date.now();
+    const mixed = await mixPlanAudio(c, c.compiledDir, seconds, pcmPath);
+    logPlanStage(c.log, "audio", stageStarted);
+    if (mixed.audioError) {
+      applyDistributedAudioWarningPolicy(c.job, mixed.audioError, mixed.audioFailures, c.log);
+    }
+    if (!mixed.hasAudio || !existsSync(mixed.audioOutputPath)) return { hasAudio: false };
+    renameSync(mixed.audioOutputPath, outputPath);
+    stageStarted = Date.now();
+    await holdPlanAudioPeak(c, outputPath, pcmPath, seconds);
+    logPlanStage(c.log, "audio-peak", stageStarted);
+    return { hasAudio: true };
+  } finally {
+    rmSync(c.workDir, { recursive: true, force: true });
+  }
 }
 
 /**

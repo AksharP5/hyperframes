@@ -107,14 +107,19 @@ function samplesOf(file: Buffer, track: ReturnType<typeof readTracks>[number]): 
   return read;
 }
 
-/** The stitched file: the header, then each chunk's mdat payload in order. */
-async function stitchInMemory(files: Buffer[]): Promise<Buffer> {
-  const layouts = await Promise.all(files.map((file) => readMp4Layout(memoryRange(file))));
+/** The stitched file: the header, then `audio`'s and each chunk's mdat payload in order. */
+async function stitchInMemory(files: Buffer[], audio?: Buffer): Promise<Buffer> {
+  const sources = audio ? [audio, ...files] : files;
+  const layouts = await Promise.all(sources.map((file) => readMp4Layout(memoryRange(file))));
   return Buffer.concat([
-    buildStitchedHeader(layouts),
-    ...layouts.map((l, i) => files[i]!.subarray(l.payloadStart, l.payloadEnd)),
+    audio ? buildStitchedHeader(layouts.slice(1), layouts[0]) : buildStitchedHeader(layouts),
+    ...layouts.map((l, i) => sources[i]!.subarray(l.payloadStart, l.payloadEnd)),
   ]);
 }
+
+/** A track's tkhd track_ID (version 0, as fakeChunk writes it). */
+const trackIdOf = (moov: Buffer, track: ReturnType<typeof readTracks>[number]) =>
+  moov.readUInt32BE(track.trak.bodyStart + 8 + 12);
 
 describe("buildStitchedHeader", () => {
   const video = (sizes: number[], mediaTime = 0): FakeTrack => ({
@@ -199,6 +204,44 @@ describe("buildStitchedHeader", () => {
     expect(tracks[1]!.durations).toEqual([1024, 1024, 1024, 640]);
   });
 
+  it("puts a separate audio file's track and payload before every chunk's", async () => {
+    const chunks = [fakeChunk(0, [video([500, 120])]), fakeChunk(1, [video([90])])];
+    const mix = fakeChunk(2, [audio([1024, 1024, 640], 1024)]);
+    const file = await stitchInMemory(
+      chunks.map((chunk) => chunk.file),
+      mix.file,
+    );
+    const { moov } = await readMp4Layout(memoryRange(file));
+    const tracks = readTracks(moov);
+    expect(tracks.map((track) => [track.handler, track.mediaTime])).toEqual([
+      ["vide", 0],
+      ["soun", 1024],
+    ]);
+    expect(tracks.map((track) => trackIdOf(moov, track))).toEqual([1, 2]);
+    expect(samplesOf(file, tracks[0]!)).toEqual([
+      ...chunks[0]!.samples[0]!,
+      ...chunks[1]!.samples[0]!,
+    ]);
+    expect(samplesOf(file, tracks[1]!)).toEqual(mix.samples[0]!);
+    expect(tracks[1]!.durations).toEqual([1024, 1024, 640]);
+    expect(Math.max(...tracks[1]!.chunkOffsets)).toBeLessThan(Math.min(...tracks[0]!.chunkOffsets));
+  });
+
+  it.each([0, 1])(
+    "refuses chunk %i carrying audio when the audio is a separate file",
+    async (carrier) => {
+      const chunk = (i: number) =>
+        fakeChunk(i, i === carrier ? [video([500]), audio([1024], 0)] : [video([500])]);
+      const layouts = await Promise.all(
+        [chunk(0), chunk(1)].map((c) => readMp4Layout(memoryRange(c.file))),
+      );
+      const mix = await readMp4Layout(memoryRange(fakeChunk(2, [audio([1024], 1024)]).file));
+      expect(() => buildStitchedHeader(layouts, mix)).toThrow(
+        `chunk ${carrier} carries its own audio`,
+      );
+    },
+  );
+
   it.each([
     [
       "an audio codec chunk 0 does not use",
@@ -244,6 +287,26 @@ describe("writeStitchedMp4", () => {
     await writeStitchedMp4([write("a.mp4", files[0]!), write("b.mp4", files[1]!)], output);
     expect(readFileSync(output).equals(await stitchInMemory(files))).toBe(true);
     expect(readdirSync(dir).sort()).toEqual(["a.mp4", "b.mp4", "out.mp4"]);
+  });
+
+  it("writes a separate audio file's payload right after the header", async () => {
+    const files = [fakeChunk(0, [video([500, 120])]).file, fakeChunk(1, [video([480])]).file];
+    const mix = fakeChunk(2, [
+      {
+        handler: "soun",
+        timescale: 48000,
+        mediaTime: 1024,
+        durations: [1024, 640],
+        sizes: [40, 41],
+      },
+    ]).file;
+    const output = join(dir, "out.mp4");
+    await writeStitchedMp4(
+      [write("a.mp4", files[0]!), write("b.mp4", files[1]!)],
+      output,
+      write("audio.m4a", mix),
+    );
+    expect(readFileSync(output).equals(await stitchInMemory(files, mix))).toBe(true);
   });
 
   it("opens no output for chunks it refuses", async () => {
