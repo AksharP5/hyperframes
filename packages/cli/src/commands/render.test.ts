@@ -227,6 +227,7 @@ vi.mock("../browser/ffmpeg.js", async (importOriginal) => {
 });
 
 vi.mock("../browser/preflight.js", () => ({
+  checkDisk: vi.fn(() => ({ name: "Disk", ok: true, level: "ok", detail: "mock" })),
   runEnvironmentChecks: vi.fn(async () => {
     preflightState.onRun?.();
     return preflightState.result;
@@ -241,6 +242,7 @@ vi.mock("../browser/preflight.js", () => ({
 // the shared `~/.cache/hyperframes/chrome`, racing other packages' browser
 // tests in CI.
 vi.mock("../browser/manager.js", () => ({
+  sweepKilledInstalls: vi.fn(async () => {}),
   ensureBrowser: vi.fn(async (options?: { signal?: AbortSignal }) => {
     await browserManagerState.onEnsure?.(options?.signal);
     return { executablePath: "/mock/chrome", source: "cache" };
