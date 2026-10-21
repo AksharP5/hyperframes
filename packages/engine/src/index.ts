@@ -295,6 +295,7 @@ export {
   type WorkerResult,
   type WorkerSizing,
   type WorkerSizingBound,
+  type LandedFrame,
   type ParallelProgress,
 } from "./services/parallelCoordinator.js";
 

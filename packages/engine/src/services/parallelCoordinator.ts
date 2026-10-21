@@ -88,6 +88,14 @@ export interface ParallelProgress {
   workerProgress: Map<number, number>;
   /** Latest lifecycle transition; absent on ordinary completed-frame updates. */
   latestWorkerPhase?: ParallelWorkerPhaseDiagnostic;
+  /** Disk capture only: the frame file this update finished writing, readable from now on. */
+  landedFrame?: LandedFrame;
+}
+
+/** A captured frame file: `index` is its file index (`frame_<index>`), `path` where it was written. */
+export interface LandedFrame {
+  index: number;
+  path: string;
 }
 
 export type ParallelWorkerPhase =
@@ -552,7 +560,9 @@ async function captureFrameRange(
   task: WorkerTask,
   captureOptions: CaptureOptions,
   signal: AbortSignal | undefined,
-  onFrameCaptured: ((workerId: number, frameIndex: number) => void) | undefined,
+  onFrameCaptured:
+    | ((workerId: number, frameIndex: number, landedFrame?: LandedFrame) => void)
+    | undefined,
   onFrameBuffer:
     | ((frameIndex: number, buffer: Buffer, session: CaptureSession) => Promise<void>)
     | undefined,
@@ -645,18 +655,20 @@ async function captureFrameRange(
     const time = (i * captureOptions.fps.den) / captureOptions.fps.num;
     const fileFrameIdx = i - outputOffset;
 
+    let landedFrame: LandedFrame | undefined;
     if (onFrameBuffer) {
       const { buffer } = await runCaptureOperation("frame_capture", i, () =>
         captureFrameToBuffer(session, fileFrameIdx, time),
       );
       await onFrameBuffer(i, buffer, session);
     } else {
-      await runCaptureOperation("frame_capture", i, () =>
+      const { path } = await runCaptureOperation("frame_capture", i, () =>
         captureFrame(session, fileFrameIdx, time),
       );
+      landedFrame = { index: fileFrameIdx, path };
     }
     framesCaptured++;
-    if (onFrameCaptured) onFrameCaptured(task.workerId, i);
+    if (onFrameCaptured) onFrameCaptured(task.workerId, i, landedFrame);
   }
   return framesCaptured;
 }
@@ -824,7 +836,7 @@ async function executeWorkerTask(
   captureOptions: CaptureOptions,
   createBeforeCaptureHook: () => BeforeCaptureHook | null,
   signal?: AbortSignal,
-  onFrameCaptured?: (workerId: number, frameIndex: number) => void,
+  onFrameCaptured?: (workerId: number, frameIndex: number, landedFrame?: LandedFrame) => void,
   onFrameBuffer?: (frameIndex: number, buffer: Buffer, session: CaptureSession) => Promise<void>,
   config?: Partial<EngineConfig>,
   parallel?: boolean,
@@ -1066,7 +1078,7 @@ export async function executeParallelCapture(
 
   for (const task of tasks) workerProgress.set(task.workerId, 0);
 
-  const onFrameCaptured = (workerId: number, _frameIndex: number) => {
+  const onFrameCaptured = (workerId: number, _frameIndex: number, landedFrame?: LandedFrame) => {
     const current = workerProgress.get(workerId) || 0;
     workerProgress.set(workerId, current + 1);
 
@@ -1077,6 +1089,7 @@ export async function executeParallelCapture(
         capturedFrames,
         activeWorkers: tasks.length,
         workerProgress: new Map(workerProgress),
+        ...(landedFrame && { landedFrame }),
       });
     }
   };

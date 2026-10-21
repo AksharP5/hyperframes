@@ -45,6 +45,7 @@ import {
   type CapturePerfSummary,
   type CaptureSession,
   type EngineConfig,
+  type LandedFrame,
   captureFrame,
   captureFrameToBufferPipelined,
   verifyDiskDrawElementSamples,
@@ -118,6 +119,7 @@ export interface CaptureStageInput {
    * When set, `endFrame - startFrame` MUST equal `totalFrames`.
    */
   frameRange?: { startFrame: number; endFrame: number };
+  onFrameLanded?: (frame: LandedFrame) => void;
 }
 
 export interface CaptureStageResult {
@@ -408,6 +410,7 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
           if (progress.capturedFrames === 0) reportWorkerStartup(job, progress, onProgress);
           return;
         }
+        if (progress.landedFrame) input.onFrameLanded?.(progress.landedFrame);
         job.framesRendered = progress.capturedFrames;
         checkDiskProjection(progress.capturedFrames);
         const frameProgress = progress.capturedFrames / progress.totalFrames;

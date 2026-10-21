@@ -46,6 +46,7 @@ mock.module("@hyperframes/engine", () => ({
   }),
   resolveConfig: () => resolvedEngineConfig,
   runFfmpeg: runFfmpegMock,
+  spawnStreamingEncoder: mock(),
 }));
 
 const tempDirs: string[] = [];

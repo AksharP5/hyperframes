@@ -211,7 +211,12 @@ import {
   runCaptureStreamingStage,
 } from "./render/stages/captureStreamingStage.js";
 import { runCaptureHdrStage } from "./render/stages/captureHdrStage.js";
-import { runEncodeStage } from "./render/stages/encodeStage.js";
+import {
+  canEncodeWhileCapturing,
+  encodeWhileCapturing,
+  runEncodeStage,
+  type EncodeStageInput,
+} from "./render/stages/encodeStage.js";
 import { runAssembleStage } from "./render/stages/assembleStage.js";
 import { shouldUseLayeredComposite } from "./hdrCompositor.js";
 import {
@@ -4868,6 +4873,40 @@ async function executeRenderPipeline(input: {
         }
         // ── Disk-based capture (original flow) ────────────────────────────
         resetCaptureAttemptProgress(job);
+        const encodeInput: EncodeStageInput = {
+          job,
+          log,
+          outputPath: stagedOutputPath,
+          framesDir,
+          videoOnlyPath,
+          width,
+          height,
+          needsAlpha,
+          captureImageFormat: captureOptions.format ?? "jpeg",
+          hasAudio,
+          audioOutputPath,
+          isPngSequence,
+          isGif,
+          preset,
+          effectiveQuality,
+          effectiveBitrate,
+          enableChunkedEncode,
+          chunkedEncodeSize,
+          engineConfig: cfg,
+          // Same value the streaming encoder above spreads — the disk and
+          // chunked-concat encoders need an identical GOP lock for HLS.
+          ...hlsEncoderGopLock,
+          abortSignal: executionSignal,
+          assertNotAborted,
+          onProgress,
+        };
+        // Not under drawElement: its verify failure discards every frame and recaptures.
+        const overlap =
+          !cfg.useDrawElement &&
+          workerSizing !== undefined &&
+          canEncodeWhileCapturing(encodeInput, capturePlan.workerCount, workerSizing.cpuCount)
+            ? encodeWhileCapturing(encodeInput, totalFrames)
+            : null;
         const captureFrameStart = Date.now();
         const invokeDiskCapture = (diskPlan: SdrDiskCapturePlan) =>
           observeRenderStage(
@@ -4892,12 +4931,14 @@ async function executeRenderPipeline(input: {
                 abortSignal: executionSignal,
                 assertNotAborted,
                 onProgress,
+                onFrameLanded: (frame) => overlap?.onFrameLanded(frame),
               }),
           );
         let captureRes;
         try {
           captureRes = await invokeDiskCapture(capturePlan);
         } catch (err) {
+          await overlap?.abort();
           // Disk-path drawElement verification or capture failed. A canvas
           // or paint-record failure cannot use the injected page as ground truth.
           // Same recovery contract as the streaming drain: re-render on the
@@ -4987,34 +5028,7 @@ async function executeRenderPipeline(input: {
             isGif,
             chunkedEncode: enableChunkedEncode,
           }),
-          () =>
-            runEncodeStage({
-              job,
-              log,
-              outputPath: stagedOutputPath,
-              framesDir,
-              videoOnlyPath,
-              width,
-              height,
-              needsAlpha,
-              captureImageFormat: captureOptions.format ?? "jpeg",
-              hasAudio,
-              audioOutputPath,
-              isPngSequence,
-              isGif,
-              preset,
-              effectiveQuality,
-              effectiveBitrate,
-              enableChunkedEncode,
-              chunkedEncodeSize,
-              engineConfig: cfg,
-              // Same value the streaming encoder above spreads — the disk and
-              // chunked-concat encoders need an identical GOP lock for HLS.
-              ...hlsEncoderGopLock,
-              abortSignal: executionSignal,
-              assertNotAborted,
-              onProgress,
-            }),
+          () => (overlap ? overlap.finish() : runEncodeStage(encodeInput)),
         );
         perfStages.encodeMs = encodeRes.encodeMs;
       }
