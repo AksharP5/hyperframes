@@ -54,7 +54,7 @@ import type {
   LayoutOverflow,
   LayoutRect,
 } from "../utils/layoutAudit.js";
-import type { SeekClock } from "../utils/checkTypes.js";
+import type { CraftFrame, SeekClock } from "../utils/checkTypes.js";
 import type { ProjectDir } from "../utils/project.js";
 
 const PROJECT: ProjectDir = {
@@ -1094,6 +1094,7 @@ function reportWithFindings(overrides: Partial<CheckReport> = {}): CheckReport {
     },
     motion: { ...emptySection(), enabled: false, samples: 0 },
     contrast: { ...emptySection(), enabled: true, samples: [], checked: 0, passed: 0 },
+    craft: { ...emptySection(), enabled: false, step: 0, samples: 0 },
     hdr: { autoPromotion: null, inspection: "available" },
     snapshots: { enabled: false, files: [], times: [], findingFiles: [] },
     ...overrides,
@@ -1996,6 +1997,112 @@ describe("check pipeline", () => {
     });
   });
 
+  describe("craft warnings", () => {
+    // A 20 s film: frame 0 empty, a 7-word line on screen 6.2–6.9 s, nothing moving 7.5–12.5 s, no sound.
+    function craftFrame(time: number): CraftFrame {
+      const line = time >= 6.2 && time < 6.9;
+      return {
+        time,
+        parts: line
+          ? [
+              {
+                key: 1,
+                block: 1,
+                selector: "#title",
+                blockSelector: "#title",
+                sourceFile: "compositions/stat.html",
+                text: "Every team gets one shared calendar now",
+                opacity: 1,
+                fontPx: 96,
+                rect: { left: 160, top: 380, width: 1600, height: 220 },
+                captions: false,
+              },
+            ]
+          : [],
+        held: false,
+        painted: time > 0,
+        signature: time >= 7.5 && time <= 12.5 ? "still" : `moving-${time}`,
+      };
+    }
+
+    function craftDriver(overrides: Partial<CheckAuditDriver> = {}): CheckAuditDriver {
+      return fakeDriver({
+        getDuration: vi.fn(async () => 20),
+        collectCraftFrame: vi.fn(async (time: number) => craftFrame(time)),
+        collectCraftFilm: vi.fn(async () => ({ soundSources: 0 })),
+        ...overrides,
+      });
+    }
+
+    it("reports them as warnings that keep exit 0, even under --strict", async () => {
+      const { report } = await runScenario(craftDriver());
+
+      expect(report.craft.enabled).toBe(true);
+      expect(report.craft.findings.map((finding) => finding.code).sort()).toEqual([
+        "dead_stretch",
+        "film_silent",
+        "first_frame_empty",
+        "line_unread",
+      ]);
+      expect(report.craft.findings.every((finding) => finding.severity === "warning")).toBe(true);
+      expect(report.craft.warningCount).toBe(4);
+      expect(report.ok).toBe(true);
+      expect(checkExitCode(report)).toBe(0);
+
+      const strict = await runScenario(craftDriver(), { strict: true });
+      expect(checkExitCode(strict.report)).toBe(0);
+    });
+
+    it("re-measures a short line between dense samples before judging it", async () => {
+      const driver = craftDriver();
+      const { report } = await runScenario(driver);
+      const line = report.craft.findings.find((finding) => finding.code === "line_unread");
+
+      expect(line?.seconds).toBeCloseTo(0.7, 1);
+      const sampled = vi.mocked(driver.collectCraftFrame!).mock.calls.map(([time]) => time);
+      expect(sampled.some((time) => Math.round(time * 1000) % 125 !== 0)).toBe(true);
+    });
+
+    it("samples a long film at 8 fps, finer than the overlap pass's capped grid", async () => {
+      // A 60 s film whose seven-word line shows 10.1-10.3 s, between two of the overlap grid's samples.
+      const driver = craftDriver({
+        getDuration: vi.fn(async () => 60),
+        collectCraftFrame: vi.fn(async (time: number) => {
+          const frame = craftFrame(time);
+          const line = time >= 10.1 && time < 10.3;
+          const part = craftFrame(6.5).parts[0];
+          return { ...frame, parts: line && part ? [part] : [], signature: `moving-${time}` };
+        }),
+      });
+      const { report } = await runScenario(driver);
+      const line = report.craft.findings.find((finding) => finding.code === "line_unread");
+
+      expect(line?.time).toBeCloseTo(10.1, 1);
+    });
+
+    it("skips the section for --range checks and for drivers without a craft sampler", async () => {
+      const ranged = await runScenario(craftDriver(), { range: [2, 8] });
+      expect(ranged.report.craft).toMatchObject({ enabled: false, findings: [] });
+
+      const { report } = await runScenario(fakeDriver({ getDuration: vi.fn(async () => 20) }));
+      expect(report.craft).toMatchObject({ enabled: false, findings: [] });
+    });
+
+    it("leaves stillness to sweep_static when the whole sweep is frozen", async () => {
+      const driver = craftDriver({
+        collectLayoutGeometry: vi.fn(async () => "frozen"),
+        collectCraftFrame: vi.fn(async (time: number) => ({
+          ...craftFrame(time),
+          signature: "still",
+        })),
+      });
+      const { report } = await runScenario(driver);
+
+      expect(report.layout.findings.some((finding) => finding.code === "sweep_static")).toBe(true);
+      expect(report.craft.findings.some((finding) => finding.code === "dead_stretch")).toBe(false);
+    });
+  });
+
   describe("keepsMoving frame check", () => {
     function frozenLiveness(withinSelector?: string) {
       const motion: MotionSpecResolution = {
@@ -2049,6 +2156,8 @@ describe("check pipeline", () => {
       let seeked = 0;
       const driver = fakeDriver({
         ...overrides,
+        // 9 s, so the last END_CARD_HOLD_SEC (6-9 s) a film may hold still stays clear of both spans.
+        getDuration: vi.fn(async () => 9),
         seek: vi.fn(async (time: number) => {
           seeked = time;
         }),
@@ -2067,10 +2176,11 @@ describe("check pipeline", () => {
         path: "/project/index.motion.json",
         spec: { assertions: [{ kind: "keepsMoving" }] },
       };
-      // A hold, a hard cut at 3 s into a second hold, then motion from 5.05 s.
+      // A hold, a hard cut at 3 s into a second hold, then motion from 5.05 s to the end at 9 s,
+      // clear of the last END_CARD_HOLD_SEC a film may hold still.
       const shot = (index: number) => (index < 60 ? "a" : index < 101 ? "b" : String(index));
       const driver = fakeDriver({
-        getDuration: vi.fn(async () => 6),
+        getDuration: vi.fn(async () => 9),
         collectMotionFrame: vi.fn(async (time: number) => ({
           time,
           data: {},

@@ -758,7 +758,7 @@ export default defineCommand({
     skill: {
       type: "string",
       description:
-        "Owning authoring workflow slug (e.g. product-launch-video). Stamped into " +
+        "Owning authoring skill slug (e.g. hyperframes). Stamped into " +
         "hyperframes.json so every render of this project is attributed to it on " +
         "anonymous telemetry, without re-passing --skill on each render. Ignored unless it is a slug.",
     },

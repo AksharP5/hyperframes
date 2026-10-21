@@ -94,14 +94,6 @@
     // The relocated media-use .mjs files are agent-invoked scripts outside the
     // import graph; keep the exemption scoped to that shipped script type.
     "packages/cli/src/media-use/**/*.mjs",
-    // Agent-invoked motion-graphics tools co-located with their docs (run via
-    // `node <path>` per grounding/PROTOCOL.md / categories/maps/module.md
-    // prose), not import-graph reachable.
-    "skills/motion-graphics/grounding/**",
-    "skills/motion-graphics/categories/**",
-    // Agent-invoked reference materials (template + motion-primitive HTML, catalogs),
-    // forked by path by the frame-worker per SKILL.md prose, not import-graph reachable.
-    "skills/music-to-video/references/**",
     // Bundled @font-face data (read at runtime via fs.readFileSync, invisible
     // to the import graph) + its manual rebuild tool.
     "skills/**/fonts/**",

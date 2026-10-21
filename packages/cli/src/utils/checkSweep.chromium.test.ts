@@ -133,7 +133,8 @@ describe.skipIf(!RUNS_CHROMIUM)("frozen-sweep guard in Chromium", () => {
 
   it("still warns on, and keepsMoving still fails, a film where nothing on screen moves", async () => {
     const result = await findings(STILL_FILM, [{ kind: "keepsMoving" }]);
-    expect(result.frozen).toEqual([expect.stringContaining("nothing moves between 0s and 6s")]);
+    // The last END_CARD_HOLD_SEC (3-6 s) may hold still, so the frozen span ends where it starts.
+    expect(result.frozen).toEqual([expect.stringContaining("nothing moves between 0s and 3s")]);
     // A motion_frozen finding already names the symptom, so the sweep guard stays quiet.
     expect(result.sweep).toEqual([]);
     expect((await findings(STILL_FILM)).sweep).toEqual(["Nothing on screen moved under seek."]);

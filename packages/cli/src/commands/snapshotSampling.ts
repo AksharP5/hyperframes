@@ -37,6 +37,15 @@ export function sampleSnapshotRange(
     exclusiveEnd || end === duration ? end - Math.min(0.001, (end - start) / (frames * 2)) : end;
   return Array.from({ length: frames }, (_, i) => start + ((last - start) * i) / (frames - 1));
 }
+export function snapshotStartResolver(document: Document, durations: Record<string, number>) {
+  return createRuntimeStartTimeResolver({
+    documentRef: document,
+    timelineRegistry: Object.fromEntries(
+      Object.entries(durations).map(([key, value]) => [key, { duration: () => value }]),
+    ),
+    includeAuthoredTimingAttrs: true,
+  });
+}
 export function resolveSnapshotCompositionRange(
   html: string,
   durations: Record<string, number>,
@@ -51,14 +60,7 @@ export function resolveSnapshotCompositionRange(
     throw new Error(
       `Composition ID ${JSON.stringify(id)} matched ${matches.length} elements; expected exactly one`,
     );
-  const registry = Object.fromEntries(
-    Object.entries(durations).map(([key, value]) => [key, { duration: () => value }]),
-  );
-  const resolver = createRuntimeStartTimeResolver({
-    documentRef: document as unknown as Document,
-    timelineRegistry: registry,
-    includeAuthoredTimingAttrs: true,
-  });
+  const resolver = snapshotStartResolver(document as unknown as Document, durations);
   let start = 0,
     end = duration;
   for (let el: Element | null = matches[0] as unknown as Element; el; el = el.parentElement) {

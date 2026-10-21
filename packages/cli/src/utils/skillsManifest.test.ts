@@ -24,6 +24,8 @@ import {
   MANIFEST_FILE,
   presentSkills,
   pruneOrphanedLockEntries,
+  RETIRED_SKILLS,
+  retiredSkillNotice,
   skillsAttributedToSource,
   type SkillsManifest,
   type SkillEntry,
@@ -136,12 +138,12 @@ describe("buildManifest", () => {
 describe("isCoreSkill", () => {
   it("classifies the entry router, hyperframes-* domain skills, and media-use as core", () => {
     expect(isCoreSkill("hyperframes")).toBe(true);
-    expect(isCoreSkill("hyperframes-core")).toBe(true);
-    expect(isCoreSkill("hyperframes-animation")).toBe(true);
+    expect(isCoreSkill("hyperframes-cli")).toBe(true);
+    expect(isCoreSkill("hyperframes-registry")).toBe(true);
     expect(isCoreSkill("media-use")).toBe(true);
-    // End-user workflows and optional integrations install on demand.
-    expect(isCoreSkill("pr-to-video")).toBe(false);
-    expect(isCoreSkill("embedded-captions")).toBe(false);
+    // Decks, ports and optional integrations install on demand.
+    expect(isCoreSkill("slideshow")).toBe(false);
+    expect(isCoreSkill("remotion-to-hyperframes")).toBe(false);
     expect(isCoreSkill("figma")).toBe(false);
   });
 });
@@ -279,7 +281,7 @@ describe("diffSkills", () => {
       source: "test",
       skills: {
         hyperframes: { hash: "e1", files: 1 }, // core: entry router
-        "pr-to-video": { hash: "w1", files: 1 }, // on-demand workflow
+        slideshow: { hash: "w1", files: 1 }, // on-demand workflow
       },
     };
 
@@ -294,7 +296,7 @@ describe("diffSkills", () => {
     });
 
     // Core itself missing → every workflow needs it, so that IS an update.
-    const coreMissing = diffSkills({ "pr-to-video": { hash: "w1", files: 1 } }, withCore);
+    const coreMissing = diffSkills({ slideshow: { hash: "w1", files: 1 } }, withCore);
     expect(coreMissing.updateAvailable).toBe(true);
     expect(coreMissing.summary).toEqual({ current: 1, outdated: 0, missing: 1, coreMissing: 1 });
   });
@@ -309,7 +311,7 @@ describe("presentSkills", () => {
     mkdirSync(join(skillsDir, "hyperframes"), { recursive: true });
     writeFileSync(join(skillsDir, "hyperframes", "SKILL.md"), "# hyperframes");
 
-    expect(presentSkills(["hyperframes", "pr-to-video"], { cwd: project, home })).toEqual([
+    expect(presentSkills(["hyperframes", "slideshow"], { cwd: project, home })).toEqual([
       "hyperframes",
     ]);
   });
@@ -623,6 +625,102 @@ describe("checkSkills removed-upstream detection", () => {
     const res = await checkSkills(opts);
 
     expect(res.summary.removed).toBe(0);
+  });
+
+  // Retired skills (folded into guide folders of a remaining skill) are ours by
+  // name, so they are removed even where the generic rule fails safe: a lock
+  // entry with no skillPath, or a bundle on disk with no lock entry at all.
+  describe("retired skills", () => {
+    const retired = "hyperframes-core";
+
+    it("is one of RETIRED_SKILLS and absent from the skills/ tree", () => {
+      expect(RETIRED_SKILLS).toContain(retired);
+      const skillsRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../skills");
+      for (const name of RETIRED_SKILLS) expect(existsSync(join(skillsRoot, name))).toBe(false);
+    });
+
+    it("flags a retired skill whose lock entry has no skillPath", async () => {
+      const { home, opts } = setup({ source: "test", skills: { alpha: { hash: "x", files: 1 } } });
+      writeFileSync(
+        join(home, ".agents/.skill-lock.json"),
+        JSON.stringify({
+          version: 3,
+          skills: { alpha: { source: "test" }, [retired]: { source: "test" } },
+        }),
+      );
+
+      const res = await checkSkills(opts);
+
+      expect(res.skills.filter((s) => s.status === "removed").map((s) => s.name)).toEqual([
+        retired,
+      ]);
+    });
+
+    it("flags a retired bundle on disk that no lock attributes", async () => {
+      const { home, opts } = setup({ source: "test", skills: { alpha: { hash: "x", files: 1 } } });
+      installSkills(join(home, ".agents/skills"), [retired]);
+
+      const res = await checkSkills(opts);
+
+      expect(res.skills.filter((s) => s.status === "removed").map((s) => s.name)).toEqual([
+        retired,
+      ]);
+      expect(res.updateAvailable).toBe(true);
+    });
+
+    it("lists the eight retired workflow skills", () => {
+      for (const name of [
+        "embedded-captions",
+        "faceless-explainer",
+        "general-video",
+        "motion-graphics",
+        "music-to-video",
+        "pr-to-video",
+        "product-launch-video",
+        "talking-head-recut",
+      ])
+        expect(RETIRED_SKILLS).toContain(name);
+    });
+
+    it("flags a retired workflow the lock attributes to us, even without a skillPath", async () => {
+      const { home, opts } = setup({ source: "test", skills: { alpha: { hash: "x", files: 1 } } });
+      installSkills(join(home, ".agents/skills"), ["general-video"]);
+      writeGlobalLock(home, { alpha: { source: "test" }, "general-video": { source: "test" } });
+
+      const res = await checkSkills(opts);
+
+      expect(res.skills.filter((s) => s.status === "removed").map((s) => s.name)).toEqual([
+        "general-video",
+      ]);
+    });
+
+    it("leaves a same-named workflow bundle alone when no lock attributes it to us", async () => {
+      // Workflow names are generic: another source's `motion-graphics` must survive.
+      const { home, opts } = setup({ source: "test", skills: { alpha: { hash: "x", files: 1 } } });
+      installSkills(join(home, ".agents/skills"), ["motion-graphics"]);
+
+      const res = await checkSkills(opts);
+
+      expect(res.summary.removed).toBe(0);
+    });
+
+    it("explains where a retired skill's knowledge lives", () => {
+      expect(retiredSkillNotice("pr-to-video")).toMatch(/\/hyperframes skill and its references/);
+      expect(retiredSkillNotice("hyperframes-audio")).toMatch(/\/media-use skill/);
+    });
+
+    it("leaves a retired name alone while the manifest still publishes it", async () => {
+      const { home, opts } = setup({
+        source: "test",
+        skills: { alpha: { hash: "x", files: 1 }, [retired]: { hash: "y", files: 1 } },
+      });
+      installSkills(join(home, ".agents/skills"), [retired]);
+      writeGlobalLock(home, { alpha: { source: "test" }, [retired]: { source: "test" } });
+
+      const res = await checkSkills(opts);
+
+      expect(res.summary.removed).toBe(0);
+    });
   });
 
   it("a removed skill alone makes an update available (no outdated/missing)", async () => {

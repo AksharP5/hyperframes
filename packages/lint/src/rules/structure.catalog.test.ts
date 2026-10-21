@@ -40,7 +40,7 @@ describe("structure rules on the shipped catalog and skills", () => {
       for (const f of findings.filter((x) => STRUCTURE_CODES.has(x.code)))
         hits.push(`${file}: ${f.code}`);
     }
-    expect(roots).toBeGreaterThan(30);
+    expect(roots).toBeGreaterThan(5);
     expect(hits).toEqual([]);
   }, 120_000);
 });

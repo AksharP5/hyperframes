@@ -60,7 +60,7 @@ export interface ProjectConfig {
   /** Media handling options (e.g. auto-proxying of browser-hostile codecs). */
   media?: ProjectConfigMedia;
   /**
-   * Owning authoring-workflow skill slug (e.g. "product-launch-video"). Stamped
+   * Owning authoring skill slug (e.g. "hyperframes"). Stamped
    * by `hyperframes init --skill` or seeded from the first `hyperframes render
    * --skill`, then read back so every later render of this project — re-render,
    * `npm run render`, `--batch`, preview — is attributed to it on anonymous

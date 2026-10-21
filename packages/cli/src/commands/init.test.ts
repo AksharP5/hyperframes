@@ -77,7 +77,7 @@ describe("hyperframes init flag rename", () => {
       expect(html).toContain('data-composition-id="main"');
       expect(html).toContain("display: flex");
       expect(html).toContain("align-items: center");
-      expect(html).toContain("font-family: Inter");
+      expect(html).toContain("font-family: var(--font-display)");
       expect(html).toContain("tl.seek(0)");
       expect(html).not.toMatch(/transform:\s*translate\(-50%/);
       expect(html).toMatch(/#root\s*\{[^}]*width:\s*100%/);
@@ -108,7 +108,7 @@ describe("hyperframes init flag rename", () => {
       const res = runInit([target, "--agent"]);
       expect(res.status).toBe(0);
       const html = readFileSync(join(target, "index.html"), "utf-8");
-      expect(html).toContain("font-family: Inter");
+      expect(html).toContain("font-family: var(--font-display)");
       expect(html).toContain("tl.seek(0)");
       expectScaffoldedScripts(target);
     } finally {

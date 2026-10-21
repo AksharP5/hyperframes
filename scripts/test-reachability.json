@@ -3,9 +3,7 @@
     "scripts/check-media-use-copy-parity.test.mjs": [
       "skills/media-use/scripts/lib/**",
       "packages/cli/src/media-use/lib/**",
-      "scripts/generate-skill-module-copies.mjs",
-      "skills/hyperframes/scripts/lib/frame-packets-core.mjs",
-      "skills/media-use/audio/scripts/lib/bgm-volume.mjs"
+      "scripts/generate-skill-module-copies.mjs"
     ],
     "scripts/check-test-reachability.test.mjs": [
       ".github/workflows/ci.yml",
@@ -24,18 +22,6 @@
       "packages/producer/**"
     ],
     "scripts/generate-catalog-payloads.test.ts": ["registry/**", "scripts/**"],
-    "skills/product-launch-video/scripts/build-frame-subsets.test.mjs": [
-      "scripts/generate-captured-font-copies.mjs",
-      "skills/product-launch-video/scripts/build-frame.mjs",
-      "skills/product-launch-video/scripts/captions.mjs",
-      "skills/product-launch-video/scripts/lib/captured-fonts.mjs",
-      "skills/faceless-explainer/scripts/build-frame.mjs",
-      "skills/faceless-explainer/scripts/captions.mjs",
-      "skills/faceless-explainer/scripts/lib/captured-fonts.mjs",
-      "skills/pr-to-video/scripts/build-frame.mjs",
-      "skills/pr-to-video/scripts/captions.mjs",
-      "skills/pr-to-video/scripts/lib/captured-fonts.mjs"
-    ],
     "scripts/check-skill-import-boundaries.test.mjs": ["skills/**"]
   },
   "runners": [

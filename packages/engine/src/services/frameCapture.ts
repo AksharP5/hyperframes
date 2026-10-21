@@ -2189,8 +2189,8 @@ export function buildLiveMapWarning(libraries: readonly string[]): CaptureWarnin
       `Live map viewport(s) detected in the composition (${libraries.join(", ")}). ` +
       `Map tiles load over the network at render time, which the deterministic-render ` +
       `contract forbids: frames captured before tiles arrive ship a blank or partial map ` +
-      `with no error. Bake the map to a video first (see the motion-graphics maps skill / ` +
-      `bake-basemap.mjs) and use the baked file as the imagery layer.`,
+      `with no error. Bake the map to a video first (the hyperframes skill's ` +
+      `scripts/bake-basemap.mjs, see references/film.md) and use the baked file as the imagery layer.`,
     details: { sources: [...libraries] },
   };
 }

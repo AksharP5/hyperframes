@@ -197,3 +197,7 @@ chrome/
 # Hosted catalog item files are generated output the docs host serves; the rules above match their folder names
 !docs/public/catalog/items/**/compositions/
 !docs/public/catalog/items/*-ad/
+
+# Python bytecode from running skill scripts
+__pycache__/
+*.pyc

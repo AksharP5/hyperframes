@@ -70,8 +70,8 @@ export {
   getCompositionDuration,
   getCapturePerfSummary,
   // Transient-vs-genuine init failure classifier — re-exported so standalone
-  // skill helpers (animation-map, contrast-report) can reuse the render
-  // pipeline's canonical retry gating instead of re-deriving it.
+  // helpers can reuse the render pipeline's canonical retry gating instead of
+  // re-deriving it.
   isTransientBrowserError,
   prepareCaptureSessionForReuse,
   type CaptureOptions,

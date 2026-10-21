@@ -123,7 +123,7 @@ const ALLOW = new Set([
   ...REACT_DOM_EXPORTS,
 ]);
 
-// Files a skill workflow writes into the user's project at run time; skill docs name them bare.
+// Files a skill workflow or a CLI command (`capture`, `transcribe`) writes into the user's project at run time; skill docs name them bare.
 const PROJECT_FILES = new Set([
   "frame.md",
   "STORYBOARD.md",
@@ -135,6 +135,15 @@ const PROJECT_FILES = new Set([
   "_role.md",
   "cinematic.json",
   "safe-zones.json",
+  "BLOCKED.md",
+  "REVIEW.md",
+  "STORYLINES.md",
+  "assets/transcript.json",
+  "asset-descriptions.md",
+  "extracted/page.html",
+  "extracted/visible-text.txt",
+  "extracted/tokens.json",
+  "extracted/design-styles.json",
 ]);
 
 // A URL, an absolute path, a `<sha>:<path>`, build output or a project file: none resolve in the tree.

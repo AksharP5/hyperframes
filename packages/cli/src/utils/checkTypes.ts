@@ -185,6 +185,33 @@ export interface OffPivotFrame {
   samples: OffPivotRotationSample[];
 }
 
+export interface CraftTextPart {
+  key: number;
+  /** Key of its reading block: the nearest block-level ancestor-or-self, so a split headline is one line. */
+  block: number;
+  selector: string;
+  blockSelector: string;
+  sourceFile: string;
+  text: string;
+  opacity: number;
+  fontPx: number;
+  rect: { left: number; top: number; width: number; height: number };
+  captions: boolean;
+}
+
+export interface CraftFrame {
+  time: number;
+  parts: CraftTextPart[];
+  /** A data-hold element is on screen: stillness here is deliberate. */
+  held: boolean;
+  painted: boolean;
+  signature: string;
+}
+
+export interface CraftFilm {
+  soundSources: number;
+}
+
 export type MotionSpecResolution =
   | { kind: "none" }
   | { kind: "valid"; path: string; spec: MotionSpec }
@@ -239,6 +266,9 @@ export interface CheckAuditDriver {
     time: number,
     snapshotAnnotations?: CheckAnnotationBox[],
   ): Promise<ContrastCapture>;
+  /** Craft section: text, stillness and paint at the current seek. A driver without it skips the section. */
+  collectCraftFrame?(time: number): Promise<CraftFrame>;
+  collectCraftFilm?(): Promise<CraftFilm>;
 }
 
 export interface CheckScreenshot {
@@ -265,9 +295,28 @@ export interface CheckBrowserResult {
   contrastFindings: CheckContrastFinding[];
   contrastChecked: number;
   contrastPassed: number;
+  craft: CraftResult;
   screenshots: CheckScreenshot[];
   timings: CheckTimings;
   skipped: boolean;
+}
+
+/** Taste warnings measured on the dense grid: never errors, so they gate only under --strict. */
+export interface CraftFinding extends CheckFinding {
+  words?: number;
+  seconds?: number;
+  floorSeconds?: number;
+  fontPx?: number;
+  floorPx?: number;
+  until?: number;
+  elements?: { selector: string; text: string; fontPx: number; time: number; seconds: number }[];
+}
+
+export interface CraftResult {
+  enabled: boolean;
+  step: number;
+  samples: number;
+  findings: CraftFinding[];
 }
 
 /** The seek-grid audit loop, injected into checkBrowser so it never imports checkPipeline back. */
@@ -314,6 +363,7 @@ export interface CheckReport {
     checked: number;
     passed: number;
   };
+  craft: CheckSection<CraftFinding> & { enabled: boolean; step: number; samples: number };
   hdr: { autoPromotion: HdrAutoPromotion | null; inspection: "available" | "unavailable" };
   snapshots: { enabled: boolean; files: string[]; times: number[]; findingFiles: string[] };
 }

@@ -184,7 +184,7 @@ export default defineCommand({
     skill: {
       type: "string",
       description:
-        "Authoring workflow skill that initiated this render (e.g. product-launch-video). " +
+        "Authoring skill that initiated this render (e.g. hyperframes). " +
         "Recorded on anonymous render telemetry for per-skill usage breakdowns; ignored unless it is a slug.",
     },
     format: {
@@ -1941,7 +1941,7 @@ function readOutputFootprint(outputPath: string): { fileSize: string; isDirector
   }
 }
 
-/** A render points to the desktop app; a batch row does not. Drafts do too: music-to-video delivers one. */
+/** A render points to the desktop app; a batch row does not. Drafts do too. */
 export function wantsDesktopHint(options: Pick<RenderOptions, "desktopHint">): boolean {
   return options.desktopHint !== false;
 }

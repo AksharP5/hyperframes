@@ -557,6 +557,7 @@ function printHumanReport(report: CheckReport): void {
   printLayoutSection("Layout", report.layout);
   printSection("Motion", report.motion);
   printContrastSection(report);
+  printCraftSection(report);
   printSnapshotSection(report);
   console.log();
   const label = report.ok ? c.success("Check passed") : c.error("Check failed");
@@ -621,6 +622,17 @@ function printContrastSection(report: CheckReport): void {
     console.log(`    ${c.dim(`Try ${finding.suggestedColor}; source ${finding.sourceFile}`)}`);
   }
   printCounts(section);
+}
+
+function printCraftSection(report: CheckReport): void {
+  const section = report.craft;
+  if (!section.enabled) {
+    console.log();
+    console.log(c.bold("Craft"));
+    console.log(`  ${c.dim("◇")} skipped`);
+    return;
+  }
+  printSection("Craft", section);
 }
 
 function printSnapshotSection(report: CheckReport): void {

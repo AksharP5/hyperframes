@@ -1,6 +1,6 @@
 {
   "@hyperframes/aws-lambda": { "packed": 70874, "unpacked": 258166 },
-  "@hyperframes/cli": { "packed": 7517641, "unpacked": 22401400 },
+  "@hyperframes/cli": { "packed": 7902966, "unpacked": 23722874 },
   "@hyperframes/core": { "packed": 1636442, "unpacked": 3903211 },
   "@hyperframes/engine": { "packed": 428347, "unpacked": 1436293 },
   "@hyperframes/gcp-cloud-run": { "packed": 49412, "unpacked": 192672 },

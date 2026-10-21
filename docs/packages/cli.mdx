@@ -121,8 +121,9 @@ that off.
 
 `--tailwind` injects the pinned Tailwind v4 browser runtime and exposes a
 `window.__tailwindReady` promise that renders wait on before capturing frame 0.
-Use the `/hyperframes-core` skill when editing these projects, so agents follow
-v4 CSS-first patterns instead of v3 `tailwind.config.js` patterns. The browser
+The `/hyperframes-cli` skill's `references/init-and-scaffold.md` (Tailwind)
+covers editing these projects, so agents follow v4 CSS-first patterns instead
+of v3 `tailwind.config.js` patterns. The browser
 runtime is meant for scaffolded projects and quick iteration — for offline or
 locked-down production renders, compile Tailwind to CSS and link the stylesheet.
 
@@ -271,8 +272,7 @@ You get `AGENTS.md`, `CLAUDE.md`, `meta.json`, scroll screenshots, extracted
 HTML and CSS, visible text, design tokens, font files, images, SVGs, animation
 metadata, and contact sheets — plus whatever Lottie, video, and WebGL context
 the page exposed. It is raw material for an agent, not a finished composition;
-the `/product-launch-video` workflow uses it when a real product has to appear
-on screen. Dynamic sites, protected pages, and unusual media loaders produce
+the `/hyperframes` skill uses it when a real product has to appear on screen. Dynamic sites, protected pages, and unusual media loaders produce
 partial results, so read `dropped`, the warnings, and the contact sheets before
 you build.
 
@@ -838,7 +838,7 @@ did, in one command and one browser session.
 
 ```bash
 npx hyperframes check [dir]
-npx hyperframes check [dir] --json         # {ok, browserSkipped, scope, lint, runtime, layout, motion, contrast, hdr, snapshots}
+npx hyperframes check [dir] --json         # {ok, browserSkipped, scope, lint, runtime, layout, motion, contrast, craft, hdr, snapshots}
 npx hyperframes check [dir] --snapshots
 npx hyperframes check [dir] --at 1.5,4,7.25
 npx hyperframes check [dir] --strict       # warnings fail too
@@ -848,7 +848,8 @@ npx hyperframes check [dir] --strict       # warnings fail too
 Then it loads the bundled composition once and sweeps a single seek grid,
 running every audit at every sample: runtime console errors and failed requests,
 layout defects (overflow, clipping, held overlaps, occlusion, coordinate-frame
-drift), `*.motion.json` assertions, and WCAG AA contrast.
+drift), `*.motion.json` assertions, WCAG AA contrast, and craft warnings
+(see [Craft warnings](#craft-warnings)).
 
 When the browser never ran (lint errors, a linter crash, or a browser launch
 failure), `browserSkipped` is `true` and the `layout`, `motion` and `contrast`
@@ -867,7 +868,7 @@ cover every finding from the full check.
 | `--at`                                       | Explicit timestamps in seconds, comma-separated                                                                             |
 | `--at-transitions`                           | Also sample every tween start and end, to catch transient overlaps at transition seams                                       |
 | `--max-transition-samples`                   | Cap the transition-derived samples. When it truncates, the omitted count is reported. Default: unlimited.                    |
-| `--range <start,end>`                        | Sample only this interval, in global seconds. Lint stays project-wide; whole-timeline motion and `sweep_static` are skipped. |
+| `--range <start,end>`                        | Sample only this interval, in global seconds. Lint stays project-wide; whole-timeline motion, `sweep_static` and craft warnings are skipped. |
 | `--components <selectors>`                   | Report only findings that involve these elements or their descendants. Counts, `ok` and the exit code still cover all.      |
 | `--max-issues`                               | Findings to print or return after static collapse (default 80)                                                              |
 | `--collapse-static` / `--no-collapse-static` | Fold a repeated static finding into one row (default: on)                                                                    |
@@ -916,6 +917,28 @@ meant to be still can declare `data-no-timeline` to skip the guard.
 
 {/* VISUAL: a `check --snapshots` overview frame beside one finding crop, with the labelled finding box visible on both */}
 
+#### Craft warnings
+
+The `craft` section reports what a viewer would notice over time and a single
+frame cannot show. Every craft finding is a warning, even under `--strict`: a
+film may break one on purpose. Its message names the fix and the skill reference to read.
+They are measured on an 8 fps sweep of the whole film, with each short line's
+edges re-measured to about 0.01 s, and skipped for a `--range` check.
+
+| Code                | Warns when                                                                                                                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `line_unread`       | A reading-size line (30 px or taller at 1080) is on screen for less than its floor: 0.4 s for one or two words, otherwise three quarters of 0.5 s + 0.3 s a word. The film's last line needs 2 s.          |
+| `dead_stretch`      | Nothing on screen changes for more than 3 s, by the same classifier `keepsMoving` uses.                                                                                                                    |
+| `text_below_floor`  | Text under 2.6% of the frame's short side (28 px on 1080) stays on screen 0.5 s or more. One finding per file lists every such element.                                                                    |
+| `first_frame_empty` | Frame 0 paints nothing but the background: no text, image, video, canvas or SVG. The first frame is the thumbnail on social players.                                                                      |
+| `film_silent`       | A film longer than 15 s has no unmuted `<audio>` and no `<video>` with sound.                                                                                                                             |
+
+Captions-track text (`data-track-kind="captions"`) and `data-layout-ignore`
+text are exempt from the text rules. `dead_stretch` never counts the film's
+last 3 s (a held end card) or time when an element marked `data-hold` is on
+screen, and it stays quiet when `sweep_static` already reports the sweep or a
+whole-composition `keepsMoving` assertion sets its own limit.
+
 #### Mark intentional layout choices
 
 When the audit is wrong because the layout is deliberate, say so in the HTML and
@@ -957,7 +980,7 @@ HTML. Without a sidecar, nothing changes.
 | `appearsBy(selector, bySec)`   | A reveal the seek lands past — the element must reach opacity ≥ 0.5 by `bySec` (`motion_appears_late`)          |
 | `before(a, b)`                 | Broken stagger order — `a` must first appear strictly before `b` (`motion_out_of_order`)                        |
 | `staysInFrame(selector)`       | Off-frame drift — once visible, the box never leaves the canvas (`motion_off_frame`)                            |
-| `keepsMoving(withinSelector?)` | A frozen shot — no fully static window longer than `maxStaticSec`, default 2s (`motion_frozen`)                 |
+| `keepsMoving(withinSelector?)` | A frozen shot — no fully static window longer than `maxStaticSec`, default 2s (`motion_frozen`); the film's last 3 s never count |
 
 `keepsMoving` uses the same motion classifier as the frozen-sweep guard: box
 geometry, opacity, text and generated content, form-control state, painted CSS
@@ -989,6 +1012,7 @@ npx hyperframes snapshot my-project --at 2.9,10.4,18.7
 npx hyperframes snapshot my-project --frames 10
 npx hyperframes snapshot my-project --zoom '#headline'
 npx hyperframes snapshot my-project --at 1.5,4.3 --against ref.mp4
+npx hyperframes snapshot my-project --review --json
 ```
 
 ```
@@ -1013,13 +1037,15 @@ npx hyperframes snapshot my-project --at 1.5,4.3 --against ref.mp4
 | `--against`             | A reference video, such as footage you are rebuilding. For every captured time also saves its frame-exact frame (`ref-XX-…png`) and a labelled render / reference pair (`pair-XX-…jpg`). |
 | `--zoom-scale`          | Pixel density for `--zoom` crops (default 3)                                                                                                                        |
 | `--angle`               | Orthogonal 3D camera for depth and occlusion checks: `front`, `iso`, `top`, `side`, or `yaw,pitch` in degrees. Tilts the whole stage, so you get real pixels.        |
+| `--review`              | Capture the frames that show the film over time instead of evenly spaced ones: `review-beats.jpg` (each scene at its start + 0.3 s and at its middle, and each timed `data-beat="name"` element at its start + 0.3 s), `review-seam-NN.jpg` (−0.2 to +0.2 s around every cut) and `review-phone.jpg` (the beat frames 360 px wide). Scenes are the top-level timed clips and sub-composition hosts; `--composition` scopes to one. |
+| `--json`                | Print one envelope: `frames` with path, time and (under `--review`) role and label, the contact sheets, and under `--review` the scenes, beats and seams behind them. Progress goes to stderr. |
 | `--describe`            | Gemini vision analysis of each frame. Runs by default when `GEMINI_API_KEY` is set. Pass a question to override the prompt, or `--describe false` to opt out.        |
 | `--timeout`             | Ms to wait for the runtime (default 5000)                                                                                                                           |
 | `--browser-gpu`, `--proxy` | Same meaning as on [`check`](#check)                                                                                                                             |
 
 Each snapshot is a 1920×1080 PNG taken by bundling the project, serving it,
-launching headless Chrome, and seeking. Useful for visual verification during
-the [product launch video](/guides/product-launch-video) workflow.
+launching headless Chrome, and seeking. Useful for visual verification while
+an agent builds, for example a [product or website video](/guides/product-launch-video).
 
 ### `keyframes`
 
@@ -1651,13 +1677,13 @@ npx hyperframes skills check --json
 # Refresh the core set and everything already installed
 npx hyperframes skills update
 
-# Refresh, and also install one workflow on demand
-npx hyperframes skills update pr-to-video
+# Refresh, and also install one skill on demand
+npx hyperframes skills update slideshow
 ```
 
 Bare `skills` installs everything. `skills update` keeps a deliberate partial
 installation partial: it refreshes the core set plus whatever is already
-installed, and never expands beyond that unless you name a workflow. Naming one
+installed, and never expands beyond that unless you name a skill. Naming one
 adds it. `check` and `update` both accept `--json`, plus `--dir` and `--source`
 to point removed-detection at a different skills directory or source — those two
 scope the prune, not the install.

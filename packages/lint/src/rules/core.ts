@@ -943,7 +943,7 @@ export const coreRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = [
     for (const script of scripts) {
       const withoutComments = stripJsComments(blankInlinedGsapLibrary(script.content));
       // Strings are content, not code. A composition that DISPLAYS source (the
-      // code-snippet blocks, /pr-to-video) carries `Math.random()` inside a string
+      // code-snippet blocks) carries `Math.random()` inside a string
       // literal it never executes, and reported itself non-deterministic with no
       // way to clear the error while still rendering the snippet.
       const executable = stripStringLiterals(withoutComments);

@@ -2406,6 +2406,202 @@
     return contentOverlapIssues(root, time);
   };
 
+  // Craft sampling for check's craft section (utils/craftAudit.ts judges it in Node). One call per seek:
+  // every painted text element with its reading block, rendered font size and opacity; whether a data-hold
+  // element is on screen; whether anything besides the background paints; and the keepsMoving liveness
+  // signature from motion-signature.browser.js, so a still stretch here is the stillness motion_frozen sees.
+  const craftKeys = new WeakMap();
+  const craftAnchors = new WeakMap();
+  let craftNextKey = 0;
+  const INLINE_LEVEL_DISPLAY = /^(inline|inline-block|inline-flex|inline-grid|contents|ruby)$/;
+  const CRAFT_PAINTED_OPACITY = 0.2;
+  const PAINT_OPTIONS = { opacityProperty: true, visibilityProperty: true };
+
+  function craftKey(element) {
+    if (!craftKeys.has(element)) craftKeys.set(element, ++craftNextKey);
+    return craftKeys.get(element);
+  }
+
+  // Sampled at every seek of a dense grid, so the selector walk runs once per element.
+  function craftAnchor(element) {
+    if (!craftAnchors.has(element)) {
+      const source = element
+        .closest("[data-composition-file]")
+        ?.getAttribute("data-composition-file");
+      craftAnchors.set(element, {
+        selector: uniqueSelectorFor(element),
+        sourceFile: source || "index.html",
+      });
+    }
+    return craftAnchors.get(element);
+  }
+
+  // Mirrors trackKindOf in @hyperframes/parsers (data-track-kind, legacy caption hosts) plus the caption
+  // stages __hyperframesGeometryCandidates already skips.
+  function isCaptionsText(element) {
+    for (let current = element; current; current = current.parentElement) {
+      if ((current.getAttribute("data-track-kind") || "").trim().toLowerCase() === "captions") {
+        return true;
+      }
+      const host =
+        current.hasAttribute("data-composition-id") || current.hasAttribute("data-composition-src");
+      if (!host) continue;
+      if (current.getAttribute("data-composition-id") === "captions") return true;
+      if (/(?:^|\s)caption[-_]/.test(current.getAttribute("class") || "")) return true;
+    }
+    return !!element.closest(".caption-layer, #caption-stage");
+  }
+
+  // The line a reader takes in at once: the nearest block-level ancestor-or-self, so a headline split into
+  // inline word or character spans is one line, while flex items and positioned spans stay their own.
+  function readingBlock(element, root) {
+    let current = element;
+    while (
+      current !== root &&
+      current.parentElement &&
+      !current.hasAttribute("data-composition-id") &&
+      INLINE_LEVEL_DISPLAY.test(getComputedStyle(current).display)
+    ) {
+      current = current.parentElement;
+    }
+    return current;
+  }
+
+  function scaleProperty(style) {
+    const parts = (style.scale || "none")
+      .split(/\s+/)
+      .map((part) => Number.parseFloat(part))
+      .filter(Number.isFinite);
+    if (parts.length === 0) return 1;
+    return Math.sqrt(Math.abs(parts[0] * (parts.length > 1 ? parts[1] : parts[0])));
+  }
+
+  // A transform scales glyphs without changing the computed font-size: multiply in every ancestor's area
+  // scale (rotation-invariant), or the SVG screen matrix for SVG text.
+  function renderedFontPx(element, style) {
+    const font = parsePx(style.fontSize);
+    if (typeof element.getScreenCTM === "function" && element.ownerSVGElement) {
+      const ctm = element.getScreenCTM();
+      return ctm ? font * Math.sqrt(Math.abs(ctm.a * ctm.d - ctm.b * ctm.c)) : font;
+    }
+    let scale = 1;
+    for (let current = element; current; current = current.parentElement) {
+      const currentStyle = current === element ? style : getComputedStyle(current);
+      if (currentStyle.transform && currentStyle.transform !== "none") {
+        try {
+          const matrix = new DOMMatrixReadOnly(currentStyle.transform);
+          scale *= Math.sqrt(Math.abs(matrix.a * matrix.d - matrix.b * matrix.c));
+        } catch {
+          // An unparsable transform leaves the size as computed.
+        }
+      }
+      scale *= scaleProperty(currentStyle);
+    }
+    return font * scale;
+  }
+
+  function intersectsRect(rect, frame) {
+    return (
+      rect.right > frame.left &&
+      rect.left < frame.right &&
+      rect.bottom > frame.top &&
+      rect.top < frame.bottom
+    );
+  }
+
+  function craftTextParts(root, rootRect) {
+    const candidates = [];
+    for (const element of Array.from(root.querySelectorAll("*"))) {
+      if (!hasOwnTextCandidate(element, true) || !isVisibleElement(element, 0.05, false)) continue;
+      const rect = unionRects(visibleTextClientRects(element, true));
+      if (!rect || !intersectsRect(rect, rootRect)) continue;
+      candidates.push({ element, rect });
+    }
+    const clipped = candidates.filter((candidate) => hasClipPath(candidate.element));
+    const clippedAway = new Set();
+    if (clipped.length > 0) {
+      const restoreHits = restoreHitTesting(root);
+      try {
+        for (const candidate of clipped) {
+          if (isClippedAway(candidate.element)) clippedAway.add(candidate.element);
+        }
+      } finally {
+        restoreHits();
+      }
+    }
+    return candidates
+      .filter((candidate) => !clippedAway.has(candidate.element))
+      .map(({ element, rect }) => {
+        const block = readingBlock(element, root);
+        return {
+          key: craftKey(element),
+          block: craftKey(block),
+          ...craftAnchor(element),
+          blockSelector: craftAnchor(block).selector,
+          text: textContentFor(element, true),
+          opacity: round(opacityChain(element)),
+          fontPx: round(renderedFontPx(element, getComputedStyle(element))),
+          rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+          captions: isCaptionsText(element),
+        };
+      });
+  }
+
+  function isPaintedBox(element, rootRect) {
+    if (typeof element.checkVisibility === "function" && !element.checkVisibility(PAINT_OPTIONS)) {
+      return false;
+    }
+    const style = getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    if (opacityChain(element) < CRAFT_PAINTED_OPACITY) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width >= 4 && rect.height >= 4 && intersectsRect(rect, rootRect);
+  }
+
+  function paintsContent(root, rootRect, parts) {
+    if (parts.some((part) => part.opacity >= CRAFT_PAINTED_OPACITY)) return true;
+    for (const element of Array.from(root.querySelectorAll("img, video, canvas, svg"))) {
+      if (element.parentElement?.closest("svg")) continue;
+      if (isPaintedBox(element, rootRect)) return true;
+    }
+    return false;
+  }
+
+  window.__hyperframesCraftSample = function collectCraftSample() {
+    const root =
+      document.querySelector("[data-composition-id][data-width][data-height]") ||
+      document.querySelector("[data-composition-id]") ||
+      document.body;
+    const rootRect = rootRectFor(root);
+    const parts = craftTextParts(root, rootRect);
+    const holds = [root, ...Array.from(root.querySelectorAll("[data-hold]"))].filter((element) =>
+      element.hasAttribute("data-hold"),
+    );
+    const shared = window.__hyperframesMotionSignature;
+    return {
+      parts,
+      held: holds.some((element) => isPaintedBox(element, rootRect)),
+      painted: paintsContent(root, rootRect, parts),
+      signature: shared
+        ? shared.compositionSignature(shared.compositionRoot(), { quantize: true })
+        : "",
+    };
+  };
+
+  // Sound the render mixes: any unmuted <audio>, and a <video> the timing compiler marks audible
+  // (data-has-audio="true", or no data-has-audio on an unmuted video).
+  window.__hyperframesCraftFilm = function collectCraftFilm() {
+    let soundSources = 0;
+    for (const media of Array.from(document.querySelectorAll("audio, video"))) {
+      if (media.hasAttribute("muted")) continue;
+      const declared = media.getAttribute("data-has-audio");
+      const audible =
+        media.tagName.toUpperCase() === "AUDIO" || declared === null || declared === "true";
+      if (audible) soundSources += 1;
+    }
+    return { soundSources };
+  };
+
   // The frozen-sweep fingerprint (window.__hyperframesLayoutGeometry, #U10 in
   // checkPipeline.ts) lives in motion-signature.browser.js, the single owner
   // of "what counts as motion" shared with motion-sample.browser.js's

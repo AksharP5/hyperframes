@@ -1,15 +1,25 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import puppeteer, { type Browser } from "puppeteer-core";
+import type { CraftFilm, CraftFrame } from "../utils/checkTypes.js";
 
 declare global {
   interface Window {
     __hyperframesLayoutAudit(options: { time: number; tolerance: number }): { code: string }[];
+    __hyperframesCraftSample(): Omit<CraftFrame, "time">;
+    __hyperframesCraftFilm(): CraftFilm;
   }
 }
 
 const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
 const script = readFileSync(new URL("./layout-audit.browser.js", import.meta.url), "utf8");
+const signatureScript = readFileSync(
+  new URL("./motion-signature.browser.js", import.meta.url),
+  "utf8",
+);
+
+const stage = (body: string) =>
+  `<div data-composition-id="main" data-width="1920" data-height="1080" style="position:relative;width:1920px;height:1080px;background:#0b0d12;color:#fff;font-family:Arial">${body}</div>`;
 
 const heading = (top: number, text: string, style = "") =>
   `<h1 style="position:absolute;left:100px;top:${top}px;margin:0;font:120px/1 Arial;${style}">${text}</h1>`;
@@ -237,5 +247,75 @@ describe.runIf(executablePath)("layout audit in Chromium", () => {
     const codes = await auditCodes(`
         <div data-composition-id="main" data-width="1920" data-height="1080" style="position:relative;width:1920px;height:1080px">${html}</div>`);
     expect(codes.includes("content_overlap")).toBe(overlap);
+  });
+
+  describe("craft sampling", () => {
+    async function sample(body: string) {
+      const page = await browser.newPage();
+      try {
+        await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
+        await page.setContent(`<body style="margin:0">${stage(body)}</body>`);
+        await page.addScriptTag({ content: signatureScript });
+        await page.addScriptTag({ content: script });
+        return await page.evaluate(() => ({
+          frame: window.__hyperframesCraftSample(),
+          again: window.__hyperframesCraftSample(),
+          film: window.__hyperframesCraftFilm(),
+        }));
+      } finally {
+        await page.close();
+      }
+    }
+
+    it("reads a headline split into inline word spans as one reading block", async () => {
+      const { frame } = await sample(
+        `<h1 id="title" style="position:absolute;left:100px;top:300px;margin:0;font-size:96px"><span style="display:inline-block">Ship</span> <span style="display:inline-block">it</span> <span style="display:inline-block">faster</span></h1>`,
+      );
+      expect(frame.parts.map((part) => part.text)).toEqual(["Ship", "it", "faster"]);
+      expect(new Set(frame.parts.map((part) => part.block)).size).toBe(1);
+      expect(frame.parts[0]?.blockSelector).toBe("#title");
+    });
+
+    it("flags captions-track text and leaves out data-layout-ignore text", async () => {
+      const { frame } = await sample(
+        `<div data-track-kind="captions" style="position:absolute;bottom:80px;left:0;font-size:40px"><span>caption word</span></div>
+         <div data-layout-ignore style="position:absolute;top:40px;left:40px;font-size:12px">texture</div>
+         <p style="position:absolute;top:500px;left:100px;margin:0;font-size:48px">Reading line</p>`,
+      );
+      expect(frame.parts.map((part) => [part.text, part.captions])).toEqual([
+        ["caption word", true],
+        ["Reading line", false],
+      ]);
+    });
+
+    it("measures the rendered font size through an ancestor scale", async () => {
+      const { frame } = await sample(
+        `<div style="position:absolute;left:100px;top:100px;transform:scale(0.5);transform-origin:0 0"><p style="margin:0;font-size:40px">Scaled label</p></div>`,
+      );
+      expect(frame.parts[0]?.fontPx).toBeCloseTo(20, 0);
+    });
+
+    it("reports an empty frame, a held element and a stable signature", async () => {
+      const empty = await sample(
+        `<h1 style="position:absolute;top:300px;opacity:0;font-size:96px">Not yet</h1><div style="position:absolute;inset:0;background:#111"></div>`,
+      );
+      expect(empty.frame.painted).toBe(false);
+      expect(empty.frame.held).toBe(false);
+      expect(empty.frame.signature).not.toBe("");
+      expect(empty.again.signature).toBe(empty.frame.signature);
+
+      const held = await sample(
+        `<section data-hold style="position:absolute;inset:0"><svg width="200" height="200"><circle cx="100" cy="100" r="80" fill="#7dd3fc"/></svg></section>`,
+      );
+      expect(held.frame.painted).toBe(true);
+      expect(held.frame.held).toBe(true);
+    });
+
+    it("counts the sound sources the render mixes", async () => {
+      const { film } = await sample(
+        `<audio src="music.mp3"></audio><video src="a.mp4"></video><video src="b.mp4" muted></video><video src="c.mp4" data-has-audio="false"></video>`,
+      );
+      expect(film.soundSources).toBe(2);
+    });
   });
 });

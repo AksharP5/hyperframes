@@ -1169,7 +1169,7 @@ describe("findBrowser — cache resolution", () => {
   // Sibling env-var alias for the CLI resolver. The engine layer already
   // honors `PRODUCER_HEADLESS_SHELL_PATH` (see
   // `packages/engine/src/services/browserManager.ts`), and docs
-  // (skills/hyperframes-animation/adapters/typegpu.md,
+  // (skills/hyperframes-registry/references/discovery.md,
   // packages/gcp-cloud-run/Dockerfile, examples/k8s-jobs/Dockerfile.example)
   // all instruct users to set that name. Before this alias, `hyperframes
   // check`/`snapshot`/`compare` — which all route through `openSettledCompositionPage`

@@ -13,6 +13,8 @@ import {
   isCoreSkill,
   presentSkills,
   pruneOrphanedLockEntries,
+  RETIRED_SKILLS,
+  retiredSkillNotice,
   SKILLS_CLI_LOCK_PATHS_VERIFIED_AT,
   type SkillDiff,
   type SkillsCheckResult,
@@ -27,7 +29,7 @@ export const examples: Example[] = [
   ["Check whether installed skills are up to date", "hyperframes skills check"],
   ["Check, machine-readable (for agents / CI)", "hyperframes skills check --json"],
   ["Update the core set + everything already installed", "hyperframes skills update"],
-  ["Also install one workflow (on-demand install)", "hyperframes skills update pr-to-video"],
+  ["Also install one on-demand skill", "hyperframes skills update slideshow"],
 ];
 
 function hasNpx(): boolean {
@@ -299,6 +301,8 @@ export interface UpdateSkillsResult {
   unknown: string[];
   /** True when freshness couldn't be checked (offline) and only presence was verified. */
   presenceOnly: boolean;
+  /** Requested names that are retired: nothing to install, their knowledge lives in the core set. */
+  retired: string[];
 }
 
 /**
@@ -306,8 +310,9 @@ export interface UpdateSkillsResult {
  * the replacement for "anything stale ⇒ re-pull the full skill set". It
  * guarantees a small, explicit set is installed and current:
  *
- *   - the requested names (a workflow being routed to, e.g. `pr-to-video`),
- *   - the core set (entry router + shared domain skills — see skillsManifest),
+ *   - the requested names (an on-demand skill, e.g. `slideshow`; a retired
+ *     name is reported, not installed),
+ *   - the core set (entry skill + shared skills — see skillsManifest),
  *   - with `refreshInstalled`, whatever is already installed (refreshed, so an
  *     update never *expands* a deliberate partial install),
  *   - with `all`, every skill the manifest publishes. The upstream `*` wildcard
@@ -332,7 +337,9 @@ export async function updateSkills(
     cwd?: string;
   } = {},
 ): Promise<UpdateSkillsResult> {
-  const requested = [...new Set(opts.requested ?? [])];
+  const named = [...new Set(opts.requested ?? [])];
+  const retired = named.filter((name) => RETIRED_SKILLS.includes(name));
+  const requested = named.filter((name) => !retired.includes(name));
   const strict = opts.strict ?? false;
 
   let check: SkillsCheckResult | null = null;
@@ -373,7 +380,7 @@ export async function updateSkills(
         ),
       );
     }
-    return updateSkillsOffline(requested, { strict, cwd: opts.cwd });
+    return { ...(await updateSkillsOffline(requested, { strict, cwd: opts.cwd })), retired };
   }
 
   // "removed" entries are lock-attributed leftovers, not manifest skills —
@@ -404,6 +411,7 @@ export async function updateSkills(
     current: targets.filter((s) => s.status === "current").map((s) => s.name),
     unknown,
     presenceOnly: false,
+    retired,
   };
 
   if (toInstall.length > 0) {
@@ -424,10 +432,10 @@ export async function updateSkills(
  * The presence half of the guarantee, after an install claims success: every
  * name must now exist on disk. Catches the "install exited 0 but delivered
  * nothing" failure mode, which would otherwise surface much later as a
- * workflow reading skill files that aren't there.
+ * skill reading files that aren't there.
  *
  * Strictness mirrors the caller's tolerance: a strict run (the `check ||
- * update` CI contract, the router's trigger-time guarantee) throws so the
+ * update` CI contract) throws so the
  * failure is loud; a non-strict run (init) only warns and proceeds, since a
  * skills hiccup must never break scaffolding.
  */
@@ -444,13 +452,13 @@ function verifyInstalled(names: readonly string[], opts: { strict: boolean; cwd?
  * Offline degradation for updateSkills: the manifest is unreachable, so
  * freshness is unknowable. What can still be honored is the PRESENCE half of
  * the guarantee, extended to the pinned FALLBACK_CORE_SKILLS list so the
- * router / preamble promise ("this workflow plus the core set it depends on")
+ * preamble promise ("this skill plus the core set it depends on")
  * doesn't silently shrink to just the named skill on degraded networks —
  * raw.githubusercontent.com blocked while `git clone` works is a real
  * corporate-proxy shape, which is exactly when the blind install below can
  * still succeed.
  *
- *   - Named run (`update <workflow>`): presence-check requested + fallback
+ *   - Named run (`update <name>`): presence-check requested + fallback
  *     core, blind-install whatever is absent (a truly dead network fails the
  *     clone fast, and `strict` decides how loudly). Stale-but-present
  *     proceeds — blocking a build on a network hiccup is worse than running
@@ -464,7 +472,7 @@ function verifyInstalled(names: readonly string[], opts: { strict: boolean; cwd?
 async function updateSkillsOffline(
   requested: readonly string[],
   opts: { strict: boolean; cwd?: string },
-): Promise<UpdateSkillsResult> {
+): Promise<Omit<UpdateSkillsResult, "retired">> {
   if (requested.length === 0 && opts.strict) {
     throw new Error(
       "can't check skills freshness (GitHub manifest unreachable) — refusing to report success. Retry when online.",
@@ -550,7 +558,7 @@ function renderCheck(result: SkillsCheckResult): void {
   printSkillSection(
     result,
     "missing",
-    "Available on demand (installed when their workflow first runs):",
+    "Available on demand (install with `hyperframes skills update <name>`):",
     "◦",
     c.dim,
     (s) => !isCoreSkill(s.name),
@@ -674,6 +682,7 @@ function reportUpdate(
     console.log(JSON.stringify(withMeta(result), null, 2));
     return;
   }
+  for (const name of result.retired) console.log(c.warn(retiredSkillNotice(name)));
   if (result.installed.length > 0) {
     console.log(
       c.success(
@@ -687,9 +696,10 @@ function reportUpdate(
   } else {
     console.log(c.success("Installed skills are already up to date."));
   }
-  // The named skills are the caller's actual question ("is my workflow ready?")
+  // The named skills are the caller's actual question ("is my skill ready?")
   // — answer it explicitly, whatever the install had to do.
-  if (requested.length) console.log(c.success(`◇ Ready: ${requested.join(", ")}`));
+  const ready = requested.filter((name) => !result.retired.includes(name));
+  if (ready.length) console.log(c.success(`◇ Ready: ${ready.join(", ")}`));
 }
 
 /**
@@ -709,7 +719,7 @@ const updateCommand = defineCommand({
   meta: {
     name: "update",
     description:
-      "Update the core set plus every installed HyperFrames skill to the latest, and remove any no longer published. Pass skill names to also install those (how workflow skills install on demand) — without names it never expands a partial install",
+      "Update the core set plus every installed HyperFrames skill to the latest, and remove any no longer published. Pass skill names to also install those (how on-demand skills install) — without names it never expands a partial install",
   },
   // Mirror `check`'s flags: the prune step runs the same removed-detection, so it
   // must respect the same overrides. Without these, `update`'s internal
@@ -732,11 +742,10 @@ const updateCommand = defineCommand({
     const dir = args.dir;
     const source = args.source;
 
-    // Positional skill names (e.g. `hyperframes skills update pr-to-video`) are
+    // Positional skill names (e.g. `hyperframes skills update slideshow`) are
     // the ONLY way update expands an install: each named skill is guaranteed
-    // present and current. This is the router's trigger-time step — the
-    // /hyperframes router runs it after picking a workflow, before reading the
-    // workflow's skill.
+    // present and current. A retired name installs nothing; the run says where
+    // its knowledge went and still refreshes the core set that carries it.
     const { requested, rejected } = requestedNamesFrom(args._ ?? []);
     if (rejected.length) {
       reportUpdateFailure(`Invalid skill name(s): ${rejected.join(", ")}`, args.json === true);
@@ -745,18 +754,17 @@ const updateCommand = defineCommand({
     }
 
     // Exit 0 without installing, pruning or touching the nudge cache: the pinned
-    // install is the one the caller wants, so the router's step keeps working.
+    // install is the one the caller wants, so the skill's step keeps working.
     if (skillsManagedExternally()) {
       reportSkillsManagedExternally(requested, args.json === true);
       return;
     }
 
-    // Targeted, not full-set: refresh the core set (entry router + shared
+    // Targeted, not full-set: refresh the core set (entry skill + shared
     // domain skills) plus whatever is already installed, plus anything named
     // above. Without names a deliberate partial install stays partial
-    // (refreshed, but never expanded) — the end-user workflow skills install
-    // on demand, when their workflow is
-    // triggered. This is where `init` and the stale-skills nudge both lead;
+    // (refreshed, but never expanded) — the on-demand skills install when
+    // named. This is where `init` and the stale-skills nudge both lead;
     // pulling the complete skill set here is exactly what users complained
     // about. Explicit full set: `hyperframes skills` or `npx skills add
     // heygen-com/hyperframes --all`.
@@ -768,8 +776,7 @@ const updateCommand = defineCommand({
     // HyperFrames repo so `update` reliably refreshes the published skills.
     //
     // strict: this is the documented recovery path for the agent/CI contract
-    // `hyperframes skills check || hyperframes skills update`, and the router's
-    // trigger-time guarantee. If the install fails (no npx, `skills add` exits
+    // `hyperframes skills check || hyperframes skills update`. If the install fails (no npx, `skills add` exits
     // non-zero, a named skill still absent afterwards) it must exit non-zero
     // too — otherwise the `||` chain passes while nothing actually changed.
     try {
@@ -782,7 +789,7 @@ const updateCommand = defineCommand({
     }
 
     // `skills add` never deletes, so a skill renamed or dropped upstream
-    // (e.g. graphic-overlays → talking-head-recut) would linger forever. Prune
+    // (e.g. a retired workflow skill) would linger forever. Prune
     // skills the lock attributes to our source that the manifest no longer
     // ships, so `check || update` fully reconciles the install to the manifest.
     //

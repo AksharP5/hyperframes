@@ -693,7 +693,7 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
     for (const tag of tags) {
       if (isInsideInertTemplate(tag, tags)) continue;
       // A `data-composition-src` element is a MOUNT of a sub-composition, not a
-      // composition root, and sub-compositions.md documents mounting one source
+      // composition root, and the hyperframes skill's format.md documents mounting one source
       // repeatedly with different `data-variable-values` to get per-instance
       // variations. Those mounts legitimately share an id: the runtime rewrites
       // repeated ones to `id__hf1`, `id__hf2` so they coexist. Counting them

@@ -80,8 +80,8 @@ vi.mock("../telemetry/events.js", () => ({
 // A realistic check result for the targeted paths (`update`, with or without names):
 // one core skill outdated, one core missing, one on-demand workflow installed
 // and current, one on-demand workflow not installed. `update` must refresh the
-// two stale core skills, leave `pr-to-video` alone (on demand), and keep
-// `embedded-captions` (installed + current) untouched.
+// two stale core skills, leave `slideshow` alone (on demand), and keep
+// `figma` (installed + current) untouched.
 const DEFAULT_CHECK = {
   location: "/home/user/.claude/skills",
   agent: "claude-code",
@@ -90,9 +90,9 @@ const DEFAULT_CHECK = {
   summary: { current: 1, outdated: 1, missing: 2, coreMissing: 1, removed: 0 },
   skills: [
     { name: "hyperframes", status: "outdated" },
-    { name: "hyperframes-core", status: "missing" },
-    { name: "embedded-captions", status: "current" },
-    { name: "pr-to-video", status: "missing" },
+    { name: "hyperframes-registry", status: "missing" },
+    { name: "figma", status: "current" },
+    { name: "slideshow", status: "missing" },
   ],
   lockMissing: false,
 };
@@ -242,9 +242,9 @@ describe("hyperframes skills", () => {
         "--skill",
         "hyperframes",
         "--skill",
-        "hyperframes-core",
+        "hyperframes-registry",
         "--skill",
-        "pr-to-video",
+        "slideshow",
         ...GLOBAL_ARGS_TAIL,
       ],
     ],
@@ -259,9 +259,9 @@ describe("hyperframes skills", () => {
         "--skill",
         "hyperframes",
         "--skill",
-        "hyperframes-core",
+        "hyperframes-registry",
         "--skill",
-        "pr-to-video",
+        "slideshow",
         ...GLOBAL_ARGS_TAIL,
       ],
     ],
@@ -280,9 +280,9 @@ describe("hyperframes skills", () => {
         "--skill",
         "hyperframes",
         "--skill",
-        "hyperframes-core",
+        "hyperframes-registry",
         "--skill",
-        "pr-to-video",
+        "slideshow",
         ...GLOBAL_ARGS_TAIL,
       ],
     ],
@@ -322,12 +322,12 @@ describe("hyperframes skills", () => {
     expect(args).toContain("--copy");
     expect(args).toContain("--full-depth");
     // targeted per-name selection: the stale core skills only
-    expect(skillFlagValues(args).sort()).toEqual(["hyperframes", "hyperframes-core"]);
+    expect(skillFlagValues(args).sort()).toEqual(["hyperframes", "hyperframes-registry"]);
     // never the full-set wildcard, and never a missing on-demand workflow
     expect(skillFlagValues(args)).not.toContain("*");
-    expect(skillFlagValues(args)).not.toContain("pr-to-video");
+    expect(skillFlagValues(args)).not.toContain("slideshow");
     // installed-and-current skills are not re-fetched
-    expect(skillFlagValues(args)).not.toContain("embedded-captions");
+    expect(skillFlagValues(args)).not.toContain("figma");
     // never the `--all` (= `--agent '*'`) spray
     expect(args).not.toContain("--all");
     // `--agent` must be followed by a concrete key, never the `'*'` wildcard
@@ -342,15 +342,15 @@ describe("hyperframes skills", () => {
       ...DEFAULT_CHECK,
       skills: [
         { name: "hyperframes", status: "current" },
-        { name: "embedded-captions", status: "outdated" }, // installed workflow → refresh
-        { name: "pr-to-video", status: "missing" }, // not installed → leave for on-demand
+        { name: "figma", status: "outdated" }, // installed workflow → refresh
+        { name: "slideshow", status: "missing" }, // not installed → leave for on-demand
       ],
     } as never);
 
     await runSkillsUpdate();
 
     const args = state.spawnCalls[0]?.args ?? [];
-    expect(skillFlagValues(args)).toEqual(["embedded-captions"]);
+    expect(skillFlagValues(args)).toEqual(["figma"]);
   });
 
   it("skills update is a no-install no-op when everything is current", async () => {
@@ -361,7 +361,7 @@ describe("hyperframes skills", () => {
       updateAvailable: false,
       skills: [
         { name: "hyperframes", status: "current" },
-        { name: "pr-to-video", status: "missing" }, // on demand — not an update
+        { name: "slideshow", status: "missing" }, // on demand — not an update
       ],
     } as never);
 
@@ -393,6 +393,25 @@ describe("hyperframes skills", () => {
     expect(removeCall!.args).toContain("graphic-overlays");
     expect(removeCall!.args).toContain("--yes");
     expect(removeCall!.args).toContain("-g"); // attributed from the global lock → remove globally
+    expect(await commandExitCode()).toBe(0);
+  });
+
+  it("skills update removes every retired skill check reports, in one call", async () => {
+    setPlatform("linux");
+    const { checkSkills, RETIRED_SKILLS } = await import("../utils/skillsManifest.js");
+    vi.mocked(checkSkills)
+      .mockResolvedValueOnce(DEFAULT_CHECK as never)
+      .mockResolvedValueOnce({
+        scope: "global",
+        skills: RETIRED_SKILLS.map((name) => ({ name, status: "removed" })),
+      } as never);
+
+    await runSkillsUpdate();
+
+    const removeCalls = state.spawnCalls.filter((s) => s.args.includes("remove"));
+    expect(removeCalls).toHaveLength(1);
+    for (const name of RETIRED_SKILLS) expect(removeCalls[0]!.args).toContain(name);
+    expect(removeCalls[0]!.args).toContain("-g");
     expect(await commandExitCode()).toBe(0);
   });
 
@@ -813,17 +832,17 @@ describe("hyperframes skills update <names>", () => {
 
   it("installs the requested workflow plus the stale core set — nothing else", async () => {
     setPlatform("linux");
-    await runSkillsUpdateWith(["pr-to-video"]);
+    await runSkillsUpdateWith(["slideshow"]);
 
     expect(await commandExitCode()).toBe(0);
     const args = state.spawnCalls[0]?.args ?? [];
     expect(args).toContain("add");
-    // requested workflow (missing) + the stale core skills; embedded-captions
+    // requested workflow (missing) + the stale core skills; figma
     // (installed + current) and the full-set wildcard must not appear.
     expect(skillFlagValues(args).sort()).toEqual([
       "hyperframes",
-      "hyperframes-core",
-      "pr-to-video",
+      "hyperframes-registry",
+      "slideshow",
     ]);
   });
 
@@ -835,15 +854,49 @@ describe("hyperframes skills update <names>", () => {
       updateAvailable: false,
       skills: [
         { name: "hyperframes", status: "current" },
-        { name: "hyperframes-core", status: "current" },
-        { name: "pr-to-video", status: "current" },
+        { name: "hyperframes-registry", status: "current" },
+        { name: "slideshow", status: "current" },
       ],
     } as never);
 
-    await runSkillsUpdateWith(["pr-to-video"]);
+    await runSkillsUpdateWith(["slideshow"]);
 
     expect(state.spawnCalls).toHaveLength(0);
     expect(await commandExitCode()).toBe(0);
+  });
+
+  it("a retired workflow name installs nothing, says where its knowledge went, and succeeds", async () => {
+    setPlatform("linux");
+    const logSpy = vi.spyOn(console, "log");
+    await runSkillsUpdateWith(["product-launch-video"]);
+
+    expect(await commandExitCode()).toBe(0);
+    // The core set that now carries the knowledge is still refreshed; the
+    // retired name never reaches `skills add`.
+    const args = state.spawnCalls[0]?.args ?? [];
+    expect(skillFlagValues(args).sort()).toEqual(["hyperframes", "hyperframes-registry"]);
+    const printed = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(printed).toMatch(/product-launch-video was retired/);
+    expect(printed).toMatch(/\/hyperframes skill and its references/);
+    expect(printed).not.toMatch(/Ready: product-launch-video/);
+  });
+
+  it("--json reports a retired name under retired, not unknown", async () => {
+    setPlatform("linux");
+    const logSpy = vi.spyOn(console, "log");
+    await runSkillsUpdateWith(["music-to-video", "slideshow"], { json: true });
+
+    expect(await commandExitCode()).toBe(0);
+    const last = String(logSpy.mock.calls.at(-1)?.[0] ?? "");
+    const parsed = JSON.parse(last) as {
+      retired?: string[];
+      unknown?: string[];
+      installed?: string[];
+    };
+    expect(parsed.retired).toEqual(["music-to-video"]);
+    expect(parsed.unknown).toEqual([]);
+    expect(parsed.installed).toContain("slideshow");
+    expect(parsed.installed).not.toContain("music-to-video");
   });
 
   it("fails loudly on a skill name the manifest doesn't ship", async () => {
@@ -867,7 +920,7 @@ describe("hyperframes skills update <names>", () => {
     const { checkSkills } = await import("../utils/skillsManifest.js");
     vi.mocked(checkSkills).mockRejectedValue(new Error("offline"));
 
-    await runSkillsUpdateWith(["pr-to-video"]);
+    await runSkillsUpdateWith(["slideshow"]);
 
     expect(state.spawnCalls).toHaveLength(0);
     expect(await commandExitCode()).toBe(0);
@@ -883,12 +936,12 @@ describe("hyperframes skills update <names>", () => {
       .mockImplementationOnce(() => [])
       .mockImplementation((names: readonly string[]) => [...names]);
 
-    await runSkillsUpdateWith(["pr-to-video"]);
+    await runSkillsUpdateWith(["slideshow"]);
 
     // The offline guarantee must still cover the core tier the workflow
     // depends on, not silently shrink to just the named skill.
     const args = state.spawnCalls[0]?.args ?? [];
-    expect(skillFlagValues(args).sort()).toEqual(["pr-to-video", ...FALLBACK_CORE_SKILLS].sort());
+    expect(skillFlagValues(args).sort()).toEqual(["slideshow", ...FALLBACK_CORE_SKILLS].sort());
     expect(await commandExitCode()).toBe(0);
   });
 
@@ -939,7 +992,7 @@ describe("hyperframes skills update <names>", () => {
       new Error("Malformed skills manifest from https://raw.githubusercontent.com/…"),
     );
 
-    await runSkillsUpdateWith(["pr-to-video"]);
+    await runSkillsUpdateWith(["slideshow"]);
 
     const warnedMalformed = vi
       .mocked(clack.log.warn)
@@ -956,7 +1009,7 @@ describe("hyperframes skills update <names>", () => {
     const { checkSkills } = await import("../utils/skillsManifest.js");
     vi.mocked(checkSkills).mockRejectedValue(new Error("fetch failed"));
 
-    await runSkillsUpdateWith(["pr-to-video"]);
+    await runSkillsUpdateWith(["slideshow"]);
 
     const warnedMalformed = vi
       .mocked(clack.log.warn)
@@ -968,14 +1021,14 @@ describe("hyperframes skills update <names>", () => {
     setPlatform("linux");
     const logSpy = vi.spyOn(console, "log");
 
-    await runSkillsUpdateWith(["pr-to-video"], { json: true });
+    await runSkillsUpdateWith(["slideshow"], { json: true });
 
     expect(await commandExitCode()).toBe(0);
     // The engine logs install progress lines too; the JSON result is the last
     // console.log of the run (the prune prints nothing when nothing was removed).
     const last = String(logSpy.mock.calls.at(-1)?.[0] ?? "");
     const parsed = JSON.parse(last) as { installed?: string[] };
-    expect(parsed.installed).toContain("pr-to-video");
+    expect(parsed.installed).toContain("slideshow");
   });
 
   it("--json emits a parseable error object on failure", async () => {
@@ -994,7 +1047,7 @@ describe("hyperframes skills update <names>", () => {
     setPlatform("linux");
     state.spawnExitCode = 1;
 
-    await runSkillsUpdateWith(["pr-to-video"]);
+    await runSkillsUpdateWith(["slideshow"]);
 
     expect(await commandExitCode()).toBe(1);
   });
@@ -1005,7 +1058,7 @@ describe("hyperframes skills update <names>", () => {
     // The install claims success but delivers nothing.
     vi.mocked(presentSkills).mockImplementation(() => []);
 
-    await runSkillsUpdateWith(["pr-to-video"]);
+    await runSkillsUpdateWith(["slideshow"]);
 
     expect(state.spawnCalls[0]?.args).toContain("add");
     expect(await commandExitCode()).toBe(1);
