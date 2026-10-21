@@ -21,9 +21,17 @@
  * `background-removal/manager.test.ts`) so we don't touch the real
  * `HOME` cache.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { managedChromeVersion } from "./manager.js";
 
@@ -200,6 +208,7 @@ function installFsMocks({
 interface InstallMockOptions {
   buildId: string;
   cacheDir: string;
+  unpack?: boolean;
   logger?: (prefix: string) => ((...args: unknown[]) => void) | undefined;
 }
 
@@ -218,12 +227,14 @@ function installPuppeteerBrowsersMock(
     installImpl?: (
       options: InstallMockOptions,
     ) => Promise<{ executablePath: string; path?: string }>;
+    unzip?: (archivePath: string, folderPath: string) => Promise<boolean>;
   } = {},
 ) {
   const impl =
     opts.installImpl ?? (async () => opts.installResult ?? { executablePath: HF_BINARY });
   // Fixtures name the binary where it lands in HF_CACHE; install() really writes it under its own cacheDir.
   const stagedInstall = async (options: InstallMockOptions) => {
+    if (options.unpack === false) return join(options.cacheDir, "archive.zip");
     const result = await impl(options);
     if (result.path || !result.executablePath.startsWith(HF_CACHE + sep)) return result;
     const rel = relative(HF_CACHE, result.executablePath);
@@ -232,8 +243,15 @@ function installPuppeteerBrowsersMock(
     mockedPaths?.add(path).add(executablePath);
     return { executablePath, path };
   };
+  vi.doMock("./unzipArchive.js", () => ({ unzipArchive: opts.unzip ?? vi.fn(async () => true) }));
   vi.doMock("@puppeteer/browsers", () => ({
     Browser: { CHROMEHEADLESSSHELL: "chrome-headless-shell" },
+    Cache: class {
+      constructor(private readonly dir: string) {}
+      installationDir(browser: string, platform: string, buildId: string) {
+        return join(this.dir, browser, `${platform}-${buildId}`);
+      }
+    },
     detectBrowserPlatform: () => opts.browserPlatform ?? "linux",
     getInstalledBrowsers: opts.installedInHfCacheError
       ? vi.fn().mockRejectedValue(opts.installedInHfCacheError)
@@ -1481,6 +1499,65 @@ describe("downloadBrowser — too little disk for the browser", () => {
       await sweepKilledInstalls();
       expect(existsSync(staging)).toBe(false);
     } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { platform: "linux", unzipsFirst: true },
+    { platform: "darwin", unzipsFirst: true },
+    { platform: "win32", unzipsFirst: false },
+  ])(
+    "on $platform, unzips the download itself first: $unzipsFirst",
+    async ({ platform, unzipsFirst }) => {
+      const home = useRealCacheHome();
+      const { platform: origPlatform, arch: origArch } = process;
+      Object.defineProperty(process, "platform", { value: platform, configurable: true });
+      Object.defineProperty(process, "arch", { value: "x64", configurable: true });
+      const unzip = vi.fn(async () => true);
+      installPuppeteerBrowsersMock({
+        unzip,
+        installImpl: async ({ cacheDir, buildId }) =>
+          writeStagedInstall(cacheDir, buildId, "fresh"),
+      });
+      try {
+        const { ensureBrowser } = await import("./manager.js");
+        await ensureBrowser({ force: true });
+        if (!unzipsFirst) return expect(unzip).not.toHaveBeenCalled();
+        const [archive, into] = unzip.mock.calls[0] as unknown as [string, string];
+        expect(into).toBe(stagedVersionDir(dirname(archive), managedChromeVersion()));
+        expect(basename(dirname(archive))).toMatch(/^\.chrome-staging-/);
+      } finally {
+        Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+        Object.defineProperty(process, "arch", { value: origArch, configurable: true });
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("a disk that fills mid-unzip fails the install at once and leaves no staged copy", async () => {
+    const home = useRealCacheHome();
+    const { platform: origPlatform, arch: origArch } = process;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+    Object.defineProperty(process, "arch", { value: "x64", configurable: true });
+    const install = vi.fn(async ({ cacheDir, buildId }: InstallMockOptions) =>
+      writeStagedInstall(cacheDir, buildId, "fresh"),
+    );
+    installPuppeteerBrowsersMock({
+      installImpl: install,
+      unzip: async () => {
+        throw new Error("Extraction failed: the disk filled up while unpacking Chrome.");
+      },
+    });
+    try {
+      const { ensureBrowser } = await import("./manager.js");
+      await expect(ensureBrowser({ force: true })).rejects.toThrow("the disk filled up");
+      expect(install).not.toHaveBeenCalled();
+      const root = join(home, ".cache", "hyperframes");
+      expect(readdirSync(root).filter((name) => name.startsWith(".chrome-staging-"))).toEqual([]);
+    } finally {
+      Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+      Object.defineProperty(process, "arch", { value: origArch, configurable: true });
       rmSync(home, { recursive: true, force: true });
     }
   });

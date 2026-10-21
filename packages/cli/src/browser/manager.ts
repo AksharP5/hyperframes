@@ -23,8 +23,10 @@ import {
 import { getFreeDiskMb } from "../telemetry/system.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { runRenderSetupWorker } from "../utils/cancellableProcess.js";
+import { unzipArchive } from "./unzipArchive.js";
 
 type PuppeteerBrowsers = typeof import("@puppeteer/browsers");
+type InstallOptions = import("@puppeteer/browsers").InstallOptions;
 
 async function loadPuppeteerBrowsers(): Promise<PuppeteerBrowsers> {
   try {
@@ -707,7 +709,7 @@ async function downloadBrowser(options?: EnsureBrowserOptions): Promise<BrowserR
         `${freeMb} MB free at ${CACHE_ROOT_DIR}. Free disk space, then retry.`,
     );
   }
-  const { Browser, detectBrowserPlatform, install } = await loadPuppeteerBrowsers();
+  const { Browser, Cache, detectBrowserPlatform, install } = await loadPuppeteerBrowsers();
 
   const platform = detectBrowserPlatform();
   if (!platform) {
@@ -719,12 +721,13 @@ async function downloadBrowser(options?: EnsureBrowserOptions): Promise<BrowserR
   const clearStaging = () => rmSync(stagingDir, { recursive: true, force: true });
   // install() only debug-logs each failed unzip tool before trying the next one; keep those lines.
   let unzipLog: string[] = [];
-  const runInstall = () => {
+  const buildId = managedChromeVersion();
+  const runInstall = async () => {
     unzipLog = [];
-    return install({
+    const installOptions: InstallOptions & { unpack?: true } = {
       cacheDir: stagingDir,
       browser: Browser.CHROMEHEADLESSSHELL,
-      buildId: managedChromeVersion(),
+      buildId,
       platform,
       downloadProgressCallback: options?.onProgress,
       logger: (prefix) => {
@@ -737,7 +740,14 @@ async function downloadBrowser(options?: EnsureBrowserOptions): Promise<BrowserR
           if (debug.enabled) debug(line);
         };
       },
-    });
+    };
+    const unzipMayAskOnInput = process.platform !== "win32";
+    if (unzipMayAskOnInput) {
+      const archive = await install({ ...installOptions, unpack: false });
+      const into = new Cache(stagingDir).installationDir(installOptions.browser, platform, buildId);
+      await unzipArchive(archive, into);
+    }
+    return install(installOptions);
   };
 
   try {
