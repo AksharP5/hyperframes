@@ -1,5 +1,4 @@
-import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import {
   createServer,
   type IncomingMessage,
@@ -8,8 +7,6 @@ import {
 } from "node:http";
 import { createServer as createHttpsServer, type RequestOptions as HttpsOptions } from "node:https";
 import { createServer as createTcpServer, type Socket } from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { TLSSocket } from "node:tls";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -77,7 +74,6 @@ type RequestReceipt = {
 const receipts: RequestReceipt[] = [];
 const sockets = new Set<Socket>();
 const streams = new Set<ServerResponse>();
-let fixtureDirectory: string;
 let httpPort: number;
 let httpsPort: number;
 let malformedPort: number;
@@ -140,32 +136,14 @@ async function waitForStreamClose() {
 
 describe("publicRequest controlled socket integration", () => {
   beforeAll(async () => {
-    fixtureDirectory = await mkdtemp(join(tmpdir(), "capture-public-network-"));
-    const key = join(fixtureDirectory, "key.pem");
-    const certificate = join(fixtureDirectory, "certificate.pem");
-    execFileSync(
-      "openssl",
-      [
-        "req",
-        "-x509",
-        "-newkey",
-        "rsa:2048",
-        "-nodes",
-        "-keyout",
-        key,
-        "-out",
-        certificate,
-        "-days",
-        "1",
-        "-subj",
-        "/CN=assets.capture-fixture.com",
-        "-addext",
-        "subjectAltName=DNS:assets.capture-fixture.com",
-      ],
-      { stdio: "pipe" },
-    );
-    transport.certificate = await readFile(certificate, "utf8");
-    httpsServer.setSecureContext({ key: await readFile(key), cert: transport.certificate });
+    // A committed self-signed pair (valid to 2126), so this 30 s hook starts no openssl child.
+    const fixture = (name: string) =>
+      new URL(`./fixtures/capture-fixture-${name}`, import.meta.url);
+    transport.certificate = await readFile(fixture("certificate.pem"), "utf8");
+    httpsServer.setSecureContext({
+      key: await readFile(fixture("key.pem")),
+      cert: transport.certificate,
+    });
     httpsServer.on("tlsClientError", () => {});
     for (const server of servers) {
       server.on("connection", (socket) => {
@@ -199,7 +177,6 @@ describe("publicRequest controlled socket integration", () => {
           }),
       ),
     );
-    await rm(fixtureDirectory, { recursive: true, force: true });
   });
 
   it("pins the checked address without a second DNS lookup and preserves HTTP Host/path", async () => {
