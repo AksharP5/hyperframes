@@ -1,0 +1,135 @@
+/**
+ * The per-frame draw: a background, then each mover's own pixels redrawn along its path.
+ *
+ * Each mover is cropped from a capture of the scene and drawn at every tap pose into a float
+ * buffer, additive at weight 1/n: the shutter integral. Its coverage fades at the path ends, so
+ * the trail needs a background without the mover (a second capture, movers hidden); falling back
+ * to the sharp frame leaves thin lines looking unblurred.
+ *
+ * Image-space approximation: a mover's box contents move with it; ink outside it is not redrawn.
+ */
+
+import { type Affine, invert, sweep, thinTaps } from "./pose";
+
+export interface MoverFrame {
+  w: number;
+  h: number;
+  /** The pose the capture shows (frame time). */
+  now: Affine;
+  /** Poses across the shutter. */
+  taps: Affine[];
+}
+
+interface CompositeStats {
+  blurred: number;
+  taps: number;
+}
+
+type Context2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+interface Layer {
+  canvas: OffscreenCanvas;
+  ctx: OffscreenCanvasRenderingContext2D;
+}
+
+// Float16 keeps n additive 1/n-weighted taps exact; 8-bit loses up to ~n/2 levels per channel.
+function makeLayer(w: number, h: number): Layer {
+  const canvas = new OffscreenCanvas(w, h);
+  let ctx: OffscreenCanvasRenderingContext2D | null = null;
+  try {
+    ctx = canvas.getContext("2d", { colorType: "float16" } as CanvasRenderingContext2DSettings);
+  } catch {
+    ctx = null;
+  }
+  ctx = ctx ?? canvas.getContext("2d");
+  if (!ctx) throw new Error("capture motion blur: no 2D context for the accumulation buffer");
+  return { canvas, ctx };
+}
+
+/** Whether a mover travels far enough within this shutter to draw a trail at all. */
+function moves(mover: MoverFrame, frameW: number, frameH: number): boolean {
+  const { travel, rect } = sweep(mover.taps, mover.w, mover.h, frameW, frameH);
+  return rect !== null && travel >= 1;
+}
+
+export function createCompositor(width: number, height: number) {
+  const accum = makeLayer(width, height);
+  const crops: Layer[] = [];
+  // A mover box this many times the frame is too big to copy every frame; it is left sharp.
+  const maxCropArea = width * height * 4;
+
+  const cropLayer = (i: number, w: number, h: number): Layer => {
+    let layer = crops[i];
+    if (!layer || layer.canvas.width < w || layer.canvas.height < h) {
+      layer = makeLayer(
+        Math.max(w, layer?.canvas.width ?? 1),
+        Math.max(h, layer?.canvas.height ?? 1),
+      );
+      crops[i] = layer;
+    }
+    return layer;
+  };
+
+  /** Copy each mover's frame-time pixels out of `src`; false marks a mover to leave sharp. */
+  function crop(src: CanvasImageSource, movers: MoverFrame[]): boolean[] {
+    return movers.map((mover, i) => {
+      const { w, h } = mover;
+      const back = invert(mover.now);
+      if (!back || w * h > maxCropArea || !moves(mover, width, height)) return false;
+      const c = cropLayer(i, w, h).ctx;
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalCompositeOperation = "source-over";
+      c.globalAlpha = 1;
+      c.clearRect(0, 0, w, h);
+      c.setTransform(back.a, back.b, back.c, back.d, back.e, back.f);
+      c.drawImage(src, 0, 0);
+      return true;
+    });
+  }
+
+  function trail(out: Context2D, mover: MoverFrame, layer: Layer): number {
+    const { w, h } = mover;
+    const { travel, rect } = sweep(mover.taps, w, h, width, height);
+    if (!rect) return 0;
+    const taps = thinTaps(mover.taps, travel);
+    const a = accum.ctx;
+    a.setTransform(1, 0, 0, 1, 0, 0);
+    a.globalCompositeOperation = "source-over";
+    a.globalAlpha = 1;
+    a.clearRect(rect.x, rect.y, rect.w, rect.h);
+    a.globalCompositeOperation = "lighter";
+    a.globalAlpha = 1 / taps.length;
+    for (const m of taps) {
+      a.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
+      a.drawImage(layer.canvas, 0, 0, w, h, 0, 0, w, h);
+    }
+    out.drawImage(accum.canvas, rect.x, rect.y, rect.w, rect.h, rect.x, rect.y, rect.w, rect.h);
+    return taps.length;
+  }
+
+  /** `background` into `out`, then the trail of every mover `crop` kept. */
+  function draw(
+    background: CanvasImageSource,
+    out: Context2D,
+    movers: MoverFrame[],
+    kept: boolean[],
+  ): CompositeStats {
+    out.setTransform(1, 0, 0, 1, 0, 0);
+    out.globalAlpha = 1;
+    out.globalCompositeOperation = "copy";
+    out.drawImage(background, 0, 0);
+    out.globalCompositeOperation = "source-over";
+    const stats: CompositeStats = { blurred: 0, taps: 0 };
+    movers.forEach((mover, i) => {
+      const layer = crops[i];
+      if (!kept[i] || !layer) return;
+      const n = trail(out, mover, layer);
+      if (n > 0) {
+        stats.blurred++;
+        stats.taps += n;
+      }
+    });
+    return stats;
+  }
+
+  return { crop, draw };
+}
