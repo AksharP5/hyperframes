@@ -184,7 +184,7 @@ describe("components report priority", () => {
 
   it("returns the snippets it keeps in file order", () => {
     const { report } = withAnimation({ targets: [{ selector: ".w-dot" }], maxBytes: 256000 });
-    const lines = report.snippets.map((s) => s.startLine);
+    const lines = report.snippets.map((s) => Number(/:(\d+)-/.exec(s.id)![1]));
     expect(lines).toEqual([...lines].sort((a, b) => a - b));
     expect(report.snippets.at(-1)?.kind).toEqual(["animation creation"]);
     expect(report.omittedCount).toBe(0);
@@ -204,5 +204,83 @@ describe("components report priority", () => {
     );
     expect(fetched.snippets.map((snippet) => snippet.id)).toEqual(ids);
     expect(fetched.omittedCount).toBe(0);
+  });
+});
+
+describe("components report shape", () => {
+  const call = `tl.to(".w-dot", { x: 100, duration: 1 }, 2);`;
+
+  function report(targets: number, coTargets: number) {
+    const dir = mkdtempSync(join(tmpdir(), "inspect-shape-"));
+    const html = `<html><body>\n<script>\nconst tl = gsap.timeline();\n${call}\n</script>\n</body></html>`;
+    writeFileSync(join(dir, "index.html"), html);
+    const sources = new Sources(dir);
+    const start = html.indexOf(call);
+    const creation = sources.slice(
+      "index.html",
+      start,
+      start + call.length,
+      "animation creation",
+      0,
+    )!;
+    const moved = Array.from({ length: coTargets + 1 }, (_, n) => element(n));
+    const result = (n: number) => ({
+      target: { selector: `.w-dot.t${n}` },
+      status: "found" as const,
+      candidates: [element(n)],
+      animations: [{ stack: "s", attachmentStacks: [], targets: moved } as never],
+      elements: [element(n)],
+      css: [],
+      truncated: false,
+    });
+    try {
+      return mapInspection(
+        {
+          results: Array.from({ length: targets }, (_, n) => result(n)),
+          recorded: 1,
+          recordLimitReached: false,
+          hooked: true,
+        },
+        { targets: Array.from({ length: targets }, (_, n) => ({ selector: `.w-dot.t${n}` })) },
+        {
+          sources,
+          map: () => [{ ...creation, targets: Array.from({ length: targets }, (_, n) => n) }],
+          catalog: new Map<string, Snippet>(),
+          generation: "g",
+          sourceVersion: "v",
+          reused: false,
+          start: performance.now(),
+        },
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("names a snippet's file and lines once, in its id, and carries no fixed disclaimers", () => {
+    const shown = report(1, 0);
+    expect(shown).not.toHaveProperty("coverage");
+    expect(shown.snippets).toEqual([
+      { id: "index.html:4-4", kind: ["animation creation"], code: `${call}\n`, uniqueInFile: true },
+    ]);
+  });
+
+  it("says which target each snippet serves when the query names more than one", () => {
+    expect(report(2, 0).snippets[0]).toMatchObject({ id: "index.html:4-4", targets: [0, 1] });
+  });
+
+  it("keeps an unqueried co-target visible when four queried elements share its tween", () => {
+    for (const result of report(4, 4).results) {
+      expect(result.coTargets[0]?.ref).toBe(element(4).ref);
+      expect(result.coTargets).toHaveLength(3);
+      expect(result.coTargetsOmitted).toBe(1);
+    }
+  });
+
+  it("lists three elements the same animation also moves and counts the rest", () => {
+    const [result] = report(1, 7).results;
+    expect(result!.coTargets).toHaveLength(3);
+    expect(result!.coTargetsOmitted).toBe(4);
+    expect(report(1, 2).results[0]).not.toHaveProperty("coTargetsOmitted");
   });
 });
