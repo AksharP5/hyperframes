@@ -51,18 +51,23 @@ function moves(mover: MoverFrame, frameW: number, frameH: number): boolean {
   return rect !== null && travel >= 1;
 }
 
-export function createCompositor(width: number, height: number) {
-  const accum = makeLayer(width, height);
+/** `width`/`height` are CSS px; the buffers hold `dpr` device pixels per CSS px. */
+export function createCompositor(width: number, height: number, dpr = 1) {
+  const accumW = Math.max(1, Math.round(width * dpr));
+  const accumH = Math.max(1, Math.round(height * dpr));
+  const accum = makeLayer(accumW, accumH);
   const crops: Layer[] = [];
   // A mover box this many times the frame is too big to copy every frame; it is left sharp.
   const maxCropArea = width * height * 4;
 
   const cropLayer = (i: number, w: number, h: number): Layer => {
+    const dw = Math.ceil(w * dpr);
+    const dh = Math.ceil(h * dpr);
     let layer = crops[i];
-    if (!layer || layer.canvas.width < w || layer.canvas.height < h) {
+    if (!layer || layer.canvas.width < dw || layer.canvas.height < dh) {
       layer = makeLayer(
-        Math.max(w, layer?.canvas.width ?? 1),
-        Math.max(h, layer?.canvas.height ?? 1),
+        Math.max(dw, layer?.canvas.width ?? 1),
+        Math.max(dh, layer?.canvas.height ?? 1),
       );
       crops[i] = layer;
     }
@@ -79,9 +84,16 @@ export function createCompositor(width: number, height: number) {
       c.setTransform(1, 0, 0, 1, 0, 0);
       c.globalCompositeOperation = "source-over";
       c.globalAlpha = 1;
-      c.clearRect(0, 0, w, h);
-      c.setTransform(back.a, back.b, back.c, back.d, back.e, back.f);
-      c.drawImage(src, 0, 0);
+      c.clearRect(0, 0, Math.ceil(w * dpr), Math.ceil(h * dpr));
+      c.setTransform(
+        dpr * back.a,
+        dpr * back.b,
+        dpr * back.c,
+        dpr * back.d,
+        dpr * back.e,
+        dpr * back.f,
+      );
+      c.drawImage(src, 0, 0, width, height);
       return true;
     });
   }
@@ -91,18 +103,23 @@ export function createCompositor(width: number, height: number) {
     const { travel, rect } = sweep(mover.taps, w, h, width, height);
     if (!rect) return 0;
     const taps = thinTaps(mover.taps, travel);
+    const rx = Math.max(0, Math.floor(rect.x * dpr));
+    const ry = Math.max(0, Math.floor(rect.y * dpr));
+    const rw = Math.min(accumW, Math.ceil((rect.x + rect.w) * dpr)) - rx;
+    const rh = Math.min(accumH, Math.ceil((rect.y + rect.h) * dpr)) - ry;
+    if (rw <= 0 || rh <= 0) return 0;
     const a = accum.ctx;
     a.setTransform(1, 0, 0, 1, 0, 0);
     a.globalCompositeOperation = "source-over";
     a.globalAlpha = 1;
-    a.clearRect(rect.x, rect.y, rect.w, rect.h);
+    a.clearRect(rx, ry, rw, rh);
     a.globalCompositeOperation = "lighter";
     a.globalAlpha = 1 / taps.length;
     for (const m of taps) {
-      a.setTransform(m.a, m.b, m.c, m.d, m.e, m.f);
-      a.drawImage(layer.canvas, 0, 0, w, h, 0, 0, w, h);
+      a.setTransform(dpr * m.a, dpr * m.b, dpr * m.c, dpr * m.d, dpr * m.e, dpr * m.f);
+      a.drawImage(layer.canvas, 0, 0, w * dpr, h * dpr, 0, 0, w, h);
     }
-    out.drawImage(accum.canvas, rect.x, rect.y, rect.w, rect.h, rect.x, rect.y, rect.w, rect.h);
+    out.drawImage(accum.canvas, rx, ry, rw, rh, rx, ry, rw, rh);
     return taps.length;
   }
 

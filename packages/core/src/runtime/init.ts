@@ -126,6 +126,7 @@ import { createColorGradingRuntime, type RuntimeColorGradingApi } from "./colorG
 import { COLOR_GRADING_AUTHORED_OPACITY_ATTR } from "../colorGrading";
 import { initVfx, paintVfx } from "./vfx";
 import {
+  captureMotionBlurBusy,
   initCaptureMotionBlur,
   paintCaptureMotionBlur,
   releaseCaptureMotionBlurFrame,
@@ -1394,6 +1395,13 @@ export function initSandboxRuntimeModular(): void {
     const ours = compositionTimingObserver?.takeRecords() ?? [];
     if (pending.length > 0 || ours.some((record) => record.target !== el))
       invalidateCompositionTimingCaches();
+  };
+
+  const withoutOwnCompositionRecords = (write: () => void) => {
+    const pending = compositionTimingObserver?.takeRecords() ?? [];
+    write();
+    compositionTimingObserver?.takeRecords();
+    if (pending.length > 0) invalidateCompositionTimingCaches();
   };
 
   const watchCompositionTimingInputs = () => {
@@ -3677,9 +3685,11 @@ export function initSandboxRuntimeModular(): void {
         Number(root.getAttribute("data-duration")) ||
         0,
       timeline: () => state.capturedTimeline,
+      now: () => Math.max(0, state.currentTime || 0),
       seek: (t, suppressEvents) => {
         seekRootChildrenAndAdapters(state.capturedTimeline, t, { suppressEvents });
       },
+      ignoreMutations: withoutOwnCompositionRecords,
     });
   }
   const settleSceneDom = (): Promise<void> => {
@@ -5187,14 +5197,17 @@ export function initSandboxRuntimeModular(): void {
       // affected — the seek runs whenever the clock is playing.
       const isPlaying = clock.isPlaying();
       const manualEditOwnsPausedFrame = !isPlaying && hasActiveStudioManualEditGesture();
+      // Both captures of a blurred frame must see the same page: the next tick catches up.
+      const blurHoldsFrame = isPlaying && captureMotionBlurBusy();
       if (manualEditOwnsPausedFrame) {
         // Force one reconciliation after drop/cancel even though the playhead did not move.
         pausedSeekDeferredByManualGesture = true;
       } else if (
-        isPlaying ||
-        pausedSeekDeferredByManualGesture ||
-        t !== lastTransportSeekTime ||
-        state.capturedTimeline !== lastTransportSeekTimeline
+        !blurHoldsFrame &&
+        (isPlaying ||
+          pausedSeekDeferredByManualGesture ||
+          t !== lastTransportSeekTime ||
+          state.capturedTimeline !== lastTransportSeekTimeline)
       ) {
         seekTimelineAndAdapters(t, { revision: timingRevision });
         // Playback: draw and move on; nothing waits on this frame's blur. Paused, it unwraps.

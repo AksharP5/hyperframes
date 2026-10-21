@@ -61,7 +61,7 @@ describe("createCompositor", () => {
     const kept = c.crop(capture, movers);
     expect(kept).toEqual([true]);
     const crop = offscreen.at(-1);
-    expect(crop?.drawImage).toHaveBeenCalledWith(capture, 0, 0);
+    expect(crop?.drawImage).toHaveBeenCalledWith(capture, 0, 0, 1000, 100);
     const out = fakeContext();
     const stats = c.draw(background, out as never, movers, kept);
     const accum = offscreen[0];
@@ -76,5 +76,28 @@ describe("createCompositor", () => {
   it("leaves a mover sharp when its box is too big to copy every frame", () => {
     const c = createCompositor(100, 100);
     expect(c.crop(capture, [mover(1000, 1000, slide(0, 100))])).toEqual([false]);
+  });
+
+  it("works in device pixels: scaled buffers, transforms and dirty rect", () => {
+    const c = createCompositor(1000, 100, 2);
+    const movers = [mover(10, 10, slide(0, 100))];
+    const kept = c.crop(capture, movers);
+    const crop = offscreen.at(-1);
+    // now = translate(50, 0): the inverse maps the capture into the mover's local space.
+    expect(crop?.setTransform.mock.calls.at(-1)?.map((v: number) => v + 0)).toEqual([
+      2, 0, 0, 2, -100, 0,
+    ]);
+    expect(crop?.clearRect).toHaveBeenCalledWith(0, 0, 20, 20);
+    expect(crop?.drawImage).toHaveBeenCalledWith(capture, 0, 0, 1000, 100);
+    const out = fakeContext();
+    c.draw(background, out as never, movers, kept);
+    const accum = offscreen[0];
+    const lastTap = accum?.setTransform.mock.calls.at(-1);
+    expect(lastTap?.slice(0, 4)).toEqual([2, 0, 0, 2]);
+    expect(accum?.drawImage.mock.calls[0]).toEqual([expect.anything(), 0, 0, 20, 20, 0, 0, 10, 10]);
+    const [, sx, sy, sw, sh, dx, dy, dw, dh] = out.drawImage.mock.calls[1] ?? [];
+    expect([sx, sy, sh, dx, dy, dh]).toEqual([2, 0, 24, 2, 0, 24]);
+    expect(sw).toBe(dw);
+    expect(sw).toBeGreaterThan(200);
   });
 });

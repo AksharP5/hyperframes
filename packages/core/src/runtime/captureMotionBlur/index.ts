@@ -11,7 +11,11 @@
  * Needs html-in-canvas (`drawElementImage`); without it nothing changes.
  */
 
-import { PAGE_MOTION_BLUR_OFF_GLOBAL, supportsCaptureMotionBlur } from "../../pageMotionBlur";
+import {
+  PAGE_DEVICE_SCALE_GLOBAL,
+  PAGE_MOTION_BLUR_OFF_GLOBAL,
+  supportsCaptureMotionBlur,
+} from "../../pageMotionBlur";
 import { swallow } from "../diagnostics";
 import { createCompositor, type MoverFrame } from "./composite";
 import { discoverMovers } from "./discover";
@@ -23,8 +27,10 @@ export interface CaptureMotionBlurHost {
   durationSeconds: () => number;
   /** The bound root timeline; movers are re-scanned when it changes. */
   timeline: () => unknown;
+  now: () => number;
   /** Seek the timeline and adapters (not media) for a pose read. */
   seek: (t: number, suppressEvents: boolean) => void;
+  ignoreMutations?: (write: () => void) => void;
 }
 
 interface Config {
@@ -158,10 +164,16 @@ function rootSize(root: HTMLElement): { width: number; height: number } {
   return { width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) };
 }
 
+function readDpr(): number {
+  const injected = Number((window as unknown as Record<string, unknown>)[PAGE_DEVICE_SCALE_GLOBAL]);
+  const dpr = injected > 0 ? injected : window.devicePixelRatio;
+  return Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+}
+
 function makeCanvas(width: number, height: number, role: string): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = Math.max(1, Math.round(width * readDpr()));
+  canvas.height = Math.max(1, Math.round(height * readDpr()));
   canvas.setAttribute("data-hf-ignore", "");
   canvas.setAttribute("data-hf-motion-blur", role);
   // ponytail: assumes the root sits at its parent's origin (true for compositions); place the
@@ -183,7 +195,8 @@ function createInstance(host: CaptureMotionBlurHost, config: Config) {
   if (!captureContext || !outputContext) throw new Error("capture motion blur: no 2D context");
   const sctx: DrawElementContext = captureContext;
   const octx: CanvasRenderingContext2D = outputContext;
-  const compositor = createCompositor(width, height);
+  let dpr = readDpr();
+  let compositor = createCompositor(width, height, dpr);
   // Hides movers for the background capture without touching author or GSAP opacity.
   const hideRule = document.createElement("style");
   hideRule.setAttribute("data-hf-ignore", "");
@@ -208,12 +221,19 @@ function createInstance(host: CaptureMotionBlurHost, config: Config) {
   // Once the engine drives frames, paused-style requests come from the transport, not a user.
   let rendering = false;
 
+  function moveRootThenResync(move: () => void): void {
+    (host.ignoreMutations ?? ((write: () => void) => write()))(move);
+    host.seek(host.now(), true);
+  }
+
   function wrap(): void {
     if (wrapped) return;
-    root.before(src);
-    src.append(root);
-    src.after(out);
-    document.head.append(hideRule);
+    moveRootThenResync(() => {
+      root.before(src);
+      src.append(root);
+      src.after(out);
+      document.head.append(hideRule);
+    });
     wrapped = true;
     staleOutput = true;
   }
@@ -229,13 +249,17 @@ function createInstance(host: CaptureMotionBlurHost, config: Config) {
     }
     if (!wrapped) return;
     wrapped = false;
-    hideRule.remove();
-    src.before(root);
-    src.remove();
-    out.remove();
+    moveRootThenResync(() => {
+      hideRule.remove();
+      src.before(root);
+      src.remove();
+      out.remove();
+    });
   }
 
   const seek = (t: number): void => host.seek(t, !config.events);
+  // The scan walks the whole timeline: callbacks must not fire (or leave their effects) there.
+  const scanSeek = (t: number): void => host.seek(t, true);
 
   function discover(restoreTo: number): void {
     scannedTimeline = host.timeline();
@@ -244,9 +268,9 @@ function createInstance(host: CaptureMotionBlurHost, config: Config) {
       scene: root,
       durationSeconds: host.durationSeconds(),
       fps: host.fps,
-      seek,
+      seek: scanSeek,
     });
-    seek(restoreTo);
+    scanSeek(restoreTo);
     movers = found.movers;
     reader = createPoseReader(root, found.dynamic);
     scanMs = Math.round(performance.now() - s0);
@@ -305,9 +329,7 @@ function createInstance(host: CaptureMotionBlurHost, config: Config) {
       done = captureAndDraw(job, finalStep);
       failures = 0;
     } catch (err) {
-      failures++;
-      swallow("runtime.captureMotionBlur.compose", err);
-      if (failures >= MAX_FAILURES) disable(`capture failed ${failures} times in a row`);
+      onCaptureFailure(err);
     }
     job.ms += performance.now() - t0;
     if (!done && !disabled) {
@@ -317,6 +339,15 @@ function createInstance(host: CaptureMotionBlurHost, config: Config) {
     timings.push(sampleMs + job.ms);
     if (timings.length > 600) timings.shift();
     finishJob(job);
+  }
+
+  function onCaptureFailure(err: unknown): void {
+    failures++;
+    swallow("runtime.captureMotionBlur.compose", err);
+    countFailedFrame(err instanceof Error ? err.message : String(err));
+    // A render never gives up mid-video: this frame shows the plain DOM, the next wraps again.
+    if (rendering) unwrap();
+    else if (failures >= MAX_FAILURES) disable(`capture failed ${failures} times in a row`);
   }
 
   /** This paint's half of the frame; false when the background capture is still to come. */
@@ -394,6 +425,11 @@ function createInstance(host: CaptureMotionBlurHost, config: Config) {
   function paint(t: number, engineMode: boolean): Promise<void> {
     if (disabled) return Promise.resolve();
     if (engineMode) rendering = true;
+    // A hidden tab paints nothing: rest on plain DOM instead of waiting on paints that never come.
+    if (!rendering && document.visibilityState === "hidden") {
+      unwrap();
+      return Promise.resolve();
+    }
     if (pending && !engineMode) {
       const previous = queued;
       return new Promise<void>((resolve) => {
@@ -410,8 +446,21 @@ function createInstance(host: CaptureMotionBlurHost, config: Config) {
     return start(t, engineMode);
   }
 
+  function syncDensity(): void {
+    const next = readDpr();
+    if (next === dpr) return;
+    dpr = next;
+    for (const canvas of [src, out]) {
+      canvas.width = Math.max(1, Math.round(width * dpr));
+      canvas.height = Math.max(1, Math.round(height * dpr));
+    }
+    compositor = createCompositor(width, height, dpr);
+    staleOutput = true;
+  }
+
   function start(t: number, engineMode: boolean): Promise<void> {
     try {
+      syncDensity();
       if (!reader || host.timeline() !== scannedTimeline) discover(t);
       if (movers.length === 0) {
         unwrap();
@@ -571,6 +620,11 @@ export function paintCaptureMotionBlur(
   // Nothing in flight (nothing moves, or blur turned off): leave the engine's composite step idle.
   if (engineMode && instance.busy()) armPageComposite();
   return done;
+}
+
+/** True while a blurred frame is between its two captures: the page must hold still. */
+export function captureMotionBlurBusy(): boolean {
+  return instance?.busy() ?? false;
 }
 
 /** Start capturing a deferred engine frame: the page (injected video frames included) is final. */
