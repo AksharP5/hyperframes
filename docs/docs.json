@@ -717,7 +717,7 @@
               },
               {
                 "group": "Motion & effects",
-                "tag": "96",
+                "tag": "97",
                 "expanded": false,
                 "pages": [
                   {
@@ -758,7 +758,7 @@
                   },
                   {
                     "group": "Effects",
-                    "tag": "56",
+                    "tag": "57",
                     "expanded": false,
                     "pages": [
                       "catalog/components/avatar-cloud",
@@ -771,6 +771,7 @@
                       "catalog/components/cut-the-curve",
                       "catalog/components/device-frame-stage",
                       "catalog/components/directional-wipe",
+                      "catalog/components/echo-smear",
                       "catalog/components/fade-through",
                       "catalog/components/grid-pixelate-wipe",
                       "catalog/components/halftone-dissolve",
