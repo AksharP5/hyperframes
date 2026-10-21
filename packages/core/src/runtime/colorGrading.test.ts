@@ -1080,6 +1080,54 @@ describe("createColorGradingRuntime", () => {
     expect(canvas.style.opacity).toBe("1");
   });
 
+  it.each([
+    ["a seek", "redraw"],
+    ["a playback tick", "redrawAnimated"],
+  ] as const)("grades an image whose ancestor starts hidden once %s shows it", (_, pass) => {
+    // A layer a timeline reveals, or a sub-composition host that starts later.
+    const scene = document.createElement("div");
+    scene.style.visibility = "hidden";
+    const image = makeDrawableImage();
+    scene.appendChild(image);
+    document.body.appendChild(scene);
+    runtime = createColorGradingRuntime();
+
+    runtime[pass]();
+    expect(runtime.isGraded(image)).toBe(false);
+    expect(webglContexts()).toBe(0);
+
+    scene.style.visibility = "visible";
+    runtime[pass]();
+
+    expect(runtime.isGraded(image)).toBe(true);
+    expect(image.nextElementSibling?.hasAttribute("data-hf-color-grading-canvas")).toBe(true);
+    expect(image.style.getPropertyValue("opacity")).toBe("0");
+  });
+
+  it.each([
+    ["shown", "visible"],
+    ["still hidden", "hidden"],
+  ])("keeps a live grade switched off while %s, though its saved attribute grades", (_, start) => {
+    const scene = document.createElement("div");
+    scene.style.visibility = start;
+    const image = makeDrawableImage();
+    image.style.removeProperty("--hf-color-grading-blur");
+    image.setAttribute(
+      HF_COLOR_GRADING_ATTR,
+      serializeHfColorGrading({ adjust: { exposure: 0.5 } }),
+    );
+    scene.appendChild(image);
+    document.body.appendChild(scene);
+    runtime = createColorGradingRuntime();
+
+    runtime.setGrading(image, {});
+    scene.style.visibility = "visible";
+    runtime.redraw();
+    runtime.redrawAnimated();
+
+    expect(runtime.isGraded(image)).toBe(false);
+  });
+
   it("updates canvas opacity through grading's own hide when CSS animation progresses (#3329)", () => {
     const video = makeDrawableVideo();
     // Simulate a CSS entrance animation: the authored opacity is empty (no

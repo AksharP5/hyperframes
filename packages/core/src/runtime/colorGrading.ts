@@ -2697,6 +2697,10 @@ function findRenderFrameImage(video: HTMLVideoElement): HTMLImageElement | null 
   return frame && isDrawableSource(frame) ? frame : null;
 }
 
+function isShownForColorGrading(element: ColorGradingMediaElement): boolean {
+  return isVisibleForColorGrading(element) || hasInjectedRenderFrame(element);
+}
+
 function hasInjectedRenderFrame(element: ColorGradingMediaElement): boolean {
   if (!isVideoElement(element)) return false;
   const frame = findInjectedRenderFrame(element);
@@ -3831,6 +3835,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
 }): RuntimeColorGradingApi {
   const entries = new WeakMap<ColorGradingMediaElement, ColorGradingEntry>();
   const trackedElements = new Set<ColorGradingMediaElement>();
+  const hiddenAtRefresh = new Set<ColorGradingMediaElement>();
   const idleRenderers: ColorGradingRenderer[] = [];
   let observer: MutationObserver | null = null;
   let previewRenderer: ColorGradingPreviewRenderer | null = null;
@@ -3887,6 +3892,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     grading: ResolvedHfColorGrading,
     source: EntrySource,
   ): boolean => {
+    hiddenAtRefresh.delete(element);
     const existing = entries.get(element);
     if (existing) {
       existing.grading = grading;
@@ -3966,6 +3972,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   };
 
   const removeElement = (element: ColorGradingMediaElement): void => {
+    hiddenAtRefresh.delete(element);
     const entry = entries.get(element);
     if (!entry) return;
     const renderer = detachEntry(entry);
@@ -3983,16 +3990,18 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   const refresh = (): number => {
     if (destroyed) return 0;
     const attributeElements = new Set<ColorGradingMediaElement>();
+    hiddenAtRefresh.clear();
     const nodes = document.querySelectorAll(COLOR_GRADING_SOURCE_SELECTOR);
     nodes.forEach((node) => {
       if (!isColorGradingMediaElement(node)) return;
       attributeElements.add(node);
       const grading = readColorGradingAttribute(node);
       if (isRuntimeColorGradingActive(node, grading)) {
-        if (isVisibleForColorGrading(node) || hasInjectedRenderFrame(node)) {
+        if (isShownForColorGrading(node)) {
           upsert(node, grading, "attribute");
         } else {
           removeElement(node);
+          hiddenAtRefresh.add(node);
         }
       } else {
         removeElement(node);
@@ -4011,8 +4020,20 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     return trackedElements.size;
   };
 
+  const adoptShownMedia = (): void => {
+    for (const element of hiddenAtRefresh) {
+      if (element.isConnected && !isShownForColorGrading(element)) continue;
+      hiddenAtRefresh.delete(element);
+      const grading = readColorGradingAttribute(element);
+      if (element.isConnected && isRuntimeColorGradingActive(element, grading)) {
+        upsert(element, grading, "attribute");
+      }
+    }
+  };
+
   const redraw = (): number => {
     if (destroyed) return 0;
+    adoptShownMedia();
     let drawn = 0;
     for (const element of trackedElements) {
       const entry = entries.get(element);
@@ -4039,6 +4060,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
 
   const redrawAnimated = (): number => {
     if (destroyed) return 0;
+    adoptShownMedia();
     let drawn = 0;
     for (const element of trackedElements) {
       const entry = entries.get(element);
@@ -4111,7 +4133,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     }
     const grading = readColorGradingAttribute(element);
     if (isRuntimeColorGradingActive(element, grading)) {
-      if (!isVisibleForColorGrading(element) && !hasInjectedRenderFrame(element)) {
+      if (!isShownForColorGrading(element)) {
         return { state: "pending", message: "Waiting for visible media" };
       }
       return { state: "unavailable", message: "WebGL unavailable" };
@@ -4179,6 +4201,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     observer?.disconnect();
     observer = null;
     for (const element of trackedElements) removeElement(element);
+    hiddenAtRefresh.clear();
     for (const renderer of idleRenderers) destroyProgramResources(renderer);
     idleRenderers.length = 0;
     shared?.gl.getExtension("WEBGL_lose_context")?.loseContext();
