@@ -1,5 +1,5 @@
-import { closeSync, fstatSync, openSync, readFileSync, readdirSync } from "node:fs";
-import { extname, join, relative } from "node:path";
+import { closeSync, fstatSync, openSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { extname, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { parse, type Node } from "acorn";
 import postcss from "postcss";
@@ -41,6 +41,14 @@ function occurrences(text: string, needle: string) {
   }
   return hits;
 }
+function realPath(path: string) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+const SHOWN_WHOLE = 2000;
 const excluded = new Set([...PREVIEW_IGNORED_DIRS, ".agents", ".claude", "evidence", "snapshots"]);
 function sourceFiles(project: string) {
   const files: string[] = [];
@@ -195,10 +203,16 @@ export class Sources {
   readonly cssRules: { id: string; selector: string; file: string; start: number; end: number }[] =
     [];
   readonly htmlTags: HtmlTag[] = [];
-  constructor(readonly project: string) {
+  constructor(
+    readonly project: string,
+    served?: Iterable<string>,
+  ) {
+    const root = realPath(project);
+    const bundled = served && new Set([...served].map((path) => relative(root, realPath(path))));
     for (const path of sourceFiles(project)) {
       const file = relative(project, path);
       if (/(?:^|\/)(?:vendor|lib)\//.test(file)) continue;
+      if (bundled && !bundled.has(file)) continue;
       const fd = openSync(path, "r");
       let text: string;
       try {
@@ -354,18 +368,21 @@ export class Sources {
               s.type === "FunctionDeclaration" &&
               hit.local >= s.start &&
               hit.local < s.end &&
-              s.end - s.start <= 2000,
+              s.end - s.start <= SHOWN_WHOLE,
           )
           .sort((a, b) => a.end - a.start - (b.end - b.start))[0];
-        const range = helper ?? enclosing;
+        const caller = result.length > 0;
+        const callLine = caller && !helper && enclosing.end - enclosing.start > SHOWN_WHOLE;
+        const range = callLine ? { start: hit.local, end: hit.local + 1 } : (helper ?? enclosing);
         const snippet = this.slice(
           hit.chunk.file,
           hit.chunk.offset + range.start,
           hit.chunk.offset + range.end,
-          result.length ? "animation caller" : "animation creation",
+          caller ? "animation caller" : "animation creation",
           target,
         );
         if (snippet) result.push(snippet);
+        if (callLine) continue;
         for (const dependency of hit.chunk.dependencies(range)) {
           const definition = this.slice(
             hit.chunk.file,

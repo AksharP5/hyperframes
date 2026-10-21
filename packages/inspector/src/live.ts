@@ -37,6 +37,7 @@ export function prepareLiveInspection(
   html: string,
   provenance: readonly BundleScriptProvenance[],
   sourceVersion: string,
+  reads?: readonly string[],
 ): LiveInspection {
   const project = realpathSync(projectDir);
   if (fingerprint(project) !== sourceVersion) throw new Error("source_changed_during_load");
@@ -55,7 +56,7 @@ export function prepareLiveInspection(
     pageGeneration: generation,
     sourceContext() {
       if (!context) {
-        const sources = new Sources(project);
+        const sources = new Sources(project, reads);
         context = { sources, map: sources.mapper(document, [...provenance]) };
       }
       return context;
