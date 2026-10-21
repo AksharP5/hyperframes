@@ -65,8 +65,7 @@ it("leaves no Chrome process behind when the CLI is killed mid busy-loop", async
   await new Promise((resolve) => setTimeout(resolve, 3_000));
   run.record();
   run.child.kill("SIGKILL");
-  await new Promise((resolve) => setTimeout(resolve, 5_000));
-  expect(alive(run.seen.chrome)).toEqual([]);
+  await waitForTestCondition(() => alive(run.seen.chrome).length === 0, 30_000);
   await waitForTestCondition(() => alive(run.seen.watchdog).length === 0, 30_000);
 }, 90_000);
 
