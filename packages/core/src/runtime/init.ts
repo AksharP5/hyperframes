@@ -4638,6 +4638,14 @@ export function initSandboxRuntimeModular(): void {
         swallow("runtime.init.activateSiblings", err);
       }
     }
+    if (rearmed.length === 0) return rearmed;
+    // GSAP leaves paused scenes out of the root's length and play() keeps that stale length.
+    try {
+      masterTimeline.shiftChildren?.(0);
+      masterTimeline.totalDuration?.();
+    } catch (err) {
+      swallow("runtime.init.remeasureRoot", err);
+    }
     return rearmed;
   };
 
