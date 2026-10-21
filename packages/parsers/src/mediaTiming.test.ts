@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveMediaStartSeconds } from "./mediaTiming";
+import { resolveMediaStartSeconds } from "./mediaTiming.js";
 
 const ordinary = () => 99;
 const base = { authoredStart: 3, hostStart: 10, hasAutoStart: false, ordinaryStart: ordinary };

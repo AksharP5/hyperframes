@@ -228,11 +228,14 @@ export function hasAttrName(tagSource: string, attr: string): boolean {
 }
 
 // An explicit data-has-audio is authoritative for the compiler; only the exact value "true" means audible.
+export function isAudibleVideo(attr: (name: string) => string | null): boolean {
+  if (attr("muted") !== null) return false;
+  const declared = attr("data-has-audio");
+  return declared === null || declared === "true";
+}
+
 export function isAudibleVideoTag(tagSource: string): boolean {
-  if (hasAttrName(tagSource, "muted")) return false;
-  if (!hasAttrName(tagSource, "data-has-audio")) return true;
-  const declared = readAttr(tagSource, "data-has-audio");
-  return declared === "true";
+  return isAudibleVideo((name) => readDecodedAttr(tagSource, name));
 }
 
 export function mediaTimeWindow(tagSource: string): { start: number; end: number } | null {

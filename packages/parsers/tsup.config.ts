@@ -24,6 +24,8 @@ export default defineConfig({
     assetResolution: "src/assetResolution.ts",
     htmlAttributeSpans: "src/htmlAttributeSpans.ts",
     timeSpans: "src/timeSpans.ts",
+    mediaTiming: "src/mediaTiming.ts",
+    referenceResolver: "src/referenceResolver.ts",
   },
   format: ["esm"],
   outDir: "dist",
