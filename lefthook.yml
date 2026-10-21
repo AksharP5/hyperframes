@@ -2,10 +2,10 @@ pre-commit:
   parallel: true
   commands:
     lint:
-      glob: "*.{js,jsx,ts,tsx}"
+      glob: "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"
       run: bunx oxlint --no-error-on-unmatched-pattern {staged_files}
     format:
-      glob: "*.{js,jsx,ts,tsx,json,md,yaml,yml}"
+      glob: "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,json,md,yaml,yml}"
       # Auto-format and re-stage so the committed snapshot is always formatted.
       # Replaces --check which only reports — that left unformatted files in
       # commits when the hook ran after the amend snapshot was taken.
