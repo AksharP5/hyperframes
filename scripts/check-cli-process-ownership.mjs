@@ -39,7 +39,9 @@ function listTypeScriptFiles(directory, roots) {
   return readdirSync(directory).flatMap((name) => {
     const path = join(directory, name);
     if (statSync(path).isDirectory()) return listTypeScriptFiles(path, roots);
-    if (!path.endsWith(".ts") || path.endsWith(".test.ts") || roots.includes(path)) return [];
+    if (!path.endsWith(".ts") || /\.(test|fixture)\.ts$/.test(path) || roots.includes(path)) {
+      return [];
+    }
     return [path];
   });
 }

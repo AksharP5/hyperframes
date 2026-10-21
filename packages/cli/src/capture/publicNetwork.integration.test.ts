@@ -14,13 +14,25 @@ import type { TLSSocket } from "node:tls";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const transport = vi.hoisted(() => ({
-  lookup: vi.fn(),
+  resolve4: vi.fn(),
   dials: [] as HttpsOptions[],
   certificate: "",
   trustCertificate: true,
 }));
 
-vi.mock("node:dns/promises", () => ({ lookup: transport.lookup }));
+vi.mock("node:dns", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:dns")>();
+  return {
+    ...real,
+    promises: {
+      ...real.promises,
+      Resolver: class {
+        resolve4 = transport.resolve4;
+        cancel() {}
+      },
+    },
+  };
+});
 
 // Only the already-checked numeric peer is mapped to an isolated loopback server.
 // The real Node HTTP/TLS transport, headers and certificate checks remain active.
@@ -172,9 +184,9 @@ describe("publicRequest controlled socket integration", () => {
     receipts.length = 0;
     transport.dials.length = 0;
     transport.trustCertificate = true;
-    transport.lookup.mockReset();
-    transport.lookup.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
-    transport.lookup.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }]);
+    transport.resolve4.mockReset();
+    transport.resolve4.mockResolvedValue(["127.0.0.1"]);
+    transport.resolve4.mockResolvedValueOnce(["93.184.216.34"]);
   });
 
   afterAll(async () => {
@@ -193,12 +205,8 @@ describe("publicRequest controlled socket integration", () => {
   it("pins the checked address without a second DNS lookup and preserves HTTP Host/path", async () => {
     const response = await publicRequest(`http://assets.capture-fixture.com:${httpPort}/asset?q=1`);
     expect(await response.text()).toBe("fixture response");
-    expect(transport.lookup).toHaveBeenCalledTimes(1);
-    expect(transport.lookup).toHaveBeenCalledWith("assets.capture-fixture.com", {
-      all: true,
-      family: 4,
-      verbatim: true,
-    });
+    expect(transport.resolve4).toHaveBeenCalledTimes(1);
+    expect(transport.resolve4).toHaveBeenCalledWith("assets.capture-fixture.com");
     expect(transport.dials).toHaveLength(1);
     expect(transport.dials[0]?.hostname).toBe("93.184.216.34");
     expect(receipts).toEqual([
@@ -255,7 +263,7 @@ describe("publicRequest controlled socket integration", () => {
   });
 
   it("rejects private DNS answers before dialing or reaching a target", async () => {
-    transport.lookup.mockReset().mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+    transport.resolve4.mockReset().mockResolvedValue(["127.0.0.1"]);
     await expect(
       publicRequest(`http://assets.capture-fixture.com:${httpPort}/asset`),
     ).rejects.toThrow(/non-public/);

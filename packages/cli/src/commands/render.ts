@@ -1,6 +1,6 @@
 import { captureArtifactRevision } from "../utils/artifactCapture.js";
 import { recordRenderSuccess, registerRenderOutput } from "@hyperframes/studio-server/history";
-import { failCommand, requestCliExit } from "../utils/commandResult.js";
+import { failCommand, requestCliExit, scheduleCliExit } from "../utils/commandResult.js";
 import { defineCommand } from "citty";
 import type { Example } from "./_examples.js";
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
@@ -921,7 +921,7 @@ async function renderDocker(
   runPostRenderStep("warnIfWebmAlphaDropped", () =>
     warnIfWebmAlphaDropped(outputPath, options.format, options.quiet),
   );
-  if (options.exitAfterComplete) scheduleRenderProcessExit();
+  if (options.exitAfterComplete) scheduleCliExit();
   return { renderTimeMs: elapsed };
 }
 
@@ -1205,7 +1205,7 @@ async function executeLocalRender(
       }),
     );
   }
-  if (options.exitAfterComplete) scheduleRenderProcessExit();
+  if (options.exitAfterComplete) scheduleCliExit();
   const durationMs = job.perfSummary
     ? Math.round(job.perfSummary.compositionDurationSeconds * 1000)
     : undefined;
@@ -1217,26 +1217,6 @@ async function executeLocalRender(
     outcome,
     warnings: job.warnings.map((warning) => ({ code: warning.code, message: warning.message })),
   };
-}
-
-type UnrefableTimer = {
-  unref: () => void;
-};
-
-function isUnrefableTimer(
-  timer: ReturnType<typeof setTimeout>,
-): timer is ReturnType<typeof setTimeout> & UnrefableTimer {
-  return (
-    typeof timer === "object" &&
-    timer !== null &&
-    "unref" in timer &&
-    typeof timer.unref === "function"
-  );
-}
-
-function scheduleRenderProcessExit(): void {
-  const timer = setTimeout(() => requestCliExit(0), 100);
-  if (isUnrefableTimer(timer)) timer.unref();
 }
 
 function getMemorySnapshot() {

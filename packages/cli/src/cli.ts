@@ -98,6 +98,7 @@ import {
   CliRuntimeError,
   CliUsageError,
   consumeCommandResult,
+  outputWritten,
   registerRootExitCodeSanitizer,
   registerRootExitRequester,
   type CommandResult,
@@ -352,7 +353,10 @@ registerRootExitRequester((exitCode) => {
     exitCode,
     kind: exitCode === 0 ? "success" : "runtime_error",
     presented: true,
-  }).finally(() => process.exit(exitCode));
+  }).finally(async () => {
+    await outputWritten();
+    process.exit(exitCode);
+  });
 });
 
 registerRootExitCodeSanitizer(() => {
