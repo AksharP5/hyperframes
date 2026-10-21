@@ -81,8 +81,6 @@ async function serveBytes(
   };
 }
 
-const MiB = 1024 * 1024;
-
 function patternBytes(length: number): Buffer {
   const bytes = Buffer.alloc(length);
   for (let i = 0; i < length; i++) bytes[i] = (i * 31 + (i >> 13)) & 0xff;
@@ -286,6 +284,10 @@ describe("cloud/download", () => {
     afterEach(async () => {
       await Promise.all(servers.splice(0).map((server) => server.close()));
     });
+    // Small parts keep the split the same while moving little data: a Windows runner's loopback
+    // has carried a single connection at ~1 MB/s, past the timeout for megabyte bodies.
+    const PART = 64 * 1024;
+    const options = { partBytes: PART };
     async function serve(...args: Parameters<typeof serveBytes>) {
       const server = await serveBytes(...args);
       servers.push(server);
@@ -293,14 +295,14 @@ describe("cloud/download", () => {
     }
 
     it("splits a large file into parallel ranged requests", async () => {
-      const body = patternBytes(60 * MiB + 123);
+      const body = patternBytes(7.5 * PART + 123);
       const server = await serve(body, { honourRange: true });
       const dest = join(dir, "out.mp4");
-      const result = await downloadToFile(server.url, dest);
+      const result = await downloadToFile(server.url, dest, options);
       expect(result.bytes).toBe(body.length);
       expect(readFileSync(dest).equals(body)).toBe(true);
       expect(server.ranges).toHaveLength(8);
-      expect(server.ranges[0]).toBe(`bytes=0-${8 * MiB - 1}`);
+      expect(server.ranges[0]).toBe(`bytes=0-${PART - 1}`);
       expect(readdirSync(dir)).toEqual(["out.mp4"]);
     });
 
@@ -309,42 +311,42 @@ describe("cloud/download", () => {
         const body = patternBytes(size);
         const server = await serve(body, { honourRange: true });
         const dest = join(dir, `out-${size}.mp4`);
-        await downloadToFile(server.url, dest);
+        await downloadToFile(server.url, dest, options);
         expect(readFileSync(dest).equals(body)).toBe(true);
-        expect(server.ranges[0]).toBe(`bytes=0-${8 * MiB - 1}`);
+        expect(server.ranges[0]).toBe(`bytes=0-${PART - 1}`);
         expect(server.ranges.slice(1)).toEqual(size === 0 ? [undefined] : []);
       }
     });
 
     it("streams the whole file in one request when the server ignores Range", async () => {
-      const body = patternBytes(20 * MiB);
+      const body = patternBytes(2.5 * PART);
       const server = await serve(body, { honourRange: false });
       const dest = join(dir, "out.mp4");
-      await downloadToFile(server.url, dest);
+      await downloadToFile(server.url, dest, options);
       expect(readFileSync(dest).equals(body)).toBe(true);
-      expect(server.ranges).toEqual([`bytes=0-${8 * MiB - 1}`]);
+      expect(server.ranges).toEqual([`bytes=0-${PART - 1}`]);
     });
 
     it("resumes a range whose connection drops mid-body from the bytes it already has", async () => {
-      const body = patternBytes(50 * MiB);
-      const at = 8 * MiB + 1024;
+      const body = patternBytes(6.25 * PART);
+      const at = PART + 1024;
       const server = await serve(body, { honourRange: true, drop: { at, times: 2 } });
       const dest = join(dir, "out.mp4");
-      const result = await downloadToFile(server.url, dest);
+      const result = await downloadToFile(server.url, dest, options);
       expect(result.bytes).toBe(body.length);
       expect(readFileSync(dest).equals(body)).toBe(true);
       expect(server.ranges.filter((range) => range?.startsWith(`bytes=${at}-`))).toHaveLength(2);
     });
 
     it("keeps the previous output and leaves no staged file when one part keeps dropping", async () => {
-      const body = patternBytes(50 * MiB);
+      const body = patternBytes(6.25 * PART);
       const server = await serve(body, {
         honourRange: true,
-        drop: { at: 8 * MiB + 1024, times: Infinity },
+        drop: { at: PART + 1024, times: Infinity },
       });
       const dest = join(dir, "out.mp4");
       writeFileSync(dest, "previous render");
-      await expect(downloadToFile(server.url, dest)).rejects.toThrow(/dropped 4 times/);
+      await expect(downloadToFile(server.url, dest, options)).rejects.toThrow(/dropped 4 times/);
       expect(readFileSync(dest, "utf8")).toBe("previous render");
       expect(readdirSync(dir)).toEqual(["out.mp4"]);
     });

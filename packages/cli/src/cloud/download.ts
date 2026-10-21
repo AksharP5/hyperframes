@@ -32,6 +32,7 @@ export interface DownloadOptions {
   fetchImpl?: typeof fetch;
   /** Called with (bytes downloaded, total or undefined). */
   onProgress?: (bytes: number, total: number | undefined) => void;
+  partBytes?: number;
 }
 
 export interface DownloadResult {
@@ -54,6 +55,7 @@ export async function downloadToFile(
   options: DownloadOptions = {},
 ): Promise<DownloadResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
+  const partBytes = options.partBytes ?? PART_BYTES;
   // Cancels the sibling parts when one fails.
   const failFast = new AbortController();
   const signal = options.signal
@@ -61,7 +63,7 @@ export async function downloadToFile(
     : failFast.signal;
   const get = async (range?: string) => fetchImpl(url, { signal, headers: range ? { range } : {} });
 
-  let first = await get(`bytes=0-${PART_BYTES - 1}`);
+  let first = await get(`bytes=0-${partBytes - 1}`);
   // 416 (empty file) or a 206 without a total cannot be split: fetch it whole.
   if (first.status === 416 || (first.status === 206 && contentRangeTotal(first) === undefined)) {
     await first.body?.cancel();
@@ -118,10 +120,10 @@ export async function downloadToFile(
     };
     const parts: Promise<void>[] = [];
     if (ranged && total !== undefined) {
-      parts.push(fetchRange(0, Math.min(PART_BYTES, total) - 1, first));
-      const rest = total - PART_BYTES;
-      const size = Math.ceil(rest / Math.min(CONNECTIONS - 1, Math.ceil(rest / PART_BYTES)));
-      for (let start = PART_BYTES; start < total; start += size) {
+      parts.push(fetchRange(0, Math.min(partBytes, total) - 1, first));
+      const rest = total - partBytes;
+      const size = Math.ceil(rest / Math.min(CONNECTIONS - 1, Math.ceil(rest / partBytes)));
+      for (let start = partBytes; start < total; start += size) {
         parts.push(fetchRange(start, Math.min(start + size, total) - 1));
       }
     } else {
