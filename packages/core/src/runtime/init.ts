@@ -125,6 +125,11 @@ import { applyVariableBindings, unproxiedMediaSrc } from "./applyVariableBinding
 import { createColorGradingRuntime, type RuntimeColorGradingApi } from "./colorGrading";
 import { COLOR_GRADING_AUTHORED_OPACITY_ATTR } from "../colorGrading";
 import { initVfx, paintVfx } from "./vfx";
+import {
+  initCaptureMotionBlur,
+  paintCaptureMotionBlur,
+  releaseCaptureMotionBlurFrame,
+} from "./captureMotionBlur";
 import { TransportClock } from "./clock";
 import { WebAudioTransport } from "./webAudioTransport";
 import {
@@ -3659,6 +3664,24 @@ export function initSandboxRuntimeModular(): void {
 
   // Passes that must see scene DOM, which arrives after init: when scenes mount, or when one is
   // swapped. Resolves when caption overrides have landed.
+  // Capture motion blur (data-motion-blur="on" on the root). Its pose reads seek the timeline
+  // and adapters only: media and transport bookkeeping stay on the frame's seek.
+  function initMotionBlur(): void {
+    const root = resolveRootCompositionElement();
+    if (!root) return;
+    initCaptureMotionBlur({
+      root,
+      fps: state.canonicalFps,
+      durationSeconds: () =>
+        getSafeTimelineDurationSeconds(state.capturedTimeline, 0) ||
+        Number(root.getAttribute("data-duration")) ||
+        0,
+      timeline: () => state.capturedTimeline,
+      seek: (t, suppressEvents) => {
+        seekRootChildrenAndAdapters(state.capturedTimeline, t, { suppressEvents });
+      },
+    });
+  }
   const settleSceneDom = (): Promise<void> => {
     bindMediaMetadataListeners();
     installAssetFailureDiagnostics();
@@ -3667,6 +3690,7 @@ export function initSandboxRuntimeModular(): void {
     applyVariableBindings(document);
     // An unregistered vfx chain paints nothing and logs nothing, so re-scan the new DOM.
     initVfx(document.body, state.canonicalFps);
+    initMotionBlur();
     return captionsApplied;
   };
   if (!externalCompositionsReady) {
@@ -4012,6 +4036,7 @@ export function initSandboxRuntimeModular(): void {
       }
     };
     initVfx(document.body, state.canonicalFps);
+    initMotionBlur();
     applyFetchedCaptionOverrides(captionOverrides, captionHosts, rewindCaptionTimelines);
     releaseDetachedMedia();
     childrenBound = false;
@@ -4064,6 +4089,7 @@ export function initSandboxRuntimeModular(): void {
   });
   // Per-pixel effect chains: compile once here, repaint on every seek below.
   initVfx(document.body, state.canonicalFps);
+  initMotionBlur();
 
   const applyPlaybackRate = (nextRate: number) => {
     const parsed = Number(nextRate);
@@ -4120,6 +4146,8 @@ export function initSandboxRuntimeModular(): void {
     }
     colorGrading.redraw();
     paintVfx(state.currentTime);
+    const blurred = paintCaptureMotionBlur(state.currentTime);
+    if (blurred) registerSeekCompletion(blurred);
     postState(true);
   };
 
@@ -4172,6 +4200,8 @@ export function initSandboxRuntimeModular(): void {
       runAdapters("pause");
       syncMediaForCurrentState();
       colorGrading.redraw();
+      // Paused: back to plain DOM so Studio can select inside the composition.
+      void paintCaptureMotionBlur(state.currentTime);
       postState(true);
     },
     seek: (timeSeconds, options) => {
@@ -4232,6 +4262,8 @@ export function initSandboxRuntimeModular(): void {
       syncMediaForCurrentState();
       colorGrading.redraw();
       paintVfx(state.currentTime, { engineMode: true });
+      const blurred = paintCaptureMotionBlur(state.currentTime, { engineMode: true });
+      if (blurred) registerSeekCompletion(blurred);
       postState(true);
     },
     getTime: () => heldSeek?.time ?? clock.now(),
@@ -4340,9 +4372,15 @@ export function initSandboxRuntimeModular(): void {
     window.__hfTypegpuTime = t;
     forceDispatchSeekEvent(t);
   };
-  window.__hfWaitForSeekCompletion = waitForSeekCompletion;
+  // Engine and CLI capture wait here once the page is final (the engine's injected video frames
+  // land after renderSeek), so a blurred engine frame is captured now, not at the seek.
+  const waitForFinalFrame: typeof waitForSeekCompletion = (options) => {
+    releaseCaptureMotionBlurFrame();
+    return waitForSeekCompletion(options);
+  };
+  window.__hfWaitForSeekCompletion = waitForFinalFrame;
   runtimeCleanupCallbacks.push(() => {
-    if (window.__hfWaitForSeekCompletion === waitForSeekCompletion) {
+    if (window.__hfWaitForSeekCompletion === waitForFinalFrame) {
       delete window.__hfWaitForSeekCompletion;
     }
   });
@@ -5159,6 +5197,8 @@ export function initSandboxRuntimeModular(): void {
         state.capturedTimeline !== lastTransportSeekTimeline
       ) {
         seekTimelineAndAdapters(t, { revision: timingRevision });
+        // Playback: draw and move on; nothing waits on this frame's blur. Paused, it unwraps.
+        void paintCaptureMotionBlur(t, { playing: isPlaying });
         if (!isPlaying) pausedSeekDeferredByManualGesture = false;
       }
       if (isPlaying) {
@@ -5181,6 +5221,7 @@ export function initSandboxRuntimeModular(): void {
         }
         runAdapters("pause");
         syncMediaForCurrentState(timingRevision);
+        void paintCaptureMotionBlur(state.currentTime);
         postState(true);
         return;
       }

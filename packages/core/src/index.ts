@@ -437,3 +437,4 @@ export {
   type HfVfxParam,
   type HfVfxParamValues,
 } from "./vfx.js";
+export { PAGE_MOTION_BLUR_OFF_GLOBAL } from "./pageMotionBlur.js";

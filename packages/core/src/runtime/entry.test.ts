@@ -96,6 +96,23 @@ const neverDecodes = (clip: HTMLElement) => {
 describe("runtime entry", () => {
   afterEach(resetRuntimeGlobals);
 
+  it("starts a held capture-motion-blur frame when capture waits on the seek, after video injection", async () => {
+    const release = vi.fn();
+    vi.doMock("./captureMotionBlur", async (original) => ({
+      ...(await original<typeof import("./captureMotionBlur")>()),
+      releaseCaptureMotionBlurFrame: release,
+    }));
+    try {
+      mountRoot().appendChild(document.createElement("div"));
+      await evaluateRuntime();
+      expect(release).not.toHaveBeenCalled();
+      await window.__hfWaitForSeekCompletion?.();
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.doUnmock("./captureMotionBlur");
+    }
+  });
+
   it("drives an async frame source without a GSAP timeline and waits before capture", async () => {
     const root = mountRoot();
     root.setAttribute("data-duration", "10");
