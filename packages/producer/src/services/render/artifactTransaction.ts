@@ -42,6 +42,8 @@ const defaultFileSystem: ArtifactTransactionFileSystem = {
 export interface ArtifactDurationProbeResult {
   durationSeconds: number;
   frames?: number;
+  width?: number;
+  height?: number;
 }
 
 /**
@@ -68,6 +70,8 @@ async function defaultArtifactDurationProbe(path: string): Promise<ArtifactDurat
   return {
     durationSeconds: meta.durationSeconds,
     frames: meta.frames,
+    width: meta.width,
+    height: meta.height,
   };
 }
 
@@ -97,6 +101,9 @@ export interface ArtifactValidationExpectation {
   expectedDurationSeconds: number;
   fps?: number;
   expectedFrames?: number;
+  /** The output size the render was asked for; a route that ignores it must not publish. */
+  expectedWidth?: number;
+  expectedHeight?: number;
   toleranceSeconds?: number;
   /** Path relative to the staging directory to run the duration probe against. */
   probeTarget?: string;
@@ -122,6 +129,8 @@ export function buildArtifactExpectation(input: {
   durationSeconds: number;
   fps: number;
   expectedFrames: number | undefined;
+  width?: number;
+  height?: number;
 }): ArtifactValidationExpectation | undefined {
   if (input.outputFormat === "png-sequence" || input.outputFormat === "gif") return undefined;
   if (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0) return undefined;
@@ -129,6 +138,8 @@ export function buildArtifactExpectation(input: {
     expectedDurationSeconds: input.durationSeconds,
     fps: input.fps,
     expectedFrames: input.expectedFrames,
+    expectedWidth: input.width,
+    expectedHeight: input.height,
   };
   if (input.outputFormat !== "hls") return expectation;
   return {
@@ -239,6 +250,23 @@ function assertFrameCountWithinTolerance(
   );
 }
 
+function assertSizeMatches(
+  expected: ArtifactValidationExpectation,
+  probed: ArtifactDurationProbeResult,
+  stagingPath: string,
+): void {
+  const { expectedWidth: width, expectedHeight: height } = expected;
+  if (width === undefined || height === undefined) return;
+  if (probed.width === undefined || probed.height === undefined) return;
+  // A 4:2:0 encode pads an odd side up by one pixel.
+  const fits = (want: number, got: number): boolean => got === want || got === want + (want % 2);
+  if (fits(width, probed.width) && fits(height, probed.height)) return;
+  throw new Error(
+    `Render artifact has the wrong size: expected ${width}x${height}, ` +
+      `probed ${probed.width}x${probed.height}. Artifact: ${stagingPath}`,
+  );
+}
+
 /**
  * Stages a render beside its final destination and promotes only a validated
  * artifact. File promotion uses one atomic replacement rename, so an existing
@@ -342,6 +370,7 @@ export class ArtifactTransaction {
       // above carries the gate on its own.
       assertFrameCountWithinTolerance(expected.expectedFrames, probed.frames, probePath);
     }
+    assertSizeMatches(expected, probed, probePath);
   }
 
   private async runDurationProbe(probePath: string): Promise<ArtifactDurationProbeResult> {

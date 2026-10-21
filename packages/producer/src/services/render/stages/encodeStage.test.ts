@@ -129,6 +129,7 @@ describe("gif encode args", () => {
   it("builds the palettegen pass with diff statistics", () => {
     expect(buildGifPalettegenArgs(input)).toEqual([
       "-y",
+      "-xerror",
       "-framerate",
       "15",
       "-reinit_filter",
@@ -144,6 +145,7 @@ describe("gif encode args", () => {
   it("builds the paletteuse pass with Sierra dithering and loop count", () => {
     expect(buildGifPaletteuseArgs({ ...input, loop: 3 })).toEqual([
       "-y",
+      "-xerror",
       "-framerate",
       "15",
       "-reinit_filter",

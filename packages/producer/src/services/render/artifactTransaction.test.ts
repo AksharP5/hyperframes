@@ -291,6 +291,49 @@ describe("ArtifactTransaction", () => {
     transaction.rollback();
   });
 
+  it("rejects a video encoded at a different size than the render asked for", async () => {
+    // A 4K export of a 1080x1920 HDR project once published a 1080x1920 file as done.
+    const dir = tempDir();
+    const probe: ArtifactDurationProbe = async () => ({
+      durationSeconds: 2,
+      width: 1080,
+      height: 1920,
+    });
+    const transaction = new ArtifactTransaction(join(dir, "render.mp4"), "file", undefined, probe);
+    writeFileSync(transaction.stagingPath, "fake-mp4-bytes-that-are-non-empty");
+
+    await expect(
+      transaction.validate({
+        expectedDurationSeconds: 2,
+        expectedWidth: 2160,
+        expectedHeight: 3840,
+      }),
+    ).rejects.toThrow("expected 2160x3840, probed 1080x1920");
+
+    transaction.rollback();
+  });
+
+  it("accepts the one-pixel pad a 4:2:0 encode gives an odd side", async () => {
+    const dir = tempDir();
+    const probe: ArtifactDurationProbe = async () => ({
+      durationSeconds: 2,
+      width: 1082,
+      height: 724,
+    });
+    const transaction = new ArtifactTransaction(join(dir, "render.mp4"), "file", undefined, probe);
+    writeFileSync(transaction.stagingPath, "fake-mp4-bytes-that-are-non-empty");
+
+    await expect(
+      transaction.validate({
+        expectedDurationSeconds: 2,
+        expectedWidth: 1081,
+        expectedHeight: 724,
+      }),
+    ).resolves.toBeUndefined();
+
+    transaction.rollback();
+  });
+
   it("rejects a video whose probed frame count is far short of the captured frame count", async () => {
     // #3395 field packet frame shortfalls (148 of 300, 1240 of 1566) are
     // both well beyond the single-frame tolerance, so the frame-count check
@@ -500,6 +543,12 @@ describe("buildArtifactExpectation", () => {
         expectedFrames: 120,
       });
     }
+  });
+
+  it("carries the requested output size", () => {
+    expect(
+      buildArtifactExpectation({ ...base, outputFormat: "mp4", width: 2160, height: 3840 }),
+    ).toMatchObject({ expectedWidth: 2160, expectedHeight: 3840 });
   });
 
   it("names the video playlist and requires the master for hls", () => {

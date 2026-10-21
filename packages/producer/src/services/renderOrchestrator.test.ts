@@ -98,6 +98,20 @@ describe("resolveRenderWorkDirPrefix", () => {
       join("C:/Temp", "hf-render-"),
     );
   });
+
+  it("keeps macOS frames out of the project folder, which a sync client may be watching", () => {
+    const outputPath = join("/Users/me/Nextcloud/project", "renders", "final.mp4");
+
+    expect(resolveRenderWorkDirPrefix(outputPath, "job-id", "darwin", "/var/folders/x/T")).toBe(
+      join("/var/folders/x/T", "hf-render-"),
+    );
+  });
+
+  it("keeps Linux frames beside the output, where a container's small /tmp cannot fill", () => {
+    expect(resolveRenderWorkDirPrefix("/work/renders/final.mp4", "job-id", "linux", "/tmp")).toBe(
+      join("/work/renders", "work-job-id-"),
+    );
+  });
 });
 
 describe("captureAttemptMadeProgress", () => {
