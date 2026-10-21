@@ -38,7 +38,11 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type CaptureOptions, extractVideoFramesRange } from "@hyperframes/engine";
+import {
+  type CaptureOptions,
+  extractVideoFramesRange,
+  VideoSourceExtractionError,
+} from "@hyperframes/engine";
 import { HOST_CHROME_FAILURE_PATTERNS } from "./__test_utils__/hostChromeFailures.js";
 import { defaultLogger } from "../../logger.js";
 import { RenderQualityError } from "../renderOrchestrator.js";
@@ -730,6 +734,61 @@ describe("renderChunk() — a video shown smaller than its source", () => {
       pip: { width: 32, height: 18 },
       full: { width: 128, height: 72 },
     });
+  }, 120_000);
+});
+
+describe("renderChunk() — a video whose frames cannot be extracted", () => {
+  it("fails with the extraction's own error while the capture browsers start", async () => {
+    if (!hasChrome) {
+      console.warn(
+        "[renderChunk.test] skipping extraction-failure test — chrome-headless-shell not available",
+      );
+      return;
+    }
+    const projectDir = join(runRoot, "project-extract-fail");
+    mkdirSync(projectDir, { recursive: true });
+    const synth = spawnSync("ffmpeg", [
+      ...["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=128x72:r=30:d=2"],
+      ...["-c:v", "libx264", "-pix_fmt", "yuv420p", join(projectDir, "clip.mp4")],
+    ]);
+    if (synth.status !== 0) throw new Error(synth.stderr.toString());
+    writeFileSync(
+      join(projectDir, "index.html"),
+      // A clip over a second long, so the planner defers it to the chunks.
+      FIXTURE_HTML.replace('data-duration="0.16667"', 'data-duration="1.2"').replace(
+        "</div>",
+        '<video id="clip" src="clip.mp4" muted data-start="0" data-duration="1.2" style="width:128px;height:72px"></video></div>',
+      ),
+      "utf-8",
+    );
+    const planDir = join(runRoot, "plan-extract-fail");
+    await planV2(
+      projectDir,
+      { fps: 30, width: 160, height: 120, format: "png-sequence", chunkSize: 36 },
+      planDir,
+    );
+    const chunkDir = join(runRoot, "chunk0-extract-fail");
+    // The clip is read by URL, as cloud chunks read it, from a port nothing listens on.
+    materializePlanV2Target(planDir, { role: "chunk", chunkIndex: 0 }, chunkDir, {
+      remoteSources: { "compiled/clip.mp4": "http://127.0.0.1:1/clip.mp4" },
+    });
+
+    let caught: unknown;
+    try {
+      await renderChunk(chunkDir, 0, join(runRoot, "chunk0-extract-fail-out"));
+    } catch (error) {
+      caught = error;
+    }
+    const message = caught instanceof Error ? caught.message : String(caught);
+    if (HOST_CHROME_FAILURE_PATTERNS.test(message)) {
+      console.warn(
+        "[renderChunk.test] skipping extraction-failure test — host Chrome stack can't render:",
+        message.slice(0, 240),
+      );
+      return;
+    }
+    // The extraction's own error, not the capture stage that waited on it.
+    expect(caught).toBeInstanceOf(VideoSourceExtractionError);
   }, 120_000);
 });
 

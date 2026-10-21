@@ -124,6 +124,26 @@ describe("distributed session isolation", () => {
     expect(screenshotRetry).not.toBeNull();
     expect(screenshotRetry).not.toBe(firstAttempt);
   });
+
+  it("holds a session's first injection until its frames are extracted", async () => {
+    let failExtraction: (error: Error) => void = () => {};
+    const lookup = new Promise<ReturnType<typeof createFrameLookupTable>>((_, reject) => {
+      failExtraction = reject;
+    });
+    const factory = createChunkVideoFrameInjectorFactory(lookup);
+    const hook = factory();
+    expect(hook).not.toBeNull();
+    expect(factory()).not.toBe(hook);
+
+    let settled = false;
+    const injection = hook!({} as Parameters<NonNullable<typeof hook>>[0], 0).finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    failExtraction(new Error("ffmpeg could not read the clip"));
+    await expect(injection).rejects.toThrow("ffmpeg could not read the clip");
+  });
 });
 
 describe("shouldRetryChunkCaptureWithScreenshot", () => {
