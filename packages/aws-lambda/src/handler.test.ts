@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { LambdaClient } from "@aws-sdk/client-lambda";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -681,6 +681,89 @@ describe("handler dispatch", () => {
     expect(result.FramesEncoded).toBe(240);
     expect(result.CaptureMode).toBe("beginframe");
     expect(renderChunkMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives a chunk as many capture browsers as the function's memory can host", async () => {
+    const tmpRoot = makeTmpRoot();
+    const s3 = new FakeS3Client();
+    s3.objects.set("s3://bucket/plan.tar.gz", await makeMinimalPlanTar());
+    const renderChunkMock = mock(
+      async (
+        _planDir: string,
+        _chunkIndex: number,
+        outputChunkPath: string,
+      ): Promise<ChunkResult> => {
+        writeFileSync(outputChunkPath, Buffer.from("FAKE-MP4-CHUNK"));
+        return {
+          outputPath: outputChunkPath,
+          outputKind: "file",
+          framesEncoded: 121,
+          sha256: "0".repeat(64),
+          durationMs: 1,
+          planHashMs: 1,
+          sessionBootMs: 1,
+          captureStageMs: 1,
+          encodeStageMs: 1,
+          workers: 5,
+          captureMode: "beginframe",
+          perfPath: outputChunkPath + ".perf.json",
+        };
+      },
+    );
+    const notCalled = mock(async () => {
+      throw new Error("should not be called");
+    });
+    const renderOnce = () =>
+      handler(
+        {
+          Action: "renderChunk",
+          PlanProtocol: "v1",
+          PlanS3Uri: "s3://bucket/plan.tar.gz",
+          PlanHash: "fakehash",
+          ChunkIndex: 0,
+          ChunkOutputS3Prefix: "s3://bucket/renders/abc/",
+          Format: "mp4",
+        },
+        {
+          s3: s3 as unknown as import("@aws-sdk/client-s3").S3Client,
+          primitives: {
+            plan: notCalled as unknown as typeof import("@hyperframes/producer/distributed").plan,
+            renderChunk:
+              renderChunkMock as unknown as typeof import("@hyperframes/producer/distributed").renderChunk,
+            assemble:
+              notCalled as unknown as typeof import("@hyperframes/producer/distributed").assemble,
+          },
+          tmpRoot,
+          skipChromeResolution: true,
+        },
+      );
+    const saved = process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE;
+    const logged: string[] = [];
+    const logSpy = spyOn(console, "log").mockImplementation((line: string) => {
+      logged.push(line);
+    });
+    try {
+      delete process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE;
+      await renderOnce();
+      process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE = "10240";
+      await renderOnce();
+    } finally {
+      if (saved === undefined) delete process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE;
+      else process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE = saved;
+      logSpy.mockRestore();
+    }
+    const options = renderChunkMock.mock.calls.map((call) => (call as unknown[])[3]);
+    expect(options).toEqual([
+      { maxCaptureWorkers: undefined },
+      { maxCaptureWorkers: Math.max(1, Math.min(5, availableParallelism() - 1)) },
+    ]);
+    const captures = logged
+      .filter((line) => line.includes('"chunk_capture"'))
+      .map((line) => JSON.parse(line));
+    expect(captures).toEqual([
+      { event: "chunk_capture", chunkIndex: 0, workers: 5, captureMode: "beginframe" },
+      { event: "chunk_capture", chunkIndex: 0, workers: 5, captureMode: "beginframe" },
+    ]);
   });
 
   it("rejects renderChunk when event.PlanHash diverges from plan.json", async () => {

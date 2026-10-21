@@ -167,7 +167,7 @@ export interface ChunkResult {
   sessionBootMs: number;
   captureStageMs: number;
   encodeStageMs: number;
-  /** Capture workers used for this chunk (`calculateOptimalWorkers` result). */
+  /** Capture workers used for this chunk (`resolveChunkCaptureWorkers` result). */
   workers: number;
   /**
    * Effective engine mode used by every worker, after any browser fallback.
@@ -207,6 +207,25 @@ export interface RenderChunkOptions {
    * whole slice.
    */
   frameRange?: ChunkFrameRange;
+  /**
+   * Capture browsers the runtime can host. Raises the machine-wide sizing up to
+   * this many, one browser per 20 frames; never lowers it.
+   */
+  maxCaptureWorkers?: number;
+}
+
+/** A browser starts in about 3 s, a small share of 20 frames' capture. */
+const MIN_FRAMES_PER_CHUNK_BROWSER = 20;
+
+/** Capture browsers for a chunk: the machine-wide sizing, raised by the runtime's budget. */
+export function resolveChunkCaptureWorkers(
+  framesInChunk: number,
+  machineSized: number,
+  maxCaptureWorkers: number | undefined,
+): number {
+  if (maxCaptureWorkers === undefined) return machineSized;
+  const byFrames = Math.floor(framesInChunk / MIN_FRAMES_PER_CHUNK_BROWSER);
+  return Math.max(machineSized, Math.floor(Math.min(maxCaptureWorkers, byFrames)));
 }
 
 /** The frames a chunk renders: its slice, or a validated sub-range of it. */
@@ -238,6 +257,7 @@ export type ChunkRenderer = (
   planDir: string,
   chunkIndex: number,
   outputChunkPath: string,
+  options?: RenderChunkOptions,
 ) => Promise<ChunkResult>;
 
 interface DistributedCaptureSessionDependencies {
@@ -682,7 +702,11 @@ export async function renderChunk(
     // `PlanJson` doesn't carry the compiled hints needed to call it
     // directly. The existing adaptive-retry path reduces workers if
     // compositor contention surfaces as CDP timeouts.
-    const chunkWorkerCount = calculateOptimalWorkers(framesInChunk, undefined, cfg);
+    const chunkWorkerCount = resolveChunkCaptureWorkers(
+      framesInChunk,
+      calculateOptimalWorkers(framesInChunk, undefined, cfg),
+      options?.maxCaptureWorkers,
+    );
 
     // ── Browser + warmup ──
     let session: CaptureSession | null = null;

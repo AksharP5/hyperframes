@@ -12,7 +12,7 @@
  */
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { GetAccountSettingsCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -594,6 +594,17 @@ async function handleAudio(event: AudioEvent, deps?: HandlerDeps): Promise<Audio
 
 // ── RenderChunk ─────────────────────────────────────────────────────────────
 
+// Twice a 4K capture browser's peak memory, so half the function stays free.
+const LAMBDA_MB_PER_CAPTURE_BROWSER = 2048;
+
+/** Capture browsers this function can host: by its memory, leaving one core to Node and ffmpeg. */
+function lambdaMaxCaptureWorkers(): number | undefined {
+  const memoryMb = Number(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE);
+  if (!(memoryMb > 0)) return undefined;
+  const byMemory = Math.floor(memoryMb / LAMBDA_MB_PER_CAPTURE_BROWSER);
+  return Math.max(1, Math.min(byMemory, availableParallelism() - 1));
+}
+
 async function handleRenderChunk(
   event: RenderChunkEvent,
   deps?: HandlerDeps,
@@ -629,7 +640,15 @@ async function handleRenderChunk(
         : `chunk-${pad(event.ChunkIndex)}${formatExtension(event.Format)}`,
     );
 
-    const result: ChunkResult = await primitive(planDir, event.ChunkIndex, chunkOutputBase);
+    const result: ChunkResult = await primitive(planDir, event.ChunkIndex, chunkOutputBase, {
+      maxCaptureWorkers: lambdaMaxCaptureWorkers(),
+    });
+    logEvent({
+      event: "chunk_capture",
+      chunkIndex: event.ChunkIndex,
+      workers: result.workers,
+      captureMode: result.captureMode,
+    });
 
     const chunkUri = await uploadChunkOutput(
       s3,
@@ -677,7 +696,15 @@ async function handleRenderChunkV2(
         ? `chunk-${pad(event.ChunkIndex)}`
         : `chunk-${pad(event.ChunkIndex)}${formatExtension(event.Format)}`,
     );
-    const result = await primitive(planDir, event.ChunkIndex, chunkOutputBase);
+    const result = await primitive(planDir, event.ChunkIndex, chunkOutputBase, {
+      maxCaptureWorkers: lambdaMaxCaptureWorkers(),
+    });
+    logEvent({
+      event: "chunk_capture",
+      chunkIndex: event.ChunkIndex,
+      workers: result.workers,
+      captureMode: result.captureMode,
+    });
     const chunkUri = await uploadChunkOutput(
       s3,
       result,

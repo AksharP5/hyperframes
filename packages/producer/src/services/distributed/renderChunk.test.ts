@@ -55,6 +55,7 @@ import {
   PLAN_HASH_MISMATCH,
   renderChunk,
   RenderChunkValidationError,
+  resolveChunkCaptureWorkers,
   resolveLockedVp9CpuUsed,
   resolvePresetForLockedEncoder,
 } from "./renderChunk.js";
@@ -976,6 +977,26 @@ describe("resolvePresetForLockedEncoder", () => {
     const base = { preset: "medium", quality: 18, codec: "h264" as const, pixelFormat: "yuv420p" };
     const out = resolvePresetForLockedEncoder(base, "png-sequence");
     expect(out).toBe(base);
+  });
+});
+
+describe("resolveChunkCaptureWorkers", () => {
+  it("keeps the machine-wide sizing when the runtime sets no budget", () => {
+    expect(resolveChunkCaptureWorkers(121, 3, undefined)).toBe(3);
+  });
+
+  it("raises a chunk to the runtime's budget", () => {
+    expect(resolveChunkCaptureWorkers(121, 3, 5)).toBe(5);
+  });
+
+  it("gives each browser at least 20 frames", () => {
+    expect(resolveChunkCaptureWorkers(121, 3, 8)).toBe(6);
+    expect(resolveChunkCaptureWorkers(99, 3, 5)).toBe(4);
+  });
+
+  it("never lowers the machine-wide sizing", () => {
+    expect(resolveChunkCaptureWorkers(121, 3, 1)).toBe(3);
+    expect(resolveChunkCaptureWorkers(30, 2, 5)).toBe(2);
   });
 });
 
