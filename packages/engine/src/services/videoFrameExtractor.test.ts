@@ -2238,6 +2238,38 @@ describe.skipIf(!HAS_FFMPEG)("frame sampling at the output frame rate", () => {
       },
       60_000,
     );
+
+    it("halves frames while they still cover the box a video is shown in", async () => {
+      const firstFrameSize = async (
+        videoId: string,
+        shownBox: { width: number; height: number },
+      ) => {
+        const result = await extractVideoFramesRange(gopSource, videoId, 0, 1, {
+          fps: 30,
+          outputDir: FIXTURE_DIR,
+          format: "jpg",
+          frameRanges: [{ firstFrame: 0, frames: 1 }],
+          shownBox,
+        });
+        const [frame] = result.framePaths.values();
+        return spawnSync("ffprobe", [
+          "-v",
+          "error",
+          "-show_entries",
+          "stream=width,height",
+          "-of",
+          "csv=p=0",
+          "--",
+          frame!,
+        ])
+          .stdout.toString()
+          .trim();
+      };
+      // 64x36 source: halved as often as the box allows (even sides round up); never below the box.
+      expect(await firstFrameSize("shown-quarter", { width: 16, height: 9 })).toBe("16,10");
+      expect(await firstFrameSize("shown-third", { width: 20, height: 12 })).toBe("32,18");
+      expect(await firstFrameSize("shown-near-full", { width: 40, height: 20 })).toBe("64,36");
+    }, 30_000);
   });
 });
 
