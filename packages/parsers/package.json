@@ -124,6 +124,12 @@
       "import": "./src/ffBinaries.ts",
       "types": "./src/ffBinaries.ts"
     },
+    "./media-alpha": {
+      "bun": "./src/mediaAlpha.ts",
+      "node": "./dist/mediaAlpha.js",
+      "import": "./src/mediaAlpha.ts",
+      "types": "./src/mediaAlpha.ts"
+    },
     "./asset-resolution": {
       "bun": "./src/assetResolution.ts",
       "node": "./dist/assetResolution.js",
@@ -236,6 +242,10 @@
       "./ff-binaries": {
         "import": "./dist/ffBinaries.js",
         "types": "./dist/ffBinaries.d.ts"
+      },
+      "./media-alpha": {
+        "import": "./dist/mediaAlpha.js",
+        "types": "./dist/mediaAlpha.d.ts"
       },
       "./asset-resolution": {
         "import": "./dist/assetResolution.js",

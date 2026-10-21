@@ -23,13 +23,21 @@ const realFfmpegFilters = realFfmpeg
   : "";
 const canToneMapForReal =
   Boolean(findFfBinary("ffprobe")) && /\szscale\s/.test(realFfmpegFilters ?? "");
+const realFfmpegEncoders = realFfmpeg
+  ? spawnSync(realFfmpeg, ["-hide_banner", "-encoders"], { encoding: "utf8" }).stdout
+  : "";
+const canEncodeVpxAlphaForReal =
+  Boolean(findFfBinary("ffprobe")) &&
+  /\slibvpx\s/.test(realFfmpegEncoders ?? "") &&
+  /\slibvpx-vp9\s/.test(realFfmpegEncoders ?? "");
 
-function meanLuma(path: string, filters = ""): number {
+function meanLuma(path: string, filters = "", inputArgs: string[] = []): number {
   const stats = execFileSync(
     realFfmpeg!,
     [
       "-v",
       "error",
+      ...inputArgs,
       "-i",
       path,
       "-frames:v",
@@ -134,6 +142,7 @@ async function loadModule(
   ffmpegPath: string | undefined,
   isHdr = false,
   hdrTransfer: string | null = isHdr ? "pq" : null,
+  codecName?: string,
 ): Promise<typeof import("./proxyTranscoder.js")> {
   vi.resetModules();
   vi.doMock("node:child_process", () => {
@@ -146,7 +155,7 @@ async function loadModule(
   vi.doMock("./mediaMetadata.js", () => ({
     probeMediaMetadata: async () => ({
       kind: "video",
-      color: { isHdr, hdrTransfer },
+      color: { isHdr, hdrTransfer, codecName },
     }),
     probeFirstFrameColour: async () => ({}),
   }));
@@ -266,6 +275,57 @@ describe("resolveProxy", () => {
     succeed(calls[0]!, "fake-vp8-bytes");
     await expect(resultPromise).resolves.toBe(vp8Path);
   });
+
+  it("decodes a VP9 alpha source with libvpx-vp9 so the VP8 proxy keeps its alpha", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy } = await loadModule(spawn, FFMPEG_PATH, false, null, "vp9");
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "cutout.webm");
+    writeFileSync(sourcePath, "source-bytes");
+
+    const vp8 = resolveProxy(projectDir, sourcePath, "vp8");
+    await flush();
+    const vp8Args = calls[0]!.args;
+    expect(vp8Args.slice(vp8Args.indexOf("-i") - 2, vp8Args.indexOf("-i"))).toEqual([
+      "-c:v",
+      "libvpx-vp9",
+    ]);
+    succeed(calls[0]!, "fake-vp8-bytes");
+    await vp8;
+
+    const h264 = resolveProxy(projectDir, sourcePath, "h264");
+    await flush();
+    expect(calls[1]!.args.slice(0, calls[1]!.args.indexOf("-i"))).not.toContain("-c:v");
+    succeed(calls[1]!);
+    await h264;
+  });
+
+  it.skipIf(!canEncodeVpxAlphaForReal)(
+    "keeps a real VP9 alpha webm transparent through probe, variant and transcode",
+    async () => {
+      vi.resetModules();
+      vi.doUnmock("./mediaMetadata.js");
+      const { resolveProxy } = await import("./proxyTranscoder.js");
+      const { probeAssetCodec, proxyVariantFor } = await import("./mediaCodecMap.js");
+      const projectDir = tmpProject();
+      const sourcePath = join(projectDir, "cutout.webm");
+      // Left half fully transparent, right half opaque: mean alpha 127.5.
+      execFileSync(realFfmpeg!, [
+        ...["-v", "error", "-f", "lavfi", "-i"],
+        "testsrc2=s=64x64:d=0.2,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(X,32),0,255)'",
+        ...["-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0"],
+        ...["-metadata:s:v:0", "alpha_mode=1", sourcePath],
+      ]);
+
+      const facts = await probeAssetCodec(sourcePath);
+      expect(facts).toMatchObject({ codecName: "vp9", hasAlpha: true });
+      const proxyPath = await resolveProxy(projectDir, sourcePath, proxyVariantFor(facts!));
+      expect(proxyPath).toMatch(/\.webm$/);
+      const meanAlpha = meanLuma(proxyPath, "alphaextract,", ["-c:v", "libvpx"]);
+      expect(Math.abs(meanAlpha - 127.5)).toBeLessThan(8);
+    },
+    60_000,
+  );
 
   it("returns without spawning on a cache hit", async () => {
     const { spawn, calls } = createSpawnSpy();

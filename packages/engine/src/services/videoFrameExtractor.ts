@@ -14,6 +14,7 @@ import { createConcurrencyLimit } from "../utils/concurrencyLimit.js";
 import { parseHTML } from "linkedom";
 import { isPathInside } from "@hyperframes/parsers/asset-paths";
 import { resolveProjectRelativeSrc } from "@hyperframes/parsers/asset-resolution";
+import { alphaDecoderFor } from "@hyperframes/parsers/media-alpha";
 import {
   MEDIA_RENDER_ID_ATTR,
   isAudibleVideoElement,
@@ -1580,10 +1581,7 @@ export function codecMayHaveAlpha(codec: string | undefined): boolean {
 }
 
 export function decoderForCodec(codec: string | undefined): string {
-  const c = (codec ?? "").toLowerCase();
-  if (c === "vp9") return "libvpx-vp9";
-  if (c === "vp8") return "libvpx";
-  return c;
+  return alphaDecoderFor(codec) ?? (codec ?? "").toLowerCase();
 }
 
 export function resolveFrameFormat(

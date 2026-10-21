@@ -116,6 +116,12 @@
       "types": "./dist/ffBinaries.d.ts",
       "environments": ["bun", "node"]
     },
+    "./media-alpha": {
+      "source": "./src/mediaAlpha.ts",
+      "runtime": "./dist/mediaAlpha.js",
+      "types": "./dist/mediaAlpha.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./asset-resolution": {
       "source": "./src/assetResolution.ts",
       "runtime": "./dist/assetResolution.js",

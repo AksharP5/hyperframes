@@ -8,6 +8,7 @@ import {
   type PreviewProxyBox,
 } from "@hyperframes/core";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
+import { alphaDecoderFor } from "@hyperframes/parsers/media-alpha";
 import { probeFirstFrameColour, probeMediaMetadata } from "./mediaMetadata.js";
 import { cleanupProxyCache } from "./proxyCache.js";
 import { PROXY_VARIANT_CONFIG, type ProxyVariant } from "./mediaCodecMap.js";
@@ -444,7 +445,9 @@ async function runFfmpeg(
     : [evenScale, `format=${pixelFormat}`].join(",");
 
   return new Promise((resolvePromise, reject) => {
-    const commonArgs = ["-y", "-i", sourcePath, "-vf", videoFilter];
+    const alphaDecoder = keepsAlpha ? alphaDecoderFor(metadata.color.codecName) : null;
+    const decoderArgs = alphaDecoder ? ["-c:v", alphaDecoder] : [];
+    const commonArgs = ["-y", ...decoderArgs, "-i", sourcePath, "-vf", videoFilter];
     const h264Args = [
       "-c:v",
       "libx264",

@@ -6,7 +6,7 @@
   "@hyperframes/gcp-cloud-run": { "packed": 49412, "unpacked": 192672 },
   "@hyperframes/inspector": { "packed": 808905, "unpacked": 3645432 },
   "@hyperframes/lint": { "packed": 168745, "unpacked": 654607 },
-  "@hyperframes/parsers": { "packed": 190591, "unpacked": 831243 },
+  "@hyperframes/parsers": { "packed": 191000, "unpacked": 831243 },
   "@hyperframes/player": { "packed": 157145, "unpacked": 541601 },
   "@hyperframes/producer": { "packed": 768210, "unpacked": 2807938 },
   "@hyperframes/sdk": { "packed": 90662, "unpacked": 325069 },
