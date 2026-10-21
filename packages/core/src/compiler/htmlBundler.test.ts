@@ -3646,3 +3646,34 @@ describe("stampHfIds", () => {
     expect(logo(html)).not.toContain("data-hf-id");
   });
 });
+
+describe("emitRootCompositionVariableStyles — authored definitions", () => {
+  function emitted(authoredCss: string): string {
+    const { document } = parseHTML(
+      `<!doctype html><html><head><style>${authoredCss}</style></head>` +
+        `<body><div data-composition-id="card"></div></body></html>`,
+    );
+    emitRootCompositionVariableStyles(document, {
+      card: { accent: "blue", "accent-dark": "navy" },
+    });
+    return document.querySelector("style[data-hf-composition-variables]")?.textContent ?? "";
+  }
+
+  it("leaves a variable the stylesheet defines, whatever space sits before its colon", () => {
+    for (const authored of [
+      ":root{--accent:red}",
+      ":root { --accent : red }",
+      ":root {\n  --accent\n  : red }",
+    ]) {
+      const css = emitted(authored);
+      expect(css).not.toContain("--accent:");
+      expect(css).toContain("--accent-dark: navy");
+    }
+  });
+
+  it("still emits a variable whose name only begins a longer authored one, or is only read", () => {
+    const css = emitted(":root { --accent-dark: black; } .badge { color: var(--accent); }");
+    expect(css).toContain("--accent: blue");
+    expect(css).not.toContain("--accent-dark");
+  });
+});

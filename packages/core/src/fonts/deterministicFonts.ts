@@ -1886,8 +1886,13 @@ function extractGoogleFontsText(html: string): string | undefined {
   // Intentional over-approximation: raw html includes base64, scripts, and
   // class names, but they collapse in the Set and the budget gate catches bloat.
   const uniqueCharacters = new Set<string>();
-  for (const character of new Set([...Array.from(html), ...Array.from(decodedBodyText)])) {
-    addCaseClosure(uniqueCharacters, character, locales);
+  const seen = new Set<string>();
+  for (const text of [html, decodedBodyText]) {
+    for (const character of text) {
+      if (seen.has(character)) continue;
+      seen.add(character);
+      addCaseClosure(uniqueCharacters, character, locales);
+    }
   }
 
   if (hasTextTransformKeyword(html, FULL_WIDTH_KEYWORD_RE)) addFullwidthVariants(uniqueCharacters);
