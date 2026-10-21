@@ -234,10 +234,6 @@ export default defineCommand({
     });
     validateDryRunSource(project, args["dry-run"] ?? false);
 
-    // 4k supersampling runs through the alpha-incompatible screenshot path;
-    // reject the combination client-side instead of failing mid-render.
-    validateResolutionFormatCombo(resolution, format);
-
     // Aspect ratio is derived from the composition's authored dimensions: for
     // a local dir we parse the entry HTML and auto-detect, so the user rarely
     // needs --aspect-ratio at all. When they DO pass it, we validate it
@@ -496,25 +492,6 @@ export function resolveAspectRatioForSubmit(
 
   logDetection(asJson, summarizeDetection(detection, entryRelative));
   return detection.kind === "matched" ? detection.aspectRatio : undefined;
-}
-
-/**
- * 4k output is produced by supersampling through the screenshot capture path,
- * which doesn't support an alpha channel. webm/mov carry alpha, so the
- * combination can't be satisfied — reject it before upload.
- */
-export function validateResolutionFormatCombo(
-  resolution: "1080p" | "4k" | undefined,
-  format: "mp4" | "webm" | "mov" | undefined,
-): void {
-  if (resolution === "4k" && (format === "webm" || format === "mov")) {
-    errorBox(
-      "Unsupported combination",
-      `--resolution 4k cannot be combined with --format ${format}.`,
-      "The alpha (webm/mov) capture path doesn't support 4k supersampling. Render 4k as mp4, or render alpha at composition resolution.",
-    );
-    failCommand();
-  }
 }
 
 const ASPECT_FALLBACK_HINT =

@@ -9,7 +9,6 @@ import {
   assertArchiveFits,
   resolveAspectRatioForSubmit,
   validateDryRunSource,
-  validateResolutionFormatCombo,
   type ProjectInputSource,
 } from "./render.js";
 import { CliRuntimeError } from "../../utils/commandResult.js";
@@ -35,19 +34,6 @@ function writeComposition(width: number, height: number): string {
   );
   return dir;
 }
-
-describe("validateResolutionFormatCombo", () => {
-  it("rejects 4k + webm and 4k + mov", () => {
-    expect(() => validateResolutionFormatCombo("4k", "webm")).toThrow(CliRuntimeError);
-    expect(() => validateResolutionFormatCombo("4k", "mov")).toThrow(CliRuntimeError);
-  });
-
-  it("allows 4k + mp4 and 1080p + any format", () => {
-    expect(() => validateResolutionFormatCombo("4k", "mp4")).not.toThrow();
-    expect(() => validateResolutionFormatCombo("1080p", "webm")).not.toThrow();
-    expect(() => validateResolutionFormatCombo(undefined, undefined)).not.toThrow();
-  });
-});
 
 describe("validateDryRunSource", () => {
   it("accepts a local directory and rejects already-uploaded sources", () => {

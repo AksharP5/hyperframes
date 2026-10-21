@@ -792,6 +792,70 @@ describe("renderChunk() — a video whose frames cannot be extracted", () => {
   }, 120_000);
 });
 
+describe("renderChunk() — an alpha format at a larger output resolution", () => {
+  it("supersamples a transparent composition and keeps its alpha", async () => {
+    if (!hasChrome) {
+      console.warn(
+        "[renderChunk.test] skipping alpha supersample test — chrome-headless-shell not available",
+      );
+      return;
+    }
+    const projectDir = join(runRoot, "project-alpha-supersample");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!doctype html><html><body style="margin:0;background:transparent">
+  <div data-composition-id="root" data-no-timeline data-width="320" data-height="180" data-duration="0.1">
+    <div style="position:absolute;left:80px;top:45px;width:160px;height:90px;background:#3a7"></div>
+  </div></body></html>`,
+      "utf-8",
+    );
+    const planDir = join(runRoot, "plan-alpha-supersample");
+    await planV2(
+      projectDir,
+      {
+        fps: 30,
+        width: 320,
+        height: 180,
+        format: "mov",
+        chunkSize: 30,
+        outputResolution: "landscape",
+      },
+      planDir,
+    );
+    const chunkDir = join(runRoot, "chunk0-alpha-supersample");
+    materializePlanV2Target(planDir, { role: "chunk", chunkIndex: 0 }, chunkDir);
+    const out = join(runRoot, "chunk0-alpha-supersample.mov");
+    try {
+      await renderChunk(chunkDir, 0, out);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!HOST_CHROME_FAILURE_PATTERNS.test(message)) throw err;
+      console.warn(
+        "[renderChunk.test] skipping alpha supersample test — host Chrome stack can't render:",
+        message.slice(0, 240),
+      );
+      return;
+    }
+    const probe = spawnSync("ffprobe", [
+      ...["-v", "error", "-select_streams", "v:0"],
+      ...["-show_entries", "stream=width,height,pix_fmt", "-of", "csv=p=0", "--", out],
+    ]);
+    expect(probe.stdout.toString().trim()).toMatch(/^1920,1080,yuva/);
+    const frame = spawnSync(
+      "ffmpeg",
+      [
+        ...["-v", "error", "-i", out, "-frames:v", "1"],
+        ...["-vf", "format=rgba", "-f", "rawvideo", "-"],
+      ],
+      { maxBuffer: 1920 * 1080 * 4 },
+    ).stdout;
+    const alphaAt = (x: number, y: number) => frame[(y * 1920 + x) * 4 + 3];
+    expect(alphaAt(10, 10)).toBe(0);
+    expect(alphaAt(960, 540)).toBe(255);
+  }, 120_000);
+});
+
 describe("renderChunk() — frameRange", () => {
   // A box sliding across the frame, so every frame differs and a misplaced,
   // dropped or repeated frame changes the assembled output.
