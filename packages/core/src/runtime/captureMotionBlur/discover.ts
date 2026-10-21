@@ -3,13 +3,18 @@
  *
  * One scan: candidates are elements whose inline style changes or that a CSS / WAAPI animation
  * moves; they must reach MIN_SPEED px/frame outside any 3D context (the redraw is 2D), and only
- * the outermost of nested candidates is kept.
+ * the outermost of nested candidates is kept. A large element that is see-through while it moves
+ * (a sweep, a light leak) is no mover: its crop would carry the scene beneath it along its path.
  */
 
 import { isHtmlElement } from "../domRealm";
+import { individualIs3d } from "./pose";
 
 /** Under this peak speed (px per frame) a smear is invisible, so the element stays sharp. */
 const MIN_SPEED = 2;
+
+/** A box this share of the scene or more holds other content, whatever sits in it. */
+const LARGE_SHARE = 0.5;
 
 /** Scan resolution: at most this many timeline samples, however long the composition. */
 const SCAN_STEPS = 240;
@@ -56,7 +61,8 @@ function in3d(el: Element, scene: Element): boolean {
       cs.transform.startsWith("matrix3d") ||
       cs.transformStyle === "preserve-3d" ||
       cs.perspective !== "none" ||
-      (cs.offsetPath ?? "none") !== "none"
+      (cs.offsetPath ?? "none") !== "none" ||
+      individualIs3d(cs)
     ) {
       return true;
     }
@@ -77,6 +83,61 @@ function pageAnimated(scene: Element): Set<HTMLElement> {
       out.add(target);
   }
   return out;
+}
+
+// Alpha of a computed colour (`rgba(r, g, b, a)` or `rgb(r g b / a)`); 1 when it has none.
+function alphaOf(color: string): number {
+  const m = /^rgba\(.*,\s*([\d.]+)\)$/.exec(color) ?? /\/\s*([\d.]+)(%?)\s*\)$/.exec(color);
+  if (!m) return 1;
+  return m[2] ? Number(m[1]) / 100 : Number(m[1]);
+}
+
+type Bitmap = HTMLImageElement | HTMLCanvasElement;
+
+const isBitmap = (el: HTMLElement): el is Bitmap => el.tagName === "IMG" || el.tagName === "CANVAS";
+
+const ALPHA_PROBE = 32;
+
+/** Whether any pixel of a bitmap is not fully opaque; an undecoded or unreadable one counts. */
+function bitmapHasAlpha(el: Bitmap): boolean {
+  if ("naturalWidth" in el && !(el.complete && el.naturalWidth > 0)) return true;
+  try {
+    const probe = el.ownerDocument.createElement("canvas");
+    probe.width = probe.height = ALPHA_PROBE;
+    const ctx = probe.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(el, 0, 0, ALPHA_PROBE, ALPHA_PROBE);
+    const { data } = ctx.getImageData(0, 0, ALPHA_PROBE, ALPHA_PROBE);
+    for (let i = 3; i < data.length; i += 4) if ((data[i] ?? 0) < 255) return true;
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** Whether the element, on screen right now, lets what is beneath its box show through. */
+function seesThrough(el: HTMLElement, scene: Element, hasAlpha: Map<Bitmap, boolean>): boolean {
+  let alpha = 1;
+  for (let n: Element | null = el; n && n !== scene; n = n.parentElement) {
+    alpha *= parseFloat(getComputedStyle(n).opacity);
+  }
+  if (alpha < 0.05) return false;
+  if (alpha < 0.99) return true;
+  if (isBitmap(el)) {
+    if (!hasAlpha.has(el)) hasAlpha.set(el, bitmapHasAlpha(el));
+    return hasAlpha.get(el) === true;
+  }
+  return !/^(VIDEO|PICTURE)$/.test(el.tagName) && paintSeesThrough(el);
+}
+
+function paintSeesThrough(el: HTMLElement): boolean {
+  const cs = getComputedStyle(el);
+  if (alphaOf(cs.backgroundColor) >= 0.99) return false;
+  if (cs.backgroundImage === "none") return true;
+  return [...cs.backgroundImage.matchAll(/rgba\([^)]*,\s*([\d.]+)\)/g)].some(
+    (m) => Number(m[1]) < 0.99,
+  );
 }
 
 /** How far a box's farthest-moving edge travelled between two reads; 0 when either is empty. */
@@ -101,6 +162,10 @@ export function discoverMovers({ scene, durationSeconds, fps, seek }: DiscoverOp
   const framesPerStep = frames / steps;
   const fast = new Set<HTMLElement>();
   const threeD = new Set<HTMLElement>();
+  const seeThrough = new Set<HTMLElement>();
+  const alphaCache = new Map<Bitmap, boolean>();
+  const sceneRect = scene.getBoundingClientRect();
+  const largeArea = sceneRect.width * sceneRect.height * LARGE_SHARE;
   let prev: Array<DOMRect | undefined> | null = null;
 
   for (let i = 0; i <= steps; i++) {
@@ -111,14 +176,25 @@ export function discoverMovers({ scene, durationSeconds, fps, seek }: DiscoverOp
       if (!dynamic.has(el) && styleKey(el) === first[j]) return;
       dynamic.add(el);
       rects[j] = el.getBoundingClientRect();
-      if (edgeShift(prev?.[j], rects[j]) / framesPerStep >= MIN_SPEED) fast.add(el);
+      if (edgeShift(prev?.[j], rects[j]) / framesPerStep < MIN_SPEED) return;
+      fast.add(el);
+      const box = rects[j];
+      if (
+        box &&
+        largeArea > 0 &&
+        box.width * box.height >= largeArea &&
+        seesThrough(el, scene, alphaCache)
+      )
+        seeThrough.add(el);
     });
     // Style reads up the chain are the costly part; every 10th step is enough to see a 3D turn.
     if (i % 10 === 0 || i === steps) for (const el of fast) if (in3d(el, scene)) threeD.add(el);
     prev = rects;
   }
 
-  const candidates = all.filter((el) => fast.has(el) && !threeD.has(el) && !optedOut(el, scene));
+  const candidates = all.filter(
+    (el) => fast.has(el) && !threeD.has(el) && !seeThrough.has(el) && !optedOut(el, scene),
+  );
   const movers = candidates.filter((el) => !candidates.some((o) => o !== el && o.contains(el)));
   return { movers, dynamic };
 }

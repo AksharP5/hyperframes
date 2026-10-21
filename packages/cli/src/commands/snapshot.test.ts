@@ -14,13 +14,15 @@ const snapshotState = vi.hoisted(() => ({
   seek: vi.fn(async (_page: unknown, _time: number, _options?: unknown): Promise<void> => {
     throw new Error("seek reached");
   }),
+  settle: vi.fn(async (_page: unknown, _options?: unknown): Promise<void> => undefined),
   closeServer: vi.fn(async () => undefined),
 }));
 
 vi.mock("../capture/captureCompositionFrame.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../capture/captureCompositionFrame.js")>()),
   openSettledCompositionPage: snapshotState.openSettledPage,
-  seekCompositionTimeline: snapshotState.seek,
+  seekCompositionTimelineOnly: snapshotState.seek,
+  settleCompositionSeek: snapshotState.settle,
 }));
 
 vi.mock("../utils/staticProjectServer.js", () => ({
@@ -187,6 +189,57 @@ describe("snapshot --at seeks", () => {
       expect(close).toHaveBeenCalled();
     } finally {
       log.mockRestore();
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("snapshot video overlays and the blurred frame", () => {
+  // The runtime draws a blurred frame when the seek settles, so the video <img> overlays must
+  // be in by then (the engine injects before it waits, too).
+  it("settles the seek only after the video overlays were read and injected", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-snapshot-blur-order-"));
+    writeFileSync(
+      join(project, "index.html"),
+      `<html><body><div data-composition-id="main" data-width="640" data-height="360" data-start="0" data-duration="3" data-motion-blur="on"><div class="clip" data-start="0" data-duration="3">Visible</div></div></body></html>`,
+    );
+    const log: string[] = [];
+    let calls = 0;
+    const evaluate = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) return { loaded: [], errored: [], unused: [] };
+      if (calls === 2) return 3;
+      if (calls === 3) return true;
+      if (calls === 4) {
+        log.push("read videos");
+        return [];
+      }
+      return undefined;
+    });
+    snapshotState.openSettledPage.mockResolvedValueOnce({
+      browser: { close: vi.fn(async () => undefined) },
+      page: { evaluate },
+      renderReadyTimedOut: false,
+    });
+    snapshotState.seek.mockReset();
+    snapshotState.seek.mockImplementation(async () => {
+      log.push("seek");
+    });
+    snapshotState.settle.mockClear();
+    snapshotState.settle.mockImplementation(async () => {
+      log.push("settle");
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        snapshotCommand.run?.({
+          args: { dir: project, at: "1", end: false, output: join(project, "out") },
+        } as never),
+      ).rejects.toBeDefined();
+      expect(log).toEqual(["seek", "read videos", "settle"]);
+    } finally {
+      logSpy.mockRestore();
       rmSync(project, { recursive: true, force: true });
     }
   });

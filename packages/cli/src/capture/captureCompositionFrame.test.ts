@@ -16,6 +16,8 @@ import {
   resolveCropRegion,
   runFfmpegOnce,
   seekCompositionTimeline,
+  seekCompositionTimelineOnly,
+  settleCompositionSeek,
   waitForRuntimeReady,
   type CompositionSeekPage,
 } from "./captureCompositionFrame.js";
@@ -114,6 +116,18 @@ describe("seekCompositionTimeline", () => {
     // Post-seek font settle: a seek can reveal glyphs whose unicode-range
     // subsets only start loading after the next layout (CJK snapshot reports).
     expect(evaluate).toHaveBeenNthCalledWith(4, expect.any(Function), { ms: 500, frames: 1 });
+  });
+
+  it("can seek without finishing the frame, so overlays land before a blurred frame is drawn", async () => {
+    const { page, evaluate } = fakeSeekPage();
+
+    await seekCompositionTimelineOnly(page, 1.25);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(evaluate).toHaveBeenNthCalledWith(1, expect.any(Function), 1.25, false, false, false);
+
+    await settleCompositionSeek(page);
+    expect(evaluate).toHaveBeenNthCalledWith(2, expect.any(Function), { videoFrames: true });
+    expect(evaluate).toHaveBeenCalledTimes(4);
   });
 
   it("waitForFontsMs: 0 disables the post-seek font wait", async () => {
@@ -285,7 +299,7 @@ describe("seekCompositionTimeline", () => {
     }).then(() => {
       settled = true;
     });
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(evaluateCall).toBe(2);
     expect(settled).toBe(false);
     completeGpu?.();

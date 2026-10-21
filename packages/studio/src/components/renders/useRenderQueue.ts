@@ -10,6 +10,13 @@ import { ffmpegInstallMessage, useFfmpegStatus } from "./useFfmpegStatus";
 import { requestStudioFeedback, type FeedbackContext } from "../feedback/feedbackTrigger";
 import { studioApiFetch } from "../../utils/studioApiFetch";
 
+// WYSIWYG: the preview iframe runs in this browser, so a render blurs only if this one can.
+function canPreviewMotionBlur(): boolean {
+  const ctx = globalThis.CanvasRenderingContext2D?.prototype;
+  if (!ctx || typeof document === "undefined") return false;
+  return "drawElementImage" in ctx && "requestPaint" in document.createElement("canvas");
+}
+
 export interface RenderJob {
   id: string;
   status: "rendering" | "complete" | "failed" | "cancelled";
@@ -238,10 +245,12 @@ export function useRenderQueue(
         gpu?: boolean;
         telemetryDistinctId?: string;
         telemetryOptOut?: boolean;
+        previewMotionBlur: boolean;
       } = {
         fps,
         quality,
         format,
+        previewMotionBlur: canPreviewMotionBlur(),
       };
       // The id is MINTED by getAnonymousId(), so calling it unconditionally
       // created a telemetry identity for a profile that had opted out — and

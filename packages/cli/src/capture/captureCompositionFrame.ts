@@ -511,6 +511,16 @@ export async function seekCompositionTimeline(
   timeSeconds: number,
   options: SeekCompositionTimelineOptions = {},
 ): Promise<void> {
+  await seekCompositionTimelineOnly(page, timeSeconds, options);
+  await settleCompositionSeek(page, options);
+}
+
+/** The seek alone; `settleCompositionSeek` must follow, which is what finishes a blurred frame. */
+export async function seekCompositionTimelineOnly(
+  page: CompositionSeekPage,
+  timeSeconds: number,
+  options: SeekCompositionTimelineOptions = {},
+): Promise<void> {
   if (options.waitForPreferredSeekTargetMs !== undefined) {
     await waitForPreferredSeekTarget(page, options.waitForPreferredSeekTargetMs);
   }
@@ -522,7 +532,12 @@ export async function seekCompositionTimeline(
     options.exactTime === true,
     options.skipWebglDraws === true,
   );
+}
 
+export async function settleCompositionSeek(
+  page: CompositionSeekPage,
+  options: SeekCompositionTimelineOptions = {},
+): Promise<void> {
   await page.evaluate(
     async (barrier: SeekBarrierOptions) => {
       const waitForCompletion = Reflect.get(window, "__hfWaitForSeekCompletion");

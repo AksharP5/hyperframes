@@ -40,6 +40,7 @@ import {
   resolveMotionBlurPlan,
   type MotionBlurPlan,
 } from "./motionBlur.js";
+import { installPageMotionBlur } from "./pageMotionBlur.js";
 
 // ── Extracted modules ───────────────────────────────────────────────────────
 import {
@@ -1509,6 +1510,7 @@ async function constructCaptureSession(
       }
     }, variablesJson);
   }
+  await installPageMotionBlur(page, options);
   const browserVersion = await browser.version();
   const sessionOptions = resolveCaptureSessionOptions(options, browserVersion);
   const expectedMajor = config?.expectedChromiumMajor;
@@ -3434,6 +3436,7 @@ export async function createStaticVerificationPage(session: CaptureSession): Pro
           JSON.parse(json);
       }, variablesJson);
     }
+    await installPageMotionBlur(page, session.options);
     await page.setViewport({
       width: session.options.width,
       height: session.options.height,

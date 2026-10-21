@@ -31,6 +31,8 @@ vi.mock("../capture/captureCompositionFrame.js", async (importOriginal) => ({
     renderReadyTimedOut: false,
   })),
   seekCompositionTimeline: capture.seek,
+  seekCompositionTimelineOnly: capture.seek,
+  settleCompositionSeek: vi.fn(async () => undefined),
 }));
 
 vi.mock("../utils/staticProjectServer.js", () => ({

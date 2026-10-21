@@ -927,6 +927,29 @@ describe("runProbeStage — render variable threading", () => {
   });
 });
 
+describe("runProbeStage — page motion blur", () => {
+  // The probe session is reused for capture, so it must carry the render's "off" like any session.
+  it("passes pageMotionBlur to the probe session so a reused session installs the off global", async () => {
+    capturedOptions.length = 0;
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({ stageForceScreenshot: false });
+    input.job.config.pageMotionBlur = "off";
+
+    await runProbeStage(input);
+
+    expect(capturedOptions[0]).toMatchObject({ pageMotionBlur: "off" });
+  });
+
+  it("leaves pageMotionBlur unset when the render does not ask for off", async () => {
+    capturedOptions.length = 0;
+    const { runProbeStage } = await import("./probeStage.js");
+
+    await runProbeStage(makeProbeInput({ stageForceScreenshot: false }));
+
+    expect(capturedOptions[0]).not.toHaveProperty("pageMotionBlur", "off");
+  });
+});
+
 describe("runProbeStage — capture jpeg quality", () => {
   // A sequential disk render reuses this session for every frame, so its quality is the render's.
   for (const [preset, expected] of [

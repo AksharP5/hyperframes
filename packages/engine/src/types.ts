@@ -171,6 +171,7 @@ export interface CaptureOptions {
    * screenshot capture mode; see `services/motionBlur.ts`.
    */
   motionBlur?: MotionBlurOptions;
+  pageMotionBlur?: "off";
   deviceScaleFactor?: number;
   /**
    * Opt into Chrome's capture-beyond-viewport screenshot path. Leave undefined

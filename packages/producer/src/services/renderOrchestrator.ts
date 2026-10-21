@@ -396,6 +396,7 @@ export interface RenderConfig {
    * and JPEG samples would be averaged after a lossy quantization.
    */
   motionBlur?: MotionBlurOptions;
+  pageMotionBlur?: "off";
   workers?: number;
   useGpu?: boolean;
   debug?: boolean;
@@ -3055,6 +3056,7 @@ async function executeRenderPipeline(input: {
         log,
         assertNotAborted,
         variables: job.config.variables,
+        pageMotionBlur: job.config.pageMotionBlur,
       }),
     );
     let compiled = compileResult.compiled;
@@ -3495,6 +3497,7 @@ async function executeRenderPipeline(input: {
       variables: job.config.variables,
       deviceScaleFactor,
       motionBlur: job.config.motionBlur,
+      pageMotionBlur: job.config.pageMotionBlur,
       ...(videoCaptureBeyondViewport !== undefined
         ? { captureBeyondViewport: videoCaptureBeyondViewport }
         : {}),

@@ -185,6 +185,7 @@ export interface StudioApiAdapter {
      * for a user who had opted out, under the CLI's own policy.
      */
     telemetryOptOut?: boolean;
+    pageMotionBlur?: "off";
     /**
      * Optional output resolution preset. See `resolveDeviceScaleFactor` in
      * the producer for the integer-scale + aspect + HDR constraints.

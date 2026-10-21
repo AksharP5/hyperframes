@@ -1316,6 +1316,26 @@ describe("resolveRenderWorkerCount", () => {
     expect(log.warn).toHaveBeenCalledOnce();
   });
 
+  it("does not pin a capture-motion-blur page to one worker", () => {
+    const log = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
+
+    const workers = resolveRenderWorkerCount(
+      900,
+      4,
+      cfg,
+      {
+        hasShaderTransitions: false,
+        renderModeHints: {
+          recommendScreenshot: true,
+          reasons: [{ code: "captureMotionBlur", message: "data-motion-blur" }],
+        },
+      },
+      log,
+    );
+
+    expect(workers).toBe(4);
+  });
+
   // fallow-ignore-next-line code-duplication
   it("pins to 1 worker in low-memory mode when no explicit --workers is set", () => {
     const log = {

@@ -642,6 +642,7 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
             ...(opts.videoFrameFormat ? { videoFrameFormat: opts.videoFrameFormat } : {}),
             ...(opts.hdrMode ? { hdrMode: opts.hdrMode } : {}),
             ...(opts.useGpu ? { useGpu: true } : {}),
+            ...(opts.pageMotionBlur ? { pageMotionBlur: opts.pageMotionBlur } : {}),
           });
           renderJob = job;
           const onProgress = (j: { progress: number; currentStage?: string }) => {

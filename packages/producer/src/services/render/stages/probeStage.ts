@@ -384,6 +384,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
         variables: job.config.variables,
         deviceScaleFactor,
         motionBlur,
+        pageMotionBlur: job.config.pageMotionBlur,
         requiresWebGpu: compositionRequiresWebGpu(compiled.html),
         subTimelineWaitMemo,
       };
