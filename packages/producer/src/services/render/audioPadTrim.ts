@@ -412,7 +412,6 @@ async function enforceAacTruePeak(input: EnforceAacTruePeakInput): Promise<{
   try {
     scratchDir = mkdtempSync(join(dirname(input.audioPath), ".true-peak-"));
     const correctedPath = join(scratchDir, "audio.m4a");
-    const correctionTargetDbfs = AAC_DELIVERY_TRUE_PEAK_DBFS - AAC_TRUE_PEAK_CORRECTION_HEADROOM_DB;
     const measurements: string[] = [];
     let attenuationDb = 0;
     let measuredPath = input.audioPath;
@@ -431,9 +430,10 @@ async function enforceAacTruePeak(input: EnforceAacTruePeakInput): Promise<{
       }
       if (pass === MAX_TRUE_PEAK_CORRECTION_PASSES) break;
 
-      // Aim below the acceptance ceiling because this correction itself is
-      // another lossy AAC encode and can regenerate content-dependent peaks.
-      attenuationDb += correctionTargetDbfs - truePeakDbfs;
+      // Aim below the ceiling, twice as far each pass: the correction is another lossy AAC encode,
+      // whose peak can stall or rise over a few dB of attenuation instead of falling dB for dB.
+      const headroomDb = AAC_TRUE_PEAK_CORRECTION_HEADROOM_DB * 2 ** pass;
+      attenuationDb += AAC_DELIVERY_TRUE_PEAK_DBFS - headroomDb - truePeakDbfs;
       const result = await input.encode(
         input.audioPath,
         correctedPath,

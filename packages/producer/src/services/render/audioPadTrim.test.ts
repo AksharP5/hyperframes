@@ -356,8 +356,8 @@ describe("padOrTrimAudioToVideoFrameCount", () => {
       const result = await padOrTrimAudioToVideoFrameCount(input);
 
       expect(result.success, result.error).toBe(true);
-      expect(corrections).toEqual([-1.5, -2.4, -2.94]);
-      expect(result.audioLoweredDb).toBe(2.94);
+      expect(corrections).toEqual([-1.5, -2.9]);
+      expect(result.audioLoweredDb).toBe(2.9);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -377,8 +377,55 @@ describe("padOrTrimAudioToVideoFrameCount", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("pass 0: 0.000 dBFS at 0.000 dB attenuation");
     expect(result.error).toContain("pass 1: -0.400 dBFS at -1.500 dB attenuation");
-    expect(result.error).toContain("pass 2: -0.600 dBFS at -2.600 dB attenuation");
-    expect(result.error).toContain("pass 3: -0.800 dBFS at -3.500 dB attenuation");
+    expect(result.error).toContain("pass 2: -0.600 dBFS at -3.100 dB attenuation");
+    expect(result.error).toContain("pass 3: -0.800 dBFS at -5.500 dB attenuation");
+  });
+
+  it("gets under the ceiling when the AAC peak stalls as attenuation grows", async () => {
+    // A failed render's measured peaks (pass 0..3), then the peak falling dB for dB again.
+    const stalled: [number, number][] = [
+      [0, 1.9],
+      [-3.4, -0.5],
+      [-4.4, -0.6],
+      [-5.3, -0.6],
+    ];
+    const peakAt = (db: number) => {
+      const i = stalled.findIndex(([at]) => at <= db);
+      if (i === -1) return -0.6 + (db + 5.3);
+      if (i === 0) return stalled[0]![1];
+      const [[a, pa], [b, pb]] = [stalled[i - 1]!, stalled[i]!];
+      return pa + ((pb - pa) * (db - a)) / (b - a);
+    };
+    const dir = mkdtempSync(join(tmpdir(), "hf-aac-stall-"));
+    const corrections: number[] = [];
+    let attenuationDb = 0;
+    const { input } = harness({
+      video: { frameCount: 90, fpsNum: 30, fpsDen: 1 },
+      audio: { durationSeconds: 3 },
+    });
+    input.videoPath = join(dir, "video.mp4");
+    input.audioPath = join(dir, "source.m4a");
+    input.outputPath = join(dir, "normalized.m4a");
+    input.probeAudioTruePeakDbfs = async () => peakAt(attenuationDb);
+    input.encodeAac = async (_input, output, _durationSeconds, filter) => {
+      const volume = /^volume=(-?[\d.]+)dB/.exec(filter);
+      if (volume) {
+        attenuationDb = Number(volume[1]);
+        corrections.push(attenuationDb);
+      }
+      writeFileSync(output, "");
+      return { success: true };
+    };
+
+    try {
+      const result = await padOrTrimAudioToVideoFrameCount(input);
+
+      expect(result.success, result.error).toBe(true);
+      expect(corrections).toEqual([-3.4, -4.9, -7.3]);
+      expect(result.audioLoweredDb).toBe(7.3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
