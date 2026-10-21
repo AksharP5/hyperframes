@@ -127,20 +127,24 @@ export interface StitchResult {
   downloadedBytes: number;
 }
 
-/** One faststart mp4 at `destUri` from the stitched mp4 chunks at `chunkUris`, in order. */
+/** One faststart mp4 at `destUri` from the stitched mp4 chunks at `chunkUris`, plus `audioUri`'s track when given. */
 export async function stitchMp4InS3(
   s3: S3Client,
   chunkUris: readonly string[],
   destUri: string,
-  minPartBytes = MIN_PART_BYTES,
+  { audioUri, minPartBytes = MIN_PART_BYTES }: { audioUri?: string; minPartBytes?: number } = {},
 ): Promise<StitchResult> {
+  const sourceUris = audioUri ? [audioUri, ...chunkUris] : chunkUris;
   const layouts = await Promise.all(
-    chunkUris.map((uri) => readMp4Layout((start, end) => getRange(s3, uri, start, end))),
+    sourceUris.map((uri) => readMp4Layout((start, end) => getRange(s3, uri, start, end))),
   );
+  const header = audioUri
+    ? buildStitchedHeader(layouts.slice(1), layouts[0])
+    : buildStitchedHeader(layouts);
   const segments: Segment[] = [
-    { bytes: buildStitchedHeader(layouts) },
+    { bytes: header },
     ...layouts.map((layout, i) => ({
-      uri: chunkUris[i]!,
+      uri: sourceUris[i]!,
       start: layout.payloadStart,
       end: layout.payloadEnd,
     })),

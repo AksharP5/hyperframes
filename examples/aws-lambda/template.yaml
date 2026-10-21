@@ -324,6 +324,7 @@ Resources:
               MaxChunkConcurrency.$: "$.Payload.MaxChunkConcurrency"
               Format.$: "$.Payload.Format"
               HasAudio.$: "$.Payload.HasAudio"
+              SeparateAudio.$: "$.Payload.SeparateAudio"
             ResultPath: $.Plan
             Retry:
               - ErrorEquals:
@@ -395,7 +396,7 @@ Resources:
             Choices:
               - Variable: $.Plan.PlanProtocol
                 StringEquals: v2
-                Next: RenderChunksV2
+                Next: RenderV2
             Default: RenderChunks
 
           RenderChunks:
@@ -511,74 +512,151 @@ Resources:
                 MaxDelaySeconds: 60
             End: true
 
-          RenderChunksV2:
-            Type: Map
-            Label: RenderChunksV2
-            ItemsPath: $.Iterator.ChunkIndexes
-            ItemSelector:
-              ChunkIndex.$: "$$.Map.Item.Value"
-              PlanV2ManifestS3Uri.$: "$.Plan.PlanV2ManifestS3Uri"
-              PlanV2ArtifactS3Prefix.$: "$.Plan.PlanV2ArtifactS3Prefix"
-              PlanHash.$: "$.Plan.PlanHash"
-              ChunkOutputS3Prefix.$: "$.PlanOutputS3Prefix"
-              Format.$: "$.Plan.Format"
-            # Chunks past the plan's concurrency queue here instead of being throttled by Lambda.
-            MaxConcurrencyPath: $.Plan.MaxChunkConcurrency
-            ResultPath: $.Chunks
-            ItemProcessor:
-              ProcessorConfig:
-                Mode: DISTRIBUTED
-                ExecutionType: STANDARD
-              StartAt: RenderChunkV2
-              States:
-                RenderChunkV2:
-                  Type: Task
-                  Resource: arn:aws:states:::lambda:invoke
-                  Parameters:
-                    FunctionName: !GetAtt RenderFunction.Arn
-                    Payload:
-                      Action: renderChunk
-                      PlanProtocol: v2
-                      ChunkIndex.$: "$.ChunkIndex"
-                      PlanV2ManifestS3Uri.$: "$.PlanV2ManifestS3Uri"
-                      PlanV2ArtifactS3Prefix.$: "$.PlanV2ArtifactS3Prefix"
-                      PlanHash.$: "$.PlanHash"
-                      ChunkOutputS3Prefix.$: "$.ChunkOutputS3Prefix"
-                      Format.$: "$.Format"
-                  ResultSelector:
-                    ChunkS3Uri.$: "$.Payload.ChunkS3Uri"
-                    ChunkIndex.$: "$.Payload.ChunkIndex"
-                    Sha256.$: "$.Payload.Sha256"
-                    FramesEncoded.$: "$.Payload.FramesEncoded"
-                    DurationMs.$: "$.Payload.DurationMs"
-                  Retry:
-                    - ErrorEquals:
-                        - FFMPEG_VERSION_MISMATCH
-                        - PLAN_HASH_MISMATCH
-                        - S3_URI_NOT_ALLOWED
-                        - BROWSER_GPU_NOT_SOFTWARE
-                        - PLAN_TOO_LARGE
-                        - PlanTooLargeError
-                        - PLAN_PROTOCOL_UNSUPPORTED
-                        - PlanProtocolUnsupportedError
-                        - PLAN_V2_INTEGRITY_UNRECOVERABLE
-                        - INVALID_VIDEO_METADATA
-                        - PlanV2IntegrityError
-                        - PLAN_ARTIFACT_DIGEST_MISMATCH
-                        - ChromeBinaryUnavailableError
-                      MaxAttempts: 0
-                    - ErrorEquals: [Lambda.TooManyRequestsException]
-                      IntervalSeconds: 5
-                      MaxAttempts: 10
-                      BackoffRate: 2
-                      MaxDelaySeconds: 60
-                      JitterStrategy: FULL
-                    - ErrorEquals: [States.ALL]
-                      IntervalSeconds: 2
-                      MaxAttempts: 4
-                      BackoffRate: 2
-                      MaxDelaySeconds: 60
-                  End: true
+          RenderV2:
+            # Chunks render video only while the audio task mixes the track AssembleV2 stitches in.
+            Type: Parallel
+            Branches:
+              - StartAt: RenderChunksV2
+                States:
+                  RenderChunksV2:
+                    Type: Map
+                    Label: RenderChunksV2
+                    ItemsPath: $.Iterator.ChunkIndexes
+                    ItemSelector:
+                      ChunkIndex.$: "$$.Map.Item.Value"
+                      PlanV2ManifestS3Uri.$: "$.Plan.PlanV2ManifestS3Uri"
+                      PlanV2ArtifactS3Prefix.$: "$.Plan.PlanV2ArtifactS3Prefix"
+                      PlanHash.$: "$.Plan.PlanHash"
+                      ChunkOutputS3Prefix.$: "$.PlanOutputS3Prefix"
+                      Format.$: "$.Plan.Format"
+                    # Chunks past the plan's concurrency queue here instead of being throttled by Lambda.
+                    MaxConcurrencyPath: $.Plan.MaxChunkConcurrency
+                    ResultPath: $.Chunks
+                    ItemProcessor:
+                      ProcessorConfig:
+                        Mode: DISTRIBUTED
+                        ExecutionType: STANDARD
+                      StartAt: RenderChunkV2
+                      States:
+                        RenderChunkV2:
+                          Type: Task
+                          Resource: arn:aws:states:::lambda:invoke
+                          Parameters:
+                            FunctionName: !GetAtt RenderFunction.Arn
+                            Payload:
+                              Action: renderChunk
+                              PlanProtocol: v2
+                              ChunkIndex.$: "$.ChunkIndex"
+                              PlanV2ManifestS3Uri.$: "$.PlanV2ManifestS3Uri"
+                              PlanV2ArtifactS3Prefix.$: "$.PlanV2ArtifactS3Prefix"
+                              PlanHash.$: "$.PlanHash"
+                              ChunkOutputS3Prefix.$: "$.ChunkOutputS3Prefix"
+                              Format.$: "$.Format"
+                          ResultSelector:
+                            ChunkS3Uri.$: "$.Payload.ChunkS3Uri"
+                            ChunkIndex.$: "$.Payload.ChunkIndex"
+                            Sha256.$: "$.Payload.Sha256"
+                            FramesEncoded.$: "$.Payload.FramesEncoded"
+                            DurationMs.$: "$.Payload.DurationMs"
+                          Retry:
+                            - ErrorEquals:
+                                - FFMPEG_VERSION_MISMATCH
+                                - PLAN_HASH_MISMATCH
+                                - S3_URI_NOT_ALLOWED
+                                - BROWSER_GPU_NOT_SOFTWARE
+                                - PLAN_TOO_LARGE
+                                - PlanTooLargeError
+                                - PLAN_PROTOCOL_UNSUPPORTED
+                                - PlanProtocolUnsupportedError
+                                - PLAN_V2_INTEGRITY_UNRECOVERABLE
+                                - INVALID_VIDEO_METADATA
+                                - PlanV2IntegrityError
+                                - PLAN_ARTIFACT_DIGEST_MISMATCH
+                                - ChromeBinaryUnavailableError
+                              MaxAttempts: 0
+                            - ErrorEquals: [Lambda.TooManyRequestsException]
+                              IntervalSeconds: 5
+                              MaxAttempts: 10
+                              BackoffRate: 2
+                              MaxDelaySeconds: 60
+                              JitterStrategy: FULL
+                            - ErrorEquals: [States.ALL]
+                              IntervalSeconds: 2
+                              MaxAttempts: 4
+                              BackoffRate: 2
+                              MaxDelaySeconds: 60
+                          End: true
+                    End: true
+              - StartAt: AudioNeeded
+                States:
+                  AudioNeeded:
+                    Type: Choice
+                    Choices:
+                      - Variable: $.Plan.SeparateAudio
+                        BooleanEquals: true
+                        Next: Audio
+                    Default: NoAudio
+                  NoAudio:
+                    Type: Pass
+                    Result:
+                      HasAudio: false
+                      AudioS3Uri: null
+                    ResultPath: $.Audio
+                    End: true
+                  Audio:
+                    # The plan left its audio out: mix it here while the chunks render.
+                    Type: Task
+                    Resource: arn:aws:states:::lambda:invoke
+                    Parameters:
+                      FunctionName: !GetAtt RenderFunction.Arn
+                      Payload:
+                        Action: audio
+                        ProjectS3Uri.$: "$.ProjectS3Uri"
+                        PlanOutputS3Prefix.$: "$.PlanOutputS3Prefix"
+                        Config.$: "$.Config"
+                    ResultSelector:
+                      HasAudio.$: "$.Payload.HasAudio"
+                      AudioS3Uri.$: "$.Payload.AudioS3Uri"
+                    ResultPath: $.Audio
+                    Retry:
+                      - ErrorEquals:
+                          - FFMPEG_VERSION_MISMATCH
+                          - PLAN_HASH_MISMATCH
+                          - S3_URI_NOT_ALLOWED
+                          - BROWSER_GPU_NOT_SOFTWARE
+                          - FONT_FETCH_FAILED
+                          - PLAN_TOO_LARGE
+                          - PlanTooLargeError
+                          - PLAN_PROTOCOL_UNSUPPORTED
+                          - PlanProtocolUnsupportedError
+                          - PLAN_V2_INTEGRITY_UNRECOVERABLE
+                          - VIDEO_SOURCE_UNRENDERABLE
+                          - INVALID_VIDEO_METADATA
+                          - NOT_MEDIA_PAYLOAD
+                          - NotMediaPayloadError
+                          - PlanV2IntegrityError
+                          - PLAN_ARTIFACT_DIGEST_MISMATCH
+                          - FORMAT_NOT_SUPPORTED_IN_DISTRIBUTED
+                          - CHUNK_EXCEEDS_WORKER_TIMEOUT
+                          - ChromeBinaryUnavailableError
+                          - SITE_MANIFEST_INVALID
+                        MaxAttempts: 0
+                      - ErrorEquals: [Lambda.TooManyRequestsException]
+                        IntervalSeconds: 5
+                        MaxAttempts: 10
+                        BackoffRate: 2
+                        MaxDelaySeconds: 60
+                        JitterStrategy: FULL
+                      - ErrorEquals: [States.ALL]
+                        IntervalSeconds: 2
+                        MaxAttempts: 4
+                        BackoffRate: 2
+                        MaxDelaySeconds: 60
+                    End: true
+            ResultSelector:
+              Chunks.$: "$[0].Chunks"
+              Audio.$: "$[1].Audio"
+            ResultPath: $.Render
             Next: AssembleV2
 
           AssembleV2:
@@ -592,8 +670,8 @@ Resources:
                 PlanV2ManifestS3Uri.$: "$.Plan.PlanV2ManifestS3Uri"
                 PlanV2ArtifactS3Prefix.$: "$.Plan.PlanV2ArtifactS3Prefix"
                 PlanHash.$: "$.Plan.PlanHash"
-                ChunkS3Uris.$: "$.Chunks[*].ChunkS3Uri"
-                AudioS3Uri: null
+                ChunkS3Uris.$: "$.Render.Chunks[*].ChunkS3Uri"
+                AudioS3Uri.$: "$.Render.Audio.AudioS3Uri"
                 OutputS3Uri.$: "$.OutputS3Uri"
                 Format.$: "$.Plan.Format"
             ResultSelector:

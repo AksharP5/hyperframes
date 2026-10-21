@@ -230,7 +230,9 @@ describe.skipIf(!hasFfmpeg)("stitchMp4InS3 on real chunks", () => {
       expect(tailAudio).toBe(rate === 30);
       const uris = CHUNKS.map((slice) => `s3://bucket/chunks/${slice.index}.mp4`);
       // A 16 KiB part minimum makes these small chunks take every path S3 takes at 5 MiB.
-      const result = await stitchMp4InS3(s3.asClient(), uris, "s3://bucket/out.mp4", 16 * 1024);
+      const result = await stitchMp4InS3(s3.asClient(), uris, "s3://bucket/out.mp4", {
+        minPartBytes: 16 * 1024,
+      });
       const outputPath = join(dir, "out.mp4");
       const output = s3.objects.get("s3://bucket/out.mp4")!;
       writeFileSync(outputPath, output);
@@ -278,6 +280,26 @@ describe.skipIf(!hasFfmpeg)("stitchMp4InS3 on real chunks", () => {
         reference[0]!.duration,
         reference[1]!.duration,
       ]);
+
+      // Video-only chunks with the plan audio as a separate object: the same bytes as on disk,
+      // and the same frames and audio as today's join.
+      s3.objects.set("s3://bucket/audio.m4a", readFileSync(audioPath));
+      for (const [i, path] of videoPaths.entries()) {
+        s3.objects.set(`s3://bucket/video/${i}.mp4`, readFileSync(path));
+      }
+      await stitchMp4InS3(
+        s3.asClient(),
+        videoPaths.map((_, i) => `s3://bucket/video/${i}.mp4`),
+        "s3://bucket/separate.mp4",
+        { audioUri: "s3://bucket/audio.m4a", minPartBytes: 16 * 1024 },
+      );
+      writeFileSync(join(planDir, "meta", "encoder.json"), JSON.stringify({ separateAudio: true }));
+      const separateLocal = join(dir, "separate-local.mp4");
+      await assemble(planDir, videoPaths, audioPath, separateLocal);
+      const separate = s3.objects.get("s3://bucket/separate.mp4")!;
+      expect(separate.equals(readFileSync(separateLocal))).toBe(true);
+      expect(frames(separateLocal)).toEqual(frames(referencePath));
+      expect(pcm(separateLocal) === pcm(referencePath)).toBe(true);
     },
     60_000,
   );

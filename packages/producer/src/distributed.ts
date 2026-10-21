@@ -117,6 +117,7 @@ export {
 export {
   assemble,
   chunksAreStitchedMp4,
+  stitchesSeparateAudio,
   type AssembleChunkPaths,
   type AssembleResult,
 } from "./services/distributed/assemble.js";

@@ -147,7 +147,7 @@ export async function assemble(
   }
 
   if (chunksAreStitchedMp4(planDir, cfr)) {
-    const separateAudio = lockedAudio(planDir).separateAudio === true && audioPath !== null;
+    const separateAudio = stitchesSeparateAudio(planDir) && audioPath !== null;
     await writeStitchedMp4(chunkPaths, outputPath, separateAudio ? audioPath : undefined);
     return {
       outputPath,
@@ -408,6 +408,10 @@ export function chunksAreStitchedMp4(planDir: string, cfr: boolean): boolean {
     throw new Error("[assemble] cfr=true cannot re-encode a plan whose mp4 chunks are stitched");
   }
   return true;
+}
+
+export function stitchesSeparateAudio(planDir: string): boolean {
+  return lockedAudio(planDir).separateAudio === true;
 }
 
 function lockedAudio(
