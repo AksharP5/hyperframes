@@ -1,3 +1,4 @@
+import { htmlInCanvasForm } from "@hyperframes/core/html-in-canvas";
 import { buildProjectApiPath } from "../../utils/projectRouting";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { CanvasResolution } from "@hyperframes/parsers";
@@ -12,9 +13,7 @@ import { studioApiFetch } from "../../utils/studioApiFetch";
 
 // WYSIWYG: the preview iframe runs in this browser, so a render blurs only if this one can.
 function canPreviewMotionBlur(): boolean {
-  const ctx = globalThis.CanvasRenderingContext2D?.prototype;
-  if (!ctx || typeof document === "undefined") return false;
-  return "drawElementImage" in ctx && "requestPaint" in document.createElement("canvas");
+  return typeof document !== "undefined" && htmlInCanvasForm() !== null;
 }
 
 export interface RenderJob {

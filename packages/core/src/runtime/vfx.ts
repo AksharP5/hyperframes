@@ -31,6 +31,7 @@ import {
   type HfVfxParamValues,
   type HfVfxRefParam,
 } from "../vfx";
+import { htmlInCanvasForm, markCaptureCanvas, markCaptured } from "../htmlInCanvas";
 import { registerSeekCompletion } from "./adapters/seek-dispatch";
 import { isCanvasElement, isHtmlElement } from "./domRealm";
 
@@ -467,6 +468,13 @@ function findBackdropWrapper(owner: HTMLElement): HTMLCanvasElement | null {
   return null;
 }
 
+/** The exporter writes `layoutsubtree`; a browser that dropped it needs `content="drawable"` and `drawable` instead. */
+function adoptCaptureForm(canvas: HTMLCanvasElement, inner: HTMLElement): void {
+  if (htmlInCanvasForm() !== "drawable") return;
+  markCaptureCanvas(canvas, "drawable");
+  markCaptured(inner, "drawable");
+}
+
 /**
  * The `<canvas layoutsubtree class="hf-vfx-src">` that supplies `owner`'s
  * pixels, plus its 2-D context. Never injected at runtime: the compiler derives
@@ -509,6 +517,7 @@ function resolveCaptureSource(
     );
     return undefined;
   }
+  adoptCaptureForm(canvas, inner);
   return {
     canvas,
     inner,

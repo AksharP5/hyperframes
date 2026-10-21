@@ -20,11 +20,24 @@ async function startRenderBody(): Promise<Record<string, unknown>> {
   return started.body;
 }
 
+function stubHtmlInCanvas(members: string[]): void {
+  vi.stubGlobal(
+    "CanvasRenderingContext2D",
+    class {
+      drawElementImage(): void {}
+    },
+  );
+  const proto = HTMLCanvasElement.prototype as unknown as Record<string, unknown>;
+  for (const name of ["requestPaint", ...members]) proto[name] = () => {};
+}
+
 afterEach(() => {
   queue?.unmount();
   queue = null;
   document.body.innerHTML = "";
-  delete (HTMLCanvasElement.prototype as unknown as Record<string, unknown>).requestPaint;
+  for (const name of ["requestPaint", "layoutSubtree", "updateElementGeometry"]) {
+    delete (HTMLCanvasElement.prototype as unknown as Record<string, unknown>)[name];
+  }
   vi.unstubAllGlobals();
 });
 
@@ -33,14 +46,16 @@ describe("render request previewMotionBlur", () => {
     expect((await startRenderBody())["previewMotionBlur"]).toBe(false);
   });
 
-  it("is true in a browser with html-in-canvas", async () => {
-    vi.stubGlobal(
-      "CanvasRenderingContext2D",
-      class {
-        drawElementImage(): void {}
-      },
-    );
-    (HTMLCanvasElement.prototype as unknown as Record<string, unknown>).requestPaint = () => {};
+  it.each([
+    ["the layoutsubtree form", "layoutSubtree"],
+    ["the content=drawable form", "updateElementGeometry"],
+  ])("is true in a browser with html-in-canvas in %s", async (_name, member) => {
+    stubHtmlInCanvas([member]);
     expect((await startRenderBody())["previewMotionBlur"]).toBe(true);
+  });
+
+  it("is false when html-in-canvas has neither known form", async () => {
+    stubHtmlInCanvas([]);
+    expect((await startRenderBody())["previewMotionBlur"]).toBe(false);
   });
 });

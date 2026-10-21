@@ -116,6 +116,12 @@
       "import": "./src/keyframeDefaults.ts",
       "types": "./src/keyframeDefaults.ts"
     },
+    "./html-in-canvas": {
+      "bun": "./src/htmlInCanvas.ts",
+      "node": "./dist/htmlInCanvas.js",
+      "import": "./src/htmlInCanvas.ts",
+      "types": "./src/htmlInCanvas.ts"
+    },
     "./gsap-cdn": {
       "bun": "./src/gsapCdn.ts",
       "node": "./dist/gsapCdn.js",
@@ -613,6 +619,10 @@
       "./keyframe-defaults": {
         "import": "./dist/keyframeDefaults.js",
         "types": "./dist/keyframeDefaults.d.ts"
+      },
+      "./html-in-canvas": {
+        "import": "./dist/htmlInCanvas.js",
+        "types": "./dist/htmlInCanvas.d.ts"
       },
       "./gsap-cdn": {
         "import": "./dist/gsapCdn.js",

@@ -500,6 +500,35 @@ describe("vfx runtime — self capture", () => {
     expectRefused(/chrome:\/\/flags\/#canvas-draw-element/);
   });
 
+  describe.each([
+    ["dropped layoutsubtree", "updateElementGeometry", "drawable"],
+    ["still has layoutsubtree", "layoutSubtree", null],
+  ])("in a browser that %s", (_name, member, content) => {
+    const canvasProto = HTMLCanvasElement.prototype as unknown as Record<string, unknown>;
+    beforeEach(() => {
+      vi.stubGlobal(
+        "CanvasRenderingContext2D",
+        class {
+          drawElementImage(): void {}
+        },
+      );
+      canvasProto.requestPaint = () => {};
+      canvasProto[member] = () => {};
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      delete canvasProto.requestPaint;
+      delete canvasProto[member];
+    });
+
+    it("marks the capture canvas and its child only where the exporter's markup needs it", () => {
+      const host = makeCaptureHost(createMockCtx2d());
+      initVfx(document.body, 30);
+      expect(host.querySelector("canvas.hf-vfx-src")?.getAttribute("content")).toBe(content);
+      expect(host.querySelector(".hf-vfx-in")?.hasAttribute("drawable")).toBe(content !== null);
+    });
+  });
+
   it("arms the page-composite protocol instead of painting inline in engine mode", () => {
     makeCaptureHost(createMockCtx2d());
     initVfx(document.body, 30);

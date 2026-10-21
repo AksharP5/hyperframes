@@ -104,6 +104,12 @@
       "types": "./dist/keyframeDefaults.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./html-in-canvas": {
+      "source": "./src/htmlInCanvas.ts",
+      "runtime": "./dist/htmlInCanvas.js",
+      "types": "./dist/htmlInCanvas.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./gsap-cdn": {
       "source": "./src/gsapCdn.ts",
       "runtime": "./dist/gsapCdn.js",
