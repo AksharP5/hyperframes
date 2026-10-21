@@ -1589,6 +1589,8 @@ describe("processCompositionAudio", () => {
     const extractArgs = runFfmpegMock.mock.calls[0]?.[0] ?? [];
     expect(extractArgs.indexOf("-tls_verify")).toBeGreaterThanOrEqual(0);
     expect(extractArgs.indexOf("-tls_verify")).toBeLessThan(extractArgs.indexOf("-i"));
+    expect(extractArgs.indexOf("-xerror")).toBeGreaterThanOrEqual(0);
+    expect(extractArgs.indexOf("-xerror")).toBeLessThan(extractArgs.indexOf("-i"));
     expect(extractArgs.slice(extractArgs.indexOf("-ss"), extractArgs.indexOf(url) + 1)).toEqual([
       "-ss",
       "600",

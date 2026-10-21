@@ -649,6 +649,8 @@ export function parseAudioElements(html: string): AudioElement[] {
   return elements;
 }
 
+const FAIL_ON_READ_ERROR_INSTEAD_OF_ENDING_THERE = ["-xerror"];
+
 /** Decode `duration` s of audio from `mediaStart` in Chrome's media time. Until every stream has
  * started, an input seek snaps audio to the video's first keyframe, so read by timestamp instead. */
 async function extractAudioSegment(
@@ -668,7 +670,8 @@ async function extractAudioSegment(
   const sourceDuration = sourceTimeAt(normalizedPlaybackRate, duration);
   // A failed local probe keeps FFmpeg's default channel conversion and the input seek; a URL probe
   // is retried once, then fails: a blip must not change how the next, successful read is mixed.
-  const metadata = isHttpUrl(srcPath)
+  const readsUrl = isHttpUrl(srcPath);
+  const metadata = readsUrl
     ? await extractAudioMetadata(srcPath, { signal }).catch((error: unknown) => {
         if (signal?.aborted) throw error;
         return extractAudioMetadata(srcPath, { signal });
@@ -687,6 +690,7 @@ async function extractAudioSegment(
   );
 
   const args = [
+    ...(readsUrl ? FAIL_ON_READ_ERROR_INSTEAD_OF_ENDING_THERE : []),
     ...urlInputArgs(srcPath),
     ...(inputSeek ? ["-ss", String(mediaStart), "-t", String(sourceDuration)] : []),
     "-i",
@@ -714,7 +718,12 @@ async function extractAudioSegment(
       failure,
     };
   }
-  const failure = !result.success ? ffmpegFailure(stage, result) : undefined;
+  let failure = result.success ? undefined : ffmpegFailure(stage, result);
+  const probedLinkFailedToRead =
+    readsUrl && (failure?.reason === "invalid_media" || failure?.reason === "ffmpeg_failed");
+  if (failure && probedLinkFailedToRead) {
+    failure = { ...failure, reason: "download_failed", owner: "system", retryable: true };
+  }
   return {
     success: result.success,
     outputPath,
