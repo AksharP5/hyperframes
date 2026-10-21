@@ -11,6 +11,7 @@
     "dist/",
     "prebuilt/",
     "scripts/",
+    "!scripts/*.test.ts",
     "README.md"
   ],
   "type": "module",

@@ -11,8 +11,7 @@ import {
   type HandlerZipManifest,
   PREBUILT_DIR,
 } from "../src/sdk/prebuiltHandler.js";
-
-const CHECKOUT_CODE_URI = "CodeUri: ../../packages/aws-lambda/dist/handler.zip";
+import { writePrebuiltTemplate } from "./prebuilt-template.mjs";
 
 export function pinHandlerZip(repoRoot: string): HandlerZipManifest {
   const pkgDir = join(repoRoot, "packages", "aws-lambda");
@@ -31,18 +30,8 @@ export function pinHandlerZip(repoRoot: string): HandlerZipManifest {
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   writeFileSync(asset.replace(/\.zip$/, ".sha256"), `${sha256}  ${HANDLER_ZIP_ASSET}\n`);
 
-  const template = readFileSync(join(repoRoot, "examples", "aws-lambda", "template.yaml"), "utf-8");
-  if (template.split(CHECKOUT_CODE_URI).length !== 2) {
-    throw new Error(
-      `[pin-handler-zip] expected exactly one "${CHECKOUT_CODE_URI}" in the template`,
-    );
-  }
   const outDir = join(pkgDir, PREBUILT_DIR);
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(
-    join(outDir, "template.yaml"),
-    template.replace(CHECKOUT_CODE_URI, "CodeUri: handler.zip"),
-  );
+  writePrebuiltTemplate(repoRoot, outDir);
   const manifest: HandlerZipManifest = {
     version: pkg.version,
     url: `${pkg.repository.url}/releases/download/v${pkg.version}/${HANDLER_ZIP_ASSET}`,
