@@ -768,7 +768,7 @@ export function parseVideoElements(html: string): VideoElement[] {
       mediaStart: readMediaStart(el),
       playbackRate: readElementRateSpec(el),
       loop: el.hasAttribute("loop"),
-      hasAudio: hasAudioAttr === "true",
+      hasAudio: hasAudioAttr === "true" && isAudibleVideoElement(el),
       ...(isSelfOrAncestorHidden(el) ||
       (isAudibleVideoElement(el) && isMemberGroupHidden(groupsById, el))
         ? { hidden: true }
