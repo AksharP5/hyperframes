@@ -12,6 +12,14 @@ import {
 import type { Page } from "puppeteer-core";
 import type { CaptureOptions } from "../types.js";
 
+function pageOffReason(
+  options: Pick<CaptureOptions, "motionBlur" | "pageMotionBlur">,
+): string | null {
+  if (options.motionBlur) return "engine-motion-blur";
+  if (options.pageMotionBlur === "off") return "preview-unsupported";
+  return options.pageMotionBlur ?? null;
+}
+
 export async function installPageMotionBlur(
   page: Pick<Page, "evaluateOnNewDocument">,
   options: Pick<CaptureOptions, "motionBlur" | "pageMotionBlur" | "deviceScaleFactor">,
@@ -27,11 +35,7 @@ export async function installPageMotionBlur(
       scale,
     );
   }
-  const off = options.motionBlur
-    ? "engine-motion-blur"
-    : options.pageMotionBlur === "off"
-      ? "preview-unsupported"
-      : null;
+  const off = pageOffReason(options);
   if (!off) return;
   await page.evaluateOnNewDocument(
     (key: string, v: string) => {

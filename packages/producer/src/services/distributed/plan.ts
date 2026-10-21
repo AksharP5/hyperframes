@@ -1232,6 +1232,7 @@ async function compilePlanComposition(
     // the Lambda/worker filesystem won't have the same fonts installed.
     allowSystemFontCapture: false,
     variables: config.variables,
+    pageMotionBlur: job.config.pageMotionBlur,
   });
   logPlanStage(log, "compile", stageStarted);
   let compiled = compileResult.compiled;

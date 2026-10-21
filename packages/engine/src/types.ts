@@ -9,6 +9,8 @@ import type { Fps } from "@hyperframes/core";
 import type { ChromeMemoryStats } from "./services/chromeMemorySampler.js";
 import type { MotionBlurOptions } from "./services/motionBlur.js";
 
+export type PageMotionBlurOff = "off" | "hdr-render" | "layered-composite" | "distributed-render";
+
 /**
  * Outcome of waiting for a sub-composition's GSAP timelines to register.
  * Threaded string-typed through `CapturePerfSummary` / `RenderPerfSummary` /
@@ -171,7 +173,8 @@ export interface CaptureOptions {
    * screenshot capture mode; see `services/motionBlur.ts`.
    */
   motionBlur?: MotionBlurOptions;
-  pageMotionBlur?: "off";
+  /** Why the page's capture motion blur stands down: the preview could not blur, or the route cannot host it. */
+  pageMotionBlur?: PageMotionBlurOff;
   deviceScaleFactor?: number;
   /**
    * Opt into Chrome's capture-beyond-viewport screenshot path. Leave undefined

@@ -36,6 +36,7 @@ export interface DiscoverOptions {
   fps: number;
   /** Seek the composition (timeline + adapters) to a time. */
   seek: (t: number) => void;
+  onStep?: (i: number, steps: number) => void;
 }
 
 export interface Discovery {
@@ -151,10 +152,27 @@ function edgeShift(a: DOMRect | undefined, b: DOMRect | undefined): number {
   );
 }
 
-export function discoverMovers({ scene, durationSeconds, fps, seek }: DiscoverOptions): Discovery {
+/** Boxes of `els` now, but with their inline style put back: their own change left out. */
+function rectsAtStyle(els: HTMLElement[], styles: string[]): DOMRect[] {
+  const now = els.map(styleKey);
+  els.forEach((el, i) => el.setAttribute("style", styles[i] ?? ""));
+  const rects = els.map((el) => el.getBoundingClientRect());
+  els.forEach((el, i) => el.setAttribute("style", now[i] ?? ""));
+  return rects;
+}
+
+export function discoverMovers({
+  scene,
+  durationSeconds,
+  fps,
+  seek,
+  onStep,
+}: DiscoverOptions): Discovery {
+  seek(0);
   const all = [...scene.querySelectorAll("*")].filter(isHtmlElement);
   const dynamic = new Set<Element>(pageAnimated(scene));
   const first = all.map(styleKey);
+  const baseRects = all.map((el) => el.getBoundingClientRect());
   const frames = Math.max(1, Math.round(durationSeconds * fps));
   // One pass, about every other frame on a typical composition. A whip shorter than one step
   // can be under-measured; ponytail: raise SCAN_STEPS if a fast move goes unblurred.
@@ -166,19 +184,35 @@ export function discoverMovers({ scene, durationSeconds, fps, seek }: DiscoverOp
   const alphaCache = new Map<Bitmap, boolean>();
   const sceneRect = scene.getBoundingClientRect();
   const largeArea = sceneRect.width * sceneRect.height * LARGE_SHARE;
-  let prev: Array<DOMRect | undefined> | null = null;
+  let prev: Array<DOMRect | undefined> = [];
 
   for (let i = 0; i <= steps; i++) {
-    seek((i / steps) * durationSeconds);
-    // Rects only for elements whose style has changed; the first read flushes layout once.
+    if (i > 0) seek((i / steps) * durationSeconds);
+    onStep?.(i, steps);
+    // Rects only for elements whose style has changed; a first change is judged against its
+    // own baseline style at this time, so an ancestor's pan is not its move.
     const rects: Array<DOMRect | undefined> = [];
+    const fresh: number[] = [];
     all.forEach((el, j) => {
       if (!dynamic.has(el) && styleKey(el) === first[j]) return;
+      if (!dynamic.has(el)) fresh.push(j);
       dynamic.add(el);
       rects[j] = el.getBoundingClientRect();
-      if (edgeShift(prev?.[j], rects[j]) / framesPerStep < MIN_SPEED) return;
+    });
+    const away = fresh.filter(
+      (j) => edgeShift(baseRects[j], rects[j]) / framesPerStep >= MIN_SPEED,
+    );
+    const before = rectsAtStyle(
+      away.map((j) => all[j] as HTMLElement),
+      away.map((j) => first[j] ?? ""),
+    );
+    away.forEach((j, k) => {
+      prev[j] = before[k];
+    });
+    rects.forEach((box, j) => {
+      const el = all[j];
+      if (!el || edgeShift(prev[j], box) / framesPerStep < MIN_SPEED) return;
       fast.add(el);
-      const box = rects[j];
       if (
         box &&
         largeArea > 0 &&

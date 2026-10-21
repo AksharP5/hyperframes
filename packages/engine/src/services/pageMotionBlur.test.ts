@@ -30,6 +30,18 @@ describe("installPageMotionBlur", () => {
     );
   });
 
+  it("says why when the render route cannot host the blur", async () => {
+    for (const route of ["hdr-render", "layered-composite", "distributed-render"] as const) {
+      const page = fakePage();
+      await installPageMotionBlur(page, { pageMotionBlur: route });
+      expect(page.evaluateOnNewDocument).toHaveBeenCalledWith(
+        expect.any(Function),
+        PAGE_MOTION_BLUR_OFF_GLOBAL,
+        route,
+      );
+    }
+  });
+
   it("tells the page the render's device scale when it is not 1", async () => {
     const page = fakePage();
     await installPageMotionBlur(page, { deviceScaleFactor: 2 });

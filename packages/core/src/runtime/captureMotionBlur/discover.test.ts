@@ -41,6 +41,67 @@ describe("discoverMovers", () => {
     expect(movers).toEqual([fast]);
   });
 
+  // A 100 px jump inside one scan step at 5 s: slow to a still-style baseline, fast between two steps.
+  function jumpScene() {
+    const scene = document.createElement("div");
+    const jumper = element(scene, "jumper");
+    const seek = (t: number): void => {
+      jumper.style.transform = `translateX(${100 * Math.min(1, Math.max(0, (t - 5) / 0.04))}px)`;
+    };
+    return { scene, jumper, seek };
+  }
+
+  it("finds the same movers whatever time the scan is started at", () => {
+    const found = [0, 3, 7].map((start) => {
+      const { scene, jumper, seek } = jumpScene();
+      seek(start);
+      const { movers } = discoverMovers({ scene, durationSeconds: 10, fps: 30, seek });
+      return movers.map((m) => m === jumper);
+    });
+    expect(found).toEqual([[true], [true], [true]]);
+  });
+
+  it("does not count an ancestor's pan as a child's move when the child's style first changes", () => {
+    // A 100 x 100 camera wrapper pans 1 px/frame; a label inside it fades in at 8 s.
+    const scene = document.createElement("div");
+    scene.getBoundingClientRect = () => ({ width: 100, height: 100 }) as DOMRect;
+    const camera = element(scene, "camera", 100);
+    const label = element(camera, "label");
+    const x = (el: HTMLElement): number => parseFloat(el.style.transform.slice(11)) || 0;
+    label.getBoundingClientRect = () => {
+      const left = x(camera) + x(label);
+      return { left, top: 0, right: left + 10, bottom: 10, width: 10, height: 10 } as DOMRect;
+    };
+    const seek = (t: number): void => {
+      camera.style.transform = `translateX(${30 * t}px)`;
+      label.style.opacity = t < 8 ? "0" : "1";
+    };
+    seek(0);
+    const { movers } = discoverMovers({ scene, durationSeconds: 10, fps: 30, seek });
+    expect(movers).toEqual([]);
+  });
+
+  it("reports each scan step after its seek, in order, without seeking more", () => {
+    const { scene, seek } = setup();
+    const events: string[] = [];
+    const plain = vi.fn(seek);
+    discoverMovers({ scene, durationSeconds: 1, fps: 30, seek: plain });
+    const traced = vi.fn((t: number) => {
+      events.push(`seek ${t.toFixed(3)}`);
+      seek(t);
+    });
+    discoverMovers({
+      scene,
+      durationSeconds: 1,
+      fps: 30,
+      seek: traced,
+      onStep: (i, steps) => events.push(`step ${i}/${steps}`),
+    });
+    expect(traced.mock.calls.length).toBe(plain.mock.calls.length);
+    expect(events.slice(0, 4)).toEqual(["seek 0.000", "step 0/30", "seek 0.033", "step 1/30"]);
+    expect(events.at(-1)).toBe("step 30/30");
+  });
+
   it("marks every changing element dynamic, slow and opted-out ones included", () => {
     const { scene, fast, fastChild, slow, still, off, seek } = setup();
     const { dynamic } = discoverMovers({ scene, durationSeconds: 1, fps: 30, seek });
