@@ -9,6 +9,7 @@ import type { Browser, Page, PuppeteerNode } from "puppeteer-core";
 
 import type { CaptureMode } from "./browserLeasePool.js";
 import { managedChromeVersion } from "./chromeHostCeiling.js";
+import { resolveConfig } from "../config.js";
 
 import {
   _resetAutoBrowserGpuModeCacheForTests,
@@ -818,6 +819,12 @@ describe("resolveHeadlessShellPath", () => {
   const originalHeadlessShellPath = process.env.PRODUCER_HEADLESS_SHELL_PATH;
   const originalHyperframesBrowserPath = process.env.HYPERFRAMES_BROWSER_PATH;
 
+  // A runner may export either var (the Windows job sets HYPERFRAMES_BROWSER_PATH); each case sets its own.
+  beforeEach(() => {
+    delete process.env.PRODUCER_HEADLESS_SHELL_PATH;
+    delete process.env.HYPERFRAMES_BROWSER_PATH;
+  });
+
   afterEach(() => {
     if (originalHeadlessShellPath === undefined) delete process.env.PRODUCER_HEADLESS_SHELL_PATH;
     else process.env.PRODUCER_HEADLESS_SHELL_PATH = originalHeadlessShellPath;
@@ -831,6 +838,38 @@ describe("resolveHeadlessShellPath", () => {
     expect(() => resolveHeadlessShellPath({})).toThrow(
       /Chrome binary not found at PRODUCER_HEADLESS_SHELL_PATH/,
     );
+  });
+
+  it("prefers HYPERFRAMES_BROWSER_PATH over PRODUCER_HEADLESS_SHELL_PATH, as the CLI does", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-env-"));
+    try {
+      const cliChoice = join(dir, "chosen-browser");
+      const other = join(dir, "other-browser");
+      writeFileSync(cliChoice, "");
+      writeFileSync(other, "");
+      process.env.HYPERFRAMES_BROWSER_PATH = cliChoice;
+      process.env.PRODUCER_HEADLESS_SHELL_PATH = other;
+
+      expect(resolveHeadlessShellPath({})).toBe(cliChoice);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps that precedence through a render's resolved engine config", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hyperframes-engine-browser-env-"));
+    try {
+      const cliChoice = join(dir, "chosen-browser");
+      const other = join(dir, "other-browser");
+      writeFileSync(cliChoice, "");
+      writeFileSync(other, "");
+      process.env.HYPERFRAMES_BROWSER_PATH = cliChoice;
+      process.env.PRODUCER_HEADLESS_SHELL_PATH = other;
+
+      expect(resolveHeadlessShellPath(resolveConfig())).toBe(cliChoice);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("uses HYPERFRAMES_BROWSER_PATH when the CLI resolved a browser explicitly", () => {

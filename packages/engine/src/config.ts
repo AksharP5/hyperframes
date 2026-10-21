@@ -852,7 +852,6 @@ export function resolveConfig(overrides?: Partial<EngineConfig>): EngineConfig {
       DEFAULT_CONFIG.largeRenderThreshold,
     ),
 
-    chromePath: env("PRODUCER_HEADLESS_SHELL_PATH"),
     disableGpu: envBool("PRODUCER_DISABLE_GPU", DEFAULT_CONFIG.disableGpu),
     browserGpuMode: envBrowserGpuMode(),
     allowSoftwareWebGpu: envBool(

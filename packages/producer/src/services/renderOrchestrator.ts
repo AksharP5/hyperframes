@@ -2562,13 +2562,14 @@ export async function closeOrphanedProbeForRetry(
  */
 export function resolveParallelCaptureMode(args: {
   platform: NodeJS.Platform;
-  /** A chrome-headless-shell binary was resolved for this render. */
-  headlessShell: boolean;
+  /** The chrome-headless-shell binary resolved for this render, if any. */
+  headlessShellPath: string | undefined;
   forceScreenshot: boolean;
   deviceScaleFactor?: number;
 }): "screenshot" | "beginframe" {
   const supersampling = (args.deviceScaleFactor ?? 1) !== 1;
-  return args.headlessShell && args.platform === "linux" && !args.forceScreenshot && !supersampling
+  const headlessShell = args.headlessShellPath !== undefined;
+  return headlessShell && args.platform === "linux" && !args.forceScreenshot && !supersampling
     ? "beginframe"
     : "screenshot";
 }
@@ -4070,7 +4071,7 @@ async function executeRenderPipeline(input: {
     // capture mode this render will actually use.
     const parallelCaptureMode = resolveParallelCaptureMode({
       platform: process.platform,
-      headlessShell: resolveHeadlessShellPath(cfg) !== null,
+      headlessShellPath: resolveHeadlessShellPath(cfg),
       forceScreenshot: captureForceScreenshot,
       deviceScaleFactor: captureOptions.deviceScaleFactor,
     });

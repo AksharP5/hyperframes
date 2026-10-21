@@ -13,6 +13,7 @@ import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import {
+  browserPathFromEnv,
   chromeMajorCeiling,
   compareBrowserVersionsDescending,
   exceedsChromeCeiling,
@@ -251,25 +252,15 @@ export function resolveHeadlessShellPath(
   if (config?.chromePath) {
     return config.chromePath;
   }
-  if (process.env.PRODUCER_HEADLESS_SHELL_PATH) {
-    const envPath = process.env.PRODUCER_HEADLESS_SHELL_PATH;
-    if (!existsSync(envPath)) {
+  const fromEnv = browserPathFromEnv();
+  if (fromEnv) {
+    if (!existsSync(fromEnv.path)) {
       throw new Error(
-        `[BrowserManager] Chrome binary not found at PRODUCER_HEADLESS_SHELL_PATH="${envPath}". ` +
+        `[BrowserManager] Chrome binary not found at ${fromEnv.name}="${fromEnv.path}". ` +
           "Run `hyperframes browser ensure` to re-download.",
       );
     }
-    return envPath;
-  }
-  if (process.env.HYPERFRAMES_BROWSER_PATH) {
-    const envPath = process.env.HYPERFRAMES_BROWSER_PATH;
-    if (!existsSync(envPath)) {
-      throw new Error(
-        `[BrowserManager] Chrome binary not found at HYPERFRAMES_BROWSER_PATH="${envPath}". ` +
-          "Run `hyperframes browser ensure` to re-download.",
-      );
-    }
-    return envPath;
+    return fromEnv.path;
   }
   const ours = join(homedir(), ".cache", "hyperframes", "chrome", "chrome-headless-shell");
   const shared = join(homedir(), ".cache", "puppeteer", "chrome-headless-shell");

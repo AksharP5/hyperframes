@@ -92,3 +92,14 @@ export function pickSharedShell(
   }
   return undefined;
 }
+
+/** The browser binary an env var names. The CLI and the engine both resolve it here, HYPERFRAMES_BROWSER_PATH first. */
+export function browserPathFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): { name: "HYPERFRAMES_BROWSER_PATH" | "PRODUCER_HEADLESS_SHELL_PATH"; path: string } | undefined {
+  for (const name of ["HYPERFRAMES_BROWSER_PATH", "PRODUCER_HEADLESS_SHELL_PATH"] as const) {
+    const path = env[name];
+    if (path) return { name, path };
+  }
+  return undefined;
+}

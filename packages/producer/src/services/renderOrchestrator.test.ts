@@ -3313,7 +3313,7 @@ describe("sequential capture stall recovery", () => {
 describe("resolveParallelCaptureMode", () => {
   const beginframe = {
     platform: "linux" as NodeJS.Platform,
-    headlessShell: true,
+    headlessShellPath: "/cache/chrome-headless-shell" as string | undefined,
     forceScreenshot: false,
     deviceScaleFactor: 1,
   };
@@ -3328,7 +3328,9 @@ describe("resolveParallelCaptureMode", () => {
     // System Chrome on linux: resolveObservedCaptureMode calls this beginframe,
     // the engine launches screenshot. Getting this wrong would default-enable
     // the router for a cohort whose real path is the screenshot one.
-    expect(resolveParallelCaptureMode({ ...beginframe, headlessShell: false })).toBe("screenshot");
+    expect(resolveParallelCaptureMode({ ...beginframe, headlessShellPath: undefined })).toBe(
+      "screenshot",
+    );
     expect(resolveParallelCaptureMode({ ...beginframe, forceScreenshot: true })).toBe("screenshot");
     // Supersampling: BeginFrame ignores deviceScaleFactor, so preMode falls back.
     expect(resolveParallelCaptureMode({ ...beginframe, deviceScaleFactor: 2 })).toBe("screenshot");
