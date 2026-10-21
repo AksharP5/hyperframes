@@ -88,6 +88,8 @@ export {
   type FileServerHandle,
 } from "./services/fileServer.js";
 
+export { prepareAnimatedGifInputs } from "./services/animatedGifPrep.js";
+
 // ── Video frame injection (Hyperframes-specific hook) ───────────────────────
 export { createVideoFrameInjector } from "@hyperframes/engine";
 

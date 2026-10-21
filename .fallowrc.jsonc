@@ -5,7 +5,7 @@
     "packages/studio/src/components/ui/index.ts",
     "packages/producer/src/**/*.test.ts",
     // Studio's browser-journey helpers are plain .mjs under tests/e2e; their unit tests live beside them.
-    "packages/studio/tests/e2e/*.test.mjs",
+    "packages/studio/tests/e2e/**/*.test.mjs",
     "packages/aws-lambda/src/**/*.test.ts",
     "packages/gcp-cloud-run/src/**/*.test.ts",
     "packages/gcp-cloud-run/terraform/*.test.ts",
@@ -67,7 +67,7 @@
     // Test fixture worker, spawned by path via the pools' workerEntryPath
     // option from the crash-recovery tests; has no import-graph referrer.
     "packages/producer/src/services/__fixtures__/crashOnMessageWorker.mjs",
-    "scripts/*.{ts,mjs,js}",
+    "scripts/**/*.{ts,mjs,js}",
     "scripts/*/run.mjs",
     // Keyframe UI components — wired dynamically via EaseCurveSection/MotionPanel.
     "packages/studio/src/components/editor/KeyframeDiamond.tsx",
@@ -255,7 +255,7 @@
     // CLI command files: every command exports a const `examples` per the
     // convention documented in CLAUDE.md. This is a namespace barrel, not a
     // collision.
-    { "file": "packages/cli/src/commands/*.ts", "exports": ["examples"] },
+    { "file": "packages/cli/src/commands/**/*.ts", "exports": ["examples"] },
     // Options type for the render-queue hook's public startRender callback —
     // consumed structurally by callers (StudioRightPanels), not by import.
     {
