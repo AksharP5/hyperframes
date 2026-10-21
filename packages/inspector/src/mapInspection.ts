@@ -6,6 +6,22 @@ const coverage = [
   "CSS selector matches are candidates, not a full cascade or dependency graph. HTML is the authored opening tag when uniquely located.",
   "Direct constructors, other animation systems, iframe contents, removed animations and unexecuted paths may be absent; missing origins are reported.",
 ];
+const KEPT_FIRST_UNDER_BUDGET = [
+  "animation creation",
+  "animation caller",
+  "timeline attachment",
+  "html opening tag",
+  "animation source dependency",
+  "matched CSS candidate",
+];
+const rank = (kind: string) => {
+  const at = KEPT_FIRST_UNDER_BUDGET.indexOf(kind);
+  return at === -1 ? KEPT_FIRST_UNDER_BUDGET.length : at;
+};
+const priority = (snippet: Snippet) => Math.min(...snippet.kind.map(rank));
+const byPosition = (a: Snippet, b: Snippet) =>
+  a.file.localeCompare(b.file) || a.startLine - b.startLine;
+
 export function mapInspection(
   raw: RuntimeResponse,
   request: InspectRequest,
@@ -71,7 +87,7 @@ export function mapInspection(
   });
   const merged = mergeSnippets(collected, sources);
   for (const snippet of merged) catalog.set(snippet.id, snippet);
-  let selected = merged;
+  let selected = [...merged].sort((a, b) => priority(a) - priority(b));
   if (request.snippets)
     selected = request.snippets.map((id) => {
       const snippet = catalog.get(id);
@@ -122,6 +138,7 @@ export function mapInspection(
       break;
     }
   }
+  if (!request.snippets) response.snippets.sort(byPosition);
   trimCandidates(maxBytes, 0);
   if (Buffer.byteLength(JSON.stringify(response)) > maxBytes)
     throw new Error("metadata_exceeds_budget: use fewer targets or increase maxBytes");

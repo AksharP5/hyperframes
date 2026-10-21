@@ -119,3 +119,90 @@ describe("components report budget", () => {
     }
   });
 });
+
+describe("components report priority", () => {
+  const css = Array.from({ length: 6 }, (_, n) => `.w-dot.n${n}{${"color:red;".repeat(30)}}`).join(
+    "\n",
+  );
+  const call = `tl.to(".w-dot", { x: 100, duration: 1 }, 2);`;
+
+  function withAnimation(
+    request: Parameters<typeof mapInspection>[1],
+    catalog = new Map<string, Snippet>(),
+  ) {
+    const dir = mkdtempSync(join(tmpdir(), "inspect-priority-"));
+    const html = `<html><head><style>\n${css}\n</style></head><body>\n<script>\nconst tl = gsap.timeline();\n${call}\n</script>\n</body></html>`;
+    writeFileSync(join(dir, "index.html"), html);
+    const sources = new Sources(dir);
+    const start = html.indexOf(call);
+    const creation = sources.slice(
+      "index.html",
+      start,
+      start + call.length,
+      "animation creation",
+      0,
+    )!;
+    const raw: RuntimeResponse = {
+      results: [
+        {
+          target: { selector: ".w-dot" },
+          status: "found",
+          candidates: [element(0)],
+          animations: [{ stack: "s", attachmentStacks: [], targets: [element(0)] } as never],
+          elements: [],
+          css: sources.cssRules.map((rule) => rule.id),
+          truncated: false,
+        },
+      ],
+      recorded: 1,
+      recordLimitReached: false,
+      hooked: true,
+    };
+    const report = mapInspection(raw, request, {
+      sources,
+      map: () => [creation],
+      catalog,
+      generation: "g",
+      sourceVersion: "v",
+      reused: false,
+      start: performance.now(),
+    });
+    rmSync(dir, { recursive: true, force: true });
+    return { report, creation };
+  }
+
+  it("keeps the code that makes an animation before CSS candidates that sit earlier in the file", () => {
+    const { report, creation } = withAnimation({
+      targets: [{ selector: ".w-dot" }],
+      maxBytes: 2600,
+    });
+    expect(report.snippets.map((s) => s.id)).toContain(creation.id);
+    expect(report.omittedCount).toBeGreaterThan(0);
+    for (const s of report.snippets.filter((s) => s.id !== creation.id))
+      expect(s.kind).toEqual(["matched CSS candidate"]);
+  });
+
+  it("returns the snippets it keeps in file order", () => {
+    const { report } = withAnimation({ targets: [{ selector: ".w-dot" }], maxBytes: 256000 });
+    const lines = report.snippets.map((s) => s.startLine);
+    expect(lines).toEqual([...lines].sort((a, b) => a - b));
+    expect(report.snippets.at(-1)?.kind).toEqual(["animation creation"]);
+    expect(report.omittedCount).toBe(0);
+  });
+
+  it("returns explicit snippet IDs in request order rather than file order", () => {
+    const catalog = new Map<string, Snippet>();
+    const { report } = withAnimation(
+      { targets: [{ selector: ".w-dot" }], maxBytes: 256000 },
+      catalog,
+    );
+    const ids = report.snippets.map((snippet) => snippet.id).reverse();
+    expect(ids).toHaveLength(2);
+    const { report: fetched } = withAnimation(
+      { targets: [], snippets: ids, maxBytes: 256000 },
+      catalog,
+    );
+    expect(fetched.snippets.map((snippet) => snippet.id)).toEqual(ids);
+    expect(fetched.omittedCount).toBe(0);
+  });
+});
