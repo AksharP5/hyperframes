@@ -4,7 +4,11 @@
  * when the render must match a Studio preview that could not blur (`pageMotionBlur: "off"`).
  */
 
-import { PAGE_DEVICE_SCALE_GLOBAL, PAGE_MOTION_BLUR_OFF_GLOBAL } from "@hyperframes/core";
+import {
+  PAGE_DEVICE_SCALE_GLOBAL,
+  PAGE_MOTION_BLUR_OFF_GLOBAL,
+  acceleratedCanvasTrackerSource,
+} from "@hyperframes/core";
 import type { Page } from "puppeteer-core";
 import type { CaptureOptions } from "../types.js";
 
@@ -12,6 +16,7 @@ export async function installPageMotionBlur(
   page: Pick<Page, "evaluateOnNewDocument">,
   options: Pick<CaptureOptions, "motionBlur" | "pageMotionBlur" | "deviceScaleFactor">,
 ): Promise<void> {
+  await page.evaluateOnNewDocument(acceleratedCanvasTrackerSource());
   const scale = options.deviceScaleFactor ?? 1;
   if (scale > 1) {
     await page.evaluateOnNewDocument(

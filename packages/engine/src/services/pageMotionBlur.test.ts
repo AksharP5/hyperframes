@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { PAGE_DEVICE_SCALE_GLOBAL, PAGE_MOTION_BLUR_OFF_GLOBAL } from "@hyperframes/core";
+import {
+  PAGE_DEVICE_SCALE_GLOBAL,
+  PAGE_MOTION_BLUR_OFF_GLOBAL,
+  acceleratedCanvasTrackerSource,
+} from "@hyperframes/core";
 import { installPageMotionBlur } from "./pageMotionBlur";
 
 const fakePage = () => ({ evaluateOnNewDocument: vi.fn(async () => ({ identifier: "1" })) });
@@ -8,7 +12,7 @@ describe("installPageMotionBlur", () => {
   it("tells the page to stand down when the engine blurs", async () => {
     const page = fakePage();
     await installPageMotionBlur(page, { motionBlur: { samplesPerFrame: 16 } });
-    expect(page.evaluateOnNewDocument).toHaveBeenCalledTimes(1);
+    expect(page.evaluateOnNewDocument).toHaveBeenCalledTimes(2);
     expect(page.evaluateOnNewDocument).toHaveBeenCalledWith(
       expect.any(Function),
       PAGE_MOTION_BLUR_OFF_GLOBAL,
@@ -36,9 +40,9 @@ describe("installPageMotionBlur", () => {
     );
   });
 
-  it("leaves the page alone otherwise", async () => {
+  it("installs the canvas tracker before any page script, and nothing else by default", async () => {
     const page = fakePage();
     await installPageMotionBlur(page, {});
-    expect(page.evaluateOnNewDocument).not.toHaveBeenCalled();
+    expect(page.evaluateOnNewDocument.mock.calls).toEqual([[acceleratedCanvasTrackerSource()]]);
   });
 });

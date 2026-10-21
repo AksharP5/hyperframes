@@ -17,6 +17,7 @@ type Win = Window & {
       reason: string | null;
       shutterDeg: number;
       moverNames: string[];
+      failedFrames: number;
     };
   };
   __hf_page_composite_pending?: boolean;
@@ -202,6 +203,22 @@ describe("opt-in and off switches", () => {
     gl.getContext("webgl");
     initCaptureMotionBlur(host(root));
     expect(win.__hfMotionBlur?.report().reason).toMatch(/WebGL/);
+  });
+
+  it("stays off for a canvas handed to an OffscreenCanvas, whose context is out of reach", () => {
+    installHtmlInCanvas();
+    (HTMLCanvasElement.prototype as unknown as Record<string, unknown>).transferControlToOffscreen =
+      () => ({});
+    trackAcceleratedCanvases();
+    const root = makeRoot();
+    const canvas = document.createElement("canvas");
+    root.append(canvas);
+    canvas.transferControlToOffscreen();
+    initCaptureMotionBlur(host(root));
+    expect(win.__hfMotionBlur?.report()).toMatchObject({ state: "off" });
+    expect(win.__hfMotionBlur?.report().reason).toMatch(/WebGL/);
+    delete (HTMLCanvasElement.prototype as unknown as Record<string, unknown>)
+      .transferControlToOffscreen;
   });
 
   it("turns off instead of wrapping when a WebGL canvas appears after init", () => {
@@ -672,6 +689,30 @@ describe("painting", () => {
     expect(win.__hfMotionBlur?.report()).toMatchObject({ state: "off" });
   });
 
+  it("counts every frame that fell back to plain DOM, though the failure streak resets", async () => {
+    vi.useFakeTimers();
+    installHtmlInCanvas();
+    const { root, h } = movingHost();
+    initCaptureMotionBlur(h);
+    const frame = async (t: number, fails: boolean): Promise<void> => {
+      captureContext()?.drawElementImage.mockImplementation(() => {
+        if (fails) throw new Error("No cached paint record");
+      });
+      const done = paintCaptureMotionBlur(t, { engineMode: true });
+      releaseCaptureMotionBlurFrame();
+      captureCanvas(root).dispatchEvent(new Event("paint"));
+      captureCanvas(root).dispatchEvent(new Event("paint"));
+      await done;
+    };
+    await frame(0.1, true);
+    await frame(0.2, false);
+    void paintCaptureMotionBlur(0.3, { engineMode: true });
+    releaseCaptureMotionBlurFrame();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(win.__hfMotionBlur?.report()).toMatchObject({ failures: 0, failedFrames: 2 });
+    expect(Object.keys(win.__hfMotionBlur?.report() ?? {})).toContain("failedFrames");
+  });
+
   it("keeps blurring in a render after repeated capture failures, each failed frame plain DOM", async () => {
     installHtmlInCanvas();
     const { root, h } = movingHost();
@@ -689,7 +730,11 @@ describe("painting", () => {
       await engineFrame(i);
       expect(root.parentElement).toBe(document.body);
     }
-    expect(win.__hfMotionBlur?.report()).toMatchObject({ state: "on", failures: 5 });
+    expect(win.__hfMotionBlur?.report()).toMatchObject({
+      state: "on",
+      failures: 5,
+      failedFrames: 5,
+    });
     captureContext()?.drawElementImage.mockReset();
     const done = paintCaptureMotionBlur(0.5, { engineMode: true });
     expect(captureCanvas(root).tagName).toBe("CANVAS");
@@ -697,7 +742,12 @@ describe("painting", () => {
     captureCanvas(root).dispatchEvent(new Event("paint"));
     captureCanvas(root).dispatchEvent(new Event("paint"));
     await done;
-    expect(win.__hfMotionBlur?.report()).toMatchObject({ state: "on", failures: 0, frames: 6 });
+    expect(win.__hfMotionBlur?.report()).toMatchObject({
+      state: "on",
+      failures: 0,
+      failedFrames: 5,
+      frames: 6,
+    });
     expect(contexts[1]?.drawImage.mock.calls.length).toBeGreaterThan(1);
   });
 });

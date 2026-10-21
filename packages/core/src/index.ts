@@ -437,4 +437,8 @@ export {
   type HfVfxParam,
   type HfVfxParamValues,
 } from "./vfx.js";
-export { PAGE_DEVICE_SCALE_GLOBAL, PAGE_MOTION_BLUR_OFF_GLOBAL } from "./pageMotionBlur.js";
+export {
+  PAGE_DEVICE_SCALE_GLOBAL,
+  PAGE_MOTION_BLUR_OFF_GLOBAL,
+  acceleratedCanvasTrackerSource,
+} from "./pageMotionBlur.js";

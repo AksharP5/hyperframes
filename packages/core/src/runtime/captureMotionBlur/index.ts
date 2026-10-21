@@ -14,6 +14,8 @@
 import {
   PAGE_DEVICE_SCALE_GLOBAL,
   PAGE_MOTION_BLUR_OFF_GLOBAL,
+  installAcceleratedCanvasTracker,
+  isAcceleratedCanvas,
   supportsCaptureMotionBlur,
 } from "../../pageMotionBlur";
 import { swallow } from "../diagnostics";
@@ -105,29 +107,8 @@ function readConfig(root: HTMLElement): Config | null {
   };
 }
 
-const ACCELERATED_CONTEXTS = new Set(["webgl", "webgl2", "experimental-webgl", "webgpu"]);
-const acceleratedCanvases = new WeakSet<HTMLCanvasElement>();
-
-/**
- * Remember canvases given a WebGL / WebGPU context. Must run before composition scripts: once
- * one has presented, html-in-canvas keeps capturing that frame however often it redraws.
- */
-export function trackAcceleratedCanvases(): void {
-  const proto = HTMLCanvasElement.prototype;
-  const original: unknown = proto.getContext;
-  if (typeof original !== "function" || "__hfAccelTracked" in original) return;
-  const tracked = function (this: HTMLCanvasElement, ...args: unknown[]): unknown {
-    const ctx: unknown = Reflect.apply(original, this, args);
-    if (ctx && ACCELERATED_CONTEXTS.has(String(args[0]))) acceleratedCanvases.add(this);
-    return ctx;
-  };
-  Object.defineProperty(tracked, "__hfAccelTracked", { value: true });
-  Object.defineProperty(proto, "getContext", {
-    value: tracked,
-    writable: true,
-    configurable: true,
-  });
-}
+/** Must run before composition scripts: see `installAcceleratedCanvasTracker`. */
+export const trackAcceleratedCanvases = installAcceleratedCanvasTracker;
 
 /** What in the composition the capture cannot take, checked again per frame (scripts add canvases). */
 function captureBlocker(root: HTMLElement): string | null {
@@ -135,7 +116,7 @@ function captureBlocker(root: HTMLElement): string | null {
   if (root.querySelector("canvas[layoutsubtree]"))
     return "the composition already uses html-in-canvas";
   for (const canvas of root.querySelectorAll("canvas")) {
-    if (acceleratedCanvases.has(canvas))
+    if (isAcceleratedCanvas(canvas))
       return "the composition draws a WebGL/WebGPU canvas, which html-in-canvas captures frozen";
   }
   return null;
