@@ -45,3 +45,55 @@ export async function installPageMotionBlur(
     off,
   );
 }
+
+interface PageMotionBlurState {
+  state: string;
+  code: string;
+  movers: number;
+  failedFrames: number;
+}
+
+async function readPageMotionBlur(
+  page: Pick<Page, "evaluate">,
+): Promise<PageMotionBlurState | null> {
+  return page.evaluate(() => {
+    const api: unknown = Reflect.get(window, "__hfMotionBlur");
+    const report: unknown = api && typeof api === "object" ? Reflect.get(api, "report") : null;
+    const got: unknown = typeof report === "function" ? report() : null;
+    if (!got || typeof got !== "object") return null;
+    return {
+      state: String(Reflect.get(got, "state")),
+      code: String(Reflect.get(got, "reasonCode")),
+      movers: Number(Reflect.get(got, "movers")),
+      failedFrames: Number(Reflect.get(got, "failedFrames")) || 0,
+    };
+  });
+}
+
+const formatPageMotionBlur = (r: PageMotionBlurState): string =>
+  `[motion-blur] ${r.state} reasonCode=${r.code} movers=${r.movers} failedFrames=${r.failedFrames}`;
+
+/** One line saying what the page's blur did for this session; null when the page never asked for blur. */
+export async function describePageMotionBlur(page: Pick<Page, "evaluate">): Promise<string | null> {
+  const r = await readPageMotionBlur(page);
+  return r && formatPageMotionBlur(r);
+}
+
+/** The session's closing line, only when frames fell back to plain DOM: the first-frame line cannot know. */
+export async function describePageMotionBlurAtEnd(
+  page: Pick<Page, "evaluate">,
+  timeoutMs = 1500,
+): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stuck = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  try {
+    const r = await Promise.race([readPageMotionBlur(page), stuck]);
+    return r && r.failedFrames > 0 ? `${formatPageMotionBlur(r)} (session end)` : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

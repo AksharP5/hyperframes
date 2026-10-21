@@ -40,7 +40,11 @@ import {
   resolveMotionBlurPlan,
   type MotionBlurPlan,
 } from "./motionBlur.js";
-import { installPageMotionBlur } from "./pageMotionBlur.js";
+import {
+  describePageMotionBlur,
+  describePageMotionBlurAtEnd,
+  installPageMotionBlur,
+} from "./pageMotionBlur.js";
 
 // ── Extracted modules ───────────────────────────────────────────────────────
 import {
@@ -4346,6 +4350,10 @@ async function captureFrameCore(
     session.capturePerf.screenshotMs += screenshotMs;
     session.capturePerf.totalMs += captureTimeMs;
     session.capturePerf.frameMs.push(captureTimeMs);
+    if (session.capturePerf.frames === 1) {
+      const blur = await describePageMotionBlur(session.page).catch(() => null);
+      if (blur) console.log(blur);
+    }
 
     // Retain this freshly-captured buffer so the following static frames can reuse it.
     if (session.staticFrames) {
@@ -4791,6 +4799,10 @@ export async function closeCaptureSession(session: CaptureSession): Promise<void
     // One last sample so the summary reflects the session's end state, not a
     // point up to `intervalMs` earlier. Best effort; the page may be gone.
     await session.chromeMemory.sampleOnce();
+  }
+  if (session.page && !session.pageReleased) {
+    const blur = await describePageMotionBlurAtEnd(session.page);
+    if (blur) console.log(blur);
   }
   // Realized static-dedup telemetry: how much the cache actually helped this
   // render (vs the prediction logged at arm time). Both capture paths
