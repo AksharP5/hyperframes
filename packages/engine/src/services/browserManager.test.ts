@@ -112,6 +112,30 @@ describe("BeginFrame capability probe", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("keeps a passed probe supported when its page close is slow", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ hasDamage: true, screenshotData: png.toString("base64") });
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(null),
+        createCDPSession: vi.fn().mockResolvedValue({
+          send,
+          detach: vi.fn().mockResolvedValue(undefined),
+        }),
+        close: vi.fn().mockReturnValue(new Promise<never>(() => {})),
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser);
+
+    expect(result.supported).toBe(true);
+    expect(result.detail).toContain("probe page cleanup timed out");
+  });
+
   it("force-kills and disconnects when graceful browser cleanup never resolves", async () => {
     const kill = vi.fn();
     const disconnect = vi.fn().mockResolvedValue(undefined);

@@ -511,11 +511,7 @@ async function probeBeginFrameSupport(
     };
   }
   if (page && !(await settleWithin(page.close(), BEGINFRAME_PROBE_CLEANUP_TIMEOUT_MS))) {
-    return {
-      supported: false,
-      detail: `${result.detail}; probe page cleanup timed out`,
-      durationMs: Date.now() - started,
-    };
+    return { ...result, detail: `${result.detail}; probe page cleanup timed out` };
   }
   return result;
 }
