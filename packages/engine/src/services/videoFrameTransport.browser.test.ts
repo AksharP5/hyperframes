@@ -105,6 +105,42 @@ describe.skipIf(!hasBrowser)("video frame transport in Chrome", () => {
     expect(unexpectedFrameRequests).toBe(0);
   });
 
+  it("publishes a replacement only after its full-resolution decode completes", async () => {
+    await injectVideoFramesBatch(page, [{ videoId: "a", dataUri: blueJpeg }]);
+    await page.addStyleTag({ content: ".__render_frame__ { visibility: visible !important }" });
+    await page.evaluate(() => {
+      const decode = HTMLImageElement.prototype.decode;
+      HTMLImageElement.prototype.decode = async function () {
+        document.documentElement.setAttribute("data-decode-pending", "1");
+        await new Promise<void>((resolve) =>
+          window.addEventListener("release-frame-decode", () => resolve(), { once: true }),
+        );
+        await decode.call(this);
+      };
+    });
+    const injection = injectVideoFramesBatch(page, [{ videoId: "a", dataUri: redPng }]);
+    try {
+      await page.waitForSelector('[data-decode-pending="1"]');
+      const visibility = await page.evaluate(() => {
+        const img = document.querySelector<HTMLImageElement>("img.__render_frame__");
+        if (!img) throw new Error("No replacement frame");
+        return getComputedStyle(img).visibility;
+      });
+      expect(visibility).toBe("hidden");
+    } finally {
+      await page.evaluate(() => window.dispatchEvent(new Event("release-frame-decode")));
+      await injection;
+    }
+    expect((await pixels())[0]?.rgba).toEqual([255, 0, 0, 255]);
+    expect(
+      await page.evaluate(() => {
+        const img = document.querySelector("img");
+        if (!img) throw new Error("No replacement frame");
+        return getComputedStyle(img).visibility;
+      }),
+    ).toBe("visible");
+  });
+
   it("loads frames even while all same-origin download connections are busy", async () => {
     await page.evaluate(() => {
       for (let i = 0; i < 6; i++) void fetch(`/slow${i}.mp4`);

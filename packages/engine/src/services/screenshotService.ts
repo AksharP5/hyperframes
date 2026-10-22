@@ -662,6 +662,7 @@ async function injectResolvedVideoFramesBatch(
     ) => {
       const injectedIds: string[] = [];
       const pendingDecodes: Array<Promise<void>> = [];
+      const imagesToPublish: HTMLImageElement[] = [];
       const replacementLayoutProperties = new Set([
         "width",
         "height",
@@ -803,6 +804,8 @@ async function injectResolvedVideoFramesBatch(
         img.style.objectPosition = computedStyle.objectPosition;
         img.style.zIndex = computedStyle.zIndex;
 
+        // Publish after full decode so raster cannot race it with a reduced JPEG decode.
+        img.style.setProperty("visibility", "hidden", "important");
         img.decoding = "sync";
         if (img.getAttribute("src") !== item.dataUri) {
           if (item.crossOrigin) img.crossOrigin = item.crossOrigin;
@@ -821,7 +824,7 @@ async function injectResolvedVideoFramesBatch(
           );
         }
         img.style.opacity = String(computedOpacity);
-        img.style.visibility = "visible";
+        imagesToPublish.push(img);
         // Hide the native <video> with visibility only — never clobber inline
         // opacity, so subsequent reads (and queryElementStacking) see the real
         // GSAP-controlled value.
@@ -832,6 +835,7 @@ async function injectResolvedVideoFramesBatch(
       if (pendingDecodes.length > 0) {
         await Promise.all(pendingDecodes);
       }
+      for (const img of imagesToPublish) img.style.visibility = "visible";
       if (injectedIds.length > 0) {
         const redraw = (window as Window & { __hf?: { colorGrading?: { redraw?: () => void } } })
           .__hf?.colorGrading?.redraw;
