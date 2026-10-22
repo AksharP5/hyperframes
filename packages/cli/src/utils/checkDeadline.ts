@@ -7,12 +7,27 @@ const CHECK_DEADLINE_MS = 120_000;
 const SCRIPT_START = "[hyperframes:script:start] ";
 const SCRIPT_FINISH = "[hyperframes:script:finish] ";
 
+const PHASE_LABELS = {
+  copies: "making video copies",
+  launch: "starting Chrome",
+  load: "loading the page",
+  settle: "waiting for the page to be ready",
+  samples: "checking samples",
+  overlap: "running the overlap pass",
+  crops: "capturing finding crops",
+} as const;
+export type CheckPhase = keyof typeof PHASE_LABELS;
+const BEFORE_DEADLINE: ReadonlySet<CheckPhase> = new Set(["copies", "launch"]);
+
 export class CheckDeadlineError extends Error {
-  constructor(readonly sourceFile?: string) {
+  constructor(
+    readonly sourceFile?: string,
+    phases = "",
+  ) {
     super(
-      sourceFile === undefined
-        ? "Check did not finish within its deadline."
-        : `${sourceFile}: its script did not finish within the check deadline.`,
+      (sourceFile === undefined
+        ? "Check did not finish within its deadline"
+        : `${sourceFile}: its script did not finish within the check deadline`) + (phases || "."),
     );
   }
 }
@@ -29,6 +44,8 @@ export class CheckDeadline {
   private readonly expiry: Promise<never>;
   private rejectExpiry!: (error: CheckDeadlineError) => void;
   private phase: "waiting" | "started" | "closed" = "waiting";
+  private work: { phase: CheckPhase; since: number } | undefined;
+  private readonly spent = new Map<CheckPhase, number>();
 
   constructor() {
     this.expiry = new Promise((_, reject) => {
@@ -36,11 +53,34 @@ export class CheckDeadline {
     });
   }
 
+  enter = (phase: CheckPhase): void => {
+    if (this.expired) return;
+    const now = Date.now();
+    if (this.work) this.spend(this.work.phase, now - this.work.since);
+    this.work = { phase, since: now };
+    this.spend(phase, 0);
+  };
+
+  private spend(phase: CheckPhase, ms: number): void {
+    this.spent.set(phase, (this.spent.get(phase) ?? 0) + ms);
+  }
+
+  private describe(): string {
+    if (!this.work) return "";
+    const open = Date.now() - this.work.since;
+    const parts = [...this.spent].map(([phase, ms]) => {
+      const seconds = ((phase === this.work?.phase ? ms + open : ms) / 1000).toFixed(1);
+      return `${PHASE_LABELS[phase]} ${seconds}${BEFORE_DEADLINE.has(phase) ? " (before the deadline)" : ""}`;
+    });
+    return ` (${CHECK_DEADLINE_MS / 1000} s from when Chrome was ready), while ${PHASE_LABELS[this.work.phase]}. Seconds per phase: ${parts.join(", ")}.`;
+  }
+
   start = (): void => {
     if (this.phase !== "waiting") return;
     this.phase = "started";
+    this.enter("load");
     this.timer = setTimeout(() => {
-      this.expired = new CheckDeadlineError(this.scripts.at(-1));
+      this.expired = new CheckDeadlineError(this.scripts.at(-1), this.describe());
       this.rejectExpiry(this.expired);
       this.abort.abort(this.expired);
     }, CHECK_DEADLINE_MS);

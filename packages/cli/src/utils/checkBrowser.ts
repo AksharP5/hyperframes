@@ -239,11 +239,13 @@ export async function runBrowserCheck(
 ): Promise<CheckBrowserResult> {
   const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
   const html = await bundleWithLocalizedFonts(project.dir);
+  deadline?.enter("copies");
   const { findings: drafts, failedPaths } = await preResolveHostileMediaProxies(
     project.dir,
     html,
     options.autoProxy,
   );
+  deadline?.enter("launch");
   const server = await serveStaticProjectHtml(
     project.dir,
     html,
@@ -279,6 +281,7 @@ export async function runBrowserCheck(
         wireRuntimeListeners(page, drafts, clock);
         await deadline?.preparePage(page);
       },
+      onLoaded: () => deadline?.enter("settle"),
     });
     chromeBrowser = session.browser;
     const page = session.page;
@@ -303,7 +306,7 @@ export async function runBrowserCheck(
     drafts.push(...blur);
     const sampleLog = sampleWindow(drafts);
     const driver = createPageDriver(page, clock, sampleLog);
-    const result = await runGrid(driver, options, motion, helpers);
+    const result = await runGrid(driver, options, motion, helpers, deadline?.enter);
     helperSession?.stop();
     const helper = await helperOpen?.catch(() => undefined);
     const merged = helper ? mergeHelperDrafts(sampleLog, helper.sampleLog) : drafts;

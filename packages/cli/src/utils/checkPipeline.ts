@@ -1,5 +1,5 @@
 import { BrowserCleanupError } from "../browser/launch.js";
-import { CheckDeadline, CheckDeadlineError } from "./checkDeadline.js";
+import { CheckDeadline, CheckDeadlineError, type CheckPhase } from "./checkDeadline.js";
 import {
   checkSnapshotDirectory,
   beginCheckSnapshots,
@@ -514,6 +514,7 @@ async function collectGridSamples(
   grid: SampleGrid,
   motion: MotionPlan,
   helpers: Promise<CheckAuditDriver[]>,
+  enter: (phase: CheckPhase) => void,
 ): Promise<GridSamples> {
   const geometryEnabled = grid.captionSamples.length > 0 || grid.frameSamples.length > 0;
   const sets: SampleSets = {
@@ -559,6 +560,7 @@ async function collectGridSamples(
   driver.markSamples?.("end");
   const collected = emptyGridSamples();
   for (const samples of perTime) appendGridSamples(collected, samples);
+  enter("overlap");
   await collectMotionOverlapSamples(
     driver,
     grid,
@@ -566,6 +568,7 @@ async function collectGridSamples(
     options.range,
     craftEnabled(driver, options),
   );
+  enter("samples");
   return collected;
 }
 
@@ -1431,7 +1434,9 @@ export async function runAuditGrid(
   options: CheckOptions,
   motion: MotionSpecResolution,
   helpers: Promise<CheckAuditDriver[]> = Promise.resolve([]),
+  enter: (phase: CheckPhase) => void = () => {},
 ): Promise<CheckBrowserResult> {
+  enter("samples");
   await driver.initialize(options.contrast);
   const grid = await buildSampleGrid(driver, options);
   const plan = await planMotionSampling(
@@ -1440,7 +1445,7 @@ export async function runAuditGrid(
     grid.duration,
   );
   const seekLoopStart = Date.now();
-  const collected = await collectGridSamples(driver, options, grid, plan, helpers);
+  const collected = await collectGridSamples(driver, options, grid, plan, helpers, enter);
   const seekLoopMs = Date.now() - seekLoopStart;
 
   let motionIssues = plan.preflightIssues;
@@ -1693,6 +1698,7 @@ async function withFindingCrops(
   const cropRequests = selectFindingCropRequests(report);
   if (cropRequests.length === 0) return report;
   try {
+    deadline.enter("crops");
     const findingFiles = await deadline.run(() =>
       dependencies.captureFindingCrops(project, options, cropRequests, deadline),
     );

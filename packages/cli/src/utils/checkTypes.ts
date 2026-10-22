@@ -7,6 +7,7 @@ import type { ProjectDir } from "./project.js";
 import type { BrowserGpuMode } from "../browser/gpuPolicy.js";
 import type { HdrAutoPromotion } from "@hyperframes/engine";
 import type { PrelaunchedBrowser } from "../capture/captureCompositionFrame.js";
+import type { CheckPhase } from "./checkDeadline.js";
 
 export interface CheckOptions {
   samples: number;
@@ -325,6 +326,7 @@ export type RunAuditGrid = (
   options: CheckOptions,
   motion: MotionSpecResolution,
   helpers?: Promise<CheckAuditDriver[]>,
+  enter?: (phase: CheckPhase) => void,
 ) => Promise<CheckBrowserResult>;
 
 export interface CheckSection<T extends CheckFinding = CheckFinding> {

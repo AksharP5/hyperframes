@@ -93,3 +93,32 @@ it("closing before browser readiness prevents a later clock from starting", asyn
   expect(vi.getTimerCount()).toBe(0);
   expect(deadline.signal.aborted).toBe(false);
 });
+
+it("an expired check names the phase it was in and the seconds each phase took", async () => {
+  vi.useFakeTimers();
+  const deadline = new CheckDeadline();
+  const outcome = deadline
+    .run(() => rejectOnAbort(deadline.signal))
+    .catch((error: unknown) => error);
+  try {
+    deadline.enter("copies");
+    await vi.advanceTimersByTimeAsync(247_000);
+    deadline.enter("launch");
+    await vi.advanceTimersByTimeAsync(2_000);
+    deadline.start();
+    await vi.advanceTimersByTimeAsync(3_000);
+    deadline.enter("settle");
+    await vi.advanceTimersByTimeAsync(60_000);
+    deadline.enter("samples");
+    await vi.advanceTimersByTimeAsync(50_000);
+    deadline.enter("overlap");
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(((await outcome) as Error).message).toBe(
+      "Check did not finish within its deadline (120 s from when Chrome was ready), while running the overlap pass. " +
+        "Seconds per phase: making video copies 247.0 (before the deadline), starting Chrome 2.0 (before the deadline), " +
+        "loading the page 3.0, waiting for the page to be ready 60.0, checking samples 50.0, running the overlap pass 7.0.",
+    );
+  } finally {
+    await deadline.close();
+  }
+});
