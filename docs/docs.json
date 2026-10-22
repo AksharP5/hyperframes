@@ -1286,5 +1286,11 @@
       "destination": "/sdk/quickstart",
       "permanent": true
     }
-  ]
+  ],
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_zjjbX0PnWxERXrMHhkEJWj9A9BhGVLRReICgsfTMmpx",
+      "sessionRecording": false
+    }
+  }
 }
