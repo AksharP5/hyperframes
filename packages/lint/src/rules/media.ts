@@ -875,7 +875,7 @@ function findVolumeTweenOverridesGainFindings(ctx: LintContext): HyperframeLintF
     // the case it exists to bless.
     .map((tag) => ({ tag, volume: Number(readAttr(tag.raw, "data-volume") ?? "1") }))
     .filter((entry) => Number.isFinite(entry.volume) && entry.volume !== 1)
-    // A lane already has its own rule, and it wins over both of these.
+    // A lane silences the tween (its own rule says so) and scales by data-volume.
     .filter((entry) => !readDecodedAttr(entry.tag.raw, "data-automation"))
     .map((entry) => ({ ...entry, id: readAttr(entry.tag.raw, "id") }))
     .filter((entry): entry is typeof entry & { id: string } => Boolean(entry.id));

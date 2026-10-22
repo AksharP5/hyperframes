@@ -777,7 +777,7 @@ describe("audio_volume_tween_overrides_gain", () => {
     expect(res.findings.some((f) => f.code === "audio_volume_tween_overrides_gain")).toBe(false);
   });
 
-  it("stays quiet at unity, without a tween, or when a lane already owns the level", async () => {
+  it("stays quiet at unity, without a tween, or when a lane makes the tween inert", async () => {
     const unity = await lintHyperframeHtml(
       withScript(`data-volume="1"`, `tl.to("#bgm", { volume: 0 });`),
     );

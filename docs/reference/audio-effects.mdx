@@ -115,6 +115,14 @@ Preview and render agree on both clocks.
 which is about `3.981` — the same ceiling `data-volume` uses. A lane that boosts
 above unity is valid and will play; `1` is unity, not the maximum.
 
+The lane multiplies `data-volume`, the way clip gain offsets volume keyframes in
+an editor: `data-volume="0.5"` under a lane at `1` plays at `0.5`. The product
+shares the same +12 dB ceiling. This holds on clips and on groups.
+
+On a clip, `data-volume` is applied **ahead of** its effects, so a compressor or
+limiter in its `data-fx-chain` reacts to it; the lane comes after them. A group's
+`data-volume` stays after its effects, like a track fader.
+
 A lane holds its first value backwards to the start of its clip and its last
 value forward to the end. **A bed that begins before the voice therefore needs an
 explicit "no cut" point at `t: 0`, or it starts out already ducked.** Maximum 512

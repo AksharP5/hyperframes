@@ -3413,8 +3413,8 @@ export function initSandboxRuntimeModular(): void {
         cueAheadSeconds,
         getCompositionDuration: () =>
           getSafeTimelineDurationSeconds(state.capturedTimeline, 0, timingRevision),
-        onElementVolume: (el, _effectiveVolume, authorVolume) =>
-          webAudio.setElementVolume(el, authorVolume),
+        onElementVolume: (el, _effectiveVolume, authorVolume, clipGain) =>
+          webAudio.setElementVolume(el, authorVolume, clipGain),
         isWebAudioOwned: (el) => webAudio.ownsElement(el),
         isWebAudioRouted: (el) => webAudio.routesElement(el),
         onAutoplayBlocked: () => {

@@ -9,6 +9,7 @@
 
 import {
   isConstantLane,
+  isBentSegment,
   resolveAutomationRange,
   sampleAutomationCurve,
   sampleAutomationLane,
@@ -62,8 +63,7 @@ function isStraight(
   scale: "linear" | "log",
   map: FxParamTarget["map"],
 ): boolean {
-  const bent = Boolean(point.curve) || (point.viaX !== undefined && point.viaY !== undefined);
-  return !bent && scale === "linear" && !map;
+  return !isBentSegment(point) && scale === "linear" && !map;
 }
 
 function curvePointCount(duration: number): number {
