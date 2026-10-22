@@ -56,6 +56,7 @@ export interface UploadZipViaDirectOptions {
   idempotencyKey?: string;
   fetchImpl?: typeof fetch;
   onProgress?: (event: UploadProgressEvent) => void;
+  signal?: AbortSignal;
 }
 
 // Per api-docs: completeAssetUpload can return 409 "Uploaded object not found
@@ -103,17 +104,19 @@ async function putBytesToPresignedUrl(
   uploadHeaders: Record<string, unknown>,
   body: Uint8Array | UploadFileSource,
   contentType: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "content-type": contentType,
     ...normalizeUploadHeaders(uploadHeaders),
   };
-  if (!(body instanceof Uint8Array)) return putFileToPresignedUrl(uploadUrl, headers, body);
+  if (!(body instanceof Uint8Array)) return putFileToPresignedUrl(uploadUrl, headers, body, signal);
   // `Uint8Array<ArrayBufferLike>` is a valid `BodyInit` at runtime but
   // not strictly assignable per lib.dom.d.ts — cast rather than copy,
   // since a 200MB buffer copy would be wasteful.
   const res = await fetchImpl(uploadUrl, {
     method: "PUT",
+    signal,
     headers,
     body: body as unknown as BodyInit,
   });
@@ -132,10 +135,12 @@ async function putFileToPresignedUrl(
   uploadUrl: string,
   headers: Record<string, string>,
   file: UploadFileSource,
+  signal?: AbortSignal,
 ): Promise<void> {
   const send = new URL(uploadUrl).protocol === "https:" ? httpsRequest : httpRequest;
   const req = send(uploadUrl, {
     method: "PUT",
+    signal,
     headers: { ...headers, "content-length": String(file.size) },
   });
   const response = new Promise<IncomingMessage>((resolve, reject) => {
@@ -221,6 +226,7 @@ export async function uploadAssetViaDirectUpload(
     initialize.upload_headers,
     body,
     opts.contentType,
+    opts.signal,
   );
   opts.onProgress?.({ phase: "upload", percent: 100 });
 

@@ -583,6 +583,50 @@ first, and the result warns when the cut part held the file's loudest moment.
 
 Word timing is not here: use [`transcribe`](#transcribe).
 
+#### Reading a whole recording
+
+`--read` turns one recording — an episode, a reference video — into
+time-stamped lines an agent can read or grep, instead of measurements of one sound:
+
+```bash
+npx hyperframes audio refs/episode.mp4 --read                 # the whole recording
+npx hyperframes audio refs/episode.mp4 --read --range 60,70   # only what overlaps 60–70 s
+```
+
+- **voice**: one line per sentence with its text, speaking rate against the
+  recording's mean, pitch when it is 3 semitones or more off the median, and a
+  rising or falling end; pauses of 0.4 s or more between sentences.
+- **effects**: each sound effect with a kind (`riser`, `boom`, `thump`, `whoosh`,
+  `click`, `tick`, `ding`, `hit`), the group of identical sounds it belongs to
+  (`S1` is the most used), band, attack, tail, how far it stands over the music,
+  and where it falls in a pause. Quick runs of one sound are a single line with a
+  count; hits on the music's beat are the music's own drums, and sounds more than
+  20 dB under the recording are separation residue nobody hears; both are left out.
+- **music**: the bed split at its cut-outs, each part naming its piece, the
+  instruments that carry it and its tempo, whether it starts, resumes after a
+  break, returns or is new, and where it fades.
+
+Sentences come from a transcript: `--transcript <file>`, or
+`<recording>.transcript.json` beside the recording. Without one, voice lines
+carry no words.
+
+Effects and music are read from stems. At `--quality best` the
+recording is separated into vocals, drums, bass, guitar, piano and other by
+HeyGen's `/v3/audio/stems`, with your HeyGen credential (see
+[audio services](#audio-services)): it is uploaded as 192 kb/s MP3 through the
+same origin's direct-upload endpoints. The separation request waits for the
+stems; an in-progress response or dropped connection retries the same request
+with the same idempotency key (`HYPERFRAMES_AUDIO_STEMS_TIMEOUT_MS`, 30 minutes
+by default). Effects are read
+from the drums stem and the music from the other four. Without stems, effects are
+read from the mix outside speech and the music is not read; with neither stems nor
+a transcript, voice and effects are not read either, because the mix alone does
+not tell speech from music. Each case says so in a warning.
+
+The result is computed once per file content and kept in `.hyperframes/read-audio`
+under the project, with the stems; the text output ends with the path of the
+whole recording's text, and `--json` returns the analysis.
+
 Every measurement comes from a provider ladder, tried in this order until one
 answers:
 
@@ -593,13 +637,12 @@ answers:
 | sections | `api`, `apple-mu`, `signal` |
 | describe | `api`, `apple-sound` |
 
-- `api` is an audio analysis service, used when `HYPERFRAMES_AUDIO_API_URL` and
-  `HYPERFRAMES_AUDIO_API_KEY` are both set. The audio is uploaded as 16 kHz mono
+- `api` is HeyGen's `/v3/audio/analysis`, used when a HeyGen credential is
+  found (see [audio services](#audio-services)). The audio is uploaded as 16 kHz mono
   WAV through the same origin’s public asset direct-upload and completion endpoints.
   Each decoded signal is uploaded once; analysis requests send its finalized asset ID as JSON.
-  The API key needs asset upload and audio-analysis permissions. Channels are averaged unless cancellation removes over 90% of the loudest
-  channel’s energy, in which case that channel is used. Requests carry the key in an `x-api-key` header and a new `Idempotency-Key` on each
-  request; the answer may come wrapped in `{ "data": … }`. Every beat,
+  The credential needs asset upload and audio permissions. Channels are averaged unless cancellation removes over 90% of the loudest
+  channel’s energy, in which case that channel is used. Each request carries a new `Idempotency-Key`; the answer may come wrapped in `{ "data": … }`. Every beat,
   downbeat or section boundary it answers moves onto the nearest beat signal
   processing measured, when one is within a quarter beat; the rest are listed in
   `snap.unsnapped`, and `snap.medianShiftMs` says how far the moved ones went.
@@ -621,12 +664,33 @@ answers:
   helper compiled once with the Xcode command line tools.
 
 A provider that cannot run, or fails, is passed over with a warning that says
-why. `--quality fast|local|best` limits which providers may run (`local` keeps
-the audio on this machine, `fast` allows only signal processing),
-`--provider beats=signal` pins one, and `--full` shows each ladder step.
+why. `--quality local|best|fast` limits which providers may run: `local`, the
+default, keeps the audio on this machine; `best` also sends it to the audio
+services below; `fast` allows only signal processing. When a capability goes
+unanswered because a service was left out, a warning says `--quality best` could
+answer it. `--provider beats=signal` pins a capability to one provider, and
+`--full` shows each ladder step.
 Tune the analysis with `--onset-method`, `--threshold`, `--band lo,hi`,
 `--hop-ms`, `--onset-ratio`, `--tail-db` and `--silence-db`. Decoding needs
 FFmpeg.
+
+#### Audio services
+
+Only at `--quality best` is audio uploaded. Stems and the `api` provider then
+call HeyGen, which may bill your account, with the same credential as the other
+HeyGen commands: `HEYGEN_API_KEY`, `HYPERFRAMES_API_KEY`, `HEYGEN_ACCESS_TOKEN`,
+or a credential saved by `hyperframes auth login`, on the API at
+`HEYGEN_API_URL` when set. API keys are sent as `x-api-key`; OAuth credentials
+are sent as bearer tokens. If the service refuses a request, analysis falls
+back with a warning. Without a credential, stems are skipped and `api` is
+passed over. At `local`, the default, no credential is looked up and nothing
+leaves the machine.
+
+To use another service, set `HYPERFRAMES_AUDIO_STEMS_URL` or
+`HYPERFRAMES_AUDIO_API_URL` to its full URL together with
+`HYPERFRAMES_AUDIO_API_KEY`, which is sent as `x-api-key`. Your HeyGen
+credential is never sent to a URL set this way. Setting either URL to an empty
+string turns that service off, whatever credential is present.
 
 ## Look at it
 
