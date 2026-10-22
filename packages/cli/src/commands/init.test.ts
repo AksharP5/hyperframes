@@ -235,6 +235,31 @@ describe("hyperframes init flag rename", () => {
     }
   });
 
+  it.each([
+    ["portrait.mp4", "1080", "1920"],
+    ["rotated-portrait.mp4", "1080", "1920"],
+    ["three-four.mp4", "1080", "1440"],
+    ["four-three.mp4", "1440", "1080"],
+    ["square.mp4", "1080", "1080"],
+    ["anamorphic.mp4", "1920", "1080"],
+  ])("sizes the project to the --video's shape as it plays (%s)", (fixture, width, height) => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-init-portrait-"));
+    const target = join(dir, "proj");
+    const clip = join(dir, fixture);
+    copyFileSync(resolve(fileURLToPath(import.meta.url), `../__fixtures__/${fixture}`), clip);
+    try {
+      const res = runInit([target, "--non-interactive", "--skip-transcribe", "--video", clip]);
+      expect(res.status).toBe(0);
+      const root = readFileSync(join(target, "index.html"), "utf-8").match(
+        /<div\b[^>]*data-composition-id="main"[^>]*>/,
+      )?.[0];
+      expect(root).toContain(`data-width="${width}"`);
+      expect(root).toContain(`data-height="${height}"`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("scaffolds a silent --video as a muted clip with no audio element", () => {
     const dir = mkdtempSync(join(tmpdir(), "hf-init-silent-"));
     const target = join(dir, "proj");
