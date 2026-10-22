@@ -77,6 +77,8 @@ export async function encodeAac(
       segments.map(({ trim, path }) =>
         runFfmpeg(
           [
+            "-cpuflags",
+            "0",
             "-i",
             input,
             "-af",

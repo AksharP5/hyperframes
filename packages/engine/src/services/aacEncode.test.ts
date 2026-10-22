@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { getFfmpegBinary, getFfprobeBinary } from "../utils/ffmpegBinaries.js";
 import { aacSegmentCount, encodeAac, splitAdtsFrames } from "./aacEncode.js";
+import * as ffmpegRunner from "../utils/runFfmpeg.js";
 
 const HAS_FFMPEG = spawnSync(getFfmpegBinary(), ["-version"], { encoding: "utf-8" }).status === 0;
 
@@ -101,6 +102,54 @@ describe("aacSegmentCount", () => {
 describe.skipIf(!HAS_FFMPEG)("encodeAac", () => {
   const dir = mkdtempSync(join(tmpdir(), "hf-aac-encode-"));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("uses identical scalar AAC arguments and output bytes on repeated encodes", async () => {
+    const source = join(dir, "scalar.wav");
+    ffmpeg([
+      "-f",
+      "lavfi",
+      "-i",
+      "anoisesrc=seed=2:amplitude=0.1:duration=0.5:sample_rate=48000",
+      "-ac",
+      "2",
+      "-c:a",
+      "pcm_f32le",
+      source,
+    ]);
+    const first = join(dir, "scalar-first.m4a");
+    const second = join(dir, "scalar-second.m4a");
+    const run = vi.spyOn(ffmpegRunner, "runFfmpeg");
+    try {
+      expect((await encodeAac(source, first, 0.5, { timeout: 30_000 })).success).toBe(true);
+      expect((await encodeAac(source, second, 0.5, { timeout: 30_000 })).success).toBe(true);
+      const encoderCalls = run.mock.calls.filter(([args]) => args.includes("-acodec"));
+      expect(encoderCalls).toHaveLength(2);
+      for (const [args] of encoderCalls) {
+        expect(args).toEqual([
+          "-cpuflags",
+          "0",
+          "-i",
+          source,
+          "-af",
+          "aresample=48000,adelay=delays=480256S:all=1",
+          "-acodec",
+          "aac",
+          "-b:a",
+          "192k",
+          "-f",
+          "adts",
+          "-y",
+          expect.stringMatching(/[/\\]0\.aac$/),
+        ]);
+      }
+      expect(readFileSync(first).equals(readFileSync(second))).toBe(true);
+      const muxCalls = run.mock.calls.filter(([args]) => args.includes("-bsf:a"));
+      expect(muxCalls).toHaveLength(2);
+      for (const [args] of muxCalls) expect(args).not.toContain("-cpuflags");
+    } finally {
+      run.mockRestore();
+    }
+  });
 
   it("encodes a long mix in parallel segments that decode like one encoder's output", async () => {
     const source = join(dir, "mix.wav");
