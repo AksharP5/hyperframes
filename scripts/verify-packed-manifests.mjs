@@ -479,7 +479,15 @@ function writeConsumerFixture(packDir, packedWorkspaces) {
 export const CONSUMER_MIN_RELEASE_AGE_SECONDS = 24 * 60 * 60;
 
 const BLOCKED_BY_AGE =
-  /No version matching "[^"]+" found for specifier "([^"]+)" \(blocked by minimum-release-age/g;
+  /No version matching "([^"]+)" found for specifier "([^"]+)" \(blocked by minimum-release-age/g;
+
+/** Packages bun refused as too new, or null when its output does not pair a name with a range. */
+export function ageBlockedPackages(stderr) {
+  const names = [...stderr.matchAll(BLOCKED_BY_AGE)].map(([, a, b]) =>
+    [a, b].find((name) => stderr.includes(`${name}@${name === a ? b : a} failed to resolve`)),
+  );
+  return names.length && names.every(Boolean) ? names : null;
+}
 
 export function installConsumer(dir, { args = [], env = process.env } = {}) {
   const install = () =>
@@ -498,8 +506,8 @@ export function installConsumer(dir, { args = [], env = process.env } = {}) {
   } catch (error) {
     // A same-day dependency bump: every version its range allows is younger than the age, and the repo
     // installed it already, so its tarball is served. Only those packages skip the age.
-    const blocked = [...`${error.stderr ?? ""}`.matchAll(BLOCKED_BY_AGE)].map((m) => m[1]);
-    if (!blocked.length) throw error;
+    const blocked = ageBlockedPackages(`${error.stderr ?? ""}`);
+    if (!blocked) throw error;
     console.log(`Consumer install: newer than the release age, allowed: ${blocked.join(", ")}`);
     writeFileSync(
       join(dir, "bunfig.toml"),

@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { Worker } from "node:worker_threads";
 import {
+  ageBlockedPackages,
   CONSUMER_TSCONFIG,
   countTypeErrorsByPackage,
   installConsumer,
@@ -352,6 +353,30 @@ async function withRegistry(name, versions, run) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+describe("ageBlockedPackages", () => {
+  const blockedBy = (first, second, name, range) =>
+    `Resolving dependencies\nerror: No version matching "${first}" found for specifier "${second}" (blocked by minimum-release-age: 86400 seconds)\nerror: ${name}@${range} failed to resolve\n`;
+
+  it("names the package whichever order bun quotes it in", () => {
+    assert.deepEqual(ageBlockedPackages(blockedBy("fake-dep", "^1.1.0", "fake-dep", "^1.1.0")), [
+      "fake-dep",
+    ]);
+    assert.deepEqual(ageBlockedPackages(blockedBy("^1.1.0", "fake-dep", "fake-dep", "^1.1.0")), [
+      "fake-dep",
+    ]);
+    assert.deepEqual(
+      ageBlockedPackages(blockedBy("^2.0.1", "@scope/pkg", "@scope/pkg", "^2.0.1")),
+      ["@scope/pkg"],
+    );
+  });
+
+  it("names none when bun's output does not say which token is the package", () => {
+    const unpaired = `error: No version matching "^1.1.0" found for specifier "fake-dep" (blocked by minimum-release-age: 86400 seconds)\n`;
+    assert.equal(ageBlockedPackages(unpaired), null);
+    assert.equal(ageBlockedPackages("error: fake-dep@^9.0.0 failed to resolve\n"), null);
+  });
+});
 
 describe("packed consumer install", () => {
   /** Installs `deps` into a fresh consumer against the registry; returns the installed fake-dep version. */
