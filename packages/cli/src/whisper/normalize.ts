@@ -126,6 +126,26 @@ function interpolateZeroDuration(words: Word[]): void {
   }
 }
 
+const TRAILING_PUNCTUATION = /^[.,!?;:'")\]}>…–—¡¿\-，。！？、；：」』）】》〉]+$/;
+
+function crossesCjkBoundary(left: string, right: string): boolean {
+  return CJK_CHAR.test(left.at(-1) ?? "") || CJK_CHAR.test(right[0] ?? "");
+}
+
+/**
+ * Whether a token extends the previous word: a sub-word continuation, trailing
+ * punctuation, or a contraction suffix. Whisper marks word boundaries with a
+ * leading space, except in CJK, where no token has one: there each token is
+ * its own word.
+ */
+function continuesWord(previous: string, rawText: string, text: string): boolean {
+  return (
+    TRAILING_PUNCTUATION.test(text) ||
+    /^'(t|m|s|ve|re|ll|d)$/i.test(text) ||
+    (!rawText.startsWith(" ") && !crossesCjkBoundary(previous, text))
+  );
+}
+
 function parseWhisperCpp(data: Record<string, unknown>): Word[] {
   const words: Word[] = [];
   const transcription = data.transcription as Array<{
@@ -142,16 +162,7 @@ function parseWhisperCpp(data: Record<string, unknown>): Word[] {
       if (!text || text.startsWith("[_") || text.startsWith("[BLANK")) continue;
 
       const lastWord = words[words.length - 1];
-
-      // Merge into previous word when the token is a sub-word continuation,
-      // trailing punctuation, or a contraction suffix.
-      // Whisper uses leading spaces to mark word boundaries in all languages.
-      const shouldMerge =
-        lastWord &&
-        (!rawText.startsWith(" ") ||
-          /^[.,!?;:'")\]}>…–—¡¿-]+$/.test(text) ||
-          /^'(t|m|s|ve|re|ll|d)$/i.test(text));
-      if (shouldMerge) {
+      if (lastWord && continuesWord(lastWord.text, rawText, text)) {
         lastWord.text += text;
         lastWord.end = round3((token.offsets?.to ?? 0) / 1000);
         continue;
@@ -330,7 +341,7 @@ function pad3(n: number): string {
 }
 
 function endsSentence(text: string): boolean {
-  return /[.!?][)"'\]}]*$/.test(text);
+  return /[.!?。！？][)"'\]}」』）]*$/.test(text);
 }
 
 function pushCue(cues: Cue[], cue: Cue | undefined): void {
@@ -411,10 +422,7 @@ function inferPreGrouped(words: Word[]): boolean {
 
 /** Join two adjacent tokens, omitting the space across a CJK boundary. */
 function joinTokens(left: string, right: string): string {
-  const a = left.at(-1) ?? "";
-  const b = right[0] ?? "";
-  const sep = CJK_CHAR.test(a) || CJK_CHAR.test(b) ? "" : " ";
-  return `${left}${sep}${right}`;
+  return `${left}${crossesCjkBoundary(left, right) ? "" : " "}${right}`;
 }
 
 export function wordsToCues(words: Word[], opts: WordsToCuesOptions = {}): Cue[] {

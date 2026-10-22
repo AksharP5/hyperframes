@@ -479,7 +479,7 @@ function writeConsumerFixture(packDir, packedWorkspaces) {
 export const CONSUMER_MIN_RELEASE_AGE_SECONDS = 24 * 60 * 60;
 
 const BLOCKED_BY_AGE =
-  /No version matching "([^"]+)" found for specifier "[^"]*" \(blocked by minimum-release-age/g;
+  /No version matching "[^"]+" found for specifier "([^"]+)" \(blocked by minimum-release-age/g;
 
 export function installConsumer(dir, { args = [], env = process.env } = {}) {
   const install = () =>
