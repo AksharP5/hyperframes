@@ -4493,6 +4493,7 @@ async function executeRenderPipeline(input: {
           outputWidth: captureCompositionWidth ?? width,
           outputHeight: captureCompositionHeight ?? height,
           motionBlur: job.config.motionBlur ? JSON.stringify(job.config.motionBlur) : "",
+          pageMotionBlur: job.config.pageMotionBlur,
           captureQuality: captureOptions.quality,
         });
         const segmentDir = segmentDirFor(join(projectDir, "renders"), segmentPlanHash);

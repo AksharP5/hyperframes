@@ -1220,6 +1220,23 @@ describe("renderLocal browser GPU config", () => {
     expect(producerState.createdJobs[0]?.variables).toBeUndefined();
   });
 
+  it.each([undefined, "off"] as const)(
+    "preserves page motion blur %s in the producer request",
+    async (pageMotionBlur) => {
+      await renderLocal(PROJECT_DIR, "/tmp/out.mp4", {
+        fps: { num: 30, den: 1 },
+        quality: "standard",
+        format: "mp4",
+        gpu: false,
+        browserGpuMode: "software",
+        hdrMode: "auto",
+        quiet: true,
+        pageMotionBlur,
+      });
+      expect(producerState.createdJobs[0]?.pageMotionBlur).toBe(pageMotionBlur);
+    },
+  );
+
   it("forwards entryFile to createRenderJob when --composition is set", async () => {
     await renderLocal(PROJECT_DIR, "/tmp/out.mp4", {
       fps: { num: 30, den: 1 },

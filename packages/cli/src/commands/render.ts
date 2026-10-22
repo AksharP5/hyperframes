@@ -215,6 +215,11 @@ export default defineCommand({
         "alpha-capable sources always extract as PNG.",
       default: "auto",
     },
+    "page-motion-blur": {
+      type: "string",
+      description:
+        "Set off to disable authored page motion blur. Omit to keep the composition's setting.",
+    },
     workers: {
       type: "string",
       alias: "w",
@@ -503,6 +508,7 @@ export interface RenderOptions {
   vp9CpuUsed?: number;
   videoBitrate?: string;
   videoFrameFormat?: VideoFrameFormat;
+  pageMotionBlur?: "off";
   quiet: boolean;
   debug?: boolean;
   /** Segmented capture: reuse a prior run's validated segments. */
@@ -832,6 +838,7 @@ async function renderDocker(
       vp9CpuUsed: options.vp9CpuUsed,
       videoBitrate: options.videoBitrate,
       videoFrameFormat: options.videoFrameFormat,
+      pageMotionBlur: options.pageMotionBlur,
       quiet: options.quiet,
       variables: options.variables,
       entryFile: options.entryFile,
@@ -1110,6 +1117,7 @@ async function executeLocalRender(
       crf: options.crf,
       videoBitrate: options.videoBitrate,
       videoFrameFormat: options.videoFrameFormat,
+      pageMotionBlur: options.pageMotionBlur,
       variables: options.variables,
       entryFile: options.entryFile,
       outputResolution: options.outputResolution,

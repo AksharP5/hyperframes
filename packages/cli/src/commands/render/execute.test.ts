@@ -25,6 +25,15 @@ describe("renderOptionsFromPlan", () => {
     rmSync(projectDir, { recursive: true, force: true });
   });
 
+  it.each([undefined, "off"] as const)(
+    "preserves page motion blur %s for single and batch renders",
+    (value) => {
+      const plan = createRenderPlan({ dir: projectDir, "page-motion-blur": value });
+      expect(renderOptionsFromPlan(plan, undefined, undefined).pageMotionBlur).toBe(value);
+      expect(batchRowRenderOptions(plan, undefined).pageMotionBlur).toBe(value);
+    },
+  );
+
   it("carries the segmented resume flags from the plan into the render options", () => {
     // The hop that once dropped --resume / --keep-segments silently; the plan
     // -> options -> request -> config chain is otherwise only exercised by a
