@@ -1310,7 +1310,8 @@ jobs:
       - name: Fail if the gate failed
         if: steps.gate.outputs.exit_code != '0'
         run: |
-          echo "::error::Edit accuracy fell against the base branch; see the PR comment."
+          verdict=$(jq -r '.verdict // empty' /tmp/edit-accuracy-gate/gate.json 2>/dev/null)
+          echo "::error::${verdict:-The edit accuracy gate could not finish; see its log.}"
           exit 1
 
   smoke-global-install:
