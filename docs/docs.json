@@ -1001,6 +1001,7 @@
               "concepts/frame-adapters",
               "concepts/determinism",
               "guides/html-in-canvas",
+              "guides/motion-blur",
               "guides/vfx-chain",
               "guides/figma"
             ]
