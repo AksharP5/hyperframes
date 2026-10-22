@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { spawn } from "node:child_process";
 import {
+  chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -26,7 +28,7 @@ import { runCommand } from "citty";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { consumeCommandResult } from "../utils/commandResult.js";
-import { historyDeps, withOwner } from "../utils/historyOwner.js";
+import { historyDeps, withOwner, withReader } from "../utils/historyOwner.js";
 import historyCommand from "./history.js";
 
 /** History's clock, a day ahead of the file system's, so each write is dated by the mtime it is stamped with. */
@@ -710,3 +712,126 @@ describe("hyperframes history, refusals", () => {
     expect([refused.code, refused.err]).toEqual([2, "That point is no longer kept"]);
   });
 });
+
+describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "hyperframes history, a history this run cannot write",
+  () => {
+    /** The project's history folder (or a folder in it) set to `mode` for the rest of the test. */
+    function lock(mode: number, ...parts: string[]) {
+      const [id] = readdirSync(historyDeps.historyRoot).filter((name) =>
+        existsSync(join(historyDeps.historyRoot, name, "log.jsonl")),
+      );
+      const path = join(historyDeps.historyRoot, id!, ...parts);
+      const dirs = [
+        path,
+        ...readdirSync(path, { recursive: true, withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => join(entry.parentPath, entry.name)),
+      ];
+      for (const dir of dirs.reverse()) chmodSync(dir, mode);
+      onTestFinished(() => dirs.forEach((dir) => chmodSync(dir, 0o755)));
+    }
+
+    it("lists the history as last recorded when its folder cannot be written, and says so", async () => {
+      const { hf, turn } = project();
+      await hf();
+      const entry = await turn("claude", "Retitle", "index.html", "A2");
+      lock(0o555);
+      const listed = await hf("--json");
+      expect(listed.code).toBe(0);
+      expect(JSON.parse(listed.out).entries.map((item: { id: string }) => item.id)).toContain(
+        entry.id,
+      );
+      expect(listed.err).toMatch(/could not write this project's history/i);
+    });
+
+    it("lists the history when its log can be read but not appended to", async () => {
+      const { hf, write, turn } = project();
+      await hf();
+      const entry = await turn("claude", "Retitle", "index.html", "A2");
+      const [id] = readdirSync(historyDeps.historyRoot).filter((name) =>
+        existsSync(join(historyDeps.historyRoot, name, "log.jsonl")),
+      );
+      const log = join(historyDeps.historyRoot, id!, "log.jsonl");
+      chmodSync(log, 0o444);
+      onTestFinished(() => chmodSync(log, 0o644));
+      write("notes.html", "N2");
+      const listed = await hf("--json");
+      expect(listed.code).toBe(0);
+      expect(JSON.parse(listed.out).entries.map((item: { id: string }) => item.id)).toContain(
+        entry.id,
+      );
+      expect(listed.err).toMatch(/could not write this project's history/i);
+    });
+
+    it("lists the history when only its stored file copies cannot be written", async () => {
+      const { hf, write, turn } = project();
+      await hf();
+      const entry = await turn("claude", "Retitle", "index.html", "A2");
+      lock(0o555, "blobs");
+      write("notes.html", "N2");
+      const listed = await hf("--json");
+      expect(listed.code).toBe(0);
+      expect(JSON.parse(listed.out).entries.map((item: { id: string }) => item.id)).toContain(
+        entry.id,
+      );
+    });
+
+    it("never runs a read twice: a write error after it started is the command's own", async () => {
+      const { dir, hf } = project();
+      await hf();
+      let runs = 0;
+      const unwritable = Object.assign(new Error("no space"), { code: "ENOSPC", syscall: "write" });
+      await expect(
+        withReader(dir, async () => {
+          runs += 1;
+          throw unwritable;
+        }),
+      ).rejects.toBe(unwritable);
+      expect(runs).toBe(1);
+    });
+
+    it("a folder it cannot read fails the read with that error, never as one it could not write", async () => {
+      const { hf, turn } = project();
+      await hf();
+      await turn("claude", "Retitle", "index.html", "A2");
+      lock(0o111, "blobs");
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await expect(hf("--json")).rejects.toMatchObject({ code: "EACCES", syscall: "scandir" });
+        expect(error.mock.calls.flat().join(" ")).not.toMatch(/could not write/i);
+      } finally {
+        error.mockRestore();
+      }
+    });
+
+    it("an owner file it cannot read fails the read with that error, never as one it could not write", async () => {
+      const { hf, turn } = project();
+      await hf();
+      await turn("claude", "Retitle", "index.html", "A2");
+      const [id] = readdirSync(historyDeps.historyRoot).filter((name) =>
+        existsSync(join(historyDeps.historyRoot, name, "log.jsonl")),
+      );
+      const owner = join(historyDeps.historyRoot, id!, "owner.pid");
+      writeFileSync(owner, "999999999");
+      chmodSync(owner, 0o000);
+      onTestFinished(() => chmodSync(owner, 0o644));
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await expect(hf("--json")).rejects.toMatchObject({ code: "EACCES", syscall: "open" });
+        expect(error.mock.calls.flat().join(" ")).not.toMatch(/could not write/i);
+      } finally {
+        error.mockRestore();
+      }
+    });
+
+    it("still fails an undo it cannot record, and leaves the files as they are", async () => {
+      const { hf, read, turn } = project();
+      await hf();
+      await turn("claude", "Retitle", "index.html", "A2");
+      lock(0o555);
+      await expect(hf("undo", "--who", "claude")).rejects.toMatchObject({ code: "EACCES" });
+      expect(read("index.html")).toBe("A2");
+    });
+  },
+);
