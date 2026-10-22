@@ -769,7 +769,7 @@ async function captureSnapshots(
               const rawDuration = parseFloat(v.dataset.duration ?? "");
               const srcDur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
               return {
-                id: v.id,
+                id: runtimeWindow.__hfMediaId?.(v) || v.id,
                 src: v.currentSrc || v.src,
                 authoredStart,
                 authoredRate: v.dataset.playbackRate,

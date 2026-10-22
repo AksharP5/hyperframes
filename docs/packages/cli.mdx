@@ -1173,6 +1173,9 @@ nothing reports `motion_selector_missing` rather than quietly passing.
 
 Capture specific frames as PNGs, without waiting for a full render.
 
+Each sub-composition may reuse a local video ID such as `clip`. Snapshots keep each
+scene's footage separate without requiring you to rename those IDs across files.
+
 ```bash
 npx hyperframes snapshot my-project --at 2.9,10.4,18.7
 npx hyperframes snapshot my-project --frames 10

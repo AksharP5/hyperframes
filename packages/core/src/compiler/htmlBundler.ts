@@ -70,6 +70,7 @@ import {
 import { isSafePath, resolveWithinProject } from "../safePath.js";
 import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
 import { HF_COLOR_GRADING_ATTR } from "../colorGrading";
+import { assignMediaRenderIds } from "./mediaRenderIds";
 
 const DEFAULT_RUNTIME_SCRIPT_URL = "";
 
@@ -1486,6 +1487,7 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
     }
   }
 
+  assignMediaRenderIds(document);
   return document.toString();
 }
 

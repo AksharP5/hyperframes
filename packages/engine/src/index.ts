@@ -158,6 +158,7 @@ export {
 } from "./services/chromeMemorySampler.js";
 
 // ── Screenshot (BeginFrame) ─────────────────────────────────────────────────────
+export { installMediaRenderIdBridge } from "./services/mediaRenderIdBridge.js";
 export {
   beginFrameCapture,
   pageScreenshotCapture,

@@ -1027,3 +1027,56 @@ describe("snapshot composite recapture", () => {
     expect(finalCapture).toBeGreaterThan(recapture);
   });
 });
+
+it("addresses colliding scene videos by the capture page's render identity", async () => {
+  const project = mkdtempSync(join(tmpdir(), "hf-snapshot-media-id-"));
+  writeFileSync(
+    join(project, "index.html"),
+    '<html><body><div data-composition-id="main" data-width="320" data-height="180" data-duration="20"></div></body></html>',
+  );
+  const videos = ["clip", "clip__hf2"].map((renderId) => ({
+    id: "clip",
+    renderId,
+    dataset: { start: "0", duration: "10" },
+    duration: 20,
+    currentSrc: "http://127.0.0.1/source.mov",
+    src: "",
+    defaultPlaybackRate: 1,
+    loop: false,
+    getBoundingClientRect: () => ({ width: 320, height: 180 }),
+  }));
+  let ids: string[] = [];
+  let calls = 0;
+  const evaluate = vi.fn(async (fn: () => unknown) => {
+    calls++;
+    if (calls === 1) return { loaded: [], errored: [], unused: [] };
+    if (calls === 2) return 20;
+    if (calls === 3) return true;
+    ids = (fn() as Array<{ id: string }>).map((video) => video.id);
+    throw new Error("candidate witness captured");
+  });
+  snapshotState.openSettledPage.mockResolvedValueOnce({
+    browser: { close: vi.fn(async () => undefined) },
+    page: { evaluate },
+    renderReadyTimedOut: false,
+  });
+  snapshotState.seek.mockResolvedValue(undefined);
+  vi.stubGlobal("window", {
+    devicePixelRatio: 1,
+    __hfMediaId: (video: { renderId: string }) => video.renderId,
+  });
+  vi.stubGlobal("document", { querySelectorAll: () => videos });
+  const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  try {
+    await expect(
+      snapshotCommand.run?.({
+        args: { dir: project, at: "1", end: false, output: join(project, "out") },
+      } as never),
+    ).rejects.toBeDefined();
+    expect(ids).toEqual(["clip", "clip__hf2"]);
+  } finally {
+    log.mockRestore();
+    vi.unstubAllGlobals();
+    rmSync(project, { recursive: true, force: true });
+  }
+});
