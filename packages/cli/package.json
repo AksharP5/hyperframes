@@ -1,7 +1,23 @@
 {
   "name": "@hyperframes/cli",
   "version": "0.8.186",
-  "description": "HyperFrames CLI — create, preview, and render HTML video compositions",
+  "description": "Make videos with code and AI agents: write HTML, render MP4. Open source.",
+  "keywords": [
+    "ai-agents",
+    "animation",
+    "claude-code",
+    "codex",
+    "cursor",
+    "gsap",
+    "html-to-video",
+    "hyperframes",
+    "motion-graphics",
+    "mp4",
+    "remotion-alternative",
+    "render",
+    "video",
+    "video-editor"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
