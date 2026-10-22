@@ -16,6 +16,9 @@ on:
       - "DOCS_GUIDELINES.md"
       - "packages/core/schemas/**"
       - "scripts/sync-schemas.ts"
+      # A new CLI command must be listed in the docs (check-docs-cli-commands.mjs).
+      - "packages/cli/src/cli.ts"
+      - "scripts/check-docs-cli-commands.mjs"
   push:
     branches: [main]
     paths:
@@ -23,6 +26,9 @@ on:
       - "DOCS_GUIDELINES.md"
       - "packages/core/schemas/**"
       - "scripts/sync-schemas.ts"
+      # A new CLI command must be listed in the docs (check-docs-cli-commands.mjs).
+      - "packages/cli/src/cli.ts"
+      - "scripts/check-docs-cli-commands.mjs"
 
 concurrency:
   group: docs-${{ github.ref }}
@@ -42,6 +48,9 @@ jobs:
 
       - name: Check schema mirror (core → docs)
         run: npx tsx scripts/sync-schemas.ts --check
+
+      - name: Check every CLI command is listed in the docs
+        run: node scripts/check-docs-cli-commands.mjs
 
       - name: Validate build
         working-directory: docs

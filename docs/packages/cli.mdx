@@ -23,14 +23,14 @@ npm install -g hyperframes
 | You want to              | Use                                                                                                                                                                                                                              |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Start a project          | [`init`](#init), [`add`](#add), [`catalog`](#catalog)                                                                                                                                                                            |
-| Bring in source material | [`capture`](#capture), [`transcribe`](#transcribe), [`tts`](#tts), [`remove-background`](#remove-background), [`media-treatment`](#media-treatment), [`beats`](#beats), [`audio`](#audio), [`normalize-audio`](#normalize-audio) |
+| Bring in source material | [`capture`](#capture), [`media-use`](#media-use), [`transcribe`](#transcribe), [`tts`](#tts), [`remove-background`](#remove-background), [`media-treatment`](#media-treatment), [`beats`](#beats), [`audio`](#audio), [`normalize-audio`](#normalize-audio), [`models`](#models) |
 | Look at it, or share it  | [`preview`](#preview), [`present`](#present-and-play), [`play`](#present-and-play), [`publish`](#publish), [`open`](#open-and-catch-up), [`catch-up`](#open-and-catch-up)                                                        |
 | Find problems            | [`lint`](#lint), [`check`](#check), [`snapshot`](#snapshot), [`keyframes`](#keyframes), [`compare`](#compare-and-grade-compare), [`grade-compare`](#compare-and-grade-compare)                                                   |
 | Edit from the terminal   | [`timeline`](#timeline), [`history`](#history)                                                                                                                                                                                   |
 | Make a file              | [`render`](#render), [`benchmark`](#benchmark)                                                                                                                                                                                   |
 | Render somewhere else    | [`cloud`](#hyperframes-cloud), [`lambda`](#hyperframes-lambda), [`cloudrun`](#hyperframes-cloudrun)                                                                                                                              |
-| Fix your setup           | [`doctor`](#doctor), [`browser`](#browser), [`upgrade`](#upgrade), [`docs`](#docs), [`info`](#info-and-compositions), [`compositions`](#info-and-compositions)                                                                   |
-| Connect other tools      | [`auth`](#hyperframes-auth), [`skills`](#skills), [`figma`](#figma-and-events), [`telemetry`](#telemetry), [`feedback`](#feedback)                                                                                               |
+| Fix your setup           | [`doctor`](#doctor), [`browser`](#browser), [`upgrade`](#upgrade), [`docs`](#docs), [`info`](#info-and-compositions), [`compositions`](#info-and-compositions), [`clean`](#clean)                                                                   |
+| Connect other tools      | [`auth`](#hyperframes-auth), [`skills`](#skills), [`usage`](#usage), [`figma`](#figma-and-events), [`events`](#figma-and-events), [`telemetry`](#telemetry), [`feedback`](#feedback)                                                                            |
 
 `validate`, `inspect`, and `layout` still work but are
 [deprecated](#deprecated-validate-inspect-and-layout). Use `check` instead.
@@ -498,6 +498,106 @@ npx hyperframes media-treatment --selector '#hero' --clear
 The command writes `data-color-grading` — the same contract Studio, preview, and
 render all read, so the two can never disagree. It does not recognise subjects
 or isolate part of an image; the effect covers the whole media layer.
+
+### `media-use`
+
+Get the music, sound effects, images, icons, logos, voiceover, and color grades
+a video needs, saved as files inside the project. Every asset is recorded, so
+asking for the same thing again reuses the file instead of fetching it twice.
+The `media-use` skill drives this command; you can also run it yourself.
+
+```bash
+# Find or make one asset and save it in the project
+npx hyperframes media-use resolve --type sfx --intent "whoosh"
+npx hyperframes media-use resolve --type logo --entity linkedin --intent "LinkedIn logo"
+npx hyperframes media-use resolve --type grade --intent "warm daylight" --json
+
+# Look at what you already have before fetching more
+npx hyperframes media-use candidates --type bgm --intent "upbeat tech launch"
+npx hyperframes media-use resolve --type bgm --reuse 06e052c0
+
+# Bring in a file you already have
+npx hyperframes media-use resolve --type image --from ./photo.jpg
+
+# Check the setup, and see what has been used
+npx hyperframes media-use doctor
+npx hyperframes media-use stats --days 7
+```
+
+`resolve` prints one line, such as
+`resolved sfx_001 → .media/audio/sfx/sfx_001.mp3 (sfx, 0.6s)`, or the whole
+record with `--json`. It never edits your composition HTML; you reference the
+file yourself.
+
+| Subcommand   | What it does                                                                                                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolve`    | Find, make, or import one asset. Takes every flag below                                                                                                                   |
+| `candidates` | List assets already in the project and the global cache for `--type`, best match for `--intent` first. Downloads nothing and changes nothing. Same as `resolve --candidates` |
+| `adopt`      | Record the files already in `assets/` so later requests find them, with duration and size read by `ffprobe`                                                               |
+| `analyze`    | Measure an image or video and print suggested exposure and color corrections, saving nothing. Needs `--type grade --for <file>`                                           |
+| `doctor`     | Check ffmpeg, ffprobe, Node.js, the bundled sound library, and the `heygen` CLI (installed, v0.3.0 or newer, signed in). Changes nothing                                  |
+| `stats`      | Count requests, misses, and reuse from the project's `.media/` and the global `~/.media/`                                                                                 |
+
+| Flag                | Description                                                                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `--type`            | Media type, from the table below. Required for every subcommand except `doctor`, `stats`, and `adopt`                               |
+| `--intent`          | What you need, in plain words. For `voice` and `video` it is the text to speak                                                      |
+| `--entity`          | A name such as a brand (`linkedin`), so a later request for the same thing reuses the file                                          |
+| `--project, -p`     | Project directory (default: current directory)                                                                                      |
+| `--candidates`      | List reusable assets instead of resolving. `--dry-run` does the same                                                                |
+| `--reuse <sha>`     | Copy one global-cache asset into this project, by the content hash or prefix that `candidates` prints                               |
+| `--from <file>`     | Import a local file or a direct public media URL. Pages such as YouTube links are refused                                           |
+| `--params <json>`   | Build a LUT from explicit values, such as `'{"contrast":0.2}'`. `lut` and `grade` only                                              |
+| `--for <media>`     | Measure this image or video and add the suggested corrections to the grade. `grade` only                                            |
+| `--analyze`         | With `--type grade --for`, print the measurement and stop                                                                           |
+| `--local-only`      | Skip every network provider. Only the caches and tools installed on this machine are used                                           |
+| `--provider <name>` | Use only this provider and skip reuse: for example `heygen`, `codex`, `mflux`, `kokoro`. An unknown name fails and lists valid ones |
+| `--voice-id`        | HeyGen voice for `voice` and `video` (default: the first voice the catalog lists)                                                   |
+| `--avatar-id`       | HeyGen avatar for `video` (default: the first public avatar)                                                                        |
+| `--days <n>`        | With `stats`, count only the last `n` days                                                                                          |
+| `--json`            | Print JSON instead of one line                                                                                                      |
+
+Where each type comes from, tried in order until one succeeds:
+
+| `--type` | You get                                         | Sources                                                                                        |
+| -------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `bgm`    | Background music                                | HeyGen music catalog                                                                           |
+| `sfx`    | Sound effects                                   | Openverse (CC0 or CC BY, no account), then a bundled library that works offline                |
+| `image`  | Photos and backgrounds                          | HeyGen asset search, then generated by mflux on this machine, then by the `codex` CLI          |
+| `icon`   | Icons                                           | HeyGen asset search                                                                            |
+| `logo`   | Official brand marks                            | theSVG, then the GitHub organization avatar, then the site's favicon                           |
+| `voice`  | Spoken audio of the `--intent` text             | HeyGen text to speech, then Kokoro on this machine                                             |
+| `video`  | An avatar speaking the `--intent` text          | HeyGen avatar video, then LTX on this machine when it is enabled                               |
+| `brand`  | Brand colors, font, and logo                    | The project's own `frame.md` or `design.md`. Never the network                                 |
+| `grade`  | A color-grading block for `data-color-grading`  | A built-in preset, a look-library LUT, or a LUT built from the words in `--intent`             |
+| `lut`    | A `.cube` LUT file                              | A look-library LUT, or one built from the words in `--intent`                                  |
+
+Before it fetches anything, `resolve` reuses an exact earlier match: the same
+`--type` and `--intent` (or `--entity`) in this project, a file in `assets/`
+whose name shares a word with the intent, then the same request in the global
+cache at `~/.media/`. `--provider` skips this. New files land in
+`.media/<kind>/`, are listed in `.media/manifest.jsonl` and `.media/index.md`,
+and are copied to `~/.media/` so other projects can reuse them. Sound effects
+under CC BY get their credit written to `.media/audio/sfx/CREDITS.md`.
+
+**What needs an account, and what can cost money.** The HeyGen sources run
+through the separate `heygen` CLI, signed in with `heygen auth login --oauth`.
+Searching the music, image, and icon catalogs is free. Text to speech and avatar
+video draw on a free allowance when you are signed in with OAuth, then on your
+HeyGen billing, so an agent should ask before generating them. When a
+host app sets `HEYGEN_API_BASE` and `HEYGEN_API_KEY`, HeyGen calls go through that
+host instead and are charged to its key. The `codex` image fallback uses your
+ChatGPT subscription. Openverse, theSVG, GitHub, favicons, color grades, and the
+local generators cost nothing. `doctor` exits 1 only when ffmpeg, ffprobe, or the
+bundled sounds are missing; HeyGen problems are listed with a fix but do not fail it.
+
+`media-use` sends anonymous usage events — the media type, which source won, and
+whether it reused a file, never your intent text or paths — and honors the same
+opt-outs as [`telemetry`](#telemetry).
+
+See [Voice, sound, and captions](/guides/voice-and-audio) and
+[Color grading](/guides/color-grading) for the workflows around these assets, and
+[Authentication](/guides/authentication) for HeyGen credentials.
 
 ### `beats`
 
@@ -1780,6 +1880,56 @@ If you called the upstream command directly instead, set it yourself:
 ```bash
 GIT_CLONE_PROTECTION_ACTIVE=0 npx skills add heygen-com/hyperframes
 ```
+
+### `usage`
+
+See how much of your AI coding subscription is left — Claude Code, Codex, or
+Grok — so an agent can size a video to the allowance before it starts. The
+HyperFrames skills run it at the start of a video and again before rendering.
+
+```bash
+npx hyperframes usage
+npx hyperframes usage --json
+npx hyperframes usage --harness codex --json
+```
+
+| Flag        | Description                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `--harness` | `claude-code`, `codex`, or `grok`. Default: the agent running the command, detected from `CLAUDECODE`, `CODEX_THREAD_ID`, or `GROK_AGENT=1` |
+| `--json`    | Print the result as one line of JSON                                                                                                  |
+
+```json
+{
+  "status": "known",
+  "harness": "claude-code",
+  "session": { "usedPercent": 42, "remainingPercent": 58, "resetsAt": "2026-10-20T18:00:00Z" },
+  "weekly": { "usedPercent": 20, "remainingPercent": 80, "resetsAt": "2026-10-24T09:00:00Z" },
+  "spend": null,
+  "planTier": "max"
+}
+```
+
+`session` is the short window (five hours on Claude Code and Codex) and `weekly`
+the weekly one; a window the plan does not have is `null`. Grok reports only
+`weekly`. `spend` appears only for spend-metered Claude Code plans, such as
+Enterprise: the share of the billing period's spend limit already used.
+`planTier` is the subscription name when the provider gives one.
+
+Without `--json`, a known result prints this object indented. When it cannot
+tell, it says so rather than guessing: `Usage unknown (no_subscription_login).`,
+or `{"status":"unknown","reason":"no_subscription_login"}` with `--json`. Other reasons include
+`expired_login`, `unsupported_auth` (for example Claude Code on an API key),
+`unsupported_harness`, `usage_request_failed`, and `http_<status>`. The command
+exits 0 either way, so check `status`.
+
+It reads the login your agent already has: for Claude Code the macOS keychain or
+`~/.claude/.credentials.json`, for Codex `~/.codex/auth.json`, for Grok
+`~/.grok/auth.json` (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`, and
+`GROK_AUTH_PATH` move them).
+It never refreshes or rewrites that login and never prints the token. The token
+goes only to that provider's own usage endpoint. The command sends no telemetry
+and skips the update check. The numbers are a snapshot: they do not reserve
+allowance or estimate what the next video will cost.
 
 ### `figma` and `events`
 

@@ -100,6 +100,7 @@ skills/                 → AI agent skill definitions
 - **Compositions**: HTML files with `data-*` attributes. Clips need `class="clip"`. Register one paused GSAP root timeline per composition on `window.__timelines`. Scene timelines manually added to that root must not be paused, or they will not advance when the root is seeked.
 - **Frame Adapters**: Animation runtimes plug in via the seek-by-frame adapter pattern. GSAP is the primary adapter.
 - **Deterministic rendering**: No `Date.now()`, no unseeded `Math.random()`, no render-time network fetches.
+- **Docs ship with the change**: a PR that adds or changes a CLI command, flag, or user-visible behavior updates `docs/` in the same PR. A new command also goes in "Find your command" in `docs/packages/cli.mdx` (CI checks it).
 
 ## Documentation
 
