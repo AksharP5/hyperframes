@@ -24,9 +24,18 @@ import {
   untarDirectory,
   putContentStoreFile,
   uploadContentAddressedFileToS3,
+  uploadFileToS3,
 } from "./s3Transport.js";
 
 let scratchRoot: string;
+
+/** An S3 error as the SDK throws it; a dropped connection carries no HTTP status. */
+function s3Error(name: string, httpStatusCode?: number): Error {
+  const error = Object.assign(new Error(name), { name });
+  return httpStatusCode === undefined
+    ? error
+    : Object.assign(error, { $metadata: { httpStatusCode } });
+}
 
 beforeAll(() => {
   scratchRoot = mkdtempSync(join(tmpdir(), "hf-s3transport-test-"));
@@ -134,6 +143,7 @@ describe("content-addressed v2 artifacts", () => {
       uploadContentAddressedFileToS3(s3.asClient(), source, uri, digest),
     ).rejects.toMatchObject({ name: "BadDigest" });
     expect(s3.objects.has(uri)).toBe(false);
+    expect(s3.putAttempts).toBe(1);
   });
 
   it("refuses to overwrite an immutable key with conflicting metadata", async () => {
@@ -278,6 +288,34 @@ describe("presignVerifiedS3GetUrl", () => {
   });
 });
 
+const TRANSIENT_FAILURES: [string, Error][] = [
+  ["a dropped connection", s3Error("TimeoutError")],
+  ["an S3 request timeout (HTTP 400)", s3Error("RequestTimeout", 400)],
+];
+
+describe("single-PUT uploads", () => {
+  it.each(TRANSIENT_FAILURES)("resends the file from a fresh read after %s", async (_, failure) => {
+    const source = join(scratchRoot, "single-retry.bin");
+    writeFileSync(source, "chunk bytes");
+    const s3 = new ContentAddressedFakeS3();
+    s3.failNextPut = failure;
+    await uploadFileToS3(s3.asClient(), source, "s3://bucket/chunks/0.mp4");
+    expect(s3.objects.get("s3://bucket/chunks/0.mp4")?.bytes.toString()).toBe("chunk bytes");
+    expect(s3.putAttempts).toBe(2);
+  });
+
+  it("does not resend after any other S3 answer", async () => {
+    const source = join(scratchRoot, "single-final.bin");
+    writeFileSync(source, "chunk bytes");
+    const s3 = new ContentAddressedFakeS3();
+    s3.failNextPut = s3Error("InvalidArgument", 400);
+    await expect(
+      uploadFileToS3(s3.asClient(), source, "s3://bucket/chunks/0.mp4"),
+    ).rejects.toMatchObject({ name: "InvalidArgument" });
+    expect(s3.putAttempts).toBe(1);
+  });
+});
+
 describe("objects over the single-PUT limit", () => {
   const bigSize = MAX_SINGLE_PUT_BYTES + 1;
   // sha256 of bigSize zero bytes, computed outside this code.
@@ -315,20 +353,24 @@ describe("objects over the single-PUT limit", () => {
     expect(s3.maxPartsInFlight).toBeLessThanOrEqual(8);
   }, 120_000);
 
-  it("resends a part from a fresh read after a dropped connection", async () => {
-    const source = sparseFile("big-retry.bin");
-    const s3 = new MultipartFakeS3();
-    s3.failNextPart = true;
-    try {
-      expect(await putContentStoreFile(s3.asClient(), source, "bucket", bigDigest)).toBe(
-        "uploaded",
-      );
-    } finally {
-      rmSync(source);
-    }
-    expect(s3.partSizes.reduce((a, b) => a + b, 0)).toBe(bigSize);
-    expect(s3.calls.at(-1)).toMatchObject({ name: "CompleteMultipartUploadCommand" });
-  }, 120_000);
+  it.each(TRANSIENT_FAILURES)(
+    "resends a part from a fresh read after %s",
+    async (_, failure) => {
+      const source = sparseFile("big-retry.bin");
+      const s3 = new MultipartFakeS3();
+      s3.failNextPart = failure;
+      try {
+        expect(await putContentStoreFile(s3.asClient(), source, "bucket", bigDigest)).toBe(
+          "uploaded",
+        );
+      } finally {
+        rmSync(source);
+      }
+      expect(s3.partSizes.reduce((a, b) => a + b, 0)).toBe(bigSize);
+      expect(s3.calls.at(-1)).toMatchObject({ name: "CompleteMultipartUploadCommand" });
+    },
+    120_000,
+  );
 
   it("aborts instead of completing when the file no longer has the digest it was stored under", async () => {
     const source = sparseFile("big-changed.bin");
@@ -388,7 +430,7 @@ class MultipartFakeS3 {
   readonly calls: { name: string; input: Record<string, unknown> }[] = [];
   readonly partSizes: number[] = [];
   head: Record<string, unknown> | undefined;
-  failNextPart = false;
+  failNextPart: Error | undefined;
   maxPartsInFlight = 0;
   #inFlight = 0;
 
@@ -433,12 +475,11 @@ class MultipartFakeS3 {
           hash.update(chunk);
           length += chunk.length;
         }
-        if (this.failNextPart) {
-          this.failNextPart = false;
-          throw Object.assign(new Error("connection reset"), { name: "ECONNRESET" });
-        }
+        const failure = this.failNextPart;
+        this.failNextPart = undefined;
+        if (failure) throw failure;
         if (length !== input.ContentLength || hash.digest("base64") !== input.ChecksumSHA256) {
-          throw Object.assign(new Error("part checksum mismatch"), { name: "BadDigest" });
+          throw s3Error("BadDigest", 400);
         }
         this.partSizes.push(length);
         return { ETag: `"part-${String(input.PartNumber)}"` };
@@ -460,6 +501,8 @@ class ContentAddressedFakeS3 {
   readonly objects = new Map<string, { bytes: Buffer; sha256: string; lastModified?: Date }>();
   readonly copies: Record<string, unknown>[] = [];
   putCount = 0;
+  putAttempts = 0;
+  failNextPut: Error | undefined;
   raceOnNextPut: { bytes: Buffer; sha256: string } | undefined;
 
   asClient(): import("@aws-sdk/client-s3").S3Client {
@@ -533,11 +576,13 @@ class ContentAddressedFakeS3 {
       const chunks: Buffer[] = [];
       for await (const chunk of value.input.Body ?? []) chunks.push(Buffer.from(chunk));
       const bytes = Buffer.concat(chunks);
+      this.putAttempts += 1;
+      const failure = this.failNextPut;
+      this.failNextPut = undefined;
+      if (failure) throw failure;
       const checksum = createHash("sha256").update(bytes).digest("base64");
       if (value.input.ChecksumSHA256 !== undefined && value.input.ChecksumSHA256 !== checksum) {
-        const error = new Error("checksum mismatch");
-        error.name = "BadDigest";
-        throw error;
+        throw s3Error("BadDigest", 400);
       }
       this.objects.set(uri, {
         bytes,

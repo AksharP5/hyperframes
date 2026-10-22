@@ -22,6 +22,7 @@ import {
   createWriteStream,
   existsSync,
   mkdirSync,
+  type ReadStream,
   rmSync,
   statSync,
 } from "node:fs";
@@ -52,7 +53,7 @@ export const MAX_SINGLE_PUT_BYTES = 5 * 1024 ** 3;
 const MAX_PARTS = 10_000;
 const MIN_FILE_PART_BYTES = 64 * 1024 * 1024;
 const FILE_PARTS_IN_FLIGHT = 8;
-const PART_ATTEMPTS = 3;
+const UPLOAD_ATTEMPTS = 3;
 
 /** Parsed `s3://bucket/key` URI. */
 export interface S3Location {
@@ -180,14 +181,16 @@ export async function uploadFileToS3(
     });
     return;
   }
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: createReadStream(localPath),
-      ContentType: contentType,
-      ContentLength: size,
-    }),
+  await sendFileBody(localPath, undefined, (body) =>
+    client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        ContentLength: size,
+      }),
+    ),
   );
 }
 
@@ -254,9 +257,8 @@ async function putImmutableBody(
   expectedSha256: string,
   contentType?: string,
 ): Promise<void> {
-  const body = createReadStream(localPath);
-  try {
-    await client.send(
+  await sendFileBody(localPath, undefined, (body) =>
+    client.send(
       new PutObjectCommand({
         Bucket: bucket,
         Key: key,
@@ -267,13 +269,8 @@ async function putImmutableBody(
         ChecksumSHA256: Buffer.from(expectedSha256, "hex").toString("base64"),
         IfNoneMatch: "*",
       }),
-    );
-  } finally {
-    // A failed conditional request may reject before consuming the stream.
-    // Explicit teardown avoids retaining the source descriptor on a warm
-    // Lambda planner.
-    body.destroy();
-  }
+    ),
+  );
 }
 
 export type MultipartTarget = { Bucket: string; Key: string; UploadId: string };
@@ -386,7 +383,6 @@ async function hashRange(path: string, { start, end }: ByteRange, whole: Hash): 
   return part.digest("base64");
 }
 
-// A streamed body cannot be replayed by the SDK's own retry, so each attempt opens a fresh stream.
 async function sendFilePart(
   client: S3Client,
   target: MultipartTarget,
@@ -395,22 +391,34 @@ async function sendFilePart(
   { start, end }: ByteRange,
   checksum: string,
 ): Promise<CompletedPart> {
+  const result = await sendFileBody(path, { start, end }, (body) =>
+    client.send(
+      new UploadPartCommand({
+        ...target,
+        PartNumber: partNumber,
+        Body: body,
+        ContentLength: end - start,
+        ChecksumSHA256: checksum,
+      }),
+    ),
+  );
+  if (!result.ETag) throw new Error(`[s3Transport] part ${partNumber} returned no ETag`);
+  return { ETag: result.ETag, PartNumber: partNumber, ChecksumSHA256: checksum };
+}
+
+// The SDK never retries a streamed body, so each attempt opens a fresh stream. Only a transient
+// failure is retried: any other S3 answer (412, BadDigest) would repeat.
+async function sendFileBody<T>(
+  path: string,
+  range: ByteRange | undefined,
+  send: (body: ReadStream) => Promise<T>,
+): Promise<T> {
   for (let attempt = 1; ; attempt++) {
-    const body = createReadStream(path, { start, end: end - 1 });
+    const body = createReadStream(path, range && { start: range.start, end: range.end - 1 });
     try {
-      const result = await client.send(
-        new UploadPartCommand({
-          ...target,
-          PartNumber: partNumber,
-          Body: body,
-          ContentLength: end - start,
-          ChecksumSHA256: checksum,
-        }),
-      );
-      if (!result.ETag) throw new Error(`[s3Transport] part ${partNumber} returned no ETag`);
-      return { ETag: result.ETag, PartNumber: partNumber, ChecksumSHA256: checksum };
+      return await send(body);
     } catch (error) {
-      if (attempt >= PART_ATTEMPTS) throw error;
+      if (attempt >= UPLOAD_ATTEMPTS || !isTransientS3Error(error)) throw error;
     } finally {
       body.destroy();
     }
@@ -616,6 +624,17 @@ function isS3PreconditionFailed(error: unknown): boolean {
   if (!isRecord(error)) return false;
   const metadata = isRecord(error.$metadata) ? error.$metadata : undefined;
   return error.name === "PreconditionFailed" || metadata?.httpStatusCode === 412;
+}
+
+// The AWS SDK's own transient codes; S3 sends RequestTimeout as HTTP 400.
+const TRANSIENT_S3_ERRORS = new Set(["TimeoutError", "RequestTimeout", "RequestTimeoutException"]);
+
+/** A dropped connection (no HTTP status), a timeout, throttling (429) or a 5xx. */
+function isTransientS3Error(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  if (typeof error.name === "string" && TRANSIENT_S3_ERRORS.has(error.name)) return true;
+  const status = isRecord(error.$metadata) ? error.$metadata.httpStatusCode : undefined;
+  return typeof status !== "number" || status === 429 || status >= 500;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
