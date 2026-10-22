@@ -882,6 +882,19 @@ export function checkComments(root, files, scope = { kind: "all" }) {
   return { failures: [...failures, ...blockFailures], warnings, examined };
 }
 
+export function generatedPaths(root, ref, paths) {
+  if (paths.length === 0) return new Set();
+  const attributes = execFileSync(
+    "git",
+    ["check-attr", `--source=${ref}`, "-z", "--stdin", "linguist-generated"],
+    { cwd: root, encoding: "utf8", input: `${paths.join("\0")}\0`, maxBuffer: 64e6 },
+  ).split("\0");
+  const generated = new Set();
+  for (let i = 0; i + 2 < attributes.length; i += 3)
+    if (["set", "true"].includes(attributes[i + 2])) generated.add(attributes[i]);
+  return generated;
+}
+
 function mergeBase(root, ref) {
   return execFileSync("git", ["merge-base", ref, "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 }
@@ -994,8 +1007,10 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
   const base =
     explicit.length > 0 ? null : mergeBase(root, process.env.COMMENT_CHECK_BASE ?? "origin/main");
   // The probe is graded by the self-check only, or every PR that edits it would go red.
-  const files =
+  const candidates =
     base === null ? explicit : changedFiles(root, base).filter((file) => file !== PROBE);
+  const generated = base === null ? new Set() : generatedPaths(root, base, candidates);
+  const files = candidates.filter((file) => !generated.has(file));
   const scope = base === null ? { kind: "all" } : { kind: "lines", ...diffScope(root, base) };
   const { failures, warnings, examined } = checkComments(root, files, scope);
 
