@@ -145,7 +145,10 @@ export function buildChunkCaptureOptions(input: {
     fpsDen: number;
     format: DistributedFormat;
   };
-  encoder: Pick<LockedRenderConfig, "quality" | "deviceScaleFactor" | "variables">;
+  encoder: Pick<
+    LockedRenderConfig,
+    "quality" | "deviceScaleFactor" | "variables" | "pageMotionBlur"
+  >;
   videoCount: number;
   html: string;
   skipReadinessVideoIds?: string[];
@@ -168,7 +171,7 @@ export function buildChunkCaptureOptions(input: {
     ...(videoCaptureBeyondViewport !== undefined
       ? { captureBeyondViewport: videoCaptureBeyondViewport }
       : {}),
-    pageMotionBlur: "distributed-render",
+    pageMotionBlur: encoder.pageMotionBlur ?? "distributed-render",
     // A fixed warmup count keeps `beginFrameTimeTicks` host-independent.
     lockWarmupTicks: true,
     requiresWebGpu: compositionRequiresWebGpu(input.html),

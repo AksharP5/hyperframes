@@ -1361,6 +1361,23 @@ describe("plan() — codec knob", () => {
   });
 });
 
+describe("plan() motion blur intent", () => {
+  it("freezes explicit off into the plan identity while omission preserves the old plan", async () => {
+    const base = { fps: 30 as const, width: 320, height: 240, format: "mp4" as const };
+    const ordinaryDir = join(runRoot, "motion-blur-omitted");
+    const offDir = join(runRoot, "motion-blur-off");
+    mkdirSync(ordinaryDir, { recursive: true });
+    mkdirSync(offDir, { recursive: true });
+    const ordinary = await plan(projectDir, base, ordinaryDir);
+    const off = await plan(projectDir, { ...base, pageMotionBlur: "off" }, offDir);
+    const encoder = (dir: string) =>
+      JSON.parse(readFileSync(join(dir, "meta", "encoder.json"), "utf-8"));
+    expect(encoder(ordinaryDir)).not.toHaveProperty("pageMotionBlur");
+    expect(encoder(offDir).pageMotionBlur).toBe("off");
+    expect(off.planHash).not.toBe(ordinary.planHash);
+  }, 30_000);
+});
+
 describe("plan() — variables", () => {
   const TIMEOUT_MS = 30_000;
 

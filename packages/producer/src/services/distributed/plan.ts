@@ -98,6 +98,7 @@ import {
   readFfmpegVersion,
   readProducerVersion,
 } from "./shared.js";
+import type { RenderRequestOptions } from "../../renderRequest.js";
 import { writeChunkAudioSlices } from "./chunkAudio.js";
 import { PLAN_PROTOCOL_V1, type PlanProtocolV1Descriptor } from "./planProtocol.js";
 import {
@@ -111,7 +112,7 @@ import {
  * `height`, and `format` are required; everything else carries a default
  * sensible for AWS Lambda fan-out.
  */
-export interface DistributedRenderConfig {
+export interface DistributedRenderConfig extends Pick<RenderRequestOptions, "pageMotionBlur"> {
   /** Integer frame rate. Distributed renders only accept integer fps; the in-process renderer's `Fps` rational handles NTSC. */
   fps: DistributedFps;
   width: number;
@@ -915,6 +916,7 @@ function buildLockedRenderConfig(input: {
     chunkCount: input.chunkCount,
     runtimeEnv: input.runtimeEnv,
     variables: config.variables,
+    pageMotionBlur: config.pageMotionBlur,
     ...(input.chunksCarryAudio ? { chunksCarryAudio: true } : {}),
     ...(input.separateAudio ? { separateAudio: true } : {}),
   };

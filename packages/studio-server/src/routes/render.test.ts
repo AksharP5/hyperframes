@@ -813,6 +813,41 @@ describe("POST /projects/:id/render — telemetryDistinctId forwarding", () => {
     }
   });
 
+  it("preserves explicit page motion blur off over preview capability", async () => {
+    const spy = vi.fn();
+    const { app, cleanup } = buildApp(spy);
+    try {
+      const res = await app.request("http://localhost/projects/demo/render", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pageMotionBlur: "off", previewMotionBlur: true }),
+      });
+      expect(res.status).toBe(200);
+      expect(spy.mock.calls[0][0].pageMotionBlur).toBe("off");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it.each(["on", "", false, true, null, 0])(
+    "rejects invalid page motion blur %s before starting a render",
+    async (pageMotionBlur) => {
+      const spy = vi.fn();
+      const { app, cleanup } = buildApp(spy);
+      try {
+        const res = await app.request("http://localhost/projects/demo/render", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pageMotionBlur }),
+        });
+        expect(res.status).toBe(400);
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        cleanup();
+      }
+    },
+  );
+
   // An old client omits the flag, and a non-boolean is not a signal either.
   // Defaulting those to "opted out" would silently drop every pre-upgrade
   // render outcome.

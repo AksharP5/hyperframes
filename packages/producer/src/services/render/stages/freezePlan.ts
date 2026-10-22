@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join, relative, resolve } from "node:path";
 
 import type { Fps } from "@hyperframes/core";
+import type { RenderRequestOptions } from "../../../renderRequest.js";
 import { PLAN_PROTOCOL_V1 } from "../../distributed/planProtocol.js";
 import {
   canonicalJsonStringify,
@@ -27,7 +28,7 @@ import {
 /**
  * The encoder configuration locked in at plan time.
  */
-export interface LockedRenderConfig {
+export interface LockedRenderConfig extends Pick<RenderRequestOptions, "pageMotionBlur"> {
   // Capture
   captureMode: "beginframe" | "screenshot";
   forceScreenshot: boolean;

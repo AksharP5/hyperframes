@@ -9,6 +9,15 @@ const input = {
 };
 
 describe("buildChunkCaptureOptions", () => {
+  it("honors the explicit off value frozen by the planner", () => {
+    expect(
+      buildChunkCaptureOptions({
+        ...input,
+        encoder: { ...input.encoder, pageMotionBlur: "off" },
+      }).pageMotionBlur,
+    ).toBe("off");
+  });
+
   it("turns the page's capture motion blur off: a distributed render has no preview to match (R19)", () => {
     expect(buildChunkCaptureOptions(input).pageMotionBlur).toBe("distributed-render");
   });

@@ -84,6 +84,7 @@ interface RenderInput {
   quality: "draft" | "standard" | "high";
   format?: "mp4" | "webm" | "mov";
   videoFrameFormat?: RenderConfig["videoFrameFormat"];
+  pageMotionBlur?: RenderConfig["pageMotionBlur"];
   outputDynamicRange?: "auto" | "hdr" | "sdr";
   workers?: number;
   crf?: number;
@@ -317,6 +318,7 @@ function buildRenderJobConfig(input: RenderInput, outputPath: string, log: Produ
       outputResolution: input.outputResolution,
       outputResolutionAspectAgnostic: input.outputResolutionAspectAgnostic,
       videoFrameFormat: input.videoFrameFormat,
+      pageMotionBlur: input.pageMotionBlur,
       hdrMode: toRenderHdrMode(input.outputDynamicRange),
     },
   });
@@ -456,7 +458,11 @@ export async function prepareRenderBody(
   const overrideError = validateRenderOverrides(body);
   if (overrideError) return { error: overrideError };
 
-  const options = parseRenderOptions(body);
+  const pageMotionBlur = body.pageMotionBlur;
+  if (pageMotionBlur !== undefined && pageMotionBlur !== "off") {
+    return { error: "pageMotionBlur must be off when supplied" };
+  }
+  const options: Omit<RenderInput, "projectDir"> = { ...parseRenderOptions(body), pageMotionBlur };
   const project = prepareProjectDirectory(body.projectDir, options);
   if (project) return project;
   const source = await resolveInlineRenderHtml(body);
