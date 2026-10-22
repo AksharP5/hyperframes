@@ -15,12 +15,15 @@ import {
   HF_AUDIO_AUTOMATION_ATTR,
   parseAutomation,
   resolveAutomation,
+  VOLUME_RANGE,
   type HfAutomation,
 } from "../audioAutomation.js";
 import {
   cancelParamLane,
   clearParamLane,
   scheduleChainAutomation,
+  scheduleParamLane,
+  volumeLane,
   type AutomationTiming,
 } from "../audio/audioFxAutomation.js";
 import type { FxParamTarget } from "../audio/audioFxGraph.js";
@@ -123,6 +126,18 @@ export interface FxAttributes {
   automation: string | null;
 }
 
+/** The element's volume lane on `param`, as a target to cancel later; none when it has no lane. */
+function scheduleVolume(
+  param: AudioParam,
+  automation: HfAutomation,
+  at: AutomationTiming,
+): FxParamTarget[] {
+  const lane = volumeLane(automation);
+  if (!lane) return [];
+  scheduleParamLane([{ param }], lane, VOLUME_RANGE.scale, at);
+  return [{ param }];
+}
+
 export function attachElementFxChain(
   ctx: BaseAudioContext,
   el: { getAttribute?(name: string): string | null },
@@ -130,6 +145,7 @@ export function attachElementFxChain(
   destination: AudioNode,
   timing?: AutomationTiming,
   attrs: FxAttributes = { automation: HF_AUDIO_AUTOMATION_ATTR },
+  volume?: AudioParam,
 ): ElementFxHandle | null {
   const { chain } = readChain(el);
 
@@ -205,16 +221,17 @@ export function attachElementFxChain(
   };
 
   const scheduleFor = (next: HfAudioFxChain, at: AutomationTiming | null): void => {
-    automated =
-      at && handle
-        ? scheduleChainAutomation(
-            readAutomation(el, next, attrs.automation),
-            next,
-            handle.nodes,
-            at,
-            handle.presets,
-          )
-        : [];
+    if (!at) {
+      automated = [];
+      return;
+    }
+    const automation = readAutomation(el, next, attrs.automation);
+    automated = [
+      ...(handle
+        ? scheduleChainAutomation(automation, next, handle.nodes, at, handle.presets)
+        : []),
+      ...(volume ? scheduleVolume(volume, automation, at) : []),
+    ];
   };
 
   // The reference frame every later reschedule measures from. Mutable because a

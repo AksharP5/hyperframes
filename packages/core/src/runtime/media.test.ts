@@ -464,6 +464,22 @@ describe("syncRuntimeMedia", () => {
       expect(onElementVolume).toHaveBeenLastCalledWith(clip.el, 0.4, 0.8);
     });
 
+    it("leaves a routed clip's lane to the transport, sending only what multiplies it", () => {
+      const clip = createMockClip({ start: 0, end: 10, volume: 0.55 });
+      clip.el.setAttribute("data-automation", DUCK);
+      const onElementVolume = vi.fn();
+      syncRuntimeMedia({
+        clips: [clip],
+        timeSeconds: 5,
+        playing: true,
+        playbackRate: 1,
+        onElementVolume,
+        isWebAudioRouted: () => true,
+      });
+
+      expect(onElementVolume).toHaveBeenLastCalledWith(clip.el, 1, 1);
+    });
+
     it("ramps between points across ticks", () => {
       const [a, b, c] = volumesAt([2, 2.5, 3], DUCK);
       expect(a).toBeCloseTo(0.8, 5);
