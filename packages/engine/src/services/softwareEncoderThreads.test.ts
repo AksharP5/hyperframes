@@ -1,0 +1,98 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { getFfmpegBinary } from "../utils/ffmpegBinaries.js";
+
+const host = vi.hoisted(() => ({ quota: 6, cores: 8 }));
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  availableParallelism: () => host.quota,
+  cpus: () => Array.from({ length: host.cores }, () => ({}) as never),
+}));
+
+import { buildEncoderArgs } from "./chunkEncoder.js";
+import type { EncoderOptions } from "./chunkEncoder.types.js";
+import { appendSoftwareEncoderThreadsArg } from "./softwareEncoderThreads.js";
+import { buildStreamingArgs } from "./streamingEncoder.js";
+
+const FFMPEG = getFfmpegBinary();
+const HAS_TASKSET = process.platform === "linux" && spawnSync("taskset", ["-V"]).status === 0;
+const HAS_FFMPEG = spawnSync(FFMPEG, ["-version"]).status === 0;
+const QUIET = ["-v", "error"];
+const SOURCE = [
+  "-f",
+  "lavfi",
+  "-i",
+  "testsrc2=size=320x240:rate=30:duration=2,noise=alls=12:allf=t",
+];
+
+const options = (codec: "h264" | "h265"): EncoderOptions => ({
+  fps: { num: 30, den: 1 },
+  width: 320,
+  height: 240,
+  codec,
+  preset: "medium",
+  quality: 23,
+});
+
+const threadsOf = (args: string[]) => args[args.indexOf("-threads") + 1];
+
+describe("software encoder thread count", () => {
+  it("takes the CPU quota and floors at one", () => {
+    const args: string[] = [];
+    appendSoftwareEncoderThreadsArg(args, 6.9);
+    appendSoftwareEncoderThreadsArg(args, 0);
+    expect(args).toEqual(["-threads", "6", "-threads", "1"]);
+  });
+
+  it.each(["h264", "h265"] as const)(
+    "pins %s threads in both encoders to the quota, not the host",
+    (codec) => {
+      const seen = new Set<string | undefined>();
+      for (const cores of [8, 16, 64]) {
+        host.cores = cores;
+        seen.add(threadsOf(buildEncoderArgs(options(codec), SOURCE, "out.mp4")));
+        seen.add(
+          threadsOf(
+            buildStreamingArgs({ ...options(codec), preset: "medium" } as never, "out.mp4"),
+          ),
+        );
+      }
+      expect([...seen]).toEqual(["6"]);
+    },
+  );
+});
+
+describe.skipIf(!HAS_TASKSET || !HAS_FFMPEG)("encoded bytes across host sizes", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Encode with the production args as a host with `cpus` cores would run them. */
+  function videoMd5(codec: "h264" | "h265", cpus: string): string {
+    const dir = mkdtempSync(join(tmpdir(), "hf-threads-"));
+    dirs.push(dir);
+    const out = join(dir, "out.mp4");
+    const args = buildEncoderArgs(options(codec), SOURCE, out);
+    expect(spawnSync("taskset", ["-c", cpus, FFMPEG, ...QUIET, ...args]).status).toBe(0);
+    const md5 = spawnSync(
+      FFMPEG,
+      ["-v", "error", "-i", out, "-map", "0:v", "-c", "copy", "-f", "md5", "-"],
+      {
+        encoding: "utf-8",
+      },
+    );
+    return md5.stdout.trim();
+  }
+
+  it.each(["h264", "h265"] as const)(
+    "gives %s identical bytes on a 2-core and a 7-core host",
+    (codec) => {
+      expect(videoMd5(codec, "0-1")).toBe(videoMd5(codec, "0-6"));
+    },
+    120_000,
+  );
+});

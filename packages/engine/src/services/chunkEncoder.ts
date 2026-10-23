@@ -47,6 +47,7 @@ import { extractAudioMetadata } from "../utils/ffprobe.js";
 import { type Fps, fpsToFfmpegArg, fpsToNumber } from "@hyperframes/core";
 import type { EncoderOptions, EncodeResult, MuxResult } from "./chunkEncoder.types.js";
 import { appendVp9CpuUsedArg } from "./vp9Options.js";
+import { appendSoftwareEncoderThreadsArg } from "./softwareEncoderThreads.js";
 import { appendRenderProvenanceArgs } from "../utils/renderProvenance.js";
 
 export type { EncoderOptions, EncodeResult, MuxResult } from "./chunkEncoder.types.js";
@@ -326,6 +327,7 @@ export function buildEncoderArgs(
     } else {
       const encoderName = codec === "h264" ? "libx264" : "libx265";
       args.push("-c:v", encoderName, "-preset", preset);
+      appendSoftwareEncoderThreadsArg(args);
       if (bitrate) args.push("-b:v", bitrate);
       else args.push("-crf", String(quality));
 

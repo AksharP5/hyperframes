@@ -40,6 +40,7 @@ import {
   muxVideoWithAudio,
   resolveConfig,
   runFfmpeg,
+  appendSoftwareEncoderThreadsArg,
 } from "@hyperframes/engine";
 import { fpsToFfmpegArg } from "@hyperframes/core";
 import { defaultLogger, type ProducerLogger } from "../../logger.js";
@@ -267,6 +268,27 @@ function videoInputArgs(ctx: JoinContext, videoSources: readonly string[]): stri
     : concatDemuxerInput(videoSources, ctx.workDir, ctx.fpsArg);
 }
 
+export function cfrEncodeArgs(
+  inputArgs: string[],
+  encoder: CfrRateControlSource,
+  fpsArg: string,
+): string[] {
+  const args = [
+    ...inputArgs,
+    "-c:v",
+    "libx264",
+    ...cfrRateControlArgs(encoder),
+    "-pix_fmt",
+    "yuv420p",
+    "-fps_mode",
+    "cfr",
+    "-r",
+    fpsArg,
+  ];
+  appendSoftwareEncoderThreadsArg(args);
+  return args;
+}
+
 // ── 2c. Optional exact-CFR re-encode ──────────────────────────────────
 // Lands the stream-level `avg_frame_rate` (PTS-derived under stream copy)
 // on the requested rational, for consumers that strict-check it.
@@ -276,18 +298,7 @@ async function reencodeCfr(
   encoder: CfrRateControlSource,
 ): Promise<string> {
   const cfrOutputPath = join(ctx.workDir, `cfr.${ctx.format}`);
-  const cfrArgs = [
-    ...videoInputArgs(ctx, chunkPaths),
-    "-c:v",
-    "libx264",
-    ...cfrRateControlArgs(encoder),
-    "-pix_fmt",
-    "yuv420p",
-    "-fps_mode",
-    "cfr",
-    "-r",
-    ctx.fpsArg,
-  ];
+  const cfrArgs = cfrEncodeArgs(videoInputArgs(ctx, chunkPaths), encoder, ctx.fpsArg);
   appendRenderProvenanceArgs(cfrArgs, cfrOutputPath);
   cfrArgs.push("-y", cfrOutputPath);
   await ctx.timed("cfrMs", () =>
