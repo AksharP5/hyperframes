@@ -209,6 +209,7 @@ export interface CaptureSession {
    * our console output.
    */
   pendingTimelineIds?: string[];
+  isolatedCompositions?: IsolatedComposition[];
   /** The render's shared memo when the caller passed one, else this session's own. */
   subTimelineWaitMemo: SubTimelineWaitMemo;
   /** Structured readiness warnings surfaced to the producer's render policy. */
@@ -1829,20 +1830,68 @@ async function listUnregisteredTimelineIds(page: Page): Promise<string[]> {
   return Array.isArray(evaluated) ? evaluated.map((id) => String(id)) : [];
 }
 
+function isScriptFailure(session: CaptureSession): boolean {
+  const outcome = session.subTimelineWaitOutcome;
+  return outcome === "script_failure" || (outcome === "timeout" && session.pageErrors.length > 0);
+}
+
+/** A nested composition whose script threw gets an empty timeline, but only while another nested timeline is live. */
+async function isolateUnregisteredCompositions(page: Page): Promise<IsolatedComposition[]> {
+  const isolated = await page.evaluate(`(function() {
+    var timelines = (window.__timelines = window.__timelines || {});
+    var out = [];
+    if (!window.gsap) return out;
+    var broken = [];
+    var live = 0;
+    var hosts = document.querySelectorAll("[data-composition-id]");
+    for (var i = 0; i < hosts.length; i++) {
+      var host = hosts[i];
+      var id = host.getAttribute("data-composition-id");
+      if (!id || host.hasAttribute("data-no-timeline")) continue;
+      var isRoot = !host.parentElement || !host.parentElement.closest("[data-composition-id]");
+      if (timelines[id]) {
+        if (!isRoot) live++;
+      } else if (isRoot) {
+        return out;
+      } else {
+        broken.push(host);
+      }
+    }
+    if (live === 0) return out;
+    broken.forEach(function(host) {
+      var tl = window.gsap.timeline({ paused: true });
+      var duration = parseFloat(host.getAttribute("data-duration"));
+      if (duration > 0) tl.set({}, {}, duration);
+      var id = host.getAttribute("data-composition-id");
+      timelines[id] = tl;
+      out.push({ compositionId: id, elementId: host.id || host.getAttribute("data-hf-id") || null });
+    });
+    if (out.length && typeof window.__hfForceTimelineRebind === "function") window.__hfForceTimelineRebind();
+    return out;
+  })()`);
+  return Array.isArray(isolated) ? (isolated as IsolatedComposition[]) : [];
+}
+
 export async function waitForSubCompositionTimelines(
   session: CaptureSession,
   page: Page,
   timeoutMs: number,
+  options: { scriptErrorGraceMs?: number } = {},
 ): Promise<void> {
   const memo = session.subTimelineWaitMemo;
   session.subTimelineWaitOutcome = await pollSubCompositionTimelines(page, timeoutMs, {
     getScriptLoadFailures: () => session.scriptLoadFailures,
+    getPageErrors: () => session.pageErrors,
+    scriptErrorGraceMs: options.scriptErrorGraceMs,
     onPending: (ids) => {
       session.pendingTimelineIds = [...ids];
     },
     shouldStop: () => session.vfxFailure !== undefined,
     knownUnregisteredIds: memo.unregisteredIds,
   });
+  if (isScriptFailure(session) && session.scriptLoadFailures.length === 0) {
+    session.isolatedCompositions = await isolateUnregisteredCompositions(page);
+  }
   // Only a clean full-length timeout is replayed: a VFX stop ends early, and page or script
   // errors must reach each session so it can still classify the wait as a script failure.
   const cleanTimeout =
@@ -1855,12 +1904,20 @@ export async function waitForSubCompositionTimelines(
   }
 }
 
+export interface IsolatedComposition {
+  compositionId: string;
+  elementId: string | null;
+}
+
 export interface SubTimelinePollOptions {
   intervalMs?: number;
   // Fail-fast: a script resource that failed to load can never register its timeline,
   // so once failures exist the poll ends `scriptFailureGraceMs` after it started.
   getScriptLoadFailures?: () => readonly string[];
   scriptFailureGraceMs?: number;
+  // A script that threw can never register its timeline either; waits this long once a page error exists.
+  getPageErrors?: () => readonly string[];
+  scriptErrorGraceMs?: number;
   // Receives the ids still unregistered at bail time, for the structured warning.
   onPending?: (ids: readonly string[]) => void;
   // Ends the wait at once; the caller then fails the render for its own reason.
@@ -1876,6 +1933,8 @@ export async function pollSubCompositionTimelines(
     intervalMs = 150,
     getScriptLoadFailures,
     scriptFailureGraceMs = 2_000,
+    getPageErrors,
+    scriptErrorGraceMs = 5_000,
     onPending,
     shouldStop,
     knownUnregisteredIds = [],
@@ -1902,19 +1961,26 @@ export async function pollSubCompositionTimelines(
   const deadline = start + timeoutMs;
   let ready = false;
   let scriptFailureBail = false;
+  // A page error is given its grace from when it first appeared, not from when the poll began.
+  let errorSeenAt: number | undefined;
   for (;;) {
     ready = Boolean(await page.evaluate(expression));
     if (ready || shouldStop?.()) break;
     const now = Date.now();
     if (now >= deadline) break;
     const failures = getScriptLoadFailures?.() ?? [];
-    if (failures.length > 0 && now - start >= scriptFailureGraceMs) {
+    const errors = getPageErrors?.() ?? [];
+    const failed = failures.length > 0 ? failures : errors;
+    const graceMs = failures.length > 0 ? scriptFailureGraceMs : scriptErrorGraceMs;
+    if (failed.length > 0) errorSeenAt ??= now;
+    const sinceFailure = failures.length > 0 ? now - start : now - (errorSeenAt ?? now);
+    if (failed.length > 0 && sinceFailure >= graceMs) {
       scriptFailureBail = true;
       console.warn(
         `[FrameCapture] Sub-composition timeline wait cut short after ${now - start}ms: ` +
-          `script resource(s) failed to load (${failures.join(", ")}), so ` +
+          `script(s) failed (${failed.join(", ")}), so ` +
           `the timeline registration they carry can never arrive. ` +
-          `Fix the script reference; the render proceeds without those animations.`,
+          `Fix the script.`,
       );
       break;
     }
@@ -2146,16 +2212,35 @@ function recordCaptureWarnings(session: CaptureSession, warnings: readonly Captu
 export function recordSubTimelineWarning(session: CaptureSession, timeoutMs: number): void {
   const outcome = session.subTimelineWaitOutcome;
   if (outcome === "ready" || !outcome) return;
-  const threwThenTimedOut = outcome === "timeout" && session.pageErrors.length > 0;
-  const scriptFailure = outcome === "script_failure" || threwThenTimedOut;
+  const threwThenTimedOut =
+    session.pageErrors.length > 0 && session.scriptLoadFailures.length === 0;
+  const scriptFailure = isScriptFailure(session);
   const sources = [...session.scriptLoadFailures, ...session.pageErrors];
   const pending = session.pendingTimelineIds ?? [];
   const pendingSuffix = pending.length > 0 ? ` (still unregistered: ${pending.join(", ")})` : "";
+  const isolated = session.isolatedCompositions ?? [];
+  if (isolated.length > 0) {
+    recordCaptureWarnings(session, [
+      {
+        code: "script_error_isolated",
+        message:
+          `A composition script failed, so its animation was skipped and the render went on: ` +
+          `${isolated.map((c) => c.elementId ?? c.compositionId).join(", ")} (${sources.join(", ")}).`,
+        details: {
+          sources,
+          pendingCompositionIds: [...pending],
+          isolatedElements: isolated,
+          failureOwner: "user",
+        },
+      },
+    ]);
+    return;
+  }
   recordCaptureWarnings(session, [
     {
       code: scriptFailure ? "sub_timeline_script_failure" : "sub_timeline_readiness_timeout",
       message: threwThenTimedOut
-        ? `A composition script threw and a timeline did not register within ${timeoutMs}ms` +
+        ? `A composition script threw before its timeline registered` +
           `${pendingSuffix} (${sources.join(", ")}). Fix the error; a composition animated by ` +
           `CSS or rAF rather than a GSAP timeline must mark its host with data-no-timeline.`
         : scriptFailure

@@ -32,6 +32,7 @@ export type CaptureWarningCode =
   | "audio_processing_failed"
   | "sub_timeline_readiness_timeout"
   | "sub_timeline_script_failure"
+  | "script_error_isolated"
   | "vfx_failure"
   | "live_map_detected";
 
@@ -43,6 +44,7 @@ export interface CaptureWarning {
     mediaType?: "image" | "video" | "audio";
     sources?: string[];
     pendingCompositionIds?: string[];
+    isolatedElements?: Array<{ compositionId: string; elementId: string | null }>;
     timeoutMs?: number;
     audioFailures?: AudioFailureDiagnostic[];
     failureReasons?: string[];
