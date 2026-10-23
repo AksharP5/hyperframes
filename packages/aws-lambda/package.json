@@ -12,6 +12,7 @@
     "prebuilt/",
     "scripts/",
     "!scripts/*.test.ts",
+    "!scripts/pin-handler-zip.ts",
     "README.md"
   ],
   "type": "module",

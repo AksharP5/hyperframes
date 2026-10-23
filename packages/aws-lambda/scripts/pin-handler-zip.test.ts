@@ -3,8 +3,14 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { adapterPackageRoot, prebuiltHandler } from "../src/sdk/prebuiltHandler.js";
-import { pinHandlerZip } from "./pin-handler-zip.js";
+import {
+  adapterPackageRoot,
+  prebuiltHandler,
+  prebuiltVideoImage,
+  VIDEO_IMAGE_ASSET,
+  VIDEO_IMAGE_MANIFEST_FILE,
+} from "../src/sdk/prebuiltHandler.js";
+import { pinHandlerZip, pinReleaseAsset } from "./pin-handler-zip.js";
 
 const examples = join(import.meta.dir, "..", "..", "..", "examples", "aws-lambda");
 const realTemplate = readFileSync(join(examples, "template.yaml"), "utf-8");
@@ -93,6 +99,31 @@ describe("pinHandlerZip", () => {
   });
 });
 
+describe("pinReleaseAsset", () => {
+  it("pins the arm64 video image beside the handler zip without touching the zip's pin", () => {
+    const { root, pkgDir } = fixtureRepo();
+    writeFileSync(join(pkgDir, "dist", "handler.zip"), "zip");
+    const zipPin = pinHandlerZip(root);
+    const image = Buffer.from("oci layout tar");
+    writeFileSync(join(root, "dist", VIDEO_IMAGE_ASSET), image);
+    const sha256 = createHash("sha256").update(image).digest("hex");
+
+    const manifest = pinReleaseAsset(root, VIDEO_IMAGE_ASSET, VIDEO_IMAGE_MANIFEST_FILE);
+
+    expect(manifest).toEqual({
+      version: "9.8.7",
+      url: "https://github.com/heygen-com/hyperframes/releases/download/v9.8.7/hyperframes-lambda-video-arm64.oci.tar",
+      sha256,
+      bytes: image.length,
+    });
+    expect(readFileSync(join(root, "dist", "hyperframes-lambda-video-arm64.sha256"), "utf-8")).toBe(
+      `${sha256}  hyperframes-lambda-video-arm64.oci.tar\n`,
+    );
+    expect(prebuiltVideoImage(pkgDir)).toEqual(manifest);
+    expect(prebuiltHandler(pkgDir)?.sha256).toBe(zipPin.sha256);
+  });
+});
+
 describe("prebuiltHandler", () => {
   it("reads from its own package root", () => {
     expect(adapterPackageRoot()).toBe(join(import.meta.dir, ".."));
@@ -101,5 +132,12 @@ describe("prebuiltHandler", () => {
   it("is undefined when the package carries no pinned zip", () => {
     const { pkgDir } = fixtureRepo();
     expect(prebuiltHandler(pkgDir)).toBeUndefined();
+  });
+
+  it("has no video image when the package pins only the zip", () => {
+    const { root, pkgDir } = fixtureRepo();
+    writeFileSync(join(pkgDir, "dist", "handler.zip"), "zip");
+    pinHandlerZip(root);
+    expect(prebuiltVideoImage(pkgDir)).toBeUndefined();
   });
 });
