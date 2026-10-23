@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  deleteEcrRepository,
   fetchStackOutputs,
   locateSamTemplate,
   parseReservedConcurrency,
@@ -55,15 +56,24 @@ describe("samDeploy", () => {
     samDeploy({ samDir: "/repo", stackName: "s", region: "us-east-2", reservedConcurrency: 8 });
     expect(overrides()).toContain("ReservedConcurrency=8");
   });
+
+  // Omitted, UsePreviousValue would keep the video function after a switch back to x86.
+  it("always sends VideoImageUri, empty without an image", () => {
+    samDeploy({ samDir: "/repo", stackName: "s", region: "r" });
+    expect(vi.mocked(spawnSync).mock.lastCall?.[1]).toContain('VideoImageUri=""');
+    samDeploy({ samDir: "/repo", stackName: "s", region: "r", videoImageUri: "repo@sha256:a" });
+    expect(vi.mocked(spawnSync).mock.lastCall?.[1]).toContain("VideoImageUri=repo@sha256:a");
+  });
 });
 
 describe("fetchStackOutputs", () => {
-  const stack = (reserved: string) =>
+  const stack = (reserved: string, extra: { OutputKey: string; OutputValue: string }[] = []) =>
     JSON.stringify({
       Outputs: [
         { OutputKey: "RenderBucketName", OutputValue: "bucket" },
         { OutputKey: "RenderFunctionArn", OutputValue: "arn:aws:lambda:r:1:function:fn" },
         { OutputKey: "RenderStateMachineArn", OutputValue: "arn:sm" },
+        ...extra,
       ],
       Parameters: [{ ParameterKey: "ReservedConcurrency", ParameterValue: reserved }],
     });
@@ -73,6 +83,29 @@ describe("fetchStackOutputs", () => {
     expect(fetchStackOutputs({ stackName: "s", region: "r" }).reservedConcurrency).toBe(8);
     vi.mocked(execFileSync).mockReturnValue(stack("-1"));
     expect(fetchStackOutputs({ stackName: "s", region: "r" }).reservedConcurrency).toBeUndefined();
+  });
+
+  it("reads the video function's name when the stack has one", () => {
+    vi.mocked(execFileSync).mockReturnValue(stack("-1"));
+    expect(fetchStackOutputs({ stackName: "s", region: "r" }).videoFunctionName).toBeUndefined();
+    const video = { OutputKey: "VideoFunctionArn", OutputValue: "arn:aws:lambda:r:1:function:v" };
+    vi.mocked(execFileSync).mockReturnValue(stack("-1", [video]));
+    expect(fetchStackOutputs({ stackName: "s", region: "r" }).videoFunctionName).toBe("v");
+  });
+});
+
+describe("deleteEcrRepository", () => {
+  const exit = (status: number, stderr = "") =>
+    vi.mocked(spawnSync).mockReturnValueOnce({ status, stderr } as never);
+
+  it("counts a repository that is already gone as deleted, and throws on any other failure", () => {
+    exit(254, "An error occurred (RepositoryNotFoundException) when calling DeleteRepository");
+    expect(() => deleteEcrRepository({ repositoryName: "s-video", region: "r" })).not.toThrow();
+    exit(254, "An error occurred (AccessDeniedException)");
+    expect(() => deleteEcrRepository({ repositoryName: "s-video", region: "r" })).toThrow(
+      "AccessDeniedException",
+    );
+    expect(vi.mocked(spawnSync).mock.lastCall?.[1]).toContain("--force");
   });
 });
 

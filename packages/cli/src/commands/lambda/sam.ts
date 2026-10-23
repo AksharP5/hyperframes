@@ -55,6 +55,8 @@ export interface DeployOptions {
   /** Lambda memory in MB. Forwarded as the `LambdaMemoryMb` parameter override. */
   lambdaMemoryMb?: number;
   chromeSource?: "sparticuz" | "chrome-headless-shell";
+  /** ECR image for the arm64 video function; omitted, chunks render on the x86 function. */
+  videoImageUri?: string;
   /** Pass-through stdio. Defaults to "inherit" so SAM's progress lines stream live. */
   stdio?: "inherit" | "pipe";
 }
@@ -91,7 +93,11 @@ export function parseReservedConcurrency(raw: unknown): number | undefined {
 /** Run `sam deploy` non-interactively. Returns when SAM exits 0; throws on non-zero. */
 export function samDeploy(opts: DeployOptions): void {
   assertSamAvailable();
-  const paramOverrides = [`ChromeSource=${opts.chromeSource ?? "sparticuz"}`];
+  const paramOverrides = [
+    `ChromeSource=${opts.chromeSource ?? "sparticuz"}`,
+    // Always sent: omitted, SAM's UsePreviousValue would keep a video function the user dropped.
+    `VideoImageUri=${opts.videoImageUri ?? '""'}`,
+  ];
   // Omitted, SAM sends UsePreviousValue: a redeploy keeps the stack's reservation, a new stack gets -1.
   if (opts.reservedConcurrency !== undefined) {
     paramOverrides.push(`ReservedConcurrency=${opts.reservedConcurrency}`);
@@ -153,6 +159,8 @@ export interface StackOutputBag {
   functionName: string;
   stateMachineArn: string;
   reservedConcurrency?: number;
+  /** Present when the stack has the arm64 video function. */
+  videoFunctionName?: string;
 }
 
 /**
@@ -205,5 +213,30 @@ export function fetchStackOutputs(opts: {
     functionName: functionName.split(":").pop() ?? functionName,
     stateMachineArn,
     reservedConcurrency: reserved > 0 ? reserved : undefined,
+    videoFunctionName: byKey.get("VideoFunctionArn")?.split(":").pop(),
   };
+}
+
+/** Delete an ECR repository and its images; one that is already gone counts as deleted. */
+export function deleteEcrRepository(opts: {
+  repositoryName: string;
+  region: string;
+  awsProfile?: string;
+}): void {
+  assertAwsCliAvailable();
+  const args = [
+    "ecr",
+    "delete-repository",
+    "--repository-name",
+    opts.repositoryName,
+    "--force",
+    "--region",
+    opts.region,
+  ];
+  if (opts.awsProfile) args.push("--profile", opts.awsProfile);
+  const result = spawnSync("aws", args, { encoding: "utf-8" });
+  if (result.status === 0 || result.stderr?.includes("RepositoryNotFoundException")) return;
+  throw new Error(
+    `[lambda] aws ecr delete-repository ${opts.repositoryName} exited with code ${result.status ?? "unknown"}: ${result.stderr ?? ""}`,
+  );
 }

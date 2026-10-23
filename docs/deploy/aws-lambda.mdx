@@ -47,7 +47,7 @@ The Lambda handler is a thin dispatch: parse the Step Functions event, download 
 | AWS credentials | The CLI and the deploy step both call AWS APIs. | Env vars, `~/.aws/credentials`, SSO, or IMDS — any chain the AWS SDK for JavaScript v3 would resolve. |
 | AWS SAM CLI | `hyperframes lambda deploy/destroy` shells out to `sam deploy`/`sam delete`. | [Install guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) |
 | Lambda adapter | The published CLI loads the AWS adapter only for Lambda commands. Each release pins a prebuilt Lambda handler ZIP (a GitHub release asset); `lambda deploy` downloads it, checks its SHA-256 and deploys it with the adapter's SAM template. No repo checkout needed. | `npm install -g @hyperframes/aws-lambda` alongside the CLI, at the same version |
-| HyperFrames repo checkout (optional) | Inside a checkout, or with `HYPERFRAMES_REPO_ROOT` pointing at one, `lambda deploy` builds the handler ZIP from source instead (needs `bun`). Use it to deploy unreleased changes, `--chrome-source=chrome-headless-shell`, or an adapter release older than the prebuilt handler. | `git clone https://github.com/heygen-com/hyperframes`, and `npm install -g bun` or [bun.sh](https://bun.sh) |
+| HyperFrames repo checkout (optional) | Inside a checkout, or with `HYPERFRAMES_REPO_ROOT` pointing at one, `lambda deploy` builds the handler ZIP from source instead (needs `bun`). Use it to deploy unreleased changes, `--chrome-source=chrome-headless-shell`, or an adapter release older than the prebuilt handler. A checkout deploy on arm64 also needs the video image built from that checkout (`HYPERFRAMES_LAMBDA_VIDEO_IMAGE`), or `--video-arch x86_64`. | `git clone https://github.com/heygen-com/hyperframes`, and `npm install -g bun` or [bun.sh](https://bun.sh) |
 
 ## Three deployment paths
 
@@ -101,6 +101,10 @@ hyperframes lambda render ./my-project --site-id=a1b2c3d4e5f6g7h8 \
 The `siteId` is content-addressed via a SHA-256 of the project tree. A site is a small `sites/<siteId>/files.json` that lists each file's path and SHA-256. The files themselves live once per bucket under `cas/sha256/`, shared by every site and render, so a file another project already uploaded is never uploaded again. Pass the same `--site-id` to as many `lambda render` calls as you like.
 
 The stack's bucket expires objects under `cas/sha256/` 30 days after they were last written (the `ExpireSharedContent` lifecycle rule). Each render or `sites create` that reuses a file at least 7 days old rewrites it in place, so files in use never expire. If a site's files did expire, `lambda render --site-id` re-uploads them from the project directory, if its copies still match. Otherwise, or when `renderToLambda` gets a `siteHandle` but no `projectDir`, the render stops with `SITE_FILES_MISSING` before starting; run `sites create` again to restore them.
+
+#### Upgrading from a version that deployed x86 only
+
+`lambda deploy` now runs the plan and the render chunks on an arm64 container-image function by default; audio and assemble stay on the x86 function. Redeploying an existing stack without `--video-arch` moves it to arm64 and adds the `<stack>-video` ECR repository. To keep a stack on x86, pass `--video-arch x86_64` on every deploy. `--chrome-source chrome-headless-shell` also needs `--video-arch x86_64`, because the arm64 image bundles sparticuz Chrome only.
 
 #### Upgrading from a version before shared content storage
 
@@ -230,6 +234,8 @@ If progress doesn't advance for >10 minutes, check the Step Functions execution 
 ### Tearing down doesn't reclaim S3 storage
 
 The render bucket is created with CloudFormation `Retain` on delete — `hyperframes lambda destroy` (or `sam delete`) tears the function + state machine down but the bucket survives. This is intentional: it protects final-rendered MP4s from being lost when you re-deploy. To fully reclaim storage, empty + delete the bucket via the AWS console / `aws s3 rb`.
+
+A stack deployed on arm64 (the default) also has an ECR repository, `<stack>-video`, holding the video function's image. `hyperframes lambda destroy` deletes it after the stack.
 
 ### `STACK_TOO_OLD`
 

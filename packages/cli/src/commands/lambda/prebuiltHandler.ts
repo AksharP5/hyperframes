@@ -4,10 +4,10 @@
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  createReadStream,
   existsSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
   renameSync,
   unlinkSync,
 } from "node:fs";
@@ -29,7 +29,7 @@ export interface StageDeps {
   log: (line: string) => void;
 }
 
-const defaultDeps: StageDeps = {
+export const defaultDeps: StageDeps = {
   loadAdapter: () => import("@hyperframes/aws-lambda/sdk"),
   download: downloadFile,
   cacheDir: HANDLER_CACHE_DIR,
@@ -50,8 +50,48 @@ export function noHandlerMessage(adapterInstalled: boolean): string {
   );
 }
 
-function sha256File(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+export interface PinnedAsset {
+  version: string;
+  url: string;
+  sha256: string;
+  bytes: number;
+}
+
+export async function fetchPinned(
+  pinned: PinnedAsset,
+  asset: { fileName: string; label: string; urlOverride?: string },
+  deps: Pick<StageDeps, "download" | "cacheDir" | "log">,
+): Promise<string> {
+  const dir = join(deps.cacheDir, `${pinned.version}-${pinned.sha256}`);
+  const file = join(dir, asset.fileName);
+  if (existsSync(file) && (await sha256File(file)) === pinned.sha256) {
+    deps.log(`→ Using verified ${asset.label} ${pinned.version} from ${dir}`);
+    return file;
+  }
+  // Override for mirrors and pre-release testing; the pinned sha256 still decides.
+  const url = asset.urlOverride ?? pinned.url;
+  deps.log(`→ Downloading ${asset.label} ${pinned.version} (${pinned.bytes} bytes)`);
+  mkdirSync(dir, { recursive: true });
+  const partial = `${file}.download`;
+  await deps.download(url, partial, { maxBytes: pinned.bytes });
+  const actual = await sha256File(partial);
+  if (actual !== pinned.sha256) {
+    unlinkSync(partial);
+    const urlWithoutCredentials = url.split("?")[0];
+    throw new Error(
+      `[lambda deploy] Refusing the ${asset.label} from ${urlWithoutCredentials}: sha256 ${actual} does not match ` +
+        `the ${pinned.sha256} pinned by @hyperframes/aws-lambda@${pinned.version}.`,
+    );
+  }
+  renameSync(partial, file);
+  deps.log(`→ Verified sha256 ${pinned.sha256}`);
+  return file;
 }
 
 /** Returns the directory holding the verified `handler.zip` and its `template.yaml`. */
@@ -68,29 +108,16 @@ export async function stagePrebuiltHandler(deps: StageDeps = defaultDeps): Promi
   const pinned = sdk.prebuiltHandler?.();
   if (!pinned) throw new Error(noHandlerMessage(true));
 
-  const dir = join(deps.cacheDir, `${pinned.version}-${pinned.sha256}`);
-  const zip = join(dir, "handler.zip");
-  if (existsSync(zip) && sha256File(zip) === pinned.sha256) {
-    deps.log(`→ Using verified handler ZIP ${pinned.version} from ${dir}`);
-  } else {
-    // Override for mirrors and pre-release testing; the pinned sha256 still decides.
-    const url = process.env.HYPERFRAMES_LAMBDA_HANDLER_URL ?? pinned.url;
-    deps.log(`→ Downloading handler ZIP ${pinned.version} (${pinned.bytes} bytes)`);
-    mkdirSync(dir, { recursive: true });
-    const partial = `${zip}.download`;
-    await deps.download(url, partial, { maxBytes: pinned.bytes });
-    const actual = sha256File(partial);
-    if (actual !== pinned.sha256) {
-      unlinkSync(partial);
-      const urlWithoutCredentials = url.split("?")[0];
-      throw new Error(
-        `[lambda deploy] Refusing the handler ZIP from ${urlWithoutCredentials}: sha256 ${actual} does not match ` +
-          `the ${pinned.sha256} pinned by @hyperframes/aws-lambda@${pinned.version}.`,
-      );
-    }
-    renameSync(partial, zip);
-    deps.log(`→ Verified sha256 ${pinned.sha256}`);
-  }
+  const zip = await fetchPinned(
+    pinned,
+    {
+      fileName: "handler.zip",
+      label: "handler ZIP",
+      urlOverride: process.env.HYPERFRAMES_LAMBDA_HANDLER_URL,
+    },
+    deps,
+  );
+  const dir = dirname(zip);
   const templateDir = dirname(pinned.templatePath);
   for (const file of readdirSync(templateDir).filter((name) => name.endsWith(".yaml"))) {
     copyFileSync(join(templateDir, file), join(dir, file));

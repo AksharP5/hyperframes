@@ -15,7 +15,8 @@ import { c } from "../../ui/colors.js";
 import { stagePrebuiltHandler } from "./prebuiltHandler.js";
 import { fetchStackOutputs, locateSamTemplate, samDeploy } from "./sam.js";
 import { repoRoot } from "./repoRoot.js";
-import { DEFAULT_STACK_NAME, writeStackOutputs } from "./state.js";
+import { DEFAULT_STACK_NAME, readStackOutputs, writeStackOutputs } from "./state.js";
+import { pushVideoImage, type VideoArch } from "./videoImage.js";
 
 export interface DeployArgs {
   stackName: string;
@@ -25,6 +26,7 @@ export interface DeployArgs {
   reservedConcurrency?: number;
   chromeSource: "sparticuz" | "chrome-headless-shell";
   lambdaMemoryMb: number;
+  videoArch: VideoArch;
   /** Override the handler-ZIP rebuild step. Useful for CI runs that already built it. */
   skipBuild: boolean;
 }
@@ -40,10 +42,26 @@ export async function runDeploy(args: Partial<DeployArgs> = {}): Promise<void> {
     reservedConcurrency: args.reservedConcurrency,
     chromeSource: args.chromeSource ?? "sparticuz",
     lambdaMemoryMb: args.lambdaMemoryMb ?? DEFAULT_MEMORY_MB,
+    videoArch: args.videoArch ?? "arm64",
     skipBuild: args.skipBuild ?? false,
   };
 
-  const samDir = await prepareSamDir(repoRoot(), resolved);
+  if (resolved.videoArch === "arm64" && resolved.chromeSource !== "sparticuz") {
+    throw new Error(
+      "[lambda deploy] The arm64 video image bundles sparticuz Chrome only. " +
+        "Pass --video-arch x86_64 to deploy with --chrome-source chrome-headless-shell.",
+    );
+  }
+  const root = repoRoot();
+  const samDir = await prepareSamDir(root, resolved);
+  const video =
+    resolved.videoArch === "arm64"
+      ? await pushVideoImage({
+          stackName: resolved.stackName,
+          region: resolved.region,
+          inCheckout: root !== undefined,
+        })
+      : undefined;
 
   console.log(c.dim(`→ sam deploy (stack=${resolved.stackName} region=${resolved.region})`));
   samDeploy({
@@ -54,6 +72,7 @@ export async function runDeploy(args: Partial<DeployArgs> = {}): Promise<void> {
     reservedConcurrency: resolved.reservedConcurrency,
     lambdaMemoryMb: resolved.lambdaMemoryMb,
     chromeSource: resolved.chromeSource,
+    videoImageUri: video?.imageUri,
   });
 
   console.log(c.dim("→ Reading stack outputs"));
@@ -71,6 +90,9 @@ export async function runDeploy(args: Partial<DeployArgs> = {}): Promise<void> {
     functionName: outputs.functionName,
     lambdaMemoryMb: resolved.lambdaMemoryMb,
     reservedConcurrency: outputs.reservedConcurrency,
+    videoFunctionName: outputs.videoFunctionName,
+    // Back on x86 the repository outlives the video function, so destroy still needs its name.
+    videoRepository: video?.repositoryName ?? readStackOutputs(resolved.stackName)?.videoRepository,
     deployedAt: new Date().toISOString(),
   });
 
@@ -96,6 +118,9 @@ export async function runDeploy(args: Partial<DeployArgs> = {}): Promise<void> {
   console.log(`  ${c.dim("Bucket:")}         ${outputs.bucketName}`);
   console.log(`  ${c.dim("State machine:")}  ${outputs.stateMachineArn}`);
   console.log(`  ${c.dim("Function:")}       ${outputs.functionName}`);
+  if (outputs.videoFunctionName) {
+    console.log(`  ${c.dim("Video function:")} ${outputs.videoFunctionName} (arm64)`);
+  }
   console.log(`  ${c.dim("State file:")}     ${resolve(statePath)}`);
   console.log();
   console.log(c.dim(`Render with: hyperframes lambda render <project-dir>`));
