@@ -120,6 +120,33 @@ describe("discoverMediaFromBrowser", () => {
     });
   });
 
+  it("reports no source for a blank src even though the browser resolves it to the page URL", async () => {
+    const { document } = parseHTML(
+      `<video id="empty" src="" data-start="0" data-end="1"></video>
+       <video id="real" src="clip.mp4" data-start="0" data-end="1"></video>`,
+    );
+    const resolved = {
+      empty: "http://localhost:4000/index.html",
+      real: "http://localhost:4000/clip.mp4",
+    };
+    for (const [id, value] of Object.entries(resolved)) {
+      const element = document.getElementById(id);
+      if (element) Object.defineProperty(element, "src", { value });
+    }
+    const previousDocument = Reflect.get(globalThis, "document");
+    Reflect.set(globalThis, "document", document);
+    try {
+      const media = await discoverMediaFromBrowser({
+        evaluate: async (collect) => collect(),
+      } as never);
+      expect(media.find((item) => item.id === "empty")?.src).toBe("");
+      expect(media.find((item) => item.id === "real")?.src).toBe("http://localhost:4000/clip.mp4");
+    } finally {
+      if (previousDocument === undefined) Reflect.deleteProperty(globalThis, "document");
+      else Reflect.set(globalThis, "document", previousDocument);
+    }
+  });
+
   it("keeps strict timing parsing self-contained after Puppeteer serializes the callback", async () => {
     const media = await discover(
       '<video id="clip" src="clip.mp4" data-start="0" data-end="2" data-duration="2" data-media-start="1"></video>',
