@@ -32,7 +32,7 @@ vi.mock("../capture/captureCompositionFrame.js", async (importOriginal) => ({
   })),
   seekCompositionTimeline: capture.seek,
   seekCompositionTimelineOnly: capture.seek,
-  settleCompositionSeek: vi.fn(async () => undefined),
+  settleCompositionSeek: vi.fn(async () => ({ pending: [], failed: [] })),
 }));
 
 vi.mock("../utils/staticProjectServer.js", () => ({

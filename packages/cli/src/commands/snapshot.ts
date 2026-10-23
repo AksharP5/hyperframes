@@ -31,8 +31,10 @@ import {
   parseZoomTarget,
   resolveCropRegion,
   runFfmpegOnce,
+  SCREENSHOT_IMAGE_WAIT_MS,
   seekCompositionTimelineOnly,
   settleCompositionSeek,
+  type UnsettledImages,
   type ZoomTarget,
 } from "../capture/captureCompositionFrame.js";
 import {
@@ -608,7 +610,7 @@ async function captureSnapshots(
       });
 
       if (duration <= 0 && !opts.at?.length) {
-        return { paths: [] };
+        return { paths: [], warnings };
       }
 
       const readTiming = () =>
@@ -749,7 +751,7 @@ async function captureSnapshots(
       for (let i = 0; i < positions.length; i++) {
         const time = positions[i]!;
 
-        const seekOptions = { exactTime: true };
+        const seekOptions = { exactTime: true, waitForImagesMs: SCREENSHOT_IMAGE_WAIT_MS };
         await seekCompositionTimelineOnly(page, time, seekOptions);
 
         if (cameraExpr) await page.evaluate(cameraExpr);
@@ -894,7 +896,7 @@ async function captureSnapshots(
           }
         }
 
-        await settleCompositionSeek(page, seekOptions);
+        warnUnsettledImages(await settleCompositionSeek(page, seekOptions), time, warnings);
         await recaptureSnapshotComposite(page);
 
         const timeLabel = formatSnapshotTimestamp(time);
@@ -1008,6 +1010,7 @@ async function captureSnapshots(
 
   return {
     paths: savedPaths,
+    warnings,
     ...(review && reviewList
       ? {
           review: {
@@ -1025,7 +1028,22 @@ async function captureSnapshots(
 interface CapturedSnapshots {
   /** Project-relative where possible, as printed. */
   paths: string[];
+  /** Why a frame may differ from the composition: shown on the console and in `--json`. */
+  warnings: string[];
   review?: { plan: ReviewPlan; frames: Array<ReviewFrame & { path: string }> };
+}
+
+function warnUnsettledImages(images: UnsettledImages, time: number, warnings: string[]): void {
+  const groups = [
+    [images.pending, `did not finish loading within ${SCREENSHOT_IMAGE_WAIT_MS} ms`],
+    [images.failed, "failed to load"],
+  ] as const;
+  for (const [sources, what] of groups) {
+    if (sources.length === 0) continue;
+    const message = `${sources.length} image(s) ${what} at ${time}s, so the frame may be missing them: ${sources.join(", ")}`;
+    warnings.push(message);
+    console.warn(`   ${c.warn("⚠")} ${message}`);
+  }
 }
 
 function warnSnapshotsNotRecorded(error: unknown): undefined {
@@ -1080,6 +1098,7 @@ function snapshotEnvelope(
     outputDir,
     frames,
     contactSheets: extra.contactSheets.map((sheet) => resolve(sheet)),
+    ...(captured.warnings.length > 0 ? { warnings: captured.warnings } : {}),
     ...(extra.describedPath ? { descriptions: extra.describedPath } : {}),
     ...(review
       ? {

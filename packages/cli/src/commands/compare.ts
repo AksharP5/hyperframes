@@ -6,6 +6,7 @@ import { defineCommand } from "citty";
 import { createContactSheet } from "../capture/contactSheet.js";
 import {
   openSettledCompositionPage,
+  SCREENSHOT_IMAGE_WAIT_MS,
   seekCompositionTimeline,
 } from "../capture/captureCompositionFrame.js";
 import { c } from "../ui/colors.js";
@@ -285,7 +286,9 @@ async function renderCompareVariant(
       });
       try {
         if (opts.atSeconds > 0) {
-          await seekCompositionTimeline(page, opts.atSeconds);
+          await seekCompositionTimeline(page, opts.atSeconds, {
+            waitForImagesMs: SCREENSHOT_IMAGE_WAIT_MS,
+          });
         }
         await page.screenshot({ path: opts.framePath, type: "png" });
         return { framePath: opts.framePath, renderReadyTimedOut };

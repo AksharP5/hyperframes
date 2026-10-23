@@ -14,7 +14,7 @@ const snapshotState = vi.hoisted(() => ({
   seek: vi.fn(async (_page: unknown, _time: number, _options?: unknown): Promise<void> => {
     throw new Error("seek reached");
   }),
-  settle: vi.fn(async (_page: unknown, _options?: unknown): Promise<void> => undefined),
+  settle: vi.fn(async (_page: unknown, _options?: unknown) => ({ pending: [], failed: [] })),
   closeServer: vi.fn(async () => undefined),
 }));
 
@@ -183,9 +183,11 @@ describe("snapshot --at seeks", () => {
           args: { dir: project, at: "19.019018", end: false, output: join(project, "out") },
         } as never),
       ).rejects.toBeDefined();
-      expect(snapshotState.seek).toHaveBeenCalledWith(expect.anything(), 19.019018, {
-        exactTime: true,
-      });
+      expect(snapshotState.seek).toHaveBeenCalledWith(
+        expect.anything(),
+        19.019018,
+        expect.objectContaining({ exactTime: true }),
+      );
       expect(close).toHaveBeenCalled();
     } finally {
       log.mockRestore();
@@ -228,6 +230,7 @@ describe("snapshot video overlays and the blurred frame", () => {
     snapshotState.settle.mockClear();
     snapshotState.settle.mockImplementation(async () => {
       log.push("settle");
+      return { pending: [], failed: [] };
     });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
