@@ -33,9 +33,13 @@ function serve(body: Buffer, cut?: { from: number; at: number }): Promise<Server
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
 }
 
-describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", () => {
+// Each case runs a mix of real ffmpeg processes, and on a Windows runner busy with the engine's 200-clip
+// mixes they take seconds, not the default 5. The assertions hold at any speed, so the suite is not timed.
+describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", { timeout: 60_000 }, () => {
   let dir: string;
   let server: Server | undefined;
+  let abort: AbortController;
+  let mixing: Promise<unknown> | undefined;
 
   function makeMedia(name: string, args: string[]): Buffer {
     const path = join(dir, name);
@@ -52,9 +56,14 @@ describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "hf-audio-url-read-"));
+    abort = new AbortController();
+    mixing = undefined;
   });
 
   afterEach(async () => {
+    // A mix still running holds its work files open, and Windows refuses to delete an open file.
+    abort.abort();
+    await mixing?.catch(() => undefined);
     await new Promise((resolve) => (server ? server.close(resolve) : resolve(undefined)));
     server = undefined;
     rmSync(dir, { recursive: true, force: true });
@@ -70,7 +79,7 @@ describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", () => {
   ) {
     const { port } = server!.address() as AddressInfo;
     const baseDir = join(dir, "project");
-    return processCompositionAudio(
+    mixing = processCompositionAudio(
       [
         {
           id: "clip",
@@ -87,13 +96,14 @@ describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", () => {
       join(dir, "work"),
       join(dir, "out.m4a"),
       clip.end,
-      undefined,
+      abort.signal,
       {
         urlByAbsentLocalPath: new Map([
           [join(baseDir, "takes", clip.name), `http://127.0.0.1:${port}/${clip.name}`],
         ]),
       },
     );
+    return mixing as ReturnType<typeof processCompositionAudio>;
   }
 
   it("mixes the whole span when the URL serves it", async () => {
