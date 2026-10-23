@@ -81,7 +81,7 @@ import {
   type CacheEntry,
   type CacheFrameFormat,
 } from "./extractionCache.js";
-import { framePathsFromDirectory } from "./extractedFrameIndex.js";
+import { framePathsFromDirectory, frameSequencePath } from "./extractedFrameIndex.js";
 
 export { resolveProjectRelativeSrc };
 
@@ -1023,7 +1023,7 @@ async function extractVideoFramesRangeUnredacted(
   }
   const format = resolveFrameFormat(metadata, options.format);
   const framePattern = `${FRAME_FILENAME_PREFIX}%05d.${format}`;
-  const outputPattern = join(videoOutputDir, framePattern);
+  const outputPattern = frameSequencePath(videoOutputDir, framePattern);
 
   // Forced-SDR extraction tone-maps HDR with zscale, the Studio proxy policy. A macOS ffmpeg
   // without zscale falls back to VideoToolbox, whose frames stay HDR and are tone-mapped by

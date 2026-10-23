@@ -1388,6 +1388,19 @@ describe.skipIf(!HAS_FFMPEG)("video frame extraction format", () => {
     };
   }
 
+  it("extracts into a work directory whose name holds a printf code", async () => {
+    const outDir = join(FIXTURE_DIR, "x 12% Up");
+    mkdirSync(outDir, { recursive: true });
+    const result = await extractAllVideoFrames([fixtureVideo()], FIXTURE_DIR, {
+      fps: 1,
+      outputDir: outDir,
+    });
+    expect(result.errors).toEqual([]);
+    const frame = result.extracted[0]!.framePaths.get(0)!;
+    expect(frame.startsWith(outDir)).toBe(true);
+    expect(existsSync(frame)).toBe(true);
+  });
+
   it("keeps the rightmost 8 columns of a 1080-wide (16n + 8) jpg extraction", async () => {
     const source = join(FIXTURE_DIR, "white-1080.mp4");
     const synth = await runFfmpeg([

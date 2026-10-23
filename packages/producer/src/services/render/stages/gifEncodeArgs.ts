@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { frameSequencePath } from "@hyperframes/engine";
 import type { Fps } from "@hyperframes/core";
 
 export interface GifEncodeArgsInput {
@@ -27,7 +27,7 @@ function framesInput(input: GifEncodeArgsInput, fpsArg: string): string[] {
     fpsArg,
     ...KEEP_FILTER_GRAPH_WHEN_FRAMES_DROP_ALPHA,
     "-i",
-    join(input.framesDir, input.framePattern),
+    frameSequencePath(input.framesDir, input.framePattern),
   ];
 }
 

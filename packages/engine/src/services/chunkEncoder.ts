@@ -6,6 +6,7 @@
  * Supports CPU (libx264) and GPU encoding.
  */
 
+import { frameSequencePath } from "./extractedFrameIndex.js";
 import {
   closeSync,
   copyFileSync,
@@ -566,7 +567,7 @@ export async function encodeFramesFromDir(
     gpuEncoder = await getCachedGpuEncoder();
   }
 
-  const inputPath = join(framesDir, framePattern);
+  const inputPath = frameSequencePath(framesDir, framePattern);
   const inputArgs = ["-framerate", fpsToFfmpegArg(options.fps), "-i", inputPath];
   const args = buildEncoderArgs(options, inputArgs, outputPath, gpuEncoder);
   const encodeTimeout = config?.ffmpegEncodeTimeout ?? DEFAULT_CONFIG.ffmpegEncodeTimeout;
@@ -731,7 +732,7 @@ export async function encodeFramesChunkedConcat(
         ? ".mov"
         : ".mp4";
     const chunkPath = join(chunkDir, `chunk_${String(i).padStart(4, "0")}${ext}`);
-    const inputPath = join(framesDir, framePattern);
+    const inputPath = frameSequencePath(framesDir, framePattern);
     const inputArgs = [
       "-framerate",
       fpsToFfmpegArg(options.fps),
