@@ -32,3 +32,10 @@ RUN cp /certs/ca.crt /etc/pki/ca-trust/source/anchors/ && update-ca-trust && bas
 FROM scratch AS artifact
 COPY --from=build /out/ /
 COPY --from=check /check.txt /hf-media-check.txt
+
+# The video function. /var/task comes from scripts/stage-arm64-image.ts as the `task` build context:
+#   docker buildx build --platform linux/arm64 --target video --build-context task=<out>/task packages/aws-lambda/image
+# Copy only, so any host builds it without emulation.
+FROM ${BASE} AS video
+COPY --from=task / /var/task/
+CMD ["handler.handler"]

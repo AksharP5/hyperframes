@@ -1909,6 +1909,10 @@ export const ALLOWED_DELETIONS = new Map([
     "packages/engine/src/services/frameCapture-releaseInjectedVideoMedia.browser.test.ts",
     "the revert of #5795 removes releaseInjectedVideoMedia, the only code this file tested",
   ],
+  [
+    ".github/workflows/lambda-ffmpeg.yml",
+    "the ffmpeg build moves into lambda-arm64-image.yml, which also builds and smokes the image",
+  ],
 ]);
 
 export function parseBase(argv, fallback = "origin/main") {
