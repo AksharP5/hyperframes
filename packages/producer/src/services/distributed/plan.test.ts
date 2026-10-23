@@ -1112,6 +1112,25 @@ describe.skipIf(spawnSync(getFfmpegBinary(), ["-version"]).status !== 0)(
       expect(existsSync(join(withCfr, "audio.m4a"))).toBe(true);
     }, 60_000);
 
+    it("leaves webm and mov audio to buildPlanAudio too; png-sequence keeps its own", async () => {
+      const project = audioProject("project-separate-audio-formats");
+      const config = { fps: 30, width: 320, height: 240 } as const;
+      for (const [format, separate] of [
+        ["webm", true],
+        ["mov", true],
+        ["png-sequence", false],
+      ] as const) {
+        const dir = join(runRoot, `plan-separate-audio-${format}`);
+        await buildLocalExecutionPlan(project, { ...config, format }, dir, { deferAudio: true });
+        const encoder = JSON.parse(readFileSync(join(dir, "meta", "encoder.json"), "utf-8"));
+        expect({ format, separate: encoder.separateAudio === true }).toEqual({ format, separate });
+        expect({ format, mixed: existsSync(join(dir, "audio.m4a")) }).toEqual({
+          format,
+          mixed: !separate,
+        });
+      }
+    }, 60_000);
+
     it("gives buildPlanAudio the sound of a video whose src the scene script sets", async () => {
       const project = join(runRoot, "project-script-src");
       mkdirSync(project, { recursive: true });

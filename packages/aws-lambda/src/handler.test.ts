@@ -1099,6 +1099,7 @@ describe("handler dispatch", () => {
     chunkCount: number,
     separateAudio = false,
     workerConcurrency?: number,
+    format: "mp4" | "webm" | "mov" = "mp4",
   ) {
     const tmpRoot = makeTmpRoot();
     const s3 = new FakeS3Client();
@@ -1114,8 +1115,9 @@ describe("handler dispatch", () => {
         const v1Dir = join(tmpRoot, "v1");
         makeMinimalV1PlanDir(v1Dir, !separateAudio, {
           chunkCount,
-          chunksCarryAudio: !separateAudio,
+          chunksCarryAudio: !separateAudio && format === "mp4",
           separateAudio,
+          format,
         });
         return publishPlanV2FromExecutionPlan(v1Dir, publisher);
       },
@@ -1136,7 +1138,7 @@ describe("handler dispatch", () => {
         Action: "plan",
         ProjectS3Uri: "s3://bucket/project.tar.gz",
         PlanOutputS3Prefix: "s3://bucket/renders/f/",
-        Config: { fps: 30, width: 640, height: 360, format: "mp4", workerConcurrency },
+        Config: { fps: 30, width: 640, height: 360, format, workerConcurrency },
       },
       deps,
     );
@@ -1151,8 +1153,8 @@ describe("handler dispatch", () => {
           PlanHash: planned.PlanHash,
           ChunkS3Uris: chunkS3Uris,
           AudioS3Uri: audioS3Uri,
-          OutputS3Uri: "s3://bucket/renders/f/output.mp4",
-          Format: "mp4",
+          OutputS3Uri: `s3://bucket/renders/f/output.${format}`,
+          Format: format,
         },
         deps,
       );
@@ -1253,6 +1255,30 @@ describe("handler dispatch", () => {
         { encoding: "utf-8" },
       );
       expect(probe.stdout.trim().split("\n").sort()).toEqual(["audio", "video"]);
+    },
+  );
+
+  it.each(["webm", "mov"] as const)(
+    "joins %s chunks with the audio task's track when the plan left its audio out",
+    async (format) => {
+      const { s3, assembleMock, assemble, planned } = await planStitched(2, true, 4, format);
+      expect(planned.SeparateAudio).toBe(true);
+      const audioUri = "s3://bucket/renders/f/audio/audio.m4a";
+      s3.objects.set(audioUri, Buffer.from("AAC-FROM-AUDIO-TASK"));
+      let audio: string | null = null;
+      assembleMock.mockImplementationOnce(async (_p, _c, audioPath, outputPath) => {
+        audio = audioPath && readFileSync(audioPath, "utf-8");
+        writeFileSync(outputPath, "LOCAL-JOIN");
+        return { outputPath, durationMs: 1, framesEncoded: 60, fileSize: 10 };
+      });
+      const chunks = [0, 1].map((index) => {
+        const uri = `s3://bucket/renders/f/chunks/000${index}.${format}`;
+        s3.objects.set(uri, Buffer.from("CHUNK"));
+        return uri;
+      });
+      await assemble(chunks, audioUri);
+      expect(assembleMock).toHaveBeenCalledTimes(1);
+      expect(audio).toBe("AAC-FROM-AUDIO-TASK");
     },
   );
 
@@ -1366,12 +1392,24 @@ describe("handler — audio", () => {
     expect(buildPlanAudio).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves the audio to the plan when the stitch cannot take it (cfr)", async () => {
-    const { result, s3, buildPlanAudio } = await runAudio({ cfr: true });
-    expect(result).toMatchObject({ Action: "audio", HasAudio: false, AudioS3Uri: null });
-    expect(buildPlanAudio).not.toHaveBeenCalled();
-    expect(s3.ops).toHaveLength(0);
-  });
+  it.each(["webm", "mov"])(
+    "mixes %s audio too, so one function makes every audio byte",
+    async (format) => {
+      const { result, buildPlanAudio } = await runAudio({ format });
+      expect(result).toMatchObject({ Action: "audio", HasAudio: true });
+      expect(buildPlanAudio).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([{ cfr: true }, { format: "png-sequence" }])(
+    "leaves the audio to the plan for %o",
+    async (config) => {
+      const { result, s3, buildPlanAudio } = await runAudio(config);
+      expect(result).toMatchObject({ Action: "audio", HasAudio: false, AudioS3Uri: null });
+      expect(buildPlanAudio).not.toHaveBeenCalled();
+      expect(s3.ops).toHaveLength(0);
+    },
+  );
 });
 
 /** A real client (so it can pre-sign offline) whose requests go to the fake. */
@@ -1619,6 +1657,7 @@ function makeMinimalV1PlanDir(
     chunksCarryAudio?: boolean;
     separateAudio?: boolean;
     withDeferredVideo?: boolean;
+    format?: string;
   } = {},
 ): void {
   const chunkCount = options.chunkCount ?? 1;
@@ -1629,7 +1668,13 @@ function makeMinimalV1PlanDir(
     planHash: "a".repeat(64),
     chunkCount,
     totalFrames: 30 * chunkCount,
-    dimensions: { fpsNum: 30, fpsDen: 1, width: 640, height: 360, format: "mp4" },
+    dimensions: {
+      fpsNum: 30,
+      fpsDen: 1,
+      width: 640,
+      height: 360,
+      format: options.format ?? "mp4",
+    },
     ffmpegVersion: "6.0",
     producerVersion: "test",
     fontSnapshotSha: "font-snapshot-test",

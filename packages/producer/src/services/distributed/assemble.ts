@@ -400,10 +400,11 @@ async function runAssembleFfmpeg(
   }
 }
 
-/** Chunks carrying audio, or with it as a separate file, stitch under one index like S3's. */
+/** Mp4 chunks carrying audio, or with it as a separate file, stitch under one index like S3's. */
 export function chunksAreStitchedMp4(planDir: string, cfr: boolean): boolean {
   const { chunksCarryAudio, separateAudio } = lockedAudio(planDir);
   if (!chunksCarryAudio && !separateAudio) return false;
+  if (planFormat(planDir) !== "mp4") return false;
   if (cfr) {
     throw new Error("[assemble] cfr=true cannot re-encode a plan whose mp4 chunks are stitched");
   }
@@ -412,6 +413,11 @@ export function chunksAreStitchedMp4(planDir: string, cfr: boolean): boolean {
 
 export function stitchesSeparateAudio(planDir: string): boolean {
   return lockedAudio(planDir).separateAudio === true;
+}
+
+function planFormat(planDir: string): DistributedFormat {
+  const plan = JSON.parse(readFileSync(join(planDir, "plan.json"), "utf-8")) as PlanJsonForAssemble;
+  return plan.dimensions.format;
 }
 
 function lockedAudio(

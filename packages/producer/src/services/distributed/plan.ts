@@ -1089,7 +1089,7 @@ export function plansSeparateAudio(
   config: Pick<DistributedRenderConfig, "format" | "cfr">,
   options: Pick<BuildLocalExecutionPlanOptions, "deferAudio">,
 ): boolean {
-  return options.deferAudio === true && config.format === "mp4" && config.cfr !== true;
+  return options.deferAudio === true && config.format !== "png-sequence" && config.cfr !== true;
 }
 
 // The plan's copy, compile and probe, shared by the plan and by buildPlanAudio so both see the
