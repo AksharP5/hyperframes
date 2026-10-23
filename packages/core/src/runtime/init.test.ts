@@ -494,6 +494,37 @@ describe("initSandboxRuntimeModular", () => {
       expect([at(1), at(6), at(9)]).toEqual(["hidden", "visible", "hidden"]);
     });
 
+    it.each([
+      ["no mark", undefined, ["auto", "auto", "auto"]],
+      ["a preview mark", "", ["auto", "none", "none"]],
+      ["a capture-mode mark", "capture", ["auto", "none", "none"]],
+    ])("loads media near the playhead under %s", (_label, mode, expected) => {
+      if (mode !== undefined) {
+        const mark = document.createElement("meta");
+        mark.name = STUDIO_PREVIEW_MARK_META;
+        if (mode) mark.content = mode;
+        document.head.append(mark);
+      }
+      try {
+        document.body.innerHTML =
+          `<div data-composition-id="main" data-root="true" data-start="0" data-duration="60" data-width="1920" data-height="1080">` +
+          [0, 20, 40]
+            .map(
+              (start, i) =>
+                `<video id="v${i}" src="a.mp4" data-start="${start}" data-duration="2" data-track-index="0"></video>`,
+            )
+            .join("") +
+          `</div>`;
+        window.__timelines = { main: createMockTimeline(60) };
+        for (const video of document.querySelectorAll("video")) video.load = vi.fn();
+        initSandboxRuntimeModular();
+        window.__player?.seek(0.5);
+        expect([...document.querySelectorAll("video")].map((v) => v.preload)).toEqual(expected);
+      } finally {
+        document.head.querySelector(`meta[name="${STUDIO_PREVIEW_MARK_META}"]`)?.remove();
+      }
+    });
+
     it("does not hold a paused seek on images in a stamped container its script hides", () => {
       const mark = Object.assign(document.createElement("meta"), {
         name: STUDIO_PREVIEW_MARK_META,

@@ -11,6 +11,7 @@ import {
   revealTimedClipsAfterFirstPass,
   SKIPPED_CLIP,
   showHiddenClips,
+  defersMedia,
   skipsHiddenImages,
 } from "./timedClipHide";
 import {
@@ -2822,6 +2823,7 @@ export function initSandboxRuntimeModular(): void {
   };
 
   const hiddenImagesSkipped = skipsHiddenImages();
+  const mediaDeferred = defersMedia();
   const LOOKAHEAD_SECONDS = 2;
   const RELEASE_LOOKAHEAD_SECONDS = 4;
   // Unskipped while within the window on either side of the playhead, so a step or shuttle back
@@ -2847,7 +2849,7 @@ export function initSandboxRuntimeModular(): void {
   // A clip with no authored length loads as in a render: a reload would drop the duration it is
   // timed by.
   const inPreloadWindow = (el: HTMLMediaElement) =>
-    hiddenImagesSkipped && el.hasAttribute("data-start") && lengthIsAuthored(el);
+    mediaDeferred && el.hasAttribute("data-start") && lengthIsAuthored(el);
 
   // Media on screen or due within the look-ahead loads; the rest stops holding a connection to
   // the origin that also serves Studio's thumbnails.
@@ -3041,7 +3043,9 @@ export function initSandboxRuntimeModular(): void {
       if (!isRuntimeStamped) rawNode.style.visibility = isVisibleNow ? "visible" : "hidden";
       rawNode.toggleAttribute(CLIP_HIDDEN_ATTR, !isRuntimeStamped && !isVisibleNow);
       const upcoming =
-        hiddenImagesSkipped && !isVisibleNow && dueSoon(rawNode, visibleAt, currentTime);
+        (hiddenImagesSkipped || mediaDeferred) &&
+        !isVisibleNow &&
+        dueSoon(rawNode, visibleAt, currentTime);
       if (upcoming && !rawNode.hasAttribute(STUDIO_PREVIEW_UPCOMING_ATTR))
         loadPreviewImagesIn(rawNode);
       rawNode.toggleAttribute(STUDIO_PREVIEW_UPCOMING_ATTR, upcoming);

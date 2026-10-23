@@ -1,6 +1,6 @@
 import { parseStrictFiniteTimingNumber } from "./playbackRate";
 import { createRuntimeStartTimeResolver } from "./startResolver";
-import { skipsHiddenImages } from "./timedClipHide";
+import { defersMedia } from "./timedClipHide";
 
 type PreloadableMedia = Pick<
   HTMLMediaElement,
@@ -40,7 +40,7 @@ export function deferMediaUntilDue(): void {
   const win = window as DeferralWindow;
   win.__hfMediaDeferral?.disconnect();
   win.__hfMediaDeferral = undefined;
-  if (!skipsHiddenImages()) return;
+  if (!defersMedia()) return;
   const defer = (el: Element, startInFilm: (el: Element) => number) => {
     const start = parseStrictFiniteTimingNumber(el.getAttribute("data-start"));
     if (start != null && lengthIsAuthored(el) && startInFilm(el) > 0)

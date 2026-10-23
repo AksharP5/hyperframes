@@ -1,5 +1,6 @@
 import {
   RUNTIME_STAMPED_ATTR,
+  STUDIO_PREVIEW_CAPTURE_MODE,
   STUDIO_PREVIEW_MARK_META,
   STUDIO_PREVIEW_UPCOMING_ATTR,
 } from "../studioPreviewMark";
@@ -44,6 +45,10 @@ function appendStyle(parent: Element, attr: string, css: string): void {
   parent.appendChild(style);
 }
 
+export function defersMedia(): boolean {
+  return document.querySelector(STUDIO_PREVIEW_MARK) !== null;
+}
+
 /** True in Studio's preview, where hidden clips' images are neither fetched nor decoded until due. */
 export function skipsHiddenImages(): boolean {
   return document.querySelector(`style[${SKIP_ATTR}]`) !== null;
@@ -53,8 +58,11 @@ export function hideTimedClipsUntilFirstPass(): void {
   if (typeof document === "undefined") return;
   const parent = document.head ?? document.documentElement;
   if (!parent) return;
-  const preview = document.querySelector(STUDIO_PREVIEW_MARK) !== null;
-  if (preview && !skipsHiddenImages()) appendStyle(parent, SKIP_ATTR, SKIP_HIDDEN_IMAGES);
+  const mark = document.querySelector(STUDIO_PREVIEW_MARK);
+  const preview = mark !== null;
+  const capture = mark?.getAttribute("content") === STUDIO_PREVIEW_CAPTURE_MODE;
+  if (preview && !capture && !skipsHiddenImages())
+    appendStyle(parent, SKIP_ATTR, SKIP_HIDDEN_IMAGES);
   if (!document.querySelector(`style[${CONTENTS_ATTR}]`))
     appendStyle(parent, CONTENTS_ATTR, `${HIDE_HIDDEN_CLIP_CONTENTS} ${HIDE_FILTER_OUTPUT}`);
   const win = window as FirstPassWindow;
