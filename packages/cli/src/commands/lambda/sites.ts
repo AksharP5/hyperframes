@@ -37,6 +37,7 @@ export async function runSitesCreate(args: SitesCreateArgs): Promise<void> {
     bucketName: stack.bucketName,
     region: stack.region,
     siteId: args.siteId,
+    onNotice: (message) => console.error(c.dim(message)),
   });
 
   if (args.json) {

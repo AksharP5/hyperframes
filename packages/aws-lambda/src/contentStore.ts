@@ -13,3 +13,7 @@ export function contentStoreUri(bucket: string, sha256: string): string {
   }
   return `s3://${bucket}/${CONTENT_STORE_PREFIX}/${sha256.slice(0, 2)}/${sha256}`;
 }
+
+export function audioSidecarUri(bucket: string, sha256: string): string {
+  return `${contentStoreUri(bucket, sha256)}.audio.m4a`;
+}

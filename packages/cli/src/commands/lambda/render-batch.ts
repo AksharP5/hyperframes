@@ -239,6 +239,7 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
       projectDir,
       bucketName: stack.bucketName,
       region: stack.region,
+      onNotice: (message) => console.error(c.dim(message)),
     });
     if (!args.json) {
       console.log(

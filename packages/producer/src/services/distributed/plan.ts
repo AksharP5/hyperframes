@@ -326,6 +326,8 @@ export interface BuildLocalExecutionPlanOptions {
 
 export interface RemoteProjectFile {
   readonly url: string;
+  /** A file of only this video's audio, when one was stored: the audio mix reads it, not the video. */
+  readonly audioSidecarUrl?: string;
   readonly sha256: string;
   readonly sizeBytes: number;
 }
@@ -1209,6 +1211,11 @@ async function compilePlanComposition(
   const localPathByUrl = new Map(
     remoteFiles.map(([rel, file]) => [file.url, remoteLocalPath(rel)]),
   );
+  const audioSidecarUrlByLocalPath = new Map(
+    remoteFiles.flatMap(([rel, file]) =>
+      file.audioSidecarUrl ? [[remoteLocalPath(rel), file.audioSidecarUrl] as const] : [],
+    ),
+  );
 
   stageStarted = Date.now();
   const compileResult = await runCompileStage({
@@ -1316,6 +1323,7 @@ async function compilePlanComposition(
     finalCompiledDir,
     remoteFiles,
     urlByAbsentLocalPath,
+    audioSidecarUrlByLocalPath,
     localPathByUrl,
     compileResult,
     compiled,
@@ -1337,6 +1345,7 @@ function mixPlanAudio(c: PlanComposition, compiledDir: string) {
     workDir: c.workDir,
     compiledDir,
     urlByAbsentLocalPath: c.urlByAbsentLocalPath,
+    audioSidecarUrlByLocalPath: c.audioSidecarUrlByLocalPath,
     totalFrames: c.totalFrames,
     fps: c.job.config.fps,
     ffmpegProcessTimeout: c.cfg.ffmpegProcessTimeout,

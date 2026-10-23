@@ -228,6 +228,8 @@ export interface AudioMetadata {
   bitrate?: number;
   /** Seconds after the file's media time 0 at which its last audio or video stream starts. */
   latestStreamLeadSeconds?: number;
+  audioStreamLeadSeconds?: number;
+  audioStreamCount?: number;
 }
 
 interface FFProbeStream {
@@ -983,6 +985,8 @@ export async function extractAudioMetadata(
       audioCodec,
       bitrate: output.format.bit_rate ? parseInt(output.format.bit_rate) : undefined,
       latestStreamLeadSeconds: latestStreamLeadSeconds(output),
+      audioStreamLeadSeconds: streamLeadSeconds(output, audioStream),
+      audioStreamCount: output.streams.filter((s) => s.codec_type === "audio").length,
     };
   })();
 

@@ -36,6 +36,7 @@ export interface RenderToLambdaOptions {
   projectDir?: string;
   /** Re-use an existing `deploySite` upload (skips tar+S3 PUT). */
   siteHandle?: SiteHandle;
+  onNotice?: (message: string) => void;
   /** Validated `SerializableDistributedRenderConfig` (no logger / abortSignal). */
   config: SerializableDistributedRenderConfig;
   /**
@@ -115,6 +116,7 @@ export async function renderToLambda(opts: RenderToLambdaOptions): Promise<Rende
         projectDir: opts.projectDir as string,
         bucketName: opts.bucketName,
         region: opts.region,
+        onNotice: opts.onNotice,
         s3: opts.s3,
       });
 

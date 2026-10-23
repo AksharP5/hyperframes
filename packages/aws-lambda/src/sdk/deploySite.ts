@@ -15,14 +15,20 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { S3Client } from "@aws-sdk/client-s3";
-import { CONTENT_STORE_RETENTION_DAYS } from "../contentStore.js";
-import { hashProjectDir, listSiteFiles } from "@hyperframes/producer/distributed";
+import { CONTENT_STORE_RETENTION_DAYS, audioSidecarUri } from "../contentStore.js";
+import {
+  buildAudioSidecar,
+  hashProjectDir,
+  listSiteFiles,
+  wantsAudioSidecar,
+} from "@hyperframes/producer/distributed";
 import {
   downloadS3ObjectToFile,
   ensureContentStoreObject,
   isS3NotFound,
   mapConcurrent,
   parseS3Uri,
+  putAudioSidecar,
   putContentStoreFile,
   s3ObjectExists,
   sha256File,
@@ -51,6 +57,8 @@ export interface DeploySiteOptions {
    * unset, the hash of the project tree picks it.
    */
   siteId?: string;
+  /** Called with a line a user should see, such as audio sidecars skipped for want of ffmpeg. */
+  onNotice?: (message: string) => void;
   /** Injection seam for tests. Production callers leave unset. */
   s3?: S3Client;
 }
@@ -159,6 +167,7 @@ export async function deploySite(opts: DeploySiteOptions): Promise<SiteHandle> {
     uploaded ||= outcome === "uploaded";
   });
   stored.sort((a, b) => (a.path < b.path ? -1 : 1));
+  await storeAudioSidecars(s3, opts, stored);
 
   const workdir = mkdtempSync(join(tmpdir(), "hf-deploy-site-"));
   try {
@@ -184,4 +193,38 @@ export async function deploySite(opts: DeploySiteOptions): Promise<SiteHandle> {
     uploadedAt: new Date().toISOString(),
     uploaded,
   };
+}
+
+/**
+ * Each large video's audio, stored on its own so a render reads kilobytes instead of the whole video.
+ * Optional: a machine that cannot make them leaves the site exactly as it was, and renders read the video.
+ */
+async function storeAudioSidecars(
+  s3: S3Client,
+  opts: DeploySiteOptions,
+  files: readonly SiteFile[],
+): Promise<void> {
+  const videos = files.filter((file) => wantsAudioSidecar(file.path, file.sizeBytes));
+  if (videos.length === 0) return;
+  const workdir = mkdtempSync(join(tmpdir(), "hf-audio-sidecar-"));
+  let unavailable = false;
+  try {
+    await mapConcurrent(videos, 2, async ({ path, sha256 }) => {
+      if (unavailable || (await s3ObjectExists(s3, audioSidecarUri(opts.bucketName, sha256))))
+        return;
+      const sidecarPath = join(workdir, `${sha256}.m4a`);
+      const outcome = await buildAudioSidecar(join(opts.projectDir, path), sidecarPath);
+      if (outcome === "unavailable") unavailable = true;
+      if (outcome === "built") await putAudioSidecar(s3, sidecarPath, opts.bucketName, sha256);
+      rmSync(sidecarPath, { force: true });
+    });
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+  if (unavailable) {
+    opts.onNotice?.(
+      "ffmpeg was not found on this machine, so the audio of large videos was not stored on its own: " +
+        "renders will read the whole video for its audio and take longer. Install ffmpeg and run `sites create` again.",
+    );
+  }
 }

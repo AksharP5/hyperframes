@@ -667,6 +667,7 @@ export function parseAudioElements(html: string): AudioElement[] {
 }
 
 const FAIL_ON_READ_ERROR_INSTEAD_OF_ENDING_THERE = ["-xerror"];
+const SIDECAR_WARM_UP_SECONDS = 1;
 
 /** Decode `duration` s of audio from `mediaStart` in Chrome's media time. Until every stream has
  * started, an input seek snaps audio to the video's first keyframe, so read by timestamp instead. */
@@ -679,6 +680,7 @@ async function extractAudioSegment(
   playbackRate: RateSpec = 1,
   signal?: AbortSignal,
   config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout">>,
+  audioSidecarUrl?: string,
 ): Promise<ExtractResult> {
   const ffmpegProcessTimeout = config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
   const outputDir = dirname(outputPath);
@@ -699,19 +701,24 @@ async function extractAudioSegment(
   const timestampTrim = inputSeek
     ? null
     : `atrim=start=${start}:end=${formatFilterNumber(mediaStart + sourceDuration)},asetpts=PTS-${start}/TB,aresample=async=1:first_pts=0`;
+  const fromSidecar = audioSidecarUrl !== undefined && inputSeek && normalizedPlaybackRate === 1;
+  const warmUp = fromSidecar ? Math.min(SIDECAR_WARM_UP_SECONDS, mediaStart) : 0;
   const outputArgs = preparedAudioOutputArgs(
     metadata,
     normalizedPlaybackRate,
     duration,
-    timestampTrim,
+    warmUp > 0 ? `atrim=start=${warmUp},asetpts=PTS-STARTPTS` : timestampTrim,
   );
+  const readFrom = fromSidecar ? audioSidecarUrl : srcPath;
 
   const args = [
     ...(readsUrl ? FAIL_ON_READ_ERROR_INSTEAD_OF_ENDING_THERE : []),
-    ...urlInputArgs(srcPath),
-    ...(inputSeek ? ["-ss", String(mediaStart), "-t", String(sourceDuration)] : []),
+    ...urlInputArgs(readFrom),
+    ...(inputSeek
+      ? ["-ss", String(mediaStart - warmUp), "-t", String(sourceDuration + warmUp)]
+      : []),
     "-i",
-    srcPath,
+    readFrom,
   ];
   args.push("-vn", "-acodec", "pcm_s16le", "-ar", "48000", ...outputArgs);
   if (normalizedPlaybackRate !== 1) args.push("-t", String(duration));
@@ -1310,6 +1317,7 @@ export async function processCompositionAudio(
     /** Serialised master bus chain, from `parseMasterFxChain`. */
     masterFxChain?: string;
     urlByAbsentLocalPath?: ReadonlyMap<string, string>;
+    audioSidecarUrlByLocalPath?: ReadonlyMap<string, string>;
     keepEncoderInputAt?: string;
   },
   compiledDir?: string,
@@ -1364,11 +1372,13 @@ export async function processCompositionAudio(
         try {
           let srcPath = element.src;
           let readInPlace = false;
+          let audioSidecarUrl: string | undefined;
           if (!isHttpUrl(srcPath)) {
             // Same browser-URL path semantics as videos.
             srcPath = resolveProjectRelativeSrc(element.src, baseDir, compiledDir);
             const remoteUrl = config?.urlByAbsentLocalPath?.get(srcPath);
             if (remoteUrl) {
+              audioSidecarUrl = config?.audioSidecarUrlByLocalPath?.get(srcPath);
               srcPath = remoteUrl;
               readInPlace = true;
             }
@@ -1456,6 +1466,7 @@ export async function processCompositionAudio(
               element.playbackRate,
               effectiveSignal,
               config,
+              audioSidecarUrl,
             );
             if (!extractResult.success) {
               failures.push(

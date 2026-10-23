@@ -143,6 +143,7 @@ export async function runRender(args: RenderArgs): Promise<void> {
     config,
     executionName: args.executionName,
     outputKey: args.outputKey,
+    onNotice: (message) => console.error(c.dim(message)),
   });
 
   if (args.json) {

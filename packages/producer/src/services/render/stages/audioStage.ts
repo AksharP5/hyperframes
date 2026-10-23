@@ -47,6 +47,7 @@ export interface AudioStageInput {
   audios: CompositionMetadata["audios"];
   masterFxChain?: string;
   urlByAbsentLocalPath?: ReadonlyMap<string, string>;
+  audioSidecarUrlByLocalPath?: ReadonlyMap<string, string>;
   abortSignal: AbortSignal | undefined;
   assertNotAborted: () => void;
   /** Where a per-track failure's detail goes. Optional so tests need not pass one. */
@@ -123,6 +124,7 @@ async function mixAudioForDelivery(
     audios,
     masterFxChain,
     urlByAbsentLocalPath,
+    audioSidecarUrlByLocalPath,
     abortSignal,
     assertNotAborted,
     log,
@@ -154,6 +156,7 @@ async function mixAudioForDelivery(
           audioGain,
           masterFxChain,
           urlByAbsentLocalPath,
+          audioSidecarUrlByLocalPath,
           keepEncoderInputAt: pcmSourcePath,
         },
         compiledDir,

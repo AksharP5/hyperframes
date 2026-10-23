@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server, type ServerResponse } from "node:http";
+import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,12 +12,31 @@ import { processCompositionAudio } from "./audioMixer.js";
 const HAS_FFMPEG = spawnSync(getFfmpegBinary(), ["-version"], { encoding: "utf-8" }).status === 0;
 const BYTES_PER_SECOND = 48_000 * 2 * 2;
 
+// Writes the body in pieces, counting the bytes served.
+async function streamBody(
+  res: ServerResponse,
+  body: Buffer,
+  start: number,
+  served?: { bytes: number },
+): Promise<void> {
+  for (let at = start; at < body.length && !res.destroyed; at += 65_536) {
+    const piece = body.subarray(at, at + 65_536);
+    if (served) served.bytes += piece.length;
+    if (!res.write(piece)) await once(res, "drain").catch(() => undefined);
+  }
+  res.end();
+}
+
 // A range server like S3's (ffmpeg asks for `bytes=<start>-`). With `cut`, the first read starting
 // at `cut.from` or later (past the probes' header reads) stops at `cut.at`, and every later request
 // is refused, as for a link that just expired.
-function serve(body: Buffer, cut?: { from: number; at: number }): Promise<Server> {
+function serve(
+  body: Buffer,
+  cut?: { from: number; at: number },
+  served?: { bytes: number },
+): Promise<Server> {
   let refusing = false;
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
     if (refusing) return void res.writeHead(403).end("Request has expired");
     const start = Number(/bytes=(\d+)-/.exec(req.headers.range ?? "")?.[1] ?? 0);
     res.writeHead(206, {
@@ -26,7 +46,7 @@ function serve(body: Buffer, cut?: { from: number; at: number }): Promise<Server
       "Content-Type": "audio/wav",
     });
     const cutHere = cut !== undefined && start >= cut.from && start < cut.at;
-    if (!cutHere) return void res.end(body.subarray(start));
+    if (!cutHere) return streamBody(res, body, start, served);
     refusing = true;
     res.write(body.subarray(start, cut.at), () => res.destroy());
   });
@@ -145,5 +165,70 @@ describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", { timeout
 
     expect(result.failures).toBeUndefined();
     expect(result.success).toBe(true);
+  });
+
+  it("reads a video's audio sidecar and mixes exactly the audio the video itself gives", async () => {
+    const take = makeMedia("take.mp4", [
+      ...["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=100"],
+      ...["-f", "lavfi", "-i", "anoisesrc=d=100:c=pink:r=48000:seed=7:amplitude=0.4"],
+      ...["-c:v", "mpeg4", "-b:v", "3M", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart"],
+    ]);
+    const sidecar = makeMedia("take.audio.m4a", [
+      ...["-i", join(dir, "take.mp4"), "-map", "0:a:0", "-vn", "-c:a", "copy"],
+      ...["-movflags", "+faststart", "-f", "mp4"],
+    ]);
+    const clip = {
+      start: 0,
+      end: 60,
+      mediaStart: 20.37,
+      layer: 0,
+      volume: 1,
+      type: "video" as const,
+    };
+    const mix = (
+      urls: Map<string, string>,
+      sidecars: Map<string, string> | undefined,
+      name: string,
+    ) =>
+      processCompositionAudio(
+        [{ id: "take-audio", src: "takes/take.mp4", ...clip }],
+        join(dir, "project"),
+        join(dir, `work-${name}`),
+        join(dir, `${name}.m4a`),
+        clip.end,
+        abort.signal,
+        {
+          urlByAbsentLocalPath: urls,
+          audioSidecarUrlByLocalPath: sidecars,
+          keepEncoderInputAt: join(dir, `${name}.wav`),
+        },
+      );
+
+    const local = join(dir, "project", "takes", "take.mp4");
+    mkdirSync(join(dir, "project", "takes"), { recursive: true });
+    writeFileSync(local, take);
+    expect((await mix(new Map(), undefined, "local")).success).toBe(true);
+    rmSync(local);
+
+    const takeServed = { bytes: 0 };
+    server = await serve(take, undefined, takeServed);
+    const sidecarServer = await serve(sidecar);
+    try {
+      const takeUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/take.mp4`;
+      const sidecarUrl = `http://127.0.0.1:${(sidecarServer.address() as AddressInfo).port}/take.m4a`;
+      const remote = await mix(
+        new Map([[local, takeUrl]]),
+        new Map([[local, sidecarUrl]]),
+        "remote",
+      );
+
+      expect(remote.success).toBe(true);
+      expect(
+        readFileSync(join(dir, "remote.wav")).equals(readFileSync(join(dir, "local.wav"))),
+      ).toBe(true);
+      expect(takeServed.bytes).toBeLessThan(take.length / 4);
+    } finally {
+      await new Promise((resolve) => sidecarServer.close(resolve));
+    }
   });
 });

@@ -46,7 +46,11 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import * as tar from "tar";
-import { CONTENT_STORE_REFRESH_AFTER_DAYS, contentStoreUri } from "./contentStore.js";
+import {
+  CONTENT_STORE_REFRESH_AFTER_DAYS,
+  audioSidecarUri,
+  contentStoreUri,
+} from "./contentStore.js";
 
 /** S3's largest PutObject or CopyObject; bigger objects go multipart. */
 export const MAX_SINGLE_PUT_BYTES = 5 * 1024 ** 3;
@@ -500,6 +504,30 @@ export async function putContentStoreFile(
   const { outcome, lastModified, size } = await putImmutableFile(client, localPath, uri, sha256);
   if (lastModified) await refreshAgingObject(client, uri, sha256, lastModified, size ?? 0);
   return outcome;
+}
+
+export async function putAudioSidecar(
+  client: S3Client,
+  localPath: string,
+  bucket: string,
+  sha256: string,
+): Promise<"uploaded" | "reused"> {
+  const uri = audioSidecarUri(bucket, sha256);
+  if (await s3ObjectExists(client, uri)) return "reused";
+  const { key } = parseS3Uri(uri);
+  const size = statSync(localPath).size;
+  const own = await sha256File(localPath);
+  try {
+    if (size > MAX_SINGLE_PUT_BYTES) {
+      await uploadFileInParts(client, localPath, size, { Bucket: bucket, Key: key }, own);
+    } else {
+      await putImmutableBody(client, localPath, bucket, key, size, own, "audio/mp4");
+    }
+  } catch (error) {
+    if (!isS3PreconditionFailed(error)) throw error;
+    return "reused";
+  }
+  return "uploaded";
 }
 
 /** Confirm an object the caller never uploaded is in the content store, restarting an aging one. */
