@@ -27,8 +27,14 @@ export async function waitForTestCondition(check: () => boolean, timeoutMs: numb
   }
 }
 
-function processTable(): Map<number, { parent: number; name: string }> {
-  const table = new Map<number, { parent: number; name: string }>();
+interface TableEntry {
+  parent: number;
+  name: string;
+  started?: bigint;
+}
+
+function processTable(): Map<number, TableEntry> {
+  const table = new Map<number, TableEntry>();
   if (process.platform === "linux") {
     for (const name of readdirSync("/proc")) {
       if (!/^\d+$/.test(name)) continue;
@@ -49,26 +55,45 @@ function processTable(): Map<number, { parent: number; name: string }> {
           [
             "-NoProfile",
             "-Command",
-            'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.Name)" }',
+            'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $($_.CreationDate.Ticks) $($_.Name)" }',
           ],
           { encoding: "utf8" },
         )
       : execFileSync("ps", ["-A", "-o", "pid=,ppid=,comm="], { encoding: "utf8" });
+  return parseProcessListing(listing, process.platform === "win32");
+}
+
+export function parseProcessListing(listing: string, withStart: boolean): Map<number, TableEntry> {
+  const table = new Map<number, TableEntry>();
   for (const line of listing.split("\n")) {
-    const [pid, parent, ...name] = line.trim().split(/\s+/);
-    if (Number(pid) > 0) table.set(Number(pid), { parent: Number(parent), name: name.join(" ") });
+    const fields = line.trim().split(/\s+/);
+    const started = withStart ? BigInt(fields.splice(2, 1)[0] ?? 0) : undefined;
+    const [pid, parent, ...name] = fields;
+    if (Number(pid) > 0) {
+      table.set(Number(pid), { parent: Number(parent), name: name.join(" "), started });
+    }
   }
   return table;
 }
 
-export function testProcessDescendants(parentPid: number, named?: RegExp): number[] {
-  const table = processTable();
+export function ownedDescendants(table: Map<number, TableEntry>, parentPid: number): number[] {
   const owned = new Set([parentPid]);
   for (const pid of owned) {
-    for (const [child, entry] of table) if (entry.parent === pid) owned.add(child);
+    const parentStart = table.get(pid)?.started;
+    for (const [child, entry] of table) {
+      const adopted =
+        parentStart !== undefined && entry.started !== undefined && entry.started < parentStart;
+      if (entry.parent === pid && !adopted) owned.add(child);
+    }
   }
-  return [...owned].filter(
-    (pid) => pid !== parentPid && (!named || named.test(table.get(pid)?.name ?? "")),
+  owned.delete(parentPid);
+  return [...owned];
+}
+
+export function testProcessDescendants(parentPid: number, named?: RegExp): number[] {
+  const table = processTable();
+  return ownedDescendants(table, parentPid).filter(
+    (pid) => !named || named.test(table.get(pid)?.name ?? ""),
   );
 }
 
