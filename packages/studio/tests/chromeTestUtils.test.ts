@@ -2,7 +2,10 @@ import { TimeoutError, type Browser } from "puppeteer-core";
 import { describe, expect, it, vi } from "vitest";
 import { closeTestChrome, launchTestChrome } from "./chromeTestUtils";
 
-vi.mock("../vite.browser", () => ({ findSystemChrome: () => "/test/chrome" }));
+vi.mock("../vite.browser", () => ({
+  findSystemChrome: () => "/test/chrome",
+  browserVersion: () => "Chrome 152.0.7977.30",
+}));
 
 const fakeBrowser = (close: () => Promise<void>) => {
   const kill = vi.fn();
@@ -27,6 +30,43 @@ describe("closeTestChrome", () => {
 });
 
 describe("launchTestChrome", () => {
+  it("names the selected browser and the failed attempt before retrying", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const { browser } = fakeBrowser(async () => undefined);
+      const failure = new TimeoutError("WS endpoint was not announced");
+      const launch = vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          vi.advanceTimersByTime(20_000);
+          throw failure;
+        })
+        .mockResolvedValueOnce(browser);
+      await expect(launchTestChrome(launch)).resolves.toBe(browser);
+      expect(info.mock.calls).toEqual([
+        ["[studio-test-chrome] launch 1/2: /test/chrome (Chrome 152.0.7977.30)"],
+        ["[studio-test-chrome] launch 2/2: /test/chrome (Chrome 152.0.7977.30)"],
+        ["[studio-test-chrome] launch 2/2 ready after 0 ms"],
+      ]);
+      expect(error.mock.calls).toEqual([
+        ["[studio-test-chrome] launch 1/2 failed after 20000 ms: WS endpoint was not announced"],
+      ]);
+    } finally {
+      vi.useRealTimers();
+      info.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  it("stops after the second stuck launch and preserves its error", async () => {
+    const failure = new TimeoutError("still stuck");
+    const launch = vi.fn().mockRejectedValue(failure);
+    await expect(launchTestChrome(launch)).rejects.toBe(failure);
+    expect(launch).toHaveBeenCalledTimes(2);
+  });
+
   it("bounds each launch and tries once more after a stuck one", async () => {
     const { browser } = fakeBrowser(async () => undefined);
     const launch = vi
@@ -35,7 +75,7 @@ describe("launchTestChrome", () => {
       .mockResolvedValueOnce(browser);
     await expect(launchTestChrome(launch)).resolves.toBe(browser);
     expect(launch).toHaveBeenCalledTimes(2);
-    expect(launch.mock.calls[0]![0]).toMatchObject({ timeout: 20_000 });
+    expect(launch.mock.calls[0]![0]).toMatchObject({ timeout: 20_000, dumpio: true });
   });
 
   it("tries once more after a stuck launch that Windows reports as already running", async () => {
