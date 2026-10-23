@@ -41,7 +41,6 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import {
-  assertDiskCaptureHeadroom,
   createDiskCaptureProjection,
   diskCaptureRemedy,
   diskCaptureShortfallError,
@@ -85,18 +84,6 @@ describe("disk capture capacity", () => {
     expect(estimateDiskCaptureBytes(10, { ...captureOptions, quality: 80 })).toBe(100_000);
     expect(estimateDiskCaptureBytes(10, { ...captureOptions, quality: 95 })).toBe(200_000);
     expect(estimateDiskCaptureBytes(10, { ...captureOptions, quality: 100 })).toBe(200_000);
-  });
-
-  it("fails before capture when estimated frames exceed available headroom", () => {
-    expect(() =>
-      assertDiskCaptureHeadroom(
-        "/render/captured-frames",
-        10,
-        pngOptions,
-        "Free up disk space.",
-        () => 800_000,
-      ),
-    ).toThrow(/may need ~0\.8 MB.*0\.8 MB is free.*Free up disk space\./s);
   });
 
   it("exposes the same 90% headroom decision to fallback planning", () => {
@@ -296,6 +283,29 @@ describe("runCaptureStage measured disk projection (both branches)", () => {
     expect(String(error)).not.toContain("--workers 1");
     expect(captureFrame).toHaveBeenCalledTimes(10);
     expect(createCaptureSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("sequential: a png render whose raw estimate exceeds free space still captures when frames are small", async () => {
+    const { workDir, framesDir } = makeDirs();
+    // 64x64 png estimates 20 * 16 KB = 327 KB raw; 100 KB free, but the real frames are 100 bytes.
+    freeBytes.mockReturnValue({ bavail: 100_000, bsize: 1 });
+    createCaptureSession.mockResolvedValue({
+      isInitialized: false,
+      browserConsoleBuffer: [],
+      options: { captureBeyondViewport: false, format: "png" },
+      workerEncodeEnabled: false,
+      outputDir: framesDir,
+    });
+    captureFrame.mockImplementation(async (_s: unknown, index: number) => {
+      writeFileSync(join(framesDir, formatCaptureFrameName(index, "png")), Buffer.alloc(100));
+    });
+    const input = makeInput(1, workDir, framesDir);
+
+    await runCaptureStage({
+      ...input,
+      buildCaptureOptions: () => ({ ...input.buildCaptureOptions(), format: "png" as const }),
+    });
+    expect(captureFrame).toHaveBeenCalledTimes(20);
   });
 
   it("a measured shortfall is never classified as a retryable browser death", () => {
