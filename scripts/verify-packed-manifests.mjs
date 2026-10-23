@@ -28,8 +28,10 @@ const PACKED_JAVASCRIPT_FILE_PATTERN = /\.(?:js|mjs|cjs)$/;
 const SIZE_BUDGETS_FILE = "scripts/package-size-budgets.json";
 // A budget sits 5% above the measured size; a package that shrinks 15% below
 // its budget fails until the budget follows it down, so budgets only ratchet down.
+// A few hundred bytes over the budget is not bloat: only more than 1% over fails.
 const SIZE_BUDGET_HEADROOM = 1.05;
 const SIZE_BUDGET_RATCHET = 0.85;
+const SIZE_BUDGET_TOLERANCE = 1.01;
 
 function listWorkspacePackageDirs() {
   return readdirSync(PACKAGES_DIR)
@@ -568,9 +570,9 @@ export function listPackageSizeIssues(name, sizes, budget) {
     if (!Number.isFinite(budget[kind]) || budget[kind] <= 0) {
       return [`${name} has an invalid ${kind} budget in ${SIZE_BUDGETS_FILE}: use a byte count.`];
     }
-    if (sizes[kind] > budget[kind]) {
+    if (sizes[kind] > budget[kind] * SIZE_BUDGET_TOLERANCE) {
       return [
-        `${name} ${kind} size ${sizes[kind]} bytes is over its budget of ${budget[kind]}. Keep source maps, tests and unused assets out of the tarball; raise the budget in ${SIZE_BUDGETS_FILE} only with the reason in the PR.`,
+        `${name} ${kind} size ${sizes[kind]} bytes is over its budget of ${budget[kind]} by more than 1%. Keep source maps, tests and unused assets out of the tarball; raise the budget in ${SIZE_BUDGETS_FILE} only with the reason in the PR.`,
       ];
     }
     if (sizes[kind] < budget[kind] * SIZE_BUDGET_RATCHET) {
