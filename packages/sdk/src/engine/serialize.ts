@@ -5,10 +5,18 @@
  * Phase 3b: GSAP script section will use the meriyah/offset-splice path once available.
  */
 
-import { findById, setElementStyles, type KeptDelete, type ParsedDocument } from "./model.js";
+import {
+  findById,
+  getElementStyles,
+  setElementStyles,
+  type KeptDelete,
+  type ParsedDocument,
+} from "./model.js";
 
 // A kept delete is not a clip: without these the renderer would still schedule its media and stretch the film.
 const CLIP_ATTRIBUTES = ["data-start", "data-duration", "data-end", "data-track-index"];
+// A hidden copy still gets its media fetched, and extracted when it is a video, so it keeps no source.
+const MEDIA_SOURCE_ATTRIBUTES = ["src", "srcset", "poster"];
 
 /** The deleted node, hidden and no longer a clip, so a script that looks it up still finds it. */
 function hiddenCopy(doc: Document, kept: KeptDelete): Element | null {
@@ -18,6 +26,9 @@ function hiddenCopy(doc: Document, kept: KeptDelete): Element | null {
   if (!node) return null;
   for (const el of [node, ...Array.from(node.querySelectorAll("*"))]) {
     for (const name of CLIP_ATTRIBUTES) el.removeAttribute(name);
+    for (const name of MEDIA_SOURCE_ATTRIBUTES) el.removeAttribute(name);
+    const remote = Object.entries(getElementStyles(el)).filter(([, v]) => v.includes("url("));
+    if (remote.length > 0) setElementStyles(el, Object.fromEntries(remote.map(([k]) => [k, null])));
   }
   setElementStyles(node, { display: "none" });
   node.setAttribute("data-hidden", "");
