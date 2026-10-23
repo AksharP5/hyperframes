@@ -10,8 +10,10 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { extname, join, posix } from "node:path";
@@ -605,8 +607,59 @@ function packAndVerifyWorkspace(workspace, packDir) {
   return { workspace, filename, packedPackage };
 }
 
+const LAMBDA_PIN_ASSETS = [
+  { asset: "hyperframes-lambda-handler.zip", flags: [] },
+  { asset: "hyperframes-lambda-video-arm64.oci.tar", flags: ["--video-image"] },
+];
+
+// The publish job pins the Lambda release assets before this check. Anywhere else, sparse stand-ins of release
+// size go through the same pin script, so the size check packs the file list a release publishes. Files a
+// developer already built (zip, image, their hashes and pins) are moved aside first and put back by the cleanup.
+function pinStandInLambdaAssets() {
+  const lambda = join(PACKAGES_DIR, "aws-lambda");
+  const prebuilt = join(lambda, "prebuilt");
+  if (existsSync(join(prebuilt, "handler-zip.json"))) return () => {};
+  const dist = join(ROOT, "dist");
+  mkdirSync(dist, { recursive: true });
+  const built = join(lambda, "dist", "handler.zip");
+  const stands = LAMBDA_PIN_ASSETS.flatMap(({ asset }) => [
+    join(dist, asset),
+    join(dist, `${asset.split(".")[0]}.sha256`),
+  ]);
+  const pins = [join(prebuilt, "handler-zip.json"), join(prebuilt, "video-image.json")];
+  const aside = mkdtempSync(join(dist, "aside-"));
+  const moved = [built, `${built}.manifest.json`, ...stands, ...pins]
+    .filter((path) => existsSync(path))
+    .map((path, index) => {
+      const to = join(aside, String(index));
+      renameSync(path, to);
+      return [path, to];
+    });
+  const restore = () => {
+    [...stands, ...pins].forEach((path) => rmSync(path, { force: true }));
+    moved.forEach(([path, to]) => renameSync(to, path));
+    rmSync(aside, { force: true, recursive: true });
+  };
+  try {
+    for (const { asset, flags } of LAMBDA_PIN_ASSETS) {
+      const path = join(dist, asset);
+      writeFileSync(path, "");
+      truncateSync(path, 150_000_000);
+      execFileSync("bun", [join(lambda, "scripts", "pin-handler-zip.ts"), ...flags], {
+        cwd: ROOT,
+        stdio: "ignore",
+      });
+    }
+  } catch (error) {
+    restore();
+    throw error;
+  }
+  return restore;
+}
+
 function main() {
   const packDir = mkdtempSync(join(tmpdir(), "hyperframes-pack-"));
+  const unpinLambda = pinStandInLambdaAssets();
   try {
     const packedWorkspaces = listWorkspacePackageDirs()
       .map((workspace) => packAndVerifyWorkspace(workspace, packDir))
@@ -614,6 +667,7 @@ function main() {
     verifyPackedConsumer(packDir, packedWorkspaces);
     verifyPackageSizes(packedWorkspaces);
   } finally {
+    unpinLambda();
     rmSync(packDir, { force: true, recursive: true });
   }
 }

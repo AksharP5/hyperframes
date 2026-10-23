@@ -13,6 +13,7 @@
     "scripts/",
     "!scripts/*.test.ts",
     "!scripts/pin-handler-zip.ts",
+    "!scripts/stage-arm64-image.ts",
     "README.md"
   ],
   "type": "module",
