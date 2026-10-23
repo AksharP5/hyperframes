@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import {
   COMPOSITION_SOURCE_URL,
+  MEDIA_RENDER_ID_ATTR,
   quantizeSeekTime,
   quantizeTimeToFrame,
   fpsToNumber,
@@ -26,6 +27,7 @@ import {
   type RawAuthoredTiming,
 } from "@hyperframes/core";
 
+import { holdRenderFrameVideos } from "./renderFrameVideoHold.js";
 import { DrawElementCaptureError } from "./drawElementCaptureError.js";
 import { encodePng } from "../utils/alphaBlit.js";
 import {
@@ -1467,6 +1469,13 @@ async function constructCaptureSession(
   // Media elements are addressed by a document-unique render id, not by the
   // per-file element id. Install the resolvers before any page script runs.
   await installMediaRenderIdBridge(page);
+  if (options.skipReadinessVideoIds?.length) {
+    await page.evaluateOnNewDocument(
+      holdRenderFrameVideos,
+      options.skipReadinessVideoIds,
+      MEDIA_RENDER_ID_ATTR,
+    );
+  }
   // Fast capture: record accelerated canvases (webgl/webgl2/webgpu) and force
   // preserveDrawingBuffer before any page script can create a context — their
   // paint records freeze at the first frame, so captureDrawElementFrame

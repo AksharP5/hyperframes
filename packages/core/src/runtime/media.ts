@@ -9,6 +9,7 @@ import { rateAt, sourceTimeAt, timeAtSourceTime, type RateSpec } from "../speedR
 import { clampAudioGain, clipGain, gainTimesLane } from "../audioGain.js";
 import { isMemberGroupHidden } from "../audioGroups.js";
 import { findInjectedRenderFrame } from "./renderFrameSibling.js";
+import { isRenderFrameVideo } from "./preloadMedia.js";
 import { registerSeekCompletion } from "./adapters/seek-dispatch.js";
 import { cutToHostSlots, type HostSlot } from "../mediaTiming.js";
 export {
@@ -539,7 +540,7 @@ export function syncRuntimeMedia(params: {
       // past the buffered range. Setting this on every tick is cheap
       // (no-op when already "auto") and catches elements whose preload
       // was overridden after init.ts set it.
-      if (el.preload !== "auto") el.preload = "auto";
+      if (el.preload !== "auto" && !isRenderFrameVideo(el)) el.preload = "auto";
       // Per-element rate × global transport rate
       const baseRate = rateAt(clipRate, params.timeSeconds - origin) * params.playbackRate;
       // Too slow for the browser to play: kept paused and stepped onto the playhead by seeks.

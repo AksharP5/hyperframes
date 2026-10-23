@@ -1053,6 +1053,22 @@ describe("syncRuntimeMedia", () => {
     expect(clip.el.preload).toBe("auto");
   });
 
+  it("leaves a video the render replaces with extracted frames at preload none", () => {
+    const clip = createMockClip({ start: 0, end: 10 });
+    clip.el.id = "cut";
+    Object.defineProperty(clip.el, "preload", { value: "none", writable: true });
+    (
+      window as Window & { __HF_RENDER_FRAME_VIDEO_IDS?: readonly string[] }
+    ).__HF_RENDER_FRAME_VIDEO_IDS = ["cut"];
+    try {
+      syncRuntimeMedia({ clips: [clip], timeSeconds: 5, playing: false, playbackRate: 1 });
+      expect(clip.el.preload).toBe("none");
+    } finally {
+      delete (window as Window & { __HF_RENDER_FRAME_VIDEO_IDS?: readonly string[] })
+        .__HF_RENDER_FRAME_VIDEO_IDS;
+    }
+  });
+
   it("does not re-fire play() while a previous play() is in flight", () => {
     // Without a play-request dedup, the 50ms runtime poll would fire 20–40
     // spurious play() calls per element during the 1–2s initial buffer, each

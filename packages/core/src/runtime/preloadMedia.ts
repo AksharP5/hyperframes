@@ -1,13 +1,23 @@
 import { parseStrictFiniteTimingNumber } from "./playbackRate";
 import { createRuntimeStartTimeResolver } from "./startResolver";
+import { readMediaRenderId } from "./renderFrameSibling";
 import { defersMedia } from "./timedClipHide";
 
 type PreloadableMedia = Pick<
   HTMLMediaElement,
-  "tagName" | "preload" | "readyState" | "networkState" | "load"
+  "id" | "tagName" | "getAttribute" | "preload" | "readyState" | "networkState" | "load"
 >;
 
+export function isRenderFrameVideo(
+  media: Pick<Element, "getAttribute" | "id" | "tagName">,
+): boolean {
+  const ids = (window as Window & { __HF_RENDER_FRAME_VIDEO_IDS?: readonly string[] })
+    .__HF_RENDER_FRAME_VIDEO_IDS;
+  return media.tagName === "VIDEO" && ids?.includes(readMediaRenderId(media) ?? "") === true;
+}
+
 export function preloadMedia(media: PreloadableMedia): void {
+  if (isRenderFrameVideo(media)) return;
   if (media.preload !== "auto") media.preload = "auto";
   // load() resets an in-flight video fetch, discarding its selected resource and buffered data.
   const videoAlreadyLoading = media.tagName === "VIDEO" && media.networkState === 2;
