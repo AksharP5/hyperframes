@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 export class HistoryBusyError extends Error {
@@ -13,6 +21,8 @@ export class HistoryBusyError extends Error {
 }
 
 const WINDOWS_BUSY = new Set(["EPERM", "EBUSY", "EACCES"]);
+const NO_HARD_LINKS = new Set(["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM"]);
+const TAKING_MS = 2_000;
 
 function busyOnWindows(error: unknown): boolean {
   return (
@@ -41,7 +51,21 @@ function ownerOf(file: string): number | null {
   }
 }
 
-/** Takes `file` if nobody holds it: written aside and linked in, so a reader never sees it without its pid. */
+/** An empty lock younger than TAKING_MS is a claim between create and write, not a dead owner's. */
+function beingTaken(file: string): boolean {
+  try {
+    const { size, mtimeMs } = statSync(file);
+    return size === 0 && Date.now() - mtimeMs < TAKING_MS;
+  } catch {
+    return false;
+  }
+}
+
+function deadHolder(file: string, pid: number): boolean {
+  return !alive(pid) && !beingTaken(file);
+}
+
+/** Takes `file` if nobody holds it: linked in whole, or created in place where links fail. */
 function claim(file: string): boolean {
   const draft = `${file}-${process.pid}-${randomUUID()}.tmp`;
   writeFileSync(draft, String(process.pid));
@@ -49,10 +73,22 @@ function claim(file: string): boolean {
     linkSync(draft, file);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    return false;
+    const code = (error as NodeJS.ErrnoException).code ?? "";
+    if (code === "EEXIST") return false;
+    if (!NO_HARD_LINKS.has(code)) throw error;
+    return createExclusively(file);
   } finally {
     rmSync(draft, { force: true });
+  }
+}
+
+function createExclusively(file: string): boolean {
+  try {
+    writeFileSync(file, String(process.pid), { flag: "wx" });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    return false;
   }
 }
 
@@ -69,12 +105,12 @@ function evictDeadOwner(file: string): boolean {
   const evictor = `${file}.evict`;
   if (!claim(evictor)) {
     const holder = ownerOf(evictor);
-    if (holder !== null && !alive(holder)) rmSync(evictor, { force: true });
+    if (holder !== null && deadHolder(evictor, holder)) rmSync(evictor, { force: true });
     return false;
   }
   try {
     const pid = ownerOf(file);
-    if (pid !== null && !alive(pid)) rmSync(file, { force: true });
+    if (pid !== null && deadHolder(file, pid)) rmSync(file, { force: true });
     return true;
   } finally {
     releaseOwn(evictor);
@@ -106,7 +142,7 @@ function attemptClaim(file: string, urlFile: string, deadline: number): Attempt 
   if (claim(file)) return "claimed";
   const pid = ownerOf(file);
   if (pid === null) return "retry";
-  if (!alive(pid) && evictDeadOwner(file)) return "retry";
+  if (deadHolder(file, pid) && evictDeadOwner(file)) return "retry";
   if (Date.now() >= deadline) throw new HistoryBusyError(pid, servedBy(file, urlFile, pid));
   return "wait";
 }

@@ -1467,10 +1467,13 @@ describe("openProjectHistory", () => {
     );
   });
 
-  it("takes over a lock file that holds no pid", async () => {
+  it("takes over a lock file that holds no pid once it is old", async () => {
     const { history, projectDir, historyRoot } = await project({ "index.html": "v1" });
     await history.close();
-    writeFileSync(join(historyRoot, history.projectId, "owner.pid"), "");
+    const lock = join(historyRoot, history.projectId, "owner.pid");
+    writeFileSync(lock, "");
+    const old = (Date.now() - 60_000) / 1000;
+    utimesSync(lock, old, old);
     expect((await open(projectDir, historyRoot, { ownerWaitMs: 0 })).projectId).toBe(
       history.projectId,
     );
