@@ -24,7 +24,7 @@ import {
   writeUrlDownloadTelemetry,
 } from "../utils/urlDownloader.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
-import { formatFfmpegError, runFfmpeg, type RunFfmpegResult } from "../utils/runFfmpeg.js";
+import { describeFfmpegFailure, runFfmpeg, type RunFfmpegResult } from "../utils/runFfmpeg.js";
 import { encodeAac } from "./aacEncode.js";
 import { audioSubprocessEvidence } from "./audioFailureDiagnostic.js";
 import { unwrapTemplate } from "../utils/htmlTemplate.js";
@@ -446,6 +446,7 @@ function downloadFailure(error: unknown, elementId: string): AudioProcessingFail
 function ffmpegFailure(
   stage: Extract<AudioFailureStage, "extract" | "prepare" | "mix" | "silence">,
   result: RunFfmpegResult,
+  timeoutMs: number,
   elementId?: string,
 ): AudioProcessingFailure {
   const stderr = result.stderr ?? "";
@@ -486,8 +487,8 @@ function ffmpegFailure(
     subprocess: audioSubprocessEvidence(result),
     detail: boundedDetail(
       result.error?.message
-        ? `${formatFfmpegError(result.exitCode, stderr)}: ${result.error.message}`
-        : formatFfmpegError(result.exitCode, stderr),
+        ? `${describeFfmpegFailure(result, timeoutMs)}: ${result.error.message}`
+        : describeFfmpegFailure(result, timeoutMs),
     ),
   };
 }
@@ -724,7 +725,7 @@ async function extractAudioSegment(
       failure,
     };
   }
-  let failure = result.success ? undefined : ffmpegFailure(stage, result);
+  let failure = result.success ? undefined : ffmpegFailure(stage, result, ffmpegProcessTimeout);
   const probedLinkFailedToRead =
     readsUrl && (failure?.reason === "invalid_media" || failure?.reason === "ffmpeg_failed");
   if (failure && probedLinkFailedToRead) {
@@ -780,7 +781,9 @@ async function generateSilence(
       failure,
     };
   }
-  const failure = !result.success ? ffmpegFailure("silence", result) : undefined;
+  const failure = !result.success
+    ? ffmpegFailure("silence", result, ffmpegProcessTimeout)
+    : undefined;
   return {
     success: result.success,
     outputPath,
@@ -934,7 +937,7 @@ async function mixAudioTracks(
     };
   }
   if (!result.success) {
-    const failure = ffmpegFailure("mix", result);
+    const failure = ffmpegFailure("mix", result, ffmpegProcessTimeout);
     return {
       success: false,
       outputPath,
@@ -1000,10 +1003,10 @@ async function mixGroupMembers(
   const outputDir = dirname(outputPath);
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
-  const buildInputFilters = (ignoreKeyframes: boolean) =>
+  const buildInputFilters = (ignoreKeyframes: boolean, padMembers: boolean) =>
     memberTracks.map((track, i) => {
       const volumeFilter = buildVolumeExpression(track, ignoreKeyframes);
-      return buildTrackInputFilter(track, i, volumeFilter, totalDuration);
+      return buildTrackInputFilter(track, i, volumeFilter, totalDuration, padMembers);
     });
   const mixInputs = memberTracks.map((_, i) => `[a${i}]`).join("");
 
@@ -1011,9 +1014,10 @@ async function mixGroupMembers(
     useNormalize: boolean,
     ignoreKeyframes = false,
   ): Promise<RunFfmpegResult> => {
-    const inputFilters = buildInputFilters(ignoreKeyframes);
+    const inputFilters = buildInputFilters(ignoreKeyframes, !useNormalize);
+    const padUnitySumOnceToFilm = `[mixed];[mixed]apad,asetpts=N/SR/TB,atrim=0:${formatFilterNumber(totalDuration)}`;
     const mixFilter = useNormalize
-      ? `${mixInputs}amix=inputs=${memberTracks.length}:duration=longest:dropout_transition=0:normalize=0[out]`
+      ? `${mixInputs}amix=inputs=${memberTracks.length}:duration=longest:dropout_transition=0:normalize=0${padUnitySumOnceToFilm}[out]`
       : // Every member is padded and trimmed to totalDuration above, and
         // dropout_transition=0 keeps all N inputs active for that whole span.
         // amix's default normalize therefore divides by exactly N throughout;
@@ -1089,7 +1093,7 @@ async function mixGroupMembers(
   }
 
   if (signal?.aborted || !result.success) {
-    const failure = ffmpegFailure("mix", result);
+    const failure = ffmpegFailure("mix", result, ffmpegProcessTimeout);
     return { success: false, error: failure.detail, failure };
   }
   return { success: true, degradedAutomation };
@@ -1127,7 +1131,11 @@ async function mixThroughFloatSum(
     timeout: config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout,
   });
   if (!encoded.success) {
-    const failure = ffmpegFailure("mix", encoded);
+    const failure = ffmpegFailure(
+      "mix",
+      encoded,
+      config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout,
+    );
     return {
       success: false,
       outputPath,
