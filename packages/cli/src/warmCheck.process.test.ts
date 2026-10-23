@@ -62,10 +62,11 @@ function run(args: string[], env: Record<string, string>) {
   });
   let stdout = "";
   child.stdout.on("data", (data: Buffer) => (stdout += data.toString()));
-  child.stderr.on("data", () => {});
+  let stderr = "";
+  child.stderr.on("data", (data: Buffer) => (stderr += data.toString()));
   const done = new Promise<number | null>((resolve) => child.once("close", resolve));
   onTestFinished(() => stopTestProcesses(child, []));
-  return { child, done, stdout: () => stdout };
+  return { child, done, stdout: () => stdout, stderr: () => stderr };
 }
 
 async function warmProcess(dir: string, env: Record<string, string>, idleMs = 60_000) {
@@ -141,7 +142,7 @@ it("serves a check that prints what a cold check prints, then exits with its Chr
   await waitForTestCondition(() => !testProcessIsAlive(warm.pid) && gone(chrome), 10_000);
 
   const cold = run([join(here, "cli.ts"), "check", dir, ...CHECK_ARGS], env);
-  expect(await cold.done).toBe(0);
+  expect(await cold.done, `${cold.stdout()}\n${cold.stderr()}`).toBe(0);
   expect(findings(served.stdout())).toEqual(findings(cold.stdout()));
 }, 120_000);
 
