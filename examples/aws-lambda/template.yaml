@@ -254,6 +254,11 @@ Resources:
           SelectPlanProtocol:
             Type: Choice
             Choices:
+              # Only a stack with the arm64 video function has a cold x86 function to warm.
+              # Without one the compared value can never match.
+              - Variable: $.PlanProtocol
+                StringEquals: !If [HasVideoFunction, v2, v2-without-video-function]
+                Next: WarmRender
               - Variable: $.PlanProtocol
                 StringEquals: v2
                 Next: PlanV2
@@ -264,6 +269,23 @@ Resources:
                 IsPresent: true
                 Next: UnsupportedPlanProtocol
             Default: PlanV2
+
+          # The audio task runs on this function once the plan is done; starting its container now hides the cold start.
+          WarmRender:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: !GetAtt RenderFunction.Arn
+              InvocationType: Event
+              Payload:
+                Action: warm
+            ResultPath: null
+            Catch:
+              - ErrorEquals:
+                  - States.ALL
+                ResultPath: null
+                Next: PlanV2
+            Next: PlanV2
 
           UnsupportedPlanProtocol:
             Type: Fail

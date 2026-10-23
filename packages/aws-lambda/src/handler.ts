@@ -121,6 +121,11 @@ export interface HandlerDeps {
  * shape; unwrap until we hit a discriminated event.
  */
 export async function handler(event: LambdaEvent, deps?: HandlerDeps): Promise<LambdaResult> {
+  if ((event as { Action?: unknown }).Action === "warm") {
+    primeRuntimeEnv();
+    await ensureChromePath(deps);
+    return { Action: "warm" };
+  }
   const unwrapped = unwrapEvent(event);
   validatePlanProtocolShape(unwrapped);
   validateEventS3Uris(unwrapped);

@@ -255,6 +255,19 @@ describe("unwrapEvent", () => {
 });
 
 describe("handler dispatch", () => {
+  it("answers a warm event without touching S3 or the project", async () => {
+    const s3 = new FakeS3Client();
+    expect(
+      await handleEvent(
+        { Action: "warm" },
+        { s3: s3 as unknown as import("@aws-sdk/client-s3").S3Client, skipChromeResolution: true },
+      ),
+    ).toEqual({
+      Action: "warm",
+    });
+    expect(s3.ops).toEqual([]);
+  });
+
   it("preserves explicit v1 plan compatibility", async () => {
     const tmpRoot = makeTmpRoot();
     const s3 = new FakeS3Client();
