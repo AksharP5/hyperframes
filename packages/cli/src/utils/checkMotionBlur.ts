@@ -4,6 +4,7 @@ import type { CheckSeverity } from "./checkTypes.js";
 /** What the core runtime's `__hfMotionBlur.probe()` reports for a root that asked for blur. */
 export interface MotionBlurProbe {
   state: "on" | "off";
+  tier: "capture" | "filter" | null;
   reason: string | null;
   reasonCode: string | null;
   movers: number;
@@ -31,6 +32,7 @@ const OFF_HINTS: Record<string, string> = {
   "nested-capture-canvas":
     "remove the inner <canvas layoutsubtree> / content=drawable, or drop motion blur",
 };
+const CHOSEN = new Set(["translation-only", "tier-attribute"]);
 const GENERIC_OFF_HINT = "remove what the reason names, or drop data-motion-blur";
 
 const ASKED = 'data-motion-blur="on" is set but';
@@ -43,9 +45,9 @@ export function motionBlurDrafts(probe: MotionBlurProbe | null): MotionBlurDraft
       {
         code: "motion_blur_unverified",
         severity: "info",
-        message: `${ASKED} blur could not be evaluated in this browser`,
+        message: `${ASKED} the check browser cannot run capture blur, so it was drawn with the filter fallback`,
         fixHint:
-          "the check browser has no html-in-canvas (drawElementImage); render once to see whether blur applies",
+          "the check browser has no html-in-canvas (drawElementImage); render once to see how capture blur looks",
         time: 0,
       },
     ];
@@ -57,6 +59,17 @@ export function motionBlurDrafts(probe: MotionBlurProbe | null): MotionBlurDraft
         severity: "warning",
         message: `${ASKED} blur is off: ${probe.reason ?? "unknown reason"}`,
         fixHint: OFF_HINTS[probe.reasonCode ?? ""] ?? GENERIC_OFF_HINT,
+        time: 0,
+      },
+    ];
+  }
+  if (probe.tier === "filter" && probe.movers > 0 && !CHOSEN.has(probe.reasonCode ?? "")) {
+    return [
+      {
+        code: "motion_blur_filter_fallback",
+        severity: "info",
+        message: `data-motion-blur="on" is drawn by the filter fallback: ${probe.reason ?? "capture blur cannot run here"}`,
+        fixHint: `the fallback smears movement but only softens zoom and rotation; ${OFF_HINTS[probe.reasonCode ?? ""] ?? GENERIC_OFF_HINT}`,
         time: 0,
       },
     ];
@@ -88,10 +101,12 @@ export function readMotionBlurProbe(): MotionBlurProbe | null {
   const reason: unknown = Reflect.get(report, "reason");
   const code: unknown = Reflect.get(report, "reasonCode");
   const movers: unknown = Reflect.get(report, "movers");
+  const tier: unknown = Reflect.get(report, "tier");
   const suspend: unknown = Reflect.get(api, "suspend");
   if (typeof suspend === "function") Reflect.apply(suspend, api, []);
   return {
     state: Reflect.get(report, "state") === "off" ? "off" : "on",
+    tier: tier === "capture" || tier === "filter" ? tier : null,
     reason: typeof reason === "string" ? reason : null,
     reasonCode: typeof code === "string" ? code : null,
     movers: typeof movers === "number" ? movers : 0,

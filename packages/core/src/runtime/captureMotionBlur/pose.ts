@@ -183,7 +183,7 @@ export function tapWeights(n: number): number[] {
 
 const PROBE_TAPS = 16;
 
-/** Taps sized to the smear: about one per `spacing` px of travel, 2 to `max`. */
+/** Taps sized to the smear: about one per `spacing` px of travel, `min` to `max`. */
 export function autoTaps(
   reads: Affine[],
   w: number,
@@ -192,9 +192,10 @@ export function autoTaps(
   frameH: number,
   spacing = 2,
   max = 128,
+  min = 32,
 ): Affine[] {
   const { travel } = sweep(tapsFromReads(reads, PROBE_TAPS), w, h, frameW, frameH);
-  return tapsFromReads(reads, Math.min(max, Math.max(2, Math.ceil(travel / spacing))));
+  return tapsFromReads(reads, Math.min(max, Math.max(min, Math.ceil(travel / spacing))));
 }
 
 /** About one tap per `spacing` px of travel (no visible steps), at least 2, at most all. */

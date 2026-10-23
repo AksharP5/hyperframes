@@ -1,4 +1,3 @@
-import { htmlInCanvasForm } from "@hyperframes/core/html-in-canvas";
 import { buildProjectApiPath } from "../../utils/projectRouting";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { CanvasResolution } from "@hyperframes/parsers";
@@ -10,11 +9,6 @@ import { readServerError } from "./serverError";
 import { ffmpegInstallMessage, useFfmpegStatus } from "./useFfmpegStatus";
 import { requestStudioFeedback, type FeedbackContext } from "../feedback/feedbackTrigger";
 import { studioApiFetch } from "../../utils/studioApiFetch";
-
-// WYSIWYG: the preview iframe runs in this browser, so a render blurs only if this one can.
-function canPreviewMotionBlur(): boolean {
-  return typeof document !== "undefined" && htmlInCanvasForm() !== null;
-}
 
 export interface RenderJob {
   id: string;
@@ -244,12 +238,10 @@ export function useRenderQueue(
         gpu?: boolean;
         telemetryDistinctId?: string;
         telemetryOptOut?: boolean;
-        previewMotionBlur: boolean;
       } = {
         fps,
         quality,
         format,
-        previewMotionBlur: canPreviewMotionBlur(),
       };
       // The id is MINTED by getAnonymousId(), so calling it unconditionally
       // created a telemetry identity for a profile that had opted out — and

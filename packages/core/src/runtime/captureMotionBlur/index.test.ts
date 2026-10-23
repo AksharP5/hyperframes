@@ -1204,6 +1204,17 @@ describe("suspend (R13)", () => {
     expect(root.parentElement).toBe(document.body);
   });
 
+  it("opens the shutter 240 degrees unless the root says otherwise", () => {
+    installHtmlInCanvas();
+    initCaptureMotionBlur(host(makeRoot()));
+    expect(win.__hfMotionBlur?.report().shutterDeg).toBe(240);
+    resetCaptureMotionBlurForTests();
+    document.body.innerHTML = "";
+    const root = makeRoot({ "data-motion-blur": "on", "data-motion-blur-shutter": "360" });
+    initCaptureMotionBlur(host(root));
+    expect(win.__hfMotionBlur?.report().shutterDeg).toBe(360);
+  });
+
   it("exists, and does nothing, where blur is off", () => {
     const root = makeRoot();
     initCaptureMotionBlur(host(root));
@@ -1590,8 +1601,9 @@ describe("filter fallback", () => {
   beforeEach(() => setFilterFallbackForTests(true));
 
   /** A root whose opacity tweens late, which a scan sees and capture cannot draw. */
+  const CAPTURE = { "data-motion-blur": "on", "data-motion-blur-tier": "capture" };
   function fadingRoot(fade: { on: boolean }) {
-    const { root, el, h } = movingHost();
+    const { root, el, h } = movingHost(CAPTURE);
     const slide = h.seek;
     const seek = vi.fn((t: number, quiet: boolean) => {
       slide(t, quiet);
@@ -1644,7 +1656,7 @@ describe("filter fallback", () => {
 
   it("falls back after repeated capture failures in preview", async () => {
     installHtmlInCanvas();
-    const { root, el, h } = movingHost();
+    const { root, el, h } = movingHost(CAPTURE);
     initCaptureMotionBlur(h);
     for (let i = 0; i < 3; i++) {
       const done = paintCaptureMotionBlur(i / 30, PLAY);
@@ -1674,6 +1686,81 @@ describe("filter fallback", () => {
     void paintCaptureMotionBlur(0.2, { engineMode: true });
     expect(win.__hfMotionBlur?.report()).toMatchObject({ tier: "capture", reasonCode: null });
     expect(root.parentElement).toBe(captureCanvas(root));
+  });
+
+  describe("choosing the tier", () => {
+    /** Turns while it moves: the one thing the filter tier only softens. */
+    function turningHost(attrs: Record<string, string>) {
+      const { root, el, h } = movingHost(attrs);
+      const slide = h.seek;
+      const seek = vi.fn((t: number, quiet: boolean) => {
+        slide(t, quiet);
+        el.style.transform = `matrix(${Math.cos(t)}, ${Math.sin(t)}, ${-Math.sin(t)}, ${Math.cos(t)}, ${300 * t}, 0)`;
+      });
+      return { root, el, h: { ...h, seek } };
+    }
+    beforeEach(() => {
+      const real = window.getComputedStyle.bind(window);
+      vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
+        const cs = real(el);
+        return new Proxy(cs, {
+          get: (target, key) => {
+            if (key === "transform")
+              return el instanceof HTMLElement ? el.style.transform || "none" : "none";
+            const value = Reflect.get(target, key);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+      });
+    });
+
+    it("takes the cheaper filter tier when every mover only translates", () => {
+      installHtmlInCanvas();
+      const { root, el, h } = movingHost();
+      initCaptureMotionBlur(h);
+      void paintCaptureMotionBlur(0.5, PLAY);
+      expect(win.__hfMotionBlur?.report()).toMatchObject({
+        state: "on",
+        tier: "filter",
+        reasonCode: "translation-only",
+      });
+      expect(root.parentElement).toBe(document.body);
+      expect(el.style.filter).toMatch(/url\("?#hf-mb-0"?\)/);
+    });
+
+    it("keeps capture for a mover that turns", () => {
+      installHtmlInCanvas();
+      const { root, h } = turningHost({ "data-motion-blur": "on" });
+      initCaptureMotionBlur(h);
+      void paintCaptureMotionBlur(0.5, PLAY);
+      expect(win.__hfMotionBlur?.report()).toMatchObject({ tier: "capture", reasonCode: null });
+      expect(root.parentElement).toBe(captureCanvas(root));
+    });
+
+    it('keeps capture when asked with data-motion-blur-tier="capture"', () => {
+      installHtmlInCanvas();
+      const { root, h } = movingHost(CAPTURE);
+      initCaptureMotionBlur(h);
+      void paintCaptureMotionBlur(0.5, PLAY);
+      expect(win.__hfMotionBlur?.report().tier).toBe("capture");
+      expect(root.parentElement).toBe(captureCanvas(root));
+    });
+
+    it('takes the filter tier when asked with data-motion-blur-tier="filter", even for a turn', () => {
+      installHtmlInCanvas();
+      const { root, el, h } = turningHost({
+        "data-motion-blur": "on",
+        "data-motion-blur-tier": "filter",
+      });
+      initCaptureMotionBlur(h);
+      void paintCaptureMotionBlur(0.5, PLAY);
+      expect(win.__hfMotionBlur?.report()).toMatchObject({
+        tier: "filter",
+        reasonCode: "tier-attribute",
+      });
+      expect(root.parentElement).toBe(document.body);
+      expect(el.style.filter).toMatch(/url\("?#hf-mb-0"?\)/);
+    });
   });
 
   it("keeps the mover's own filter under the smear, and puts it back when paused", () => {

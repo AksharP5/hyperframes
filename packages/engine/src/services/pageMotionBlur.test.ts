@@ -87,6 +87,22 @@ describe("describePageMotionBlur", () => {
     );
   });
 
+  it("names the tier that drew the blur, so a fallback is visible in the log", async () => {
+    vi.stubGlobal("window", {
+      __hfMotionBlur: {
+        report: () => ({
+          state: "on",
+          tier: "filter",
+          reasonCode: "accelerated-canvas",
+          movers: 2,
+        }),
+      },
+    });
+    expect(await describePageMotionBlur(inPage)).toBe(
+      "[motion-blur] on reasonCode=accelerated-canvas movers=2 failedFrames=0 tier=filter",
+    );
+  });
+
   it('carries the frames that fell back to plain DOM, so "on" cannot hide them', async () => {
     vi.stubGlobal("window", {
       __hfMotionBlur: {

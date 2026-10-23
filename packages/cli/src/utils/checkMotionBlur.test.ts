@@ -7,6 +7,7 @@ import {
 
 const off = (reasonCode: string | null, reason = "because"): MotionBlurProbe => ({
   state: "off",
+  tier: null,
   reason,
   reasonCode,
   movers: 0,
@@ -15,12 +16,12 @@ const off = (reasonCode: string | null, reason = "because"): MotionBlurProbe => 
 describe("motionBlurDrafts", () => {
   it("says nothing without an opt-in to read, or when blur works", () => {
     expect(motionBlurDrafts(null)).toEqual([]);
-    expect(motionBlurDrafts({ state: "on", reason: null, reasonCode: null, movers: 2 })).toEqual(
-      [],
-    );
-    expect(motionBlurDrafts({ state: "on", reason: null, reasonCode: null, movers: 1 })).toEqual(
-      [],
-    );
+    expect(
+      motionBlurDrafts({ state: "on", tier: "capture", reason: null, reasonCode: null, movers: 2 }),
+    ).toEqual([]);
+    expect(
+      motionBlurDrafts({ state: "on", tier: "capture", reason: null, reasonCode: null, movers: 1 }),
+    ).toEqual([]);
   });
 
   it.each([
@@ -46,16 +47,40 @@ describe("motionBlurDrafts", () => {
     expect(finding?.fixHint).toMatch(hint);
   });
 
+  it("informs, with the reason and a way back to capture, when the filter fallback draws it", () => {
+    const filter = (reasonCode: string, movers = 2): MotionBlurProbe => ({
+      state: "on",
+      tier: "filter",
+      reason: "a WebGL canvas is in the page",
+      reasonCode,
+      movers,
+    });
+    const [finding, ...rest] = motionBlurDrafts(filter("accelerated-canvas"));
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({
+      code: "motion_blur_filter_fallback",
+      severity: "info",
+      message: expect.stringContaining("a WebGL canvas is in the page"),
+      fixHint: expect.stringContaining("only softens zoom and rotation"),
+    });
+    expect(finding?.fixHint).toContain("render that effect separately");
+    expect(motionBlurDrafts(filter("accelerated-canvas", 0))[0]?.code).toBe(
+      "motion_blur_no_movers",
+    );
+    expect(motionBlurDrafts(filter("translation-only"))).toEqual([]);
+    expect(motionBlurDrafts(filter("tier-attribute"))).toEqual([]);
+  });
+
   it("only informs, once, when the browser cannot run html-in-canvas", () => {
     const drafts = motionBlurDrafts(off("unsupported-browser", "html-in-canvas is unavailable"));
     expect(drafts).toHaveLength(1);
     expect(drafts[0]).toMatchObject({ code: "motion_blur_unverified", severity: "info" });
-    expect(drafts[0]?.message).toContain("could not be evaluated in this browser");
+    expect(drafts[0]?.message).toContain("drawn with the filter fallback");
   });
 
   it("informs when blur is on but nothing moves", () => {
     expect(
-      motionBlurDrafts({ state: "on", reason: null, reasonCode: null, movers: 0 }),
+      motionBlurDrafts({ state: "on", tier: "capture", reason: null, reasonCode: null, movers: 0 }),
     ).toMatchObject([
       {
         code: "motion_blur_no_movers",

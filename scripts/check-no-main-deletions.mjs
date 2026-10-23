@@ -742,6 +742,10 @@ const FALLOW_PRUNE_REASON =
 
 export const ALLOWED_DELETIONS = new Map([
   [
+    "packages/studio/src/components/renders/useRenderQueueMotionBlur.test.tsx",
+    "Studio no longer sends previewMotionBlur with renders: blur picks its tier from the page, so the test of that field goes with it",
+  ],
+  [
     "packages/cli/src/beats/headlessAnalyzer.ts",
     "the TypeScript beat tracker replaces the Chrome analyzer; the beats command decodes with ffmpeg directly",
   ],

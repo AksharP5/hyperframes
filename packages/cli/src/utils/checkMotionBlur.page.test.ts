@@ -2,7 +2,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readMotionBlurProbe } from "./checkMotionBlur.js";
 
-const report = { state: "off", reason: "why", reasonCode: "root-transform", movers: 3 };
+const report = {
+  state: "off",
+  tier: "filter",
+  reason: "why",
+  reasonCode: "root-transform",
+  movers: 3,
+};
 
 function page(html: string, withApi = true, order: string[] = []) {
   document.body.innerHTML = html;

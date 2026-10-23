@@ -103,10 +103,17 @@ describe("taps", () => {
     expect(Math.max(...steps)).toBeLessThanOrEqual(2.3);
   });
 
-  it("uses two taps for a move too small to show and caps a huge one", () => {
+  it("never uses fewer than 32 taps, and caps a huge move at 128", () => {
     expect(
       autoTaps([translate(IDENTITY, 0, 0), translate(IDENTITY, 0.5, 0)], 100, 50, 1920, 1080),
-    ).toHaveLength(2);
+    ).toHaveLength(32);
+    expect(
+      autoTaps([translate(IDENTITY, 0, 0), translate(IDENTITY, 40, 0)], 100, 50, 1920, 1080),
+    ).toHaveLength(32);
+    expect(
+      autoTaps([translate(IDENTITY, 0, 0), translate(IDENTITY, 200, 0)], 100, 50, 1920, 1080)
+        .length,
+    ).toBeGreaterThan(90);
     expect(
       autoTaps([translate(IDENTITY, 0, 0), translate(IDENTITY, 5000, 0)], 100, 50, 1920, 1080),
     ).toHaveLength(128);

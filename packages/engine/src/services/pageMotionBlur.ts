@@ -51,6 +51,7 @@ interface PageMotionBlurState {
   code: string;
   movers: number;
   failedFrames: number;
+  tier: string | null;
 }
 
 async function readPageMotionBlur(
@@ -61,17 +62,19 @@ async function readPageMotionBlur(
     const report: unknown = api && typeof api === "object" ? Reflect.get(api, "report") : null;
     const got: unknown = typeof report === "function" ? report() : null;
     if (!got || typeof got !== "object") return null;
+    const tier: unknown = Reflect.get(got, "tier");
     return {
       state: String(Reflect.get(got, "state")),
       code: String(Reflect.get(got, "reasonCode")),
       movers: Number(Reflect.get(got, "movers")),
       failedFrames: Number(Reflect.get(got, "failedFrames")) || 0,
+      tier: typeof tier === "string" ? tier : null,
     };
   });
 }
 
 const formatPageMotionBlur = (r: PageMotionBlurState): string =>
-  `[motion-blur] ${r.state} reasonCode=${r.code} movers=${r.movers} failedFrames=${r.failedFrames}`;
+  `[motion-blur] ${r.state} reasonCode=${r.code} movers=${r.movers} failedFrames=${r.failedFrames}${r.tier ? ` tier=${r.tier}` : ""}`;
 
 /** One line saying what the page's blur did for this session; null when the page never asked for blur. */
 export async function describePageMotionBlur(page: Pick<Page, "evaluate">): Promise<string | null> {
