@@ -10,6 +10,8 @@ import {
   createChunkVideoFrameInjectorFactory,
   createVerifiedDistributedCaptureSession,
   type ChunkResult,
+  MixedCaptureModesError,
+  observedChunkCaptureMode,
   runCaptureWithScreenshotFallback,
   shouldRetryChunkCaptureWithScreenshot,
 } from "./renderChunk.js";
@@ -269,5 +271,38 @@ describe("beginFrameSessionNeedsScreenshotFallback", () => {
       }),
     ).toBe(false);
     expect(probes).toBe(1);
+  });
+});
+
+describe("a chunk whose workers launched in different capture modes", () => {
+  const mixed = [{ captureMode: "beginframe" }, { captureMode: "screenshot" }];
+
+  it("fails with a typed error instead of being retried or mixed into one output", async () => {
+    expect(() => observedChunkCaptureMode(mixed)).toThrow(MixedCaptureModesError);
+    expect(
+      shouldRetryChunkCaptureWithScreenshot(
+        new MixedCaptureModesError(["beginframe", "screenshot"]),
+      ),
+    ).toBe(false);
+    let runs = 0;
+    await expect(
+      runCaptureWithScreenshotFallback({
+        forceScreenshot: false,
+        run: async () => {
+          runs++;
+          return observedChunkCaptureMode(mixed);
+        },
+        resetForScreenshotRetry: () => {},
+      }),
+    ).rejects.toThrow(MixedCaptureModesError);
+    expect(runs).toBe(1);
+  });
+
+  it("accepts one mode and still rejects a chunk with no workers or an unknown mode", () => {
+    expect(
+      observedChunkCaptureMode([{ captureMode: "beginframe" }, { captureMode: "beginframe" }]),
+    ).toBe("beginframe");
+    expect(() => observedChunkCaptureMode([])).toThrow(/invalid mode/);
+    expect(() => observedChunkCaptureMode([{ captureMode: "gpu" }])).toThrow(/invalid mode/);
   });
 });

@@ -80,10 +80,39 @@ describe("BeginFrame capability probe", () => {
       }),
     } as unknown as Browser;
 
-    const result = await _probeBeginFrameSupportForTests(browser);
+    const result = await _probeBeginFrameSupportForTests(browser, 120);
 
     expect(result.supported).toBe(false);
-    expect(result.detail).toContain("returned 0 bytes after 10 attempts");
+    expect(result.detail).toMatch(/returned 0 bytes after \d+ attempts in \d+ms/);
+  });
+
+  it("keeps trying a renderer that has not drawn its first surface yet, up to the probe deadline", async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    let screenshotCalls = 0;
+    const send = vi
+      .fn()
+      .mockImplementation(async (_method: string, params?: { screenshot?: unknown }) => {
+        if (!params?.screenshot) return {};
+        screenshotCalls += 1;
+        return screenshotCalls <= 25
+          ? { hasDamage: false }
+          : { screenshotData: png.toString("base64") };
+      });
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(null),
+        createCDPSession: vi.fn().mockResolvedValue({
+          send,
+          detach: vi.fn().mockResolvedValue(undefined),
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser);
+
+    expect(result.supported).toBe(true);
+    expect(screenshotCalls).toBe(26);
   });
 
   it("bounds a screenshot-bearing CDP call that never resolves", async () => {

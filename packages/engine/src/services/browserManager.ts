@@ -347,7 +347,6 @@ interface BeginFrameProbeResult {
   durationMs: number;
 }
 
-const BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS = 10;
 const BEGINFRAME_PROBE_TIMEOUT_MS = 2000;
 const BEGINFRAME_PROBE_CLEANUP_TIMEOUT_MS = 250;
 
@@ -463,7 +462,8 @@ async function probeBeginFrameSupport(
     let bytes = Buffer.alloc(0);
     let isPng = false;
     let attempts = 0;
-    for (attempts = 1; attempts <= BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS; attempts += 1) {
+    while (!isPng && Date.now() < deadline) {
+      attempts += 1;
       const response = await awaitBeforeDeadline(
         client.send("HeadlessExperimental.beginFrame", {
           frameTimeTicks: 1000 + (attempts - 1) * 33,
@@ -481,7 +481,7 @@ async function probeBeginFrameSupport(
         bytes[1] === 0x50 &&
         bytes[2] === 0x4e &&
         bytes[3] === 0x47;
-      if (isPng) break;
+      if (isPng || Date.now() + 10 >= deadline) break;
       await awaitBeforeDeadline(
         new Promise((resolveDelay) => setTimeout(resolveDelay, 10)),
         deadline,
@@ -491,7 +491,7 @@ async function probeBeginFrameSupport(
     if (!isPng) {
       throw new Error(
         `beginFrame screenshot returned ${bytes.length} bytes after ` +
-          `${BEGINFRAME_SCREENSHOT_PROBE_ATTEMPTS} attempts with signature ` +
+          `${attempts} attempts in ${Date.now() - started}ms with signature ` +
           `${bytes.length >= 4 ? bytes.subarray(0, 4).toString("hex") : "<empty>"}`,
       );
     }
