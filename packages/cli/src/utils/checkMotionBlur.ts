@@ -68,7 +68,7 @@ export function motionBlurDrafts(probe: MotionBlurProbe | null): MotionBlurDraft
         severity: "info",
         message: `${ASKED} nothing in the composition moves fast enough to blur, so it has no effect`,
         fixHint:
-          "animate an element's transform or position by 2+ px per frame, or drop data-motion-blur",
+          'animate an element\'s transform or position by 2+ px per frame; if the motion is set from a timeline callback (onUpdate, render(t)), add data-motion-blur-events="on"; otherwise drop data-motion-blur',
         time: 0,
       },
     ];

@@ -56,7 +56,13 @@ describe("motionBlurDrafts", () => {
   it("informs when blur is on but nothing moves", () => {
     expect(
       motionBlurDrafts({ state: "on", reason: null, reasonCode: null, movers: 0 }),
-    ).toMatchObject([{ code: "motion_blur_no_movers", severity: "info" }]);
+    ).toMatchObject([
+      {
+        code: "motion_blur_no_movers",
+        severity: "info",
+        fixHint: expect.stringContaining("data-motion-blur-events"),
+      },
+    ]);
   });
 });
 

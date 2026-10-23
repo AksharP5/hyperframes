@@ -171,6 +171,32 @@ export function sweep(taps: Affine[], w: number, h: number, frameW: number, fram
   return { travel, rect };
 }
 
+/** Per-tap alphas, whole 1/255 units summing to 1: canvas quantizes image alpha to them. */
+export function tapWeights(n: number): number[] {
+  const base = Math.floor(255 / n);
+  const extra = 255 - base * n;
+  return Array.from(
+    { length: n },
+    (_, i) => (base + Math.floor(((i + 1) * extra) / n) - Math.floor((i * extra) / n)) / 255,
+  );
+}
+
+const PROBE_TAPS = 16;
+
+/** Taps sized to the smear: about one per `spacing` px of travel, 2 to `max`. */
+export function autoTaps(
+  reads: Affine[],
+  w: number,
+  h: number,
+  frameW: number,
+  frameH: number,
+  spacing = 2,
+  max = 128,
+): Affine[] {
+  const { travel } = sweep(tapsFromReads(reads, PROBE_TAPS), w, h, frameW, frameH);
+  return tapsFromReads(reads, Math.min(max, Math.max(2, Math.ceil(travel / spacing))));
+}
+
 /** About one tap per `spacing` px of travel (no visible steps), at least 2, at most all. */
 export function thinTaps(taps: Affine[], travel: number, spacing = 1.5): Affine[] {
   const n = Math.min(taps.length, Math.max(2, Math.ceil(travel / spacing)));

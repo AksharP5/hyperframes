@@ -8,6 +8,7 @@
  */
 
 import { isHtmlElement } from "../domRealm";
+import { inkPad } from "./ink";
 import { individualIs3d } from "./pose";
 
 /** Under this peak speed (px per frame) a smear is invisible, so the element stays sharp. */
@@ -43,6 +44,8 @@ export interface Discovery {
   movers: HTMLElement[];
   /** Every element whose pose changes at all; their transforms are never cached. */
   dynamic: Set<Element>;
+  /** Px each mover's ink reaches past its box (shadows, glows), the largest seen. */
+  pads: Map<HTMLElement, number>;
 }
 
 // The whole inline style in one read; opacity or colour tweens only cost a rect check.
@@ -180,6 +183,10 @@ export function discoverMovers({
   const framesPerStep = frames / steps;
   const fast = new Set<HTMLElement>();
   const threeD = new Set<HTMLElement>();
+  const pads = new Map<HTMLElement, number>();
+  const measure = (el: HTMLElement): void => {
+    pads.set(el, Math.max(pads.get(el) ?? 0, inkPad(el)));
+  };
   const seeThrough = new Set<HTMLElement>();
   const alphaCache = new Map<Bitmap, boolean>();
   const sceneRect = scene.getBoundingClientRect();
@@ -212,6 +219,7 @@ export function discoverMovers({
     rects.forEach((box, j) => {
       const el = all[j];
       if (!el || edgeShift(prev[j], box) / framesPerStep < MIN_SPEED) return;
+      if (!fast.has(el)) measure(el);
       fast.add(el);
       if (
         box &&
@@ -222,7 +230,12 @@ export function discoverMovers({
         seeThrough.add(el);
     });
     // Style reads up the chain are the costly part; every 10th step is enough to see a 3D turn.
-    if (i % 10 === 0 || i === steps) for (const el of fast) if (in3d(el, scene)) threeD.add(el);
+    if (i % 10 === 0 || i === steps) {
+      for (const el of fast) {
+        if (in3d(el, scene)) threeD.add(el);
+        measure(el);
+      }
+    }
     prev = rects;
   }
 
@@ -230,5 +243,5 @@ export function discoverMovers({
     (el) => fast.has(el) && !threeD.has(el) && !seeThrough.has(el) && !optedOut(el, scene),
   );
   const movers = candidates.filter((el) => !candidates.some((o) => o !== el && o.contains(el)));
-  return { movers, dynamic };
+  return { movers, dynamic, pads };
 }

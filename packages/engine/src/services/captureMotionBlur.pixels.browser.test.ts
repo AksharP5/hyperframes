@@ -154,6 +154,27 @@ describe.skipIf(!hasBrowser)("capture motion blur pixels in Chrome", () => {
 
   const FRAME = 2 / FPS;
 
+  it("keeps a rotating or scaling mover where it is, blurred, not at the origin or gone", async (ctx) => {
+    if (!supported) ctx.skip();
+    const style = `<style>@keyframes spin{to{transform:rotate(360deg)}}@keyframes grow{to{transform:scale(3)}}</style>`;
+    const tile = (animation: string) =>
+      `<div style="position:absolute;left:120px;top:50px;width:80px;height:80px;background:#131109;box-shadow:0 8px 16px -8px rgba(19,17,9,.4);animation:${animation} 1s linear both"></div>${style}`;
+    const inked = (f: Frame): number => {
+      let n = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (px(f, x, y)[0] < 128) n++;
+      return n;
+    };
+    for (const animation of ["spin", "grow"]) {
+      const blurred = await frameOf(tile(animation), true, 0.3);
+      const sharp = await frameOf(tile(animation), false, 0.3);
+      expect(blurred.report).toMatchObject({ state: "on", movers: 1, failedFrames: 0 });
+      expect(same(blurred.frame, sharp.frame)).toBe(false);
+      expect(inked(blurred.frame)).toBeGreaterThan(inked(sharp.frame) * 0.5);
+      expect(px(blurred.frame, 160, 90)[0]).toBeLessThan(60);
+      expect(px(blurred.frame, 5, 5)).toEqual([255, 255, 255]);
+    }
+  });
+
   it("leaves a trail along the motion line where the sharp frame has hard edges", async (ctx) => {
     if (!supported) ctx.skip();
     const blurred = await frameOf(BOX, true, FRAME);
@@ -196,6 +217,36 @@ describe.skipIf(!hasBrowser)("capture motion blur pixels in Chrome", () => {
     expect(new Set(Array.from({ length: 40 }, (_, x) => px(sharp.frame, 200 + x, 110)[0]))).toEqual(
       new Set([0, 255]),
     );
+  });
+
+  it("leaves the backdrop under a see-through mover where it is", async (ctx) => {
+    if (!supported) ctx.skip();
+    const body = `<div style="position:absolute;left:0;top:0;width:${W}px;height:100px;background:repeating-linear-gradient(90deg,#000 0 2px,#fff 2px 4px)"></div>
+      <div class="box" style="left:20px;top:30px;background:transparent">
+        <div style="position:absolute;left:16px;top:16px;width:8px;height:8px;background:#f00"></div>
+      </div>`;
+    const blurred = await frameOf(body, true, FRAME);
+    const sharp = await frameOf(body, false, FRAME);
+    expect(blurred.report).toMatchObject({ state: "on", movers: 1 });
+    // Row 34 is inside the mover's box but clear of the dot it carries: its backdrop must not move.
+    let moved = 0;
+    for (let x = 0; x < W; x++) {
+      if (px(blurred.frame, x, 34).join() !== px(sharp.frame, x, 34).join()) moved++;
+    }
+    expect(moved).toBe(0);
+    expect(Math.max(...row(blurred.frame, 50))).toBeGreaterThan(120);
+  });
+
+  it("carries a glow that paints outside the mover's box along with it", async (ctx) => {
+    if (!supported) ctx.skip();
+    const body = `<div class="box" style="left:20px;top:80px;box-shadow:0 0 24px 0 #f00"></div>`;
+    const blurred = await frameOf(body, true, FRAME);
+    const sharp = await frameOf(body, false, FRAME);
+    expect(blurred.report).toMatchObject({ state: "on", movers: 1 });
+    // 10 px above the box, mid-trail: the glow is there in the sharp frame, so it must be here too.
+    const glow = (f: Frame): number => Math.max(...row(f, 70).slice(120, 200));
+    expect(glow(sharp.frame)).toBeGreaterThan(40);
+    expect(glow(blurred.frame)).toBeGreaterThan(glow(sharp.frame) * 0.5);
   });
 
   it("blurs a box centred with translate around where it really is", async (ctx) => {

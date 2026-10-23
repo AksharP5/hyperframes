@@ -1,15 +1,15 @@
 /**
  * The per-frame draw: a background, then each mover's own pixels redrawn along its path.
  *
- * Each mover is cropped from a capture of the scene and drawn at every tap pose into a float
- * buffer, additive at weight 1/n: the shutter integral. Its coverage fades at the path ends, so
- * the trail needs a background without the mover (a second capture, movers hidden); falling back
- * to the sharp frame leaves thin lines looking unblurred.
+ * Each mover is cropped from a capture of the movers alone, on a transparent background, and
+ * drawn at every tap pose into a float buffer, additive at weight 1/n: the shutter integral. Its
+ * coverage fades at the path ends, so the trail goes over a background without the movers (a
+ * second capture, movers hidden).
  *
- * Image-space approximation: a mover's box contents move with it; ink outside it is not redrawn.
+ * Image-space approximation: a mover's box and the glow around it move together.
  */
 
-import { type Affine, invert, sweep, thinTaps } from "./pose";
+import { type Affine, invert, sweep, tapWeights, thinTaps } from "./pose";
 
 export interface MoverFrame {
   w: number;
@@ -74,12 +74,21 @@ export function createCompositor(width: number, height: number, dpr = 1) {
     return layer;
   };
 
-  /** Copy each mover's frame-time pixels out of `src`; false marks a mover to leave sharp. */
-  function crop(src: CanvasImageSource, movers: MoverFrame[]): boolean[] {
-    return movers.map((mover, i) => {
-      const { w, h } = mover;
+  function plan(movers: MoverFrame[]): boolean[] {
+    return movers.map(
+      (mover) =>
+        invert(mover.now) !== null &&
+        mover.w * mover.h <= maxCropArea &&
+        moves(mover, width, height),
+    );
+  }
+
+  /** Copy each kept mover's frame-time pixels out of `src`. */
+  function crop(src: CanvasImageSource, movers: MoverFrame[], kept: boolean[]): void {
+    movers.forEach((mover, i) => {
       const back = invert(mover.now);
-      if (!back || w * h > maxCropArea || !moves(mover, width, height)) return false;
+      if (!kept[i] || !back) return;
+      const { w, h } = mover;
       const c = cropLayer(i, w, h).ctx;
       c.setTransform(1, 0, 0, 1, 0, 0);
       c.globalCompositeOperation = "source-over";
@@ -94,7 +103,6 @@ export function createCompositor(width: number, height: number, dpr = 1) {
         dpr * back.f,
       );
       c.drawImage(src, 0, 0, width, height);
-      return true;
     });
   }
 
@@ -114,11 +122,12 @@ export function createCompositor(width: number, height: number, dpr = 1) {
     a.globalAlpha = 1;
     a.clearRect(rx, ry, rw, rh);
     a.globalCompositeOperation = "lighter";
-    a.globalAlpha = 1 / taps.length;
-    for (const m of taps) {
+    const weights = tapWeights(taps.length);
+    taps.forEach((m, k) => {
+      a.globalAlpha = weights[k] ?? 0;
       a.setTransform(dpr * m.a, dpr * m.b, dpr * m.c, dpr * m.d, dpr * m.e, dpr * m.f);
       a.drawImage(layer.canvas, 0, 0, w * dpr, h * dpr, 0, 0, w, h);
-    }
+    });
     out.drawImage(accum.canvas, rx, ry, rw, rh, rx, ry, rw, rh);
     return taps.length;
   }
@@ -148,5 +157,5 @@ export function createCompositor(width: number, height: number, dpr = 1) {
     return stats;
   }
 
-  return { crop, draw };
+  return { plan, crop, draw };
 }

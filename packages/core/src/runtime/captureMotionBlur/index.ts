@@ -1,7 +1,7 @@
 /**
  * Capture motion blur, in preview and render. Root attributes: data-motion-blur="on"|"off",
- * -shutter (0–720°, default 180), -samples (2–64, default 16), -events="on" (run timeline
- * callbacks at sub-frame samples). PAGE_MOTION_BLUR_OFF_GLOBAL (engine blur, or a preview that
+ * -shutter (0–720°, default 180), -samples (2–64; unset sizes the taps to the smear),
+ * -events="on" (run timeline callbacks at sub-frame samples). PAGE_MOTION_BLUR_OFF_GLOBAL (engine blur, or a preview that
  * could not blur) turns all off.
  *
  * Per frame: read movers' poses across the shutter (seeks, no paint), capture the root and crop
@@ -36,7 +36,14 @@ import {
 import { swallow } from "../diagnostics";
 import { createCompositor, type MoverFrame } from "./composite";
 import { discoverMovers } from "./discover";
-import { type Affine, createPoseReader, IDENTITY, tapsFromReads } from "./pose";
+import {
+  type Affine,
+  autoTaps,
+  createPoseReader,
+  IDENTITY,
+  tapsFromReads,
+  translate,
+} from "./pose";
 
 export interface CaptureMotionBlurHost {
   root: HTMLElement;
@@ -52,7 +59,7 @@ export interface CaptureMotionBlurHost {
 
 interface Config {
   shutterDeg: number;
-  samples: number;
+  samples: number | null;
   events: boolean;
 }
 
@@ -82,15 +89,19 @@ type CompositeWindow = Window & {
   __hf_page_composite_resolve?: () => boolean;
 };
 
-/** Marks a mover hidden for the background capture; set only between a frame's two paints. */
+/** Marks a mover hidden for the background capture. */
 const HIDE_ATTR = "data-hf-motion-blur-hide";
+/** On the root while the movers alone are captured; the movers carry MOVER_ATTR. */
+const ONLY_ATTR = "data-hf-motion-blur-only";
+const MOVER_ATTR = "data-hf-motion-blur-mover";
 
 interface Job {
   seq: number;
   els: HTMLElement[];
   frames: MoverFrame[];
-  /** Which movers were cropped (null until the first capture of this frame). */
-  kept: boolean[] | null;
+  kept: boolean[];
+  /** What the next paint captures: the sharp frame, the movers alone, or the background. */
+  phase: "sharp" | "movers" | "background";
   /** Engine frames wait for a release: video frames are injected after the seek. */
   armed: boolean;
   /** The paint wait starts on arming, so slow video injection cannot time a frame out unseen. */
@@ -118,7 +129,9 @@ function readConfig(root: HTMLElement): Config | null {
   };
   return {
     shutterDeg: clamp(num("data-motion-blur-shutter", 180), 0, 720),
-    samples: Math.round(clamp(num("data-motion-blur-samples", 16), 2, 64)),
+    samples: root.hasAttribute("data-motion-blur-samples")
+      ? Math.round(clamp(num("data-motion-blur-samples", 16), 2, 64))
+      : null,
     events: root.getAttribute("data-motion-blur-events") === "on",
   };
 }
@@ -190,9 +203,16 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
   // Hides movers for the background capture without touching author or GSAP opacity.
   const hideRule = document.createElement("style");
   hideRule.setAttribute("data-hf-ignore", "");
-  hideRule.textContent = `[${HIDE_ATTR}] { opacity: 0 !important; }`;
+  hideRule.textContent = [
+    `[${HIDE_ATTR}] { opacity: 0 !important; }`,
+    // The root stays visible: a rotated or scaled mover under a hidden root is captured at the origin, untransformed.
+    `[${ONLY_ATTR}] { background: none !important; border-color: transparent !important; box-shadow: none !important; outline-color: transparent !important; }`,
+    `[${ONLY_ATTR}]::before, [${ONLY_ATTR}]::after, [${ONLY_ATTR}] * { visibility: hidden !important; }`,
+    `[${ONLY_ATTR}] [${MOVER_ATTR}], [${ONLY_ATTR}] [${MOVER_ATTR}] * { visibility: visible !important; }`,
+  ].join("\n");
 
   let movers: HTMLElement[] = [];
+  let pads = new Map<HTMLElement, number>();
   let reader: ReturnType<typeof createPoseReader> | null = null;
   let pending: Job | null = null;
   // While a frame is in flight (two paints), newer requests collapse into the latest one.
@@ -212,8 +232,6 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
   let faceNow: () => boolean = () => false;
   const loggedBackstops = new Set<string>();
   let wrapped = false;
-  // The output still shows the last frame of the previous wrap until this one draws.
-  let staleOutput = false;
   // Once the engine drives frames, paused-style requests come from the transport, not a user.
   let rendering = false;
 
@@ -231,8 +249,10 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
       src.after(out);
       document.head.append(hideRule);
     });
+    // The output holds the last frame of the previous wrap: blank until this wrap draws its own.
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    octx.clearRect(0, 0, out.width, out.height);
     wrapped = true;
-    staleOutput = true;
   }
 
   /** Back to plain DOM: drop any frame in flight, put the root where it was. */
@@ -256,8 +276,6 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
   }
 
   const seek = (t: number): void => host.seek(t, !config.events);
-  // The scan walks the whole timeline: callbacks must not fire (or leave their effects) there.
-  const scanSeek = (t: number): void => host.seek(t, true);
 
   function discover(restoreTo: number): void {
     scannedTimeline = host.timeline();
@@ -268,13 +286,14 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
       scene: root,
       durationSeconds: duration,
       fps: host.fps,
-      seek: scanSeek,
+      seek,
       onStep: (i, steps) => defects.sample(i, steps, (i / steps) * duration),
     });
-    scanSeek(restoreTo);
+    seek(restoreTo);
     scanDefect = defects.result();
     faceNow = defects.facesNow;
     movers = found.movers;
+    pads = found.pads;
     reader = createPoseReader(root, found.dynamic);
     scanMs = Math.round(performance.now() - s0);
   }
@@ -298,12 +317,23 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
     }
     seek(t);
     r.reset();
-    const result = visible.map((el, i) => ({
-      w: el.offsetWidth,
-      h: el.offsetHeight,
-      now: r.pose(el),
-      taps: tapsFromReads(poses[i] ?? [IDENTITY], config.samples),
-    }));
+    const result = visible.map((el, i) => {
+      // The mover's ink box: its own box grown by the glow and shadow that paint outside it.
+      const pad = pads.get(el) ?? 0;
+      const w = el.offsetWidth + 2 * pad;
+      const h = el.offsetHeight + 2 * pad;
+      const grow = (m: Affine): Affine => translate(m, -pad, -pad);
+      const reads = (poses[i] ?? [IDENTITY]).map(grow);
+      return {
+        w,
+        h,
+        now: grow(r.pose(el)),
+        taps:
+          config.samples === null
+            ? autoTaps(reads, w, h, width, height)
+            : tapsFromReads(reads, config.samples),
+      };
+    });
     r.reset();
     return { els: visible, frames: result };
   }
@@ -313,7 +343,24 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
     sctx.drawElementImage(root, 0, 0);
   };
   const reveal = (job: Job): void => {
-    for (const el of job.els) el.removeAttribute(HIDE_ATTR);
+    root.removeAttribute(ONLY_ATTR);
+    for (const el of job.els) {
+      el.removeAttribute(HIDE_ATTR);
+      el.removeAttribute(MOVER_ATTR);
+    }
+  };
+  /** Show the kept movers alone, on a transparent background, for the next paint. */
+  const isolate = (job: Job): void => {
+    root.setAttribute(ONLY_ATTR, "");
+    job.els.forEach((el, i) => job.kept[i] && el.setAttribute(MOVER_ATTR, ""));
+  };
+  /** Swap to the background capture: kept movers hidden, the rest shown as usual. */
+  const hideMovers = (job: Job): void => {
+    root.removeAttribute(ONLY_ATTR);
+    job.els.forEach((el, i) => {
+      el.removeAttribute(MOVER_ATTR);
+      if (job.kept[i]) el.setAttribute(HIDE_ATTR, "");
+    });
   };
 
   /**
@@ -354,24 +401,20 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
       disable(`capture failed ${failures} times in a row`, "capture-failures", true);
   }
 
-  /** This paint's half of the frame; false when the background capture is still to come. */
+  /** This paint's capture; false when another paint is still to come for this frame. */
   function captureAndDraw(job: Job, finalStep: boolean): boolean {
     capture();
     try {
-      if (!job.kept) {
-        job.kept = compositor.crop(src, job.frames);
-        if (staleOutput) {
-          // First paint since wrapping: show this frame sharp until its trails are drawn.
-          octx.setTransform(1, 0, 0, 1, 0, 0);
-          octx.globalAlpha = 1;
-          octx.globalCompositeOperation = "copy";
-          octx.drawImage(src, 0, 0);
-          staleOutput = false;
-        }
-        if (job.kept.some(Boolean) && !finalStep) {
-          job.els.forEach((el, i) => job.kept?.[i] && el.setAttribute(HIDE_ATTR, ""));
-          return false;
-        }
+      if (job.phase === "sharp") {
+        compositor.draw(src, octx, job.frames, job.kept);
+        return true;
+      }
+      if (finalStep) throw new Error(`the ${job.phase} capture did not arrive`);
+      if (job.phase === "movers") {
+        compositor.crop(src, job.frames, job.kept);
+        hideMovers(job);
+        job.phase = "background";
+        return false;
       }
       compositor.draw(src, octx, job.frames, job.kept);
       return true;
@@ -474,7 +517,6 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
       canvas.height = Math.max(1, Math.round(height * dpr));
     }
     compositor = createCompositor(width, height, dpr);
-    staleOutput = true;
   }
 
   /** Scan when the timeline is new; true when the scan found a defect (blur is then off). */
@@ -508,6 +550,7 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
       wrap();
       const s0 = performance.now();
       const next = frames(t, engineMode ? RENDER_READS : PREVIEW_READS);
+      const kept = compositor.plan(next.frames);
       sampleMs = performance.now() - s0;
       if (pending) finishJob(pending);
       return new Promise<void>((resolve) => {
@@ -523,7 +566,8 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
           seq: mine,
           els: next.els,
           frames: next.frames,
-          kept: null,
+          kept,
+          phase: kept.some(Boolean) ? "movers" : "sharp",
           armed: !engineMode,
           startTimer,
           ms: 0,
@@ -532,6 +576,7 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
             resolve();
           },
         };
+        if (pending.phase === "movers") isolate(pending);
         if (engineMode) return;
         startTimer();
         src.requestPaint();

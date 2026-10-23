@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type Affine,
   IDENTITY,
+  autoTaps,
   corners,
   createPoseReader,
   individualIs3d,
@@ -11,6 +12,7 @@ import {
   multiply,
   parseTransform,
   sweep,
+  tapWeights,
   tapsFromReads,
   thinTaps,
   translate,
@@ -90,6 +92,34 @@ describe("taps", () => {
     expect(thinTaps(taps, 3)).toHaveLength(2);
     expect(thinTaps(taps, 15)).toHaveLength(10);
     expect(thinTaps(taps, 300)).toHaveLength(32);
+  });
+
+  it("sizes taps to the smear: about one per 2 px, so a fast move has no steps", () => {
+    const reads = [translate(IDENTITY, 0, 0), translate(IDENTITY, 200, 0)];
+    const taps = autoTaps(reads, 100, 50, 1920, 1080);
+    expect(taps.length).toBeGreaterThanOrEqual(90);
+    expect(taps.length).toBeLessThanOrEqual(105);
+    const steps = taps.slice(1).map((m, i) => m.e - (taps[i] as Affine).e);
+    expect(Math.max(...steps)).toBeLessThanOrEqual(2.3);
+  });
+
+  it("uses two taps for a move too small to show and caps a huge one", () => {
+    expect(
+      autoTaps([translate(IDENTITY, 0, 0), translate(IDENTITY, 0.5, 0)], 100, 50, 1920, 1080),
+    ).toHaveLength(2);
+    expect(
+      autoTaps([translate(IDENTITY, 0, 0), translate(IDENTITY, 5000, 0)], 100, 50, 1920, 1080),
+    ).toHaveLength(128);
+  });
+
+  it("weights taps in whole 1/255 units that sum to exactly 1, for any count", () => {
+    for (const n of [2, 3, 16, 40, 60, 80, 94, 104, 113, 127, 128, 255]) {
+      const w = tapWeights(n);
+      expect(w).toHaveLength(n);
+      const units = w.map((x) => Math.round(x * 255));
+      expect(units.reduce((s, u) => s + u, 0)).toBe(255);
+      expect(Math.max(...units) - Math.min(...units)).toBeLessThanOrEqual(1);
+    }
   });
 
   it("places a rotated box's corners", () => {
