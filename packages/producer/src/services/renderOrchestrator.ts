@@ -133,6 +133,7 @@ import {
   validateHlsRenderConfig,
 } from "./render/hlsConfig.js";
 import { createMemorySampler, type MemorySampler, updateJobStatus } from "./render/shared.js";
+import { frameCacheOptions } from "./render/frameCacheBudget.js";
 import { buildRenderErrorDetails } from "./render/cleanup.js";
 import { publishRenderFailure } from "./render/renderEventPublisher.js";
 import { EncoderInterruptedError } from "./render/encoderInterruption.js";
@@ -3551,10 +3552,7 @@ async function executeRenderPipeline(input: {
     // The byte ceiling bounds the Node LRU; Chrome receives short URLs so
     // its resource cache does not retain the corresponding inline strings.
     const createRenderVideoFrameInjector = (): BeforeCaptureHook | null =>
-      createVideoFrameInjector(frameLookup, {
-        frameDataUriCacheLimit: cfg.frameDataUriCacheLimit,
-        frameDataUriCacheBytesLimitMb: cfg.frameDataUriCacheBytesLimitMb,
-      });
+      createVideoFrameInjector(frameLookup, frameCacheOptions(cfg, workerCount));
 
     let captureCalibration:
       | {

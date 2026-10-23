@@ -55,12 +55,14 @@ export class RenderChunkValidationError extends Error {
 /** One injector per browser session: a hook reused on a fresh page can skip its first injection. */
 export function createChunkVideoFrameInjectorFactory(
   frameLookup: FrameLookupTable | Promise<FrameLookupTable> | null,
+  options?: Parameters<typeof createVideoFrameInjector>[1],
 ): () => BeforeCaptureHook | null {
-  if (!(frameLookup instanceof Promise)) return () => createVideoFrameInjector(frameLookup);
+  if (!(frameLookup instanceof Promise))
+    return () => createVideoFrameInjector(frameLookup, options);
   return () => {
     let hook: BeforeCaptureHook | null | undefined;
     return async (page, time, heldVideoTime) => {
-      hook ??= createVideoFrameInjector(await frameLookup);
+      hook ??= createVideoFrameInjector(await frameLookup, options);
       await hook?.(page, time, heldVideoTime);
     };
   };
