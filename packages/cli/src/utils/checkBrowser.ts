@@ -1,4 +1,5 @@
 import type { CheckDeadline } from "./checkDeadline.js";
+import { logCheckProgress } from "./checkProgress.js";
 import { BrowserCleanupError, closeManagedBrowser } from "../browser/launch.js";
 import { collectMotionBlurDrafts, dropMotionBlurConsoleEcho } from "./checkMotionBlur.js";
 import { checkSnapshotDirectory } from "./checkSnapshotDirectory.js";
@@ -330,7 +331,14 @@ export async function runBrowserCheck(
     drafts.push(...blur);
     const sampleLog = sampleWindow(drafts);
     const driver = createPageDriver(page, clock, sampleLog);
-    const result = await runGrid(driver, options, motion, helpers, deadline?.enter);
+    const result = await runGrid(
+      driver,
+      options,
+      motion,
+      helpers,
+      deadline?.enter,
+      logCheckProgress,
+    );
     helperSession?.stop();
     const helper = await helperOpen?.catch(() => undefined);
     const merged = helper ? mergeHelperDrafts(sampleLog, helper.sampleLog) : drafts;

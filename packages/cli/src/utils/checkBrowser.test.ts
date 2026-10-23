@@ -169,6 +169,8 @@ function mountCanvasFixture(inner = ""): void {
 }
 
 it("carries raw browser geometry through the page driver and pipeline", async () => {
+  // Vitest's console reads Date.now, which would spend a mocked reading below.
+  vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(Date, "now")
     .mockReturnValueOnce(100)
     .mockReturnValueOnce(160)
@@ -310,6 +312,7 @@ it("runs the dense overlap grid in page tasks of at most 8 samples, keeping each
     evaluateCalls += 1;
     return Reflect.apply(evaluate, page, args);
   });
+  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
   const denseAudits: number[] = [];
   const injectScript = page.addScriptTag;
   page.addScriptTag = vi.fn(async (arg: { content: string }) => {
@@ -340,6 +343,10 @@ it("runs the dense overlap grid in page tasks of at most 8 samples, keeping each
     runAuditGrid,
   );
 
+  const lines = stderr.mock.calls.map((call) => String(call[0]));
+  expect(lines).toContain("[hyperframes] check: samples 1/1");
+  const batches = Math.ceil(denseAudits.length / 8);
+  expect(lines).toContain(`[hyperframes] check: overlap ${batches}/${batches}`);
   expect(denseAudits.length).toBeGreaterThan(10);
   const tasks = new Map<number, number>();
   for (const calls of denseAudits) tasks.set(calls, (tasks.get(calls) ?? 0) + 1);

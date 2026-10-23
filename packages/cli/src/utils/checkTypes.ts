@@ -1,4 +1,5 @@
 import type { CheckDeadline } from "./checkDeadline.js";
+import type { CheckProgress } from "./checkProgress.js";
 import type { ProjectLintResult } from "./lintProject.js";
 import type { LayoutIssue, LayoutOverflow, LayoutRect } from "./layoutAudit.js";
 import type { Canvas, MotionFrame } from "./motionAudit.js";
@@ -327,6 +328,7 @@ export type RunAuditGrid = (
   motion: MotionSpecResolution,
   helpers?: Promise<CheckAuditDriver[]>,
   enter?: (phase: CheckPhase) => void,
+  report?: CheckProgress,
 ) => Promise<CheckBrowserResult>;
 
 export interface CheckSection<T extends CheckFinding = CheckFinding> {
