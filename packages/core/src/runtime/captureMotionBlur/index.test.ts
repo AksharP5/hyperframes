@@ -6,6 +6,7 @@ import {
   paintCaptureMotionBlur,
   releaseCaptureMotionBlurFrame,
   resetCaptureMotionBlurForTests,
+  setFilterFallbackForTests,
   trackAcceleratedCanvases,
 } from ".";
 
@@ -93,6 +94,7 @@ function host(
 const captureCanvas = (root: HTMLElement) => root.parentElement as HTMLCanvasElement;
 
 beforeEach(() => {
+  setFilterFallbackForTests(false);
   contexts = [];
   vi.spyOn(console, "info").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -100,6 +102,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetCaptureMotionBlurForTests();
+  setFilterFallbackForTests(true);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -1580,5 +1583,116 @@ describe("paint timeouts", () => {
     captureCanvas(root).dispatchEvent(new Event("paint"));
     await done;
     expect(contexts[0]?.drawElementImage).toHaveBeenCalled();
+  });
+});
+
+describe("filter fallback", () => {
+  beforeEach(() => setFilterFallbackForTests(true));
+
+  /** A root whose opacity tweens late, which a scan sees and capture cannot draw. */
+  function fadingRoot(fade: { on: boolean }) {
+    const { root, el, h } = movingHost();
+    const slide = h.seek;
+    const seek = vi.fn((t: number, quiet: boolean) => {
+      slide(t, quiet);
+      root.style.opacity = fade.on && t > 0.5 ? "0.5" : "1";
+    });
+    return { root, el, h: { ...h, seek } };
+  }
+
+  it("draws with filters where html-in-canvas is missing, and says why", () => {
+    const { root, el, h } = movingHost();
+    initCaptureMotionBlur(h);
+    expect(win.__hfMotionBlur?.report()).toMatchObject({
+      state: "on",
+      tier: "filter",
+      reasonCode: "unsupported-browser",
+    });
+    void paintCaptureMotionBlur(0.5, PLAY);
+    expect(el.style.filter).toMatch(/url\("?#hf-mb-0"?\)/);
+    expect(root.parentElement).toBe(document.body);
+    expect(document.querySelectorAll("feOffset")).toHaveLength(32);
+    expect(document.querySelectorAll("feComposite")).toHaveLength(31);
+    expect(document.querySelectorAll("feGaussianBlur")).toHaveLength(1);
+  });
+
+  it("stays off when the renderer turned blur off", () => {
+    win.__HF_PAGE_MOTION_BLUR_OFF__ = "hdr-render";
+    const { el, h } = movingHost();
+    initCaptureMotionBlur(h);
+    expect(win.__hfMotionBlur?.report()).toMatchObject({
+      state: "off",
+      reasonCode: "renderer-off",
+    });
+    void paintCaptureMotionBlur(0.5, PLAY);
+    expect(el.style.filter).toBe("");
+  });
+
+  it("takes over from capture when a scan finds a defect, keeping the reason", () => {
+    installHtmlInCanvas();
+    const { root, el, h } = fadingRoot({ on: true });
+    initCaptureMotionBlur(h);
+    void paintCaptureMotionBlur(0.2, { engineMode: true });
+    expect(win.__hfMotionBlur?.report()).toMatchObject({
+      state: "on",
+      tier: "filter",
+      reasonCode: "root-opacity",
+    });
+    expect(root.parentElement).toBe(document.body);
+    expect(el.style.filter).toMatch(/url\("?#hf-mb-0"?\)/);
+  });
+
+  it("falls back after repeated capture failures in preview", async () => {
+    installHtmlInCanvas();
+    const { root, el, h } = movingHost();
+    initCaptureMotionBlur(h);
+    for (let i = 0; i < 3; i++) {
+      const done = paintCaptureMotionBlur(i / 30, PLAY);
+      captureContext()?.drawElementImage.mockImplementation(() => {
+        throw new Error("No cached paint record");
+      });
+      captureCanvas(root).dispatchEvent(new Event("paint"));
+      await done;
+    }
+    void paintCaptureMotionBlur(0.5, PLAY);
+    expect(win.__hfMotionBlur?.report()).toMatchObject({
+      tier: "filter",
+      reasonCode: "capture-failures",
+    });
+    expect(el.style.filter).toMatch(/url\("?#hf-mb-\d+"?\)/);
+  });
+
+  it("tries capture again when the scene is initialised after the cause is gone", () => {
+    installHtmlInCanvas();
+    const fade = { on: true };
+    const { root, h } = fadingRoot(fade);
+    initCaptureMotionBlur(h);
+    void paintCaptureMotionBlur(0.2, { engineMode: true });
+    expect(win.__hfMotionBlur?.report().tier).toBe("filter");
+    fade.on = false;
+    initCaptureMotionBlur(h);
+    void paintCaptureMotionBlur(0.2, { engineMode: true });
+    expect(win.__hfMotionBlur?.report()).toMatchObject({ tier: "capture", reasonCode: null });
+    expect(root.parentElement).toBe(captureCanvas(root));
+  });
+
+  it("keeps the mover's own filter under the smear, and puts it back when paused", () => {
+    const { el, h } = movingHost();
+    el.style.filter = "drop-shadow(0px 0px 4px red)";
+    initCaptureMotionBlur(h);
+    void paintCaptureMotionBlur(0.5, PLAY);
+    expect(el.style.filter).toContain("drop-shadow");
+    expect(el.style.filter).toMatch(/url\("?#hf-mb-0"?\)/);
+    expect(paintCaptureMotionBlur(0.5)).toBeNull();
+    expect(el.style.filter).toBe("drop-shadow(0px 0px 4px red)");
+  });
+
+  it("removes its filters and its SVG on teardown", () => {
+    const { el, h } = movingHost();
+    initCaptureMotionBlur(h);
+    void paintCaptureMotionBlur(0.5, PLAY);
+    resetCaptureMotionBlurForTests();
+    expect(el.style.filter).toBe("");
+    expect(document.querySelectorAll("filter")).toHaveLength(0);
   });
 });

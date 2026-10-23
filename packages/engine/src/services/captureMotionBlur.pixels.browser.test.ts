@@ -266,7 +266,7 @@ describe.skipIf(!hasBrowser)("capture motion blur pixels in Chrome", () => {
     if (!supported) ctx.skip();
     const blurred = await frameOf(FLIP, true, 0.4);
     const sharp = await frameOf(FLIP, false, 0.4);
-    expect(blurred.report).toMatchObject({ state: "off", reasonCode: "backface-visibility" });
+    expect(blurred.report).toMatchObject({ tier: "filter", reasonCode: "backface-visibility" });
     expect(Buffer.from(blurred.frame.data).equals(Buffer.from(sharp.frame.data))).toBe(true);
   });
 
@@ -275,7 +275,7 @@ describe.skipIf(!hasBrowser)("capture motion blur pixels in Chrome", () => {
     const sharp = await frameOf(BOX + card(""), false, 0.4);
     for (const body of [BOX + card("animation: hide 1s both"), BOX + card("") + WAAPI]) {
       const blurred = await frameOf(body, true, 0.4);
-      expect(blurred.report).toMatchObject({ state: "off", reasonCode: "backface-visibility" });
+      expect(blurred.report).toMatchObject({ tier: "filter", reasonCode: "backface-visibility" });
       expect(same(blurred.frame, sharp.frame)).toBe(true);
     }
   });

@@ -36,48 +36,12 @@ import {
 import { swallow } from "../diagnostics";
 import { createCompositor, type MoverFrame } from "./composite";
 import { discoverMovers } from "./discover";
-import {
-  type Affine,
-  autoTaps,
-  createPoseReader,
-  IDENTITY,
-  tapsFromReads,
-  translate,
-} from "./pose";
+import { createFilterTier } from "./filterTier";
+import { readMoverFrames } from "./frames";
+import { createPoseReader } from "./pose";
+import type { CaptureMotionBlurHost, Config, Report, Tier } from "./tier";
 
-export interface CaptureMotionBlurHost {
-  root: HTMLElement;
-  fps: number;
-  durationSeconds: () => number;
-  /** The bound root timeline; movers are re-scanned when it changes. */
-  timeline: () => unknown;
-  now: () => number;
-  /** Seek the timeline and adapters (not media) for a pose read. */
-  seek: (t: number, suppressEvents: boolean) => void;
-  ignoreMutations?: (write: () => void) => void;
-}
-
-interface Config {
-  shutterDeg: number;
-  samples: number | null;
-  events: boolean;
-}
-
-interface Report {
-  state: "on" | "off";
-  reason: string | null;
-  reasonCode: string | null;
-  movers: number;
-  /** The blurred elements, as `tag#id.class`, for diagnosing what was (not) picked. */
-  moverNames: string[];
-  /** One-time cost of finding the movers, in ms. */
-  scanMs: number;
-  shutterDeg: number;
-  frames: number;
-  meanMs: number;
-  failures: number;
-  failedFrames: number;
-}
+export type { CaptureMotionBlurHost };
 
 type DrawElementContext = CanvasRenderingContext2D & {
   drawElementImage: (el: Element, x: number, y: number) => unknown;
@@ -299,43 +263,19 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
   }
 
   function frames(t: number, reads: number): { els: HTMLElement[]; frames: MoverFrame[] } {
-    const r = reader;
-    if (!r) return { els: [], frames: [] };
-    const visible = movers.filter(
-      (el) =>
-        typeof el.checkVisibility !== "function" ||
-        el.checkVisibility({ visibilityProperty: true }),
-    );
-    const shutter = config.shutterDeg / 360 / host.fps;
-    if (visible.length === 0 || shutter <= 0) return { els: [], frames: [] };
-    const start = t - shutter / 2;
-    const poses = visible.map((): Affine[] => []);
-    for (let j = 0; j < reads; j++) {
-      seek(Math.max(0, start + (j / (reads - 1)) * shutter));
-      r.reset();
-      visible.forEach((el, i) => poses[i]?.push(r.pose(el)));
-    }
-    seek(t);
-    r.reset();
-    const result = visible.map((el, i) => {
-      // The mover's ink box: its own box grown by the glow and shadow that paint outside it.
-      const pad = pads.get(el) ?? 0;
-      const w = el.offsetWidth + 2 * pad;
-      const h = el.offsetHeight + 2 * pad;
-      const grow = (m: Affine): Affine => translate(m, -pad, -pad);
-      const reads = (poses[i] ?? [IDENTITY]).map(grow);
-      return {
-        w,
-        h,
-        now: grow(r.pose(el)),
-        taps:
-          config.samples === null
-            ? autoTaps(reads, w, h, width, height)
-            : tapsFromReads(reads, config.samples),
-      };
+    if (!reader) return { els: [], frames: [] };
+    return readMoverFrames({
+      movers,
+      reader,
+      seek,
+      t,
+      reads,
+      shutterSeconds: config.shutterDeg / 360 / host.fps,
+      taps: config.samples,
+      pads,
+      frameW: width,
+      frameH: height,
     });
-    r.reset();
-    return { els: visible, frames: result };
   }
 
   const capture = (): void => {
@@ -592,6 +532,7 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
     const mean = timings.length ? timings.reduce((s, x) => s + x, 0) / timings.length : 0;
     return {
       state: disabled ? "off" : "on",
+      tier: disabled ? null : "capture",
       reason: disabled,
       reasonCode: disabledCode,
       movers: movers.length,
@@ -634,6 +575,9 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
     },
     teardown,
     suspend: unwrap,
+    /** Why capture turned itself off (a scan defect, repeated capture failures), if it did. */
+    defect: (): CaptureDefect | null =>
+      disabled ? { code: disabledCode ?? "capture-failures", reason: disabled } : null,
     report,
     busy: (): boolean => pending !== null,
     rediscover: () => {
@@ -643,8 +587,13 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
   };
 }
 
-type Instance = ReturnType<typeof createInstance>;
-let instance: Instance | null = null;
+type Active = Tier & { defect?: () => CaptureDefect | null };
+let instance: Active | null = null;
+let activeHost: CaptureMotionBlurHost | null = null;
+let activeConfig: Config | null = null;
+/** The filter tier stands in for capture; a scene re-init tries capture again. */
+let onFallback = false;
+let fallbackEnabled = true;
 let suspended = false;
 let priorResolver: (() => boolean) | null = null;
 let ourResolver: (() => boolean) | null = null;
@@ -662,38 +611,89 @@ export function initCaptureMotionBlur(host: CaptureMotionBlurHost): void {
     delete w.__hfMotionBlur;
   }
   if (!config) return;
+  if (instance && onFallback) {
+    instance.teardown();
+    instance = null;
+    onFallback = false;
+  }
   if (instance) {
     instance.rediscover();
     return;
   }
+  activeHost = host;
+  activeConfig = config;
   const form = htmlInCanvasForm();
   const why = unsupported(host.root);
   if (!form || why) {
-    const reason = why?.reason ?? null;
-    console.info(`[motion-blur] off: ${reason} (Chrome ${chromeMajor() ?? "unknown"})`);
-    const report = (): Report => ({
-      state: "off",
-      reason,
-      reasonCode: why?.code ?? null,
-      movers: 0,
-      moverNames: [],
-      scanMs: 0,
-      shutterDeg: config.shutterDeg,
-      frames: 0,
-      meanMs: 0,
-      failures: 0,
-      failedFrames: 0,
-    });
-    w.__hfMotionBlur = { report, probe: report, suspend: suspendCaptureMotionBlur };
-    return;
+    if (fallbackEnabled && why?.code !== "renderer-off") startFallback(host, config, why);
+    else standDown(w, config, why);
+  } else {
+    instance = createInstance(host, config, form);
   }
-  instance = createInstance(host, config, form);
-  const current = instance;
+  bindApi(w, config);
+}
+
+function startFallback(
+  host: CaptureMotionBlurHost,
+  config: Config,
+  why: CaptureDefect | null,
+): void {
+  const reason = why ?? {
+    code: "unsupported-browser",
+    reason: "html-in-canvas (drawElementImage) is unavailable in this browser",
+  };
+  instance = createFilterTier(host, config, reason);
+  onFallback = true;
+  console.info(
+    `[motion-blur] filter fallback: ${reason.reason} (Chrome ${chromeMajor() ?? "unknown"})`,
+  );
+}
+
+/** Blur is off for good on this page (the renderer said so): report why, draw nothing. */
+function standDown(w: CompositeWindow, config: Config, why: CaptureDefect | null): void {
+  console.info(`[motion-blur] off: ${why?.reason ?? null} (Chrome ${chromeMajor() ?? "unknown"})`);
+  const report = (): Report => offReport(config, why);
+  w.__hfMotionBlur = { report, probe: report, suspend: suspendCaptureMotionBlur };
+}
+
+function offReport(config: Config, why: CaptureDefect | null): Report {
+  return {
+    state: "off",
+    tier: null,
+    reason: why?.reason ?? null,
+    reasonCode: why?.code ?? null,
+    movers: 0,
+    moverNames: [],
+    scanMs: 0,
+    shutterDeg: config.shutterDeg,
+    frames: 0,
+    meanMs: 0,
+    failures: 0,
+    failedFrames: 0,
+  };
+}
+
+function bindApi(w: CompositeWindow, config: Config): void {
+  if (!instance) return;
   w.__hfMotionBlur = {
-    report: () => current.report(),
-    probe: () => current.probe(),
+    report: () => instance?.report() ?? offReport(config, null),
+    probe: () => {
+      instance?.probe();
+      settleTier();
+      return instance?.probe() ?? offReport(config, null);
+    },
     suspend: suspendCaptureMotionBlur,
   };
+}
+
+/** A scan that found a defect turned capture off for this timeline: draw with filters instead. */
+function settleTier(): void {
+  const defect = instance?.defect?.();
+  if (!fallbackEnabled || !instance || !defect || !activeHost || !activeConfig) return;
+  instance.teardown();
+  instance = createFilterTier(activeHost, activeConfig, defect);
+  onFallback = true;
+  console.info(`[motion-blur] filter fallback: ${defect.reason}`);
 }
 
 /**
@@ -710,7 +710,12 @@ export function paintCaptureMotionBlur(
   if (!instance || suspended) return null;
   const engineMode = options?.engineMode === true;
   if (!engineMode && !options?.playing && instance.rest()) return null;
-  const done = instance.paint(t, engineMode);
+  let done = instance.paint(t, engineMode);
+  if (instance.defect?.()) {
+    settleTier();
+    if (!engineMode && !options?.playing && instance.rest()) return null;
+    done = instance.paint(t, engineMode);
+  }
   // Nothing in flight (nothing moves, or blur turned off): leave the engine's composite step idle.
   if (engineMode && instance.busy()) armPageComposite();
   return done;
@@ -754,7 +759,15 @@ function suspendCaptureMotionBlur(): void {
 export function resetCaptureMotionBlurForTests(): void {
   instance?.teardown();
   instance = null;
+  activeHost = null;
+  activeConfig = null;
+  onFallback = false;
   suspended = false;
   priorResolver = null;
   ourResolver = null;
+}
+
+/** Test-only: judge the capture tier alone, without the filter fallback taking over. */
+export function setFilterFallbackForTests(on: boolean): void {
+  fallbackEnabled = on;
 }
