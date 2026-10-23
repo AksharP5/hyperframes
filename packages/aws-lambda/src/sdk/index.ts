@@ -45,5 +45,12 @@ export {
   prebuiltVideoImage,
   type ReleaseAssetManifest,
 } from "./prebuiltHandler.js";
+export {
+  ensureEcrRepository,
+  type EnsureEcrRepositoryOptions,
+  type PushedImage,
+  pushImageToEcr,
+  type PushImageToEcrOptions,
+} from "./pushImageToEcr.js";
 export type { SerializableDistributedRenderConfig } from "../events.js";
 export type { DistributedFormat } from "../formatExtension.js";
