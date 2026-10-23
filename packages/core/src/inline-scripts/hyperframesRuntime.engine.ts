@@ -9,6 +9,8 @@ export type HyperframesRuntimeBuildOptions = {
   minify?: boolean;
 };
 
+export const RUNTIME_ESBUILD_DEFINE = { console: "globalThis.console" };
+
 function applyDefaultParityMode(script: string, enabled: boolean): string {
   const parityFlagPattern = /var\s+_parityModeEnabled\s*=\s*(?:true|false)\s*;/;
   if (!parityFlagPattern.test(script)) return script;
@@ -41,6 +43,7 @@ export function buildHyperframesRuntimeScript(
     target: ["es2020"],
     minify: options.minify ?? true,
     legalComments: "none",
+    define: RUNTIME_ESBUILD_DEFINE,
   });
   let script = result.outputFiles[0]?.text ?? "";
   if (typeof options.defaultParityMode === "boolean") {
