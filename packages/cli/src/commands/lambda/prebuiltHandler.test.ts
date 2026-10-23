@@ -15,6 +15,7 @@ function setup(body: Buffer = ZIP) {
   dirs.push(root);
   const templatePath = join(root, "template.yaml");
   writeFileSync(templatePath, "CodeUri: handler.zip\n");
+  writeFileSync(join(root, "video-function.yaml"), "PackageType: Image\n");
   const downloads: string[] = [];
   const logs: string[] = [];
   const deps: StageDeps = {
@@ -57,6 +58,7 @@ describe("stagePrebuiltHandler", () => {
     expect(dir).toBe(join(deps.cacheDir, `9.8.7-${SHA}`));
     expect(readFileSync(join(dir, "handler.zip"))).toEqual(ZIP);
     expect(readFileSync(join(dir, "template.yaml"), "utf-8")).toBe("CodeUri: handler.zip\n");
+    expect(readFileSync(join(dir, "video-function.yaml"), "utf-8")).toBe("PackageType: Image\n");
 
     expect(await stagePrebuiltHandler(deps)).toBe(dir);
     expect(downloads).toEqual([URL]);

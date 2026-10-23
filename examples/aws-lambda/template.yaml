@@ -3,7 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Description: >-
   HyperFrames distributed rendering — Step Functions standard workflow with
   one Lambda function handling Plan, RenderChunk (fan-out via Map state),
-  and Assemble. One S3 bucket, alarms for runaway concurrency, Lambda
+  and Assemble, or Plan and RenderChunk on an optional arm64 image. One S3 bucket, alarms for runaway concurrency, Lambda
   errors, and Step Functions execution failures.
 
   Built from the handler ZIP at packages/aws-lambda/dist/handler.zip.
@@ -64,29 +64,29 @@ Parameters:
       chunks than expected; an alarm at 10× the typical workload
       protects against billing surprises.
 
+  VideoImageUri:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional arm64 image (`<ECR repository URI>@sha256:<digest>`) that runs the
+      plan and renders the chunks. Audio and assemble stay on the x86 render
+      function. Empty: one x86 function does it all.
+
 Conditions:
   HasReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, -1]]
+  HasVideoFunction: !Not [!Equals [!Ref VideoImageUri, ""]]
 
 Globals:
   Function:
-    Runtime: nodejs22.x
     MemorySize: !Ref LambdaMemoryMb
     Timeout: !Ref LambdaTimeoutSec
-    # x86_64 is required for @sparticuz/chromium — its prebuilt
-    # Chromium ships x86_64-only. Adopters who switch to a custom
-    # ARM-built chrome-headless-shell can change this to `arm64`, but
-    # the default ZIP build will fail to launch on Graviton.
-    Architectures: [x86_64]
     # Lambda function-level X-Ray tracing. The state machine already
     # has Tracing.Enabled: true; without this, X-Ray traces would
     # terminate at the Step Functions → Lambda boundary instead of
     # following into per-function spans.
     Tracing: Active
-    # Cost-allocation tags. Setting these at the Globals level applies
-    # to every AWS::Serverless::Function in the template — there's
-    # only one today, but the contract is portable to multi-function
-    # variants. Bucket + state-machine carry the same tags resource-
-    # locally because Globals only covers functions.
+    # Cost-allocation tags for the render function. Bucket, state machine and
+    # video-function.yaml carry the same tags themselves; Globals covers only SAM functions.
     Tags:
       Project: !Ref ProjectName
       HyperFramesComponent: lambda-renderer
@@ -149,14 +149,18 @@ Resources:
       Description: >-
         HyperFrames distributed render handler. Dispatches on event.Action.
       Handler: handler.handler
+      Runtime: nodejs22.x
+      # The ZIP's @sparticuz/chromium ships x86_64 Chrome only; video-function.yaml runs chunks on arm64.
+      Architectures: [x86_64]
       # Local path is resolved by `sam build` + `sam deploy --resolve-s3`
       # (or `--s3-bucket`); the resulting CodeUri rewrites to s3://.
       CodeUri: ../../packages/aws-lambda/dist/handler.zip
       PackageType: Zip
+      # With a video function the chunks run there, so the reservation moves with them.
       ReservedConcurrentExecutions: !If
-        - HasReservedConcurrency
-        - !Ref ReservedConcurrency
+        - HasVideoFunction
         - !Ref AWS::NoValue
+        - !If [HasReservedConcurrency, !Ref ReservedConcurrency, !Ref AWS::NoValue]
       EphemeralStorage:
         Size: 10240
       Environment:
@@ -183,6 +187,27 @@ Resources:
       # would be overscope (`logs:*` on `*`, including DeleteLogGroup +
       # CreateExportTask). Reference templates shouldn't leak overbroad
       # IAM into adopters' accounts.
+
+  # ── Optional arm64 chunk renderer: the same handler as a container image ──
+  # Nested: `sam deploy` demands an image repository for any image function in this template.
+  VideoFunctionStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: HasVideoFunction
+    Properties:
+      TemplateURL: video-function.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        ImageUri: !Ref VideoImageUri
+        RenderBucket: !Ref RenderBucket
+        MemorySize: !Ref LambdaMemoryMb
+        Timeout: !Ref LambdaTimeoutSec
+        ReservedConcurrency: !Ref ReservedConcurrency
+        ChromeSource: !Ref ChromeSource
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: HyperFramesComponent
+          Value: lambda-renderer
 
   # ── CloudWatch log group for the state machine ──────────────────────────
   # SAM doesn't auto-create one when `LoggingConfiguration` is set, so we
@@ -249,7 +274,13 @@ Resources:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke
             Parameters:
-              FunctionName: !GetAtt RenderFunction.Arn
+              # Chunks must run the ffmpeg build the plan records, so the plan runs where they do.
+              FunctionName:
+                !If [
+                  HasVideoFunction,
+                  !GetAtt VideoFunctionStack.Outputs.FunctionArn,
+                  !GetAtt RenderFunction.Arn,
+                ]
               Payload:
                 Action: plan
                 PlanProtocol: v1
@@ -308,7 +339,12 @@ Resources:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke
             Parameters:
-              FunctionName: !GetAtt RenderFunction.Arn
+              FunctionName:
+                !If [
+                  HasVideoFunction,
+                  !GetAtt VideoFunctionStack.Outputs.FunctionArn,
+                  !GetAtt RenderFunction.Arn,
+                ]
               Payload:
                 Action: plan
                 PlanProtocol: v2
@@ -424,7 +460,12 @@ Resources:
                   Type: Task
                   Resource: arn:aws:states:::lambda:invoke
                   Parameters:
-                    FunctionName: !GetAtt RenderFunction.Arn
+                    FunctionName:
+                      !If [
+                        HasVideoFunction,
+                        !GetAtt VideoFunctionStack.Outputs.FunctionArn,
+                        !GetAtt RenderFunction.Arn,
+                      ]
                     Payload:
                       Action: renderChunk
                       PlanProtocol: v1
@@ -542,7 +583,12 @@ Resources:
                           Type: Task
                           Resource: arn:aws:states:::lambda:invoke
                           Parameters:
-                            FunctionName: !GetAtt RenderFunction.Arn
+                            FunctionName:
+                              !If [
+                                HasVideoFunction,
+                                !GetAtt VideoFunctionStack.Outputs.FunctionArn,
+                                !GetAtt RenderFunction.Arn,
+                              ]
                             Payload:
                               Action: renderChunk
                               PlanProtocol: v2
@@ -725,7 +771,13 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: lambda:InvokeFunction
-                Resource: !GetAtt RenderFunction.Arn
+                Resource:
+                  - !GetAtt RenderFunction.Arn
+                  - !If [
+                      HasVideoFunction,
+                      !GetAtt VideoFunctionStack.Outputs.FunctionArn,
+                      !Ref AWS::NoValue,
+                    ]
         # A Distributed Map runs each chunk as a child execution of this state machine.
         # ARNs built by name: !Ref RenderStateMachine here would be a dependency cycle.
         - PolicyName: RunDistributedMapChildren
@@ -780,7 +832,12 @@ Resources:
       MetricName: Invocations
       Dimensions:
         - Name: FunctionName
-          Value: !Ref RenderFunction
+          Value:
+            !If [
+              HasVideoFunction,
+              !GetAtt VideoFunctionStack.Outputs.FunctionName,
+              !Ref RenderFunction,
+            ]
       Statistic: Sum
       Period: 3600
       EvaluationPeriods: 1
@@ -806,6 +863,25 @@ Resources:
       Dimensions:
         - Name: FunctionName
           Value: !Ref RenderFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  VideoFunctionErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasVideoFunction
+    Properties:
+      AlarmName: !Sub "${ProjectName}-video-function-errors"
+      AlarmDescription: >-
+        Fires if the arm64 chunk Lambda reports any errors in a 5-minute window.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !GetAtt VideoFunctionStack.Outputs.FunctionName
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -852,6 +928,11 @@ Outputs:
     Value: !GetAtt RenderFunction.Arn
     Export:
       Name: !Sub "${AWS::StackName}-RenderFunctionArn"
+
+  VideoFunctionArn:
+    Condition: HasVideoFunction
+    Description: ARN of the arm64 chunk-rendering function.
+    Value: !GetAtt VideoFunctionStack.Outputs.FunctionArn
 
   RenderStateMachineArn:
     Description: ARN of the Step Functions state machine. Pass to `aws stepfunctions start-execution`.

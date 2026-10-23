@@ -2,9 +2,17 @@
 // stage it beside the packaged SAM template.
 
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { downloadFile } from "../../utils/download.js";
 import { isMissingPackageError } from "../../utils/missingPackage.js";
 import { VERSION } from "../../version.js";
@@ -83,6 +91,9 @@ export async function stagePrebuiltHandler(deps: StageDeps = defaultDeps): Promi
     renameSync(partial, zip);
     deps.log(`→ Verified sha256 ${pinned.sha256}`);
   }
-  copyFileSync(pinned.templatePath, join(dir, "template.yaml"));
+  const templateDir = dirname(pinned.templatePath);
+  for (const file of readdirSync(templateDir).filter((name) => name.endsWith(".yaml"))) {
+    copyFileSync(join(templateDir, file), join(dir, file));
+  }
   return dir;
 }
