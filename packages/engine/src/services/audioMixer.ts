@@ -392,7 +392,11 @@ function boundedDetail(message: string, maxLength = 2_000): string {
       /(^|[\s"'(])\/.+?(?=:\s[A-Z]|\s(?:ENOENT|EACCES|EPERM)\b|\r?$)/gm,
       "$1<redacted-path>",
     );
-  return redacted.length <= maxLength ? redacted : `${redacted.slice(0, maxLength - 1)}…`;
+  // Keep both ends: the head names the failure, the tail holds ffmpeg's last words.
+  const head = Math.floor(maxLength / 4);
+  return redacted.length <= maxLength
+    ? redacted
+    : `${redacted.slice(0, head)}…${redacted.slice(-(maxLength - head - 1))}`;
 }
 
 function probeFailure(message: string, elementId: string): AudioProcessingFailure {
@@ -486,9 +490,10 @@ function ffmpegFailure(
     elementId,
     subprocess: audioSubprocessEvidence(result),
     detail: boundedDetail(
-      result.error?.message
-        ? `${describeFfmpegFailure(result, timeoutMs)}: ${result.error.message}`
-        : describeFfmpegFailure(result, timeoutMs),
+      `(ran ${result.durationMs} ms, limit ${timeoutMs} ms) ` +
+        (result.error?.message
+          ? `${describeFfmpegFailure(result, timeoutMs)}: ${result.error.message}`
+          : describeFfmpegFailure(result, timeoutMs)),
     ),
   };
 }
@@ -793,14 +798,25 @@ async function generateSilence(
   };
 }
 
-async function mixAudioTracks(
+/** A mix graph's work grows with the film length (about 11 ms per film second at 96 inputs); so does its deadline. */
+const MIX_TIMEOUT_MS_PER_FILM_SECOND = 100;
+
+function mixProcessTimeout(
+  config: Partial<Pick<EngineConfig, "ffmpegProcessTimeout">> | undefined,
+  totalDuration: number,
+): number {
+  const configured = config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
+  return Math.max(configured, Math.ceil(totalDuration * MIX_TIMEOUT_MS_PER_FILM_SECOND));
+}
+
+async function mixAudioTracksFlat(
   tracks: AudioTrack[],
   outputPath: string,
   totalDuration: number,
   signal?: AbortSignal,
   config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout" | "audioGain">>,
 ): Promise<MixResult> {
-  const ffmpegProcessTimeout = config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
+  const ffmpegProcessTimeout = mixProcessTimeout(config, totalDuration);
   const masterOutputGain = config?.audioGain ?? DEFAULT_CONFIG.audioGain;
 
   if (tracks.length === 0) {
@@ -989,7 +1005,7 @@ function groupNormalizeOptionUnsupported(stderr: string): boolean {
  * compensation at all and is preferred; the manual per-own-count fallback
  * only runs when this ffmpeg build's `amix` rejects the option.
  */
-async function mixGroupMembers(
+async function mixGroupMembersFlat(
   memberTracks: AudioTrack[],
   outputPath: string,
   totalDuration: number,
@@ -999,7 +1015,7 @@ async function mixGroupMembers(
   | { success: true; degradedAutomation?: boolean }
   | { success: false; error: string; failure: AudioProcessingFailure }
 > {
-  const ffmpegProcessTimeout = config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
+  const ffmpegProcessTimeout = mixProcessTimeout(config, totalDuration);
   const outputDir = dirname(outputPath);
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
@@ -1097,6 +1113,135 @@ async function mixGroupMembers(
     return { success: false, error: failure.detail, failure };
   }
   return { success: true, degradedAutomation };
+}
+
+/** Tracks per ffmpeg graph; a larger mix is summed in stages, so there is no cap on the total. */
+export const MAX_MIX_INPUTS = 96;
+
+type GroupMixResult =
+  | { success: true; degradedAutomation?: boolean }
+  | { success: false; error: string; failure: AudioProcessingFailure };
+
+/** Unity-sum `tracks` (the group gain law) slice by slice into one float WAV, with few full-length files at once. */
+async function sumInSlices(
+  tracks: AudioTrack[],
+  scratchDir: string,
+  totalDuration: number,
+  signal?: AbortSignal,
+  config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout">>,
+): Promise<
+  | { success: true; track: AudioTrack; degradedAutomation: boolean }
+  | Extract<GroupMixResult, { success: false }>
+> {
+  const wavTrack = (id: string, srcPath: string): AudioTrack => ({
+    id,
+    srcPath,
+    start: 0,
+    end: totalDuration,
+    mediaStart: 0,
+    duration: totalDuration,
+    volume: 1,
+  });
+  let running: AudioTrack | null = null;
+  let degradedAutomation = false;
+  for (let at = 0; at < tracks.length; at += MAX_MIX_INPUTS) {
+    const id = `sum-${at / MAX_MIX_INPUTS}`;
+    const slicePath = join(scratchDir, `${id}-slice.wav`);
+    const slice = await mixGroupMembersFlat(
+      tracks.slice(at, at + MAX_MIX_INPUTS),
+      slicePath,
+      totalDuration,
+      signal,
+      config,
+    );
+    if (!slice.success) return slice;
+    degradedAutomation ||= slice.degradedAutomation === true;
+    if (!running) {
+      running = wavTrack(id, slicePath);
+      continue;
+    }
+    const foldedPath = join(scratchDir, `${id}.wav`);
+    const folded = await mixGroupMembersFlat(
+      [running, wavTrack(`${id}-slice`, slicePath)],
+      foldedPath,
+      totalDuration,
+      signal,
+      config,
+    );
+    rmSync(running.srcPath, { force: true });
+    rmSync(slicePath, { force: true });
+    if (!folded.success) return folded;
+    running = wavTrack(id, foldedPath);
+  }
+  if (!running) throw new Error("[audioMixer] sumInSlices needs at least one track");
+  return { success: true, track: running, degradedAutomation };
+}
+
+async function mixGroupMembers(
+  memberTracks: AudioTrack[],
+  outputPath: string,
+  totalDuration: number,
+  signal?: AbortSignal,
+  config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout">>,
+): Promise<GroupMixResult> {
+  if (memberTracks.length <= MAX_MIX_INPUTS) {
+    return mixGroupMembersFlat(memberTracks, outputPath, totalDuration, signal, config);
+  }
+  mkdirSync(dirname(outputPath), { recursive: true });
+  const scratchDir = mkdtempSync(join(dirname(outputPath), ".mix-batches-"));
+  try {
+    const summed = await sumInSlices(memberTracks, scratchDir, totalDuration, signal, config);
+    if (!summed.success) return summed;
+    renameSync(summed.track.srcPath, outputPath);
+    return { success: true, degradedAutomation: summed.degradedAutomation };
+  } finally {
+    rmSync(scratchDir, { recursive: true, force: true });
+  }
+}
+
+async function mixAudioTracks(
+  tracks: AudioTrack[],
+  outputPath: string,
+  totalDuration: number,
+  signal?: AbortSignal,
+  config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout" | "audioGain">>,
+): Promise<MixResult> {
+  if (tracks.length <= MAX_MIX_INPUTS) {
+    return mixAudioTracksFlat(tracks, outputPath, totalDuration, signal, config);
+  }
+  mkdirSync(dirname(outputPath), { recursive: true });
+  const scratchDir = mkdtempSync(join(dirname(outputPath), ".mix-batches-"));
+  try {
+    const summed = await sumInSlices(tracks, scratchDir, totalDuration, signal, config);
+    if (!summed.success) {
+      return {
+        success: false,
+        outputPath,
+        durationMs: 0,
+        tracksProcessed: 0,
+        error: summed.error,
+        failures: [summed.failure],
+      };
+    }
+    const mixed = await mixAudioTracksFlat(
+      [summed.track],
+      outputPath,
+      totalDuration,
+      signal,
+      config,
+    );
+    return mixed.success
+      ? {
+          ...mixed,
+          tracksProcessed: tracks.length,
+          error: summed.degradedAutomation
+            ? "Volume automation exceeded this ffmpeg build's expression limits; rendered at base volume"
+            : mixed.error,
+        }
+      : mixed;
+  } finally {
+    rmSync(scratchDir, { recursive: true, force: true });
+  }
 }
 
 /**
