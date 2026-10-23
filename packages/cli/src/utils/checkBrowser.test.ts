@@ -28,9 +28,19 @@ const mocks = vi.hoisted(() => ({
   bundleWithLocalizedFonts: vi.fn(async () => "<html></html>"),
   serverClose: vi.fn(async () => undefined),
   resolveProxy:
-    vi.fn<(projectDir: string, absoluteSourcePath: string, variant?: string) => Promise<string>>(),
+    vi.fn<
+      (
+        projectDir: string,
+        absoluteSourcePath: string,
+        variant?: string,
+        box?: { width: number; height: number },
+      ) => Promise<string>
+    >(),
   FfmpegUnavailableError: class FfmpegUnavailableError extends Error {},
-  getProxyCachePath: vi.fn((projectDir: string, sourcePath: string) => `${sourcePath}.proxy.mp4`),
+  getProxyCachePath: vi.fn(
+    (projectDir: string, sourcePath: string, _variant?: string, _box?: unknown) =>
+      `${sourcePath}.proxy.mp4`,
+  ),
   scanProjectMediaCodecMap: vi.fn<
     (...args: unknown[]) => Promise<
       Record<
@@ -88,12 +98,19 @@ vi.mock("@hyperframes/studio-server/proxy-transcoder", () => ({
   getProxyCachePath: mocks.getProxyCachePath,
   resolveProxies: (
     projectDir: string,
-    sources: Array<{ sourcePath: string; variant: string }>,
+    sources: Array<{
+      sourcePath: string;
+      variant: string;
+      box?: { width: number; height: number };
+    }>,
     onSettled: () => void = () => {},
   ) =>
     Promise.allSettled(
-      sources.map(({ sourcePath, variant }) =>
-        mocks.resolveProxy(projectDir, sourcePath, variant).finally(onSettled),
+      sources.map(({ sourcePath, variant, box }) =>
+        (box
+          ? mocks.resolveProxy(projectDir, sourcePath, variant, box)
+          : mocks.resolveProxy(projectDir, sourcePath, variant)
+        ).finally(onSettled),
       ),
     ),
 }));
@@ -268,7 +285,7 @@ it("splits the samples over a second Chrome and reports what one Chrome reports"
   expect(sampled(unopened.messages)).toEqual(sampled(serial.messages));
 });
 
-it("runs the dense overlap grid in one page task, keeping each sample's time on what it logs", async () => {
+it("runs the dense overlap grid in page tasks of at most 8 samples, keeping each sample's time on what it logs", async () => {
   mountCanvasFixture(
     `<section data-composition-file="scenes/copy.html"><p id="copy" data-layout-name="copy">Hi</p></section>`,
   );
@@ -324,13 +341,20 @@ it("runs the dense overlap grid in one page task, keeping each sample's time on 
   );
 
   expect(denseAudits.length).toBeGreaterThan(10);
-  expect(new Set(denseAudits).size).toBe(1);
+  const tasks = new Map<number, number>();
+  for (const calls of denseAudits) tasks.set(calls, (tasks.get(calls) ?? 0) + 1);
+  const perTask = [...tasks.values()];
+  expect(Math.max(...perTask)).toBeLessThanOrEqual(8);
+  expect(perTask).toHaveLength(Math.ceil(denseAudits.length / 8));
   expect(result.runtimeFindings).toContainEqual(
     expect.objectContaining({ code: "console_error", message: "thrown at 2.5", time: 2.5 }),
   );
-  expect(result.runtimeFindings).toContainEqual(
-    expect.objectContaining({ message: "queued during the grid", time: 0, timeRange: [0, 10] }),
+  const queued = result.runtimeFindings.filter(
+    (finding) => finding.message === "queued during the grid",
   );
+  expect(queued).toHaveLength(perTask.length);
+  expect(queued[0]).toMatchObject({ time: 0, timeRange: [0, expect.any(Number)] });
+  expect(queued.at(-1)?.timeRange?.[1]).toBe(10);
   expect(
     result.runtimeFindings.find((finding) => finding.message === "thrown at 2.5"),
   ).not.toHaveProperty("timeRange");
@@ -1099,6 +1123,38 @@ describe("preResolveHostileMediaProxies", () => {
     expect(settled).toBe(true);
   });
 
+  it("makes the copy at the size that fills the composition, not at the source size", async () => {
+    const projectDir = mkProjectDir();
+    mocks.scanProjectMediaCodecMap.mockResolvedValue({
+      "/clip.mp4": {
+        codecName: "hevc",
+        browserHostile: true,
+        representativeMime: null,
+        hasAlpha: false,
+      },
+    });
+    mocks.resolveProxy.mockResolvedValue("/cache/clip.mp4");
+    const html =
+      '<html><body><div data-composition-id="root" data-width="1920" data-height="1080"></div></body></html>';
+
+    await preResolveHostileMediaProxies(projectDir, html);
+
+    // The page asks for the quantized stage size, so the copy and its cache check use that box.
+    const box = { width: 2048, height: 1448 };
+    expect(mocks.resolveProxy).toHaveBeenCalledWith(
+      projectDir,
+      join(projectDir, "clip.mp4"),
+      "h264",
+      box,
+    );
+    expect(mocks.getProxyCachePath).toHaveBeenCalledWith(
+      projectDir,
+      join(projectDir, "clip.mp4"),
+      "h264",
+      box,
+    );
+  });
+
   it("does nothing (no scan, no resolveProxy) when autoProxy is off in hyperframes.json", async () => {
     const projectDir = mkProjectDir();
     writeFileSync(
@@ -1134,6 +1190,7 @@ describe("preResolveHostileMediaProxies", () => {
         }),
       ],
       failedPaths: new Set(["/clip.mp4"]),
+      files: [{ file: "clip.mp4", state: "failed", reason: "ffmpeg exited with code 1" }],
     });
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining("media proxy pre-resolve: 0/1 ready, 1 failed"),
@@ -1205,7 +1262,11 @@ describe("preResolveHostileMediaProxies", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     writeFileSync(join(projectDir, "a.mov.proxy.mp4"), "");
-    await preResolveHostileMediaProxies(projectDir, "<html></html>");
+    const { files } = await preResolveHostileMediaProxies(projectDir, "<html></html>");
+    expect(files).toEqual([
+      { file: "a.mov", state: "cached" },
+      { file: "b.mov", state: "ready" },
+    ]);
     expect(errorSpy.mock.calls.map(([line]) => String(line).slice(0, 48))).toEqual([
       "[hyperframes] Making browser-playable copies of ",
       "[hyperframes] browser-playable copies: 1/2",
@@ -1231,6 +1292,7 @@ describe("preResolveHostileMediaProxies", () => {
     await expect(preResolveHostileMediaProxies(projectDir, "<html></html>")).resolves.toEqual({
       findings: [],
       failedPaths: new Set(),
+      files: [],
     });
 
     expect(errorSpy).toHaveBeenCalledWith(

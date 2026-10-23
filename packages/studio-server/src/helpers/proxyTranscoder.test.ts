@@ -2,6 +2,7 @@ import { execFileSync, spawn as realSpawn, spawnSync, type ChildProcess } from "
 import { EventEmitter, once } from "node:events";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   realpathSync,
@@ -143,6 +144,7 @@ async function loadModule(
   isHdr = false,
   hdrTransfer: string | null = isHdr ? "pq" : null,
   codecName?: string,
+  durationSeconds?: number,
 ): Promise<typeof import("./proxyTranscoder.js")> {
   vi.resetModules();
   vi.doMock("node:child_process", () => {
@@ -156,11 +158,74 @@ async function loadModule(
     probeMediaMetadata: async () => ({
       kind: "video",
       color: { isHdr, hdrTransfer, codecName },
+      durationSeconds,
     }),
     probeFirstFrameColour: async () => ({}),
   }));
   return import("./proxyTranscoder.js");
 }
+
+describe("resolveProxy on a long source", () => {
+  const startsOf = (calls: SpawnCall[]): string[] =>
+    calls
+      .filter((call) => call.args.includes("-ss"))
+      .map((call) => call.args[call.args.indexOf("-ss") + 1]!);
+
+  it("copies in pieces, and a stopped copy continues from its finished pieces", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy, getProxyCachePath, clearFailedTranscodesForTest } = await loadModule(
+      spawn,
+      FFMPEG_PATH,
+      false,
+      null,
+      undefined,
+      200,
+    );
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "long.mov");
+    writeFileSync(sourcePath, "source-bytes");
+    const cachePath = getProxyCachePath(projectDir, sourcePath);
+    const cacheDirectory = join(projectDir, ".transcode-cache");
+
+    const first = resolveProxy(projectDir, sourcePath).catch((error: unknown) => error);
+    await flush();
+    succeed(calls[0]!);
+    await flush(50);
+    calls[1]!.proc.emit("close", null, "SIGKILL");
+    expect(await first).toBeInstanceOf(Error);
+    expect(startsOf(calls)).toEqual(["0", "60"]);
+    expect(readdirSync(cacheDirectory)).toHaveLength(1);
+
+    clearFailedTranscodesForTest();
+    const second = resolveProxy(projectDir, sourcePath);
+    for (let answered = calls.length; ; answered = calls.length) {
+      await flush(50);
+      if (calls.length === answered) break;
+      calls.slice(answered).forEach((call) => succeed(call));
+    }
+
+    expect(await second).toBe(cachePath);
+    // Only the pieces that were missing were encoded again; the last one runs to the end.
+    expect(startsOf(calls)).toEqual(["0", "60", "60", "120"]);
+    expect(calls.at(-1)!.args).toEqual(expect.arrayContaining(["-f", "concat", "-c", "copy"]));
+    expect(readdirSync(cacheDirectory)).toEqual([cachePath.split("/").at(-1)]);
+  });
+
+  it("keeps a short source to one pass", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy } = await loadModule(spawn, FFMPEG_PATH, false, null, undefined, 80);
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "short.mov");
+    writeFileSync(sourcePath, "source-bytes");
+
+    const result = resolveProxy(projectDir, sourcePath);
+    await flush();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args).not.toContain("-ss");
+    succeed(calls[0]!);
+    await result;
+  });
+});
 
 describe("resolveProxy", () => {
   it("bounds a caller wait without cancelling the shared transcode promise", async () => {
@@ -645,6 +710,52 @@ describe("resolveProxy", () => {
     const results = await batch;
     expect(results.map((result) => result.status)).toEqual(sources.map(() => "fulfilled"));
     expect(settled).toBe(sources.length);
+  });
+
+  it("makes a batch's copy at the box it is given, under that box's own cache name", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxies, getProxyCachePath } = await loadModule(spawn, FFMPEG_PATH);
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "clip.mov");
+    writeFileSync(sourcePath, "source");
+    const box = { width: 2048, height: 1448 };
+
+    const batch = resolveProxies(projectDir, [{ sourcePath, variant: "h264", box }]);
+    await answerUntilIdle(calls, (call) => succeed(call));
+
+    const [result] = await batch;
+    expect(result).toEqual({
+      status: "fulfilled",
+      value: getProxyCachePath(projectDir, sourcePath, "h264", box),
+    });
+    expect(result.status === "fulfilled" && result.value).not.toBe(
+      getProxyCachePath(projectDir, sourcePath, "h264"),
+    );
+  });
+
+  it("clears a partial copy left by a stopped process before it starts a batch, and keeps a live one", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxies } = await loadModule(spawn, FFMPEG_PATH);
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "clip.mov");
+    writeFileSync(sourcePath, "source");
+    const cacheDir = join(projectDir, ".transcode-cache");
+    mkdirSync(cacheDir, { recursive: true });
+    const name = (id: string) => `.tmp-${id}-${"a".repeat(64)}.mp4`;
+    const dead = join(cacheDir, name("11111111-1111-1111-1111-111111111111"));
+    const live = join(cacheDir, name("22222222-2222-2222-2222-222222222222"));
+    writeFileSync(dead, "partial");
+    writeFileSync(live, "partial");
+    const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
+    utimesSync(dead, minutesAgo(11), minutesAgo(11));
+    utimesSync(live, minutesAgo(1), minutesAgo(1));
+
+    const batch = resolveProxies(projectDir, [{ sourcePath, variant: "h264" }]);
+    await answerUntilIdle(calls, (call) => succeed(call));
+    await batch;
+
+    expect(existsSync(dead)).toBe(false);
+    expect(existsSync(live)).toBe(true);
   });
 
   it("settles each request of a batch on its own when one of them fails", async () => {

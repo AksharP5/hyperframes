@@ -369,6 +369,69 @@ describe("contrast sample selection", () => {
   });
 });
 
+describe("check --prepare-media", () => {
+  async function runPrepare(
+    files: Array<{ file: string; state: "ready" | "cached" | "failed"; reason?: string }>,
+    rawArgs: string[],
+  ) {
+    const { report } = await runScenario(fakeDriver());
+    const runPipeline = vi.fn(async (_project: ProjectDir, _options: CheckOptions) => report);
+    const prepareMedia = vi.fn(async (_project: ProjectDir, _options: CheckOptions) => files);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await runCommand(
+      createCheckCommand({
+        resolveProject: () => PROJECT,
+        runPipeline,
+        prepareMedia,
+        withMeta: (value) => value,
+      }),
+      { rawArgs },
+    );
+    return { runPipeline, prepareMedia, log };
+  }
+
+  it("makes the copies without running the check, and reports every file", async () => {
+    const files = [
+      { file: "a.mov", state: "ready" as const },
+      { file: "b.mov", state: "cached" as const },
+    ];
+    const { runPipeline, prepareMedia, log } = await runPrepare(files, [
+      "--prepare-media",
+      "--json",
+      "--no-proxy",
+    ]);
+
+    expect(runPipeline).not.toHaveBeenCalled();
+    expect(prepareMedia).toHaveBeenCalledWith(
+      PROJECT,
+      expect.objectContaining({ autoProxy: false }),
+    );
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual({
+      ok: true,
+      prepared: files,
+      total: 2,
+      ready: 2,
+      failed: 0,
+    });
+    expect(consumeCommandResult().exitCode).toBe(0);
+  });
+
+  it("exits 1 and names the reason when a copy failed", async () => {
+    const { log } = await runPrepare(
+      [{ file: "a.mov", state: "failed", reason: "ffmpeg exited with code 1" }],
+      ["--prepare-media", "--json"],
+    );
+
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({
+      ok: false,
+      ready: 0,
+      failed: 1,
+      prepared: [{ file: "a.mov", state: "failed", reason: "ffmpeg exited with code 1" }],
+    });
+    expect(consumeCommandResult().exitCode).toBe(1);
+  });
+});
+
 it("parses the caption-zone grammar and enables the frame gate", async () => {
   const { report } = await runScenario(fakeDriver());
   const runPipeline = vi.fn(async (_project: ProjectDir, _options: CheckOptions) => report);
@@ -376,6 +439,7 @@ it("parses the caption-zone grammar and enables the frame gate", async () => {
   const command = createCheckCommand({
     resolveProject: () => PROJECT,
     runPipeline,
+    prepareMedia: vi.fn(async () => []),
     withMeta: (value) => value,
   });
 
@@ -411,6 +475,7 @@ it("preserves caption-zone after bare --frame-check", async () => {
   const command = createCheckCommand({
     resolveProject: () => PROJECT,
     runPipeline,
+    prepareMedia: vi.fn(async () => []),
     withMeta: (value) => value,
   });
 
@@ -446,6 +511,7 @@ it("preserves --json after bare --frame-check", async () => {
   const command = createCheckCommand({
     resolveProject: () => PROJECT,
     runPipeline,
+    prepareMedia: vi.fn(async () => []),
     withMeta: (value) => value,
   });
 
@@ -472,6 +538,7 @@ it("prints a dash-prefixed --frame-check value's parse failure exactly once, not
   const command = createCheckCommand({
     resolveProject: () => PROJECT,
     runPipeline,
+    prepareMedia: vi.fn(async () => []),
     withMeta: (value) => value,
   });
 
@@ -491,6 +558,7 @@ it("no longer swallows --json after a --layout value (the wider bug class beyond
   const command = createCheckCommand({
     resolveProject: () => PROJECT,
     runPipeline,
+    prepareMedia: vi.fn(async () => []),
     withMeta: (value) => value,
   });
 
@@ -517,6 +585,7 @@ it("includes local HDR auto-promotion attribution in --json output", async () =>
   const command = createCheckCommand({
     resolveProject: () => PROJECT,
     runPipeline: vi.fn(async () => report),
+    prepareMedia: vi.fn(async () => []),
     withMeta: (value) => value,
   });
 
@@ -548,6 +617,7 @@ it("threads --no-proxy into the browser check options", async () => {
   const command = createCheckCommand({
     resolveProject: () => PROJECT,
     runPipeline,
+    prepareMedia: vi.fn(async () => []),
     withMeta: (value) => value,
   });
 
@@ -571,6 +641,7 @@ it("waits for the project lock declared in HF_TOOL_CONTEXT before running the pi
   const command = createCheckCommand({
     resolveProject: () => ({ ...PROJECT, dir }),
     runPipeline,
+    prepareMedia: vi.fn(async () => []),
     withMeta: (value) => value,
   });
   try {
@@ -591,6 +662,7 @@ it("rejects malformed caption-zone specs instead of silently disabling the gate"
   const command = createCheckCommand({
     resolveProject: () => PROJECT,
     runPipeline,
+    prepareMedia: vi.fn(async () => []),
     withMeta: (value) => ({ ...value, _meta: { version: "test" } }),
   });
 
@@ -1164,6 +1236,7 @@ describe("check pipeline", () => {
     const command = createCheckCommand({
       resolveProject: () => PROJECT,
       runPipeline: vi.fn(async () => report),
+      prepareMedia: vi.fn(async () => []),
       withMeta: (value) => ({ ...value, _meta: { version: "test" } }),
     });
 
@@ -1629,6 +1702,56 @@ describe("check pipeline", () => {
         message: "Check did not finish within its deadline.",
       }),
     );
+  });
+
+  it("slow samples that each finish keep the check alive past 120 s", async () => {
+    vi.useFakeTimers();
+    try {
+      const collectLayout = vi.fn(async (_time: number, _tolerance: number) => {
+        await new Promise((resolve) => setTimeout(resolve, 30_000));
+        return [];
+      });
+      const driver = fakeDriver({ collectLayout });
+      const { deps } = dependencies(driver);
+      deps.runBrowserCheck = async (_project, options, motion, deadline) => {
+        deadline!.start();
+        return runAuditGrid(driver, options, motion, undefined, deadline!.enter);
+      };
+      const pending = runCheckPipeline(PROJECT, DEFAULT_CHECK_OPTIONS, deps);
+      await vi.advanceTimersByTimeAsync(2_000_000);
+      const report = await pending;
+      expect(report.runtime.findings.map((finding) => finding.code)).not.toContain(
+        "check_runtime_failure",
+      );
+      expect(collectLayout.mock.calls.length * 30).toBeGreaterThan(120);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a long overlap pass that keeps reporting progress finishes instead of hitting a wall clock", async () => {
+    vi.useFakeTimers();
+    try {
+      const collectOverlapGrid = vi.fn(async (times: number[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 10_000 * times.length));
+        return times.map((): AnchoredLayoutIssue[] => []);
+      });
+      const driver = fakeDriver({ collectOverlapGrid });
+      const { deps } = dependencies(driver);
+      deps.runBrowserCheck = async (_project, options, motion, deadline) => {
+        deadline!.start();
+        return runAuditGrid(driver, options, motion, undefined, deadline!.enter);
+      };
+      const pending = runCheckPipeline(PROJECT, DEFAULT_CHECK_OPTIONS, deps);
+      await vi.advanceTimersByTimeAsync(2_000_000);
+      const report = await pending;
+      expect(report.runtime.findings.map((finding) => finding.code)).not.toContain(
+        "check_runtime_failure",
+      );
+      expect(collectOverlapGrid.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a deadline that fires in the overlap pass names that pass in its finding", async () => {
@@ -2320,6 +2443,7 @@ describe("layout flag grammar", () => {
     const command = createCheckCommand({
       resolveProject: () => PROJECT,
       runPipeline,
+      prepareMedia: vi.fn(async () => []),
       withMeta: (value) => value,
     });
 
@@ -2474,6 +2598,7 @@ describe("sampled finding reporting", () => {
     const command = createCheckCommand({
       resolveProject: () => PROJECT,
       runPipeline: vi.fn(async () => report),
+      prepareMedia: vi.fn(async () => []),
       withMeta: (value) => value,
     });
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);

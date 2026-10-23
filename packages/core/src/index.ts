@@ -270,6 +270,7 @@ export {
   PREVIEW_PROXY_BOX_PARAM,
   formatPreviewProxyBox,
   parsePreviewProxyBox,
+  quantizePreviewProxyBox,
   type PreviewProxyBox,
 } from "./previewProxyBox";
 

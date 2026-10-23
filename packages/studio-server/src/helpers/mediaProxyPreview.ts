@@ -95,6 +95,7 @@ export async function injectMediaCodecMapIntoHtml(
   prewarm = true,
   /** Aborting it stops the pre-warms nobody else waits for. */
   signal?: AbortSignal,
+  box?: PreviewProxyBox,
 ): Promise<string> {
   let map: MediaCodecMap;
   try {
@@ -115,7 +116,7 @@ export async function injectMediaCodecMapIntoHtml(
       projectDir,
       resolve(projectDir, rootRelativePathname.replace(/^\/+/, "")),
       proxyVariantFor(facts),
-      undefined,
+      box,
       { signal },
     ).catch(() => {
       // Swallowed: the pre-warm is best-effort. A real `?hf-proxy=` request

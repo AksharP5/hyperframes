@@ -76,6 +76,7 @@ export interface MediaMetadata {
   hasAudio?: boolean;
   /** Video stream carries alpha (pix_fmt or the VP8/VP9 alpha_mode tag). */
   hasAlpha?: boolean;
+  durationSeconds?: number;
   probeError?: string;
 }
 
@@ -215,7 +216,7 @@ export async function probeMediaMetadata(
       "-v",
       "error",
       "-show_entries",
-      "stream=codec_type,codec_name,profile,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample:stream_disposition=attached_pic:stream_tags=alpha_mode",
+      "stream=codec_type,codec_name,profile,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample:stream_disposition=attached_pic:stream_tags=alpha_mode:format=duration",
       "-of",
       "json",
       "--",
@@ -232,7 +233,10 @@ export async function probeMediaMetadata(
   }
 
   try {
-    const parsed = JSON.parse(String(result.stdout || "{}")) as { streams?: FfprobeStream[] };
+    const parsed = JSON.parse(String(result.stdout || "{}")) as {
+      streams?: FfprobeStream[];
+      format?: { duration?: string };
+    };
     const stream = parsed.streams?.find((item) => {
       if (kind === "image") return item.codec_type === "video";
       return item.codec_type === kind && item.disposition?.attached_pic !== 1;
@@ -241,6 +245,8 @@ export async function probeMediaMetadata(
     if (kind === "video") {
       metadata.hasAudio = (parsed.streams ?? []).some((item) => item.codec_type === "audio");
       metadata.hasAlpha = stream !== undefined && videoStreamHasAlpha(stream);
+      const duration = Number(parsed.format?.duration);
+      if (Number.isFinite(duration) && duration > 0) metadata.durationSeconds = duration;
     }
     return metadata;
   } catch {
