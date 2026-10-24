@@ -860,7 +860,7 @@ Source: the project lint pass in `packages/lint/src/project.ts`, `packages/lint/
 
 ### `texture_mask_asset_not_found`
 
-**Error.** A CSS `mask-image` references files that are not in the project, so the texture mask fails to load.
+**Error.** A CSS `mask-image` or `-webkit-mask-image` declaration references files that are not in the project, so the texture mask fails to load. In valid CSS, comments and text inside other declarations, such as `content` strings, are ignored.
 
 **Fix:** Add the missing mask file(s) to the project, or update the `mask-image` URL.
 

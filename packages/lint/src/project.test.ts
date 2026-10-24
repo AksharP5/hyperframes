@@ -399,6 +399,73 @@ describe("missing_or_empty_sub_composition", () => {
   });
 });
 
+describe("texture_mask_asset_not_found declarations", () => {
+  it("still reports a missing inline mask beside a malformed declaration", async () => {
+    const project = makeProject(
+      validHtml().replace(
+        "<div ",
+        '<div style="color: red; broken; mask-image: url(missing.png);" ',
+      ),
+    );
+
+    const { results } = await lintProject(project);
+    const findings = results
+      .flatMap((entry) => entry.result.findings)
+      .filter((finding) => finding.code === "texture_mask_asset_not_found");
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        severity: "error",
+        message: expect.stringContaining("missing.png"),
+      }),
+    ]);
+  });
+
+  it.each([
+    ["embedded", "comment", "/* .badge { mask-image: url(removed-texture.png); } */"],
+    ["linked", "comment", "/* .badge { mask-image: url(removed-texture.png); } */"],
+    ["embedded", "content string", '.badge::after { content: "mask-image: url(example.png)"; }'],
+    ["linked", "content string", '.badge::after { content: "mask-image: url(example.png)"; }'],
+  ])("ignores mask syntax in a %s stylesheet's %s", async (source, _kind, css) => {
+    const style =
+      source === "linked" ? '<link rel="stylesheet" href="style.css">' : `<style>${css}</style>`;
+    const project = makeProject(validHtml().replace("<body>", `<head>${style}</head><body>`));
+    if (source === "linked") writeFileSync(join(project, "style.css"), css);
+
+    const { totalErrors, results } = await lintProject(project);
+
+    expect(totalErrors).toBe(0);
+    expect(
+      results.flatMap((entry) => entry.result.findings).map((finding) => finding.code),
+    ).not.toContain("texture_mask_asset_not_found");
+  });
+
+  it.each(["embedded", "linked"])(
+    "still errors for missing masks declared in %s CSS",
+    async (source) => {
+      const css = `/* .badge { mask-image: url(removed-texture.png); } */
+      .badge::after { content: "mask-image: url(example.png)"; }
+      .badge { -webkit-mask-image: url(missing-webkit.png); MASK-IMAGE: url(missing.png); }`;
+      const style =
+        source === "linked" ? '<link rel="stylesheet" href="style.css">' : `<style>${css}</style>`;
+      const project = makeProject(validHtml().replace("<body>", `<head>${style}</head><body>`));
+      if (source === "linked") writeFileSync(join(project, "style.css"), css);
+
+      const { results } = await lintProject(project);
+      const findings = results
+        .flatMap((entry) => entry.result.findings)
+        .filter((finding) => finding.code === "texture_mask_asset_not_found");
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({ severity: "error", file: join(project, "index.html") });
+      expect(findings[0]?.message).toContain("missing-webkit.png");
+      expect(findings[0]?.message).toContain("missing.png");
+      expect(findings[0]?.message).not.toContain("removed-texture.png");
+      expect(findings[0]?.message).not.toContain("example.png");
+    },
+  );
+});
+
 describe("template shell style sources", () => {
   it("collects links, style blocks, and inline styles from template content", async () => {
     const project = makeProject(`<html><body>

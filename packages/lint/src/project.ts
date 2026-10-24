@@ -20,6 +20,7 @@ import {
 } from "@hyperframes/parsers/reference-resolver";
 import { checkSubCompositionUsability } from "@hyperframes/parsers/sub-composition-validity";
 import { parseHTML } from "linkedom";
+import postcss from "postcss";
 import {
   cleanAssetUrl,
   collectSubCompositionSrcs,
@@ -98,6 +99,7 @@ function contentDigest(html: string): string {
 }
 
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".aac", ".ogg", ".m4a", ".flac", ".opus"]);
+const CSS_URL_RE = /\burl\(\s*(?:"([^"]+)"|'([^']+)'|([^"')\s]+))\s*\)/gi;
 const MASK_IMAGE_URL_RE =
   /\b(?:-webkit-)?mask-image\s*:\s*[^;{}]*url\(\s*(?:"([^"]+)"|'([^']+)'|([^"')\s]+))\s*\)/gi;
 
@@ -501,9 +503,16 @@ function lintTextureMaskAssetNotFound(
   for (const { html, compSrcPath } of htmlSources) {
     const file = sourceFile(projectDir, compSrcPath);
     for (const cssSource of collectCssSources(projectDir, html, compSrcPath)) {
-      let match: RegExpExecArray | null;
-      const pattern = new RegExp(MASK_IMAGE_URL_RE.source, MASK_IMAGE_URL_RE.flags);
-      while ((match = pattern.exec(cssSource.content)) !== null) {
+      let matches: RegExpExecArray[] = [];
+      try {
+        postcss.parse(cssSource.content).walkDecls(/^(?:-webkit-)?mask-image$/i, (declaration) => {
+          matches.push(...declaration.value.matchAll(CSS_URL_RE));
+        });
+      } catch (error) {
+        if (!(error instanceof postcss.CssSyntaxError)) throw error;
+        matches = [...cssSource.content.matchAll(MASK_IMAGE_URL_RE)];
+      }
+      for (const match of matches) {
         const rawUrl = match[1] ?? match[2] ?? match[3] ?? "";
         // Placeholder check runs on the RAW value: cleanAssetUrl() splits on ?/# and would chop inside a ${...} token.
         if (isUnresolvedAssetPlaceholder(rawUrl)) continue;
