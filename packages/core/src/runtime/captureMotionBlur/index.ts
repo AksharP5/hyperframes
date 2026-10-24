@@ -527,7 +527,7 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
             resolve();
           },
         };
-        if (pending.phase === "movers") isolate(pending);
+        if (pending.phase === "movers" && !engineMode) isolate(pending);
         if (engineMode) return;
         startTimer();
         src.requestPaint();
@@ -576,6 +576,7 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
     arm: () => {
       if (!pending || pending.armed) return;
       pending.armed = true;
+      if (pending.phase === "movers") isolate(pending);
       pending.startTimer();
       src.requestPaint();
     },
