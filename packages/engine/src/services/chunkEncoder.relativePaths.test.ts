@@ -49,6 +49,7 @@ describe.skipIf(!HAS_FFMPEG)("concat input paths", () => {
         "stream=width,height,avg_frame_rate,nb_read_frames",
         "-of",
         "csv=p=0",
+        "--",
         outputPath,
       ],
       { encoding: "utf8" },
