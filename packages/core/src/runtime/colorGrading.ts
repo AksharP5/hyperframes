@@ -3867,6 +3867,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
         if (entry.contextLost) restoreSourceElement(entry);
         else drawEntry(entry);
       }
+      refresh();
     });
     shared = { canvas, gl };
     return shared;
