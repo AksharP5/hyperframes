@@ -359,6 +359,9 @@ const INLINE_MIME: Record<string, string> = {
  */
 const MAX_INLINE_ASSET_BYTES = 2 * 1024 * 1024;
 
+// An asset is inlined once per reference, so repeats can pass V8's ~2^29-char string limit.
+const MAX_INLINED_BUNDLE_CHARS = 256 * 1024 * 1024;
+
 function safeStatSize(filePath: string): number | null {
   try {
     return statSync(filePath).size;
@@ -374,6 +377,12 @@ function warnAssetTooLargeToInline(assetPath: string, byteLength: number): void 
   );
 }
 
+function warnInlineBudgetExhausted(assetPath: string): void {
+  console.warn(
+    `[HyperFrames] Not inlining "${assetPath}" and later assets: the bundle already inlines ${MAX_INLINED_BUNDLE_CHARS / (1024 * 1024)} MB of data URLs. The bundle may not be self-contained.`,
+  );
+}
+
 type AssetInliner = (urlValue: string) => string | null;
 type InlinableAsset = { dataUrl: string | null } | { tooLarge: number };
 
@@ -383,6 +392,8 @@ function createAssetInliner(
   inlineAssets: boolean,
 ): AssetInliner {
   const assets = new Map<string, InlinableAsset>();
+  let inlinedChars = 0;
+  let budgetExhausted = false;
   const readAsset = (filePath: string, mimeType: string): InlinableAsset => {
     // Size-check before reading: an oversized asset must not be pulled into memory
     // just to be discarded.
@@ -414,7 +425,14 @@ function createAssetInliner(
       warnAssetTooLargeToInline(basePath, asset.tooLarge);
       return null;
     }
-    return asset.dataUrl === null ? null : appendSuffixToUrl(asset.dataUrl, suffix);
+    if (asset.dataUrl === null) return null;
+    if (budgetExhausted || inlinedChars + asset.dataUrl.length > MAX_INLINED_BUNDLE_CHARS) {
+      if (!budgetExhausted) warnInlineBudgetExhausted(basePath);
+      budgetExhausted = true;
+      return null;
+    }
+    inlinedChars += asset.dataUrl.length;
+    return appendSuffixToUrl(asset.dataUrl, suffix);
   };
 }
 

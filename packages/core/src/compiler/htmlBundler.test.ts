@@ -105,6 +105,31 @@ describe("bundleToSingleHtml", () => {
     }
   });
 
+  it("stops inlining a repeated asset once the bundle's inline budget is spent instead of overflowing the string", async () => {
+    // 300 references to one 1.9 MB image inline ~760M characters, past V8's
+    // maximum string length: without a bundle-wide budget this throws
+    // "Invalid string length".
+    const references = 300;
+    const dir = makeTempProject({
+      "index.html": `<html><body><main data-composition-id="root" data-width="320" data-height="180">${'<img src="unit.png">'.repeat(references)}</main></body></html>`,
+      "unit.png": "x".repeat(1_900_000),
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const bundled = await bundleToSingleHtml(dir);
+      const inlined = bundled.split("data:image/png;base64,").length - 1;
+      const relative = bundled.split('src="unit.png"').length - 1;
+      expect(inlined).toBeGreaterThan(0);
+      expect(relative).toBeGreaterThan(0);
+      expect(inlined + relative).toBe(references);
+      expect(bundled.length).toBeLessThan(300 * 1024 * 1024);
+      expect(warn.mock.calls.filter(([m]) => String(m).includes("inline")).length).toBe(1);
+    } finally {
+      warn.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("resolves encoded URL filenames once across asset, stylesheet and script consumers", async () => {
     const dir = makeTempProject({
       "index.html":
