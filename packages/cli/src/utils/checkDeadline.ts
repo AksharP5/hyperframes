@@ -2,6 +2,7 @@ import type { Browser, Page } from "puppeteer-core";
 import { normalizeErrorMessage } from "./errorMessage.js";
 import { withRemainingBudget } from "../capture/captureTimeout.js";
 import { BrowserCleanupError, closeManagedBrowser } from "../browser/launch.js";
+import type { CheckBrowserResult } from "./checkTypes.js";
 
 const CHECK_IDLE_MS = 120_000;
 const SCRIPT_START = "[hyperframes:script:start] ";
@@ -46,11 +47,20 @@ export class CheckDeadline {
   private phase: "waiting" | "started" | "closed" = "waiting";
   private work: { phase: CheckPhase; since: number } | undefined;
   private readonly spent = new Map<CheckPhase, number>();
+  private readonly partials: Array<() => Partial<CheckBrowserResult>> = [];
 
   constructor() {
     this.expiry = new Promise((_, reject) => {
       this.rejectExpiry = reject;
     });
+  }
+
+  keepPartial = (read: () => Partial<CheckBrowserResult>): void => {
+    this.partials.push(read);
+  };
+
+  partialResult(): Partial<CheckBrowserResult> {
+    return Object.assign({}, ...this.partials.map((read) => read()));
   }
 
   enter = (phase: CheckPhase): void => {

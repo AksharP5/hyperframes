@@ -313,6 +313,12 @@ export async function runBrowserCheck(
     await waitForPreferredSeekTarget(page);
 
     const rootAnchor = await resolveRootAnchor(page);
+    deadline?.keepPartial(() => ({
+      runtimeFindings: dropFailedProxyEchoes(
+        keepBrokenImageAborts(drafts, new Set()),
+        failedPaths,
+      ).map((draft) => runtimeFinding(draft, rootAnchor)),
+    }));
     const launchSettleMs = Date.now() - launchSettleStart;
     // validate's per-media-element audit, kept in the consolidation: a clip
     // whose intrinsic duration is meaningfully shorter than its data-duration
@@ -338,6 +344,7 @@ export async function runBrowserCheck(
       helpers,
       deadline?.enter,
       logCheckProgress,
+      deadline?.keepPartial,
     );
     helperSession?.stop();
     const helper = await helperOpen?.catch(() => undefined);

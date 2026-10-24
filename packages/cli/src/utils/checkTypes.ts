@@ -329,6 +329,7 @@ export type RunAuditGrid = (
   helpers?: Promise<CheckAuditDriver[]>,
   enter?: (phase: CheckPhase) => void,
   report?: CheckProgress,
+  keep?: (read: () => Partial<CheckBrowserResult>) => void,
 ) => Promise<CheckBrowserResult>;
 
 export interface CheckSection<T extends CheckFinding = CheckFinding> {

@@ -1786,6 +1786,50 @@ describe("check pipeline", () => {
     }
   });
 
+  it("a deadline keeps the layout findings the finished samples already made", async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted!: AbortSignal;
+      const driver = fakeDriver({
+        collectLayout: vi.fn(async (time: number) => [
+          layoutIssue("warning", { time, code: "container_overflow" }),
+        ]),
+        collectOverlapGrid: vi.fn(
+          () =>
+            new Promise<never>((_, reject) =>
+              aborted.addEventListener("abort", () => reject(aborted.reason)),
+            ),
+        ),
+      });
+      const { deps } = dependencies(driver);
+      deps.runBrowserCheck = async (_project, options, motion, deadline) => {
+        aborted = deadline!.signal;
+        deadline!.start();
+        return runAuditGrid(
+          driver,
+          options,
+          motion,
+          undefined,
+          deadline!.enter,
+          undefined,
+          deadline!.keepPartial,
+        );
+      };
+      const pending = runCheckPipeline(PROJECT, DEFAULT_CHECK_OPTIONS, deps);
+      await vi.advanceTimersByTimeAsync(120_000);
+      const report = await pending;
+      expect(report.layout.findings.some((finding) => finding.code === "container_overflow")).toBe(
+        true,
+      );
+      expect(report.browserSkipped).toBe(false);
+      expect(
+        report.runtime.findings.some((finding) => finding.code === "check_runtime_failure"),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("--strict flips a warnings-only result from exit 0 to exit 1", async () => {
     const warningDriver = () =>
       fakeDriver({
