@@ -13,6 +13,7 @@ export {
   type HistoryResult,
   type HistoryWindow,
   HistoryClosedError,
+  HistoryRefusedError,
 } from "./projectHistory.js";
 export { reclaimUncopiedBlobs, type ReclaimedHistory } from "./reclaimUncopied.js";
 export { HistoryBusyError } from "./ownerLock.js";

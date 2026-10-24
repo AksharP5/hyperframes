@@ -1238,6 +1238,18 @@ class Engine {
       [...this.tracked.keys()].map((path) => [path, null]),
     );
     for (const [path, hash] of files) target.set(path, hash);
+    if (point === START && this.adopting.size > 0) {
+      throw new HistoryRefusedError(
+        "The project's starting copy is still being saved; try again in a moment. Nothing was changed.",
+      );
+    }
+    const isProjectFile = (path: string) => !KEPT_HIDDEN_PATHS.has(path);
+    const keepsAny = [...target].some(([path, hash]) => hash !== null && isProjectFile(path));
+    if ([...this.tracked.keys()].some(isProjectFile) && !keepsAny) {
+      throw new HistoryRefusedError(
+        "Restoring this point would remove every file in this project, so nothing was changed.",
+      );
+    }
     return this.writeAs(who, label, target, { restoredTo: point });
   }
 
@@ -1369,6 +1381,13 @@ export class HistoryClosedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "HistoryClosedError";
+  }
+}
+
+export class HistoryRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HistoryRefusedError";
   }
 }
 

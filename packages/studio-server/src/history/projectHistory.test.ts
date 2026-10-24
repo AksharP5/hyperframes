@@ -25,6 +25,7 @@ import { HistoryBusyError } from "./ownerLock";
 import { HistoryIdError } from "./historyId";
 import {
   HistoryClosedError,
+  HistoryRefusedError,
   openProjectHistory,
   readProjectHistory,
   type ProjectHistory,
@@ -2651,4 +2652,73 @@ describe("the history's copy of a file", () => {
       expect(readdirSync(join(dir, "blobs"))).toEqual([]);
     },
   );
+});
+
+describe("restore refuses to empty a project", () => {
+  it.each(["restore", "back-to-before"])(
+    "refuses %s from an empty start without changing files",
+    async (action) => {
+      const { history, write, read } = await project({});
+      const files = { "index.html": "A", "compositions/a.html": "B", "assets/x.css": "C" };
+      const window = await history.beginWindow(you, "Add files");
+      for (const [path, content] of Object.entries(files)) write(path, content);
+      const entry = await window.close();
+      const restore =
+        action === "restore"
+          ? history.restore(START, you)
+          : history.undo(entry!.id, { who: you, mode: "back-to-before" });
+      await expect(restore).rejects.toThrow(HistoryRefusedError);
+      for (const [path, content] of Object.entries(files)) expect(read(path)).toBe(content);
+    },
+  );
+
+  it("refuses a start that holds only the media ledger", async () => {
+    const { history, write, read } = await project({ ".media/manifest.jsonl": "{}\n" });
+    expect(history.peek(START)).toHaveProperty([".media/manifest.jsonl"]);
+    const window = await history.beginWindow(you, "Add files");
+    write("index.html", "A");
+    write("compositions/a.html", "B");
+    await window.close();
+    await expect(history.restore(START, you)).rejects.toThrow(HistoryRefusedError);
+    expect([read("index.html"), read("compositions/a.html")]).toEqual(["A", "B"]);
+  });
+
+  it("refuses start while its media copy is still adopting", async () => {
+    let release = () => {};
+    mediaCopy.held = new Promise<void>((resolve) => (release = resolve));
+    const clip = Buffer.alloc(2 * 1024 ** 2, 7);
+    const { history, projectDir, read } = await project({ "index.html": "A", "clip.mp4": clip });
+    try {
+      await expect(history.restore(START, you)).rejects.toThrow(HistoryRefusedError);
+      expect(read("index.html")).toBe("A");
+      expect(readFileSync(join(projectDir, "clip.mp4")).equals(clip)).toBe(true);
+    } finally {
+      release();
+    }
+    await vi.waitFor(() => expect(history.peek(START)).toHaveProperty(["clip.mp4"]));
+    await expect(history.restore(START, you)).resolves.toBeNull();
+  });
+
+  it("restores an earlier entry and removes only files added later", async () => {
+    const { history, write, read, has } = await project({ "index.html": "A" });
+    const first = await history.beginWindow(you, "Edit index");
+    write("index.html", "B");
+    const entry = await first.close();
+    const later = await history.beginWindow(you, "Add file");
+    write("index.html", "C");
+    write("later.html", "later");
+    await later.close();
+    await history.restore(entry!.id, you);
+    expect(read("index.html")).toBe("B");
+    expect(has("later.html")).toBe(false);
+  });
+
+  it("allows normal undo to remove the only added file", async () => {
+    const { history, write, has } = await project({});
+    const window = await history.beginWindow(you, "Add index");
+    write("index.html", "A");
+    const entry = await window.close();
+    expect((await history.undo(entry!.id, { who: you })).ok).toBe(true);
+    expect(has("index.html")).toBe(false);
+  });
 });

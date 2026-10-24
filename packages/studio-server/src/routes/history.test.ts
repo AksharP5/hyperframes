@@ -645,3 +645,23 @@ it("checkpoints pending writes without closing an agent window", async () => {
   expect(history.list()).toHaveLength(2);
   expect(history.list().at(-1)?.who).toEqual(who);
 });
+
+it("refuses an empty start restore with 409 and leaves files intact", async () => {
+  const projectDir = tempDir("hf-history-empty-start-");
+  const history = await openProjectHistory({
+    projectDir,
+    historyRoot: tempDir("hf-history-root-"),
+  });
+  cleanup.push(() => history.close());
+  const call = apiFor(projectDir, history);
+  writeFileSync(join(projectDir, "index.html"), "A");
+  writeFileSync(join(projectDir, "notes.html"), "N");
+  await history.checkpoint();
+  const response = await call("/restore", { point: "start" });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    error: "Restoring this point would remove every file in this project, so nothing was changed.",
+  });
+  expect(readFileSync(join(projectDir, "index.html"), "utf-8")).toBe("A");
+  expect(readFileSync(join(projectDir, "notes.html"), "utf-8")).toBe("N");
+});

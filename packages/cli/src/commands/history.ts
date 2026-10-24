@@ -16,6 +16,7 @@ import {
   HISTORY_START,
   HistoryBusyError,
   HistoryIdError,
+  HistoryRefusedError,
   type HistoryEntry,
   type HistoryListItem,
   type HistoryResult,
@@ -358,7 +359,8 @@ function guarded<A>(run: (args: A) => Promise<void>) {
         error instanceof Refusal ||
         error instanceof AmbiguousPreviewServerError ||
         error instanceof HistoryBusyError ||
-        error instanceof HistoryIdError;
+        error instanceof HistoryIdError ||
+        error instanceof HistoryRefusedError;
       if (!refused) throw error;
       setCommandExitCode(2);
       const message =

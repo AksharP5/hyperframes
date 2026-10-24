@@ -183,6 +183,27 @@ describe.each(["direct", "preview"])("hyperframes history (%s)", (mode) => {
     return { ...p, personWrites };
   }
 
+  it("refuses an empty start restore with exit 2 and leaves files intact", async () => {
+    const p = project();
+    rmSync(join(p.dir, "index.html"));
+    rmSync(join(p.dir, "notes.html"));
+    const history = await openProjectHistory({
+      projectDir: p.dir,
+      historyRoot: historyDeps.historyRoot,
+      now: () => clock.at,
+    });
+    p.write("index.html", "A");
+    p.write("notes.html", "N");
+    await history.close();
+    if (mode === "preview") await preview(p.dir);
+    const result = await p.hf("restore", "start");
+    expect(result.code).toBe(2);
+    expect(result.err).toBe(
+      "Restoring this point would remove every file in this project, so nothing was changed.",
+    );
+    expect(p.files()).toEqual(["A", "N"]);
+  });
+
   it("an agent's labelled turn, a person's edit after it: --since shows both, undo of the turn keeps the edit", async () => {
     const { json, hf, turn, personWrites, files } = await setup();
     const startedAt = new Date(clock.at - 1).toISOString();
