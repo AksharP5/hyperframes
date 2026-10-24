@@ -103,3 +103,56 @@ describe("a kept delete carries no media source", () => {
     expect(out()).toContain("live.png");
   });
 });
+
+const lookupDoc = (script: string) => `<!DOCTYPE html><html><body>
+<div data-composition-id="c" data-width="1920" data-height="1080">
+<svg data-hf-id="hf-halftone" class="halftone-svg"><path d="M0 0"></path></svg>
+<div data-hf-id="hf-fiber" id="fiber-1"></div>
+<div data-hf-id="hf-plain" id="plain">keep</div>
+</div>
+<script>${script}</script>
+</body></html>`;
+
+describe("a stored delete any script lookup could reach", () => {
+  const kept = (script: string, id: string) => {
+    const parsed = parseMutable(lookupDoc(script));
+    applyOverrideSet(parsed, { [id]: null });
+    return serializeDocument(parsed).includes("data-hidden");
+  };
+
+  it("is hidden when the script looks it up by class", () => {
+    expect(kept("document.querySelector('.halftone-svg').getBBox();", "hf-halftone")).toBe(true);
+    expect(
+      kept("document.getElementsByClassName('halftone-svg')[0].getBBox();", "hf-halftone"),
+    ).toBe(true);
+  });
+
+  it("is hidden when the lookup argument is a variable", () => {
+    expect(
+      kept(
+        "['#fiber-1'].forEach(function (s) { document.querySelector(s).getTotalLength(); });",
+        "hf-fiber",
+      ),
+    ).toBe(true);
+    expect(
+      kept("var id = 'fiber-1'; document.getElementById(id).getTotalLength();", "hf-fiber"),
+    ).toBe(true);
+  });
+
+  it("is hidden when the argument is a literal continued by an expression", () => {
+    const loop = (call: string) => `for (var n = 1; n < 4; n++) ${call}.getTotalLength();`;
+    expect(kept(loop("document.getElementById('fiber-' + n)"), "hf-fiber")).toBe(true);
+    expect(kept(loop("document.querySelector('#fiber-' + n)"), "hf-fiber")).toBe(true);
+    expect(kept(loop("document.getElementById('fiber-'.concat(n))"), "hf-fiber")).toBe(true);
+  });
+
+  it("is hidden when a class or tag lookup carries a template placeholder", () => {
+    const call = (lookup: string) => `${lookup}[0].getBBox();`;
+    expect(kept(call("document.getElementsByClassName(`item-${n}`)"), "hf-halftone")).toBe(true);
+    expect(kept(call("document.getElementsByTagName(`${t}`)"), "hf-halftone")).toBe(true);
+  });
+
+  it("is still removed when no lookup can reach it", () => {
+    expect(kept("document.getElementById('other').getBBox();", "hf-plain")).toBe(false);
+  });
+});
