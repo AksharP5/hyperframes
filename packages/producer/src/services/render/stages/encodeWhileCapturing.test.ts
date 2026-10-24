@@ -97,6 +97,28 @@ describe("encodeWhileCapturing", () => {
     expect(canEncodeWhileCapturing(input, 4, 8)).toBe(true);
     expect(canEncodeWhileCapturing(input, 4, 4)).toBe(false);
     expect(canEncodeWhileCapturing(input, 1, 8)).toBe(false);
+    expect(
+      canEncodeWhileCapturing({ ...input, lockGopForChunkConcat: true, gopSize: FRAMES }, 4, 8),
+    ).toBe(true);
+  });
+
+  it("encodes a closed-GOP distributed chunk byte-identical to the encode after capture", async () => {
+    const { root, framesDir, landed, merge } = captureToWorkerDirs();
+    const locked = (name: string) => ({
+      ...makeInput(root, framesDir, name),
+      lockGopForChunkConcat: true,
+      gopSize: FRAMES,
+    });
+    const overlap = encodeWhileCapturing(locked("overlap.mp4"), FRAMES);
+    for (const frame of [...landed.slice(FRAMES / 2), ...landed.slice(0, FRAMES / 2)]) {
+      overlap.onFrameLanded(frame);
+    }
+    await until(() => overlap.framesFed === FRAMES);
+    merge();
+    await overlap.finish();
+
+    await runEncodeStage(locked("after.mp4"));
+    expect(sha(join(root, "overlap.mp4"))).toBe(sha(join(root, "after.mp4")));
   });
 
   it("encodes in frame order while frames land out of order, byte-identical to the encode after capture", async () => {

@@ -306,8 +306,7 @@ export function canEncodeWhileCapturing(
     input.preset.codec === "h264" &&
     !input.preset.hdr &&
     input.job.config.useGpu !== true &&
-    input.captureImageFormat === "jpeg" &&
-    input.lockGopForChunkConcat !== true
+    input.captureImageFormat === "jpeg"
   );
 }
 

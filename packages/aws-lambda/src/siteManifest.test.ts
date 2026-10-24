@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { S3Client } from "@aws-sdk/client-s3";
-import { audioSidecarUri, contentStoreUri } from "./contentStore.js";
+import { audioSidecarUri, contentStoreUri, probeFactsUri } from "./contentStore.js";
 import { FakeS3 } from "./sdk/__fixtures__/fakeS3.js";
 import { downloadSiteFiles, serializeSiteManifest, siteManifestUri } from "./siteManifest.js";
 
@@ -69,5 +69,20 @@ describe("downloadSiteFiles", () => {
 
     expect(remote["takes/camera.mov"]?.url).toBeString();
     expect(remote["takes/camera.mov"]?.audioSidecarUrl).toBeUndefined();
+  });
+
+  it("hands a remote video's stored probe along with it, when one is stored", async () => {
+    const fake = new FakeS3();
+    const manifestUri = siteWithVideo(fake);
+    fake.existing.add(probeFactsUri("bucket", VIDEO_SHA).replace("s3://", ""));
+
+    const remote = await downloadSiteFiles(
+      clientOver(fake),
+      manifestUri,
+      join(dir, "project"),
+      true,
+    );
+
+    expect(remote["takes/camera.mov"]?.probeFactsUrl).toContain(`${VIDEO_SHA}.probe.v2.json`);
   });
 });

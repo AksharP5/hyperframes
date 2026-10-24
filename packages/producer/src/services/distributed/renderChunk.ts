@@ -36,6 +36,7 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpus } from "node:os";
 import { join } from "node:path";
 import {
   assertSwiftShader,
@@ -61,7 +62,13 @@ import {
 } from "@hyperframes/engine";
 import { defaultLogger } from "../../logger.js";
 import { applyRenderWarningPolicy, collectVideoMetadataHints } from "../renderOrchestrator.js";
-import { runEncodeStage } from "../render/stages/encodeStage.js";
+import {
+  canEncodeWhileCapturing,
+  encodeWhileCapturing,
+  runEncodeStage,
+  type EncodeStageInput,
+  type EncodeWhileCapturing,
+} from "../render/stages/encodeStage.js";
 import { frameCacheOptions } from "../render/frameCacheBudget.js";
 import { runCaptureStage } from "../render/stages/captureStage.js";
 import { createCapturePlan } from "../render/capturePlan.js";
@@ -745,6 +752,8 @@ export async function renderChunk(
     let forceScreenshotForChunk = encoder.forceScreenshot;
     let shownBoxes: Map<string, ShownBox> | undefined;
     let extraction: Promise<unknown> | undefined;
+    // Frames go to the encoder as they land; it is started again if the capture is retried.
+    const overlap: { current: EncodeWhileCapturing | null } = { current: null };
     try {
       if (chunkWorkerCount === 1 || !forceScreenshotForChunk) {
         // Sequential capture reuses this session. Parallel BeginFrame capture
@@ -859,6 +868,69 @@ export async function renderChunk(
         frameCacheOptions(cfg, chunkWorkerCount),
       );
 
+      const isPngSequence = plan.dimensions.format === "png-sequence";
+      outputKind = isPngSequence ? "frame-dir" : "file";
+      // mp4 / mov / webm use the standard preset machinery; locked encoder values come from the plan's
+      // encoder metadata. png-sequence has no encoder, but `runEncodeStage` still reads `preset.quality`,
+      // so fall back to the mp4 preset shape, as `renderOrchestrator` does.
+      const presetFormat: "mp4" | "mov" | "webm" = isPngSequence
+        ? "mp4"
+        : (plan.dimensions.format as "mp4" | "mov" | "webm");
+      const basePreset = getEncoderPreset(job.config.quality, presetFormat, undefined);
+      const preset = resolvePresetForLockedEncoder(basePreset, encoder.encoder);
+      const effectiveQuality = encoder.crf ?? preset.quality;
+      const effectiveBitrate = encoder.crf != null ? undefined : encoder.bitrate;
+      // For non-pngseq, encodeStage writes to `outputPath` when `isPngSequence`
+      // is false. `videoOnlyPath` is the encoder's direct output: assemble muxes
+      // the audio, or a chunk that carries audio muxes its own below.
+      const videoOnlyPath = encoder.chunksCarryAudio
+        ? `${outputChunkPath}.video.mp4`
+        : outputChunkPath;
+      if (isPngSequence) {
+        if (!existsSync(outputChunkPath)) mkdirSync(outputChunkPath, { recursive: true });
+      } else {
+        const outDir = join(outputChunkPath, "..");
+        if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+      }
+
+      const encodeInput: EncodeStageInput = {
+        job,
+        log,
+        outputPath: videoOnlyPath,
+        framesDir,
+        videoOnlyPath,
+        width: Math.round(plan.dimensions.width * encoder.deviceScaleFactor),
+        height: Math.round(plan.dimensions.height * encoder.deviceScaleFactor),
+        needsAlpha: plan.dimensions.format !== "mp4",
+        captureImageFormat: captureOptions.format ?? "jpeg",
+        // The encoder writes video only; audio joins at assemble time or in the
+        // chunk that carries audio. Suppressing `hasAudio` skips the png-sequence audio
+        // sidecar AND the mp4 audio mux.
+        hasAudio: false,
+        isPngSequence,
+        // `DistributedFormat` has no "gif" member — distributed chunks are
+        // always video segments (gif renders in-process only).
+        isGif: false,
+        preset,
+        effectiveQuality,
+        effectiveBitrate,
+        engineConfig: {
+          ffmpegEncodeTimeout: cfg.ffmpegEncodeTimeout,
+          vp9CpuUsed: resolveLockedVp9CpuUsed(encoder) ?? cfg.vp9CpuUsed,
+        },
+        // Distributed chunks emit a single ffmpeg call per chunk; the
+        // in-process per-chunk-within-chunk path would re-split our
+        // already-chunked work.
+        enableChunkedEncode: false,
+        chunkedEncodeSize: framesInChunk,
+        abortSignal: undefined,
+        assertNotAborted: () => {},
+        // GOP === framesInChunk + force-keyframe at frame 0 → the chunk's
+        // first frame is an IDR keyframe and concat-copy at assemble time
+        // round-trips losslessly.
+        lockGopForChunkConcat: !isPngSequence,
+        gopSize: framesInChunk,
+      };
       const captureStarted = Date.now();
       captureMode = await runCaptureWithScreenshotFallback({
         forceScreenshot: forceScreenshotForChunk,
@@ -897,6 +969,9 @@ export async function renderChunk(
           // including error paths. Clear our defensive handle before await.
           const captureSession = session;
           session = null;
+          overlap.current = canEncodeWhileCapturing(encodeInput, chunkWorkerCount, cpus().length)
+            ? encodeWhileCapturing(encodeInput, framesInChunk)
+            : null;
           await runCaptureStage({
             fileServer,
             workDir,
@@ -916,6 +991,11 @@ export async function renderChunk(
             abortSignal: undefined,
             assertNotAborted: () => {},
             frameRange: range,
+            onFrameLanded: (frame) => overlap.current?.onFrameLanded(frame),
+          }).catch(async (captureError: unknown) => {
+            await overlap.current?.abort();
+            overlap.current = null;
+            throw captureError;
           });
 
           return observedChunkCaptureMode(capturePerfs);
@@ -953,74 +1033,10 @@ export async function renderChunk(
       framesEncoded = framesInChunk;
 
       // ── Encode the chunk ──
-      const isPngSequence = plan.dimensions.format === "png-sequence";
-      outputKind = isPngSequence ? "frame-dir" : "file";
-      // For mp4 / mov / webm we use the standard preset machinery; the
-      // locked encoder values come from `meta/encoder.json` and the
-      // `lockGopForChunkConcat` toggle is the only Phase-2 flag that flips
-      // on at this site. png-sequence has no encoder, but `runEncodeStage`
-      // still reads `preset.quality` for bookkeeping (it never reaches
-      // ffmpeg on the pngseq branch). Fall back to the mp4 preset shape —
-      // same trick `renderOrchestrator` plays.
-      const presetFormat: "mp4" | "mov" | "webm" = isPngSequence
-        ? "mp4"
-        : (plan.dimensions.format as "mp4" | "mov" | "webm");
-      const basePreset = getEncoderPreset(job.config.quality, presetFormat, undefined);
-      const preset = resolvePresetForLockedEncoder(basePreset, encoder.encoder);
-      const effectiveQuality = encoder.crf ?? preset.quality;
-      const effectiveBitrate = encoder.crf != null ? undefined : encoder.bitrate;
-      // For non-pngseq, encodeStage writes to `outputPath` when `isPngSequence`
-      // is false. `videoOnlyPath` is the encoder's direct output: assemble muxes
-      // the audio, or a chunk that carries audio muxes its own below.
-      const videoOnlyPath = encoder.chunksCarryAudio
-        ? `${outputChunkPath}.video.mp4`
-        : outputChunkPath;
-      if (isPngSequence) {
-        if (!existsSync(outputChunkPath)) mkdirSync(outputChunkPath, { recursive: true });
-      } else {
-        const outDir = join(outputChunkPath, "..");
-        if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
-      }
-
       const encodeStarted = Date.now();
-      await runEncodeStage({
-        job,
-        log,
-        outputPath: videoOnlyPath,
-        framesDir,
-        videoOnlyPath,
-        width: Math.round(plan.dimensions.width * encoder.deviceScaleFactor),
-        height: Math.round(plan.dimensions.height * encoder.deviceScaleFactor),
-        needsAlpha: plan.dimensions.format !== "mp4",
-        captureImageFormat: captureOptions.format ?? "jpeg",
-        // The encoder writes video only; audio joins at assemble time or in the
-        // chunk that carries audio. Suppressing `hasAudio` skips the png-sequence audio
-        // sidecar AND the mp4 audio mux.
-        hasAudio: false,
-        isPngSequence,
-        // `DistributedFormat` has no "gif" member — distributed chunks are
-        // always video segments (gif renders in-process only).
-        isGif: false,
-        preset,
-        effectiveQuality,
-        effectiveBitrate,
-        engineConfig: {
-          ffmpegEncodeTimeout: cfg.ffmpegEncodeTimeout,
-          vp9CpuUsed: resolveLockedVp9CpuUsed(encoder) ?? cfg.vp9CpuUsed,
-        },
-        // Distributed chunks emit a single ffmpeg call per chunk; the
-        // in-process per-chunk-within-chunk path would re-split our
-        // already-chunked work.
-        enableChunkedEncode: false,
-        chunkedEncodeSize: framesInChunk,
-        abortSignal: undefined,
-        assertNotAborted: () => {},
-        // GOP === framesInChunk + force-keyframe at frame 0 → the chunk's
-        // first frame is an IDR keyframe and concat-copy at assemble time
-        // round-trips losslessly.
-        lockGopForChunkConcat: !isPngSequence,
-        gopSize: framesInChunk,
-      });
+      const overlapped = overlap.current;
+      overlap.current = null;
+      await (overlapped ? overlapped.finish() : runEncodeStage(encodeInput));
       if (encoder.chunksCarryAudio) {
         const audioScratchPath = `${outputChunkPath}.audio.m4a`;
         // A sub-range muxes the packets it owns as if it were a chunk of its own.
@@ -1042,6 +1058,7 @@ export async function renderChunk(
       encodeStageMs = Date.now() - encodeStarted;
     } finally {
       // No ffmpeg left writing into a work dir the caller removes; its error surfaced above.
+      await overlap.current?.abort().catch(() => {});
       await extraction?.catch(() => {});
       // Cleanest path: captureStage closed the session for us. The defensive
       // close handles error paths where we threw before delegating.

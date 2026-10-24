@@ -711,6 +711,43 @@ describe("processCompositionAudio", () => {
     },
   );
 
+  it("reports how long each phase of the mix took", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
+    const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
+    tempDirs.push(baseDir, workDir);
+    writeFileSync(join(baseDir, "bed.wav"), "stub");
+
+    const result = await processCompositionAudio(
+      [
+        {
+          id: "bed",
+          src: "bed.wav",
+          start: 0,
+          end: 2,
+          mediaStart: 0,
+          layer: 0,
+          volume: 1,
+          type: "audio",
+        },
+      ],
+      baseDir,
+      workDir,
+      join(baseDir, "out.m4a"),
+      2,
+      undefined,
+      { masterFxChain: gainChain },
+    );
+
+    expect(result.success).toBe(true);
+    expect(Object.keys(result.phaseMs ?? {}).sort()).toEqual([
+      "encode",
+      "groups",
+      "master",
+      "mix",
+      "prepare",
+    ]);
+  });
+
   it.each([
     ["the master pass", {}, { masterFxChain: gainChain }],
     ["a group bus", { groupId: "bus", groupFxChain: gainChain }, {}],

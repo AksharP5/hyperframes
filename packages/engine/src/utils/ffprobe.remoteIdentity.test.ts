@@ -5,10 +5,15 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getFfmpegBinary } from "./ffmpegBinaries.js";
+import { getFfmpegBinary, getFfprobeBinary } from "./ffmpegBinaries.js";
 import {
+  buildProbeFactsText,
   declareContentAddressedUrl,
+  declareProbeFactsUrl,
+  readProbeJson,
+  readStoredFinalFrame,
   extractAudioMetadata,
+  extractFinalVideoFrameTimestamp,
   extractMediaMetadata,
 } from "./ffprobe.js";
 
@@ -19,6 +24,7 @@ describe.skipIf(!HAS_FFMPEG)("probing a file held at a URL", { timeout: 60_000 }
   let server: Server;
   let requests = 0;
   let base: string;
+  let factsJson = "";
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "hf-remote-identity-"));
@@ -30,8 +36,15 @@ describe.skipIf(!HAS_FFMPEG)("probing a file held at a URL", { timeout: 60_000 }
     ]);
     expect(made.status).toBe(0);
     const body = readFileSync(path);
+    factsJson = await buildProbeFactsText(path);
     server = createServer((req, res) => {
       requests++;
+      if (req.url?.startsWith("/facts/")) return void res.writeHead(200).end(factsJson);
+      if (req.url?.startsWith("/facts-other-major/")) {
+        const other = { ...JSON.parse(factsJson), ffprobeMajor: 99 };
+        return void res.writeHead(200).end(JSON.stringify(other));
+      }
+      if (req.url?.startsWith("/gone/")) return void res.writeHead(404).end("gone");
       const start = Number(/bytes=(\d+)-/.exec(req.headers.range ?? "")?.[1] ?? 0);
       res.writeHead(206, {
         "Accept-Ranges": "bytes",
@@ -79,5 +92,62 @@ describe.skipIf(!HAS_FFMPEG)("probing a file held at a URL", { timeout: 60_000 }
 
     expect(second).toBeGreaterThanOrEqual(first);
     expect(second).toBeGreaterThan(5);
+  });
+
+  it("answers a declared URL's probe from its stored JSON without touching the media", async () => {
+    const url = `${base}/gone/stored.mp4`;
+    declareProbeFactsUrl(url, `${base}/facts/stored.json`);
+
+    const metadata = await extractMediaMetadata(url);
+
+    expect(metadata.width).toBe(64);
+    expect(metadata.hasAudio).toBe(true);
+  });
+
+  it("answers a declared URL's final-frame timestamp from its stored copy, for the window it was stored for", async () => {
+    const url = `${base}/gone/final.mp4`;
+    declareProbeFactsUrl(url, `${base}/facts/final.json`);
+    const metadata = await extractMediaMetadata(url);
+    const window = {
+      videoStreamStartSeconds: metadata.videoStreamStartSeconds,
+      videoStreamDurationSeconds: metadata.videoStreamDurationSeconds,
+    };
+
+    const seconds = await extractFinalVideoFrameTimestamp(url, window);
+
+    expect(seconds).toBeGreaterThan(2);
+    expect(seconds).toBeLessThanOrEqual(3);
+  });
+
+  it("stores the final packet's duration beside the final frame, and reads it back", async () => {
+    const url = `${base}/gone/packet.mp4`;
+    declareProbeFactsUrl(url, `${base}/facts/packet.json`);
+    const metadata = await extractMediaMetadata(url);
+
+    const stored = await readStoredFinalFrame(url, metadata);
+
+    expect(stored?.lastPacketSeconds).toBeCloseTo(0.04, 3);
+  });
+
+  it("ignores the stored final frame when another ffprobe major version stored it", async () => {
+    const url = `${base}/gone/major.mp4`;
+    declareProbeFactsUrl(url, `${base}/facts-other-major/major.json`);
+    const metadata = await extractMediaMetadata(url);
+
+    expect(await readStoredFinalFrame(url, metadata)).toBeUndefined();
+  });
+
+  it("records the ffprobe major version beside the facts, when the build reports one", () => {
+    const binary = getFfprobeBinary();
+    const banner = spawnSync(binary, ["-version"], { encoding: "utf-8" }).stdout;
+    const major = Number(/version n?(\d+)/.exec(banner)?.[1]) || undefined;
+    expect(JSON.parse(factsJson).ffprobeMajor).toBe(major);
+  });
+
+  it("probes the media itself when its stored JSON cannot be read", async () => {
+    const url = `${base}/content/fallback.mp4`;
+    declareProbeFactsUrl(url, `${base}/gone/facts.json`);
+
+    expect(JSON.parse(await readProbeJson(url)).streams.length).toBe(2);
   });
 });

@@ -113,4 +113,5 @@ export interface MixResult {
   tracksProcessed: number;
   error?: string;
   failures?: AudioProcessingFailure[];
+  phaseMs?: Partial<Record<"prepare" | "groups" | "mix" | "master" | "encode", number>>;
 }

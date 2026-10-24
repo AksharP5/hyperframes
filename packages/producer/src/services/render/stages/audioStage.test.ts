@@ -237,6 +237,26 @@ describe("runAudioStage", () => {
     expect(result.audioError).toBeUndefined();
   });
 
+  it("logs the mixer's phase times and the peak check's as one line", async () => {
+    const phaseMs = { prepare: 11, groups: 2, mix: 30, master: 4, encode: 20 };
+    processCompositionAudioMock.mockResolvedValue({
+      success: true,
+      outputPath: "audio.m4a",
+      durationMs: 1,
+      tracksProcessed: 1,
+      phaseMs,
+    });
+    const info = vi.fn();
+
+    await runAudioStage(makeInput({ log: { info } as never }));
+
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith(
+      "[audio] phases",
+      expect.objectContaining({ ...phaseMs, guard: expect.any(Number) }),
+    );
+  });
+
   it("throws a structured retry signal when audio ffmpeg is externally interrupted", async () => {
     processCompositionAudioMock.mockResolvedValue({
       success: false,

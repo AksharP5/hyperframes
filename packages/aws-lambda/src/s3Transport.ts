@@ -49,6 +49,7 @@ import * as tar from "tar";
 import {
   CONTENT_STORE_REFRESH_AFTER_DAYS,
   audioSidecarUri,
+  probeFactsUri,
   contentStoreUri,
 } from "./contentStore.js";
 
@@ -709,4 +710,31 @@ export async function untarDirectory(tarballPath: string, destDir: string): Prom
   }
   mkdirSync(destDir, { recursive: true });
   await tar.extract({ file: tarballPath, cwd: destDir });
+}
+
+export async function putProbeFacts(
+  client: S3Client,
+  localPath: string,
+  bucket: string,
+  sha256: string,
+): Promise<"uploaded" | "reused"> {
+  const uri = probeFactsUri(bucket, sha256);
+  if (await s3ObjectExists(client, uri)) return "reused";
+  const { key } = parseS3Uri(uri);
+  const size = statSync(localPath).size;
+  try {
+    await putImmutableBody(
+      client,
+      localPath,
+      bucket,
+      key,
+      size,
+      await sha256File(localPath),
+      "application/json",
+    );
+  } catch (error) {
+    if (!isS3PreconditionFailed(error)) throw error;
+    return "reused";
+  }
+  return "uploaded";
 }
