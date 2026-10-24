@@ -145,6 +145,8 @@ function isBufferSource(
   return source.sourceKind === "buffer";
 }
 
+const decodeKey = (el: HTMLMediaElement): string | null => el.currentSrc || el.getAttribute("src");
+
 // A pause to scrub or a reschedule mid-play keeps the output awake; a real idle lets it sleep.
 const IDLE_SUSPEND_MS = 10000;
 
@@ -260,8 +262,16 @@ export class WebAudioTransport {
     return this._rateAnchorComp + (this._ctx.currentTime - this._rateAnchorCtx) * this._rate;
   }
 
+  /** Drops decoded audio no listed element still points at. A playing source holds its own buffer. */
+  releaseDecodedExcept(els: readonly HTMLMediaElement[]): void {
+    const live = new Set(els.map(decodeKey));
+    for (const src of [...this._bufferCache.keys()]) {
+      if (!live.has(src)) this._bufferCache.delete(src);
+    }
+  }
+
   async decodeAudioElement(el: HTMLMediaElement): Promise<AudioBuffer | null> {
-    const src = el.currentSrc || el.getAttribute("src");
+    const src = decodeKey(el);
     if (!src) return null;
     if (this._bufferCache.has(src)) return this._bufferCache.get(src)!;
     if (this._failedSrcs.has(src)) return null;

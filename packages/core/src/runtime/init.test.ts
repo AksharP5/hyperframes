@@ -5947,6 +5947,61 @@ describe("initSandboxRuntimeModular", () => {
     });
   });
 
+  describe("decoded audio across edits", () => {
+    useMockAudioContext();
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("releases buffers for sources the film no longer uses and keeps the rest without re-decoding", async () => {
+      const first = mountAudio("https://cdn.example.com/clip-0.mp3");
+      const audios = [first];
+      for (let i = 1; i < 8; i++) {
+        const audio = document.createElement("audio");
+        audio.setAttribute("data-start", String(i));
+        audio.setAttribute("data-duration", "1");
+        audio.setAttribute("src", `https://cdn.example.com/clip-${i}.mp3`);
+        audio.load = () => {};
+        audio.play = vi.fn(() => Promise.resolve());
+        first.parentElement!.appendChild(audio);
+        audios.push(audio);
+      }
+      (AudioContext.prototype as unknown as { decodeAudioData: unknown }).decodeAudioData =
+        async () => ({}) as AudioBuffer;
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(8),
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      vi.spyOn(console, "info").mockImplementation(() => {});
+      vi.spyOn(WebAudioTransport.prototype, "schedulePlayback").mockResolvedValue(null);
+      const decode = vi.spyOn(WebAudioTransport.prototype, "decodeAudioElement");
+      const settled = async (calls: number) => {
+        await vi.waitFor(() => expect(decode).toHaveBeenCalledTimes(calls));
+        await Promise.all(decode.mock.results.map((r) => r.value));
+      };
+      const cached = () =>
+        [
+          ...(
+            decode.mock.contexts[0] as unknown as { _bufferCache: Map<string, unknown> }
+          )._bufferCache.keys(),
+        ].sort();
+
+      await startPlayback();
+      await settled(8);
+      expect(cached()).toHaveLength(8);
+
+      // An edit swaps the second half of the clips to new sources.
+      window.__player?.pause();
+      audios
+        .slice(4)
+        .forEach((a, i) => a.setAttribute("src", `https://cdn.example.com/edit-${i}.mp3`));
+      window.__player?.play();
+      await settled(16);
+
+      expect(cached()).toEqual(audios.map((a) => a.getAttribute("src")).sort());
+      expect(fetchMock).toHaveBeenCalledTimes(12);
+    });
+  });
+
   // `el.volume` stops at 1, so a video's authored boost can only be carried by a Web Audio gain.
   describe("a video's sound above unity", () => {
     const ctx = useMockAudioContext();
