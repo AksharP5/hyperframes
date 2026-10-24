@@ -19,9 +19,12 @@ beforeAll(async () => {
   ]);
 }, 120_000);
 
-afterEach(() => {
+afterEach(async () => {
   process.argv = [...originalArgv];
   process.exitCode = originalExitCode;
+  // The CLI starts background imports it never awaits; one still loading when the registry resets
+  // splits a module in two, and the next test's error class no longer matches its own.
+  await vi.dynamicImportSettled();
   for (const path of MOCKED_MODULES) vi.doUnmock(path);
   vi.resetModules();
 });
