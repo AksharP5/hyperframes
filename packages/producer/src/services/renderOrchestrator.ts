@@ -171,6 +171,7 @@ import { findRenderHdrAutoPromotionTrigger, resolveEffectiveHdrMode } from "./re
 import {
   buildRenderPerfSummary,
   pushWorkerDedupPerfs,
+  pushWorkerPageErrors,
   roundDb,
   worstSubTimelineWaitOutcome,
 } from "./render/perfSummary.js";
@@ -1201,6 +1202,8 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
   frameRangeStart?: number;
   /** Mutated in place — replaced each attempt so only the final attempt's worker perf survives (see retry reset below). */
   dedupPerfs: CapturePerfSummary[];
+  /** Mutated in place: the workers' page-error console lines, for the render's error count. */
+  pageErrorLines?: string[];
 }): Promise<CaptureAttemptSummary[]> {
   const attempts: CaptureAttemptSummary[] = [];
   let currentWorkers = options.initialWorkerCount;
@@ -1271,6 +1274,7 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
             options.cfg,
           );
           pushWorkerDedupPerfs(workerResults, options.dedupPerfs);
+          if (options.pageErrorLines) pushWorkerPageErrors(workerResults, options.pageErrorLines);
         } finally {
           await mergeWorkerFrames(attemptWorkDir, tasks, options.framesDir);
         }

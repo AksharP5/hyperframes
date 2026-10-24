@@ -68,6 +68,7 @@ import {
 } from "../../renderOrchestrator.js";
 import { wrapCaptureStageError } from "../captureStageError.js";
 import { reportFrameProgress, reportWorkerStartup } from "../shared.js";
+import { withWorkerPageErrors } from "../perfSummary.js";
 import type { SdrDiskCapturePlan } from "../capturePlan.js";
 
 export interface CaptureStageInput {
@@ -315,6 +316,7 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
   let { workerCount } = plan;
   const { forceScreenshot } = plan;
   let lastBrowserConsole: string[] = [];
+  const workerPageErrors: string[] = [];
   let captureBeyondViewport: boolean | undefined = probeSession?.options.captureBeyondViewport;
 
   // Derive a local cfg view rather than reading `forceScreenshot` from the
@@ -376,6 +378,7 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
       abortSignal,
       frameRangeStart: frameRange?.startFrame,
       dedupPerfs,
+      pageErrorLines: workerPageErrors,
       onProgress: (progress) => {
         if (progress.latestWorkerPhase) {
           if (progress.capturedFrames === 0) reportWorkerStartup(job, progress, onProgress);
@@ -396,6 +399,11 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
       },
       cfg: captureCfg,
       log,
+    }).catch((error: unknown) => {
+      throw wrapCaptureStageError(
+        error,
+        withWorkerPageErrors(probeSession?.browserConsoleBuffer ?? [], workerPageErrors),
+      );
     });
     captureAttempts.push(...attempts);
     const lastAttempt = attempts[attempts.length - 1];
@@ -408,6 +416,7 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
       await closeCaptureSession(probeSession);
       probeSession = null;
     }
+    lastBrowserConsole = withWorkerPageErrors(lastBrowserConsole, workerPageErrors);
   } else {
     const sequential = await runSequentialDiskCapture(
       input,

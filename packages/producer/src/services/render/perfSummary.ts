@@ -54,6 +54,21 @@ export function pushWorkerDedupPerfs(
   }
 }
 
+/** Adds each worker's page-error console lines to `sink`, once per distinct line. */
+export function pushWorkerPageErrors(
+  results: ReadonlyArray<{ pageErrorLines?: string[] }>,
+  sink: string[],
+): void {
+  for (const result of results) {
+    for (const line of result.pageErrorLines ?? []) if (!sink.includes(line)) sink.push(line);
+  }
+}
+
+/** The console lines plus the workers' page-error lines the console does not already hold. */
+export function withWorkerPageErrors(consoleLines: string[], workerLines: string[]): string[] {
+  return [...consoleLines, ...workerLines.filter((line) => !consoleLines.includes(line))];
+}
+
 /**
  * Collapse per-session/per-worker static-dedup perf into one render-level
  * outcome. enabled/armed = OR across workers (they run the same gates on the
