@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { Script } from "node:vm";
 import { Window } from "happy-dom";
 import {
   loadTranscript,
@@ -734,6 +735,28 @@ describe("whisper-cpp zero-duration interpolation", () => {
 });
 
 describe("patchCaptionHtml", () => {
+  it.each(["script", "TRANSCRIPT"])(
+    "replaces the complete %s array when old caption text contains an array terminator",
+    (name) => {
+      const dir = mkdtempSync(join(tmpdir(), "hf-patch-test-"));
+      dirs.push(dir);
+      const file = join(dir, "captions.html");
+      const oldWords = [{ text: "items[i];", start: 0, end: 1 }];
+      const prefix = `const ${name} = `;
+      const suffix = ";\nconst sentinel = true;";
+      writeFileSync(file, `<script>${prefix}${JSON.stringify(oldWords)}${suffix}</script>`);
+      const words = [{ id: "w0", text: "Replacement caption", start: 0, end: 1 }];
+
+      patchCaptionHtml(dir, words);
+
+      const html = readFileSync(file, "utf8");
+      const source = html.slice("<script>".length, -"</script>".length);
+      expect(() => new Script(source)).not.toThrow();
+      expect(source.endsWith(suffix)).toBe(true);
+      expect(JSON.parse(source.slice(prefix.length, -suffix.length))).toEqual(words);
+    },
+  );
+
   it.each([
     "</ScRiPt><span data-unexpected>caption</span>",
     "</script\t><span data-unexpected>caption</span>",
