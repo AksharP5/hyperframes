@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { getFfmpegBinary, getFfprobeBinary } from "../utils/ffmpegBinaries.js";
+import { FFMPEG_PATH_ENV, getFfmpegBinary, getFfprobeBinary } from "../utils/ffmpegBinaries.js";
 import { aacSegmentCount, encodeAac, splitAdtsFrames } from "./aacEncode.js";
 import * as ffmpegRunner from "../utils/runFfmpeg.js";
 
@@ -195,6 +195,39 @@ describe.skipIf(!HAS_FFMPEG)("encodeAac", () => {
     expect((await encodeAac(source, split, 147.52, { timeout: 120_000 })).success).toBe(true);
     expect(streamEnd(split)).toBe(streamEnd(single));
   }, 120_000);
+
+  it.skipIf(process.platform === "win32")(
+    "ends the stream at the duration on an FFmpeg whose setts has no duration option",
+    async () => {
+      const source = join(dir, "old-ffmpeg.wav");
+      ffmpeg(["-f", "lavfi", "-i", "sine=f=440:d=2.5:r=48000", "-ac", "2", "-y", source]);
+      const wrapper = join(dir, "ffmpeg-without-setts-duration");
+      writeFileSync(
+        wrapper,
+        [
+          "#!/bin/sh",
+          'case "$*" in *"-h bsf=setts"*) exit 0;; esac',
+          `case "$*" in *"setts=duration"*) echo "Option 'duration' not found" >&2; exit 1;; esac`,
+          `exec "${getFfmpegBinary()}" "$@"`,
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      const reference = join(dir, "old-ffmpeg-reference.m4a");
+      expect((await encodeAac(source, reference, 2.5, { timeout: 30_000 })).success).toBe(true);
+
+      const saved = process.env[FFMPEG_PATH_ENV];
+      process.env[FFMPEG_PATH_ENV] = wrapper;
+      const coded = join(dir, "old-ffmpeg.m4a");
+      try {
+        expect((await encodeAac(source, coded, 2.5, { timeout: 30_000 })).success).toBe(true);
+      } finally {
+        if (saved === undefined) delete process.env[FFMPEG_PATH_ENV];
+        else process.env[FFMPEG_PATH_ENV] = saved;
+      }
+      expect(streamEnd(coded)).toBe(streamEnd(reference));
+    },
+    60_000,
+  );
 
   it("keeps a sharp onset at its level when the audio opens quietly, encode after encode", async () => {
     const growthDb: number[] = [];
