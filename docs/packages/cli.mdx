@@ -113,7 +113,7 @@ npx hyperframes init my-video --tailwind
 | `--keep-original`   | Copy the `--video` file as is instead of converting a non-web codec to H.264 MP4                                                                                                                                                                                                     |
 | `--model`           | Whisper model for that transcription (for example `small.en`, `medium.en`, `large`)                                                                                                                                                                                                   |
 | `--language`        | Language code for transcription (`en`, `es`, `ja`, …). Filters out speech in other languages.                                                                                                                                                                                         |
-| `--skip-skills`     | Currently ignored. Set `HYPERFRAMES_SKIP_SKILLS=1` to opt out in CI or tests.                                                                                                                                                                                                         |
+| `--skip-skills`     | Leave AI coding skills alone: `init` does not install the core set. `HYPERFRAMES_SKIP_SKILLS=1` does the same.
 
 Pass `--video` or `--audio` and the CLI transcribes the audio with Whisper and
 patches the captions into the composition for you. `--skip-transcribe` turns
@@ -1862,9 +1862,10 @@ npx hyperframes skills update slideshow
 Bare `skills` installs everything. `skills update` keeps a deliberate partial
 installation partial: it refreshes the core set plus whatever is already
 installed, and never expands beyond that unless you name a skill. Naming one
-adds it. `check` and `update` both accept `--json`, plus `--dir` and `--source`
-to point removed-detection at a different skills directory or source — those two
-scope the prune, not the install.
+adds it. `check` and `update` both accept `--json`, and `check` also accepts
+`--dir` and `--source`. `update` never removes a skill, and it leaves a skill the
+install record attributes to another publisher alone, even when the name matches
+one of ours.
 
 Set `HYPERFRAMES_SKIP_SKILLS=1` when something else manages the skills (CI, tests,
 or an install pinned to one commit). `skills update` and bare `skills` then exit 0
@@ -1872,7 +1873,7 @@ with a one-line notice and leave the installed skills unchanged.
 
 The CLI installs from the current HyperFrames GitHub source and links the global
 bundles into whichever compatible agents it finds. After scaffolding, `init`
-also refreshes the core set plus any HyperFrames skills you already have.
+installs the core set if it is missing. It never refreshes or removes a skill you already have; run `skills update` for that.
 
 #### `fatal: active post-checkout hook found during git clone`
 

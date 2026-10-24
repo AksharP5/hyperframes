@@ -321,6 +321,32 @@ describe("CLI lifecycle", () => {
   });
 });
 
+describe("stale-skills notice under --json", () => {
+  it("prints on a --json run while the self-update notices stay off", async () => {
+    const printSkillsUpdateNotice = vi.fn();
+    const printUpdateNotice = vi.fn();
+    mockInitCommand(vi.fn());
+    mockTelemetry();
+    vi.doMock("./utils/autoUpdate.js", () => ({
+      reportCompletedUpdate: vi.fn(),
+      scheduleBackgroundInstall: vi.fn(),
+    }));
+    vi.doMock("./utils/updateCheck.js", () => ({
+      cachedUpdateCheck: () => ({ current: "1.0.0", latest: "1.0.0", updateAvailable: false }),
+      printUpdateNotice,
+      printStalePinNotice: vi.fn(),
+    }));
+    vi.doMock("./utils/skillsUpdateCheck.js", () => ({ printSkillsUpdateNotice }));
+    vi.doMock("./utils/backgroundChecks.js", () => ({ launchBackgroundChecks: vi.fn() }));
+
+    process.argv = ["node", "cli.ts", "init", "--json"];
+    await import("./cli.js");
+
+    await vi.waitFor(() => expect(printSkillsUpdateNotice).toHaveBeenCalledTimes(1));
+    expect(printUpdateNotice).not.toHaveBeenCalled();
+  });
+});
+
 const MOCKED_MODULES = [
   "./commands/init.js",
   "./telemetry/events.js",

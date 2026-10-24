@@ -30,13 +30,20 @@ const tailwindScript =
 // TypeScript-aware runtime. vitest runs under node, so `process.execPath`
 // would be node and couldn't load the entry. This repo hard-depends on bun
 // (package.json scripts), so assuming it's on PATH is safe.
-function runInit(args: string[]): { status: number; stdout: string; stderr: string } {
+function runInit(
+  args: string[],
+  opts: { skillsEnvOptOut?: boolean } = {},
+): { status: number; stdout: string; stderr: string } {
+  const env = { ...process.env, HYPERFRAMES_SKIP_SKILLS: "1" } as Record<
+    string,
+    string | undefined
+  >;
+  // Default keeps tests offline and fast; a test passes false to rely on the flag alone.
+  if (opts.skillsEnvOptOut === false) delete env.HYPERFRAMES_SKIP_SKILLS;
   const res = spawnSync("bun", ["run", cliEntry, "init", ...args], {
     encoding: "utf-8",
     timeout: 30_000,
-    // The `--skip-skills` flag is neutered (see init.ts); the GitHub skills check
-    // is opted out only via this env var, so tests stay offline and fast.
-    env: { ...process.env, HYPERFRAMES_SKIP_SKILLS: "1" },
+    env,
   });
   return {
     status: res.status ?? -1,
@@ -134,6 +141,21 @@ describe("hyperframes init flag rename", () => {
       expect(pkg.private).toBe(true);
       expect(pkg.type).toBe("module");
       expectScaffoldedScripts(target);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("--skip-skills alone leaves skills alone, without the env opt-out", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-init-test-"));
+    const target = join(dir, "proj");
+    try {
+      const res = runInit([target, "--example", "blank", "--non-interactive", "--skip-skills"], {
+        skillsEnvOptOut: false,
+      });
+      expect(res.status).toBe(0);
+      expect(res.stdout).not.toContain("Checking AI coding skills");
+      expect(res.stdout).not.toContain("temporarily ignored");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

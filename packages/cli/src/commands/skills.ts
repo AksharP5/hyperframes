@@ -12,10 +12,8 @@ import {
   hyperframesSkillNames,
   isCoreSkill,
   presentSkills,
-  pruneOrphanedLockEntries,
   RETIRED_SKILLS,
   retiredSkillNotice,
-  SKILLS_CLI_LOCK_PATHS_VERIFIED_AT,
   type SkillDiff,
   type SkillsCheckResult,
 } from "../utils/skillsManifest.js";
@@ -148,20 +146,6 @@ function runSkillsAdd(
 // on the Windows `cmd.exe` spawn path, where arg escaping is fragile.
 const PLAIN_SKILL_NAME = /^[a-z0-9][a-z0-9._-]*$/i;
 
-function runSkillsRemove(names: string[], opts: { global: boolean }): Promise<void> {
-  const safe = names.filter((n) => PLAIN_SKILL_NAME.test(n));
-  const rejected = names.filter((n) => !PLAIN_SKILL_NAME.test(n));
-  if (rejected.length) {
-    clack.log.warn(c.warn(`Skipping unexpected skill name(s): ${rejected.join(", ")}`));
-  }
-  if (!safe.length) return Promise.resolve();
-  // `skills remove --yes` deletes the bundle dir, every agent symlink, and the
-  // lock entry non-interactively. `-g` targets the global install; without it,
-  // the project (cwd) install — we pass whichever scope detection attributed
-  // these names from, so we never reach into a scope we didn't inspect.
-  return spawnNpx(["skills", "remove", ...safe, ...(opts.global ? ["-g"] : []), "--yes"]);
-}
-
 // Use the full GitHub URL (not the `owner/repo` slug) as the clone source. The
 // freshness comes from --full-depth (see GLOBAL_INSTALL_ARGS_TAIL), which clones the
 // repo at latest `main`; the URL just names what to clone. Our freshness check
@@ -169,7 +153,7 @@ function runSkillsRemove(names: string[], opts: { global: boolean }): Promise<vo
 const SOURCES = [{ name: "HyperFrames", url: "https://github.com/heygen-com/hyperframes" }];
 
 // Fan HyperFrames' own skills out to every other installed agent. Scope by the
-// lock's source attribution (the same definition prune uses) — NOT by listing
+// lock's source attribution (the same attribution the foreign check uses) — NOT by listing
 // ~/.claude/skills, which is shared with the user's other Claude skills (gstack,
 // personal, company). No-op when nothing is attributed or the global store is
 // absent, so it's safe to run unconditionally after any install. Best-effort: a
@@ -331,6 +315,8 @@ export async function updateSkills(
   opts: {
     requested?: readonly string[];
     refreshInstalled?: boolean;
+    /** Install only what is missing; never touch a skill that is already installed. */
+    onlyMissing?: boolean;
     /** Every skill the manifest publishes (bare `hyperframes skills`). */
     all?: boolean;
     strict?: boolean;
@@ -383,9 +369,7 @@ export async function updateSkills(
     return { ...(await updateSkillsOffline(requested, { strict, cwd: opts.cwd })), retired };
   }
 
-  // "removed" entries are lock-attributed leftovers, not manifest skills —
-  // they are `skills update`'s prune concern, never an update target.
-  const manifestSkills = check.skills.filter((s) => s.status !== "removed");
+  const manifestSkills = check.skills;
   const manifestNames = new Set(manifestSkills.map((s) => s.name));
 
   const unknown = requested.filter((name) => !manifestNames.has(name));
@@ -404,7 +388,9 @@ export async function updateSkills(
       isCoreSkill(s.name) ||
       (opts.refreshInstalled === true && s.status !== "missing"),
   );
-  const toInstall = targets.filter((s) => s.status === "missing" || s.status === "outdated");
+  const toInstall = targets.filter(
+    (s) => s.status === "missing" || (s.status === "outdated" && opts.onlyMissing !== true),
+  );
   const result: UpdateSkillsResult = {
     targets: targets.map((s) => s.name),
     installed: toInstall.map((s) => s.name),
@@ -543,7 +529,6 @@ function renderCheck(result: SkillsCheckResult): void {
   if (summary.outdated) parts.push(c.warn(`↑ ${summary.outdated} outdated`));
   if (summary.coreMissing) parts.push(c.warn(`◦ ${summary.coreMissing} core not installed`));
   if (onDemandMissing) parts.push(c.dim(`◦ ${onDemandMissing} available on demand`));
-  if (summary.removed) parts.push(c.warn(`✗ ${summary.removed} removed upstream`));
   console.log(`  ${parts.join("   ")}`);
 
   printSkillSection(result, "outdated", "Outdated:", "↑", c.warn);
@@ -563,27 +548,6 @@ function renderCheck(result: SkillsCheckResult): void {
     c.dim,
     (s) => !isCoreSkill(s.name),
   );
-  printSkillSection(
-    result,
-    "removed",
-    "Removed upstream (renamed or dropped — no longer published):",
-    "✗",
-    c.warn,
-  );
-
-  // Removed-detection cross-references the upstream skills lock. If that lock is
-  // absent where we expect it (e.g. upstream moved its path), removed-detection
-  // silently reports zero — so warn rather than imply a clean "up to date".
-  if (result.lockMissing) {
-    console.log();
-    console.log(
-      `  ${c.warn(`! Skills lock not found — can't check for skills removed upstream.`)}`,
-    );
-    console.log(
-      `  ${c.dim(`  (lock paths verified against ${SKILLS_CLI_LOCK_PATHS_VERIFIED_AT})`)}`,
-    );
-  }
-
   console.log();
   if (result.updateAvailable) {
     console.log(`  ${c.accent("Update: npx hyperframes skills update")}`);
@@ -719,29 +683,12 @@ const updateCommand = defineCommand({
   meta: {
     name: "update",
     description:
-      "Update the core set plus every installed HyperFrames skill to the latest, and remove any no longer published. Pass skill names to also install those (how on-demand skills install) — without names it never expands a partial install",
+      "Update the core set plus every installed HyperFrames skill to the latest. Pass skill names to also install those (how on-demand skills install) — without names it never expands a partial install, and it never removes a skill",
   },
-  // Mirror `check`'s flags: the prune step runs the same removed-detection, so it
-  // must respect the same overrides. Without these, `update`'s internal
-  // checkSkills() fell back to defaults — pruning the auto-detected install
-  // against the default manifest even when the user pointed `check` elsewhere.
   args: {
     json: { type: "boolean", description: "Output as JSON", default: false },
-    dir: {
-      type: "string",
-      description:
-        "Skills dir for removed-detection only — scopes the prune, not the install (default: auto-detect)",
-    },
-    source: {
-      type: "string",
-      description:
-        "Where 'latest' comes from for removed-detection (local path, owner/repo, or URL) — does not change the install source",
-    },
   },
   async run({ args }) {
-    const dir = args.dir;
-    const source = args.source;
-
     // Positional skill names (e.g. `hyperframes skills update slideshow`) are
     // the ONLY way update expands an install: each named skill is guaranteed
     // present and current. A retired name installs nothing; the run says where
@@ -753,7 +700,7 @@ const updateCommand = defineCommand({
       return;
     }
 
-    // Exit 0 without installing, pruning or touching the nudge cache: the pinned
+    // Exit 0 without installing or touching the nudge cache: the pinned
     // install is the one the caller wants, so the skill's step keeps working.
     if (skillsManagedExternally()) {
       reportSkillsManagedExternally(requested, args.json === true);
@@ -769,12 +716,6 @@ const updateCommand = defineCommand({
     // about. Explicit full set: `hyperframes skills` or `npx skills add
     // heygen-com/hyperframes --all`.
     //
-    // Note: the upstream `skills add` CLI has no `--dir` flag (it installs into
-    // the resolved agent dirs), so `--dir` here scopes only the *prune* detection
-    // below, not the install. `--source` likewise drives where the prune's
-    // "latest" manifest comes from; the install always targets the canonical
-    // HyperFrames repo so `update` reliably refreshes the published skills.
-    //
     // strict: this is the documented recovery path for the agent/CI contract
     // `hyperframes skills check || hyperframes skills update`. If the install fails (no npx, `skills add` exits
     // non-zero, a named skill still absent afterwards) it must exit non-zero
@@ -786,59 +727,6 @@ const updateCommand = defineCommand({
       reportUpdateFailure(`Update failed: ${(err as Error).message}`, args.json === true);
       setCommandExitCode(1);
       return;
-    }
-
-    // `skills add` never deletes, so a skill renamed or dropped upstream
-    // (e.g. a retired workflow skill) would linger forever. Prune
-    // skills the lock attributes to our source that the manifest no longer
-    // ships, so `check || update` fully reconciles the install to the manifest.
-    //
-    // Safety: `removed` only ever contains skills the lock records as installed
-    // from our source (see detectRemoved) — never a user's own or another
-    // source's skills. We remove in the exact scope detection attributed from,
-    // so we never reach into a scope we didn't inspect. Best-effort: cleanup
-    // failure doesn't fail the update — the install the CI contract gates on
-    // already succeeded.
-    try {
-      // `canonical: true` for the same reason the install's target selection
-      // uses it (see updateSkills) — and more urgently, because this branch
-      // DELETES. Without it, resolveLatestManifest takes the findRepoManifest
-      // shortcut: any `skills-manifest.json` within 16 parent dirs of cwd
-      // becomes "latest". HyperFrames' own repo manifest declares
-      // `source: heygen-com/hyperframes`, so a checkout (or any project
-      // carrying a copy) matches attribution and every published skill absent
-      // from that local file is deleted globally as "no longer published".
-      // An explicit `--source` still wins — canonical only decides what
-      // "latest" means when no source was given. GH #3111.
-      const { skills, scope } = await checkSkills({ dir, source, canonical: true });
-      const removed = skills.filter((s) => s.status === "removed").map((s) => s.name);
-      if (removed.length) {
-        console.log();
-        console.log(
-          c.dim(`Removing ${removed.length} skill(s) no longer published: ${removed.join(", ")}`),
-        );
-        await runSkillsRemove(removed, { global: scope === "global" });
-        // Self-heal: `skills remove` only clears a lock entry for a name it
-        // found an on-disk bundle for (see pruneOrphanedLockEntries). A skill
-        // retired before it ever shipped a bundle to this machine has none, so
-        // the call above is a silent no-op for it — the lock entry lingers and
-        // would be re-flagged "removed" on every future run. Prune whatever is
-        // still attributed after the call so `check || update` converges
-        // instead of looping forever. Best-effort and scoped to exactly the
-        // lock the remove above targeted (same `scope`); a write failure here
-        // must not fail the update — the install already succeeded.
-        const scopeForPrune = scope ?? "global";
-        const stillOrphaned = pruneOrphanedLockEntries(removed, scopeForPrune);
-        if (stillOrphaned.length) {
-          console.log(
-            c.dim(
-              `Reconciled ${stillOrphaned.length} orphaned lock entr${stillOrphaned.length === 1 ? "y" : "ies"} with no on-disk bundle: ${stillOrphaned.join(", ")}`,
-            ),
-          );
-        }
-      }
-    } catch (err) {
-      clack.log.warn(c.warn(`Skipped removed-skill cleanup: ${(err as Error).message}`));
     }
   },
 });

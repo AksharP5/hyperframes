@@ -107,11 +107,6 @@ vi.mock("../utils/skillsManifest.js", async (importOriginal) => {
     checkSkills: vi.fn(async () => DEFAULT_CHECK),
     hyperframesSkillNames: vi.fn(() => ["hyperframes"]),
     presentSkills: vi.fn((names: readonly string[]) => [...names]),
-    // Default: nothing left to prune after `runSkillsRemove`. The real
-    // (unmocked) fs-level behavior is covered in skillsManifest.test.ts;
-    // here we only assert the wiring — what update passes in, and that it
-    // isn't reached when there's nothing removed.
-    pruneOrphanedLockEntries: vi.fn(() => []),
   };
 });
 
@@ -192,19 +187,11 @@ describe("hyperframes skills", () => {
     vi.resetModules();
     // vi.resetModules re-imports skills.js but the manifest mock's vi.fn
     // instances persist — restore their default behavior for each test.
-    // pruneOrphanedLockEntries is reset explicitly too: relying on afterEach's
-    // vi.restoreAllMocks() to clear vi.fn() call state is vitest-3-specific
-    // (vitest 4 restores spies only), and call-count assertions like the
-    // twice-in-a-row convergence test would then see counts accumulated from
-    // earlier tests.
-    const { checkSkills, presentSkills, pruneOrphanedLockEntries } =
-      await import("../utils/skillsManifest.js");
+    const { checkSkills, presentSkills } = await import("../utils/skillsManifest.js");
     vi.mocked(checkSkills).mockReset();
     vi.mocked(checkSkills).mockImplementation(async () => DEFAULT_CHECK as never);
     vi.mocked(presentSkills).mockReset();
     vi.mocked(presentSkills).mockImplementation((names: readonly string[]) => [...names]);
-    vi.mocked(pruneOrphanedLockEntries).mockReset();
-    vi.mocked(pruneOrphanedLockEntries).mockImplementation(() => []);
     await resetCommandResult();
   });
 
@@ -373,83 +360,33 @@ describe("hyperframes skills", () => {
 
   // `skills add` never deletes, so update must separately prune skills the
   // manifest dropped (renames/removals) for `check || update` to fully reconcile.
-  it("skills update prunes skills removed upstream, in the attributed scope", async () => {
+  it("skills update never removes a skill, even one check once called retired", async () => {
     setPlatform("linux");
     const { checkSkills } = await import("../utils/skillsManifest.js");
-    // First call feeds the targeted install; the second is the prune detection.
-    vi.mocked(checkSkills)
-      .mockResolvedValueOnce(DEFAULT_CHECK as never)
-      .mockResolvedValueOnce({
-        scope: "global",
-        skills: [{ name: "graphic-overlays", status: "removed" }],
-      } as never);
+    vi.mocked(checkSkills).mockImplementation(
+      async () =>
+        ({
+          ...DEFAULT_CHECK,
+          skills: [...DEFAULT_CHECK.skills, { name: "graphic-overlays", status: "removed" }],
+        }) as never,
+    );
 
     await runSkillsUpdate();
 
-    // install first, then a `skills remove` for the dropped skill
-    expect(state.spawnCalls[0]?.args).toContain("add");
-    const removeCall = state.spawnCalls.find((s) => s.args.includes("remove"));
-    expect(removeCall, "expected a `skills remove` spawn").toBeDefined();
-    expect(removeCall!.args).toContain("graphic-overlays");
-    expect(removeCall!.args).toContain("--yes");
-    expect(removeCall!.args).toContain("-g"); // attributed from the global lock → remove globally
-    expect(await commandExitCode()).toBe(0);
-  });
-
-  it("skills update removes every retired skill check reports, in one call", async () => {
-    setPlatform("linux");
-    const { checkSkills, RETIRED_SKILLS } = await import("../utils/skillsManifest.js");
-    vi.mocked(checkSkills)
-      .mockResolvedValueOnce(DEFAULT_CHECK as never)
-      .mockResolvedValueOnce({
-        scope: "global",
-        skills: RETIRED_SKILLS.map((name) => ({ name, status: "removed" })),
-      } as never);
-
-    await runSkillsUpdate();
-
-    const removeCalls = state.spawnCalls.filter((s) => s.args.includes("remove"));
-    expect(removeCalls).toHaveLength(1);
-    for (const name of RETIRED_SKILLS) expect(removeCalls[0]!.args).toContain(name);
-    expect(removeCalls[0]!.args).toContain("-g");
-    expect(await commandExitCode()).toBe(0);
-  });
-
-  // The scope the skill was attributed from drives the remove scope: a
-  // project-scoped removal must NOT pass -g (which would target a different,
-  // possibly user-owned, global skill of the same name).
-  it("skills update prunes in project scope without -g", async () => {
-    setPlatform("linux");
-    const { checkSkills } = await import("../utils/skillsManifest.js");
-    vi.mocked(checkSkills)
-      .mockResolvedValueOnce(DEFAULT_CHECK as never)
-      .mockResolvedValueOnce({
-        scope: "project",
-        skills: [{ name: "graphic-overlays", status: "removed" }],
-      } as never);
-
-    await runSkillsUpdate();
-
-    const removeCall = state.spawnCalls.find((s) => s.args.includes("remove"));
-    expect(removeCall, "expected a `skills remove` spawn").toBeDefined();
-    expect(removeCall!.args).toContain("graphic-overlays");
-    expect(removeCall!.args).not.toContain("-g");
-  });
-
-  it("skills update does not prune when nothing was removed upstream", async () => {
-    setPlatform("linux");
-    await runSkillsUpdate();
     expect(state.spawnCalls.some((s) => s.args.includes("remove"))).toBe(false);
+    expect(await commandExitCode()).toBe(0);
   });
 
-  // Retired-skill regression (variant 1): the update engine's OWN targeted-
-  // install check must resolve the canonical (published) manifest, never a
-  // stale local `skills-manifest.json` a checkout might still have lying
-  // around — see resolveLatestManifest's in-repo shortcut. Without this, a
-  // skill retired upstream but still listed locally gets forced into
-  // `targets` (isCoreSkill pattern-matches `hyperframes-*`), `skills add`
-  // silently declines to install something that doesn't exist canonically,
-  // and the old code strict-threw on a "failure" that was never real.
+  it("updateSkills with onlyMissing installs what is missing and leaves outdated skills alone", async () => {
+    setPlatform("linux");
+    const { updateSkills } = await import("./skills.js");
+
+    const result = await updateSkills({ onlyMissing: true });
+
+    expect(result.installed).toEqual(["hyperframes-registry"]);
+    expect(skillFlagValues(state.spawnCalls[0]?.args ?? [])).toEqual(["hyperframes-registry"]);
+  });
+
   it("checks freshness against the canonical manifest, never a possibly-stale local one", async () => {
     setPlatform("linux");
     const { checkSkills } = await import("../utils/skillsManifest.js");
@@ -475,151 +412,6 @@ describe("hyperframes skills", () => {
   // "Removing 6 skill(s) no longer published: captions-overlay, changelog-video,
   // cut-the-curve, motion-doctrine, oversized-cursor, seam-craft" and deleted
   // all six — every one of them currently published.
-  it("resolves the prune's manifest canonically, so a local manifest can never drive deletion", async () => {
-    setPlatform("linux");
-    const { checkSkills } = await import("../utils/skillsManifest.js");
-
-    await runSkillsUpdate();
-
-    // The prune's check is the LAST call; assert on every call so a future
-    // caller can't reintroduce a non-canonical deletion path.
-    const calls = vi.mocked(checkSkills).mock.calls;
-    expect(calls.length).toBeGreaterThan(1);
-    for (const [arg] of calls) {
-      expect(arg).toEqual(expect.objectContaining({ canonical: true }));
-    }
-  });
-
-  // Retired-skill regression (variant 2): `skills remove` is a silent no-op
-  // for a lock entry with no on-disk bundle (upstream scans disk, not the
-  // lock, to decide what's "installed" — see pruneOrphanedLockEntries's
-  // doc comment). `skills update` must self-heal that lock entry itself so
-  // `check || update` actually converges instead of re-flagging it forever.
-  it("self-heals an orphaned lock entry after `skills remove` no-ops on it", async () => {
-    setPlatform("linux");
-    const { checkSkills, pruneOrphanedLockEntries } = await import("../utils/skillsManifest.js");
-    vi.mocked(checkSkills)
-      .mockResolvedValueOnce(DEFAULT_CHECK as never)
-      .mockResolvedValueOnce({
-        scope: "global",
-        skills: [{ name: "hyperframes-captions", status: "removed" }],
-      } as never);
-    vi.mocked(pruneOrphanedLockEntries).mockReturnValueOnce(["hyperframes-captions"]);
-
-    await runSkillsUpdate();
-
-    expect(pruneOrphanedLockEntries).toHaveBeenCalledWith(["hyperframes-captions"], "global");
-    expect(await commandExitCode()).toBe(0);
-  });
-
-  // The idempotent-second-run contract at the command level: once nothing is
-  // left attributed as removed (the fs-level idempotency of the prune itself
-  // is covered directly in skillsManifest.test.ts), a second `skills update`
-  // must be a clean no-op — no `skills remove` spawn, no prune call finding
-  // anything, still exit 0.
-  it("running update twice in a row converges — the second run prunes nothing", async () => {
-    setPlatform("linux");
-    const { checkSkills, pruneOrphanedLockEntries } = await import("../utils/skillsManifest.js");
-    vi.mocked(checkSkills)
-      .mockResolvedValueOnce(DEFAULT_CHECK as never)
-      .mockResolvedValueOnce({
-        scope: "global",
-        skills: [{ name: "hyperframes-captions", status: "removed" }],
-      } as never);
-    vi.mocked(pruneOrphanedLockEntries).mockReturnValueOnce(["hyperframes-captions"]);
-
-    await runSkillsUpdate();
-    expect(await commandExitCode()).toBe(0);
-    expect(state.spawnCalls.some((s) => s.args.includes("remove"))).toBe(true);
-
-    // Second run: nothing attributed as removed anymore (the lock entry was
-    // pruned above), so there's nothing left to reconcile.
-    state.spawnCalls = [];
-    vi.mocked(checkSkills)
-      .mockResolvedValueOnce(DEFAULT_CHECK as never)
-      .mockResolvedValueOnce({ scope: "global", skills: [] } as never);
-
-    await runSkillsUpdate();
-    expect(await commandExitCode()).toBe(0);
-    expect(state.spawnCalls.some((s) => s.args.includes("remove"))).toBe(false);
-    // Nothing to prune this time — pruneOrphanedLockEntries isn't even reached.
-    expect(pruneOrphanedLockEntries).toHaveBeenCalledTimes(1);
-  });
-
-  // `update`'s prune runs the same removed-detection as `check`, so its
-  // --source/--dir must reach the internal checkSkills() — otherwise the prune
-  // reconciles against defaults even when the user pointed elsewhere.
-  it("skills update plumbs --source/--dir to its prune detection (parity with check)", async () => {
-    setPlatform("linux");
-    const { checkSkills } = await import("../utils/skillsManifest.js");
-
-    await runSkillsUpdate({ source: "owner/repo", dir: "/custom/skills" });
-
-    // The last checkSkills call is the prune's — the update engine's own check
-    // (first call) doesn't take --source/--dir, matching where the install
-    // actually lands. `canonical` rides along on every call (GH #3111); an
-    // explicit --source still wins over it inside resolveLatestManifest.
-    expect(checkSkills).toHaveBeenLastCalledWith({
-      source: "owner/repo",
-      dir: "/custom/skills",
-      canonical: true,
-    });
-  });
-
-  // Skill names come from lock-file JSON keys; a flag-like / shell-special name
-  // must never reach the spawn (esp. the Windows cmd.exe path).
-  it("skills update never passes a non-slug skill name to remove", async () => {
-    setPlatform("linux");
-    const { checkSkills } = await import("../utils/skillsManifest.js");
-    vi.mocked(checkSkills)
-      .mockResolvedValueOnce(DEFAULT_CHECK as never)
-      .mockResolvedValueOnce({
-        scope: "global",
-        skills: [
-          { name: "graphic-overlays", status: "removed" },
-          { name: "--config=evil.js", status: "removed" },
-        ],
-      } as never);
-
-    await runSkillsUpdate();
-
-    const removeCall = state.spawnCalls.find((s) => s.args.includes("remove"));
-    expect(removeCall, "expected a `skills remove` spawn for the valid name").toBeDefined();
-    expect(removeCall!.args).toContain("graphic-overlays");
-    expect(removeCall!.args).not.toContain("--config=evil.js");
-  });
-
-  // The early-return guard in runSkillsRemove: when EVERY candidate name is
-  // rejected as non-slug, no `skills remove` is spawned at all (the prior test
-  // only covers a mix of valid + invalid). A spawn here would run `skills remove
-  // --yes` with no names — which the upstream CLI treats as "remove nothing" at
-  // best, or prompts interactively at worst — so we must not reach it.
-  it("skills update spawns no remove when every removed name is rejected", async () => {
-    setPlatform("linux");
-    const { checkSkills } = await import("../utils/skillsManifest.js");
-    vi.mocked(checkSkills)
-      .mockResolvedValueOnce(DEFAULT_CHECK as never)
-      .mockResolvedValueOnce({
-        scope: "global",
-        skills: [
-          { name: "--config=evil.js", status: "removed" },
-          { name: "../escape", status: "removed" },
-        ],
-      } as never);
-
-    await runSkillsUpdate();
-
-    expect(state.spawnCalls.some((s) => s.args.includes("remove"))).toBe(false);
-    // The install still ran and the update still succeeded — a cleanup no-op
-    // doesn't fail the update.
-    expect(state.spawnCalls[0]?.args).toContain("add");
-    expect(await commandExitCode()).toBe(0);
-  });
-
-  // When git is missing the upstream `skills add` would clone-abort with a noisy
-  // `spawn git ENOENT` block. Detect it first and never spawn the install, so a
-  // best-effort caller (init) skips cleanly and a fresh boot without git still
-  // scaffolds the project.
   it("bare `skills` skips the install (no spawn) when git is unavailable", async () => {
     setPlatform("linux");
     state.gitMissing = true;
@@ -686,7 +478,7 @@ describe("hyperframes skills", () => {
       expect(String(logSpy.mock.calls.at(-1)?.[0] ?? "")).toMatch(/managed externally/);
     });
 
-    it("bare `skills update` neither installs nor prunes", async () => {
+    it("bare `skills update` does not install", async () => {
       setPlatform("linux");
       const { checkSkills } = await import("../utils/skillsManifest.js");
       vi.mocked(checkSkills).mockImplementation(
@@ -811,16 +603,11 @@ describe("hyperframes skills update <names>", () => {
     state.spawnExitCode = 0;
     state.gitMissing = false;
     vi.resetModules();
-    // Same explicit resets as the describe above (incl. the vitest-4-proofing
-    // note on pruneOrphanedLockEntries).
-    const { checkSkills, presentSkills, pruneOrphanedLockEntries } =
-      await import("../utils/skillsManifest.js");
+    const { checkSkills, presentSkills } = await import("../utils/skillsManifest.js");
     vi.mocked(checkSkills).mockReset();
     vi.mocked(checkSkills).mockImplementation(async () => DEFAULT_CHECK as never);
     vi.mocked(presentSkills).mockReset();
     vi.mocked(presentSkills).mockImplementation((names: readonly string[]) => [...names]);
-    vi.mocked(pruneOrphanedLockEntries).mockReset();
-    vi.mocked(pruneOrphanedLockEntries).mockImplementation(() => []);
     await resetCommandResult();
   });
 
