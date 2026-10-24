@@ -214,6 +214,7 @@ export {
   isVideoPastTimelineEnd,
   resolveTimelineExtractionWindow,
   resolveVideoExtractionWindow,
+  rebaseVideoToWindow,
   resolveFinalFrameExtractionWindow,
   resolveVideoExtractionDuration,
   resolvePlayableVideoDuration,

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getFfmpegBinary } from "../utils/ffmpegBinaries.js";
@@ -230,5 +230,51 @@ describe.skipIf(!HAS_FFMPEG)("audio cut from a cloud-held file's URL", { timeout
     } finally {
       await new Promise((resolve) => sidecarServer.close(resolve));
     }
+  });
+
+  it("reads many clips of one URL at once, since the wait is on the network and not the CPU", async () => {
+    const body = makeVoice();
+    let open = 0;
+    let peak = 0;
+    server = createServer((req, res) => {
+      const start = Number(/bytes=(\d+)-/.exec(req.headers.range ?? "")?.[1] ?? 0);
+      open++;
+      peak = Math.max(peak, open);
+      res.on("close", () => open--);
+      setTimeout(() => {
+        res.writeHead(206, {
+          "Accept-Ranges": "bytes",
+          "Content-Length": body.length - start,
+          "Content-Range": `bytes ${start}-${body.length - 1}/${body.length}`,
+        });
+        res.end(body.subarray(start));
+      }, 300);
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    const baseDir = join(dir, "project");
+    const local = join(baseDir, "takes", "voice.wav");
+
+    const result = await processCompositionAudio(
+      Array.from({ length: 24 }, (_, i) => ({
+        id: `clip-${i}`,
+        src: "takes/voice.wav",
+        start: i,
+        end: i + 1,
+        mediaStart: i % 10,
+        layer: i,
+        volume: 1,
+        type: "audio" as const,
+      })),
+      baseDir,
+      join(dir, "work"),
+      join(dir, "out.m4a"),
+      24,
+      abort.signal,
+      { urlByAbsentLocalPath: new Map([[local, `http://127.0.0.1:${port}/voice.wav`]]) },
+    );
+
+    expect(result.success).toBe(true);
+    expect(peak).toBeGreaterThan(Math.max(2, Math.floor(cpus().length / 2)));
   });
 });

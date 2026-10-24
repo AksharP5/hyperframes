@@ -203,6 +203,8 @@ function legacyFilterScriptOptionIsUnsupported(stderr: string): boolean {
  */
 // Caps the ffmpeg runs that prepare clips; all of a long mix's clips at once starved the host (200 clips, 200 ffmpeg).
 const inPrepareSlot = createConcurrencyLimit(Math.max(2, Math.floor(cpus().length / 2)));
+// A clip read from a URL spends its time waiting on the network, so it needs no CPU-sized limit.
+const inRemotePrepareSlot = createConcurrencyLimit(16);
 
 const MAX_VOLUME_SEGMENTS = 32;
 
@@ -755,6 +757,23 @@ async function extractAudioSegment(
     error: failure?.detail,
     failure,
   };
+}
+
+function isRemoteElement(
+  element: { src: string },
+  baseDir: string,
+  compiledDir: string | undefined,
+  config?: { urlByAbsentLocalPath?: ReadonlyMap<string, string> },
+): boolean {
+  if (isHttpUrl(element.src)) return true;
+  if (!config?.urlByAbsentLocalPath?.size) return false;
+  try {
+    return config.urlByAbsentLocalPath.has(
+      resolveProjectRelativeSrc(element.src, baseDir, compiledDir),
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function generateSilence(
@@ -1357,7 +1376,9 @@ export async function processCompositionAudio(
 
   await Promise.all(
     elements.map((element, index) =>
-      inPrepareSlot(async () => {
+      (isRemoteElement(element, baseDir, compiledDir, config)
+        ? inRemotePrepareSlot
+        : inPrepareSlot)(async () => {
         if (effectiveSignal.aborted) {
           failures.push({
             stage: "cancelled",

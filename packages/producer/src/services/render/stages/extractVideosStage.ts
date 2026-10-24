@@ -33,7 +33,6 @@ import { join } from "node:path";
 import {
   type CaptureVideoMetadataHint,
   type EngineConfig,
-  type ExtractedFrames,
   type ExtractionResult,
   type FrameLookupTable,
   type HdrTransfer,
@@ -47,6 +46,10 @@ import {
   extractMediaMetadata,
   isVideoPastTimelineEnd,
   isHdrColorSpace,
+  rebaseVideoToWindow,
+  resolveFinalFrameExtractionWindow,
+  resolveVideoExtractionWindow,
+  isHttpUrl,
   resolveProjectRelativeSrc,
   runVideoExtractionWithRetry,
   safeVideoExtractionSourceIdentity,
@@ -568,7 +571,7 @@ export async function runExtractVideosStage(
  */
 export function appendAutoDetectedVideoAudio(
   composition: Pick<CompositionMetadata, "videos" | "audios">,
-  extracted: ExtractedFrames[],
+  extracted: ReadonlyArray<{ videoId: string; metadata: { hasAudio: boolean } }>,
 ): void {
   const existingAudioSrcs = new Set(composition.audios.map((a) => a.src));
   for (const ext of extracted) {
@@ -587,4 +590,43 @@ export function appendAutoDetectedVideoAudio(
     });
     existingAudioSrcs.add(video.src);
   }
+}
+
+/**
+ * The audio-only form of the extract stage: which videos carry sound takes a probe per source, not their frames.
+ * Each video is moved to its extraction window first, as extraction does, so its sound lands where its picture does.
+ */
+export async function appendVideoAudioFromProbe(input: {
+  projectDir: string;
+  compiledDir: string;
+  composition: CompositionMetadata;
+  urlByAbsentLocalPath?: ReadonlyMap<string, string>;
+}): Promise<void> {
+  const { projectDir, compiledDir, composition, urlByAbsentLocalPath } = input;
+  const videos = composition.videos.filter(
+    (video) => !isVideoPastTimelineEnd(video, composition.duration),
+  );
+  const probed = await Promise.all(
+    videos.map(async (video) => {
+      const path = isHttpUrl(video.src)
+        ? video.src
+        : resolveProjectRelativeSrc(video.src, projectDir, compiledDir);
+      const readFrom = urlByAbsentLocalPath?.get(path) ?? path;
+      if (!isHttpUrl(readFrom) && !existsSync(readFrom)) return null;
+      const metadata = await extractMediaMetadata(readFrom);
+      const window = await resolveFinalFrameExtractionWindow(
+        readFrom,
+        video,
+        metadata,
+        resolveVideoExtractionWindow(video, metadata, composition.duration),
+      );
+      if (window.durationSeconds <= 0) return null;
+      rebaseVideoToWindow(video, window);
+      return { videoId: video.id, metadata };
+    }),
+  );
+  appendAutoDetectedVideoAudio(
+    composition,
+    probed.filter((entry) => entry !== null),
+  );
 }

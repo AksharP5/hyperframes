@@ -64,6 +64,7 @@ import { measurePlanSecondsPerFrame } from "./planFrameCost.js";
 import { runAudioStage } from "../render/stages/audioStage.js";
 import { runCompileStage } from "../render/stages/compileStage.js";
 import {
+  appendVideoAudioFromProbe,
   assertVideoExtractionSucceeded,
   runExtractVideosStage,
 } from "../render/stages/extractVideosStage.js";
@@ -1727,7 +1728,7 @@ export async function buildPlanAudio(
   });
   try {
     let stageStarted = Date.now();
-    await extractPlanVideos(c, true);
+    await appendVideoAudioFromProbe(c);
     logPlanStage(c.log, "extract", stageStarted);
     stageStarted = Date.now();
     const mixed = await mixPlanAudio(c, c.compiledDir);
