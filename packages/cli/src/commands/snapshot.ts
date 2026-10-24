@@ -244,7 +244,7 @@ export function containingSourceFrameIndex(timestamps: readonly number[], time: 
 }
 
 /** Keyframe seek plus the decoded-time threshold that selects the frame containing `time`, or null. */
-async function probeContainingSourceFrameSeek(
+export async function probeContainingSourceFrameSeek(
   videoPath: string,
   time: number,
   holdLastFrame: boolean,
@@ -338,6 +338,9 @@ async function probeContainingSourceFrameSeek(
     const landed = await landing(candidate.pts);
     if (landed === null) break;
     if (landed <= 0 || landed > frame) continue;
+    // An index that places this keyframe after its own time lands on the one before; an accurate seek
+    // to the keyframe's time decodes from there and drops everything before it.
+    if (landed < candidate.pts - 1e-6) return { seek: candidate.pts, select: mid - candidate.pts };
     const again = Math.abs(landed - candidate.pts) < 1e-6 ? landed : await landing(landed);
     if (again !== null && Math.abs(again - landed) < 1e-6)
       return { seek: landed, select: mid - landed };

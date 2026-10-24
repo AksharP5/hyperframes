@@ -34,6 +34,7 @@ vi.mock("../utils/staticProjectServer.js", () => ({
 
 import snapshotCommand, {
   extractVideoFrameToBuffer,
+  probeContainingSourceFrameSeek,
   containingSourceFrameIndex,
   computeSnapshotTimes,
   formatSnapshotTimestamp,
@@ -430,6 +431,9 @@ describe("extractVideoFrameToBuffer", () => {
   const ffmpeg = findFFmpeg();
   const ffprobe = findFFprobe();
   const noProbe = !ffmpeg || !ffprobe;
+  const hasX265 =
+    !noProbe &&
+    execFileSync(ffmpeg!, ["-hide_banner", "-encoders"], { encoding: "utf-8" }).includes("libx265");
 
   it.skipIf(noProbe)("selects containing frames for snapshots and reference pairs", async () => {
     const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-containing-"));
@@ -548,6 +552,38 @@ describe("extractVideoFrameToBuffer", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(noProbe || !hasX265)(
+    "seeks into a stream-copied HEVC cut instead of decoding it from the start",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-hevc-cut-"));
+      try {
+        const quiet = ["-hide_banner", "-loglevel", "error"];
+        const source = join(dir, "source.mov");
+        const x265 = "bframes=3:keyint=250:min-keyint=250:open-gop=0:scenecut=0:log-level=error";
+        execFileSync(ffmpeg!, [
+          ...quiet,
+          ...["-f", "lavfi", "-i", "testsrc2=d=70:r=30:s=160x90", "-pix_fmt", "yuv420p"],
+          ...["-c:v", "libx265", "-x265-params", x265, "-tag:v", "hvc1", source],
+        ]);
+        const clip = join(dir, "cut.mov");
+        execFileSync(ffmpeg!, [...quiet, ...["-ss", "31.77", "-i", source, "-c", "copy", clip]]);
+
+        const seek = await probeContainingSourceFrameSeek(clip, 35.2, false);
+        expect(seek?.seek, "must seek, not decode from the start").toBeDefined();
+
+        const expected = join(dir, "frame.png");
+        execFileSync(ffmpeg!, [
+          ...quiet,
+          ...["-i", clip, "-vf", "select=eq(n\\,1056)", "-frames:v", "1", "-y", expected],
+        ]);
+        const actual = await extractVideoFrameToBuffer(clip, 1056.5 / 30);
+        expect(actual?.equals(readFileSync(expected))).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.skipIf(noProbe)(
     "leaves an unreadable video blank instead of failing the snapshot",
