@@ -243,6 +243,27 @@ function installPuppeteerBrowsersMock(
     mockedPaths?.add(path).add(executablePath);
     return { executablePath, path };
   };
+  vi.doMock("./installInChild.js", async () => {
+    const { install } = await import("@puppeteer/browsers");
+    return {
+      BrowserDownloadStalledError: class extends Error {},
+      installInChild: (
+        input: object,
+        hooks: {
+          onProgress?: (downloaded: number, total: number) => void;
+          onLog: (line: string) => void;
+        },
+      ) =>
+        install({
+          ...input,
+          downloadProgressCallback: hooks.onProgress,
+          logger: (prefix: string) =>
+            prefix === "puppeteer:browsers:fileUtil"
+              ? (...args: unknown[]) => hooks.onLog(args.join(" "))
+              : undefined,
+        } as never),
+    };
+  });
   vi.doMock("./unzipArchive.js", () => ({ unzipArchive: opts.unzip ?? vi.fn(async () => true) }));
   vi.doMock("@puppeteer/browsers", () => ({
     Browser: { CHROMEHEADLESSSHELL: "chrome-headless-shell" },

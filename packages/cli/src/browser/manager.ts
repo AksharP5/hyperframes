@@ -13,7 +13,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { debuglog } from "node:util";
 import { basename, dirname, join, relative } from "node:path";
 import {
   browserPathFromEnv,
@@ -21,12 +20,12 @@ import {
   pickSharedShell,
 } from "@hyperframes/engine/chrome-host-ceiling";
 import { getFreeDiskMb } from "../telemetry/system.js";
+import { BrowserDownloadStalledError, installInChild } from "./installInChild.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { runRenderSetupWorker } from "../utils/cancellableProcess.js";
 import { unzipArchive } from "./unzipArchive.js";
 
 type PuppeteerBrowsers = typeof import("@puppeteer/browsers");
-type InstallOptions = import("@puppeteer/browsers").InstallOptions;
 
 async function loadPuppeteerBrowsers(): Promise<PuppeteerBrowsers> {
   try {
@@ -229,6 +228,8 @@ export interface BrowserResult {
 
 export interface EnsureBrowserOptions {
   onProgress?: (downloadedBytes: number, totalBytes: number) => void;
+  downloadStallMs?: number;
+  downloadBaseUrl?: string;
   // Re-download the managed build even when cached; only its version dir is replaced.
   force?: boolean;
   // Always resolve to OUR pinned `CHROME_VERSION` build (cached, or freshly
@@ -695,12 +696,42 @@ function wrapDownloadFailureWithBrowserPathHint(
   return new Error(message, { cause: cause instanceof Error ? cause : undefined });
 }
 
-async function downloadBrowser(options?: EnsureBrowserOptions): Promise<BrowserResult> {
-  if (isLinuxArm()) {
-    return ensureLinuxArmBrowser(options);
-  }
+const DOWNLOAD_STALL_MS = 60_000;
+const DOWNLOAD_ATTEMPTS = 3;
 
-  // Callers hold the install lock, so every leftover belongs to an install that was killed mid-way.
+async function retryOnStall<T>(run: () => Promise<T>, clear: () => void): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      if (!(err instanceof BrowserDownloadStalledError) || attempt >= DOWNLOAD_ATTEMPTS) throw err;
+      console.warn(`[hyperframes] ${err.message} Retrying (${attempt}/${DOWNLOAD_ATTEMPTS - 1}).`);
+      clear();
+    }
+  }
+}
+
+function downloadHostOf(
+  browsers: PuppeteerBrowsers,
+  platform: Parameters<PuppeteerBrowsers["getDownloadUrl"]>[1],
+  buildId: string,
+  baseUrl: string | undefined,
+): string {
+  try {
+    const url = browsers.getDownloadUrl(
+      browsers.Browser.CHROMEHEADLESSSHELL,
+      platform,
+      buildId,
+      baseUrl,
+    );
+    return new URL(url).host;
+  } catch {
+    return "the Chrome download host";
+  }
+}
+
+// Callers hold the install lock, so every leftover belongs to an install that was killed mid-way.
+function assertRoomToDownload(): void {
   removeInstallLeftovers();
   const freeMb = getFreeDiskMb(CACHE_ROOT_DIR);
   if (freeMb !== null && freeMb < ARCHIVE_PLUS_UNPACKED_SHELL_MB) {
@@ -709,9 +740,50 @@ async function downloadBrowser(options?: EnsureBrowserOptions): Promise<BrowserR
         `${freeMb} MB free at ${CACHE_ROOT_DIR}. Free disk space, then retry.`,
     );
   }
-  const { Browser, Cache, detectBrowserPlatform, install } = await loadPuppeteerBrowsers();
+}
 
-  const platform = detectBrowserPlatform();
+type BrowserPlatform = NonNullable<ReturnType<PuppeteerBrowsers["detectBrowserPlatform"]>>;
+
+function stagedInstaller(
+  browsers: PuppeteerBrowsers,
+  platform: BrowserPlatform,
+  stagingDir: string,
+  options: EnsureBrowserOptions | undefined,
+  unzipLog: { lines: string[] },
+) {
+  const buildId = managedChromeVersion();
+  const hooks = {
+    stallMs: options?.downloadStallMs ?? DOWNLOAD_STALL_MS,
+    host: downloadHostOf(browsers, platform, buildId, options?.downloadBaseUrl),
+    onProgress: options?.onProgress,
+    onLog: (line: string) => unzipLog.lines.push(line),
+  };
+  return async () => {
+    unzipLog.lines = [];
+    const input = {
+      cacheDir: stagingDir,
+      browser: browsers.Browser.CHROMEHEADLESSSHELL,
+      buildId,
+      platform,
+      baseUrl: options?.downloadBaseUrl,
+    };
+    const unzipMayAskOnInput = process.platform !== "win32";
+    if (unzipMayAskOnInput) {
+      const archive = await installInChild({ ...input, unpack: false }, hooks);
+      const into = new browsers.Cache(stagingDir).installationDir(input.browser, platform, buildId);
+      await unzipArchive(archive, into);
+    }
+    return installInChild(input, hooks);
+  };
+}
+
+async function downloadBrowser(options?: EnsureBrowserOptions): Promise<BrowserResult> {
+  if (isLinuxArm()) {
+    return ensureLinuxArmBrowser(options);
+  }
+  assertRoomToDownload();
+  const browsers = await loadPuppeteerBrowsers();
+  const platform = browsers.detectBrowserPlatform();
   if (!platform) {
     throw new Error(`Unsupported platform: ${process.platform} ${process.arch}`);
   }
@@ -720,47 +792,24 @@ async function downloadBrowser(options?: EnsureBrowserOptions): Promise<BrowserR
   const stagingDir = join(CACHE_ROOT_DIR, `${STAGING_PREFIX}${randomUUID()}`);
   const clearStaging = () => rmSync(stagingDir, { recursive: true, force: true });
   // install() only debug-logs each failed unzip tool before trying the next one; keep those lines.
-  let unzipLog: string[] = [];
-  const buildId = managedChromeVersion();
-  const runInstall = async () => {
-    unzipLog = [];
-    const installOptions: InstallOptions & { unpack?: true } = {
-      cacheDir: stagingDir,
-      browser: Browser.CHROMEHEADLESSSHELL,
-      buildId,
-      platform,
-      downloadProgressCallback: options?.onProgress,
-      logger: (prefix) => {
-        const debug = debuglog(prefix);
-        const isUnzip = prefix === "puppeteer:browsers:fileUtil";
-        if (!isUnzip && !debug.enabled) return undefined;
-        return (...args) => {
-          const line = args.join(" ");
-          if (isUnzip) unzipLog.push(line);
-          if (debug.enabled) debug(line);
-        };
-      },
-    };
-    const unzipMayAskOnInput = process.platform !== "win32";
-    if (unzipMayAskOnInput) {
-      const archive = await install({ ...installOptions, unpack: false });
-      const into = new Cache(stagingDir).installationDir(installOptions.browser, platform, buildId);
-      await unzipArchive(archive, into);
-    }
-    return install(installOptions);
-  };
+  const unzipLog = { lines: [] as string[] };
+  const runInstall = stagedInstaller(browsers, platform, stagingDir, options, unzipLog);
 
   try {
-    const staged = await installWithCorruptArchiveRecovery(runInstall, clearStaging, (err) =>
-      console.warn(
-        `[hyperframes] Downloaded browser archive was corrupt (${normalizeErrorMessage(err)}); re-downloading.`,
-      ),
+    const staged = await retryOnStall(
+      () =>
+        installWithCorruptArchiveRecovery(runInstall, clearStaging, (err) =>
+          console.warn(
+            `[hyperframes] Downloaded browser archive was corrupt (${normalizeErrorMessage(err)}); re-downloading.`,
+          ),
+        ),
+      clearStaging,
     );
     assertExecutableUnpacked(stagingDir, staged.executablePath);
-    unzipLog = [];
+    unzipLog.lines = [];
     return { executablePath: moveStagedInstallIntoCache(stagingDir, staged), source: "download" };
   } catch (err) {
-    throw wrapDownloadFailureWithBrowserPathHint(err, unzipLog);
+    throw wrapDownloadFailureWithBrowserPathHint(err, unzipLog.lines);
   } finally {
     clearStaging();
   }

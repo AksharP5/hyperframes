@@ -16,6 +16,7 @@ export interface CancellableProcessOptions {
   env?: NodeJS.ProcessEnv;
   detached?: boolean;
   onSpawn?: (pid: number) => void;
+  onStdout?: (chunk: string) => void;
 }
 
 class CancellableProcessError extends Error {
@@ -112,6 +113,7 @@ export function runCancellableProcess(
 
     child.stdout?.on("data", (chunk: Buffer | string) => {
       stdout += chunk.toString();
+      options.onStdout?.(chunk.toString());
       if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > maxBufferBytes) {
         terminate(new Error(`Process output exceeded ${maxBufferBytes} bytes`), "ENOBUFS");
       }
@@ -194,7 +196,7 @@ function tsxLoaderFromCliInstall(): string {
 }
 
 export async function runRenderSetupWorker<T>(
-  mode: "browser" | "lint" | "orphan-cleanup",
+  mode: "browser" | "browser-install" | "lint" | "orphan-cleanup",
   input: unknown,
   options: CancellableProcessOptions,
 ): Promise<T> {
