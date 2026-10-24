@@ -1,11 +1,23 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { mockTelemetry } from "./cliDispatchTestUtils.js";
 
 const originalArgv = [...process.argv];
 const originalExitCode = process.exitCode;
+
+// The first import of the CLI's module graph is slow on a cold Windows runner; pay it here, not in a test.
+beforeAll(async () => {
+  await Promise.all([
+    import("citty"),
+    import("@hyperframes/core/figma"),
+    import("./telemetry/client.js"),
+    import("./utils/command-failure-tracking.js"),
+    import("./utils/project.js"),
+    import("./utils/render-success-state.js"),
+  ]);
+}, 120_000);
 
 afterEach(() => {
   process.argv = [...originalArgv];
