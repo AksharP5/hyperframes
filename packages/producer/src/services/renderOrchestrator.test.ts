@@ -49,6 +49,7 @@ import {
   envInt,
   isDeParallelRouterEnabled,
   mergeWorkerInitObservability,
+  PROBE_READ_TIMEOUT_MS,
   resolveCompositionElementCount,
   detectAdaptersStatic,
   resolveAdaptersUsed,
@@ -2499,6 +2500,27 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
   });
 
   describe("resolveCompositionElementCount", () => {
+    it("returns the static answer and warns when the live read never answers", async () => {
+      vi.useFakeTimers();
+      try {
+        const warn = vi.fn();
+        const session = {
+          isInitialized: true,
+          page: { evaluate: () => new Promise<never>(() => {}) },
+        };
+        const pending = resolveCompositionElementCount(session, "<div><span></span></div>", {
+          warn,
+        });
+        await vi.advanceTimersByTimeAsync(PROBE_READ_TIMEOUT_MS);
+        const resolved = await pending;
+        expect(resolved.source).toBe("static");
+        expect(resolved.count).toBe(2);
+        expect(warn).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     // Review finding (R3): a static scan of SOURCE markup cannot see DOM a
     // composition's own script creates at runtime (document.createElement) —
     // an unbounded undercount no regex can close. style-10-prod's real
@@ -2673,6 +2695,23 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
   });
 
   describe("resolveAdaptersUsed", () => {
+    it("returns the static adapters and warns when the live read never answers", async () => {
+      vi.useFakeTimers();
+      try {
+        const warn = vi.fn();
+        const session = {
+          isInitialized: true,
+          page: { evaluate: () => new Promise<never>(() => {}) },
+        };
+        const pending = resolveAdaptersUsed(session, "<script>gsap.timeline();</script>", { warn });
+        await vi.advanceTimersByTimeAsync(PROBE_READ_TIMEOUT_MS);
+        expect(await pending).toEqual(["gsap"]);
+        expect(warn).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("falls back to the static scan when there is no probe session", async () => {
       const html = "<script>gsap.timeline();</script>";
       expect(await resolveAdaptersUsed(null, html)).toEqual(["gsap"]);
