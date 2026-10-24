@@ -229,6 +229,36 @@ describe("buildChromeArgs browser GPU mode", () => {
     expect(args).not.toContain("--use-angle=swiftshader");
   });
 
+  it("disables DXC for hardware WebGPU on Windows", () => {
+    const args = buildChromeArgs({ ...base, platform: "win32" }, { browserGpuMode: "hardware" });
+    expect(args).toContain("--enable-unsafe-webgpu");
+    expect(args).toContain("--disable-dawn-features=use_dxc");
+  });
+
+  it("disables DXC for a WebGPU composition in software mode on Windows", () => {
+    const args = buildChromeArgs(
+      { ...base, platform: "win32", requiresWebGpu: true },
+      { browserGpuMode: "software" },
+    );
+    expect(args).toContain("--enable-unsafe-webgpu");
+    expect(args).toContain("--disable-dawn-features=use_dxc");
+  });
+
+  it("leaves DXC unchanged without WebGPU in software mode on Windows", () => {
+    const args = buildChromeArgs({ ...base, platform: "win32" }, { browserGpuMode: "software" });
+    expect(args).not.toContain("--enable-unsafe-webgpu");
+    expect(args).not.toContain("--disable-dawn-features=use_dxc");
+  });
+
+  it("leaves DXC unchanged for hardware WebGPU on macOS and Linux", () => {
+    const platforms: NodeJS.Platform[] = ["darwin", "linux"];
+    for (const platform of platforms) {
+      const args = buildChromeArgs({ ...base, platform }, { browserGpuMode: "hardware" });
+      expect(args).toContain("--enable-unsafe-webgpu");
+      expect(args).not.toContain("--disable-dawn-features=use_dxc");
+    }
+  });
+
   it("uses ANGLE-EGL for hardware browser GPU mode on Linux", () => {
     const args = buildChromeArgs({ ...base, platform: "linux" }, { browserGpuMode: "hardware" });
     expect(args).toContain("--use-gl=angle");
