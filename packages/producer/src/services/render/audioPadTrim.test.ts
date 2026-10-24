@@ -13,7 +13,8 @@
  * No real ffmpeg/ffprobe runs in these tests.
  */
 
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it, mock, spyOn } from "bun:test";
+import * as fs from "node:fs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -309,6 +310,40 @@ describe("padOrTrimAudioToVideoFrameCount", () => {
       durationSeconds: 3,
       filter: "volume=-3.000dB,apad,atrim=0:3.000000",
     });
+  });
+
+  it("rides out a transient Windows file lock when the corrected AAC replaces the audio", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-peak-lock-"));
+    const outputPath = join(dir, "o.aac");
+    writeFileSync(outputPath, "original");
+    const { input } = harness({
+      video: { frameCount: 90, fpsNum: 30, fpsDen: 1 },
+      audio: { durationSeconds: 3 },
+    });
+    input.outputPath = outputPath;
+    let peaks = [1.5, -3];
+    input.probeAudioTruePeakDbfs = async () => peaks.shift()!;
+    input.encodeAac = async (_input, output) => {
+      writeFileSync(output, "corrected");
+      return { success: true };
+    };
+    const real = fs.renameSync;
+    let locked = 2;
+    const rename = spyOn(fs, "renameSync").mockImplementation(((from: string, to: string) => {
+      if (locked-- > 0) throw Object.assign(new Error("EPERM: rename"), { code: "EPERM" });
+      return real(from, to);
+    }) as typeof fs.renameSync);
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      const result = await padOrTrimAudioToVideoFrameCount(input);
+      expect(result.success).toBe(true);
+      expect(fs.readFileSync(outputPath, "utf-8")).toBe("corrected");
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+      rename.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("keeps the end of a long correction failure, where ffmpeg says what went wrong", async () => {

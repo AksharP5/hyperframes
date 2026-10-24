@@ -1,15 +1,6 @@
-import {
-  closeSync,
-  existsSync,
-  fstatSync,
-  openSync,
-  readSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-} from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { HLS_MASTER_PLAYLIST, HLS_VIDEO_PLAYLIST } from "@hyperframes/engine";
+import { HLS_MASTER_PLAYLIST, HLS_VIDEO_PLAYLIST, renameWithRetry } from "@hyperframes/engine";
 import { extractMediaMetadata } from "../../utils/ffprobe.js";
 import type { RenderOutputFormat } from "./renderFormat.js";
 import { TRANSACTION_BACKUP, createOwnedRenderDir } from "./renderDirOwner.js";
@@ -24,7 +15,7 @@ export interface ArtifactTransactionFileSystem {
 
 const defaultFileSystem: ArtifactTransactionFileSystem = {
   existsSync,
-  renameSync,
+  renameSync: (source, destination) => renameWithRetry(source, destination),
   rmSync,
 };
 

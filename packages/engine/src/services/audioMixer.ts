@@ -1,15 +1,7 @@
 // fallow-ignore-file complexity code-duplication
 import { isSelfOrAncestorHidden, memberGroupKey, isMemberGroupHidden } from "./mediaHidden.js";
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from "fs";
+import { renameWithRetry } from "../utils/renameWithRetry.js";
 import { join, dirname, isAbsolute, relative } from "path";
 import { parseHTML } from "linkedom";
 import { extractAudioMetadata, type AudioMetadata } from "../utils/ffprobe.js";
@@ -1288,7 +1280,7 @@ async function mixGroupMembers(
   try {
     const summed = await sumInSlices(memberTracks, scratchDir, totalDuration, signal, config);
     if (!summed.success) return summed;
-    renameSync(summed.track.srcPath, outputPath);
+    renameWithRetry(summed.track.srcPath, outputPath);
     return { success: true, degradedAutomation: summed.degradedAutomation };
   } finally {
     rmSync(scratchDir, { recursive: true, force: true });
@@ -1386,7 +1378,7 @@ async function mixThroughFloatSum(
       failures: [failure],
     };
   }
-  if (config?.keepEncoderInputAt) renameSync(encoderInput, config.keepEncoderInputAt);
+  if (config?.keepEncoderInputAt) renameWithRetry(encoderInput, config.keepEncoderInputAt);
   return { ...sum, outputPath, durationMs: sum.durationMs + encoded.durationMs };
 }
 

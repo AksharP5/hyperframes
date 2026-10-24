@@ -26,7 +26,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -41,6 +40,7 @@ import {
   resolveConfig,
   runFfmpeg,
   appendSoftwareEncoderThreadsArg,
+  renameWithRetry,
 } from "@hyperframes/engine";
 import { fpsToFfmpegArg } from "@hyperframes/core";
 import { defaultLogger, type ProducerLogger } from "../../logger.js";
@@ -188,7 +188,7 @@ export async function assemble(
     const finalPath = join(workDir, `output.${format}`);
     const audio = audioPath !== null && existsSync(audioPath) ? audioPath : null;
     await writeJoined(ctx, videoSources, audio, finalPath);
-    renameSync(finalPath, outputPath);
+    renameWithRetry(finalPath, outputPath);
     log.info("[assemble] stage timings", {
       ...stageMs,
       chunks: chunkPaths.length,

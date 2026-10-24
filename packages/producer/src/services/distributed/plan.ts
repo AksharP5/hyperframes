@@ -33,7 +33,6 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -52,6 +51,7 @@ import {
   resolveConfig,
   type AudioProcessingFailure,
   declareContentAddressedUrl,
+  renameWithRetry,
 } from "@hyperframes/engine";
 import { defaultLogger, type ProducerLogger } from "../../logger.js";
 import {
@@ -1452,13 +1452,13 @@ export async function buildLocalExecutionPlan(
   const videoSourcesDir = join(planDir, "video-sources");
   rmSync(videoSourcesDir, { recursive: true, force: true });
   if (existsSync(stagedVideoFrames)) {
-    renameSync(stagedVideoFrames, videoFramesDst);
+    renameWithRetry(stagedVideoFrames, videoFramesDst);
   } else {
     mkdirSync(videoFramesDst, { recursive: true });
   }
 
   if (existsSync(finalCompiledDir)) rmSync(finalCompiledDir, { recursive: true, force: true });
-  renameSync(compiledDir, finalCompiledDir);
+  renameWithRetry(compiledDir, finalCompiledDir);
 
   // `meta/videos.json` is the contract that makes distributed renders
   // pixel-comparable to in-process for compositions with video sources —
@@ -1580,7 +1580,7 @@ export async function buildLocalExecutionPlan(
 
   const planAudioPath = join(planDir, PLAN_AUDIO_RELATIVE_PATH);
   if (audioResult?.hasAudio && existsSync(audioResult.audioOutputPath)) {
-    renameSync(audioResult.audioOutputPath, planAudioPath);
+    renameWithRetry(audioResult.audioOutputPath, planAudioPath);
   }
   if (chunksCarryAudio && existsSync(planAudioPath)) {
     if (options.sliceChunkAudio) {
@@ -1737,7 +1737,7 @@ export async function buildPlanAudio(
       applyDistributedAudioWarningPolicy(c.job, mixed.audioError, mixed.audioFailures, c.log);
     }
     if (!mixed.hasAudio || !existsSync(mixed.audioOutputPath)) return { hasAudio: false };
-    renameSync(mixed.audioOutputPath, outputPath);
+    renameWithRetry(mixed.audioOutputPath, outputPath);
     return { hasAudio: true };
   } finally {
     rmSync(c.workDir, { recursive: true, force: true });

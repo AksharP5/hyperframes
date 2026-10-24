@@ -7,8 +7,9 @@
  * and every reused segment is re-validated on disk before it is skipped.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { renameWithRetry } from "@hyperframes/engine";
 
 export interface SegmentManifestEntry {
   index: number;
@@ -133,7 +134,7 @@ export function writeSegmentManifest(segmentDir: string, manifest: SegmentManife
   mkdirSync(segmentDir, { recursive: true });
   const tmp = join(segmentDir, `${MANIFEST_FILENAME}.${process.pid}.tmp`);
   writeFileSync(tmp, JSON.stringify(manifest, null, 2), "utf-8");
-  renameSync(tmp, join(segmentDir, MANIFEST_FILENAME));
+  renameWithRetry(tmp, join(segmentDir, MANIFEST_FILENAME));
 }
 
 /**

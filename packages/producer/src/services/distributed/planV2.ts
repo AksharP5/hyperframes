@@ -19,7 +19,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -27,7 +26,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DISTRIBUTED_FPS, type DistributedFps, isDistributedFps } from "@hyperframes/core";
-import { createFrameLookupTable, type ExtractedFrames } from "@hyperframes/engine";
+import { createFrameLookupTable, type ExtractedFrames, renameWithRetry } from "@hyperframes/engine";
 import {
   readPlanRemoteFiles,
   planFileSha256,
@@ -503,7 +502,7 @@ function writeBlob(sourcePath: string, destinationPath: string): void {
   const temporaryPath = join(temporaryDir, "blob");
   try {
     copyFileSync(sourcePath, temporaryPath);
-    renameSync(temporaryPath, destinationPath);
+    renameWithRetry(temporaryPath, destinationPath);
   } finally {
     rmSync(temporaryDir, { recursive: true, force: true });
   }
@@ -674,7 +673,7 @@ export function createPlanV2FromExecutionPlan(
       canonicalJsonStringify(publication.manifest),
       "utf-8",
     );
-    renameSync(tempDir, planV2Dir);
+    renameWithRetry(tempDir, planV2Dir);
     return resultFromManifest(planV2Dir, publication.manifest);
   } catch (error) {
     rmSync(tempDir, { recursive: true, force: true });
@@ -1072,7 +1071,7 @@ export function materializePlanV2Target(
       }),
       "utf-8",
     );
-    renameSync(tempDir, destinationDir);
+    renameWithRetry(tempDir, destinationDir);
   } catch (error) {
     rmSync(tempDir, { recursive: true, force: true });
     throw error;

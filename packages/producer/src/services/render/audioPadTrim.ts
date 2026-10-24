@@ -20,7 +20,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdtempSync, renameSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   DEFAULT_CONFIG,
@@ -29,6 +29,7 @@ import {
   extractAudioMetadata,
   getFfprobeBinary,
   ManagedChildProcess,
+  renameWithRetry,
   runFfmpeg,
   trackChildProcess,
   type AudioMetadata,
@@ -425,7 +426,7 @@ async function enforceAacTruePeak(input: EnforceAacTruePeakInput): Promise<{
       }
       if (truePeakDbfs <= AAC_DELIVERY_TRUE_PEAK_DBFS) {
         if (measuredPath !== correctedPath) return { success: true };
-        renameSync(correctedPath, input.audioPath);
+        renameWithRetry(correctedPath, input.audioPath);
         return { success: true, loweredDb: Number((-attenuationDb).toFixed(2)) };
       }
       if (pass === MAX_TRUE_PEAK_CORRECTION_PASSES) break;

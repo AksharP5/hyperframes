@@ -7,7 +7,8 @@
 
 import { cpus, freemem } from "os";
 import { existsSync, mkdirSync, readdirSync } from "fs";
-import { copyFile, readFile, rename } from "fs/promises";
+import { copyFile, readFile } from "fs/promises";
+import { renameWithRetryAsync } from "../utils/renameWithRetry.js";
 import { join } from "path";
 import { getHeapStatistics } from "v8";
 
@@ -1184,7 +1185,7 @@ export async function mergeWorkerFrames(
       const sourcePath = join(task.outputDir, file);
       const targetPath = join(outputDir, file);
       try {
-        await rename(sourcePath, targetPath);
+        await renameWithRetryAsync(sourcePath, targetPath);
       } catch {
         await copyFile(sourcePath, targetPath);
       }

@@ -39,12 +39,12 @@ import {
   lstatSync,
   mkdirSync,
   readdirSync,
-  renameSync,
   rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { renameWithRetry } from "../utils/renameWithRetry.js";
 import { join } from "node:path";
 import type { VideoMetadata } from "../utils/ffprobe.js";
 import { FRAME_FILENAME_PREFIX, framePathsFromDirectory } from "./extractedFrameIndex.js";
@@ -259,7 +259,7 @@ export function publishCacheEntry(entry: CacheEntry, partialDir: string): CacheP
   }
 
   try {
-    renameSync(partialDir, entry.dir);
+    renameWithRetry(partialDir, entry.dir);
     return { dir: entry.dir, published: true };
   } catch (err) {
     if (!isTargetExistsRenameError(err)) return { dir: partialDir, published: false };
@@ -275,7 +275,7 @@ export function publishCacheEntry(entry: CacheEntry, partialDir: string): CacheP
   }
 
   try {
-    renameSync(partialDir, entry.dir);
+    renameWithRetry(partialDir, entry.dir);
     return { dir: entry.dir, published: true };
   } catch {
     // TOCTOU: a concurrent writer can publish between the winner check, the
