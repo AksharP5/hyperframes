@@ -277,6 +277,30 @@ describe("override-set replay on open", () => {
     expect(reopened.serialize()).toBe(comp.serialize());
   });
 
+  it.each(["session", "host"] as const)(
+    "keeps later %s edits to a child after restoring its base parent",
+    async (origin) => {
+      const html =
+        '<div data-hf-id="hf-stage" data-hf-root><section data-hf-id="hf-box"><p data-hf-id="hf-in">In</p></section></div>';
+      const comp = await openComposition(html, { coalesceMs: 0 });
+      comp.setText("hf-in", "Before removal");
+      comp.removeElement("hf-box");
+      comp.undo();
+      if (origin === "session") comp.setText("hf-in", "After restore");
+      else
+        comp.applyPatches([
+          { op: "replace", path: "/elements/hf-in/text", value: "After restore" },
+        ]);
+
+      const reopened = await openComposition(html, {
+        overrides: JSON.parse(JSON.stringify(comp.getOverrides())),
+      });
+
+      expect(reopened.getElement("hf-in")?.text).toBe("After restore");
+      expect(reopened.serialize()).toBe(comp.serialize());
+    },
+  );
+
   it.each(["base", "added"] as const)(
     "keeps a restored %s element's position after removing a temporary sibling",
     async (kind) => {
