@@ -646,6 +646,7 @@ class CompositionImpl implements Composition {
     for (const p of forward) {
       const key = pathToKey(p.path);
       if (key !== null) {
+        delete this.overrides[key];
         this.overrides[key] =
           p.op === "remove"
             ? null
@@ -841,6 +842,7 @@ class CompositionImpl implements Composition {
     for (const p of patches) {
       const key = pathToKey(p.path);
       if (key !== null) {
+        delete this.overrides[key];
         this.overrides[key] =
           p.op === "remove"
             ? null

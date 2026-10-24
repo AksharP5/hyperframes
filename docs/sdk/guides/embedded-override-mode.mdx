@@ -59,6 +59,10 @@ const reopened = await openComposition(templateHtml, {
 reopened.getElement(id)?.text; // "Available worldwide"
 ```
 
+Store the returned set without sorting its keys. The SDK keeps the latest edit
+order so restored elements follow earlier sibling removals and later child edits
+apply after their parent's snapshot.
+
 ## Override set key format
 
 Keys follow the pattern `hfId.prop.path`. The common forms are:

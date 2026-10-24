@@ -226,6 +226,56 @@ describe("override-set replay on open", () => {
     expect(reopened.getElements().filter((element) => element.id === "hf-title")).toHaveLength(1);
     expect(reopened.serialize()).toBe(comp.serialize());
   });
+
+  it("keeps a restored base element after siblings removed before its latest snapshot", async () => {
+    const comp = await openComposition(BASE_HTML);
+    comp.removeElement("hf-logo");
+    comp.undo();
+    comp.removeElement("hf-title");
+    comp.removeElement("hf-logo");
+    comp.undo();
+
+    const reopened = await openComposition(BASE_HTML, { overrides: comp.getOverrides() });
+
+    expect(reopened.getElement("hf-stage")?.children.map((child) => child.id)).toEqual([
+      "hf-sub",
+      "hf-logo",
+    ]);
+    expect(reopened.serialize()).toBe(comp.serialize());
+  });
+
+  it("keeps an added element's position after removing a sibling and undoing its removal", async () => {
+    const comp = await openComposition(BASE_HTML);
+    const id = comp.addElement("hf-stage", 2, "<p>Available today</p>");
+    comp.removeElement("hf-title");
+    comp.removeElement(id);
+    comp.undo();
+
+    const reopened = await openComposition(BASE_HTML, { overrides: comp.getOverrides() });
+
+    expect(reopened.getElement("hf-stage")?.children.map((child) => child.id)).toEqual([
+      "hf-sub",
+      id,
+      "hf-logo",
+    ]);
+    expect(reopened.serialize()).toBe(comp.serialize());
+  });
+
+  it("keeps child edits made after restoring an added parent", async () => {
+    const comp = await openComposition(BASE_HTML);
+    const parent = comp.addElement("hf-stage", 1, "<section>Details</section>");
+    const child = comp.addElement(parent, 0, "<p>Original</p>");
+    comp.setText(child, "Before removal");
+    comp.removeElement(parent);
+    comp.undo();
+    comp.setText(child, "After restore");
+
+    const reopened = await openComposition(BASE_HTML, { overrides: comp.getOverrides() });
+
+    expect(reopened.getElement(child)?.text).toBe("After restore");
+    expect(reopened.getElements().filter((element) => element.id === child)).toHaveLength(1);
+    expect(reopened.serialize()).toBe(comp.serialize());
+  });
 });
 
 // ─── batch() transactional rollback ───────────────────────────────────────────
