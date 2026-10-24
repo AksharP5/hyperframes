@@ -14,7 +14,7 @@ vi.mock("node:os", async (importOriginal) => ({
 
 import { buildEncoderArgs } from "./chunkEncoder.js";
 import type { EncoderOptions } from "./chunkEncoder.types.js";
-import { appendSoftwareEncoderThreadsArg } from "./softwareEncoderThreads.js";
+import { appendSoftwareEncoderThreadsArg, X265_MAX_THREADS } from "./softwareEncoderThreads.js";
 import { buildStreamingArgs } from "./streamingEncoder.js";
 
 const FFMPEG = getFfmpegBinary();
@@ -42,9 +42,20 @@ const threadsOf = (args: string[]) => args[args.indexOf("-threads") + 1];
 describe("software encoder thread count", () => {
   it("takes the CPU quota and floors at one", () => {
     const args: string[] = [];
-    appendSoftwareEncoderThreadsArg(args, 6.9);
-    appendSoftwareEncoderThreadsArg(args, 0);
+    appendSoftwareEncoderThreadsArg(args, "libx264", 6.9);
+    appendSoftwareEncoderThreadsArg(args, "libx264", 0);
     expect(args).toEqual(["-threads", "6", "-threads", "1"]);
+  });
+
+  it("caps libx265 at 16 threads and leaves libx264 uncapped", () => {
+    const x265: string[] = [];
+    const x264: string[] = [];
+    appendSoftwareEncoderThreadsArg(x265, "libx265", 64);
+    appendSoftwareEncoderThreadsArg(x264, "libx264", 64);
+    expect([x265, x264]).toEqual([
+      ["-threads", "16"],
+      ["-threads", "64"],
+    ]);
   });
 
   it.each(["h264", "h265"] as const)(
@@ -63,6 +74,28 @@ describe("software encoder thread count", () => {
       expect([...seen]).toEqual(["6"]);
     },
   );
+});
+
+describe.skipIf(!HAS_FFMPEG)("libx265 thread limit", () => {
+  const encode = (threads: number) =>
+    spawnSync(FFMPEG, [
+      ...QUIET,
+      ...SOURCE,
+      "-frames:v",
+      "4",
+      "-c:v",
+      "libx265",
+      "-threads",
+      String(threads),
+      "-f",
+      "null",
+      "-",
+    ]).status;
+
+  it("rejects 17 threads and accepts the cap", () => {
+    expect(encode(X265_MAX_THREADS + 1)).not.toBe(0);
+    expect(encode(X265_MAX_THREADS)).toBe(0);
+  }, 60_000);
 });
 
 describe.skipIf(!HAS_TASKSET || !HAS_FFMPEG)("encoded bytes across host sizes", () => {

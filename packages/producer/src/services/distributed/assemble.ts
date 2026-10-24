@@ -285,7 +285,7 @@ export function cfrEncodeArgs(
     "-r",
     fpsArg,
   ];
-  appendSoftwareEncoderThreadsArg(args);
+  appendSoftwareEncoderThreadsArg(args, "libx264");
   return args;
 }
 

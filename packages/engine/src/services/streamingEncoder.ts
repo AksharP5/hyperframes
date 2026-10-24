@@ -339,7 +339,7 @@ export function buildStreamingArgs(
     } else {
       const encoderName = codec === "h264" ? "libx264" : "libx265";
       args.push("-c:v", encoderName, "-preset", preset);
-      appendSoftwareEncoderThreadsArg(args);
+      appendSoftwareEncoderThreadsArg(args, encoderName);
       if (bitrate) args.push("-b:v", bitrate);
       else args.push("-crf", String(quality));
 
