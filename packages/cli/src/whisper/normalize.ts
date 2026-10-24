@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
+import { parseExpressionAt, tokenizer } from "acorn";
 import { parseHTML } from "linkedom";
 
 export interface Word {
@@ -543,6 +544,22 @@ export function loadTranscript(filePath: string): { words: Word[]; format: Trans
   return { words, format };
 }
 
+function findCaptionArray(source: string, name: "script" | "TRANSCRIPT"): string | undefined {
+  const prefix = `const ${name} = `;
+  const start = source.indexOf(`${prefix}[`);
+  if (start < 0) return undefined;
+
+  try {
+    const array = parseExpressionAt(source, start + prefix.length, { ecmaVersion: "latest" });
+    if (array.type !== "ArrayExpression") return undefined;
+    const terminator = tokenizer(source.slice(array.end), { ecmaVersion: "latest" }).getToken();
+    if (terminator.type.label !== ";") return undefined;
+    return source.slice(start, array.end + terminator.end);
+  } catch {
+    return undefined;
+  }
+}
+
 export function patchCaptionHtml(dir: string, words: Word[]): void {
   if (words.length === 0) return;
 
@@ -563,16 +580,16 @@ export function patchCaptionHtml(dir: string, words: Word[]): void {
   for (const file of htmlFiles) {
     let content = readFileSync(file, "utf-8");
     const scriptBlocks = content.match(/<script>[\s\S]*?<\/script>/g) ?? [];
-    let scriptMatch: RegExpMatchArray | null = null;
-    let transcriptMatch: RegExpMatchArray | null = null;
+    let scriptMatch: string | undefined;
+    let transcriptMatch: string | undefined;
     for (const block of scriptBlocks) {
-      scriptMatch = scriptMatch ?? block.match(/const script = \[[\s\S]*?\];/);
-      transcriptMatch = transcriptMatch ?? block.match(/const TRANSCRIPT = \[[\s\S]*?\];/);
+      scriptMatch = scriptMatch ?? findCaptionArray(block, "script");
+      transcriptMatch = transcriptMatch ?? findCaptionArray(block, "TRANSCRIPT");
     }
     const match = scriptMatch ?? transcriptMatch;
     if (match) {
       const varName = scriptMatch ? "script" : "TRANSCRIPT";
-      content = content.replace(match[0], () => `const ${varName} = ${wordsJson};`);
+      content = content.replace(match, () => `const ${varName} = ${wordsJson};`);
       writeFileSync(file, content, "utf-8");
     }
   }
