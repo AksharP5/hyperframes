@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { HYPERFRAMES_BROWSER_MARKER_ARG } from "@hyperframes/core/browser-marker";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -232,6 +233,7 @@ describe("openSettledCompositionPage when nothing may listen", () => {
         "--headless",
         "--single-process",
         "--disable-gpu-compositing",
+        HYPERFRAMES_BROWSER_MARKER_ARG,
       ]);
       expect(opened.page.setRequestInterception).toHaveBeenCalledWith(true);
       const onRequest = opened.page.on.mock.calls.find(([event]) => event === "request")![1];
@@ -263,7 +265,7 @@ describe("openSettledCompositionPage when nothing may listen", () => {
     mocks.launch.mockResolvedValue(opened.browser);
     await openSettledCompositionPage(HTML, "http://127.0.0.1:3000", OPTIONS);
     expect(launched().pipe).toBe(true);
-    expect(launched().args).toEqual(["--headless"]);
+    expect(launched().args).toEqual(["--headless", HYPERFRAMES_BROWSER_MARKER_ARG]);
     expect(opened.page.setRequestInterception).not.toHaveBeenCalled();
   });
 });

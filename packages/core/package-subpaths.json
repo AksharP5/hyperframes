@@ -56,6 +56,12 @@
       "types": "./dist/safePath.d.ts",
       "environments": ["bun", "node"]
     },
+    "./browser-marker": {
+      "source": "./src/browserMarker.ts",
+      "runtime": "./dist/browserMarker.js",
+      "types": "./dist/browserMarker.d.ts",
+      "environments": ["bun", "node"]
+    },
     "./atomic-file": {
       "source": "./src/atomicFile.ts",
       "runtime": "./dist/atomicFile.js",

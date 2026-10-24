@@ -68,6 +68,12 @@
       "import": "./src/safePath.ts",
       "types": "./src/safePath.ts"
     },
+    "./browser-marker": {
+      "bun": "./src/browserMarker.ts",
+      "node": "./dist/browserMarker.js",
+      "import": "./src/browserMarker.ts",
+      "types": "./src/browserMarker.ts"
+    },
     "./atomic-file": {
       "bun": "./src/atomicFile.ts",
       "node": "./dist/atomicFile.js",
@@ -593,6 +599,10 @@
       "./safe-path": {
         "import": "./dist/safePath.js",
         "types": "./dist/safePath.d.ts"
+      },
+      "./browser-marker": {
+        "import": "./dist/browserMarker.js",
+        "types": "./dist/browserMarker.d.ts"
       },
       "./atomic-file": {
         "import": "./dist/atomicFile.js",
