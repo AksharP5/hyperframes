@@ -631,6 +631,34 @@ globalThis.gsap.to("p", { x: 1 });
     expect(targetCompositions).toEqual(["scene", "scene"]);
   });
 
+  it("preserves missing GSAP selectors without targeting another composition", () => {
+    const { document } = parseHTML(`
+      <div data-composition-id="scene"></div>
+      <div data-composition-id="other"><span data-part="missing"></span></div>
+    `);
+    const targets: Element[][] = [];
+    const fakeWindow = {
+      document,
+      __timelines: {},
+      gsap: {
+        to(target: Element[]) {
+          targets.push(target);
+        },
+      },
+    };
+    const wrapped = wrapScopedCompositionScript(
+      `gsap.to('[data-part="missing"]', { opacity: 1 });`,
+      "scene",
+    );
+
+    new Function("window", "gsap", wrapped)(fakeWindow, fakeWindow.gsap);
+
+    expect(targets).toHaveLength(1);
+    expect(Array.isArray(targets[0])).toBe(true);
+    expect(targets[0]).toHaveLength(0);
+    expect(String(targets[0])).toBe('[data-part="missing"]');
+  });
+
   it("scopes getElementById when duplicate IDs exist across composition roots", () => {
     const { document } = parseHTML(`
       <div data-composition-id="scene-a"><canvas id="gl-canvas"></canvas></div>

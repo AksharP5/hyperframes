@@ -579,16 +579,22 @@ export function wrapScopedCompositionScript(
       })
     : window;
   var __hfResolveGsapTarget = function(target) {
-    if (typeof target === "string") return __hfQueryAll(target);
-    if (!Array.isArray(target)) return target;
-    return target.reduce(function(resolved, item) {
+    if (typeof target !== "string" && !Array.isArray(target)) return target;
+    var resolved = typeof target === "string" ? __hfQueryAll(target) : target.reduce(function(resolved, item) {
       if (typeof item === "string") {
         return resolved.concat(Array.prototype.slice.call(__hfQueryAll(item)));
       }
       resolved.push(item);
       return resolved;
     }, []);
-
+    if (!resolved.length) {
+      // GSAP warns "GSAP target " + targets + " not found"; a bare empty match list prints an
+      // empty name. Keep the authored selector as the text while still targeting nothing here.
+      var originalTarget = String(target);
+      resolved = [];
+      resolved.toString = function() { return originalTarget; };
+    }
+    return resolved;
   };
   var __hfScopeTimeline = function(timeline) {
     if (!timeline || timeline.__hfScopedCompositionRoot === __hfFindRoot()) return timeline;

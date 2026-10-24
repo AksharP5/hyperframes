@@ -557,15 +557,22 @@ window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {},
     }
   }) : window;
   var __hfResolveGsapTarget = function(target) {
-    if (typeof target === "string") return __hfQueryAll(target);
-    if (!Array.isArray(target)) return target;
-    return target.reduce(function(resolved, item) {
+    if (typeof target !== "string" && !Array.isArray(target)) return target;
+    var resolved = typeof target === "string" ? __hfQueryAll(target) : target.reduce(function(resolved2, item) {
       if (typeof item === "string") {
-        return resolved.concat(Array.prototype.slice.call(__hfQueryAll(item)));
+        return resolved2.concat(Array.prototype.slice.call(__hfQueryAll(item)));
       }
-      resolved.push(item);
-      return resolved;
+      resolved2.push(item);
+      return resolved2;
     }, []);
+    if (!resolved.length) {
+      var originalTarget = String(target);
+      resolved = [];
+      resolved.toString = function() {
+        return originalTarget;
+      };
+    }
+    return resolved;
   };
   var __hfScopeTimeline = function(timeline) {
     if (!timeline || timeline.__hfScopedCompositionRoot === __hfFindRoot()) return timeline;
@@ -1095,15 +1102,22 @@ window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {},
     }
   }) : window;
   var __hfResolveGsapTarget = function(target) {
-    if (typeof target === "string") return __hfQueryAll(target);
-    if (!Array.isArray(target)) return target;
-    return target.reduce(function(resolved, item) {
+    if (typeof target !== "string" && !Array.isArray(target)) return target;
+    var resolved = typeof target === "string" ? __hfQueryAll(target) : target.reduce(function(resolved2, item) {
       if (typeof item === "string") {
-        return resolved.concat(Array.prototype.slice.call(__hfQueryAll(item)));
+        return resolved2.concat(Array.prototype.slice.call(__hfQueryAll(item)));
       }
-      resolved.push(item);
-      return resolved;
+      resolved2.push(item);
+      return resolved2;
     }, []);
+    if (!resolved.length) {
+      var originalTarget = String(target);
+      resolved = [];
+      resolved.toString = function() {
+        return originalTarget;
+      };
+    }
+    return resolved;
   };
   var __hfScopeTimeline = function(timeline) {
     if (!timeline || timeline.__hfScopedCompositionRoot === __hfFindRoot()) return timeline;
@@ -1633,15 +1647,22 @@ window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {},
     }
   }) : window;
   var __hfResolveGsapTarget = function(target) {
-    if (typeof target === "string") return __hfQueryAll(target);
-    if (!Array.isArray(target)) return target;
-    return target.reduce(function(resolved, item) {
+    if (typeof target !== "string" && !Array.isArray(target)) return target;
+    var resolved = typeof target === "string" ? __hfQueryAll(target) : target.reduce(function(resolved2, item) {
       if (typeof item === "string") {
-        return resolved.concat(Array.prototype.slice.call(__hfQueryAll(item)));
+        return resolved2.concat(Array.prototype.slice.call(__hfQueryAll(item)));
       }
-      resolved.push(item);
-      return resolved;
+      resolved2.push(item);
+      return resolved2;
     }, []);
+    if (!resolved.length) {
+      var originalTarget = String(target);
+      resolved = [];
+      resolved.toString = function() {
+        return originalTarget;
+      };
+    }
+    return resolved;
   };
   var __hfScopeTimeline = function(timeline) {
     if (!timeline || timeline.__hfScopedCompositionRoot === __hfFindRoot()) return timeline;
