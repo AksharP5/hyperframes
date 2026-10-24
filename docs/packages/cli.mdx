@@ -150,6 +150,10 @@ The positional name is a registry item, or a tag — a tag installs every block
 carrying it. `--dir` picks the project directory, `--json` prints the written
 files and paste snippet, and `--no-clipboard` skips the clipboard copy for CI.
 
+If any block in a tag fails to install, `add` keeps the successful installs and
+exits with code 1. With `--json`, `ok` is `false` and `errors` lists each failed
+block's `name` and `error`; `installed` lists the blocks that succeeded.
+
 Every install produces files plus a **paste snippet**: the `<iframe>` tag for a
 block, or the fragment path for a component. It goes to your clipboard by
 default. Naming an example instead of a registry item (`add warm-grain`) gets
