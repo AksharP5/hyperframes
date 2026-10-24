@@ -159,7 +159,7 @@ export default defineCommand({
     output: {
       type: "string",
       alias: "o",
-      description: "Output path (default: renders/<name>.mp4)",
+      description: "Output path (default: renders/<project>_<YYYY-MM-DD>_<HH-MM-SS>.<ext>)",
     },
     fps: {
       type: "string",
