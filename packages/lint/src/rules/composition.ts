@@ -282,6 +282,7 @@ function canvasScopeCandidate(selector: string, root: ReturnType<typeof canvasId
 
 // Unknown predicates retain the conservative canvas guard.
 type CanvasMatch = boolean | undefined;
+type CanvasMatchResult = { match: CanvasMatch; hasIdentity: boolean };
 
 function canvasIdentity(tag: Pick<OpenTag, "name" | "raw">) {
   return {
@@ -316,15 +317,21 @@ function canvasPseudoMatch(
   node: selectorParser.Pseudo,
   element: CanvasElement,
   hasIdentity: boolean,
-): CanvasMatch {
+): CanvasMatchResult {
   const name = node.value.toLowerCase();
   if (name.startsWith("::") || [":before", ":after", ":first-letter", ":first-line"].includes(name))
-    return false;
-  if ([":is", ":where"].includes(name))
-    return anyCanvasMatch(
-      node.nodes.map((branch) => canvasPathMatch(branch.nodes, element, hasIdentity)),
+    return { match: false, hasIdentity: false };
+  if ([":is", ":where"].includes(name)) {
+    const branches = node.nodes.map((branch) =>
+      canvasPathMatch(branch.nodes, element, hasIdentity),
     );
-  if (name === ":root") return element.name === "html";
+    const match = anyCanvasMatch(branches.map((branch) => branch.match));
+    return { match, hasIdentity: match === true || branches.some((branch) => branch.hasIdentity) };
+  }
+  if (name === ":root") {
+    const match = element.name === "html";
+    return { match, hasIdentity: match };
+  }
   if (name === ":nth-child" && element.name === "body") {
     // Body follows head even when their tags are implicit.
     // https://html.spec.whatwg.org/multipage/semantics.html#the-html-element
@@ -332,15 +339,19 @@ function canvasPseudoMatch(
       .map((branch) => branch.toString())
       .join(",")
       .trim();
-    if (/^[1-9]\d*$/.test(argument)) return Number(argument) === 2;
+    if (/^[1-9]\d*$/.test(argument)) {
+      const match = Number(argument) === 2;
+      return { match, hasIdentity: match };
+    }
   }
-  return undefined;
+  return { match: undefined, hasIdentity: false };
 }
 
-function canvasTagMatch(node: selectorParser.Tag, element: CanvasElement): CanvasMatch {
-  if (node.namespace !== undefined) return undefined;
-  if (node.value.toLowerCase() !== element.name.toLowerCase()) return false;
-  return ["html", "body"].includes(element.name) ? true : undefined;
+function canvasTagMatch(node: selectorParser.Tag, element: CanvasElement): CanvasMatchResult {
+  if (node.namespace !== undefined) return { match: undefined, hasIdentity: false };
+  if (node.value.toLowerCase() !== element.name.toLowerCase())
+    return { match: false, hasIdentity: false };
+  return { match: ["html", "body"].includes(element.name) ? true : undefined, hasIdentity: true };
 }
 
 function canvasAttributeMatch(node: selectorParser.Attribute, element: CanvasElement): CanvasMatch {
@@ -356,23 +367,27 @@ function canvasAttributeMatch(node: selectorParser.Attribute, element: CanvasEle
 function canvasNodeMatch(
   node: selectorParser.Node,
   element: CanvasElement,
-  hasIdentity = false,
-): CanvasMatch {
+  hasIdentity: boolean,
+): CanvasMatchResult {
   switch (node.type) {
-    case "id":
-      return canvasTokenMatch(element.id === null ? [] : [element.id], node.value);
-    case "class":
-      return canvasTokenMatch(element.classes, node.value);
+    case "id": {
+      const match = canvasTokenMatch(element.id === null ? [] : [element.id], node.value);
+      return { match, hasIdentity: match === true };
+    }
+    case "class": {
+      const match = canvasTokenMatch(element.classes, node.value);
+      return { match, hasIdentity: match === true };
+    }
     case "tag":
       return canvasTagMatch(node, element);
     case "universal":
-      return node.toString().trim() === "*" ? true : undefined;
+      return { match: node.toString().trim() === "*" ? true : undefined, hasIdentity: false };
     case "attribute":
-      return canvasAttributeMatch(node, element);
+      return { match: canvasAttributeMatch(node, element), hasIdentity: false };
     case "pseudo":
       return canvasPseudoMatch(node, element, hasIdentity);
     default:
-      return undefined;
+      return { match: undefined, hasIdentity: false };
   }
 }
 
@@ -385,7 +400,7 @@ function canvasAncestorMatch(
   const matches: CanvasMatch[] = [];
   let parent = element.parent;
   while (parent) {
-    matches.push(canvasPathMatch(nodes, parent));
+    matches.push(canvasPathMatch(nodes, parent).match);
     if (relation === ">") break;
     parent = parent.parent;
   }
@@ -397,7 +412,7 @@ function canvasPathMatch(
   nodes: selectorParser.Node[],
   element: CanvasElement,
   inheritedIdentity = false,
-): CanvasMatch {
+): CanvasMatchResult {
   let split = -1;
   let relation = "";
   for (const [index, node] of nodes.entries()) {
@@ -407,30 +422,25 @@ function canvasPathMatch(
     }
   }
   const subjectNodes = nodes.slice(split + 1);
-  if (subjectNodes.length === 0) return undefined;
+  if (subjectNodes.length === 0) return { match: undefined, hasIdentity: false };
   const matches = subjectNodes.map((node) => canvasNodeMatch(node, element, inheritedIdentity));
-  const hasIdentity =
-    inheritedIdentity ||
-    subjectNodes.some((node, index) =>
-      node.type === "tag"
-        ? node.namespace === undefined && node.value.toLowerCase() === element.name.toLowerCase()
-        : ["id", "class", "pseudo"].includes(node.type) && matches[index] === true,
-    );
+  const hasIdentity = inheritedIdentity || matches.some((result) => result.hasIdentity);
   const subject = allCanvasMatch(
     subjectNodes.map((node, index) => {
-      const match = matches[index];
+      const match = matches[index]?.match;
       if (!hasIdentity || match !== false) return match;
       // Scripts can change the remaining identity tokens on a known canvas element.
       if (["id", "class", "attribute"].includes(node.type)) return undefined;
       if (node.type === "pseudo" && !inheritedIdentity)
-        return canvasPseudoMatch(node, element, true);
+        return canvasNodeMatch(node, element, true).match;
       return match;
     }),
   );
-  if (subject === false) return false;
-  if (split === -1) return subject;
-  const preceding = canvasAncestorMatch(nodes.slice(0, split), relation, element);
-  return allCanvasMatch([subject, preceding]);
+  const match =
+    subject === false || split === -1
+      ? subject
+      : allCanvasMatch([subject, canvasAncestorMatch(nodes.slice(0, split), relation, element)]);
+  return { match, hasIdentity: match !== false && hasIdentity };
 }
 
 function canvasElements(rootTag: OpenTag, tags: OpenTag[]) {
@@ -458,7 +468,7 @@ function canvasSelectorMatcher(rootTag: OpenTag, tags: OpenTag[]) {
   return (selector: selectorParser.Selector, allowNewHits: boolean): boolean => {
     const { root, elements } = (canvas ??= canvasElements(rootTag, tags));
     const match = anyCanvasMatch(
-      elements.map((element) => canvasPathMatch(selector.nodes, element)),
+      elements.map((element) => canvasPathMatch(selector.nodes, element).match),
     );
     if (match === false) return false;
     if (match === true && allowNewHits) return true;
