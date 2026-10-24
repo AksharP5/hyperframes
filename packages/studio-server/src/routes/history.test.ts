@@ -25,7 +25,7 @@ vi.mock("../history/blobStore", async (importOriginal) => {
       return {
         ...store,
         put: async (path: string) => {
-          if (path.endsWith(".mp4")) await mediaCopy.held;
+          if (path.endsWith(".bin")) await mediaCopy.held;
           return store.put(path);
         },
       };
@@ -410,7 +410,7 @@ describe("history routes", () => {
     let finishCopy = () => {};
     mediaCopy.held = new Promise<void>((resolve) => (finishCopy = resolve));
     const { projectDir, file, put, post, histories } = lazyHistoryProject();
-    writeFileSync(join(projectDir, "clip.mp4"), Buffer.alloc(4 * 1024 ** 2, 7));
+    writeFileSync(join(projectDir, "clip.bin"), Buffer.alloc(4 * 1024 ** 2, 7));
 
     // The copy stays held until finishCopy, so a save or claim that waited on it never returns.
     expect((await put("B")).status).toBe(200);
@@ -420,7 +420,7 @@ describe("history routes", () => {
 
     finishCopy();
     const history = (await histories.get(projectDir))!;
-    await vi.waitFor(() => expect(history.peek(START)).toHaveProperty(["clip.mp4"]), {
+    await vi.waitFor(() => expect(history.peek(START)).toHaveProperty(["clip.bin"]), {
       timeout: 10_000,
     });
     await history.flush();
@@ -431,12 +431,12 @@ describe("history routes", () => {
     let finishCopy = () => {};
     mediaCopy.held = new Promise<void>((resolve) => (finishCopy = resolve));
     const { projectDir, api, post } = lazyHistoryProject();
-    const clip = join(projectDir, "clip.mp4");
+    const clip = join(projectDir, "clip.bin");
     const original = Buffer.alloc(4 * 1024 ** 2, 7);
     writeFileSync(clip, original);
     await post("/claim", { label: "Nothing", paths: [] });
 
-    const written = await api.request("/projects/demo/files/clip.mp4", {
+    const written = await api.request("/projects/demo/files/clip.bin", {
       method: "PUT",
       body: Buffer.alloc(4 * 1024 ** 2, 9),
       headers: { "If-Match": fileContentVersion(original) },
@@ -445,8 +445,8 @@ describe("history routes", () => {
     finishCopy();
     const claimed = await post("/claim", {
       label: "Replace clip",
-      paths: ["clip.mp4"],
-      overwrote: { "clip.mp4": fileContentVersion(original) },
+      paths: ["clip.bin"],
+      overwrote: { "clip.bin": fileContentVersion(original) },
     });
     expect(((await claimed.json()) as { claimed: unknown }).claimed).not.toBeNull();
 

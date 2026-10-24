@@ -48,13 +48,13 @@ vi.mock("./blobStore", async (importOriginal) => {
       return {
         ...store,
         put: async (path: string) => {
-          if (path.endsWith(".mp4")) {
+          if (path.endsWith(".bin")) {
             await mediaCopy.held;
             mediaCopy.copies.push(basename(path));
             if (mediaCopy.fails?.(mediaCopy.copies.length)) throw new Error("The disk is full.");
           }
           const hash = await store.put(path);
-          if (path.endsWith(".mp4")) await mediaCopy.stored?.();
+          if (path.endsWith(".bin")) await mediaCopy.stored?.();
           return hash;
         },
       };
@@ -306,10 +306,10 @@ describe("openProjectHistory", () => {
 
   it("a ledger made while closed is still a change after the project's media was copied in the background", async () => {
     const { history, write, has, projectDir, historyRoot } = await project(
-      { "index.html": "A", "clip.mp4": Buffer.alloc(2 * 1024 ** 2, 7) },
+      { "index.html": "A", "clip.bin": Buffer.alloc(2 * 1024 ** 2, 7) },
       { quietMs: 30 },
     );
-    await vi.waitFor(() => expect(history.peek(START)).toHaveProperty(["clip.mp4"]), {
+    await vi.waitFor(() => expect(history.peek(START)).toHaveProperty(["clip.bin"]), {
       timeout: 10_000,
     });
     await history.close();
@@ -331,12 +331,12 @@ describe("openProjectHistory", () => {
     mediaCopy.held = new Promise<void>((resolve) => (release = resolve));
     const { history, historyRoot } = await project({
       "index.html": "A",
-      "clip.mp4": Buffer.alloc(2 * 1024 ** 2, 7),
+      "clip.bin": Buffer.alloc(2 * 1024 ** 2, 7),
     });
     const adopting = join(historyRoot, history.projectId, "adopting.json");
-    expect(JSON.parse(readFileSync(adopting, "utf-8"))).toEqual(["clip.mp4"]);
+    expect(JSON.parse(readFileSync(adopting, "utf-8"))).toEqual(["clip.bin"]);
     release();
-    await vi.waitFor(() => expect(history.peek(START)).toHaveProperty(["clip.mp4"]), {
+    await vi.waitFor(() => expect(history.peek(START)).toHaveProperty(["clip.bin"]), {
       timeout: 10_000,
     });
     expect(existsSync(adopting)).toBe(false);
@@ -344,7 +344,7 @@ describe("openProjectHistory", () => {
 
   it("keeps media whose recording failed for the next open, rather than log it as added", async () => {
     const { history, write, historyRoot } = await project(
-      { "index.html": "A", "clip.mp4": Buffer.alloc(2 * 1024 ** 2, 7) },
+      { "index.html": "A", "clip.bin": Buffer.alloc(2 * 1024 ** 2, 7) },
       { budgetBytes: 1, quietMs: 30 },
     );
     // The edit's prune takes the first copy; storing it again then fails.
@@ -356,18 +356,18 @@ describe("openProjectHistory", () => {
     await vi.waitFor(() => expect(mediaCopy.copies).toHaveLength(2), { timeout: 10_000 });
     await history.flush();
     expect(history.list().flatMap((entry) => entry.files.map((file) => file.path))).not.toContain(
-      "clip.mp4",
+      "clip.bin",
     );
     const adopting = join(historyRoot, history.projectId, "adopting.json");
-    expect(JSON.parse(readFileSync(adopting, "utf-8"))).toEqual(["clip.mp4"]);
+    expect(JSON.parse(readFileSync(adopting, "utf-8"))).toEqual(["clip.bin"]);
   });
 
   it("never copies the media of a folder that replaced the project", async () => {
     let release = () => {};
     mediaCopy.held = new Promise<void>((resolve) => (release = resolve));
     const media = {
-      "a.mp4": Buffer.alloc(2 * 1024 ** 2, 1),
-      "b.mp4": Buffer.alloc(2 * 1024 ** 2, 2),
+      "a.bin": Buffer.alloc(2 * 1024 ** 2, 1),
+      "b.bin": Buffer.alloc(2 * 1024 ** 2, 2),
     };
     const { history, write, projectDir } = await project({ "index.html": "A", ...media });
     renameSync(projectDir, `${projectDir}-moved`);
@@ -377,7 +377,7 @@ describe("openProjectHistory", () => {
     release();
     await history.close();
     // Only the copy already running when the folder changed may finish.
-    expect(mediaCopy.copies).toEqual(["a.mp4"]);
+    expect(mediaCopy.copies).toEqual(["a.bin"]);
   });
 
   it("undoes a clip replaced while closed, though the history closed before its copy finished", async () => {
@@ -385,30 +385,30 @@ describe("openProjectHistory", () => {
     let release = () => {};
     mediaCopy.held = new Promise<void>((resolve) => (release = resolve));
     const { history, write, projectDir, historyRoot } = await project(
-      { "index.html": "A", "clip.mp4": clip },
+      { "index.html": "A", "clip.bin": clip },
       { quietMs: 30 },
     );
     const closed = history.close();
     release();
     await closed;
-    write("clip.mp4", Buffer.alloc(2 * 1024 ** 2, 9));
+    write("clip.bin", Buffer.alloc(2 * 1024 ** 2, 9));
     const reopened = await open(projectDir, historyRoot, { quietMs: 30 });
     await reopened.flush();
     expect(reopened.list().map((entry) => entry.files.map((file) => file.path))).toEqual([
-      ["clip.mp4"],
+      ["clip.bin"],
     ]);
     expect(await reopened.step("back", you)).toMatchObject({ ok: true });
-    expect(readFileSync(join(projectDir, "clip.mp4")).equals(clip)).toBe(true);
+    expect(readFileSync(join(projectDir, "clip.bin")).equals(clip)).toBe(true);
   });
 
   it("adopts media whose copy a process exit cut short, rather than log it as added", async () => {
     const { history, write, projectDir, historyRoot } = await project({ "index.html": "A" });
     await history.close();
     // What an exit mid-copy leaves: the clip on disk, named as still being copied, not in the baseline.
-    write("clip.mp4", Buffer.alloc(2 * 1024 ** 2, 7));
-    writeFileSync(join(historyRoot, history.projectId, "adopting.json"), '["clip.mp4"]');
+    write("clip.bin", Buffer.alloc(2 * 1024 ** 2, 7));
+    writeFileSync(join(historyRoot, history.projectId, "adopting.json"), '["clip.bin"]');
     const reopened = await open(projectDir, historyRoot, { quietMs: 30 });
-    await vi.waitFor(() => expect(reopened.peek(START)).toHaveProperty(["clip.mp4"]), {
+    await vi.waitFor(() => expect(reopened.peek(START)).toHaveProperty(["clip.bin"]), {
       timeout: 10_000,
     });
     await reopened.flush();
@@ -420,7 +420,7 @@ describe("openProjectHistory", () => {
     let release = () => {};
     mediaCopy.held = new Promise<void>((resolve) => (release = resolve));
     const { history, write } = await project(
-      { "index.html": "A", "clip.mp4": clip },
+      { "index.html": "A", "clip.bin": clip },
       { budgetBytes: 1, quietMs: 30 },
     );
     // The copy is stored; an edit commits and prunes before history records the copy.
@@ -429,10 +429,10 @@ describe("openProjectHistory", () => {
       return change(history, you, "Color", () => write("index.html", "B"));
     };
     release();
-    await vi.waitFor(() => expect(history.peek(START)).toHaveProperty(["clip.mp4"]), {
+    await vi.waitFor(() => expect(history.peek(START)).toHaveProperty(["clip.bin"]), {
       timeout: 10_000,
     });
-    const start = history.peek(START)["clip.mp4"]!;
+    const start = history.peek(START)["clip.bin"]!;
     expect((await history.readBlob(start)).equals(clip)).toBe(true);
   });
 

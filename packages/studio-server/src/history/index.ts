@@ -14,6 +14,7 @@ export {
   type HistoryWindow,
   HistoryClosedError,
 } from "./projectHistory.js";
+export { reclaimUncopiedBlobs, type ReclaimedHistory } from "./reclaimUncopied.js";
 export { HistoryBusyError } from "./ownerLock.js";
 export { HistoryIdError } from "./historyId.js";
 export { historyCache } from "./historyCache.js";
