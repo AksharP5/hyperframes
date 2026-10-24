@@ -582,11 +582,12 @@ export function parseAudioElements(html: string): AudioElement[] {
   const visiting = new Set<RefResolverEl>();
   const resolveStart = (el: RefResolverEl): number =>
     el.getAttribute("data-start") ? resolveReferencedStart(document, el, startCache, visiting) : 0;
-  // `end` stays a plain numeric read (the mixer derives the real segment length
-  // from data-duration / natural media downstream); guard NaN so a malformed
-  // value never poisons the mix instead of falling back to 0.
-  const parseEnd = (raw: string | null): number => {
-    return parseStrictFiniteTimingNumber(raw) ?? 0;
+  // Same rule as core's compileTimingAttrs: data-end, else start + data-duration, else 0 (unknown).
+  const resolveEnd = (el: RefResolverEl): number => {
+    const end = parseStrictFiniteTimingNumber(el.getAttribute("data-end"));
+    if (end != null) return end;
+    const duration = parseStrictFiniteTimingNumber(el.getAttribute("data-duration"));
+    return duration != null && duration > 0 ? resolveStart(el) + duration : 0;
   };
   const isHidden = isSelfOrAncestorHidden;
 
@@ -619,7 +620,7 @@ export function parseAudioElements(html: string): AudioElement[] {
       id,
       src,
       start: resolveStart(el),
-      end: parseEnd(el.getAttribute("data-end")),
+      end: resolveEnd(el),
       mediaStart: readMediaStart(el),
       playbackRate: readElementRateSpec(el),
       loop: el.getAttribute("loop") !== null,
@@ -1518,6 +1519,9 @@ export async function processCompositionAudio(
 
           // Fallback: if no duration was specified, probe the actual file
           if (element.end - element.start <= 0) {
+            console.warn(
+              `[audioMixer] ${element.id} has no data-duration or data-end; its length is unknown, so it plays to the end of its source`,
+            );
             let metadata;
             try {
               metadata = await extractAudioMetadata(

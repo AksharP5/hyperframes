@@ -99,6 +99,31 @@ describe("parseAudioElements strict literal timing", () => {
   );
 });
 
+describe("parseAudioElements clip end", () => {
+  const endOf = (attrs: string) =>
+    parseAudioElements(`<audio id="vo" src="vo.wav" ${attrs}></audio>`)[0]?.end;
+
+  it("ends a clip at start + data-duration when it has no data-end", () => {
+    expect(endOf('data-start="773.1" data-duration="6.909"')).toBeCloseTo(780.009, 6);
+  });
+
+  it("lets data-end win over data-duration", () => {
+    expect(endOf('data-start="10" data-duration="6" data-end="12"')).toBe(12);
+  });
+
+  it("leaves the end unknown (0) when neither is authored", () => {
+    expect(endOf('data-start="10"')).toBe(0);
+  });
+
+  it("measures data-duration from a relative data-start", () => {
+    const [, second] = parseAudioElements(
+      '<audio id="a" src="a.wav" data-start="2" data-end="5"></audio>' +
+        '<audio id="b" src="b.wav" data-start="a" data-duration="4"></audio>',
+    );
+    expect(second?.end).toBe(9);
+  });
+});
+
 describe("parseAudioElements — <source> children", () => {
   it("discovers audio and audible-video tracks that use <source> children", () => {
     const tracks = parseAudioElements(`
@@ -176,6 +201,25 @@ describe("processCompositionAudio", () => {
       expect(result).toMatchObject({ success: true, tracksProcessed: 0 });
     },
   );
+
+  it("warns, naming the clip, when a clip's length is unknown and it plays to its source end", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
+    const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
+    tempDirs.push(baseDir, workDir);
+    writeFileSync(join(baseDir, "tone.wav"), Buffer.from("RIFF0000WAVEfmt "));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await processCompositionAudio(
+      parseAudioElements('<audio id="open-ended" src="tone.wav" data-start="0"></audio>'),
+      baseDir,
+      workDir,
+      join(baseDir, "out.m4a"),
+      10,
+    );
+    expect(warn.mock.calls.map(([line]) => String(line))).toEqual([
+      expect.stringContaining("open-ended has no data-duration or data-end"),
+    ]);
+    warn.mockRestore();
+  });
 
   it("classifies an HTML-as-200 audio source as deterministic user input", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
