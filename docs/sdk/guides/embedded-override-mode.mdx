@@ -45,6 +45,20 @@ await db.saveOverrides(sessionId, nextOverrides);
 
 On the next session open, pass `nextOverrides` as `overrides` again — the user sees their exact state.
 
+Elements inserted with `addElement()` are stored in the delta too, including their
+parent and sibling position. Later text, style, or attribute edits replay onto the
+restored element:
+
+```typescript
+const id = comp.addElement("hf-stage", 1, "<p>Available today</p>");
+comp.setText(id, "Available worldwide");
+
+const reopened = await openComposition(templateHtml, {
+  overrides: comp.getOverrides(),
+});
+reopened.getElement(id)?.text; // "Available worldwide"
+```
+
 ## Override set key format
 
 Keys follow the pattern `hfId.prop.path`. The common forms are:
@@ -54,6 +68,7 @@ Keys follow the pattern `hfId.prop.path`. The common forms are:
 | `"hf-title.text"` | Inner text of element `hf-title` |
 | `"hf-logo.attr.src"` | `src` attribute on `hf-logo` |
 | `"hf-x.style.fontSize"` | Inline `fontSize` style on `hf-x` |
+| `"hf-card"` with an element snapshot | Added or restored element, with its HTML, parent, and sibling position |
 | `"hf-card"` with value `null` | Removal marker — element was deleted |
 
 A `null` value is a removal marker. When the SDK serializes the composition it omits that element entirely. This lets the host distinguish "never touched" (key absent) from "user deleted" (key present, value `null`).

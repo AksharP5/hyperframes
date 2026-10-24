@@ -271,7 +271,7 @@ function applyOne(
         if (el && options.keepScriptTargets && scriptLooksUp(parsed.document, el))
           keepDelete(parsed, el);
         el?.remove();
-      } else if (patch.op === "add" && patch.value) {
+      } else if ((patch.op === "add" || patch.op === "replace") && patch.value) {
         const v = patch.value as { html: string; parentId: string | null; siblingIndex: number };
         const parent = v.parentId
           ? findById(parsed.document, v.parentId)
@@ -282,6 +282,7 @@ function applyOne(
         tmp.innerHTML = v.html;
         const node = tmp.firstElementChild;
         if (!node) return;
+        if (patch.op === "replace") findById(parsed.document, p.id)?.remove();
         const children = Array.from(parent.children);
         const ref = children[v.siblingIndex] ?? null;
         parent.insertBefore(node, ref);

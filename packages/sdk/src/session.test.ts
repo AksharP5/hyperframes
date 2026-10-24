@@ -196,6 +196,36 @@ describe("override-set replay on open", () => {
     const comp = await openComposition(BASE_HTML, { overrides });
     expect(comp.getOverrides()).toEqual(overrides);
   });
+
+  it("restores added elements and their later edits from the stored override set", async () => {
+    const comp = await openComposition(BASE_HTML, { overrides: {} });
+    const id = comp.addElement("hf-stage", 1, "<p>Available today</p>");
+    comp.setText(id, "Available worldwide");
+
+    const reopened = await openComposition(BASE_HTML, { overrides: comp.getOverrides() });
+
+    expect(reopened.getElement(id)?.text).toBe("Available worldwide");
+    expect(reopened.getElement("hf-stage")?.children.map((child) => child.id)).toEqual([
+      "hf-title",
+      id,
+      "hf-sub",
+      "hf-logo",
+    ]);
+    expect(reopened.serialize()).toBe(comp.serialize());
+  });
+
+  it("replaces the base element once when reopening an undone removal", async () => {
+    const comp = await openComposition(BASE_HTML);
+    comp.setText("hf-title", "Edited headline");
+    comp.removeElement("hf-title");
+    comp.undo();
+
+    const reopened = await openComposition(BASE_HTML, { overrides: comp.getOverrides() });
+
+    expect(reopened.getElement("hf-title")?.text).toBe("Edited headline");
+    expect(reopened.getElements().filter((element) => element.id === "hf-title")).toHaveLength(1);
+    expect(reopened.serialize()).toBe(comp.serialize());
+  });
 });
 
 // ─── batch() transactional rollback ───────────────────────────────────────────
