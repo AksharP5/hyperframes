@@ -150,11 +150,63 @@ describe("snapshot contact sheet failures", () => {
       ],
     });
 
-    expect(generate).toHaveBeenCalledWith(join(project, "snapshots"), sheet);
+    expect(generate).toHaveBeenCalledWith(
+      ["frame-00-at-0.5s.png", "frame-01-at-1s.png"].map((name) =>
+        join(project, "snapshots", name),
+      ),
+      sheet,
+    );
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining("contact-sheet.jpg"));
     expect(console.warn).not.toHaveBeenCalled();
     expect(console.error).not.toHaveBeenCalled();
   });
+
+  it("builds the sheet from this run's frames, not another frame-*.png in the folder", async () => {
+    const output = join(project, "snapshots");
+    mkdirSync(output, { recursive: true });
+    writeFileSync(join(output, "frame-hero.png"), "user image");
+    const read: string[] = [];
+    const image = {
+      metadata: async () => ({ width: 640, height: 360, autoOrient: { width: 640, height: 360 } }),
+      autoOrient: () => image,
+      resize: () => image,
+      composite: () => image,
+      jpeg: () => image,
+      toBuffer: async () => Buffer.from("sheet"),
+    };
+    vi.doMock("../utils/optionalPackages.js", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../utils/optionalPackages.js")>()),
+      loadSharp: async () => (input: unknown) => {
+        if (typeof input === "string") read.push(input);
+        return image;
+      },
+    }));
+
+    await runCommand(snapshotCommand, {
+      rawArgs: [project, ...["--at", "0.5,1", "--no-end", "--describe", "false", "-o", output]],
+    });
+
+    expect([...new Set(read)]).toEqual([
+      join(output, "frame-00-at-0.5s.png"),
+      join(output, "frame-01-at-1s.png"),
+    ]);
+    expect(readFileSync(join(output, "frame-hero.png"), "utf8")).toBe("user image");
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it.each(["-1", "0.5,-1", "Infinity", "NaN", "1,", "1junk", ""])(
+    "refuses --at %s before writing anything",
+    async (at) => {
+      const output = join(project, "snapshots");
+      await expect(
+        runCommand(snapshotCommand, {
+          rawArgs: [project, "--at", at, "--no-end", "--describe", "false", "-o", output],
+        }),
+      ).rejects.toThrow("--at must be comma-separated times in seconds, each 0 or more");
+      expect(capture.screenshot).not.toHaveBeenCalled();
+      expect(existsSync(output)).toBe(false);
+    },
+  );
 
   it("keeps and records the captured frames when another process holds history", async () => {
     const args = {

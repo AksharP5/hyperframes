@@ -214,22 +214,15 @@ export async function createScrollContactSheet(
  * Returns array of written file paths.
  */
 export async function createSnapshotContactSheet(
-  snapshotsDir: string,
+  paths: string[],
   outputPath: string,
   budget: Pick<ContactSheetOptions, "remainingMs"> = {},
 ): Promise<string[]> {
-  if (!existsSync(snapshotsDir)) return [];
+  if (paths.length === 0) return [];
 
-  const snapshotFiles = readdirSync(snapshotsDir)
-    .filter((f) => f.startsWith("frame-") && f.endsWith(".png"))
-    .sort();
-
-  if (snapshotFiles.length === 0) return [];
-
-  const paths = snapshotFiles.map((f) => join(snapshotsDir, f));
-  const labels = snapshotFiles.map((f) => {
-    const m = f.match(/at-([\d.]+)s/);
-    return m ? `${m[1]}s` : f;
+  const labels = paths.map((path) => {
+    const m = basename(path).match(/at-([\d.]+)s/);
+    return m ? `${m[1]}s` : basename(path);
   });
 
   // 3 cols, 9 per page (3×3)

@@ -13,6 +13,12 @@ export function parseSnapshotRange(value: string): SnapshotRange {
     throw new Error("--range must be START,END in seconds, with 0 <= START < END");
   return [range[0]!, range[1]!];
 }
+export function parseSnapshotAt(value: string): number[] {
+  const times = value.split(",").map((part) => (part.trim() === "" ? NaN : Number(part)));
+  if (!times.every((time) => Number.isFinite(time) && time >= 0))
+    throw new Error("--at must be comma-separated times in seconds, each 0 or more");
+  return times;
+}
 export function sampleSnapshotRange(
   [start, end]: SnapshotRange,
   frames: number,
