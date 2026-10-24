@@ -2096,6 +2096,66 @@ describe("bundleToSingleHtml", () => {
     expect(bundled).toContain(`url('${inlinedAs("image/png", "fake-sprite")}?v=2#section')`);
   });
 
+  it.each([true, false])(
+    "preserves srcset URL commas with inlineAssets %s",
+    async (inlineAssets) => {
+      const srcset = `${inlinedAs("image/svg+xml", '<svg xmlns="http://www.w3.org/2000/svg"/>')} 1x, https://cdn.example/hero,blue.png 2x`;
+      const dir = makeTempProject({
+        "index.html": `<html><body><div data-composition-id="root" data-width="320" data-height="180" data-duration="1" data-no-timeline><img id="photo" srcset="${srcset}"></div></body></html>`,
+      });
+      try {
+        const bundled = await bundleToSingleHtml(dir, { inlineAssets });
+        const { document } = parseHTML(bundled);
+        expect(document.getElementById("photo")?.getAttribute("srcset")).toBe(srcset);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("inlines a comma-named srcset image beside an existing data URL", async () => {
+    const dataUrl = inlinedAs("image/svg+xml", '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    const dir = makeTempProject({
+      "index.html": `<html><body><div data-composition-id="root" data-width="320" data-height="180" data-duration="1" data-no-timeline><img id="photo" srcset="${dataUrl} 1x, hero,blue.png 2x"></div></body></html>`,
+      "hero,blue.png": "blue-image-bytes",
+    });
+    try {
+      const bundled = await bundleToSingleHtml(dir);
+      const { document } = parseHTML(bundled);
+      expect(document.getElementById("photo")?.getAttribute("srcset")).toBe(
+        `${dataUrl} 1x, ${inlinedAs("image/png", "blue-image-bytes")} 2x`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([true, false])(
+    "rebases complete picture srcset URLs with inlineAssets %s",
+    async (inlineAssets) => {
+      const dataUrl = inlinedAs("image/svg+xml", '<svg xmlns="http://www.w3.org/2000/svg"/>');
+      const dir = makeTempProject({
+        "scenes/scene.html": `<html><body><div data-composition-id="root" data-width="320" data-height="180" data-duration="1" data-no-timeline><picture><source id="photo" srcset="${dataUrl} 160w, hero,blue.png 320w"><img src="hero,blue.png"></picture></div></body></html>`,
+        "scenes/hero,blue.png": "blue-image-bytes",
+      });
+      try {
+        const bundled = await bundleToSingleHtml(dir, {
+          entryFile: "scenes/scene.html",
+          inlineAssets,
+        });
+        const { document } = parseHTML(bundled);
+        const image = inlineAssets
+          ? inlinedAs("image/png", "blue-image-bytes")
+          : "scenes/hero%2Cblue.png";
+        expect(document.getElementById("photo")?.getAttribute("srcset")).toBe(
+          `${dataUrl} 160w, ${image} 320w`,
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("inlines fonts, images and scripts so no relative asset reference survives", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html>
