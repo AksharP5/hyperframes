@@ -159,6 +159,10 @@ const finalVideoFrameTimestampSignalCaches = new WeakMap<
   Map<string, MediaProbeCacheEntry<number>>
 >();
 const audioMetadataCache = new Map<string, MediaProbeCacheEntry<AudioMetadata>>();
+const audioMetadataSignalCaches = new WeakMap<
+  AbortSignal,
+  Map<string, MediaProbeCacheEntry<AudioMetadata>>
+>();
 export interface MediaProbeCacheEntry<T = FFProbeOutput> {
   identity: string | null;
   promise: Promise<T>;
@@ -344,7 +348,19 @@ function isPngImageProbe(output: FFProbeOutput): boolean {
   );
 }
 
+const contentAddressedUrls = new Map<string, string>();
+const withoutQuery = (url: string) => url.split(/[?#]/, 1)[0] ?? url;
+
+/** A URL whose bytes can never change (its path holds their hash), so probes of it are cacheable. */
+export function declareContentAddressedUrl(url: string, sha256: string): void {
+  contentAddressedUrls.set(withoutQuery(url), sha256);
+}
+
 export function mediaFileIdentity(filePath: string): string | null {
+  if (/^https?:\/\//i.test(filePath)) {
+    const sha256 = contentAddressedUrls.get(withoutQuery(filePath));
+    return sha256 ? `sha256:${sha256}` : null;
+  }
   try {
     const stat = statSync(filePath, { bigint: true });
     return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":");
@@ -944,55 +960,58 @@ export async function extractAudioMetadata(
   filePath: string,
   options?: { signal?: AbortSignal },
 ): Promise<AudioMetadata> {
-  // A caller-owned abort signal cannot safely share a cached in-flight probe:
-  // cancelling one consumer would also cancel unrelated consumers. Signal-bound
-  // probes therefore bypass the process-promise cache.
+  // A probe bound to a caller's abort signal is shared only among callers of that same signal,
+  // and only when the file has an identity to key it by.
   const identity = mediaFileIdentity(filePath);
-  const cached = options?.signal
-    ? undefined
-    : readMetadataCache(audioMetadataCache, filePath, identity);
+  const signal = options?.signal;
+  if (signal && identity === null) return probeAudioMetadata(filePath, signal);
+  let cache = audioMetadataCache;
+  if (signal) {
+    cache = audioMetadataSignalCaches.get(signal) ?? new Map();
+    audioMetadataSignalCaches.set(signal, cache);
+  }
+  const cached = readMetadataCache(cache, filePath, identity);
   if (cached) return cached;
-
-  const probePromise = (async (): Promise<AudioMetadata> => {
-    const output = await probeMediaOutput(filePath, options?.signal);
-    const audioStream = output.streams.find((s) => s.codec_type === "audio");
-    if (!audioStream) throw new Error("[FFmpeg] No audio stream found");
-
-    let durationSeconds = output.format.duration ? parseFloat(output.format.duration) : 0;
-    const streamDuration = audioStream.duration ? parseFloat(audioStream.duration) : undefined;
-    const sampleRate = audioStream.sample_rate ? parseInt(audioStream.sample_rate) : 44100;
-    const audioCodec = audioStream.codec_name || "unknown";
-    // Container summaries can undercount intact audio, so the decoded last frame wins.
-    // The probe returns null instead of throwing: a throw here drops the audio element.
-    if (sampleRate > 0) {
-      const decoded = await probeDecodedAudioDuration(
-        filePath,
-        sampleRate,
-        audioStartSeconds(audioStream, output.format),
-        durationSeconds,
-        options?.signal,
-      );
-      if (decoded !== null) {
-        durationSeconds = reconcileAudioDuration(durationSeconds, decoded, output.format);
-      }
-    }
-
-    return {
-      durationSeconds,
-      streamDurationSeconds: streamDuration && streamDuration > 0 ? streamDuration : undefined,
-      sampleRate,
-      channels: audioStream.channels || 2,
-      audioCodec,
-      bitrate: output.format.bit_rate ? parseInt(output.format.bit_rate) : undefined,
-      latestStreamLeadSeconds: latestStreamLeadSeconds(output),
-      audioStreamLeadSeconds: streamLeadSeconds(output, audioStream),
-      audioStreamCount: output.streams.filter((s) => s.codec_type === "audio").length,
-    };
-  })();
-
-  if (options?.signal) return probePromise;
-  writeMetadataCache(audioMetadataCache, filePath, identity, probePromise);
+  const probePromise = probeAudioMetadata(filePath, signal);
+  writeMetadataCache(cache, filePath, identity, probePromise);
   return probePromise;
+}
+
+async function probeAudioMetadata(filePath: string, signal?: AbortSignal): Promise<AudioMetadata> {
+  const output = await probeMediaOutput(filePath, signal);
+  const audioStream = output.streams.find((s) => s.codec_type === "audio");
+  if (!audioStream) throw new Error("[FFmpeg] No audio stream found");
+
+  let durationSeconds = output.format.duration ? parseFloat(output.format.duration) : 0;
+  const streamDuration = audioStream.duration ? parseFloat(audioStream.duration) : undefined;
+  const sampleRate = audioStream.sample_rate ? parseInt(audioStream.sample_rate) : 44100;
+  const audioCodec = audioStream.codec_name || "unknown";
+  // Container summaries can undercount intact audio, so the decoded last frame wins.
+  // The probe returns null instead of throwing: a throw here drops the audio element.
+  if (sampleRate > 0) {
+    const decoded = await probeDecodedAudioDuration(
+      filePath,
+      sampleRate,
+      audioStartSeconds(audioStream, output.format),
+      durationSeconds,
+      signal,
+    );
+    if (decoded !== null) {
+      durationSeconds = reconcileAudioDuration(durationSeconds, decoded, output.format);
+    }
+  }
+
+  return {
+    durationSeconds,
+    streamDurationSeconds: streamDuration && streamDuration > 0 ? streamDuration : undefined,
+    sampleRate,
+    channels: audioStream.channels || 2,
+    audioCodec,
+    bitrate: output.format.bit_rate ? parseInt(output.format.bit_rate) : undefined,
+    latestStreamLeadSeconds: latestStreamLeadSeconds(output),
+    audioStreamLeadSeconds: streamLeadSeconds(output, audioStream),
+    audioStreamCount: output.streams.filter((s) => s.codec_type === "audio").length,
+  };
 }
 
 /** Chrome's media time 0 is the earliest of these; a stream starting later plays that much in. */

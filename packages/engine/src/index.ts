@@ -329,6 +329,7 @@ export {
   extractVideoMetadata,
   extractFinalVideoFrameTimestamp,
   extractAudioMetadata,
+  declareContentAddressedUrl,
   probeMediaProfile,
   analyzeKeyframeIntervals,
   type VideoMetadata,
