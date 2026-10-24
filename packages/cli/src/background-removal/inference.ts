@@ -96,11 +96,32 @@ export async function createSession(options: CreateSessionOptions = {}): Promise
   let rgbaBuf: Buffer | null = null;
   let rgbaBgBuf: Buffer | null = null;
 
+  // The load-time fallback above cannot see a provider that loads and then fails on a frame (CoreML's "Unable to
+  // compute the prediction" on a long run). One retry per session on CPU keeps the whole run from dying with it.
+  let retried = false;
+  const run = async (tensor: Tensor) => {
+    try {
+      return await session.run({ [inputName]: tensor });
+    } catch (err) {
+      if (providerUsed === "CPU" || retried) throw err;
+      retried = true;
+      options.onProgress?.(
+        `${providerUsed} failed while running a frame (${(err as Error).message}); continuing on CPU.`,
+      );
+      await session.release().catch(() => undefined);
+      session = await tryCreate(["cpu"]);
+      providerUsed = "CPU";
+      return await session.run({ [inputName]: tensor });
+    }
+  };
+
   return {
-    provider: providerUsed,
+    get provider() {
+      return providerUsed;
+    },
     async process(rgb, width, height, withBackground = false) {
       const tensor = await preprocess(sharp, ort, rgb, width, height, inputData);
-      const outputs = await session.run({ [inputName]: tensor });
+      const outputs = await run(tensor);
       const output = outputs[outputName];
       if (!output) throw new Error(`Model did not return output '${outputName}'`);
       const expectedBytes = width * height * 4;
