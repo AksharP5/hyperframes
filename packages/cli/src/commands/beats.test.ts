@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,6 +64,7 @@ async function runBeats(dir: string): Promise<{ exitCode: number; out: string }>
   return { exitCode, out: lines.join("\n") };
 }
 
+const dirLink = process.platform === "win32" ? "junction" : "dir";
 const ffmpeg = findFfBinary("ffmpeg");
 const canDecode = ffmpeg && findFfBinary("ffprobe");
 
@@ -86,6 +96,59 @@ describe.skipIf(!canDecode)("hyperframes beats", () => {
     expect(exitCode).toBe(1);
     expect(out).toMatch(/No beats detected in assets\/song\.wav/);
     expect(existsSync(join(dir, "beats"))).toBe(false);
+  });
+
+  it("refuses a music src that resolves outside the project", async () => {
+    // An encoded `../` survives URL normalization and decodes to a parent path, so
+    // without a containment check the command reads ../../secret.wav and writes
+    // beats/../../secret.wav.json, both outside the project.
+    const dir = project(join("escape", "nested", "proj"), 120);
+    const base = join(root, "escape");
+    writeFileSync(join(base, "secret.wav"), readFileSync(join(dir, "assets", "song.wav")));
+    writeFileSync(
+      join(dir, "index.html"),
+      `<div data-composition-id="main"><audio id="music" src="..%2F..%2Fsecret.wav"></audio></div>`,
+    );
+    const { exitCode, out } = await runBeats(dir);
+    expect(exitCode).toBe(1);
+    expect(out).toMatch(/outside the project/);
+    expect(existsSync(join(base, "nested", "secret.wav.json"))).toBe(false);
+    expect(existsSync(join(dir, "beats"))).toBe(false);
+  });
+
+  it("refuses music read through a symlinked folder that points outside the project", async () => {
+    const dir = project(join("link-read", "proj"), 120);
+    const outside = join(root, "link-read", "outside");
+    renameSync(join(dir, "assets"), outside);
+    symlinkSync(outside, join(dir, "assets"), dirLink);
+    const { exitCode, out } = await runBeats(dir);
+    expect(exitCode).toBe(1);
+    expect(out).toMatch(/outside the project/);
+    expect(existsSync(join(dir, "beats"))).toBe(false);
+  });
+
+  it("refuses to write a beat file through a symlinked folder that points outside the project", async () => {
+    const dir = project(join("link-write", "proj"), 120);
+    const outside = join(root, "link-write", "outside");
+    mkdirSync(outside, { recursive: true });
+    mkdirSync(join(dir, "beats"));
+    symlinkSync(outside, join(dir, "beats", "assets"), dirLink);
+    const { exitCode, out } = await runBeats(dir);
+    expect(exitCode).toBe(1);
+    expect(out).toMatch(/outside the project/);
+    expect(existsSync(join(outside, "song.wav.json"))).toBe(false);
+  });
+
+  it("accepts an in-project file whose name starts with two dots", async () => {
+    const dir = project("dotted", 120);
+    renameSync(join(dir, "assets", "song.wav"), join(dir, "..music.wav"));
+    writeFileSync(
+      join(dir, "index.html"),
+      `<div data-composition-id="main"><audio id="music" src="..music.wav"></audio></div>`,
+    );
+    const { exitCode } = await runBeats(dir);
+    expect(exitCode).toBe(0);
+    expect(existsSync(join(dir, "beats", "..music.wav.json"))).toBe(true);
   });
 });
 
