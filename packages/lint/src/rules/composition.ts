@@ -394,7 +394,20 @@ function canvasPathMatch(nodes: selectorParser.Node[], element: CanvasElement): 
   }
   const subjectNodes = nodes.slice(split + 1);
   if (subjectNodes.length === 0) return undefined;
-  const subject = allCanvasMatch(subjectNodes.map((node) => canvasNodeMatch(node, element)));
+  const hasIdentity = subjectNodes.some((node) =>
+    node.type === "tag"
+      ? node.namespace === undefined && node.value.toLowerCase() === element.name.toLowerCase()
+      : ["id", "class"].includes(node.type) && canvasNodeMatch(node, element) === true,
+  );
+  const subject = allCanvasMatch(
+    subjectNodes.map((node) => {
+      const match = canvasNodeMatch(node, element);
+      // Scripts can change the remaining identity tokens on a known canvas element.
+      if (hasIdentity && match === false && ["id", "class", "attribute"].includes(node.type))
+        return undefined;
+      return match;
+    }),
+  );
   if (subject === false) return false;
   if (split === -1) return subject;
   const preceding = canvasAncestorMatch(nodes.slice(0, split), relation, element);

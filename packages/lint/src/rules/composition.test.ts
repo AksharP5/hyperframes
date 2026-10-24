@@ -2389,6 +2389,9 @@ describe("composition rules", () => {
 
     it.each([
       "#root .badge",
+      "#root .badge.zoomed",
+      "#root #badge",
+      "#root [data-badge]",
       "#root > .badge",
       ".canvas .badge",
       "body .badge",
@@ -2426,6 +2429,45 @@ describe("composition rules", () => {
           <div class="badge"></div>
         </div>
       </body></html>`);
+
+      expect(codes(result)).toContain("root_zoom_rescales_a_fixed_canvas");
+    });
+
+    it.each([
+      ["#root.zoomed", 'root.classList.add("zoomed")'],
+      [".canvas.zoomed", 'root.classList.add("zoomed")'],
+      [".zoomed.canvas", 'root.classList.add("zoomed")'],
+      [".canvas#zoomed", 'root.id = "zoomed"'],
+      ["#root[data-zoomed]", 'root.dataset.zoomed = ""'],
+      ["body > div.zoomed", 'root.classList.add("zoomed")'],
+      ["body > div#zoomed", 'root.id = "zoomed"'],
+      ["body > div[data-zoomed]", 'root.dataset.zoomed = ""'],
+    ])("retains canvas protection for runtime identity in %s", async (selector, mutation) => {
+      const result = await lintHyperframeHtml(`<!doctype html><html><head><style>
+        ${selector} { zoom: 2; }
+      </style></head><body>
+        <div id="root" class="canvas" data-composition-id="main" data-width="800" data-height="400" data-duration="5"></div>
+        <script>const root = document.getElementById("root"); ${mutation};</script>
+      </body></html>`);
+
+      expect(codes(result)).toContain("root_zoom_rescales_a_fixed_canvas");
+    });
+
+    it("does not assume a head composition root is a child of body", async () => {
+      const result = await lintHyperframeHtml(`<!doctype html><html>
+        <head id="root" data-composition-id="main" data-width="800" data-height="400" data-duration="5">
+          <style>head { display: block; } html > #root { zoom: 2; }</style>
+        </head>
+      </html>`);
+
+      expect(codes(result)).toContain("root_zoom_rescales_a_fixed_canvas");
+    });
+
+    it("does not assume a template composition root is a child of body", async () => {
+      const result = await lintHyperframeHtml(`<!doctype html><html><head>
+        <style>head, template { display: block; } html > head > #root { zoom: 2; }</style>
+        <template id="root" data-composition-id="main" data-width="800" data-height="400" data-duration="5"></template>
+      </head><div></div></html>`);
 
       expect(codes(result)).toContain("root_zoom_rescales_a_fixed_canvas");
     });
