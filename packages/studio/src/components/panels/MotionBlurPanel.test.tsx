@@ -130,20 +130,29 @@ describe("MotionBlurPanel", () => {
     expect(html).toContain('data-motion-blur-samples="64"');
   });
 
-  it("Off removes data-motion-blur and leaves every other setting on the root", async () => {
+  it("Off removes data-motion-blur and its events, and leaves the other settings on the root", async () => {
     const host = await mount(
       ' data-motion-blur="on" data-motion-blur-shutter="720" data-motion-blur-samples="64" data-motion-blur-tier="filter" data-motion-blur-events="on"',
     );
     await click(radio(host, "Off"));
     const html = files["index.html"] ?? "";
     expect(html).not.toContain('data-motion-blur="on"');
-    for (const kept of ['shutter="720"', 'samples="64"', 'tier="filter"', 'events="on"']) {
+    expect(html).not.toContain("data-motion-blur-events");
+    for (const kept of ['shutter="720"', 'samples="64"', 'tier="filter"']) {
       expect(html).toContain(`data-motion-blur-${kept}`);
     }
   });
 
+  it("turns the events attribute on with Subtle and Strong, so callback-driven motion is found", async () => {
+    const host = await mount();
+    await click(radio(host, "Subtle"));
+    expect(files["index.html"]).toContain('data-motion-blur-events="on"');
+    await click(radio(host, "Strong"));
+    expect(files["index.html"]).toContain('data-motion-blur-events="on"');
+  });
+
   it("writes nothing when the chosen level is already set", async () => {
-    const host = await mount(' data-motion-blur="on"');
+    const host = await mount(' data-motion-blur="on" data-motion-blur-events="on"');
     await click(radio(host, "Subtle"));
     expect(writeProjectFile).not.toHaveBeenCalled();
   });

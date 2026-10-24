@@ -130,9 +130,19 @@ describe("levelOf and patchForLevel", () => {
   });
 
   it("sets Subtle to the default blur and Strong to the maximum, and leaves the rest alone for Off", () => {
-    expect(patchForLevel("subtle")).toEqual({ enabled: true, shutterDeg: 240, samples: null });
-    expect(patchForLevel("strong")).toEqual({ enabled: true, shutterDeg: 720, samples: 64 });
-    expect(patchForLevel("off")).toEqual({ enabled: false });
+    expect(patchForLevel("subtle")).toEqual({
+      enabled: true,
+      events: true,
+      shutterDeg: 240,
+      samples: null,
+    });
+    expect(patchForLevel("strong")).toEqual({
+      enabled: true,
+      events: true,
+      shutterDeg: 720,
+      samples: 64,
+    });
+    expect(patchForLevel("off")).toEqual({ enabled: false, events: false });
   });
 
   it("reads back as the level that was chosen", () => {

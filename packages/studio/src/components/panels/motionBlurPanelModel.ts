@@ -92,7 +92,9 @@ export function levelOf(settings: MotionBlurSettings): BlurLevel {
   return settings.shutterDeg > STRONG_ABOVE ? "strong" : "subtle";
 }
 
-/** What choosing `level` changes; Off leaves the shutter, samples and every other setting where they were. */
+/** What choosing `level` changes; blur on turns events on too, and Off leaves the shutter, samples and the rest alone. */
 export function patchForLevel(level: BlurLevel): Partial<MotionBlurSettings> {
-  return level === "off" ? { enabled: false } : { enabled: true, ...LEVEL_SETTINGS[level] };
+  return level === "off"
+    ? { enabled: false, events: false }
+    : { enabled: true, events: true, ...LEVEL_SETTINGS[level] };
 }

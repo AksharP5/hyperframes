@@ -34,7 +34,7 @@ That is all. The same attribute drives Studio preview and `hyperframes render`.
 
 ## In Studio
 
-The **Blur** tab in Studio's right dock sets it with one control: **Off**, **Subtle** or **Strong**. Subtle is the default blur (240° shutter, samples sized to the smear). Strong opens the shutter to 720° and the samples to 64. The panel writes the attributes above to the composition root, so a render uses the same setting, and Undo works. Off removes `data-motion-blur` and leaves the other attributes where they are.
+The **Blur** tab in Studio's right dock sets it with one control: **Off**, **Subtle** or **Strong**. Subtle is the default blur (240° shutter, samples sized to the smear). Strong opens the shutter to 720° and the samples to 64. The panel writes the attributes above to the composition root, so a render uses the same setting, and Undo works. Subtle and Strong also turn on `data-motion-blur-events`, so motion set from a `render(t)` callback is found. Off removes `data-motion-blur` and `data-motion-blur-events` and leaves the other attributes where they are.
 
 ## What it blurs
 
