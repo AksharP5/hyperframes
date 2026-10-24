@@ -268,6 +268,21 @@ describe.skipIf(!hasBrowser)("capture motion blur pixels in Chrome", () => {
     },
   );
 
+  it("keeps a visibility:hidden child of a mover out of the trail", async (ctx) => {
+    if (!supported) ctx.skip();
+    const body = `<div class="box" style="left:20px;top:80px"><div style="position:absolute;left:10px;top:10px;width:20px;height:20px;background:#0f0;visibility:hidden"></div></div>`;
+    const blurred = await frameOf(body, true, FRAME, "capture");
+    expect(blurred.report).toMatchObject({ state: "on", tier: "capture", movers: 1 });
+    let green = 0;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const [r = 0, g = 0, b = 0] = px(blurred.frame, x, y);
+        if (g - r > 30 && g - b > 30) green++;
+      }
+    }
+    expect(green).toBe(0);
+  });
+
   it("blurs with filters where capture cannot run, over a page that has a WebGL canvas", async (ctx) => {
     if (!supported) ctx.skip();
     const gl = `<canvas id="gl" width="64" height="36" style="position:absolute;left:0;top:0;width:${W}px;height:${H}px"></canvas><script>document.getElementById("gl").getContext("webgl")</script>`;

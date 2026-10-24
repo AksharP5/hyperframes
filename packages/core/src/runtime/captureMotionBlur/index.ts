@@ -168,8 +168,8 @@ function createInstance(host: CaptureMotionBlurHost, config: Config, form: HtmlI
     `[${HIDE_ATTR}] { opacity: 0 !important; }`,
     // The root stays visible: a rotated or scaled mover under a hidden root is captured at the origin, untransformed.
     `[${ONLY_ATTR}] { background: none !important; border-color: transparent !important; box-shadow: none !important; outline-color: transparent !important; }`,
-    `[${ONLY_ATTR}]::before, [${ONLY_ATTR}]::after, [${ONLY_ATTR}] * { visibility: hidden !important; }`,
-    `[${ONLY_ATTR}] [${MOVER_ATTR}], [${ONLY_ATTR}] [${MOVER_ATTR}] * { visibility: visible !important; }`,
+    `[${ONLY_ATTR}]::before, [${ONLY_ATTR}]::after, [${ONLY_ATTR}] *:not([${MOVER_ATTR}], [${MOVER_ATTR}] *) { visibility: hidden !important; }`,
+    `[${ONLY_ATTR}] [${MOVER_ATTR}] { visibility: visible !important; }`,
   ].join("\n");
 
   let movers: HTMLElement[] = [];
