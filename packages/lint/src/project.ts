@@ -200,7 +200,7 @@ function resolveCssAssetCandidates(
 export async function lintProject(
   projectDir: string,
   entryFile?: string,
-  hostOptions: Pick<HyperframeLinterOptions, "host"> = {},
+  hostOptions: Pick<HyperframeLinterOptions, "host" | "isSubComposition"> = {},
 ): Promise<ProjectLintResult> {
   const indexPath = entryFile ? resolve(entryFile) : resolve(projectDir, "index.html");
   if (entryFile && !isWithinProjectRoot(projectDir, indexPath)) {
