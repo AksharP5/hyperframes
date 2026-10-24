@@ -647,6 +647,7 @@ describe("tag installation failures", () => {
     },
     { names: ["my-block"], failed: [], installed: ["my-block"], json: true },
     { names: ["my-block"], failed: ["my-block"], installed: [], json: false },
+    { names: ["my-block"], failed: [], installed: ["my-block"], json: false },
   ])("reports failed downloads and keeps successful installs: %j", async (scenario) => {
     vi.stubGlobal(
       "fetch",
@@ -689,7 +690,12 @@ describe("tag installation failures", () => {
         })),
       });
     } else {
-      expect(log.mock.calls.flat().join(" ")).toContain("HTTP 404");
+      expect(log).toHaveBeenLastCalledWith(
+        `${scenario.failed.length > 0 ? "✗" : "✓"} Installed ${scenario.installed.length}/${scenario.names.length} blocks`,
+      );
+      if (scenario.failed.length > 0) {
+        expect(log.mock.calls.flat().join(" ")).toContain("HTTP 404");
+      }
     }
     for (const name of scenario.names) {
       expect(existsSync(join(dir, "compositions", `${name}.html`))).toBe(

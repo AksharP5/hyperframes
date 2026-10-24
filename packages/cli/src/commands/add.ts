@@ -616,7 +616,7 @@ export default defineCommand({
       } else {
         console.log("");
         const summary = `Installed ${results.length}/${items.length} blocks`;
-        console.log(errors.length > 0 ? c.error(summary) : c.success(summary));
+        console.log(`${errors.length > 0 ? c.error("✗") : c.success("✓")} ${summary}`);
       }
       if (errors.length > 0) failCommand();
     }
