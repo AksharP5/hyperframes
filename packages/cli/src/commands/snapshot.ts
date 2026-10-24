@@ -120,6 +120,9 @@ export function formatSnapshotTimestamp(time: number): string {
   return `${Number(time.toFixed(3))}s`;
 }
 
+export const SNAPSHOT_IMAGE_NAME =
+  /^(?:(?:frame-\d+-|ref-(?:\d+-)?)?at-[\d.]+s\.png|pair-(?:\d+-)?at-[\d.]+s\.jpg|(?:beat-\d+|seam-\d+-\d+)-at-[\d.]+s\.png|(?:contact-sheet|review-beats|review-phone)(?:-\d+)?\.jpg|review-seam-\d+\.jpg)$/;
+
 /** --keep names a still by its millisecond label, so two distinct times may not share one. */
 function assertDistinctKeepNames(times: number[]): void {
   const timeByLabel = new Map<string, number>();
@@ -683,7 +686,7 @@ async function captureSnapshots(
       try {
         const { readdirSync } = await import("node:fs");
         for (const file of opts.keep ? [] : readdirSync(snapshotDir)) {
-          if (/\.(png|jpg|jpeg)$/i.test(file)) {
+          if (SNAPSHOT_IMAGE_NAME.test(file)) {
             const path = resolve(snapshotDir, file);
             replaced.push(path);
             rmSync(path, { force: true });

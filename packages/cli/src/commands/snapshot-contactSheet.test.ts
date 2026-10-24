@@ -48,7 +48,8 @@ vi.mock("@hyperframes/engine", () => ({
   extractMediaMetadata: vi.fn(),
 }));
 
-import snapshotCommand from "./snapshot.js";
+import snapshotCommand, { SNAPSHOT_IMAGE_NAME } from "./snapshot.js";
+import { planReview, reviewFrames } from "./snapshotReview.js";
 import { historyDeps } from "../utils/historyOwner.js";
 import { openProjectHistory } from "@hyperframes/studio-server/history";
 
@@ -305,5 +306,76 @@ describe("snapshot --keep", () => {
       expect(lstatSync(join(stills, still)).isFile()).toBe(true);
       expect(readFileSync(join(stills, still), "utf8")).toBe("new PNG");
     }
+  });
+});
+
+describe("snapshot --output", () => {
+  let project: string;
+
+  const USER_IMAGES = ["hero.png", "logo.jpg", "Notes.PNG", "frame-hero.png"];
+  const PREVIOUS_RUN = [
+    "frame-00-at-0.25s.png",
+    "frame-07-at-12.5s.png",
+    "at-3s.png",
+    "ref-00-at-0.25s.png",
+    "pair-00-at-0.25s.jpg",
+    "contact-sheet-2.jpg",
+    "beat-01-at-0.3s.png",
+    "seam-01-3-at-6s.png",
+    "review-beats.jpg",
+    "review-seam-01.jpg",
+    "review-phone-2.jpg",
+  ];
+
+  beforeEach(() => {
+    project = mkdtempSync(join(tmpdir(), "hf-snapshot-output-"));
+    writeFileSync(join(project, "index.html"), PROJECT_HTML);
+    capture.screenshot.mockImplementation(async () => Buffer.from("captured PNG"));
+    primePage(2);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(project, { recursive: true, force: true });
+  });
+
+  it.each([
+    ["a snapshots folder", "snapshots"],
+    ["the project folder", "."],
+    ["the assets folder", "assets"],
+  ])("replaces the previous run's images in %s and keeps every other image", async (_, sub) => {
+    const output = join(project, sub);
+    mkdirSync(output, { recursive: true });
+    for (const name of [...USER_IMAGES, ...PREVIOUS_RUN]) writeFileSync(join(output, name), name);
+
+    await runCommand(snapshotCommand, {
+      rawArgs: [project, ...["--at", "0.5,1", "--no-end", "--describe", "false", "-o", output]],
+    });
+
+    for (const name of USER_IMAGES) expect(readFileSync(join(output, name), "utf8")).toBe(name);
+    for (const name of PREVIOUS_RUN) expect(existsSync(join(output, name))).toBe(false);
+    for (const name of ["frame-00-at-0.5s.png", "frame-01-at-1s.png"]) {
+      expect(readFileSync(join(output, name), "utf8")).toBe("captured PNG");
+    }
+  });
+
+  it("names every review still with a name the next run clears", () => {
+    const plan = planReview(
+      {
+        window: [0, 10],
+        scenes: [
+          { id: "a", start: 0, end: 4 },
+          { id: "b", start: 4, end: 10 },
+        ],
+        beats: [],
+        notes: [],
+      },
+      10,
+    );
+    const files = reviewFrames(plan).map((frame) => frame.file);
+    expect(files.some((file) => file.startsWith("seam-"))).toBe(true);
+    for (const file of files) expect(file).toMatch(SNAPSHOT_IMAGE_NAME);
   });
 });
