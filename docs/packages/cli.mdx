@@ -945,7 +945,8 @@ npx hyperframes open --json     # for agents
 When it runs under Claude Code, Codex, or Grok, the app's chat picks up that
 conversation. When it cannot open the app, for example because the app is not
 installed, `open` exits 1 and prints a download link. With `--json`, the result
-names the `reason` and the `downloadUrl`.
+names the `reason` and the `downloadUrl`. The hand-off works on macOS only for
+now: on Windows and Linux, `open` always exits 1 with the download link.
 
 `catch-up` is the other half of that hand-off. Run it when the person is back
 from the desktop app, before you change anything: it lists what they asked and
@@ -1352,7 +1353,7 @@ use is refused before anything is written.
 
 | Flag          | Applies to                                                     | Description                                                   |
 | ------------- | -------------------------------------------------------------- | ------------------------------------------------------------- |
-| `--plan`      | `move`, `trim`, `split`, `delete`, `set`, `duplicate`, `apply` | Print the result and the diff without writing                 |
+| `--plan`      | `move`, `trim`, `split`, `delete`, `set`, `duplicate`, `apply` | Print the result and the diff without writing. `apply --plan` prints only a count (`planned 1 file`); add `--json` for the result and diff. |
 | `--overwrite` | `move`, `trim`                                                 | Allow the clip to overlap a neighbour on its track            |
 | `--snap`      | `move`, `trim`, `split`, `delete`, `duplicate`                 | Round times to whole frames. Needs `data-fps` on the project. |
 | `--at`        | `duplicate`                                                    | Where the copy starts                                         |
@@ -1386,7 +1387,7 @@ npx hyperframes history undo --who claude            # undo your newest turn
 | Command                 | What it does                                                                                           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------ |
 | `show <ref> [--diff]`   | One entry's files, before and after. `--diff` prints a text diff (needs `git`).                        |
-| `undo [ref]`            | Undo an entry, or with `--who <name>` and no ref, that name's newest turn still in effect              |
+| `undo [ref]`            | Undo an entry, or with `--who <name>` and no ref, whatever is still in effect from that name's last turn (its newest entry if it never used `begin`). If nothing from that turn is still in effect, it refuses rather than undoing an older turn. |
 | `restore <ref> [--who]` | Make the files what they were right after an entry, a time, or `start`                                 |
 | `peek <ref> [path]`     | List the files at an entry, a time, or `start` without changing anything; with a path, print that file |
 | `pin <ref> [--off]`     | Keep an entry, and what it needs, when old history is trimmed. `--off` unpins it.                      |
