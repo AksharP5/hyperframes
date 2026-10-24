@@ -181,20 +181,37 @@ function rebaseRelativePath(urlValue: string, fromDir: string, toDir: string): s
   return appendSuffixToUrl(rebased, suffix);
 }
 
-function rebaseSrcsetPaths(srcsetValue: string, fromDir: string, toDir: string): string {
-  if (!srcsetValue) return srcsetValue;
-  return srcsetValue
-    .split(",")
-    .map((rawCandidate) => {
-      const candidate = rawCandidate.trim();
-      if (!candidate) return candidate;
-      const parts = candidate.split(/\s+/);
-      const first = parts[0] ?? "";
-      if (parts.length === 0 || !isRelativeUrl(first)) return candidate;
-      parts[0] = rebaseRelativePath(first, fromDir, toDir);
-      return parts.join(" ");
-    })
-    .join(", ");
+function rewriteSrcsetUrls(srcset: string, rewriteUrl: (url: string) => string): string {
+  const parts: string[] = [];
+  let position = 0;
+  let written = 0;
+
+  // Preserve URL commas per https://html.spec.whatwg.org/multipage/images.html#parse-a-srcset-attribute
+  while (position < srcset.length) {
+    while (position < srcset.length && /[ \t\n\r\f,]/.test(srcset.charAt(position))) position++;
+    const start = position;
+    while (position < srcset.length && !/[ \t\n\r\f]/.test(srcset.charAt(position))) position++;
+    let end = position;
+    while (end > start && srcset.charAt(end - 1) === ",") end--;
+    if (end > start) {
+      const url = srcset.slice(start, end);
+      const rewritten = rewriteUrl(url);
+      if (rewritten !== url) {
+        parts.push(srcset.slice(written, start), rewritten);
+        written = end;
+      }
+    }
+    if (end < position) continue;
+
+    let inParens = false;
+    while (position < srcset.length) {
+      const char = srcset.charAt(position++);
+      if (char === "(") inParens = true;
+      else if (char === ")") inParens = false;
+      else if (char === "," && !inParens) break;
+    }
+  }
+  return parts.length > 0 ? parts.join("") + srcset.slice(written) : srcset;
 }
 
 function rebaseColorGradingLutPath(value: string, fromDir: string, toDir: string): string {
@@ -244,7 +261,13 @@ function rebaseEntryAuthoredAssetPaths(
   }
   for (const el of [...document.querySelectorAll("[srcset]")]) {
     const srcset = el.getAttribute("srcset");
-    if (srcset) el.setAttribute("srcset", rebaseSrcsetPaths(srcset, sourceDir, projectDir));
+    if (srcset)
+      el.setAttribute(
+        "srcset",
+        rewriteSrcsetUrls(srcset, (url) =>
+          isRelativeUrl(url) ? rebaseRelativePath(url, sourceDir, projectDir) : url,
+        ),
+      );
   }
   for (const el of [...document.querySelectorAll(`[${HF_COLOR_GRADING_ATTR}]`)]) {
     const value = el.getAttribute(HF_COLOR_GRADING_ATTR);
@@ -469,22 +492,6 @@ function rewriteColorGradingLutWithInlinedAssets(value: string, inlineAsset: Ass
   }
   Reflect.set(lut, "src", inlined);
   return JSON.stringify(parsed);
-}
-
-function rewriteSrcsetWithInlinedAssets(srcsetValue: string, inlineAsset: AssetInliner): string {
-  if (!srcsetValue) return srcsetValue;
-  return srcsetValue
-    .split(",")
-    .map((rawCandidate) => {
-      const candidate = rawCandidate.trim();
-      if (!candidate) return candidate;
-      const parts = candidate.split(/\s+/);
-      if (parts.length === 0) return candidate;
-      const maybeInlined = inlineAsset(parts[0] ?? "");
-      if (maybeInlined) parts[0] = maybeInlined;
-      return parts.join(" ");
-    })
-    .join(", ");
 }
 
 function rewriteCssUrlsWithInlinedAssets(cssText: string, inlineAsset: AssetInliner): string {
@@ -1449,7 +1456,11 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
   }
   for (const el of [...document.querySelectorAll("[srcset]")]) {
     const srcset = el.getAttribute("srcset");
-    if (srcset) el.setAttribute("srcset", rewriteSrcsetWithInlinedAssets(srcset, inlineAsset));
+    if (srcset)
+      el.setAttribute(
+        "srcset",
+        rewriteSrcsetUrls(srcset, (url) => inlineAsset(url) ?? url),
+      );
   }
   // Before inlining, so postcss reads paths not font bytes.
   const liveStyles = [...document.querySelectorAll("style")].filter(isAlwaysAppliedStyle);
