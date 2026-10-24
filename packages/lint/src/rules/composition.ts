@@ -1,4 +1,5 @@
 import type { LintContext, HyperframeLintFinding, ExtractedBlock, OpenTag } from "../context";
+import selectorParser from "postcss-selector-parser";
 import {
   findHtmlTag,
   extractTimelineRegistryKeys,
@@ -272,22 +273,168 @@ function firstRescalingZoom(css: string): string | null {
   return null;
 }
 
-/**
- * Does this selector's leftmost compound target the canvas itself — the
- * composition root, or an ancestor of it? A zoom on a DESCENDANT is ordinary
- * authoring and renders exactly as authored; only the canvas-level one
- * desynchronises painted content from the declared frame.
- */
-function targetsCanvasRoot(
-  selector: string,
-  rootId: string | null,
-  rootClasses: string[],
-): boolean {
+function canvasScopeCandidate(selector: string, root: ReturnType<typeof canvasIdentity>): boolean {
   const leftmost = selector.trim().split(/[\s>+~]+/)[0] ?? "";
-  const bare = leftmost.toLowerCase();
-  if (bare === "html" || bare === "body" || bare === ":root" || bare === "*") return true;
-  if (rootId && leftmostCompoundId(selector) === rootId) return true;
-  return leftmostCompoundClasses(selector).some((cls) => rootClasses.includes(cls));
+  if (["html", "body", ":root", "*"].includes(leftmost.toLowerCase())) return true;
+  if (root.id && leftmostCompoundId(selector) === root.id) return true;
+  return leftmostCompoundClasses(selector).some((name) => root.classes.includes(name));
+}
+
+// Unknown predicates retain the conservative canvas guard.
+type CanvasMatch = boolean | undefined;
+
+function canvasIdentity(tag: Pick<OpenTag, "name" | "raw">) {
+  return {
+    name: tag.name,
+    raw: tag.raw,
+    id: readDecodedAttr(tag.raw, "id"),
+    classes: (readDecodedAttr(tag.raw, "class") ?? "").split(/[\t\n\f\r ]+/),
+  };
+}
+
+type CanvasElement = ReturnType<typeof canvasIdentity> & {
+  parent: CanvasElement | null | undefined;
+};
+
+function anyCanvasMatch(matches: CanvasMatch[]): CanvasMatch {
+  if (matches.includes(true)) return true;
+  return matches.includes(undefined) ? undefined : false;
+}
+
+function allCanvasMatch(matches: CanvasMatch[]): CanvasMatch {
+  if (matches.includes(false)) return false;
+  return matches.includes(undefined) ? undefined : true;
+}
+
+function canvasTokenMatch(tokens: string[], value: string): CanvasMatch {
+  if (tokens.includes(value)) return true;
+  const fold = (token: string) => token.replace(/[A-Z]/g, (char) => char.toLowerCase());
+  return tokens.some((token) => fold(token) === fold(value)) ? undefined : false;
+}
+
+function canvasPseudoMatch(node: selectorParser.Pseudo, element: CanvasElement): CanvasMatch {
+  const name = node.value.toLowerCase();
+  if (name.startsWith("::") || [":before", ":after", ":first-letter", ":first-line"].includes(name))
+    return false;
+  if ([":is", ":where"].includes(name))
+    return anyCanvasMatch(node.nodes.map((branch) => canvasPathMatch(branch.nodes, element)));
+  if (name === ":root") return element.name === "html";
+  if (name === ":nth-child" && element.name === "body") {
+    // Body follows head even when their tags are implicit.
+    // https://html.spec.whatwg.org/multipage/semantics.html#the-html-element
+    const argument = node.nodes
+      .map((branch) => branch.toString())
+      .join(",")
+      .trim();
+    if (/^[1-9]\d*$/.test(argument)) return Number(argument) === 2;
+  }
+  return undefined;
+}
+
+function canvasTagMatch(node: selectorParser.Tag, element: CanvasElement): CanvasMatch {
+  if (node.namespace !== undefined) return undefined;
+  if (node.value.toLowerCase() !== element.name.toLowerCase()) return false;
+  return ["html", "body"].includes(element.name) ? true : undefined;
+}
+
+function canvasAttributeMatch(node: selectorParser.Attribute, element: CanvasElement): CanvasMatch {
+  if (
+    node.namespace === undefined &&
+    node.operator === undefined &&
+    /^data-[a-z0-9_-]+$/.test(node.attribute)
+  )
+    return readDecodedAttr(element.raw, node.attribute) !== null;
+  return undefined;
+}
+
+function canvasNodeMatch(node: selectorParser.Node, element: CanvasElement): CanvasMatch {
+  switch (node.type) {
+    case "id":
+      return canvasTokenMatch(element.id === null ? [] : [element.id], node.value);
+    case "class":
+      return canvasTokenMatch(element.classes, node.value);
+    case "tag":
+      return canvasTagMatch(node, element);
+    case "universal":
+      return node.toString().trim() === "*" ? true : undefined;
+    case "attribute":
+      return canvasAttributeMatch(node, element);
+    case "pseudo":
+      return canvasPseudoMatch(node, element);
+    default:
+      return undefined;
+  }
+}
+
+function canvasAncestorMatch(
+  nodes: selectorParser.Node[],
+  relation: string,
+  element: CanvasElement,
+): CanvasMatch {
+  if (!["", ">"].includes(relation)) return undefined;
+  const matches: CanvasMatch[] = [];
+  let parent = element.parent;
+  while (parent) {
+    matches.push(canvasPathMatch(nodes, parent));
+    if (relation === ">") break;
+    parent = parent.parent;
+  }
+  if (parent === undefined) matches.push(undefined);
+  return anyCanvasMatch(matches);
+}
+
+function canvasPathMatch(nodes: selectorParser.Node[], element: CanvasElement): CanvasMatch {
+  let split = -1;
+  let relation = "";
+  for (const [index, node] of nodes.entries()) {
+    if (node.type === "combinator") {
+      split = index;
+      relation = node.value.trim();
+    }
+  }
+  const subjectNodes = nodes.slice(split + 1);
+  if (subjectNodes.length === 0) return undefined;
+  const subject = allCanvasMatch(subjectNodes.map((node) => canvasNodeMatch(node, element)));
+  if (subject === false) return false;
+  if (split === -1) return subject;
+  const preceding = canvasAncestorMatch(nodes.slice(0, split), relation, element);
+  return allCanvasMatch([subject, preceding]);
+}
+
+function canvasElements(rootTag: OpenTag, tags: OpenTag[]) {
+  const root = canvasIdentity(rootTag);
+  const html: CanvasElement = {
+    ...(root.name === "html"
+      ? root
+      : canvasIdentity(findHtmlTag(tags) ?? { name: "html", raw: "<html>" })),
+    parent: null,
+  };
+  const body: CanvasElement = {
+    ...(root.name === "body"
+      ? root
+      : canvasIdentity(tags.find((tag) => tag.name === "body") ?? { name: "body", raw: "<body>" })),
+    parent: html,
+  };
+  const elements = [html, body];
+  if (!["html", "body"].includes(root.name))
+    elements.push({ ...root, parent: ["head", "template"].includes(root.name) ? undefined : body });
+  return { root, elements };
+}
+
+function canvasSelectorMatcher(rootTag: OpenTag, tags: OpenTag[]) {
+  let canvas: ReturnType<typeof canvasElements> | undefined;
+  return (selector: selectorParser.Selector, allowNewHits: boolean): boolean => {
+    const { root, elements } = (canvas ??= canvasElements(rootTag, tags));
+    const match = anyCanvasMatch(
+      elements.map((element) => canvasPathMatch(selector.nodes, element)),
+    );
+    if (match === false) return false;
+    if (match === true && allowNewHits) return true;
+    return selector
+      .toString()
+      .split(",")
+      .some((part) => canvasScopeCandidate(part, root));
+  };
 }
 
 /**
@@ -325,12 +472,15 @@ function inlineCanvasZoomHits(rootTag: OpenTag, tags: OpenTag[]): CanvasZoomHit[
  */
 function firstCanvasSelector(
   header: string,
-  rootId: string | null,
-  rootClasses: string[],
+  matchesCanvas: (selector: selectorParser.Selector) => boolean,
 ): string | null {
-  for (const selector of header.split(",")) {
-    const trimmed = selector.trim();
-    if (trimmed && targetsCanvasRoot(trimmed, rootId, rootClasses)) return trimmed;
+  try {
+    for (const selector of selectorParser().astSync(header).nodes) {
+      const trimmed = selector.toString().trim();
+      if (matchesCanvas(selector)) return trimmed;
+    }
+  } catch {
+    return null;
   }
   return null;
 }
@@ -339,15 +489,14 @@ function firstCanvasSelector(
 function canvasZoomInRule(
   header: string,
   body: string,
-  rootId: string | null,
-  rootClasses: string[],
+  matchesCanvas: (selector: selectorParser.Selector) => boolean,
 ): CanvasZoomHit | null {
   const trimmedHeader = header.trim();
   // An at-rule's "header" is `@media ...`, not a selector list.
   if (!trimmedHeader || trimmedHeader.startsWith("@")) return null;
   const value = firstRescalingZoom(body);
   if (!value) return null;
-  const selector = firstCanvasSelector(trimmedHeader, rootId, rootClasses);
+  const selector = firstCanvasSelector(trimmedHeader, matchesCanvas);
   if (!selector) return null;
   return {
     where: `\`${selector}\``,
@@ -358,16 +507,19 @@ function canvasZoomInRule(
 
 function stylesheetCanvasZoomHits(
   styles: ExtractedBlock[],
-  rootId: string | null,
-  rootClasses: string[],
+  matchesCanvas: ReturnType<typeof canvasSelectorMatcher>,
 ): CanvasZoomHit[] {
   const hits: CanvasZoomHit[] = [];
   for (const style of styles) {
     const ruleWithBody = /([^{}]+)\{([^{}]*)\}/g;
     const content = stripCssComments(style.content);
+    // At-rules and style attributes can restrict selector applicability.
+    const allowNewHits = style.attrs.trim() === "" && !content.includes("@");
     let match: RegExpExecArray | null;
     while ((match = ruleWithBody.exec(content)) !== null) {
-      const hit = canvasZoomInRule(match[1] ?? "", match[2] ?? "", rootId, rootClasses);
+      const hit = canvasZoomInRule(match[1] ?? "", match[2] ?? "", (selector) =>
+        matchesCanvas(selector, allowNewHits),
+      );
       if (hit) hits.push(hit);
     }
   }
@@ -378,12 +530,10 @@ function canvasZoomHits(
   rootTag: OpenTag,
   tags: OpenTag[],
   styles: ExtractedBlock[],
-  rootId: string | null,
-  rootClasses: string[],
 ): CanvasZoomHit[] {
   return [
     ...inlineCanvasZoomHits(rootTag, tags),
-    ...stylesheetCanvasZoomHits(styles, rootId, rootClasses),
+    ...stylesheetCanvasZoomHits(styles, canvasSelectorMatcher(rootTag, tags)),
   ];
 }
 
@@ -1619,9 +1769,7 @@ export const compositionRules: Array<(ctx: LintContext) => HyperframeLintFinding
   // fired on every `zoom` would be flagging correct authoring.
   ({ rootTag, tags, styles }) => {
     if (!rootTag) return [];
-    const rootId = readAttr(rootTag.raw, "id");
-    const rootClasses = (readAttr(rootTag.raw, "class") || "").split(/\s+/).filter(Boolean);
-    const hits = canvasZoomHits(rootTag, tags, styles, rootId, rootClasses);
+    const hits = canvasZoomHits(rootTag, tags, styles);
 
     // `noUncheckedIndexedAccess` makes hits[0] `T | undefined`, and a length
     // check does not narrow it — guard on the element itself.
