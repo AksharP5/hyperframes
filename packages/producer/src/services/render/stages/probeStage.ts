@@ -43,8 +43,17 @@ import {
   initializeSession,
   isTransientBrowserError,
   probeBeginFrameLiveness,
+  videoAudioId,
 } from "@hyperframes/engine";
-import { MEDIA_RENDER_ID_ATTR, fpsToNumber, readMediaStart } from "@hyperframes/core";
+import {
+  MEDIA_RENDER_ID_ATTR,
+  fpsToNumber,
+  normalizeRateSpec,
+  readMediaStart,
+  shiftRateLane,
+  sourceTimeAt,
+  timeAtSourceTime,
+} from "@hyperframes/core";
 import { extractMediaSrcMutations } from "@hyperframes/parsers";
 import type { BrowserMediaElement, CompiledComposition } from "../../htmlCompiler.js";
 import {
@@ -193,20 +202,18 @@ function authoredMediaStarts(html: string): Map<string, number> {
 }
 
 function isVideoAudio(audio: CompositionMetadata["audios"][number], videoId: string): boolean {
-  return audio.type === "video" && audio.id === `${videoId}-audio`;
+  return audio.type === "video" && audio.id === videoAudioId(videoId);
 }
 
 /**
- * Take a start point the page changed by moving the collected one by the same amount, so the
- * in-point its scene added survives, and a video's sound track moves with its picture.
+ * Adopt browser timing without losing the scene trim the collector applied to picture and sound.
  */
-function adoptRuntimeMediaStart(
+function adoptRuntimeMediaTiming(
   composition: Pick<CompositionMetadata, "videos" | "audios">,
   el: BrowserMediaElement,
   authored: number,
 ): void {
   const shift = el.mediaStart - authored;
-  if (el.mediaStart <= 0 || Math.abs(shift) <= BROWSER_MEDIA_EPSILON) return;
   const entries =
     el.tagName === "video"
       ? [
@@ -214,7 +221,20 @@ function adoptRuntimeMediaStart(
           ...composition.audios.filter((audio) => isVideoAudio(audio, el.id)),
         ]
       : composition.audios.filter((audio) => audio.type !== "video" && audio.id === el.id);
-  for (const entry of entries) entry.mediaStart += shift;
+  for (const entry of entries) {
+    // Collected lanes already carry their scene trim. Only newly discovered lanes need it.
+    if (typeof entry.playbackRate !== "object") {
+      if (typeof el.playbackRate === "object") {
+        const consumed = Math.max(0, entry.mediaStart - authored);
+        const head = timeAtSourceTime(normalizeRateSpec(entry.playbackRate), consumed);
+        entry.mediaStart += sourceTimeAt(el.playbackRate, head) - consumed;
+        entry.playbackRate = shiftRateLane(el.playbackRate, head);
+      } else {
+        entry.playbackRate = el.playbackRate;
+      }
+    }
+    if (el.mediaStart > 0 && Math.abs(shift) > BROWSER_MEDIA_EPSILON) entry.mediaStart += shift;
+  }
 }
 
 function reconcileBrowserMediaEnd(
@@ -597,20 +617,11 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
                   sourceChanged,
                   el.durationInferred,
                 );
-                adoptRuntimeMediaStart(
+                adoptRuntimeMediaTiming(
                   composition,
                   el,
                   authoredStarts.get(el.id) ?? existing.mediaStart,
                 );
-                // A collected rate lane already includes scene trimming; retain its phase.
-                if (typeof existing.playbackRate !== "object") {
-                  existing.playbackRate = el.playbackRate;
-                  for (const audio of composition.audios) {
-                    if (isVideoAudio(audio, el.id) && typeof audio.playbackRate !== "object") {
-                      audio.playbackRate = el.playbackRate;
-                    }
-                  }
-                }
                 if (el.hasAudio && !el.muted && !existing.hasAudio) {
                   existing.hasAudio = true;
                 }
@@ -656,15 +667,12 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
                   sourceChanged,
                   el.durationInferred,
                 );
-                adoptRuntimeMediaStart(
+                adoptRuntimeMediaTiming(
                   composition,
                   el,
                   authoredStarts.get(el.id) ?? existing.mediaStart,
                 );
                 existing.loop = el.loop;
-                if (typeof existing.playbackRate !== "object") {
-                  existing.playbackRate = el.playbackRate;
-                }
                 if (
                   el.volume > 0 &&
                   Math.abs((existing.volume ?? 1) - el.volume) > BROWSER_MEDIA_EPSILON

@@ -3,6 +3,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RateSpec } from "@hyperframes/core";
+import { parseAudioElements, videoAudioId } from "../../../../../engine/src/services/audioMixer.js";
+import {
+  parseVideoElements,
+  parseImageElements,
+} from "../../../../../engine/src/services/videoFrameExtractor.js";
+import { resolveReferencedStart } from "../../../../../engine/src/services/referenceResolver.js";
+import { collectRenderMedia } from "../../renderMediaCollector.js";
 
 const workDir = mkdtempSync(join(tmpdir(), "hf-stage-test-"));
 afterAll(() => rmSync(workDir, { recursive: true, force: true }));
@@ -100,6 +107,11 @@ mock.module("../../assetMediaType.js", () => ({
 }));
 
 mock.module("@hyperframes/engine", () => ({
+  parseAudioElements,
+  parseVideoElements,
+  parseImageElements,
+  resolveReferencedStart,
+  videoAudioId,
   createCaptureSession: async (
     _url: string,
     _dir: string,
@@ -529,49 +541,124 @@ describe("runProbeStage — forceScreenshot threading", () => {
     },
   );
 
-  it.each(runtimeRates)(
-    "preserves a collected speed ramp during browser rate %j reconciliation",
-    async (browserRate) => {
+  it.each([
+    { tagName: "video", pageStart: 1, expected: 3 },
+    { tagName: "video", pageStart: 3, expected: 5 },
+    { tagName: "audio", pageStart: 1, expected: 3 },
+    { tagName: "audio", pageStart: 3, expected: 5 },
+  ])(
+    "applies a scene trim when adopting a runtime $tagName lane (page start $pageStart)",
+    async ({ tagName, pageStart, expected }) => {
       resetRetryMocks();
+      const playbackRate = {
+        target: "rate",
+        points: [
+          { t: 0, v: 1 },
+          { t: 2, v: 1 },
+          { t: 4, v: 2 },
+        ],
+      } satisfies RateSpec;
       browserMediaResults = [
         {
           id: "clip",
-          tagName: "video",
+          tagName,
           src: "clip.mp4",
           start: 0,
-          end: 3,
-          duration: 3,
-          mediaStart: 0,
-          playbackRate: browserRate,
+          end: 5,
+          duration: 5,
+          mediaStart: pageStart,
+          playbackRate,
           loop: false,
-          hasAudio: false,
+          hasAudio: true,
           volume: 1,
           muted: false,
         },
       ];
       const { runProbeStage } = await import("./probeStage.js");
       const input = makeProbeInput({});
-      const playbackRate = {
-        target: "rate",
-        points: [
-          { t: 0, v: 1.25 },
-          { t: 2, v: 2 },
-        ],
-      } satisfies RateSpec;
-      input.composition.videos.push({
-        id: "clip",
-        src: "clip.mp4",
-        start: 0,
-        end: 3,
-        mediaStart: 0,
-        playbackRate,
-        loop: false,
-        hasAudio: false,
-      });
+      input.compiled.html = `<div data-composition-id="scene" data-start="5" data-duration="3" data-playback-start="2">
+        <${tagName} id="clip" src="clip.mp4" data-start="0" data-duration="5" data-playback-start="1" data-playback-rate="2" data-has-audio="true"></${tagName}>
+      </div>`;
+      const collected = collectRenderMedia(input.compiled.html);
+      input.composition.videos = collected.videos;
+      input.composition.audios = collected.audios;
+      const before = tagName === "video" ? collected.videos : collected.audios;
+      expect(before[0]).toMatchObject({ start: 5, end: 8, mediaStart: 5, playbackRate: 2 });
 
       await runProbeStage(input);
 
-      expect(input.composition.videos[0]?.playbackRate).toEqual(playbackRate);
+      const shiftedRate = {
+        target: "rate",
+        points: [
+          { t: 0, v: 1 },
+          { t: 2, v: 2 },
+        ],
+      };
+      const media = tagName === "video" ? input.composition.videos : input.composition.audios;
+      expect(media[0]).toMatchObject({
+        start: 5,
+        end: 8,
+        mediaStart: expected,
+        playbackRate: shiftedRate,
+      });
+      if (tagName === "video") {
+        expect(input.composition.audios[0]).toMatchObject({
+          mediaStart: expected,
+          playbackRate: shiftedRate,
+        });
+      }
+    },
+  );
+
+  it.each(
+    runtimeRates.flatMap((playbackRate) => [
+      { tagName: "video", playbackRate },
+      { tagName: "audio", playbackRate },
+    ]),
+  )(
+    "preserves a collected $tagName speed ramp during reconciliation (browser rate: $playbackRate)",
+    async ({ tagName, playbackRate }) => {
+      resetRetryMocks();
+      browserMediaResults = [
+        {
+          id: "clip",
+          tagName,
+          src: "clip.mp4",
+          start: 0,
+          end: 5,
+          duration: 5,
+          mediaStart: 1,
+          playbackRate,
+          loop: false,
+          hasAudio: true,
+          volume: 1,
+          muted: false,
+        },
+      ];
+      const { runProbeStage } = await import("./probeStage.js");
+      const input = makeProbeInput({});
+      const authoredRate = {
+        target: "rate",
+        points: [
+          { t: 0, v: 1 },
+          { t: 2, v: 1 },
+          { t: 4, v: 2 },
+        ],
+      } satisfies RateSpec;
+      input.compiled.html = `<div data-composition-id="scene" data-start="5" data-duration="3" data-playback-start="2">
+        <${tagName} id="clip" src="clip.mp4" data-start="0" data-duration="5" data-playback-start="1" data-has-audio="true" data-automation='${JSON.stringify({ version: 1, lanes: [authoredRate] })}'></${tagName}>
+      </div>`;
+      const collected = collectRenderMedia(input.compiled.html);
+      input.composition.videos = collected.videos;
+      input.composition.audios = collected.audios;
+      const before = structuredClone({ videos: collected.videos, audios: collected.audios });
+      const media = tagName === "video" ? collected.videos : collected.audios;
+      expect(media[0]).toMatchObject({ mediaStart: 3 });
+
+      await runProbeStage(input);
+
+      expect(input.composition.videos).toEqual(before.videos);
+      expect(input.composition.audios).toEqual(before.audios);
     },
   );
 
