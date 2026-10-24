@@ -276,6 +276,117 @@ describe("override-set replay on open", () => {
     expect(reopened.getElements().filter((element) => element.id === child)).toHaveLength(1);
     expect(reopened.serialize()).toBe(comp.serialize());
   });
+
+  it.each(["base", "added"] as const)(
+    "keeps a restored %s element's position after removing a temporary sibling",
+    async (kind) => {
+      const comp = await openComposition(BASE_HTML, { coalesceMs: 0 });
+      const id = kind === "base" ? "hf-sub" : comp.addElement("hf-stage", 1, "<p>Keep</p>");
+      const temporary = comp.addElement("hf-stage", 1, "<p>Temporary</p>");
+      comp.removeElement(id);
+      comp.undo();
+      comp.removeElement(temporary);
+
+      const reopened = await openComposition(BASE_HTML, {
+        overrides: JSON.parse(JSON.stringify(comp.getOverrides())),
+      });
+
+      expect(reopened.getElement("hf-stage")?.children.map((child) => child.id)).toEqual(
+        kind === "base" ? ["hf-title", "hf-sub", "hf-logo"] : ["hf-title", id, "hf-sub", "hf-logo"],
+      );
+      expect(reopened.serialize()).toBe(comp.serialize());
+    },
+  );
+
+  it("positions an added element after replaying later sibling removals", async () => {
+    const comp = await openComposition(BASE_HTML);
+    const id = comp.addElement("hf-stage", 2, "<p>Keep</p>");
+    comp.removeElement("hf-title");
+
+    const reopened = await openComposition(BASE_HTML, {
+      overrides: JSON.parse(JSON.stringify(comp.getOverrides())),
+    });
+
+    expect(reopened.getElement("hf-stage")?.children.map((child) => child.id)).toEqual([
+      "hf-sub",
+      id,
+      "hf-logo",
+    ]);
+    expect(reopened.serialize()).toBe(comp.serialize());
+  });
+
+  it("restores several saved positions without shifting a previously restored sibling", async () => {
+    const ids = ["hf-c", "hf-b", "hf-first", "hf-last", "hf-a"];
+    const html = `<div data-hf-id="hf-stage" data-hf-root>${ids.map((id) => `<p data-hf-id="${id}">${id}</p>`).join("")}</div>`;
+    const comp = await openComposition(html);
+    comp.applyPatches([
+      ...["hf-c", "hf-b", "hf-a"].map((id) => ({ op: "remove", path: `/elements/${id}` })),
+      ...["hf-a", "hf-b", "hf-c"].map((id, index) => ({
+        op: "add",
+        path: `/elements/${id}`,
+        value: {
+          html: `<p data-hf-id="${id}">${id}</p>`,
+          parentId: "hf-stage",
+          siblingIndex: index + 1,
+        },
+      })),
+    ]);
+
+    const reopened = await openComposition(html, {
+      overrides: JSON.parse(JSON.stringify(comp.getOverrides())),
+    });
+
+    expect(reopened.getElement("hf-stage")?.children.map((child) => child.id)).toEqual([
+      "hf-first",
+      "hf-a",
+      "hf-b",
+      "hf-c",
+      "hf-last",
+    ]);
+    expect(reopened.serialize()).toBe(comp.serialize());
+  });
+
+  it.each([false, true])(
+    "keeps text around restored inline elements, with temporary sibling: %s",
+    async (withTemporary) => {
+      const html =
+        '<p data-hf-id="hf-stage" data-hf-root>Start <b data-hf-id="hf-a">A</b> middle <i data-hf-id="hf-b">B</i> end <span data-hf-id="hf-c">C</span>.</p>';
+      const comp = await openComposition(html, { coalesceMs: 0 });
+      const temporary = withTemporary ? comp.addElement("hf-stage", 0, "<u>Temporary</u>") : null;
+      comp.removeElement("hf-a");
+      comp.undo();
+      comp.removeElement("hf-b");
+      comp.undo();
+      if (temporary) comp.removeElement(temporary);
+
+      const reopened = await openComposition(html, {
+        overrides: JSON.parse(JSON.stringify(comp.getOverrides())),
+      });
+
+      expect(reopened.serialize()).toBe(comp.serialize());
+    },
+  );
+
+  it("replays element snapshots with only an element sibling index", async () => {
+    const comp = await openComposition(BASE_HTML, {
+      overrides: {
+        "hf-added": {
+          html: '<p data-hf-id="hf-added">Original</p>',
+          parentId: "hf-stage",
+          siblingIndex: 1,
+        },
+        "hf-added.text": "Updated",
+      },
+    });
+
+    expect(comp.getElement("hf-stage")?.children.map((child) => child.id)).toEqual([
+      "hf-title",
+      "hf-added",
+      "hf-sub",
+      "hf-logo",
+    ]);
+    expect(comp.getElement("hf-added")?.text).toBe("Updated");
+  });
 });
 
 // ─── batch() transactional rollback ───────────────────────────────────────────

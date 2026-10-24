@@ -160,6 +160,33 @@ export function applyOverrideSet(parsed: ParsedDocument, overrides: OverrideSet)
     }
   }
   applyPatchesToDocument(parsed, patches, { keepScriptTargets: true });
+  restoreOverridePositions(parsed, overrides);
+}
+
+export function isElementSnapshotOverride(
+  key: string,
+  value: OverrideSet[string],
+): value is Record<string, unknown> & { siblingIndex: number } {
+  if (value === null || typeof value !== "object") return false;
+  return /^\/elements\/[^/]+$/.test(keyToPath(key) ?? "") && typeof value.siblingIndex === "number";
+}
+
+function restoreOverridePositions(parsed: ParsedDocument, overrides: OverrideSet): void {
+  const positions: Array<{ el: Element; parent: Element; childNodeIndex: number }> = [];
+  for (const [key, value] of Object.entries(overrides)) {
+    if (!isElementSnapshotOverride(key, value) || typeof value.childNodeIndex !== "number")
+      continue;
+    const el = findById(parsed.document, key);
+    if (!el?.parentElement) continue;
+    positions.push({ el, parent: el.parentElement, childNodeIndex: value.childNodeIndex });
+  }
+  // Detach every restored sibling so inserting one cannot shift another's saved position.
+  for (const { el } of positions) el.remove();
+  for (const { el, parent, childNodeIndex } of positions.sort(
+    (a, b) => a.childNodeIndex - b.childNodeIndex,
+  )) {
+    parent.insertBefore(el, parent.childNodes[childNodeIndex] ?? null);
+  }
 }
 
 /** Keep a deleted node a script looks up: serialize writes it back hidden, so the script finds it. */

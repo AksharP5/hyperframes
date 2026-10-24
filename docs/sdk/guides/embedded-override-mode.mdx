@@ -9,7 +9,7 @@ This is exactly how a canvas embedder (for example, AI Studio) persists in-compo
 
 ## Opening with overrides
 
-Pass the stored delta as `overrides` when you call `openComposition`. The SDK replays the override set onto the base template in one pass, so the session exposes the user's exact edited state immediately:
+Pass the stored delta as `overrides` when you call `openComposition`. The SDK applies the saved changes to the base template, so the session exposes the user's exact edited state immediately:
 
 ```typescript
 import { openComposition } from "@hyperframes/sdk";
@@ -31,7 +31,7 @@ After `openComposition` returns, `comp.getElements()` reflects the overridden st
 
 ## Reading the current delta
 
-Call `getOverrides()` to retrieve the current delta for storage. It returns a shallow copy of the internal override set — safe to serialize and stash:
+Call `getOverrides()` to retrieve the current delta for storage. It returns a copy ready to serialize and save:
 
 ```typescript
 comp.setText("hf-cta", "Get started free");
@@ -59,9 +59,11 @@ const reopened = await openComposition(templateHtml, {
 reopened.getElement(id)?.text; // "Available worldwide"
 ```
 
+`getOverrides()` saves each added or restored element's current position among
+all child nodes, including surrounding text. Removing a temporary sibling does
+not shift the element when reopened.
 Store the returned set without sorting its keys. The SDK keeps the latest edit
-order so restored elements follow earlier sibling removals and later child edits
-apply after their parent's snapshot.
+order so later child edits apply after their parent's snapshot.
 
 ## Override set key format
 
