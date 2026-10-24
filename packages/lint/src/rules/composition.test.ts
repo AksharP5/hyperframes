@@ -2400,6 +2400,10 @@ describe("composition rules", () => {
       ":is(.missing, #root .badge)",
       '#root[data-label="main canvas"] > .badge',
       "#root::before",
+      "#root:is(span.zoomed)",
+      "#root:is(.badge::before)",
+      "#root :is(.badge.zoomed)",
+      "#root:is(#root .canvas)",
     ])("allows descendant or pseudo-element zoom selected by %s", async (selector) => {
       const result = await lintHyperframeHtml(`<!doctype html><html><head><style>
         ${selector} { zoom: 2; }
@@ -2435,6 +2439,11 @@ describe("composition rules", () => {
 
     it.each([
       ["#root.zoomed", 'root.classList.add("zoomed")'],
+      ["#root:is(.zoomed)", 'root.classList.add("zoomed")'],
+      ["#root:where([data-zoomed])", 'root.dataset.zoomed = ""'],
+      [".canvas:is(.zoomed)", 'root.classList.add("zoomed")'],
+      [":is(#root).zoomed", 'root.classList.add("zoomed")'],
+      ["#root:is(:where(.zoomed))", 'root.classList.add("zoomed")'],
       [".canvas.zoomed", 'root.classList.add("zoomed")'],
       [".zoomed.canvas", 'root.classList.add("zoomed")'],
       [".canvas#zoomed", 'root.id = "zoomed"'],
