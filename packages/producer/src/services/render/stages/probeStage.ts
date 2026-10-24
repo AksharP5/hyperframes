@@ -606,6 +606,10 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
                 if (el.loop && !existing.loop) {
                   existing.loop = true;
                 }
+                const audio = composition.audios.find(
+                  (audio) => audio.type === "video" && audio.id === `${el.id}-audio`,
+                );
+                if (audio) audio.loop = existing.loop;
               }
             } else if (!compiled.droppedMediaIds.has(el.id)) {
               // New video discovered from browser
@@ -645,6 +649,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
                   el,
                   authoredStarts.get(el.id) ?? existing.mediaStart,
                 );
+                existing.loop = el.loop;
                 if (
                   el.volume > 0 &&
                   Math.abs((existing.volume ?? 1) - el.volume) > BROWSER_MEDIA_EPSILON
@@ -659,6 +664,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
                 start: el.start,
                 end: resolveBrowserMediaEnd(el.start, el.end, el.duration),
                 mediaStart: el.mediaStart,
+                loop: el.loop,
                 layer: 0,
                 volume: el.volume,
                 type: "audio",

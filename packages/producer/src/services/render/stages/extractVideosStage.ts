@@ -584,6 +584,8 @@ export function appendAutoDetectedVideoAudio(
       start: video.start,
       end: video.end,
       mediaStart: video.mediaStart,
+      playbackRate: video.playbackRate,
+      loop: video.loop,
       layer: 0,
       volume: 1.0,
       type: "video",

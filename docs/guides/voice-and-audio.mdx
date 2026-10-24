@@ -95,6 +95,20 @@ For an existing talking-head clip, use [Captions or
 recuts](/guides/captions-and-recuts) to choose between plain captions, designed
 graphic overlays, and an actual change to the spoken edit.
 
+## Repeat music inside a slot
+
+Use the native `loop` attribute to repeat a short track for a longer slot:
+
+```html
+<audio id="music" src="music.wav" data-start="0" data-duration="30" loop></audio>
+```
+
+The track repeats until the 30-second slot ends in preview and export. If you
+set `data-media-start`, every repeat starts at that source in-point. Playback
+speed and rate automation apply to the repeated audio. Looping videos with
+`data-has-audio="true"` repeat their sound too, including any silence before
+the next cycle.
+
 ## Mix for understanding
 
 - Keep voice clear above music.

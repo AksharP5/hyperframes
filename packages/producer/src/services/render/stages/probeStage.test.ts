@@ -412,6 +412,56 @@ describe("runProbeStage — forceScreenshot threading", () => {
     expect(mediaPreflightComposition).toBe(input.composition);
   });
 
+  it("preserves browser-discovered loops on audio and audible video tracks", async () => {
+    resetRetryMocks();
+    const timing = {
+      start: 0,
+      end: 5,
+      duration: 5,
+      mediaStart: 0,
+      loop: true,
+      volume: 1,
+      muted: false,
+    };
+    browserMediaResults = [
+      { id: "existing", tagName: "audio", src: "tone.wav", hasAudio: false, ...timing },
+      { id: "inserted", tagName: "audio", src: "other.wav", hasAudio: false, ...timing },
+      { id: "muted", tagName: "audio", src: "muted.wav", hasAudio: false, ...timing, muted: true },
+      { id: "clip", tagName: "video", src: "clip.mp4", hasAudio: true, ...timing },
+    ];
+    const { runProbeStage } = await import("./probeStage.js");
+    const input = makeProbeInput({});
+    input.compiled.html = '<script>new Audio("other.wav")</script>';
+    input.composition.duration = 5;
+    input.composition.audios.push(
+      { id: "existing", src: "tone.wav", start: 0, end: 5, mediaStart: 0, layer: 0, type: "audio" },
+      {
+        id: "clip-audio",
+        src: "clip.mp4",
+        start: 0,
+        end: 5,
+        mediaStart: 0,
+        layer: 0,
+        type: "video",
+      },
+    );
+    input.composition.videos.push({
+      id: "clip",
+      src: "clip.mp4",
+      start: 0,
+      end: 5,
+      mediaStart: 0,
+      loop: false,
+      hasAudio: true,
+    });
+    await runProbeStage(input);
+    expect(input.composition.audios.map((audio) => ({ id: audio.id, loop: audio.loop }))).toEqual([
+      { id: "existing", loop: true },
+      { id: "clip-audio", loop: true },
+      { id: "inserted", loop: true },
+    ]);
+  });
+
   // Scene in-point 5 and clip trim 1: the collector starts picture and sound at source 6.
   it.each([
     { pageStart: 1, expected: 6 },

@@ -622,6 +622,7 @@ export function parseAudioElements(html: string): AudioElement[] {
       end: parseEnd(el.getAttribute("data-end")),
       mediaStart: readMediaStart(el),
       playbackRate: readElementRateSpec(el),
+      loop: el.getAttribute("loop") !== null,
       layer: layerAttr ? parseInt(layerAttr) : 0,
       volume: volumeAttr ? parseFloat(volumeAttr) : 1.0,
       ...(fades.fadeIn > 0 ? { fadeIn: fades.fadeIn } : {}),
@@ -683,13 +684,14 @@ async function extractAudioSegment(
   signal?: AbortSignal,
   config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout">>,
   audioSidecarUrl?: string,
+  options?: { loop?: boolean; padToDuration?: boolean },
 ): Promise<ExtractResult> {
   const ffmpegProcessTimeout = config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
   const outputDir = dirname(outputPath);
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
   const normalizedPlaybackRate = normalizeRateSpec(playbackRate);
   const sourceDuration = sourceTimeAt(normalizedPlaybackRate, duration);
-  // A failed local probe keeps FFmpeg's default channel conversion and the input seek; a URL probe
+  // A failed non-looping local probe keeps FFmpeg's channel conversion and input seek; a URL probe
   // is retried once, then fails: a blip must not change how the next, successful read is mixed.
   const readsUrl = isHttpUrl(srcPath);
   const metadata = readsUrl
@@ -697,7 +699,64 @@ async function extractAudioSegment(
         if (signal?.aborted) throw error;
         return extractAudioMetadata(srcPath, { signal });
       })
-    : await extractAudioMetadata(srcPath).catch(() => null);
+    : await extractAudioMetadata(srcPath).catch((error: unknown) => {
+        if (options?.loop) throw error;
+        return null;
+      });
+  const loopDuration = (metadata?.durationSeconds ?? 0) - mediaStart;
+  if (options?.loop && loopDuration > 0 && sourceDuration > loopDuration) {
+    const cycleDir = mkdtempSync(join(outputDir, ".audio-loop-"));
+    const cyclePath = join(cycleDir, "cycle.wav");
+    try {
+      const cycle = await extractAudioSegment(
+        srcPath,
+        cyclePath,
+        stage,
+        mediaStart,
+        loopDuration,
+        1,
+        signal,
+        config,
+        audioSidecarUrl,
+        { padToDuration: true },
+      );
+      if (!cycle.success) return { ...cycle, outputPath };
+      const outputArgs = preparedAudioOutputArgs(metadata, normalizedPlaybackRate, duration, null);
+      const result = await runFfmpeg(
+        [
+          "-stream_loop",
+          "-1",
+          "-t",
+          String(sourceDuration),
+          "-i",
+          cyclePath,
+          "-vn",
+          "-acodec",
+          "pcm_s16le",
+          "-ar",
+          "48000",
+          ...outputArgs,
+          "-t",
+          String(duration),
+          "-y",
+          outputPath,
+        ],
+        { signal, timeout: ffmpegProcessTimeout },
+      );
+      const failure = result.success
+        ? undefined
+        : ffmpegFailure(stage, result, ffmpegProcessTimeout);
+      return {
+        success: result.success,
+        outputPath,
+        durationMs: cycle.durationMs + result.durationMs,
+        error: failure?.detail,
+        failure,
+      };
+    } finally {
+      rmSync(cycleDir, { recursive: true, force: true });
+    }
+  }
   const inputSeek = mediaStart >= (metadata?.latestStreamLeadSeconds ?? 0);
   const start = formatFilterNumber(mediaStart);
   const timestampTrim = inputSeek
@@ -709,7 +768,12 @@ async function extractAudioSegment(
     metadata,
     normalizedPlaybackRate,
     duration,
-    warmUp > 0 ? `atrim=start=${warmUp},asetpts=PTS-STARTPTS` : timestampTrim,
+    [
+      warmUp > 0 ? `atrim=start=${warmUp},asetpts=PTS-STARTPTS` : timestampTrim,
+      ...(options?.padToDuration ? ["apad"] : []),
+    ]
+      .filter(Boolean)
+      .join(",") || null,
   );
   const readFrom = fromSidecar ? audioSidecarUrl : srcPath;
 
@@ -723,7 +787,7 @@ async function extractAudioSegment(
     readFrom,
   ];
   args.push("-vn", "-acodec", "pcm_s16le", "-ar", "48000", ...outputArgs);
-  if (normalizedPlaybackRate !== 1) args.push("-t", String(duration));
+  if (normalizedPlaybackRate !== 1 || options?.padToDuration) args.push("-t", String(duration));
   args.push("-y", outputPath);
 
   const result = await runFfmpeg(args, { signal, timeout: ffmpegProcessTimeout });
@@ -1488,6 +1552,7 @@ export async function processCompositionAudio(
               effectiveSignal,
               config,
               audioSidecarUrl,
+              { loop: element.loop },
             );
             if (!extractResult.success) {
               failures.push(
@@ -1516,6 +1581,8 @@ export async function processCompositionAudio(
               element.playbackRate,
               effectiveSignal,
               config,
+              undefined,
+              { loop: element.loop },
             );
             if (!prepResult.success) {
               failures.push(
