@@ -32,6 +32,10 @@ That is all. The same attribute drives Studio preview and `hyperframes render`.
 | `data-motion-blur-events` | off | `on` runs timeline callbacks (`onUpdate` and similar) while blur looks for movers and at each sample. Needed when the motion is set from a callback, such as a `render(t)` function, which blur cannot otherwise see. |
 | `data-motion-blur-tier` | `auto` | `capture` or `filter` forces one of the two ways blur is drawn (below). |
 
+## In Studio
+
+The **Blur** tab in Studio's right dock sets it with one control: **Off**, **Subtle** or **Strong**. Subtle is the default blur (240° shutter, samples sized to the smear). Strong opens the shutter to 720° and the samples to 64. The panel writes the attributes above to the composition root, so a render uses the same setting, and Undo works. Off removes `data-motion-blur` and leaves the other attributes where they are.
+
 ## What it blurs
 
 Elements that move quickly in 2D: position, scale and rotation changes from GSAP, CSS animations and transitions, and the Web Animations API. Slow movers and static content are left sharp. A mover's glow and shadow travel with it, and the background behind it stays where it is.

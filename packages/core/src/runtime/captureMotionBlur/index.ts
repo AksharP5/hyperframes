@@ -35,6 +35,7 @@ import {
 } from "../../pageMotionBlur";
 import { swallow } from "../diagnostics";
 import { createCompositor, type MoverFrame } from "./composite";
+import { readMotionBlurSettings } from "../../motionBlurSettings";
 import { discoverMovers } from "./discover";
 import { createFilterTier } from "./filterTier";
 import { readMoverFrames } from "./frames";
@@ -89,26 +90,11 @@ const PAINT_TIMEOUT_MS = 2000;
 const MAX_FAILURES = 3;
 const LOG_EVERY = 25;
 
-const clamp = (x: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, x));
-
-function tierAttribute(value: string | null): Config["tier"] {
-  return value === "capture" || value === "filter" ? value : "auto";
-}
-
 function readConfig(root: HTMLElement): Config | null {
-  if (root.getAttribute("data-motion-blur") !== "on") return null;
-  const num = (name: string, fallback: number): number => {
-    const v = Number(root.getAttribute(name));
-    return root.hasAttribute(name) && Number.isFinite(v) ? v : fallback;
-  };
-  return {
-    shutterDeg: clamp(num("data-motion-blur-shutter", 240), 0, 720),
-    samples: root.hasAttribute("data-motion-blur-samples")
-      ? Math.round(clamp(num("data-motion-blur-samples", 16), 2, 64))
-      : null,
-    events: root.getAttribute("data-motion-blur-events") === "on",
-    tier: tierAttribute(root.getAttribute("data-motion-blur-tier")),
-  };
+  const settings = readMotionBlurSettings((name) => root.getAttribute(name));
+  if (!settings.enabled) return null;
+  const { shutterDeg, samples, events, tier } = settings;
+  return { shutterDeg, samples, events, tier };
 }
 
 /** Must run before composition scripts: see `installAcceleratedCanvasTracker`. */

@@ -122,6 +122,12 @@
       "import": "./src/htmlInCanvas.ts",
       "types": "./src/htmlInCanvas.ts"
     },
+    "./motion-blur-settings": {
+      "bun": "./src/motionBlurSettings.ts",
+      "node": "./dist/motionBlurSettings.js",
+      "import": "./src/motionBlurSettings.ts",
+      "types": "./src/motionBlurSettings.ts"
+    },
     "./gsap-cdn": {
       "bun": "./src/gsapCdn.ts",
       "node": "./dist/gsapCdn.js",
@@ -623,6 +629,10 @@
       "./html-in-canvas": {
         "import": "./dist/htmlInCanvas.js",
         "types": "./dist/htmlInCanvas.d.ts"
+      },
+      "./motion-blur-settings": {
+        "import": "./dist/motionBlurSettings.js",
+        "types": "./dist/motionBlurSettings.d.ts"
       },
       "./gsap-cdn": {
         "import": "./dist/gsapCdn.js",
