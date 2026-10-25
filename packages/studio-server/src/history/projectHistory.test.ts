@@ -36,6 +36,7 @@ import { openBlobStore } from "./blobStore";
 // A test can hold a media copy, and run work after its blob is stored but before history records it.
 const mediaCopy = vi.hoisted(() => ({
   held: null as Promise<void> | null,
+  entered: null as (() => void) | null,
   stored: null as (() => Promise<unknown>) | null,
   copies: [] as string[],
   fails: null as ((copy: number) => boolean) | null,
@@ -50,6 +51,7 @@ vi.mock("./blobStore", async (importOriginal) => {
         ...store,
         put: async (path: string) => {
           if (path.endsWith(".bin")) {
+            mediaCopy.entered?.();
             await mediaCopy.held;
             mediaCopy.copies.push(basename(path));
             if (mediaCopy.fails?.(mediaCopy.copies.length)) throw new Error("The disk is full.");
@@ -70,7 +72,7 @@ const cleanup: Array<() => unknown> = [];
 
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
-  Object.assign(mediaCopy, { held: null, stored: null, copies: [], fails: null });
+  Object.assign(mediaCopy, { held: null, entered: null, stored: null, copies: [], fails: null });
 });
 
 const inside = (dir: string, path: string) => readFileSync(join(dir, path), "utf-8");
@@ -366,11 +368,13 @@ describe("openProjectHistory", () => {
   it("never copies the media of a folder that replaced the project", async () => {
     let release = () => {};
     mediaCopy.held = new Promise<void>((resolve) => (release = resolve));
+    const firstCopyRunning = new Promise<void>((resolve) => (mediaCopy.entered = resolve));
     const media = {
       "a.bin": Buffer.alloc(2 * 1024 ** 2, 1),
       "b.bin": Buffer.alloc(2 * 1024 ** 2, 2),
     };
     const { history, write, projectDir } = await project({ "index.html": "A", ...media });
+    await firstCopyRunning;
     renameSync(projectDir, `${projectDir}-moved`);
     cleanup.push(() => rmSync(`${projectDir}-moved`, { recursive: true, force: true }));
     mkdirSync(projectDir);
