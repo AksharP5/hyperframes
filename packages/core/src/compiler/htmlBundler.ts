@@ -456,7 +456,8 @@ function createAssetInliner(
       return null;
     }
     inlinedChars += asset.dataUrl.length;
-    return appendSuffixToUrl(asset.dataUrl, suffix);
+    const hashIdx = suffix.indexOf("#");
+    return hashIdx < 0 ? asset.dataUrl : `${asset.dataUrl}${suffix.slice(hashIdx)}`;
   };
 }
 
