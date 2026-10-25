@@ -5093,6 +5093,26 @@ export function computeDeVerifySampleFractions(k: number): number[] {
   return [...Array.from({ length: k - 1 }, (_, i) => (i + 1) / k), 0.95];
 }
 
+/** Seeks the page the truth is read from; callbacks run unless suppressed (suppressed, a count-up's text is stale). */
+export async function seekDeVerifyTruth(
+  page: Page,
+  t: number,
+  suppressEvents: boolean,
+): Promise<void> {
+  await page.evaluate(
+    (tt: number, suppress: boolean) => {
+      const hf = (
+        window as unknown as {
+          __hf?: { seek?: (x: number, options?: { suppressEvents?: boolean }) => void };
+        }
+      ).__hf;
+      if (hf && typeof hf.seek === "function") hf.seek(tt, { suppressEvents: suppress });
+    },
+    t,
+    suppressEvents,
+  );
+}
+
 async function captureDeVerificationFrames(
   session: CaptureSession,
   page: Page,
@@ -5142,47 +5162,47 @@ async function captureDeVerificationFrames(
   // would share the corruption, PSNR would pass on the damaged output.
   // Seeking 0 → ascending reproduces the render's own seek order.
   const fractions = computeDeVerifySampleFractions(k);
-  const seekTo = async (t: number): Promise<void> => {
-    await page.evaluate((tt: number) => {
-      const hf = (
-        window as unknown as {
-          __hf?: { seek?: (x: number, options?: { suppressEvents?: boolean }) => void };
-        }
-      ).__hf;
-      if (hf && typeof hf.seek === "function") hf.seek(tt, { suppressEvents: true });
-    }, t);
-  };
-  await seekTo(quantizeTimeToFrame(0, fps));
-  // Force one frame so lazy tween initialization paints at t=0 state.
-  await pageScreenshotCapture(page, session.options);
+  // A video-free comp reads its truth on a disposable page: callbacks that run there
+  // cannot leave the render's own page changed. The video injector is tied to the render page.
+  const disposable = session.onBeforeCapture
+    ? null
+    : await createStaticVerificationPage(session).catch(() => {
+        logInitPhase("self-verify truth page unavailable; reading it on the render page");
+        return null;
+      });
+  const isolated = disposable !== null;
+  const truthPage = disposable ?? page;
+  const seekTo = (t: number): Promise<void> => seekDeVerifyTruth(truthPage, t, !isolated);
   const frames = new Map<number, Buffer>();
-  for (const f of fractions) {
-    let idx = Math.min(totalFrames - 1, Math.max(1, Math.round(totalFrames * f)));
-    // Nudge off clip-cut boundaries (±1-frame desync is legitimate there);
-    // if the nudge saturates on a boundary index, skip the sample entirely.
-    let guard = 0;
-    while (boundary.has(idx) && guard++ < 6) idx = Math.min(totalFrames - 1, idx + 2);
-    if (boundary.has(idx)) continue;
-    if (frames.has(idx)) continue;
-    const t = quantizeTimeToFrame(idx / fps, fps);
-    await seekTo(t);
-    // Video frame injection (same hook the real capture paths run) — without
-    // it, <video> elements screenshot black and every video comp would
-    // false-positive into the screenshot fallback.
-    if (session.onBeforeCapture) await session.onBeforeCapture(page, t);
-    // Double-capture: the first screenshot forces a frame, which is what runs
-    // rAF-driven callbacks (count-up text counters land a tick after seek()
-    // returns — a single immediate screenshot captures stale text and
-    // false-positives the verify: 3bea8c73 28.7dB vs a truth missing its stat
-    // values while the DE frame was correct). NOTE: waiting on rAF via
-    // evaluate instead deadlocks — headless only fires rAF when a frame is
-    // produced, and nothing produces one until a screenshot asks.
-    await pageScreenshotCapture(page, session.options);
-    frames.set(idx, await pageScreenshotCapture(page, session.options));
+  try {
+    await seekTo(quantizeTimeToFrame(0, fps));
+    // Force one frame so lazy tween initialization paints at t=0 state.
+    await pageScreenshotCapture(truthPage, session.options);
+    for (const f of fractions) {
+      let idx = Math.min(totalFrames - 1, Math.max(1, Math.round(totalFrames * f)));
+      // Nudge off clip-cut boundaries (±1-frame desync is legitimate there);
+      // if the nudge saturates on a boundary index, skip the sample entirely.
+      let guard = 0;
+      while (boundary.has(idx) && guard++ < 6) idx = Math.min(totalFrames - 1, idx + 2);
+      if (boundary.has(idx)) continue;
+      if (frames.has(idx)) continue;
+      const t = quantizeTimeToFrame(idx / fps, fps);
+      await seekTo(t);
+      // Video frame injection (same hook the real capture paths run) — without
+      // it, <video> elements screenshot black and every video comp would
+      // false-positive into the screenshot fallback.
+      if (session.onBeforeCapture) await session.onBeforeCapture(truthPage, t);
+      // The first screenshot forces a frame, which runs rAF-driven callbacks (a count-up lands
+      // a tick after seek()); waiting on rAF via evaluate deadlocks, headless fires it only
+      // when a frame is produced.
+      await pageScreenshotCapture(truthPage, session.options);
+      frames.set(idx, await pageScreenshotCapture(truthPage, session.options));
+    }
+    // The render's own page goes back to frame 0 so its first seek starts like an unverified render.
+    if (!isolated) await seekTo(quantizeTimeToFrame(0, fps));
+  } finally {
+    if (isolated) await truthPage.close().catch(() => {});
   }
-  // Leave the page at frame 0 so the render's first seek starts from the
-  // same state as an unverified render.
-  await seekTo(quantizeTimeToFrame(0, fps));
   session.deVerifyFrames = frames;
   logInitPhase(
     `drawElement self-verify armed: ${frames.size} ground-truth frame(s) @ [${[...frames.keys()].join(", ")}] of ${totalFrames}`,
