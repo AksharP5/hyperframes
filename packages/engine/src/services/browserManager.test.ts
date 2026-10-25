@@ -380,12 +380,13 @@ describe("assertWebGpuAdapterAvailable", () => {
   const pageWithAdapter = (hasAdapter: boolean) =>
     ({ evaluate: vi.fn().mockResolvedValue(hasAdapter) }) as unknown as Page;
 
-  it("no-ops for a composition that does not require WebGPU, regardless of adapter", () => {
+  it("no-ops for a composition that does not require WebGPU, regardless of adapter", async () => {
     const page = pageWithAdapter(false);
-    return expect(assertWebGpuAdapterAvailable(page, false)).resolves.toBeUndefined();
+    await expect(assertWebGpuAdapterAvailable(page, false)).resolves.toBeUndefined();
+    expect(page.evaluate).not.toHaveBeenCalled();
   });
 
-  it("resolves when a WebGPU adapter is obtainable", () => {
+  it("resolves when the page confirms a usable WebGPU device", () => {
     const page = pageWithAdapter(true);
     return expect(assertWebGpuAdapterAvailable(page, true)).resolves.toBeUndefined();
   });
@@ -395,32 +396,54 @@ describe("assertWebGpuAdapterAvailable", () => {
     await expect(assertWebGpuAdapterAvailable(page, true)).rejects.toThrow("data-requires-webgpu");
   });
 
+  it("preserves page evaluation failures separately from device unavailability", async () => {
+    const page = pageWithAdapter(false);
+    const failure = new Error("Execution context was destroyed");
+    vi.mocked(page.evaluate).mockRejectedValue(failure);
+    await expect(assertWebGpuAdapterAvailable(page, true)).rejects.toBe(failure);
+  });
+
   describe("in-page adapter check (real callback, stubbed navigator.gpu)", () => {
     const runInPage = {
       evaluate: (fn: (...args: unknown[]) => unknown, ...args: unknown[]) => fn(...args),
     } as unknown as Page;
     const stubAdapter = (adapter: unknown) =>
       vi.stubGlobal("navigator", { gpu: { requestAdapter: async () => adapter } });
-    afterEach(() => vi.unstubAllGlobals());
+    const workingAdapter = (fallback = false) => ({
+      info: { isFallbackAdapter: fallback },
+      requestDevice: vi.fn().mockResolvedValue({ destroy: vi.fn() }),
+    });
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
 
     it("accepts a hardware adapter", async () => {
-      stubAdapter({ info: { isFallbackAdapter: false } });
+      stubAdapter(workingAdapter());
       await expect(assertWebGpuAdapterAvailable(runInPage, true)).resolves.toBeUndefined();
     });
 
     it("refuses a software fallback adapter such as swiftshader", async () => {
-      stubAdapter({ info: { isFallbackAdapter: true } });
+      const adapter = workingAdapter(true);
+      stubAdapter(adapter);
       await expect(assertWebGpuAdapterAvailable(runInPage, true)).rejects.toBeInstanceOf(
         WebGpuUnavailableError,
       );
+      expect(adapter.requestDevice).not.toHaveBeenCalled();
     });
 
     it("accepts a software fallback adapter only on a launch that runs software WebGPU", async () => {
-      stubAdapter({ info: { isFallbackAdapter: true } });
+      const adapter = workingAdapter(true);
+      const destroy = vi.fn();
+      adapter.requestDevice.mockResolvedValue({ destroy });
+      stubAdapter(adapter);
       await expect(assertWebGpuAdapterAvailable(runInPage, true, true)).resolves.toBeUndefined();
       await expect(assertWebGpuAdapterAvailable(runInPage, true, false)).rejects.toBeInstanceOf(
         WebGpuUnavailableError,
       );
+      expect(adapter.requestDevice).toHaveBeenCalledExactlyOnceWith();
+      expect(destroy).toHaveBeenCalledOnce();
     });
 
     it("refuses a host with no navigator.gpu", async () => {
@@ -428,6 +451,121 @@ describe("assertWebGpuAdapterAvailable", () => {
       await expect(assertWebGpuAdapterAvailable(runInPage, true)).rejects.toBeInstanceOf(
         WebGpuUnavailableError,
       );
+    });
+
+    it("refuses a missing adapter and clears its timeout", async () => {
+      stubAdapter(null);
+      await expect(assertWebGpuAdapterAvailable(runInPage, true)).rejects.toBeInstanceOf(
+        WebGpuUnavailableError,
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("creates a descriptor-free device, destroys it, and clears its timeout", async () => {
+      const destroy = vi.fn();
+      const adapter = workingAdapter();
+      adapter.requestDevice.mockResolvedValue({ destroy });
+      stubAdapter(adapter);
+
+      await expect(assertWebGpuAdapterAvailable(runInPage, true)).resolves.toBeUndefined();
+
+      expect(adapter.requestDevice).toHaveBeenCalledExactlyOnceWith();
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it.each([false, true])("rejects a device-creation failure (software: %s)", async (software) => {
+      const adapter = workingAdapter(software);
+      adapter.requestDevice.mockRejectedValue(new Error("OperationError: device unavailable"));
+      stubAdapter(adapter);
+
+      await expect(assertWebGpuAdapterAvailable(runInPage, true, software)).rejects.toBeInstanceOf(
+        WebGpuUnavailableError,
+      );
+      expect(adapter.requestDevice).toHaveBeenCalledExactlyOnceWith();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("rejects a synchronous device-creation failure and clears its timeout", async () => {
+      const adapter = workingAdapter();
+      adapter.requestDevice.mockImplementation(() => {
+        throw new Error("device creation failed");
+      });
+      stubAdapter(adapter);
+      await expect(assertWebGpuAdapterAvailable(runInPage, true)).rejects.toBeInstanceOf(
+        WebGpuUnavailableError,
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("shares the ten-second budget across adapter and device creation", async () => {
+      const adapter = workingAdapter();
+      adapter.requestDevice.mockImplementation(() => new Promise(() => {}));
+      vi.stubGlobal("navigator", {
+        gpu: {
+          requestAdapter: () => new Promise((resolve) => setTimeout(() => resolve(adapter), 9_000)),
+        },
+      });
+      const result = assertWebGpuAdapterAvailable(runInPage, true).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(adapter.requestDevice).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await result).toBeInstanceOf(WebGpuUnavailableError);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("bounds an adapter request that never completes", async () => {
+      vi.stubGlobal("navigator", { gpu: { requestAdapter: () => new Promise(() => {}) } });
+      const result = assertWebGpuAdapterAvailable(runInPage, true).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await result).toBeInstanceOf(WebGpuUnavailableError);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("does not create a device when the adapter arrives after the deadline", async () => {
+      const adapter = workingAdapter();
+      vi.stubGlobal("navigator", {
+        gpu: {
+          requestAdapter: () =>
+            new Promise((resolve) => setTimeout(() => resolve(adapter), 11_000)),
+        },
+      });
+      const result = assertWebGpuAdapterAvailable(runInPage, true).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await result).toBeInstanceOf(WebGpuUnavailableError);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(adapter.requestDevice).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("destroys a device that resolves after the deadline", async () => {
+      const destroy = vi.fn();
+      const adapter = workingAdapter();
+      adapter.requestDevice.mockImplementation(
+        () => new Promise((resolve) => setTimeout(() => resolve({ destroy }), 11_000)),
+      );
+      stubAdapter(adapter);
+      const result = assertWebGpuAdapterAvailable(runInPage, true).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await result).toBeInstanceOf(WebGpuUnavailableError);
+      expect(destroy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("clears the timeout when the adapter request rejects", async () => {
+      vi.stubGlobal("navigator", {
+        gpu: {
+          requestAdapter: async () => {
+            throw new Error("adapter unavailable");
+          },
+        },
+      });
+      await expect(assertWebGpuAdapterAvailable(runInPage, true)).rejects.toBeInstanceOf(
+        WebGpuUnavailableError,
+      );
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 });

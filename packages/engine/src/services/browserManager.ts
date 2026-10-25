@@ -1182,12 +1182,12 @@ export function compositionRequiresWebGpu(html: string): boolean {
   return false;
 }
 
-/** No hardware WebGPU adapter on this host; distinct from a browser or navigation failure. */
+/** No usable WebGPU device on this launch; distinct from a browser or navigation failure. */
 export class WebGpuUnavailableError extends Error {
   constructor() {
     super(
-      "This composition declares data-requires-webgpu, but no hardware WebGPU adapter could be " +
-        "obtained on this browser launch. Run on a host with a GPU, set " +
+      "This composition declares data-requires-webgpu, but a usable WebGPU device could not be " +
+        "created on this browser launch. Run on a host with a GPU, set " +
         "PRODUCER_ALLOW_SOFTWARE_WEBGPU=true to render it on SwiftShader (slow), or remove " +
         "data-requires-webgpu.",
     );
@@ -1195,11 +1195,11 @@ export class WebGpuUnavailableError extends Error {
   }
 }
 
-const WEBGPU_ADAPTER_PROBE_TIMEOUT_MS = 10_000;
+const WEBGPU_DEVICE_PROBE_TIMEOUT_MS = 10_000;
 
 /**
- * Confirms the already-navigated page can obtain a hardware WebGPU adapter, or any adapter when the launch runs
- * software WebGPU ({@link usesSoftwareWebGpu}); no-op otherwise.
+ * Confirms the already-navigated page can create a device on a hardware WebGPU adapter, or any adapter when
+ * the launch runs software WebGPU ({@link usesSoftwareWebGpu}); no-op otherwise.
  * `page` must be on a secure-context origin, or navigator.gpu always reads absent.
  */
 export async function assertWebGpuAdapterAvailable(
@@ -1208,26 +1208,44 @@ export async function assertWebGpuAdapterAvailable(
   softwareWebGpu = false,
 ): Promise<void> {
   if (!requiresWebGpu) return;
-  // requestAdapter() has no native timeout; a broken driver can hang it
-  // indefinitely. Race it in-page so a stuck adapter reads as "unavailable"
-  // instead of hanging the caller.
-  const hasUsableAdapter = await page.evaluate(
+  // An adapter can exist even when missing driver libraries make device creation fail.
+  // Both requests can hang; share one deadline and release late devices as well.
+  const hasUsableDevice = await page.evaluate(
     async (timeoutMs, acceptFallback) => {
       if (typeof navigator === "undefined" || !navigator.gpu) return false;
+      let expired = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const adapter = await Promise.race([
-          navigator.gpu.requestAdapter(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+        const probe = async () => {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (!adapter || expired || (!acceptFallback && adapter.info.isFallbackAdapter))
+            return false;
+          const device = await adapter.requestDevice();
+          try {
+            return !expired;
+          } finally {
+            device.destroy();
+          }
+        };
+        return await Promise.race([
+          probe(),
+          new Promise<false>((resolve) => {
+            timer = setTimeout(() => {
+              expired = true;
+              resolve(false);
+            }, timeoutMs);
+          }),
         ]);
-        return !!adapter && (acceptFallback || !adapter.info.isFallbackAdapter);
       } catch {
         return false;
+      } finally {
+        clearTimeout(timer);
       }
     },
-    WEBGPU_ADAPTER_PROBE_TIMEOUT_MS,
+    WEBGPU_DEVICE_PROBE_TIMEOUT_MS,
     softwareWebGpu,
   );
-  if (!hasUsableAdapter) throw new WebGpuUnavailableError();
+  if (!hasUsableDevice) throw new WebGpuUnavailableError();
 }
 
 function getBrowserGpuArgs(
