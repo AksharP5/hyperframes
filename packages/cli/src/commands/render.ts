@@ -86,6 +86,9 @@ import {
 import { maybePromptRenderFeedback } from "../telemetry/feedback.js";
 import {
   readConfigFresh,
+  releaseDeParallelRouterLatch,
+  type DeRouterBreaker,
+  type DeRouterRevert,
   recordRecentRender,
   writeConfig,
   writeConfigWithResult,
@@ -99,6 +102,12 @@ import {
 } from "../telemetry/renderCpu.js";
 import { bytesToMb } from "../telemetry/system.js";
 import { VERSION } from "../version.js";
+import {
+  afterCleanRender,
+  afterRevert,
+  forVersion,
+  isRouterOff,
+} from "./render/deRouterBreaker.js";
 import { isDevMode } from "../utils/env.js";
 import { buildDockerRunArgs, resolveDockerPlatform } from "../utils/dockerRunArgs.js";
 import { createStderrTail, DockerRenderExitError } from "../utils/dockerStderrTail.js";
@@ -1179,7 +1188,7 @@ async function executeLocalRender(
     ).then(() => {}),
   );
 
-  maybeConsumeDeParallelRouterTrial(deParallelRouterActive, job, options.quiet);
+  maybeConsumeDeParallelRouterTrial(deParallelRouterActive, job, options.quiet, true);
   const elapsed = Date.now() - startTime;
   const cpuUsage = cpu.stop();
   if (job.outcome === "completed_with_warnings") {
@@ -1396,18 +1405,71 @@ export function __resetDeParallelRouterTrialStateForTests(): void {
 }
 
 /**
- * Has this install's router circuit breaker already tripped — on disk, or via
- * this process's in-memory latch?
- *
- * Deliberately does NOT consider telemetry state. The old opt-in trial did:
- * there was no point running an experimental path if the resulting signal
- * couldn't be recorded. Now that the router is a shipped default, gating it
- * on telemetry would mean users who opted out of analytics silently get a
- * slower renderer — punishing a privacy choice with a performance penalty
- * (review finding). Telemetry state governs REPORTING, never behavior.
+ * Put the router back: lift the latch from both stores, store `next` as the
+ * remaining breaker state, and undo the "false" this process wrote.
  */
-function hasDeParallelRouterBreakerTripped(config: HyperframesConfig): boolean {
-  return deParallelRouterBreakerTrippedThisProcess || Boolean(config.deParallelRouterTrialFired);
+function rearmDeParallelRouter(next: DeRouterBreaker | undefined): void {
+  releaseDeParallelRouterLatch();
+  const config = readConfigFresh();
+  config.deParallelRouterBreaker = next;
+  writeConfig(config);
+  deParallelRouterBreakerTrippedThisProcess = false;
+  if (!deParallelRouterUserManaged) delete process.env.HF_DE_PARALLEL_ROUTER;
+}
+
+/** Is the router held off for this render? A stale or record-less latch is lifted here. */
+function routerHeldOff(config: HyperframesConfig): boolean {
+  if (deParallelRouterBreakerTrippedThisProcess) return true;
+  if (!config.deParallelRouterTrialFired) return false;
+  if (isRouterOff(config.deParallelRouterBreaker, VERSION)) return true;
+  rearmDeParallelRouter(forVersion(config.deParallelRouterBreaker, VERSION));
+  return false;
+}
+
+/** A render finished with the router held off: count it toward bringing the router back. */
+function countCleanRenderWithRouterOff(): void {
+  if (!deParallelRouterBreakerTrippedThisProcess || deParallelRouterUserManaged) return;
+  const config = readConfigFresh();
+  // A trip that never reached disk (unwritable config) lasts for this process only.
+  if (config.deParallelRouterBreaker?.trip === undefined) return;
+  const next = afterCleanRender(config.deParallelRouterBreaker);
+  if (next?.trip === undefined) {
+    rearmDeParallelRouter(next);
+    return;
+  }
+  config.deParallelRouterBreaker = next;
+  writeConfig(config);
+}
+
+type DeFallback = Pick<
+  NonNullable<NonNullable<RenderJob["perfSummary"]>["drawElement"]>,
+  "fallbackReason" | "fallbackFrameIndex" | "fallbackFailedDb" | "fallbackThresholdDb"
+>;
+
+/** The rejected frame's detail: the perf summary on a finished render, the capture observability on a failed one. */
+function fallbackOf(job: RenderJob): DeFallback {
+  const capture = job.errorDetails?.observability?.capture;
+  return (
+    job.perfSummary?.drawElement ?? {
+      fallbackReason: capture?.deFallbackReason,
+      fallbackFrameIndex: capture?.deFallbackFrameIndex,
+      fallbackFailedDb: capture?.deFallbackFailedDb,
+      fallbackThresholdDb: capture?.deFallbackThresholdDb,
+    }
+  );
+}
+
+function revertFrom(job: RenderJob, outcome: string, atRender: number): DeRouterRevert {
+  const fallback = fallbackOf(job);
+  return {
+    reason: fallback.fallbackReason ?? outcome,
+    frameIndex: fallback.fallbackFrameIndex,
+    failedDb: fallback.fallbackFailedDb,
+    thresholdDb: fallback.fallbackThresholdDb,
+    at: new Date().toISOString(),
+    version: VERSION,
+    atRender,
+  };
 }
 
 /**
@@ -1481,14 +1543,15 @@ function applyDeParallelRouterCircuitBreaker(quiet: boolean): boolean {
   }
   // readConfigFresh, NOT readConfig: the cached read is process-lifetime, so
   // another process persisting a trip mid-`--batch` would never be observed.
-  if (hasDeParallelRouterBreakerTripped(readConfigFresh())) {
+  if (routerHeldOff(readConfigFresh())) {
     deParallelRouterBreakerTrippedThisProcess = true;
     applyDeParallelRouterBreaker();
     if (!quiet) {
       console.log(
         c.dim(
-          "  Parallel drawElement capture stays off for this install (a previous render " +
-            "had to fall back). Re-enable with HF_DE_PARALLEL_ROUTER=true.",
+          "  Parallel drawElement capture is off for this install after two failed frame " +
+            "checks; it returns with the next version or after 20 more renders. " +
+            "Re-enable now with HF_DE_PARALLEL_ROUTER=true.",
         ),
       );
     }
@@ -1571,71 +1634,42 @@ function persistDeParallelRouterTrialFired(): boolean {
 }
 
 /**
- * After a trial-armed render, persist that the router's OWN bet actually
- * failed — its self-verify/generic-failure safety net fired (recorded as
- * anything other than a clean `"routed"`, e.g. `"reverted"`, or a stall/hang
- * outcome — heygen-com/hyperframes#3441) — or that the render-count backstop
- * (`DE_PARALLEL_ROUTER_TRIAL_MAX_RENDERS`) was reached, so it's never
- * enabled again for this install. A clean "routed" (the render succeeded
- * with no fallback) does NOT consume the trial by itself — the whole point
- * is to keep trying on every eligible render until we see a real failure
- * signal (bounded by the render cap), maximizing successful-routing
- * telemetry volume rather than stopping at the first data point. Checks
- * both the success path (`perfSummary`) and the failure path
- * (`errorDetails.observability.capture`, mutated in place before a hard
- * failure throws) — a render that still failed even after the fallback
- * retry counts too. A render that crashed for an unrelated reason while
- * merely "routed" (never reached "reverted" — e.g. cancellation) does NOT
- * count as a router failure and does not turn the trial off. No-ops if the
- * router never became eligible for this render (e.g. too few frames): the
- * trial stays available for a future run either way, uncounted.
- *
- * Cross-process race semantics (no file locking exists here): the render
- * COUNTER is written exactly once, unverified — a lost increment under a
- * concurrent-writer race just under-counts the exposure cap by one
- * (benign), whereas retrying it would double-count this render whenever our
- * write actually landed but another writer raced the verify read (trips the
- * cap early, killing the trial prematurely — review finding). The FIRED
- * flag is the safety-critical bit and IS verified/re-asserted — see
- * `persistDeParallelRouterTrialFired`.
+ * Record how a router render went: a clean "routed" only counts it, any other
+ * outcome is a strike (see `deRouterBreaker.ts`), and a cancelled "routed" render is not one.
  */
 function maybeConsumeDeParallelRouterTrial(
   routerActive: boolean,
   job: RenderJob,
   quiet: boolean,
+  renderSucceeded = false,
 ): void {
-  if (!routerActive) return;
+  if (!routerActive) {
+    if (renderSucceeded) countCleanRenderWithRouterOff();
+    return;
+  }
   const outcome = resolveDeParallelRouterOutcome(job);
   if (outcome === undefined) return;
 
   const config = readConfigFresh();
   const renderCount = (config.deParallelRouterTrialRenderCount ?? 0) + 1;
   config.deParallelRouterTrialRenderCount = renderCount;
-  // Trip on any recorded non-success, not only the literal string
-  // "reverted". The old trial also tripped at a 25-render exposure cap,
-  // which was sampling logic: bound how long an experiment force-enables
-  // itself. Under a shipped default that would switch the feature off
-  // behind the user's back after 25 good renders — so a clean "routed" (no
-  // fallback needed) must NOT trip. But narrowing the positive check to the
-  // single string "reverted" (heygen-com/hyperframes#3441) meant any other
-  // non-success signal the observability layer might ever record — a stall,
-  // a timeout, a future outcome value — would silently fall through to "not
-  // fired" instead of tripping. `outcome` is `undefined`-filtered above, so
-  // by this point it is a real recorded outcome; the only one that means
-  // "no fallback happened" is "routed" itself.
-  const fired = outcome !== "routed";
+  if (outcome === "routed") {
+    writeConfig(config);
+    return;
+  }
+  const breaker = afterRevert(
+    forVersion(config.deParallelRouterBreaker, VERSION),
+    revertFrom(job, outcome, renderCount),
+  );
+  config.deParallelRouterBreaker = breaker;
+  const fired = breaker.trip !== undefined;
   if (fired) {
     config.deParallelRouterTrialFired = true;
-    // Latch BEFORE attempting persistence — the decision holds for this
-    // process even if the disk write never sticks (unwritable config).
+    // Latch before persisting: the decision holds for this process even if the write never sticks.
     deParallelRouterBreakerTrippedThisProcess = true;
     applyDeParallelRouterBreaker();
   }
   writeConfig(config);
-  // Only announce a trip the breaker could actually act on. With an explicit
-  // user opt-in the breaker is a no-op, so "now off for this install" would
-  // be false — and would reprint on every subsequent revert, since the user's
-  // value keeps the router active (review finding).
   if (fired && !deParallelRouterUserManaged) reportDeParallelRouterBreakerTrip(quiet);
 }
 
@@ -1651,8 +1685,8 @@ function reportDeParallelRouterBreakerTrip(quiet: boolean): void {
   if (quiet) return;
   console.log(
     c.dim(
-      "  A frame failed verification, so parallel drawElement capture fell back to the " +
-        "screenshot path and is now off for this install. Re-enable: " +
+      "  Frames failed verification twice, so parallel drawElement capture is off for this " +
+        "install until the next version or 20 more renders. Re-enable now: " +
         "HF_DE_PARALLEL_ROUTER=true",
     ),
   );
@@ -1887,6 +1921,7 @@ function trackRenderMetrics(
     deFallbackFailedDb: perf?.drawElement?.fallbackFailedDb,
     deFallbackFrameIndex: perf?.drawElement?.fallbackFrameIndex,
     deFallbackThresholdDb: perf?.drawElement?.fallbackThresholdDb,
+    deRouterBreakerOff: deParallelRouterBreakerTrippedThisProcess || undefined,
     deBlankSuspects: perf?.drawElement?.blankSuspects,
     deBlankDeterministicAccepts: perf?.drawElement?.blankDeterministicAccepts,
     deBlankRecaptures: perf?.drawElement?.blankRecaptures,

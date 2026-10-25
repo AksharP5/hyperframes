@@ -446,6 +446,7 @@ export function trackRenderComplete(
     capturePeakMs?: number;
     // Resource usage
     peakMemoryMb?: number;
+    deRouterBreakerOff?: boolean;
     // Aggregate Chrome memory (RenderPerfSummary.chromeMemory); overrides the
     // live observability values when both are present, because the live ones
     // are only the last session's and the aggregate covers every worker.
@@ -595,6 +596,7 @@ export function trackRenderComplete(
         props.deFallbackThresholdDb,
         props.captureDeFallbackThresholdDb,
       ),
+      de_router_breaker_off: props.deRouterBreakerOff,
       de_blank_suspects: props.deBlankSuspects,
       de_blank_deterministic_accepts: props.deBlankDeterministicAccepts,
       de_blank_recaptures: props.deBlankRecaptures,

@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { VERSION } from "../version.js";
 
 const producerState = vi.hoisted(() => ({
   createdJobs: [] as Array<Record<string, unknown>>,
@@ -176,6 +177,10 @@ vi.mock("../telemetry/config.js", () => ({
     configState.disk = { ...config };
     configState.cache = { ...config };
     return true;
+  }),
+  releaseDeParallelRouterLatch: vi.fn(() => {
+    configState.disk = { ...configState.disk, deParallelRouterTrialFired: undefined };
+    configState.cache = { ...configState.disk };
   }),
   // The breaker's safety path uses this rather than writeConfig, so it can
   // see a mirror failure instead of having it collapsed into `true`.
@@ -1433,6 +1438,34 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
     vi.clearAllMocks();
   });
 
+  const strike = (over: Record<string, unknown> = {}) => ({
+    reason: "psnr",
+    at: "2026-10-01T00:00:00.000Z",
+    version: VERSION,
+    atRender: 0,
+    ...over,
+  });
+  /** One earlier revert on record: the next one trips the breaker. */
+  const afterOneStrike = () => ({
+    telemetryEnabled: true,
+    deParallelRouterTrialFired: false,
+    telemetryNoticeShown: true,
+    deParallelRouterBreaker: { strike: strike() },
+    deParallelRouterTrialRenderCount: 1,
+  });
+  const tripped = (over: Record<string, unknown> = {}) => ({
+    telemetryEnabled: true,
+    deParallelRouterTrialFired: true,
+    telemetryNoticeShown: true,
+    deParallelRouterBreaker: { trip: { ...strike(), cleanRenders: 0, ...over } },
+  });
+  const revertedRender = async (job: { perfSummary?: unknown }) => {
+    job.perfSummary = {
+      resolution: { width: 100, height: 100 },
+      drawElement: { parallelRouter: "reverted" },
+    };
+  };
+
   const baseOptions = {
     fps: { num: 30, den: 1 },
     quality: "standard" as const,
@@ -1505,11 +1538,7 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
     // router by DELETING the var. With a default-ON router, absent means ON,
     // so deleting would silently re-enable it on the very host that just
     // failed. Only an explicit "false" is a real off-switch.
-    configState.disk = {
-      telemetryEnabled: true,
-      deParallelRouterTrialFired: true,
-      telemetryNoticeShown: true,
-    };
+    configState.disk = tripped();
     await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
     expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
   });
@@ -1521,11 +1550,7 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
       // user choice, the breaker would no-op and this install would keep
       // retrying a failing router forever — losing the first-fallback
       // protection that is the point of the breaker.
-      configState.disk = {
-        telemetryEnabled: true,
-        deParallelRouterTrialFired: false,
-        telemetryNoticeShown: true,
-      };
+      configState.disk = afterOneStrike();
       process.env.HF_DE_PARALLEL_ROUTER = emptyish;
       producerState.executeImpl = async (job) => {
         job.perfSummary = {
@@ -1597,20 +1622,34 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
   });
 
   it("persists the trial as fired when the router's own safety net actually reverted", async () => {
-    configState.disk = {
-      telemetryEnabled: true,
-      deParallelRouterTrialFired: false,
-      telemetryNoticeShown: true,
-    };
+    configState.disk = afterOneStrike();
     producerState.executeImpl = async (job) => {
       job.perfSummary = {
         resolution: { width: 100, height: 100 },
-        drawElement: { parallelRouter: "reverted" },
+        drawElement: {
+          parallelRouter: "reverted",
+          fallbackReason: "psnr",
+          fallbackFrameIndex: 812,
+          fallbackFailedDb: 24.5,
+          fallbackThresholdDb: 32,
+        },
       };
     };
     await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
     expect(configState.writeConfigCalls).toContainEqual(
-      expect.objectContaining({ deParallelRouterTrialFired: true }),
+      expect.objectContaining({
+        deParallelRouterTrialFired: true,
+        deParallelRouterBreaker: {
+          trip: expect.objectContaining({
+            reason: "psnr",
+            frameIndex: 812,
+            failedDb: 24.5,
+            thresholdDb: 32,
+            version: VERSION,
+            cleanRenders: 0,
+          }),
+        },
+      }),
     );
   });
 
@@ -1660,11 +1699,7 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
   });
 
   it("persists the trial as fired from the failure path when the router's safety net reverted but the retry still failed", async () => {
-    configState.disk = {
-      telemetryEnabled: true,
-      deParallelRouterTrialFired: false,
-      telemetryNoticeShown: true,
-    };
+    configState.disk = afterOneStrike();
     producerState.executeImpl = async (job) => {
       job.errorDetails = { observability: { capture: { deParallelRouter: "reverted" } } };
       throw new Error("worker crashed even after fallback");
@@ -1677,40 +1712,91 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
     );
   });
 
-  it("persists a later --batch row's revert even though this process already armed the trial on an earlier row", async () => {
-    // The --batch scenario: multiple renderLocal calls in one process. Row 1
-    // succeeds (breaker stays out of the way, env untouched); row 2 reverts
-    // and must still be recorded and trip the breaker.
+  it("trips on the second revert of a --batch, not the first", async () => {
     configState.disk = {
       telemetryEnabled: true,
       deParallelRouterTrialFired: false,
       telemetryNoticeShown: true,
     };
+    producerState.executeImpl = revertedRender;
 
-    producerState.executeImpl = async (job) => {
-      job.perfSummary = {
-        resolution: { width: 100, height: 100 },
-        drawElement: { parallelRouter: "routed" },
-      };
-    };
     await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
     expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
     expect(configState.disk.deParallelRouterTrialFired).toBe(false);
 
-    producerState.executeImpl = async (job) => {
-      job.perfSummary = {
-        resolution: { width: 100, height: 100 },
-        drawElement: { parallelRouter: "reverted" },
-      };
-    };
     await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
-
-    expect(configState.writeConfigCalls).toContainEqual(
-      expect.objectContaining({ deParallelRouterTrialFired: true }),
-    );
+    expect(configState.disk.deParallelRouterTrialFired).toBe(true);
     // Explicit "false", not deleted: with a default-ON router, unsetting the
     // var would re-enable it on the host that just reverted.
     expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
+  });
+
+  it("keeps the router on after a single revert and remembers the strike", async () => {
+    configState.disk = { telemetryEnabled: true, telemetryNoticeShown: true };
+    producerState.executeImpl = revertedRender;
+    await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+    expect(configState.disk.deParallelRouterTrialFired).toBeFalsy();
+    expect(configState.disk.deParallelRouterBreaker).toEqual({
+      strike: expect.objectContaining({ reason: "reverted", atRender: 1, version: VERSION }),
+    });
+  });
+
+  it("forgets a strike that is 20 or more router renders old", async () => {
+    configState.disk = { ...afterOneStrike(), deParallelRouterTrialRenderCount: 20 };
+    producerState.executeImpl = revertedRender;
+    await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
+    expect(configState.disk.deParallelRouterTrialFired).toBeFalsy();
+    expect(configState.disk.deParallelRouterBreaker).toEqual({
+      strike: expect.objectContaining({ atRender: 21 }),
+    });
+  });
+
+  it("brings the router back for a new CLI version", async () => {
+    configState.disk = tripped({ version: "0.0.1-older" });
+    await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+    expect(configState.disk.deParallelRouterTrialFired).toBeFalsy();
+    expect(configState.disk.deParallelRouterBreaker).toBeUndefined();
+  });
+
+  it("brings the router back when the latch has no record (set by an older CLI)", async () => {
+    configState.disk = {
+      telemetryEnabled: true,
+      deParallelRouterTrialFired: true,
+      telemetryNoticeShown: true,
+    };
+    await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+    expect(configState.disk.deParallelRouterTrialFired).toBeFalsy();
+  });
+
+  it("brings the router back after 20 clean renders, not before", async () => {
+    configState.disk = tripped({ cleanRenders: 17 });
+    for (const expected of [18, 19]) {
+      await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
+      expect(process.env.HF_DE_PARALLEL_ROUTER).toBe("false");
+      expect(configState.disk.deParallelRouterBreaker).toEqual({
+        trip: expect.objectContaining({ cleanRenders: expected }),
+      });
+    }
+    await renderLocal(PROJECT_DIR, "/tmp/out.mp4", baseOptions);
+    expect(process.env.HF_DE_PARALLEL_ROUTER).toBeUndefined();
+    expect(configState.disk.deParallelRouterTrialFired).toBeFalsy();
+    expect(configState.disk.deParallelRouterBreaker).toBeUndefined();
+  });
+
+  it("does not count a failed render toward bringing the router back", async () => {
+    configState.disk = tripped({ cleanRenders: 5 });
+    producerState.executeImpl = async () => {
+      throw new Error("render failed");
+    };
+    await renderLocal(PROJECT_DIR, "/tmp/out.mp4", { ...baseOptions, throwOnError: true }).catch(
+      () => {},
+    );
+    expect(configState.disk.deParallelRouterBreaker).toEqual({
+      trip: expect.objectContaining({ cleanRenders: 5 }),
+    });
   });
 
   it("does not arm the trial for programmatic callers that never opted in (opt-in polarity — also covers --batch-concurrency N>=2, which leaves it unset)", async () => {
@@ -1784,11 +1870,7 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
   // safety fact on the erasable store only. writeConfig() collapsed
   // {ok:true, mirrored:false} to success and the loop stopped there.
   it("retries when the install-state mirror fails even though config.json landed", async () => {
-    configState.disk = {
-      telemetryEnabled: true,
-      deParallelRouterTrialFired: false,
-      telemetryNoticeShown: true,
-    };
+    configState.disk = afterOneStrike();
     configState.failMirrors = 1; // first attempt mirrors nothing
     producerState.executeImpl = async (job) => {
       job.perfSummary = {
@@ -1807,11 +1889,7 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
   });
 
   it("re-asserts the fired flag when the write is lost (concurrent clobber / transient failure), without re-counting the render", async () => {
-    configState.disk = {
-      telemetryEnabled: true,
-      deParallelRouterTrialFired: false,
-      telemetryNoticeShown: true,
-    };
+    configState.disk = afterOneStrike();
     configState.failWrites = 1; // the consume's main write is silently dropped
     producerState.executeImpl = async (job) => {
       job.perfSummary = {
@@ -1825,15 +1903,11 @@ describe("renderLocal — DE parallel-router circuit breaker", () => {
     // ...but the render counter is deliberately NOT re-applied — a lost
     // increment under a race is benign, a re-applied one double-counts the
     // render and trips the exposure cap early (review finding).
-    expect(configState.disk.deParallelRouterTrialRenderCount).toBeUndefined();
+    expect(configState.disk.deParallelRouterTrialRenderCount).toBe(1);
   });
 
   it("blocks re-arming for the rest of the process when the fired flag can never persist (unwritable config)", async () => {
-    configState.disk = {
-      telemetryEnabled: true,
-      deParallelRouterTrialFired: false,
-      telemetryNoticeShown: true,
-    };
+    configState.disk = afterOneStrike();
     configState.failWrites = Number.MAX_SAFE_INTEGER; // ~/.hyperframes is unwritable
     producerState.executeImpl = async (job) => {
       job.perfSummary = {
