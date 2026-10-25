@@ -986,7 +986,7 @@ async function initDrawElementOrTransparentBackground(
   if ((session.config?.useDrawElement ?? false) && supersampling) {
     session.deGateReason = "supersampling";
     session.deFallbackTrigger = "supersampling";
-    console.log(
+    console.error(
       "[engine] --experimental-fast-capture disabled for this render: drawElementImage " +
         "ignores deviceScaleFactor, so scaled (DPR other than 1) output uses screenshot capture.",
     );
@@ -994,7 +994,7 @@ async function initDrawElementOrTransparentBackground(
   if ((session.config?.useDrawElement ?? false) && !supersampling && forceScreenshot) {
     session.deGateReason = "render_mode_hint";
     session.deFallbackTrigger = "render_mode_hint";
-    console.log(
+    console.error(
       "[engine] fast capture falls back to screenshot: render-mode compatibility " +
         "hint forced screenshot capture (e.g. raw requestAnimationFrame composition).",
     );
@@ -1046,7 +1046,7 @@ async function initDrawElementOrTransparentBackground(
     if (!supportsDrawElement) {
       session.deGateReason = "unsupported_chrome";
       session.deFallbackTrigger = "unsupported_chrome";
-      console.log(
+      console.error(
         `[engine] fast capture falls back to ${session.launchCaptureMode} capture: ` +
           "this Chrome build does not implement canvas.drawElementImage (Dev/Canary-only " +
           "feature); run `hyperframes browser ensure --force` to fetch a supported " +
@@ -1098,7 +1098,7 @@ async function initDrawElementOrTransparentBackground(
       // "screenshot": on a BeginFrame-launched browser (Linux fast capture)
       // Page.captureScreenshot hangs for the full protocol timeout, while
       // beginFrameCapture is the platform's normal baseline path.
-      console.log(
+      console.error(
         `[engine] fast capture falls back to ${session.launchCaptureMode} capture: ` +
           "SwiftShader (software rasterizer, no GPU egress to skip, drawElement is " +
           "parity-or-slower; see fast-capture-limitations.md)",
@@ -1122,7 +1122,7 @@ async function initDrawElementOrTransparentBackground(
       const routeWholeRender = async (reason: string, trigger: string, message: string) => {
         session.deGateReason = reason;
         session.deFallbackTrigger = trigger;
-        console.log(
+        console.error(
           `[engine] fast capture falls back to ${session.launchCaptureMode} capture: ${message}`,
         );
         await routeToFallback();
@@ -1223,7 +1223,7 @@ async function initDrawElementOrTransparentBackground(
       if (!forceDE && !threeD.ok) {
         session.deGateReason = "3d_init_failed";
         session.deFallbackTrigger = "3d_init_failed";
-        console.log(
+        console.error(
           `[engine] fast capture falls back to ${session.launchCaptureMode} capture: ` +
             `3D projection init failed (${threeD.reason ?? "unknown"})`,
         );
@@ -1306,7 +1306,7 @@ async function cssEffectRiskFrames(
     );
     return live && withFramesAfterCallback(live, scan.callbackFrom, fps, totalFrames);
   } catch (error) {
-    console.log(
+    console.error(
       `[engine] fast capture: effect scan failed (${error instanceof Error ? error.message : String(error)})`,
     );
     return null;
@@ -1387,7 +1387,7 @@ export async function completeDeferredDrawElementInit(session: CaptureSession): 
   if (!session.deInitDeferred || !session.onBeforeCapture) return;
   const page = session.page;
   const logInitPhase = (phase: string) =>
-    console.log(`[initSession:${session.captureMode}] ${phase} (deferred drawElement init)`);
+    console.error(`[initSession:${session.captureMode}] ${phase} (deferred drawElement init)`);
   await finalizeDrawElementInit(session, page, logInitPhase, {
     transparent: capturesAlpha(session.options),
     forceDE: process.env.HF_FORCE_DRAWELEMENT === "1",
@@ -2655,14 +2655,14 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
   const { page, serverUrl } = session;
 
   // Forward browser console to host. HyperFrames runtime logs get a dedicated
-  // prefix so page-context observability is visible in producer stdout.
+  // prefix so page-context observability is visible in producer stderr.
   page.on("console", (msg: ConsoleMessage) => {
     const type = msg.type();
     const text = msg.text();
     const locationUrl = msg.location()?.url ?? "";
     const diagnostic = formatConsoleDiagnostic(type, text, locationUrl);
     if (!diagnostic.suppressHostLog && !loggedEarlierInRender(session, text)) {
-      console.log(diagnostic.text);
+      console.error(diagnostic.text);
     }
     appendBrowserDiagnostic(session, diagnostic.text);
 
@@ -2739,7 +2739,7 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
     session.config?.pageNavigationTimeout ?? DEFAULT_CONFIG.pageNavigationTimeout;
   const initStart = Date.now();
   const logInitPhase = (phase: string) => {
-    console.log(`[initSession:${session.captureMode}] ${phase} (${Date.now() - initStart}ms)`);
+    console.error(`[initSession:${session.captureMode}] ${phase} (${Date.now() - initStart}ms)`);
   };
   const gotoEntryPage = async (): Promise<void> => {
     appendBrowserDiagnostic(
@@ -4685,7 +4685,7 @@ async function captureFrameCore(
     session.capturePerf.frameMs.push(captureTimeMs);
     if (session.capturePerf.frames === 1) {
       const blur = await describePageMotionBlur(session.page).catch(() => null);
-      if (blur) console.log(blur);
+      if (blur) console.error(blur);
     }
 
     // Retain this freshly-captured buffer so the following static frames can reuse it.
@@ -4775,7 +4775,7 @@ export async function captureFrameToBuffer(
             // works. Counted here rather than in captureFrameCore's catch: the
             // deadline rejects from outside it, so that catch never runs.
             session.deFrameTimeouts = (session.deFrameTimeouts ?? 0) + 1;
-            console.log(
+            console.error(
               `[engine] fast capture frame ${frameIndex}: capture exceeded ` +
                 `${DE_FRAME_TIMEOUT_MS}ms; renderer stalled after drawElementImage ` +
                 `(PRINFRA-488). Failing the drawElement attempt so the whole render ` +
@@ -5038,7 +5038,7 @@ export async function captureFramesBatchPipelined(
       session.deNcprFallbacks = (session.deNcprFallbacks ?? 0) + 1;
       throw new DrawElementCaptureError(frameIndices[failedAt] ?? failedAt, reason, error);
     } else {
-      console.log(
+      console.error(
         `[engine] fast capture: batch produce failed at frame ` +
           `${frameIndices[failedAt] ?? "?"} (${error ?? "?"}); ` +
           `re-capturing ${frameIndices.length - failedAt} frame(s) per-frame`,
@@ -5137,7 +5137,7 @@ export async function closeCaptureSession(session: CaptureSession): Promise<void
   }
   if (session.page && !session.pageReleased) {
     const blur = await describePageMotionBlurAtEnd(session.page);
-    if (blur) console.log(blur);
+    if (blur) console.error(blur);
   }
   // Realized static-dedup telemetry: how much the cache actually helped this
   // render (vs the prediction logged at arm time). Both capture paths
@@ -5150,7 +5150,7 @@ export async function closeCaptureSession(session: CaptureSession): Promise<void
     const total = captured + reused;
     const pct = total > 0 ? Math.round((reused / total) * 100) : 0;
     const avgTotalMs = captured > 0 ? Math.round(session.capturePerf.totalMs / captured) : 0;
-    console.log(
+    console.error(
       `[static-dedup] reused ${reused}/${total} frame(s) (${pct}%), ` +
         `est. ~${reused * avgTotalMs}ms saved (avg ${avgTotalMs}ms/frame)`,
     );
