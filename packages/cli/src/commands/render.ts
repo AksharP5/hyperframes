@@ -1926,6 +1926,7 @@ function trackRenderMetrics(
     deBlankDeterministicAccepts: perf?.drawElement?.blankDeterministicAccepts,
     deBlankRecaptures: perf?.drawElement?.blankRecaptures,
     deBoundaryFrames: perf?.drawElement?.boundaryFrames,
+    deRiskFrames: perf?.drawElement?.riskFrames,
     deNcprFallbacks: perf?.drawElement?.ncprFallbacks,
     deFrameTimeouts: perf?.drawElement?.frameTimeouts,
     compositionDurationMs,

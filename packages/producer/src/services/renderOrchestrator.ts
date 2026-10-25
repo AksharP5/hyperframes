@@ -674,6 +674,7 @@ export interface RenderPerfSummary {
     blankRecaptures: number;
     /** Clip-cut boundary frames captured via per-frame screenshot. */
     boundaryFrames: number;
+    riskFrames: number;
     /** Per-frame "No cached paint record" screenshot fallbacks. */
     ncprFallbacks: number;
     /**
@@ -2206,6 +2207,14 @@ export function shouldPreferSingleWorkerDrawElement(args: {
   );
 }
 
+/**
+ * The session kept drawElement but left some frames to a screenshot session. Only the
+ * single-worker streaming capture hands those over, so parallel drawElement must not be chosen.
+ */
+function probeNeedsScreenshotFrames(session: CaptureSession | null): boolean {
+  return (session?.deRiskFrames?.size ?? 0) > 0;
+}
+
 /** The session ran the engine's init-time drawElement gates and one refused it. */
 function isProbeDeGated(session: CaptureSession | null): session is CaptureSession {
   return session !== null && session.captureMode !== "drawelement" && !session.deInitDeferred;
@@ -3579,6 +3588,7 @@ async function executeRenderPipeline(input: {
       // Probe-resolved duration: drawElement self-verification derives its
       // sample frame indices from this so they land inside the drained range.
       compositionDurationSeconds: job.duration,
+      deFrameFallback: true,
       requiresWebGpu: compositionRequiresWebGpu(compiled.html),
       // Live route for Chrome memory (spec §5 Phase −1). The aggregate route
       // through CapturePerfSummary only exists on success; a mid-capture
@@ -3804,7 +3814,7 @@ async function executeRenderPipeline(input: {
       minFrames: deParallelMinFrames,
       layeredOrEffectRoute: hasHdrContent || compiled.hasShaderTransitions,
       supersampling: deviceScaleFactor !== 1,
-      probeDeGated: isProbeDeGated(probeSession),
+      probeDeGated: isProbeDeGated(probeSession) || probeNeedsScreenshotFrames(probeSession),
       experimentalParallelDeOptIn:
         process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true" ||
         process.env.HF_DE_PARALLEL_STREAM === "true",
@@ -3852,6 +3862,8 @@ async function executeRenderPipeline(input: {
         deInversionEligible = false;
         deParallelRouterEligible = false;
         deShortBand = undefined;
+      } else if (probeNeedsScreenshotFrames(probeSession)) {
+        deParallelRouterEligible = false;
       }
     }
     // Workers capturing by screenshot report no gate of their own, so carry the probe's.
@@ -4123,7 +4135,14 @@ async function executeRenderPipeline(input: {
       (deParallelStreamForced || process.env.HF_DE_PARALLEL_STREAM === "true") &&
       useStreamingEncode &&
       workerCount > 1;
+    // Frames drawElement cannot reproduce go to a screenshot session only on single-worker
+    // streaming capture; any other route captures them all by screenshot, as before.
+    const routeDropsScreenshotFrames =
+      cfg.useDrawElement &&
+      probeNeedsScreenshotFrames(probeSession) &&
+      (!useStreamingEncode || workerCount !== 1);
     if (
+      routeDropsScreenshotFrames ||
       shouldClampDefaultDrawElement({
         useDrawElement: cfg.useDrawElement,
         fastCaptureExplicitOptIn: process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true",

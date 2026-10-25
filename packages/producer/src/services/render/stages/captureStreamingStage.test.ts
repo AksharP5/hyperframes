@@ -45,6 +45,13 @@ const reorderAbortCalls: unknown[] = [];
 let hangSequentialUntilStall = false;
 let sessionWorkerEncodeEnabled = false;
 let captureSessionMode: "drawelement" | "screenshot" = "drawelement";
+// Frames the drawElement session hands to a screenshot session, and the batches it was asked for.
+let sessionRiskFrames: Set<number> | undefined;
+let batchesRequested: number[][] | null = null;
+// A session with a before-capture hook (video frames) captures one frame at a time.
+let sessionHasBeforeCapture = false;
+const deFrame = (index: number) =>
+  Buffer.concat([Buffer.from(`de${index}:`), Buffer.alloc(30_000)]);
 let failPrepareCaptureSessionForReuse = false;
 let initializeSessionErrorMessage = "initialize failed";
 const browserConsoleBuffer = ["[FrameCapture:ERROR] page.goto failed"];
@@ -73,19 +80,33 @@ mock.module("@hyperframes/engine", () => ({
   calculateOptimalWorkers: () => 1,
   convertTransfer: () => {},
   captureFrame: async () => {},
-  captureFrameToBufferPipelined: async () => {
+  captureFrameToBufferPipelined: async (_session: unknown, frameIndex: number) => {
     if (hangSequentialUntilStall) {
       return new Promise(() => {});
     }
-    return { encodeResult: Promise.resolve(Buffer.from("frame")) };
+    if (batchesRequested) batchesRequested.push([frameIndex]);
+    return {
+      encodeResult: Promise.resolve(batchesRequested ? deFrame(frameIndex) : Buffer.from("frame")),
+    };
   },
-  captureFramesBatchPipelined: async () => {
+  captureFramesBatchPipelined: async (_session: unknown, indices: number[]) => {
     if (hangSequentialUntilStall) {
       return new Promise(() => {});
     }
-    return [];
+    if (!batchesRequested) return [];
+    batchesRequested.push(indices);
+    return indices.map((frameIndex) => ({
+      frameIndex,
+      encodeResult: Promise.resolve(deFrame(frameIndex)),
+    }));
   },
-  captureFrameToBuffer: async (session: { captureStep?: string }) => {
+  captureFrameToBuffer: async (
+    session: { captureStep?: string; isScreenshotFallback?: boolean },
+    frameIndex: number,
+  ) => {
+    if (session.isScreenshotFallback) {
+      return { buffer: Buffer.from(`screenshot${frameIndex}`), captureTimeMs: 1 };
+    }
     if (failCaptureFrameToBuffer) {
       throw new Error("captureFrameToBuffer failed");
     }
@@ -98,7 +119,16 @@ mock.module("@hyperframes/engine", () => ({
   closeCaptureSession,
   cloneCaptureWarnings: () => [],
   completeDeferredDrawElementInit: async () => {},
-  createCaptureSession: async () => ({
+  createCaptureSession: async (
+    _url: string,
+    _dir: string,
+    _options: unknown,
+    _injector: unknown,
+    config?: { useDrawElement?: boolean },
+  ) => ({
+    isScreenshotFallback: config?.useDrawElement === false,
+    onBeforeCapture: sessionHasBeforeCapture ? async () => {} : undefined,
+    deRiskFrames: config?.useDrawElement === false ? undefined : sessionRiskFrames,
     isInitialized: false,
     browserConsoleBuffer,
     options: { captureBeyondViewport: false },
@@ -633,6 +663,41 @@ describe("runCaptureStreamingStage", () => {
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).not.toContain("stalled");
   });
+
+  it.each([
+    ["in batches", false],
+    ["one frame at a time when the session injects video frames", true],
+  ])(
+    "captures risk frames in a screenshot session and every other frame with drawElement, in order, %s",
+    async (_name, withBeforeCapture) => {
+      sessionWorkerEncodeEnabled = true;
+      sessionHasBeforeCapture = withBeforeCapture;
+      sessionRiskFrames = new Set([2, 3, 25]);
+      batchesRequested = [];
+      writeFrame.mockClear();
+      closeCaptureSession.mockClear();
+      const { runCaptureStreamingStage } = await import("./captureStreamingStage.js");
+      const cfg = { forceScreenshot: false, ffmpegStreamingTimeout: 3_600_000 };
+      try {
+        await runCaptureStreamingStage({ ...createInput(cfg), totalFrames: 30, workerCount: 1 });
+      } finally {
+        sessionWorkerEncodeEnabled = false;
+        sessionHasBeforeCapture = false;
+        sessionRiskFrames = undefined;
+      }
+      const written = writeFrame.mock.calls.map(([buffer]) => buffer.toString().split(":")[0]);
+      expect(written).toEqual(
+        Array.from({ length: 30 }, (_, i) =>
+          [2, 3, 25].includes(i) ? `screenshot${i}` : `de${i}`,
+        ),
+      );
+      // drawElement was never asked for a risk frame
+      expect(batchesRequested?.flat().filter((f) => [2, 3, 25].includes(f))).toEqual([]);
+      // the drawElement session and the screenshot session both closed
+      expect(closeCaptureSession).toHaveBeenCalledTimes(2);
+      batchesRequested = null;
+    },
+  );
 
   it("trips the stall watchdog on the single-worker worker-encode pipeline when capture makes no progress", async () => {
     hangSequentialUntilStall = true;

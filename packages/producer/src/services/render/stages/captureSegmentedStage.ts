@@ -323,7 +323,7 @@ async function openSegmentedSession(input: CaptureSegmentedStageInput): Promise<
       ? input.cfg
       : { ...input.cfg, forceScreenshot: input.plan.forceScreenshot };
   const videoInjector = input.createRenderVideoFrameInjector();
-  const captureOptions = input.buildCaptureOptions();
+  const captureOptions = { ...input.buildCaptureOptions(), deFrameFallback: false };
   const ownBrowser = shouldDisableBrowserPoolForParallelWorker({
     parallel: (input.workerCount ?? 1) > 1,
   });

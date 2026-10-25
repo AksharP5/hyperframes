@@ -212,6 +212,7 @@ function aggregateDrawElement(
     blankDeterministicAccepts: drain?.blankDeterministicAccepts ?? 0,
     blankRecaptures: drain?.blankRecaptures ?? 0,
     boundaryFrames: perfs.reduce((sum, p) => sum + (p.deBoundaryFrames ?? 0), 0),
+    riskFrames: perfs.reduce((sum, p) => sum + (p.deRiskFrames ?? 0), 0),
     ncprFallbacks: perfs.reduce((sum, p) => sum + (p.deNcprFallbacks ?? 0), 0),
     frameTimeouts: perfs.reduce((sum, p) => sum + (p.deFrameTimeouts ?? 0), 0),
   };

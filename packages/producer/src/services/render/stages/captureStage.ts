@@ -352,7 +352,7 @@ export async function runCaptureStage(input: CaptureStageInput): Promise<Capture
     }
   }
 
-  const captureOptions = buildCaptureOptions();
+  const captureOptions = { ...buildCaptureOptions(), deFrameFallback: false };
   const remedy = diskCaptureRemedy(cfg, job.config.format ?? "mp4", job.duration ?? 0, workerCount);
   const checkDiskProjection = createDiskCaptureProjection({
     framesDir,

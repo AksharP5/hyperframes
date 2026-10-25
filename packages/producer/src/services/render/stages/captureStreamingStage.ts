@@ -466,6 +466,14 @@ function createDrainFrameGuard(args: {
   };
 }
 
+/** Frames drawElement cannot reproduce, and how to capture one by screenshot. */
+interface RiskFrameCapture {
+  frames: ReadonlySet<number>;
+  /** Opens the screenshot session; kept out of the stall budget, a browser launch is slow. */
+  open: () => Promise<void>;
+  capture: (frameIndex: number, time: number) => Promise<Buffer>;
+}
+
 async function runWorkerEncodePipelineLoop(
   session: CaptureSession,
   totalFrames: number,
@@ -477,11 +485,27 @@ async function runWorkerEncodePipelineLoop(
   log: CaptureStreamingStageInput["log"],
   stats: DeDrainStats,
   abortSignal: AbortSignal | undefined,
+  risk?: RiskFrameCapture,
 ): Promise<void> {
-  let prev: { idx: number; encodeResult: Promise<Buffer> } | null = null;
+  /** A frame whose encode is in flight; `trusted` frames came from the screenshot session. */
+  type Pending = { idx: number; encodeResult: Promise<Buffer>; trusted?: boolean };
+  let prev: Pending | null = null;
   const frameTime = (i: number) => (i * job.config.fps.den) / job.config.fps.num;
   const guard = createDrainFrameGuard({ log, stats, frameTime });
-  const guardFrame = (idx: number, buf: Buffer): Promise<Buffer> => guard(session, idx, buf);
+  // Drain-time self-verification checks drawElement frames against a pre-injection screenshot;
+  // a screenshot-session frame is that ground truth already.
+  const guardFrame = (item: Pending, buf: Buffer): Promise<Buffer> =>
+    item.trusted ? Promise.resolve(buf) : guard(session, item.idx, buf);
+  const captureRisk = async (idx: number): Promise<Buffer> => {
+    await risk!.open();
+    lastProgressAt = Date.now();
+    return raceAgainstStall(
+      risk!.capture(idx, frameTime(idx)),
+      stallTimeoutMs - (Date.now() - lastProgressAt),
+      { session, frameIndex: idx, totalFrames, stallTimeoutMs },
+      abortSignal,
+    );
+  };
 
   const stallTimeoutMs = resolveCaptureStallTimeoutMs();
   let lastProgressAt = Date.now();
@@ -499,7 +523,7 @@ async function runWorkerEncodePipelineLoop(
     // longest stretch of the loop); without this an abort isn't seen until the
     // next produce iteration.
     assertNotAborted();
-    const buf = await guardFrame(prev.idx, await prev.encodeResult);
+    const buf = await guardFrame(prev, await prev.encodeResult);
     await reorderBuffer.waitForFrame(prev.idx);
     ensureFrameWritten(await currentEncoder.writeFrame(buf), prev.idx, currentEncoder);
     reorderBuffer.advanceTo(prev.idx + 1);
@@ -524,10 +548,10 @@ async function runWorkerEncodePipelineLoop(
   // a node-side hook per frame → no batching. Kill switch: HF_DE_BATCH=0.
   const batchNRaw = Number(process.env.HF_DE_BATCH ?? "4");
   const batchN = Number.isFinite(batchNRaw) ? Math.floor(batchNRaw) : 4;
-  const drainBatch = async (batch: Array<{ idx: number; encodeResult: Promise<Buffer> }>) => {
+  const drainBatch = async (batch: Pending[]) => {
     for (const item of batch) {
       assertNotAborted();
-      const buf = await guardFrame(item.idx, await item.encodeResult);
+      const buf = await guardFrame(item, await item.encodeResult);
       await reorderBuffer.waitForFrame(item.idx);
       ensureFrameWritten(await currentEncoder.writeFrame(buf), item.idx, currentEncoder);
       reorderBuffer.advanceTo(item.idx + 1);
@@ -546,8 +570,10 @@ async function runWorkerEncodePipelineLoop(
   if (batchN > 1 && !session.onBeforeCapture) {
     const boundarySS = process.env.HF_FAST_CAPTURE_BOUNDARY_SS === "true";
     const batchable = (f: number) =>
-      !session.staticFrames?.has(f) && !(boundarySS && session.clipBoundaryFrames?.has(f));
-    let prevBatch: Array<{ idx: number; encodeResult: Promise<Buffer> }> = [];
+      !session.staticFrames?.has(f) &&
+      !(boundarySS && session.clipBoundaryFrames?.has(f)) &&
+      !risk?.frames.has(f);
+    let prevBatch: Pending[] = [];
     let i = 0;
     while (i < totalFrames) {
       assertNotAborted();
@@ -569,6 +595,11 @@ async function runWorkerEncodePipelineLoop(
         );
         await drainBatch(prevBatch);
         prevBatch = results.map((r) => ({ idx: r.frameIndex, encodeResult: r.encodeResult }));
+      } else if (risk?.frames.has(i)) {
+        const buffer = await captureRisk(i);
+        await drainBatch(prevBatch);
+        prevBatch = [{ idx: i, encodeResult: Promise.resolve(buffer), trusted: true }];
+        i++;
       } else {
         const { encodeResult } = await captureWithStallGuard(
           i,
@@ -590,6 +621,12 @@ async function runWorkerEncodePipelineLoop(
   // the loop needs no special guard here.
   for (let i = 0; i < totalFrames; i++) {
     assertNotAborted();
+    if (risk?.frames.has(i)) {
+      const buffer = await captureRisk(i);
+      await drainPrev();
+      prev = { idx: i, encodeResult: Promise.resolve(buffer), trusted: true };
+      continue;
+    }
     const time = frameTime(i);
     const { encodeResult } = await captureWithStallGuard(
       i,
@@ -930,6 +967,26 @@ export async function runCaptureStreamingStage(
         prepareCaptureSessionForReuse(session, framesDir, videoInjector);
         probeSession = null;
       }
+      // The screenshot capture of today: same config with fast capture off. Its frames are not
+      // consecutive, so static-frame reuse is off.
+      let riskSession: CaptureSession | null = null;
+      const openRiskSession = async (): Promise<CaptureSession> => {
+        const opened = await createCaptureSession(
+          fileServer.url,
+          framesDir,
+          buildCaptureOptions(),
+          createRenderVideoFrameInjector(),
+          {
+            ...captureCfg,
+            useDrawElement: false,
+            staticFrameDedup: false,
+            enableBrowserPool: false,
+          },
+        );
+        riskSession = opened;
+        await initializeSession(opened);
+        return opened;
+      };
 
       try {
         if (!session.isInitialized) {
@@ -951,6 +1008,7 @@ export async function runCaptureStreamingStage(
             blankDeterministicAccepts: 0,
             blankRecaptures: 0,
           };
+          const riskFrames = session.deRiskFrames;
           await runWorkerEncodePipelineLoop(
             session,
             totalFrames,
@@ -962,6 +1020,18 @@ export async function runCaptureStreamingStage(
             log,
             deDrainStats,
             abortSignal,
+            riskFrames && riskFrames.size > 0
+              ? {
+                  frames: riskFrames,
+                  // Opened on the first risk frame, in a browser of its own: pages sharing a
+                  // browser share a compositor, which starves the drawElement page's paint events.
+                  open: async () => {
+                    riskSession ??= await openRiskSession();
+                  },
+                  capture: async (frameIndex, time) =>
+                    (await captureFrameToBuffer(riskSession!, frameIndex, time)).buffer,
+                }
+              : undefined,
           );
         } else {
           const stallTimeoutMs = resolveCaptureStallTimeoutMs();
@@ -1011,6 +1081,7 @@ export async function runCaptureStreamingStage(
         // Keep the latest console buffer for success and cleanup-error summaries.
         lastBrowserConsole = session.browserConsoleBuffer;
         await closeCaptureSession(session);
+        if (riskSession) await closeCaptureSession(riskSession);
       }
     }
 

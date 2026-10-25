@@ -240,6 +240,7 @@ export interface CaptureOptions {
    * Clamped to 0..8 like the env knob; HF_DE_VERIFY, when set, still wins.
    */
   deVerifySamples?: number;
+  deFrameFallback?: boolean;
 }
 
 export interface CaptureVideoMetadataHint {
@@ -416,6 +417,7 @@ export interface CapturePerfSummary {
   deVerifyInitMs: number;
   /** Clip-cut boundary frames routed to per-frame screenshot (Lim 6). */
   deBoundaryFrames: number;
+  deRiskFrames: number;
   /** Per-frame "No cached paint record" screenshot fallbacks during capture. */
   deNcprFallbacks: number;
   /**

@@ -8,8 +8,9 @@
  * it lives here once instead of being re-derived inline.
  */
 
+import { execSync } from "child_process";
 import { readFileSync } from "fs";
-import { totalmem } from "os";
+import { freemem, platform, totalmem } from "os";
 
 const BYTES_PER_MIB = 1024 * 1024;
 const BYTES_PER_MIB_BIGINT = BigInt(BYTES_PER_MIB);
@@ -184,4 +185,46 @@ export const LOW_MEMORY_TOTAL_MB_THRESHOLD = 8192;
  */
 export function isLowMemorySystem(totalMb: number = getSystemTotalMb()): boolean {
   return totalMb <= LOW_MEMORY_TOTAL_MB_THRESHOLD;
+}
+
+/** Memory available in MiB: on macOS and Linux, counting pages the OS reclaims on demand. */
+export function getAvailableMemoryMb(): number {
+  const fallback = Math.trunc(freemem() / BYTES_PER_MIB);
+
+  if (platform() === "darwin") {
+    try {
+      const raw = execSync("vm_stat", { encoding: "utf-8", timeout: 5000 });
+      const pageSize = parseInt(raw.match(/page size of (\d+)/)?.[1] ?? "0", 10);
+      if (!pageSize) return fallback;
+
+      const pages = (key: string) =>
+        parseInt(raw.match(new RegExp(`${key}:\\s+(\\d+)`))?.[1] ?? "0", 10);
+
+      const available =
+        (pages("Pages free") +
+          pages("Pages inactive") +
+          pages("Pages purgeable") +
+          pages("Pages speculative")) *
+        pageSize;
+
+      return available > 0 ? Math.trunc(available / BYTES_PER_MIB) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  if (platform() === "linux") {
+    try {
+      const meminfo = readFileSync("/proc/meminfo", "utf-8");
+      const match = meminfo.match(/MemAvailable:\s+(\d+)\s+kB/);
+      if (match) {
+        return Math.trunc(parseInt(match[1]!, 10) / 1024);
+      }
+      return fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  return fallback;
 }
