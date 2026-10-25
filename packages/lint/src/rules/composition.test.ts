@@ -1280,6 +1280,8 @@ describe("composition rules", () => {
       { id: "setting", type: "color", label: "Setting", default: 3 },
       { id: "setting", type: "font", label: "Setting", default: 3 },
       { id: "setting", type: "image", label: "Setting", default: 3 },
+      { id: "setting", type: "font", label: "Setting", default: { name: "Brand" } },
+      { id: "setting", type: "image", label: "Setting", default: { url: 3 } },
       { id: "setting", type: "enum", label: "Setting", default: 3, options: [] },
       { id: "setting", type: "enum", label: "Setting", default: "light" },
       { id: "setting", type: "enum", label: "Setting", default: "light", options: "light" },
@@ -1318,6 +1320,18 @@ describe("composition rules", () => {
       { id: "setting", type: "color", label: "Setting", default: "#fff" },
       { id: "setting", type: "font", label: "Setting", default: "Arial" },
       { id: "setting", type: "image", label: "Setting", default: "assets/a.png" },
+      {
+        id: "setting",
+        type: "font",
+        label: "Setting",
+        default: { name: "Brand", source: "assets/brand.css" },
+      },
+      {
+        id: "setting",
+        type: "image",
+        label: "Setting",
+        default: { url: "assets/a.png", alt: "Brand", fit: "contain" },
+      },
       { id: "setting", type: "enum", label: "Setting", default: "light", options: [] },
     ])("preserves parser-admitted declaration %j", async (declaration) => {
       const element = document.createElement("div");
@@ -1425,6 +1439,30 @@ describe("composition rules", () => {
   describe("unloadable_media_variable_default", () => {
     const CODE = "unloadable_media_variable_default";
     const find = (r: { findings: { code: string }[] }) => r.findings.find((f) => f.code === CODE);
+
+    it.each(["file:///abs/logo.svg", "javascript:alert(1)", "data:text/html,hello"])(
+      "rejects an unsafe URL inside an image object default: %s",
+      async (url) => {
+        const declarations = [
+          {
+            id: "logo",
+            type: "image",
+            label: "Logo",
+            default: { url, alt: "Logo", fit: "contain" },
+          },
+        ];
+        const html = `<html data-composition-variables='${JSON.stringify(declarations)}'><body><div data-composition-id="x"></div></body></html>`;
+        const result = await lintHyperframeHtml(html);
+        expect(
+          result.findings.filter((finding) => finding.code === "unloadable_media_variable_default"),
+        ).toHaveLength(1);
+        expect(
+          result.findings.some(
+            (finding) => finding.code === "invalid_composition_variables_declaration",
+          ),
+        ).toBe(false);
+      },
+    );
 
     it("errors on an image variable defaulting to a file:// URL", async () => {
       const html = `<html data-composition-variables='[{"id":"bg","type":"image","label":"BG","default":"file:///abs/assets/blue.png"}]'><body><img data-composition-id="x" src="assets/red.png" data-var-src="bg"></body></html>`;

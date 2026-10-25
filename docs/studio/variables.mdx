@@ -21,6 +21,8 @@ The quickest path starts from the canvas:
 3. Bind the text, media source, text color, background, or font property.
 4. Create a new variable or choose a compatible existing one.
 
+Before binding to an existing variable, Studio shows its saved default, using the font name or image URL for object values.
+
 For a value that is not tied to the selected element, click **Add variable**. Studio supports string, number, color, boolean, enum, font, and image variables. Number variables can include minimum, maximum, and step values; enums can define their allowed options.
 
 Name the input by meaning—`customerName`, `headline`, or `brandColor`—rather than by its position in the design.
@@ -30,6 +32,8 @@ Name the input by meaning—`customerName`, `headline`, or `brandColor`—rather
 Change a value in the Variables panel to preview that version immediately. The preview is an override: it does not replace the saved default.
 
 The panel tells you whether you are previewing defaults or custom values. Use **Reset** to clear all preview overrides. When a scalar preview should become the new default, use **Set default**.
+
+Use **Edit** to change a variable's label, description, or saved default. For font and image objects, **Default** edits the font name or image URL. Saving keeps the font source, image alt text and fit, and any other stored metadata, including when you change only the label or description.
 
 <Note>
   Variables from other compositions are listed separately. You can edit their declarations, but
