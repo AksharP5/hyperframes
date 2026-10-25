@@ -177,6 +177,7 @@ export {
   rewriteInlineStyleAssetUrls,
 } from "./compiler/rewriteSubCompPaths";
 export { CSS_URL_RE, isNonRelativeUrl, isPathInside } from "./compiler/assetPaths";
+export { rewriteSrcsetUrls } from "./compiler/srcset";
 export {
   checkSubCompositionUsability,
   type ParsableDocumentLike,

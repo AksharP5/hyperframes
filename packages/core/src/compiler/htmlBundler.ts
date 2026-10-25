@@ -41,6 +41,7 @@ import {
   splitUrlSuffix,
 } from "@hyperframes/parsers/asset-paths";
 import { CSS_URL_RE, isNonRelativeUrl } from "./assetPaths.js";
+import { rewriteSrcsetUrls } from "./srcset.js";
 import { compileHtml, type MediaDurationProber } from "./htmlCompiler";
 import {
   RUNTIME_BOOTSTRAP_ATTR,
@@ -180,39 +181,6 @@ function rebaseRelativePath(urlValue: string, fromDir: string, toDir: string): s
   const absolutePath = resolveRelativeUrlPath(fromDir, basePath);
   const rebased = encodeUrlPath(relative(resolve(toDir), absolutePath).split(sep).join("/"));
   return appendSuffixToUrl(rebased, suffix);
-}
-
-function rewriteSrcsetUrls(srcset: string, rewriteUrl: (url: string) => string): string {
-  const parts: string[] = [];
-  let position = 0;
-  let written = 0;
-
-  // Preserve URL commas per https://html.spec.whatwg.org/multipage/images.html#parse-a-srcset-attribute
-  while (position < srcset.length) {
-    while (position < srcset.length && /[ \t\n\r\f,]/.test(srcset.charAt(position))) position++;
-    const start = position;
-    while (position < srcset.length && !/[ \t\n\r\f]/.test(srcset.charAt(position))) position++;
-    let end = position;
-    while (end > start && srcset.charAt(end - 1) === ",") end--;
-    if (end > start) {
-      const url = srcset.slice(start, end);
-      const rewritten = rewriteUrl(url);
-      if (rewritten !== url) {
-        parts.push(srcset.slice(written, start), rewritten);
-        written = end;
-      }
-    }
-    if (end < position) continue;
-
-    let inParens = false;
-    while (position < srcset.length) {
-      const char = srcset.charAt(position++);
-      if (char === "(") inParens = true;
-      else if (char === ")") inParens = false;
-      else if (char === "," && !inParens) break;
-    }
-  }
-  return parts.length > 0 ? parts.join("") + srcset.slice(written) : srcset;
 }
 
 function rebaseColorGradingLutPath(value: string, fromDir: string, toDir: string): string {
