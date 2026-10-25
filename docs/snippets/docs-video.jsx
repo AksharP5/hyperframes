@@ -401,46 +401,25 @@ export const DocsVideo = ({
 };
 
 export const ShowcaseWall = () => {
-  const CDN = "https://static.heygen.ai/hyperframes-oss/docs/images/showcase";
+  // The same films as the homepage showcase (hyperframes.heygen.com), from the team and ours: a tile plays the 720p
+  // card, an opened film the 1080p copy.
+  const CDN = "https://static.heygen.ai/hyperframes-oss/homepage/showcase";
+  const homepageFilm = (id, v, title, note, length) => ({
+    id,
+    title,
+    note,
+    length,
+    tile: `${CDN}/card/${id}-v${v}.mp4`,
+    full: `${CDN}/hq/${id}-v${v}.mp4`,
+    poster: `${CDN}/poster/${id}-v${v}.jpg`,
+  });
   const films = [
-    {
-      id: "grading",
-      tile: "tile-grading-v2",
-      full: "full-grading-4k-v2",
-      title: "Colour grading and media effects",
-      note: "Real footage graded with LUTs, curves, and scopes — inside Studio.",
-      length: "48s",
-    },
-    {
-      id: "variables",
-      title: "One shoot, many cuts",
-      note: "The same footage rendered as several vertical videos from one project.",
-      length: "44s",
-    },
-    {
-      id: "music",
-      title: "Cut to the music",
-      note: "A track analysed for beats and sections, then everything snapped to that grid.",
-      length: "90s",
-    },
-    {
-      id: "prvideo",
-      title: "A pull request, explained",
-      note: "A code change turned into a review anyone on the team can watch.",
-      length: "32s",
-    },
-    {
-      id: "timeline",
-      title: "Editing on a timeline",
-      note: "Trimming, splitting, and retiming a project by hand.",
-      length: "34s",
-    },
-    {
-      id: "hypecard",
-      title: "A year in review",
-      note: "Personal data turned into a shareable card, generated per person.",
-      length: "27s",
-    },
+    homepageFilm("frameys-opening-night", 1, "Opening night", "Awards trailer", "50s"),
+    homepageFilm("real-ui-newspaper-1969", 2, "Men walk on the Moon", "Real UI, rebuilt in code", "8s"),
+    homepageFilm("manga-last-onigiri", 1, "The last onigiri", "Manga", "26s"),
+    homepageFilm("vfx-background-removal-launch", 1, "Background removal", "VFX", "43s"),
+    homepageFilm("cow", 1, "Cow 1.0", "Launch parody", "30s"),
+    homepageFilm("remotion-to-hyperframes", 1, "Remotion to HyperFrames", "3D voxel", "20s"),
   ];
   const [openId, setOpenId] = useState(null);
   // Lazy initializer, not a post-mount effect: with useState(false) the first
@@ -481,12 +460,17 @@ export const ShowcaseWall = () => {
   if (open) {
     return (
       <div style={{ margin: "1.5rem 0" }}>
-        <DocsVideo
+        {/* A plain video, not DocsVideo: a Mintlify snippet can't use another export of its file, and the reference
+            alone stopped the whole wall from rendering. Opened by a click, so it may start with sound. */}
+        <video
           key={open.id}
-          title={open.title}
-          src={`${CDN}/${open.full || `full-${open.id}`}.mp4`}
-          poster={`${CDN}/${open.tile || `tile-${open.id}`}.jpg`}
+          src={open.full}
+          poster={open.poster}
+          aria-label={open.title}
+          controls
           autoPlay
+          playsInline
+          style={{ display: "block", width: "100%", borderRadius: "12px", background: "#000" }}
         />
         <div
           style={{
@@ -553,8 +537,8 @@ export const ShowcaseWall = () => {
           }}
         >
           <video
-            src={reduced ? undefined : `${CDN}/${film.tile || `tile-${film.id}`}.mp4`}
-            poster={`${CDN}/${film.tile || `tile-${film.id}`}.jpg`}
+            src={reduced ? undefined : film.tile}
+            poster={film.poster}
             autoPlay={!reduced}
             muted
             loop={!reduced}

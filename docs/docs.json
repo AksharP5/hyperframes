@@ -1129,8 +1129,8 @@
             "href": "/product-updates"
           },
           {
-            "label": "Playground",
-            "href": "https://www.hyperframes.dev/"
+            "label": "Download the Studio app",
+            "href": "https://hyperframes.dev/studio/download?src=docs-footer"
           },
           {
             "label": "GitHub",
@@ -1149,8 +1149,8 @@
     ],
     "primary": {
       "type": "button",
-      "label": "Playground",
-      "href": "https://www.hyperframes.dev/"
+      "label": "Download Studio",
+      "href": "https://hyperframes.dev/studio/download?src=docs-navbar"
     }
   },
   "redirects": [
