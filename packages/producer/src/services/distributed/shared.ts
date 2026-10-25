@@ -250,6 +250,12 @@ function readVideoMetadata(
     hasAudio: readBoolean(record.hasAudio, `${field}.hasAudio`),
     isVFR: readBoolean(record.isVFR, `${field}.isVFR`),
     hasAlpha: readBoolean(record.hasAlpha, `${field}.hasAlpha`),
+    // Optional: plans from producers without the decode probe keep today's png for vp8/vp9.
+    ...(record.alphaPlaneDecoded === undefined
+      ? {}
+      : {
+          alphaPlaneDecoded: readBoolean(record.alphaPlaneDecoded, `${field}.alphaPlaneDecoded`),
+        }),
     colorSpace,
   };
 }

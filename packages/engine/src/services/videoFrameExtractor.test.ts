@@ -700,6 +700,41 @@ describe("resolveFrameFormat", () => {
       "png",
     );
   });
+
+  type FormatCase = Pick<VideoMetadata, "videoCodec" | "hasAlpha" | "alphaPlaneDecoded"> & {
+    requested: "auto" | "jpg" | "png";
+  };
+  const formatCases: FormatCase[] = ["vp9", "vp8", "h264", "prores"].flatMap((videoCodec) =>
+    [true, false].flatMap((hasAlpha) =>
+      [true, false, undefined].flatMap((alphaPlaneDecoded) =>
+        (["auto", "jpg", "png"] as const).map((requested) => ({
+          videoCodec,
+          hasAlpha,
+          alphaPlaneDecoded,
+          requested,
+        })),
+      ),
+    ),
+  );
+  function expectedFormat({ videoCodec, hasAlpha, alphaPlaneDecoded, requested }: FormatCase) {
+    const sidecar = videoCodec === "vp9" || videoCodec === "vp8";
+    const keepsPng = hasAlpha || (sidecar && alphaPlaneDecoded !== false);
+    return keepsPng || requested === "png" ? "png" : "jpg";
+  }
+
+  it("lets VP8/VP9 leave png only when a decode probe found no alpha plane", () => {
+    expect(formatCases).toHaveLength(72);
+    for (const { requested, ...fields } of formatCases) {
+      const actual = resolveFrameFormat(metadata(fields), requested);
+      expect(actual, JSON.stringify(fields)).toBe(expectedFormat({ requested, ...fields }));
+    }
+    expect(resolveFrameFormat(metadata({ videoCodec: "vp9", alphaPlaneDecoded: false }))).toBe(
+      "jpg",
+    );
+    expect(resolveFrameFormat(metadata({ videoCodec: "vp8", alphaPlaneDecoded: false }))).toBe(
+      "jpg",
+    );
+  });
 });
 
 describe("parseVideoElements", () => {

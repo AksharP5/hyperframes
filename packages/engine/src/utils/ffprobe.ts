@@ -1,12 +1,18 @@
 // fallow-ignore-file code-duplication complexity
 import { spawn } from "child_process";
-import { createReadStream, readFileSync, statSync } from "fs";
+import { createReadStream, mkdtempSync, readFileSync, rmSync, statSync } from "fs";
 import { chunkCrc32 } from "./crc32.js";
 import { StringDecoder } from "node:string_decoder";
-import { basename } from "path";
+import { tmpdir } from "os";
+import { basename, join } from "path";
 import { redactTelemetryString } from "@hyperframes/core";
-import { videoStreamHasAlpha } from "@hyperframes/parsers/media-alpha";
+import {
+  alphaDecoderFor,
+  pixelFormatHasAlpha,
+  videoStreamHasAlpha,
+} from "@hyperframes/parsers/media-alpha";
 import { urlInputArgs } from "./urlInput.js";
+import { runFfmpeg } from "./runFfmpeg.js";
 import { FFPROBE_PATH_ENV, getFfprobeBinary } from "./ffmpegBinaries.js";
 import { ManagedChildProcess } from "./managedChildProcess.js";
 import { trackChildProcess } from "./processTracker.js";
@@ -209,6 +215,9 @@ export interface VideoMetadata {
   isVFR: boolean;
   /** True when the stream carries an alpha channel. */
   hasAlpha: boolean;
+  /** VP8/VP9 without an alpha tag: whether a frame decoded with the alpha-aware decoder had an alpha plane.
+   * Absent when not probed or the probe failed. */
+  alphaPlaneDecoded?: boolean;
   /** Color space info from the video stream. Null if ffprobe didn't report it. */
   colorSpace: VideoColorSpace | null;
   colorRange?: string;
@@ -814,6 +823,57 @@ export function parseFrameRate(frameRateStr: string | undefined): number {
 }
 
 /**
+ * Whether the first frame decoded with `decoder` (alpha-aware) has an alpha pixel format; undefined on any
+ * failure. ffprobe cannot pick a decoder, so ffmpeg writes the frame as rawvideo, which keeps its pix_fmt.
+ */
+export async function probeDecodedAlphaPlane(
+  filePath: string,
+  decoder: string,
+): Promise<boolean | undefined> {
+  let probeDir: string | undefined;
+  try {
+    probeDir = mkdtempSync(join(tmpdir(), "hf-decoded-alpha-"));
+    const framePath = join(probeDir, "frame.nut");
+    const decoded = await runFfmpeg(
+      [
+        "-v",
+        "error",
+        ...urlInputArgs(filePath),
+        "-c:v",
+        decoder,
+        "-i",
+        filePath,
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=8:8",
+        "-c:v",
+        "rawvideo",
+        "-f",
+        "nut",
+        framePath,
+      ],
+      { timeout: 30_000 },
+    );
+    if (!decoded.success) return undefined;
+    const stdout = await runFfprobe(framePath, [
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=pix_fmt",
+      "-of",
+      "json",
+    ]);
+    const pixFmt = (JSON.parse(stdout) as FFProbeOutput).streams?.[0]?.pix_fmt;
+    return pixFmt ? pixelFormatHasAlpha(pixFmt) : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (probeDir) rmSync(probeDir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Probe a media file (video, image, or container) and return normalized metadata.
  *
  * Despite the legacy name `extractVideoMetadata` (still exported as a
@@ -897,6 +957,10 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
       merged.colorTransfer || merged.colorPrimaries || merged.colorSpace ? merged : null;
     const pixelFormat = videoStream.pix_fmt || "";
     const hasAlpha = videoStreamHasAlpha(videoStream);
+    const alphaDecoder = hasAlpha ? null : alphaDecoderFor(videoStream.codec_name);
+    const alphaPlaneDecoded = alphaDecoder
+      ? await probeDecodedAlphaPlane(filePath, alphaDecoder)
+      : undefined;
 
     const containerDuration = output?.format.duration ? parseFloat(output.format.duration) : 0;
     const streamDuration = videoStream.duration ? parseFloat(videoStream.duration) : 0;
@@ -941,6 +1005,7 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
       hasAudio: output?.streams.some((s) => s.codec_type === "audio") ?? false,
       isVFR,
       hasAlpha,
+      ...(alphaPlaneDecoded === undefined ? {} : { alphaPlaneDecoded }),
       colorSpace,
       colorRange: videoStream.color_range,
       pixelFormat,

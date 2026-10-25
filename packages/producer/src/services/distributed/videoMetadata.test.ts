@@ -120,6 +120,31 @@ describe("distributed video metadata", () => {
     expect(legacyParsed?.videoStreamLeadSeconds).toBe(0);
   });
 
+  it("keeps alphaPlaneDecoded when present and accepts plans without it", () => {
+    const withField = (alphaPlaneDecoded: unknown) =>
+      buildPlanVideosJson({
+        videos: [video()],
+        extracted: [
+          extractedMetadata({
+            metadata: {
+              ...extractedMetadata().metadata,
+              videoCodec: "vp9",
+              alphaPlaneDecoded,
+            } as PlanVideosJson["extracted"][number]["metadata"],
+          }),
+        ],
+        compositionEnd: 8,
+      });
+    const roundTrip = (plan: PlanVideosJson) =>
+      parsePlanVideosJson(JSON.parse(JSON.stringify(plan))).extracted[0]?.metadata;
+
+    expect(roundTrip(withField(false))?.alphaPlaneDecoded).toBe(false);
+    expect(roundTrip(withField(true))?.alphaPlaneDecoded).toBe(true);
+    const legacy = roundTrip(withField(undefined));
+    expect(legacy && "alphaPlaneDecoded" in legacy).toBe(false);
+    expect(() => withField("no")).toThrow(PlanVideosMetadataError);
+  });
+
   it.each([Number.NaN, Number.POSITIVE_INFINITY, 0, 2])(
     "fails closed when no safe composition boundary can be derived (%s)",
     (compositionEnd) => {
