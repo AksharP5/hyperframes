@@ -91,17 +91,6 @@
             "pages": [
               "prompting/overview",
               {
-                "group": "Level 1 — Your first video",
-                "pages": [
-                  "prompting/product-launch",
-                  "prompting/explainers",
-                  "prompting/code-and-prs",
-                  "prompting/captions-and-talking-heads",
-                  "prompting/music-and-slideshows",
-                  "prompting/motion-graphics"
-                ]
-              },
-              {
                 "group": "Level 2 — Control",
                 "pages": [
                   "prompting/anatomy",
@@ -1289,6 +1278,36 @@
     {
       "source": "/sdk/overview",
       "destination": "/sdk/quickstart",
+      "permanent": true
+    },
+    {
+      "source": "/prompting/product-launch",
+      "destination": "/guides/product-launch-video#prompts-that-work",
+      "permanent": true
+    },
+    {
+      "source": "/prompting/explainers",
+      "destination": "/guides/faceless-explainer#prompts-that-work",
+      "permanent": true
+    },
+    {
+      "source": "/prompting/code-and-prs",
+      "destination": "/guides/pr-to-video#prompts-that-work",
+      "permanent": true
+    },
+    {
+      "source": "/prompting/captions-and-talking-heads",
+      "destination": "/guides/captions-and-recuts#prompts-that-work",
+      "permanent": true
+    },
+    {
+      "source": "/prompting/music-and-slideshows",
+      "destination": "/guides/music-to-video#prompts-that-work",
+      "permanent": true
+    },
+    {
+      "source": "/prompting/motion-graphics",
+      "destination": "/guides/motion-graphics#prompts-that-work",
       "permanent": true
     }
   ],

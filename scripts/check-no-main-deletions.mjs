@@ -750,6 +750,30 @@ export const ALLOWED_DELETIONS = new Map([
     "the project screen page is built from recorded clips and posters; nothing links this still any more",
   ],
   [
+    "docs/prompting/captions-and-talking-heads.mdx",
+    "each Make guide now holds these prompts as its 'Prompts that work' section; the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/code-and-prs.mdx",
+    "each Make guide now holds these prompts as its 'Prompts that work' section; the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/explainers.mdx",
+    "each Make guide now holds these prompts as its 'Prompts that work' section; the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/motion-graphics.mdx",
+    "each Make guide now holds these prompts as its 'Prompts that work' section; the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/music-and-slideshows.mdx",
+    "each Make guide now holds these prompts as its 'Prompts that work' section; the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/product-launch.mdx",
+    "each Make guide now holds these prompts as its 'Prompts that work' section; the old URL 301s there (docs.json)",
+  ],
+  [
     "packages/studio/src/components/renders/useRenderQueueMotionBlur.test.tsx",
     "Studio no longer sends previewMotionBlur with renders: blur picks its tier from the page, so the test of that field goes with it",
   ],
