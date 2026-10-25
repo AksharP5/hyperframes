@@ -138,6 +138,19 @@ describe("history coalescing", () => {
 // ─── T3 override replay ───────────────────────────────────────────────────────
 
 describe("override-set replay on open", () => {
+  it.each([
+    { key: "hf-title.timing.bogus", value: 2 },
+    { key: "meta.fps", value: 30 },
+    { key: "style.foo", value: "x" },
+    { key: "future.element", value: { html: '<p data-hf-id="hf-extra">Extra</p>' } },
+    { key: "future.element", value: { siblingIndex: 0 } },
+  ])("ignores an unrecognized non-snapshot override: $key", async ({ key, value }) => {
+    const base = await openComposition(BASE_HTML);
+    const reopened = await openComposition(BASE_HTML, { overrides: { [key]: value } });
+
+    expect(reopened.serialize()).toBe(base.serialize());
+  });
+
   it.each([false, true])("replays edits with dotted IDs, scoped: %s", async (scoped) => {
     const title = '<h1 data-hf-id="hf-title.main" style="color:red" title="Original">Original</h1>';
     const html = `<div data-hf-id="hf-stage" data-hf-root>${

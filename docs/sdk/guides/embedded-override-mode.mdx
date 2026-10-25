@@ -83,6 +83,8 @@ Sub-composition elements use scoped IDs — `"hf-host/hf-leaf.text"` — where t
 
 Periods in an authored ID stay part of that ID: editing `hf-title.main` produces
 `"hf-title.main.text"`, which restores the edit to that same element when reopened.
+Non-null whole-element values must be snapshots returned by `getOverrides()`. Opening a
+delta skips scalar values and incomplete snapshots under whole-element keys.
 
 ### Font and image variable overrides
 
