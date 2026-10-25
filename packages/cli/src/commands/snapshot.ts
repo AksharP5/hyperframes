@@ -113,6 +113,7 @@ function orbitStageSource(): string {
  * clip (corrupt media, stalled network mount, codec edge case) cannot wedge
  * `hyperframes snapshot` indefinitely. */
 const FFMPEG_EXTRACT_TIMEOUT_MS = 30_000;
+const FALLBACK_SEEK_LEAD_SECONDS = 5;
 /** Each 4K decode is already multi-threaded, so a few at once fill the cores without exhausting memory. */
 const VIDEO_FRAME_EXTRACT_CONCURRENCY = 4;
 
@@ -346,8 +347,12 @@ export async function probeContainingSourceFrameSeek(
     if (again !== null && Math.abs(again - landed) < 1e-6)
       return { seek: landed, select: mid - landed };
   }
-  // No seek: the first frame FFmpeg emits is the first one at or after the file start.
-  return { select: mid - (timestamps.find((t) => t >= 0) ?? frame) };
+  // No usable keyframe landing: an accurate seek to the gap before the frame decodes up to it and drops the rest.
+  // An exact frame time keeps start_t at 0; a time between frames would shift the select by the gap to the next frame.
+  const from = timestamps.filter((t) => t > 0 && t <= mid - FALLBACK_SEEK_LEAD_SECONDS).at(-1) ?? 0;
+  return from > 0
+    ? { seek: from, select: mid - from }
+    : { select: mid - (timestamps.find((t) => t >= 0) ?? frame) };
 }
 
 /** Raw stream time of the packet an input seek to `seek` lands on, read without decoding. */
@@ -373,6 +378,8 @@ async function probeSeekLanding(
     return null;
   }
 }
+
+class FrameExtractTimeoutError extends Error {}
 
 export async function extractVideoFrameToBuffer(
   videoPath: string,
@@ -406,7 +413,12 @@ export async function extractVideoFrameToBuffer(
     if (filters.length > 0) args.push("-vf", filters.join(","));
     args.push("-frames:v", "1", "-q:v", "2", "-y", outPath);
     const result = await runFfmpegOnce(ffmpegPath, args, FFMPEG_EXTRACT_TIMEOUT_MS);
-    if (result.code !== 0 || result.timedOut || !existsSync(outPath)) return null;
+    if (result.timedOut) {
+      throw new FrameExtractTimeoutError(
+        `FFmpeg timed out after ${FFMPEG_EXTRACT_TIMEOUT_MS / 1000}s extracting the frame of ${videoPath} at ${timeSeconds.toFixed(2)}s`,
+      );
+    }
+    if (result.code !== 0 || !existsSync(outPath)) return null;
     return readFileSync(outPath);
   } finally {
     try {
@@ -414,6 +426,21 @@ export async function extractVideoFrameToBuffer(
     } catch {
       /* best-effort */
     }
+  }
+}
+
+/** A timed-out clip becomes a finding naming it, so the other frames of the snapshot still land. */
+export async function extractVideoFrameOrWarn(
+  warnings: string[],
+  ...args: Parameters<typeof extractVideoFrameToBuffer>
+): Promise<Buffer | null> {
+  try {
+    return await extractVideoFrameToBuffer(...args);
+  } catch (error) {
+    if (!(error instanceof FrameExtractTimeoutError)) throw error;
+    warnings.push(error.message);
+    console.warn(`   ${c.warn("⚠")} ${error.message}`);
+    return null;
   }
 }
 
@@ -862,7 +889,8 @@ async function captureSnapshots(
               const useVp9AlphaDecoder = inputIsLocal
                 ? await shouldUseVp9AlphaDecoder(ffmpegInput)
                 : false;
-              const png = await extractVideoFrameToBuffer(
+              const png = await extractVideoFrameOrWarn(
+                warnings,
                 ffmpegInput,
                 Math.max(0, v.relTime),
                 useVp9AlphaDecoder,
