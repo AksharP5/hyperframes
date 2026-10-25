@@ -13,6 +13,7 @@ import { parseHTML } from "linkedom";
 import AdmZip from "adm-zip";
 import ignore, { type Ignore } from "ignore";
 import { CSS_URL_RE, isNonRelativeUrl, isPathInside } from "@hyperframes/core";
+import { decodeUrlPathVariants, encodeUrlPath } from "@hyperframes/parsers";
 import { buildAuthHeaders } from "../auth/client.js";
 import { tryResolveCredential } from "../auth/index.js";
 import { isAuthError } from "../auth/errors.js";
@@ -434,14 +435,17 @@ function tryResolveExternal(
   referrerAbsDir: string,
 ): string | null {
   if (isNonRelativeUrl(rawPath)) return null;
-  const absPath = resolve(referrerAbsDir, rawPath);
-  if (isPathInside(absPath, ctx.absProjectDir)) return null;
-  try {
-    if (!existsSync(absPath) || !statSync(absPath).isFile()) return null;
-  } catch {
-    return null;
+  for (const path of decodeUrlPathVariants(rawPath)) {
+    const absPath = resolve(referrerAbsDir, path);
+    if (isPathInside(absPath, ctx.absProjectDir)) return null;
+    try {
+      if (!existsSync(absPath) || !statSync(absPath).isFile()) continue;
+    } catch {
+      continue;
+    }
+    return encodeUrlPath(addExternalAsset(ctx, absPath));
   }
-  return addExternalAsset(ctx, absPath);
+  return null;
 }
 
 /** Resolves a raw attribute or CSS `url()` value to the archive path or absolute

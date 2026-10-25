@@ -130,7 +130,9 @@ immediately, update an existing link, or publish into a shared space.
 
 A local video poster referenced with a relative path, such as
 `../shared/poster.png`, is copied into the published project even when it lives
-outside the project directory.
+outside the project directory. Percent-encoded paths work too, such as
+`../shared/poster%20art.svg` for `poster art.svg` or
+`../shared/%E5%B0%81%E9%9D%A2.svg` for `封面.svg`.
 
 Before sharing source, remove secrets and confirm that every included media file
 can be shared. Tell a reviewer whether you need feedback on story, visuals,
