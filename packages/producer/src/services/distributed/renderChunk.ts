@@ -746,6 +746,7 @@ export async function renderChunk(
     // (boot, warmup, hash, IO) vs frame-proportional work. Consumed from the
     // perf sidecar / ChunkResult by the orchestration's telemetry.
     let sessionBootMs = 0;
+    let videoExtractMs = 0;
     let captureStageMs = 0;
     let encodeStageMs = 0;
     let captureMode: CaptureMode | undefined;
@@ -833,6 +834,7 @@ export async function renderChunk(
       // its own injector hook because the hook remembers the last injected frame
       // per video; sharing that state across a fresh retry page can suppress the
       // first injection and produce a blank/stale frame.
+      const extractStarted = Date.now();
       const deferredVideoFrames = planVideos
         ? extractDeferredVideoFramesForChunk({
             planDir,
@@ -843,6 +845,9 @@ export async function renderChunk(
             cfg,
             remoteSources,
             shownBoxes,
+          }).then((frames) => {
+            videoExtractMs = Date.now() - extractStarted;
+            return frames;
           })
         : Promise.resolve([]);
       extraction = deferredVideoFrames;
@@ -1096,6 +1101,8 @@ export async function renderChunk(
       sessionBootMs,
       captureStageMs,
       encodeStageMs,
+      // Wall time of the chunk's own video frame extraction; it overlaps captureStageMs, so do not add them.
+      videoExtractMs,
       workers: chunkWorkerCount,
       captureMode,
       // Device-pixel box each video's frames were extracted to cover; a video not listed kept full size.
