@@ -15,6 +15,7 @@ vi.mock("os", async (importOriginal) => ({
 
 const { extractAllVideoFrames, extractVideoFramesRange } = await import("./videoFrameExtractor.js");
 const { extractMediaMetadata } = await import("../utils/ffprobe.js");
+const { isFfmpegFilterAvailable } = await import("../utils/psnrFilterAvailability.js");
 
 describe.skipIf(process.platform === "win32")("extractAllVideoFrames ffmpeg concurrency", () => {
   const dir = mkdtempSync(join(tmpdir(), "hf-extract-concurrency-"));
@@ -124,6 +125,8 @@ describe.skipIf(process.platform === "win32")("extractAllVideoFrames ffmpeg conc
       );
       const run = join(dir, "tonemap");
       mkdirSync(join(run, "running"), { recursive: true });
+      // macOS checks for zscale once per process; take that check before the shim counts runs.
+      await isFfmpegFilterAvailable("zscale");
       process.env.HF_TEST_SHIM_DIR = run;
       process.env[FFMPEG_PATH_ENV] = shim;
       try {
