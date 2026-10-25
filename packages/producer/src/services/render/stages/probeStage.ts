@@ -401,6 +401,7 @@ export async function runProbeStage(input: ProbeStageInput): Promise<ProbeStageR
         height,
         fps: job.config.fps,
         format: captureFormat,
+        transparent: needsAlpha,
         quality:
           captureFormat === "png" ? undefined : resolveCaptureJpegQuality(job.config.quality),
         variables: job.config.variables,

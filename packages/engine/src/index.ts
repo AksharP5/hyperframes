@@ -170,6 +170,7 @@ export {
   cdpSessionCache,
   probeBeginFrameLiveness,
   initTransparentBackground,
+  capturesAlpha,
   captureAlphaPng,
   applyDomLayerMask,
   removeDomLayerMask,

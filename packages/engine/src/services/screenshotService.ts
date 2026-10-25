@@ -284,6 +284,11 @@ export async function captureScreenshotWithAlpha(
  * [data-composition-id] roots (nested too) keep their background unless clearCompositionRoot (HDR layered pass).
  * A repeat call rewrites the rule, so the last call wins.
  */
+/** Whether frames must carry alpha. PNG alone does not imply it: motion blur captures opaque output as PNG. */
+export function capturesAlpha(options: Pick<CaptureOptions, "format" | "transparent">): boolean {
+  return options.transparent ?? options.format === "png";
+}
+
 const TRANSPARENT_BG_STYLE_ID = "__hf_transparent_bg__";
 
 export async function initTransparentBackground(
