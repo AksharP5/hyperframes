@@ -36,6 +36,11 @@ import { collectTweenRecords, findTweenTails, tweenTailMessage } from "./gsapTwe
 import { resolveAutoProxy } from "./projectConfig.js";
 import { findStageProxyBox } from "./compositionViewport.js";
 import type { PreviewProxyBox } from "@hyperframes/core";
+import { injectTagsAtHeadStart } from "@hyperframes/core/compiler/html-document";
+import {
+  STUDIO_PREVIEW_CAPTURE_MODE,
+  STUDIO_PREVIEW_MARK_META,
+} from "@hyperframes/core/studio-preview-mark";
 import {
   decideMediaProxyEligibility,
   proxyVariantFor,
@@ -254,6 +259,15 @@ function proxyFailedDraft(message: string): RuntimeDraft {
   return { code: "media_proxy_failed", severity: "warning", message, time: 0 };
 }
 
+/** Studio's capture mode loads only media near the playhead, so a long project's decoders cannot exhaust memory. */
+async function loadCheckHtml(dir: string): Promise<string> {
+  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
+  return injectTagsAtHeadStart(
+    await bundleWithLocalizedFonts(dir),
+    `<meta name="${STUDIO_PREVIEW_MARK_META}" content="${STUDIO_PREVIEW_CAPTURE_MODE}">`,
+  );
+}
+
 export async function runBrowserCheck(
   project: ProjectDir,
   options: CheckOptions,
@@ -262,8 +276,7 @@ export async function runBrowserCheck(
   deadline?: CheckDeadline,
   prelaunched?: PrelaunchedBrowser,
 ): Promise<CheckBrowserResult> {
-  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
-  const html = await bundleWithLocalizedFonts(project.dir);
+  const html = await loadCheckHtml(project.dir);
   deadline?.enter("copies");
   const { findings: drafts, failedPaths } = await preResolveHostileMediaProxies(
     project.dir,
@@ -496,8 +509,7 @@ export async function captureFindingCrops(
   deadline?: CheckDeadline,
 ): Promise<string[]> {
   if (requests.length === 0) return [];
-  const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
-  const html = await bundleWithLocalizedFonts(project.dir);
+  const html = await loadCheckHtml(project.dir);
   const server = await serveStaticProjectHtml(
     project.dir,
     html,
@@ -778,12 +790,37 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], clock: Runtime
   });
 }
 
+/**
+ * A crashed or closed page never settles the calls pending on it, so a check waiting on one runs to
+ * its deadline; every driver call settles with the page's death instead.
+ */
+function failWhenPageDies(page: Page, driver: CheckAuditDriver): CheckAuditDriver {
+  const dead = new Promise<never>((_, reject) => {
+    page.on("error", (error) =>
+      reject(new Error(`The page crashed: ${normalizeErrorMessage(error)}`)),
+    );
+    page.on("close", () => reject(new Error("The page closed before the check finished")));
+  });
+  dead.catch(() => undefined);
+  return Object.fromEntries(
+    Object.entries(driver).map(([name, member]) => [
+      name,
+      typeof member === "function"
+        ? (...args: unknown[]) => {
+            const result: unknown = Reflect.apply(member, driver, args);
+            return result instanceof Promise ? Promise.race([result, dead]) : result;
+          }
+        : member,
+    ]),
+  ) as unknown as CheckAuditDriver;
+}
+
 export function createPageDriver(
   page: Page,
   clock: RuntimeClock = createRuntimeClock(),
   sampleLog?: SampleWindow,
 ): CheckAuditDriver {
-  return {
+  return failWhenPageDies(page, {
     initialize: (contrast) => injectAuditScripts(page, contrast),
     markSamples: (phase) => {
       if (!sampleLog) return;
@@ -839,7 +876,7 @@ export function createPageDriver(
     collectContrast: (time, annotations) => collectContrast(page, time, annotations),
     collectCraftFrame: (time) => collectCraftFrame(page, time),
     collectCraftFilm: () => collectCraftFilm(page),
-  };
+  });
 }
 
 async function collectCraftFrame(page: Page, time: number): Promise<CraftFrame> {

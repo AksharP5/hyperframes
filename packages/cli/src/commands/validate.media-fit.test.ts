@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import { analyzeClipMediaFit } from "@hyperframes/engine";
 import type { Page } from "puppeteer-core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { auditClipDurations } from "./validate.js";
 
 afterEach(() => {
   document.body.innerHTML = "";
+  vi.unstubAllGlobals();
 });
 
 async function auditAudio(attributes: string, sourceDuration: number) {
@@ -73,5 +74,29 @@ describe("audio slot fit at the authored playback speed", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.text).toContain(`Audio "voice" is ${expected}s`);
     expect(warnings[0]?.text).toContain(`Set data-duration to ~${expected}s`);
+  });
+});
+
+describe("audio the page never loaded", () => {
+  it("reads its duration from a detached element on the same source", async () => {
+    class Probe extends EventTarget {
+      preload = "";
+      duration = 3;
+      set src(_url: string) {
+        queueMicrotask(() => this.dispatchEvent(new Event("loadedmetadata")));
+      }
+    }
+    vi.stubGlobal("Audio", Probe);
+    document.body.innerHTML = '<audio id="voice" src="voice.mp3" data-duration="5"></audio>';
+    const evaluate: Page["evaluate"] = async (fn, ...args) => {
+      if (typeof fn !== "function") throw new Error("Expected a browser function");
+      return window.eval(`(${fn.toString()})`)(...args);
+    };
+
+    const warnings = await auditClipDurations({ evaluate }, analyzeClipMediaFit, 0);
+
+    expect(warnings.map((warning) => warning.text)).toEqual([
+      expect.stringContaining('Audio "voice" is 3.00s'),
+    ]);
   });
 });

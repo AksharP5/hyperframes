@@ -213,12 +213,16 @@ it("carries raw browser geometry through the page driver and pipeline", async ()
 it("splits the samples over a second Chrome and reports what one Chrome reports", async () => {
   mountCanvasFixture(`<p id="copy" data-layout-name="copy">Hi</p>`);
   type Message = ReturnType<typeof fakeConsoleMessage>;
-  const run = async (cores: number, helper: "works" | "crashes" | "never opens" = "works") => {
+  const run = async (
+    cores: number,
+    helper: "works" | "crashes" | "hangs after crashing" | "never opens" = "works",
+  ) => {
     vi.mocked(os.availableParallelism).mockReturnValue(cores);
     let helperSeeks = 0;
     const pages: ReturnType<typeof fakePage>[] = [];
     const helperPages = new Set<unknown>();
     const handlers = new Map<unknown, ((message: Message) => void)[]>();
+    const errorHandlers = new Map<unknown, ((error: Error) => void)[]>();
     const log = (page: unknown, text: string) =>
       handlers.get(page)?.forEach((handler) => handler(fakeConsoleMessage("error", text)));
     const browser = Object.assign(Object.create(null), {
@@ -230,6 +234,8 @@ it("splits the samples over a second Chrome and reports what one Chrome reports"
         const page = fakePage();
         page.on = vi.fn((event: string, handler: (message: Message) => void) => {
           if (event === "console") handlers.set(page, [...(handlers.get(page) ?? []), handler]);
+          if (event === "error")
+            errorHandlers.set(page, [...(errorHandlers.get(page) ?? []), handler as never]);
         });
         const opened = pages.push(page);
         // Only the first page's open takes prelaunched Chromes.
@@ -246,6 +252,12 @@ it("splits the samples over a second Chrome and reports what one Chrome reports"
       if (helperPages.has(page) && helper === "crashes" && ++helperSeeks === 2) {
         log(page, "renderer crashed");
         throw new Error("Target closed");
+      }
+      // A crashed puppeteer page emits "error" and leaves the call pending for good.
+      if (helperPages.has(page) && helper === "hangs after crashing" && ++helperSeeks === 2) {
+        log(page, "renderer crashed");
+        errorHandlers.get(page)?.forEach((handler) => handler(new Error("Page crashed!")));
+        return new Promise<never>(() => undefined);
       }
       log(page, `seeked to ${time}`);
     });
@@ -280,6 +292,10 @@ it("splits the samples over a second Chrome and reports what one Chrome reports"
   expect(crashed.seekingPages).toBe(2);
   expect(loads(crashed.messages)).toHaveLength(1);
   expect(sampled(crashed.messages)).toEqual(sampled(serial.messages));
+  const hung = await run(4, "hangs after crashing");
+  expect(hung.seekingPages).toBe(2);
+  expect(loads(hung.messages)).toHaveLength(1);
+  expect(sampled(hung.messages)).toEqual(sampled(serial.messages));
   const unopened = await run(4, "never opens");
   expect(unopened.pages).toHaveLength(2);
   expect(unopened.seekingPages).toBe(1);
@@ -429,7 +445,7 @@ it("measures text on its own opaque fill without a contrast screenshot", async (
   expect(page.screenshot).not.toHaveBeenCalled();
 });
 
-it("uses check --timeout for both navigation and render-ready settling", async () => {
+it("uses check --timeout for both navigation and render-ready settling, and loads media near the playhead", async () => {
   mountCanvasFixture();
   const page = fakePage();
   installSessionMock(page);
@@ -442,13 +458,44 @@ it("uses check --timeout for both navigation and render-ready settling", async (
   );
 
   expect(openSettledCompositionPage).toHaveBeenCalledWith(
-    "<html></html>",
+    expect.stringMatching(
+      /<meta name="hyperframes-studio-preview" content="capture">[\s\S]*<html>/,
+    ),
     "http://127.0.0.1:3000",
     expect.objectContaining({
       navigationTimeoutMs: 30_000,
       renderReadyTimeoutMs: 30_000,
     }),
   );
+});
+
+it("fails at once when the page crashes, instead of waiting out the deadline", async () => {
+  mountCanvasFixture(`<p id="copy" data-layout-name="copy">Hi</p>`);
+  const page = fakePage();
+  const onError: Array<(error: Error) => void> = [];
+  page.on = vi.fn((event: string, handler: (error: Error) => void) => {
+    if (event === "error") onError.push(handler);
+  });
+  installSessionMock(page);
+  // A crashed puppeteer page emits "error" and leaves the call pending for good.
+  vi.mocked(seekCompositionTimeline).mockImplementation(async () => {
+    for (const handler of onError) handler(new Error("Page crashed!"));
+    return new Promise<never>(() => undefined);
+  });
+
+  try {
+    await expect(
+      runBrowserCheck(
+        PROJECT,
+        { ...DEFAULT_CHECK_OPTIONS, contrast: false },
+        { kind: "none" },
+        runAuditGrid,
+      ),
+    ).rejects.toThrow("The page crashed: Page crashed!");
+  } finally {
+    // clearAllMocks keeps implementations, and a seek that never settles would hang every later test.
+    vi.mocked(seekCompositionTimeline).mockImplementation(async () => undefined);
+  }
 });
 
 it("round-trips the browser script's raw contrast candidates back into finish", async () => {

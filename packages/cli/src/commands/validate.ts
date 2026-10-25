@@ -164,21 +164,32 @@ export async function auditClipDurations(
     // snapshot. Elements that already have a duration resolve immediately, so
     // this adds no latency in the common case.
     const deadline = Date.now() + maxWaitMs;
+    // A page that defers media (check's) never loads an off-screen element, so its duration is read
+    // from a detached element on the same source instead.
+    const reads = new Map<HTMLMediaElement, HTMLMediaElement>();
     await Promise.all(
       nodes.map((el) => {
         if (Number.isFinite(el.duration) && el.duration > 0) return Promise.resolve();
+        const probe = new Audio();
+        probe.preload = "metadata";
+        probe.src = el.currentSrc || el.src || el.querySelector("source")?.src || "";
+        reads.set(el, probe);
         return new Promise<void>((resolve) => {
           const cleanup = () => {
-            el.removeEventListener("loadedmetadata", onReady);
-            el.removeEventListener("error", onReady);
+            for (const target of [el, probe]) {
+              target.removeEventListener("loadedmetadata", onReady);
+              target.removeEventListener("error", onReady);
+            }
             clearTimeout(timer);
           };
           const onReady = () => {
             cleanup();
             resolve();
           };
-          el.addEventListener("loadedmetadata", onReady, { once: true });
-          el.addEventListener("error", onReady, { once: true });
+          for (const target of [el, probe]) {
+            target.addEventListener("loadedmetadata", onReady, { once: true });
+            target.addEventListener("error", onReady, { once: true });
+          }
           const timer = setTimeout(onReady, Math.max(0, deadline - Date.now()));
         });
       }),
@@ -205,7 +216,9 @@ export async function auditClipDurations(
           "data-playback-rate": el.getAttribute("data-playback-rate"),
           "data-automation": el.getAttribute("data-automation"),
         },
-        duration: el.duration,
+        duration: Number.isFinite(el.duration)
+          ? el.duration
+          : (reads.get(el)?.duration ?? Number.NaN),
         loop: el.loop || el.getAttribute("data-loop") === "true",
       });
     }
