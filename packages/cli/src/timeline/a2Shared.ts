@@ -462,6 +462,7 @@ function duplicateMutation(
     context.resolved.target,
     `${splitBaseId(context.row)}-copy`,
     time.seconds,
+    context.row.duration,
   );
   if (!duplicate.matched) {
     return { ok: false, reason: `${context.ref} was not found`, fix: "choose an existing clip" };
