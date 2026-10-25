@@ -90,8 +90,18 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function isProduction(): boolean {
+  try {
+    return process.env.NODE_ENV === "production";
+  } catch {
+    return false; // no process in a browser without a bundler define
+  }
+}
+
 class CompositionImpl implements Composition {
-  private readonly parsed: ParsedDocument;
+  private parsedDoc: ParsedDocument;
+  private disposed = false;
+  private warnedDisposedRead = false;
   private readonly persist: PersistAdapter | undefined;
   readonly preview: PreviewAdapter | undefined;
 
@@ -137,7 +147,7 @@ class CompositionImpl implements Composition {
     opts: OpenCompositionOptions,
     baseVariableDefaults: Record<string, unknown> = {},
   ) {
-    this.parsed = parsed;
+    this.parsedDoc = parsed;
     this.persist = opts.persist;
     this.preview = opts.preview;
     this.overrides = { ...(opts.overrides ?? {}) };
@@ -879,6 +889,20 @@ class CompositionImpl implements Composition {
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
+  /** The single read path; a read after dispose means a stale reference is still in use. */
+  private get parsed(): ParsedDocument {
+    if (this.disposed) this.warnDisposedRead();
+    return this.parsedDoc;
+  }
+
+  private warnDisposedRead(): void {
+    if (this.warnedDisposedRead || isProduction()) return;
+    this.warnedDisposedRead = true;
+    console.warn(
+      `[hyperframes] a disposed Composition was read and answered from an empty document; something still holds the stale session.\n${new Error().stack}`,
+    );
+  }
+
   async flush(): Promise<void> {
     await this.persistQueueModule?.flush();
   }
@@ -894,6 +918,12 @@ class CompositionImpl implements Composition {
     this.selectionHandlers = [];
     this.patchHandlers = [];
     this.errorHandlers = [];
+    // A disposed session is still referenced by stale closures; without this each
+    // one keeps its whole parsed document alive.
+    this.elementsCache = null;
+    this.rootsCache = null;
+    if (!this.disposed) this.parsedDoc = parseMutable("");
+    this.disposed = true;
   }
 }
 
