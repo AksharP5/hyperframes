@@ -65,6 +65,7 @@ import { readDeclaredDefaults } from "../runtime/getVariables";
 import {
   ensureExternalLinkTag,
   inlineSubCompositions,
+  isLibraryCopy,
   refuseSwapsReachedByRootScripts,
 } from "./inlineSubCompositions";
 import { isSafePath, resolveWithinProject } from "../safePath.js";
@@ -1179,7 +1180,8 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
       ].map((el) => {
         const src = el.getAttribute("src");
         const path = src && isRelativeUrl(src) ? resolveEntryUrl(src) : null;
-        return src ? (path && safeReadFile(path)) || "" : el.textContent || "";
+        const text = src ? (path && safeReadFile(path)) || "" : el.textContent || "";
+        return isLibraryCopy(text) ? "" : text;
       })
     : [];
 
@@ -1218,6 +1220,10 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
     },
     flattenInnerRoot: prepareFlattenedInnerRoot,
     tagScenes: options?.sceneParts === true,
+    readProjectScript: (path: string) => {
+      const resolved = isRelativeUrl(path) ? resolveEntryUrl(path) : null;
+      return resolved ? safeReadFile(resolved) : null;
+    },
     readVariableDefaults: readDeclaredDefaults,
     parseHostVariables: parseHostVariableValues,
     buildScopeSelector: (compId: string) => cssAttributeSelector("data-composition-id", compId),
@@ -1241,6 +1247,10 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
     ...subCompResult.variablesByComp,
   };
   const seenCompScriptSrcs = new Set<string>();
+  const scenesBySrc = new Map<string, Set<string | undefined>>();
+  for (const item of subCompResult.scriptItems)
+    if (item.kind !== "inline")
+      scenesBySrc.set(item.src, (scenesBySrc.get(item.src) ?? new Set()).add(item.scene));
   for (const scriptItem of subCompResult.scriptItems) {
     if (scriptItem.kind === "inline") {
       pushRun(scriptRuns, scriptItem.scene, scriptItem.content);
@@ -1254,13 +1264,15 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
     }
     if (seenCompScriptSrcs.has(extSrc)) continue;
     seenCompScriptSrcs.add(extSrc);
+    // Run once for the film when scenes share it: a scene mounts without the one that loaded it first.
+    const scene = (scenesBySrc.get(extSrc)?.size ?? 0) > 1 ? undefined : scriptItem.scene;
     if (isRelativeUrl(extSrc) && scriptItem.type !== "module") {
       const jsPath = resolveEntryUrl(extSrc);
       const js = jsPath ? safeReadFile(jsPath) : null;
       if (js != null) {
         const chunk = () =>
           preserveLocalScriptIntegrity(document, extSrc, resolveEntryUrl) ? "" : js;
-        pushRun(scriptRuns, scriptItem.scene, chunk);
+        pushRun(scriptRuns, scene, chunk);
         continue;
       }
     }

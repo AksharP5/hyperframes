@@ -3559,9 +3559,8 @@ describe("bundleToSingleHtml sceneParts", () => {
       "its script uses addEventListener",
     );
     expect(host("b")?.hasAttribute("data-hf-scene-no-swap")).toBe(false);
-    expect(host("c")?.getAttribute("data-hf-scene-no-swap")).toBe(
-      "it runs a script that is not a known library",
-    );
+    // A project file is read and held to the rules of an inline script.
+    expect(host("c")?.getAttribute("data-hf-scene-no-swap")).toBe("its script uses .animate(");
     // The root loading the same URL does not make a scene's own initializer a library.
     expect(host("d")?.getAttribute("data-hf-scene-no-swap")).toBe(
       "it runs a script that is not a known library",
@@ -3575,6 +3574,179 @@ describe("bundleToSingleHtml sceneParts", () => {
     );
     const rendered = await bundleToSingleHtml(dir);
     expect(parseHTML(rendered).document.querySelector("[data-hf-scene-no-swap]")).toBeNull();
+  });
+
+  it("lets a scene load a project helper and wait for fonts, and refuses anything else either leaves pending", async () => {
+    const scenes: Record<string, string> = {
+      helper: `<script src="../lib/helper.js"></script><script>window.__timelines.helper = window.build("helper");</script>`,
+      fontsThen: `<script>document.fonts.ready.then(() => window.fit("fontsThen"));</script>`,
+      fontsAwait: `<script>(async () => { await document.fonts.ready; window.fit("fontsAwait"); })();</script>`,
+      timerHelper: `<script src="../lib/ticker.js"></script>`,
+      missingHelper: `<script src="../lib/gone.js"></script>`,
+      fetchThen: `<script>fetch("data.json").then((r) => r.json());</script>`,
+      otherAwait: `<script>(async () => { await document.fonts.ready; await window.load(); })();</script>`,
+      promise: `<script>new Promise((done) => done()).then(() => {});</script>`,
+    };
+    const names = Object.keys(scenes);
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="2">
+    ${names.map((n) => `<div data-composition-id="${n}" data-composition-src="compositions/${n}.html" data-start="0" data-duration="2"></div>`).join("\n")}
+  </div></body></html>`,
+      "lib/helper.js": `window.build = function (id) { var tl = gsap.timeline({ paused: true }); tl.to(document.querySelector('[data-composition-id="' + id + '"] p'), { x: 1 }); return tl; };`,
+      "lib/ticker.js": `setInterval(function () {}, 100);`,
+      ...Object.fromEntries(
+        names.map((n) => [
+          `compositions/${n}.html`,
+          `<template id="${n}-template"><div data-composition-id="${n}"><p>${n}</p>${scenes[n]}</div></template>`,
+        ]),
+      ),
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const refusals = Object.fromEntries(
+      names.map((n) => [
+        n,
+        doc.querySelector(`div[data-hf-scene="${n}"]`)?.getAttribute("data-hf-scene-no-swap") ??
+          null,
+      ]),
+    );
+    expect(refusals).toEqual({
+      helper: null,
+      fontsThen: null,
+      fontsAwait: null,
+      timerHelper: "its script uses setInterval",
+      missingHelper: "it runs a script that is not a known library",
+      fetchThen: "its script uses fetch",
+      otherAwait: "its script uses async",
+      promise: "its script uses Promise",
+    });
+  });
+
+  it("runs a helper scenes share once for the film, so a scene mounts without the one that loaded it first", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="4">
+    <div data-composition-id="late" data-composition-src="compositions/late.html" data-start="2" data-duration="2"></div>
+    <div data-composition-id="early" data-composition-src="compositions/early.html" data-start="0" data-duration="2"></div>
+  </div></body></html>`,
+      "lib/kit.js": `window.Kit = { build: function (id) { return id; } };`,
+      "lib/own.js": `window.Own = 1;`,
+      "compositions/late.html": `<template id="late-template"><div data-composition-id="late"><p>late</p><script src="../lib/kit.js"></script><script src="../lib/own.js"></script><script>window.Kit.build("late");</script></div></template>`,
+      "compositions/early.html": `<template id="early-template"><div data-composition-id="early"><p>early</p><script src="../lib/kit.js"></script><script>window.Kit.build("early");</script></div></template>`,
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const texts = (selector: string) =>
+      [...doc.querySelectorAll(selector)].map((el) => el.textContent ?? "").join("\n");
+    const film = texts("script:not([data-hf-scene])");
+    expect(film.match(/window\.Kit =/g)).toHaveLength(1);
+    expect(texts('script[data-hf-scene="late"]')).toContain("window.Own = 1");
+    expect(texts("script[data-hf-scene]")).not.toContain("window.Kit =");
+    const rendered = parseHTML(await bundleToSingleHtml(dir)).document.documentElement.outerHTML;
+    expect(rendered.match(/window\.Kit =/g)).toHaveLength(1);
+  });
+
+  it("treats a GSAP file copied into the project as the library, at the root and in a scene, and no other file", async () => {
+    const gsapCopy = `/*!\n * GSAP 3.14.2\n * https://gsap.com\n */\nwindow.gsap = { all: "*" }; requestAnimationFrame(() => {});`;
+    const project = (file: string) =>
+      makeTempProject({
+        "index.html": `<!doctype html><html><head><script src="vendor/${file}"></script></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="2">
+    <div data-composition-id="a" data-composition-src="compositions/a.html" data-start="0" data-duration="1"></div>
+    <div data-composition-id="b" data-composition-src="compositions/b.html" data-start="1" data-duration="1"></div>
+  </div></body></html>`,
+        [`vendor/${file}`]:
+          file === "gsap.min.js" ? gsapCopy : gsapCopy.replace("GSAP 3.14.2", "Helpers 1.0.0"),
+        "compositions/a.html": `<template id="a-template"><div data-composition-id="a"><p>A</p><script src="../vendor/${file}"></script></div></template>`,
+        "compositions/b.html": `<template id="b-template"><div data-composition-id="b"><p>B</p></div></template>`,
+      });
+    const marks = async (dir: string) => {
+      const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+      return ["a", "b"].map(
+        (id) =>
+          doc.querySelector(`div[data-hf-scene="${id}"]`)?.getAttribute("data-hf-scene-no-swap") ??
+          null,
+      );
+    };
+    expect(await marks(project("gsap.min.js"))).toEqual([null, null]);
+    expect(await marks(project("helpers.js"))).toEqual([
+      "its script uses requestAnimationFrame",
+      "a script outside the scene selects *",
+    ]);
+  });
+
+  it("lets a scene measure text on an unattached canvas, chain a timeline into the registry, call its own animate and wait on font loads, and nothing more", async () => {
+    const measure = `let ctx = null; window.measure = (s) => { if (!ctx) { ctx = document.createElement("canvas").getContext("2d"); } ctx.font = "800 46px Outfit"; return ctx.measureText(s).width; };`;
+    const scenes: Record<string, string> = {
+      measureCanvas: `<script>${measure}</script>`,
+      ownAnimate: `<script>const built = { animate(t) { return t; } }; window.step = (t) => built.animate(t);</script>`,
+      fontLoads: `<script>Promise.all([document.fonts.load("800 46px Outfit"), document.fonts.load('112px "Gochi Hand"')]).then(window.build, window.build);</script>`,
+      fontLoadThen: `<script>document.fonts.load("700 30px Outfit").then(() => window.fit("fontLoadThen"));</script>`,
+      fontLoadAwait: `<script>(async () => { await document.fonts.load("700 30px Outfit"); window.fit("fontLoadAwait"); })();</script>`,
+      namedCanvas: `<script>const c = document.createElement("canvas"); c.getContext("2d");</script>`,
+      canvasBack: `<script>const x = document.createElement("canvas").getContext("2d"); window.keep = x.canvas;</script>`,
+      drawOnStage: `<script>const g = document.querySelector("canvas").getContext('2d'); g.fillRect(0, 0, 4, 4);</script>`,
+      registeredChain: `<script>const clock = { t: 0 }; window.__timelines["registeredChain"] = gsap.timeline({ paused: true, onUpdate: () => draw(clock.t) }).to(clock, { t: 2, duration: 2, ease: "none" });</script>`,
+      registeredChainByKey: `<script>const clock = { t: 0 }; __timelines[doc.scene_id] = gsap.timeline({ paused: true }).to(clock, { t: 2 });</script>`,
+      unregisteredChain: `<script>gsap.timeline().to(window.__sharedState, { x: 1 });</script>`,
+      chainKeptAside: `<script>const tl = gsap.timeline({ paused: true }).to({ t: 0 }, { t: 1 }); window.__timelines["chainKeptAside"] = tl;</script>`,
+      registeredChainAndTween: `<script>window.__timelines["registeredChainAndTween"] = gsap.timeline().to({}, { x: 1 }); gsap.to(window.__shared, { x: 1 });</script>`,
+      webglCanvas: `<script>document.createElement("canvas").getContext("webgl");</script>`,
+      webgl2Canvas: `<script>document.querySelector("canvas").getContext("webgl2");</script>`,
+      experimentalWebgl: `<script>document.querySelector("canvas").getContext("experimental-webgl");</script>`,
+      webgpuCanvas: `<script>document.querySelector("canvas").getContext("webgpu");</script>`,
+      bitmapCanvas: `<script>document.querySelector("canvas").getContext("bitmaprenderer");</script>`,
+      dynamicContext: `<script>document.querySelector("canvas").getContext(window.kind);</script>`,
+      browserAnimate: `<script>document.querySelector("p").animate([{ opacity: 0 }], { duration: 1000 });</script>`,
+      spreadAnimate: `<script>document.querySelector("p").animate(...window.frames);</script>`,
+      otherPromise: `<script>Promise.all([fetch("a.json")]).then(() => {});</script>`,
+      dynamicFontLoad: `<script>document.fonts.load(window.face).then(() => {});</script>`,
+    };
+    const names = Object.keys(scenes);
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head></head><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-duration="2">
+    ${names.map((n) => `<div data-composition-id="${n}" data-composition-src="compositions/${n}.html" data-start="0" data-duration="2"></div>`).join("\n")}
+  </div></body></html>`,
+      ...Object.fromEntries(
+        names.map((n) => [
+          `compositions/${n}.html`,
+          `<template id="${n}-template"><div data-composition-id="${n}"><p>${n}</p><canvas></canvas>${scenes[n]}</div></template>`,
+        ]),
+      ),
+    });
+    const doc = parseHTML(await bundleToSingleHtml(dir, { sceneParts: true })).document;
+    const refusals = Object.fromEntries(
+      names.map((n) => [
+        n,
+        doc.querySelector(`div[data-hf-scene="${n}"]`)?.getAttribute("data-hf-scene-no-swap") ??
+          null,
+      ]),
+    );
+    expect(refusals).toEqual({
+      measureCanvas: null,
+      ownAnimate: null,
+      fontLoads: null,
+      fontLoadThen: null,
+      fontLoadAwait: null,
+      namedCanvas: "its script uses getContext",
+      canvasBack: "its script uses getContext",
+      drawOnStage: "its script uses getContext",
+      registeredChain: null,
+      registeredChainByKey: null,
+      unregisteredChain: "its script uses gsap.timeline().to(",
+      chainKeptAside: "its script uses gsap.timeline({ paused: true }).to(",
+      registeredChainAndTween: "its script uses gsap.to(",
+      webglCanvas: "its script uses getContext",
+      webgl2Canvas: "its script uses getContext",
+      experimentalWebgl: "its script uses getContext",
+      webgpuCanvas: "its script uses getContext",
+      bitmapCanvas: "its script uses getContext",
+      dynamicContext: "its script uses getContext",
+      browserAnimate: "its script uses .animate(",
+      spreadAnimate: "its script uses .animate(",
+      otherPromise: "its script uses Promise",
+      dynamicFontLoad: "its script uses .then(",
+    });
   });
 
   const rootProject = (root: string, extra: Record<string, string> = {}) =>

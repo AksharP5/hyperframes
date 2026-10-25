@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { bundleToSingleHtml } from "@hyperframes/core/compiler";
+import { addScenePartsManifest, bundleToSingleHtml } from "@hyperframes/core/compiler";
 import { resolve } from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer";
 import type {} from "../../../core/src/runtime/window";
@@ -14,6 +14,25 @@ import {
 const RUNTIME_PATH = resolve(import.meta.dirname, "../../../core/dist/hyperframe.runtime.iife.js");
 const PNG_1PX =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+
+// A tenth of a second of 8 kHz, 8-bit mono silence.
+function silentWav(): Buffer {
+  const samples = 800;
+  const wav = Buffer.alloc(44 + samples, 128);
+  wav.write("RIFF", 0);
+  wav.writeUInt32LE(36 + samples, 4);
+  wav.write("WAVEfmt ", 8);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24);
+  wav.writeUInt32LE(8000, 28);
+  wav.writeUInt16LE(1, 32);
+  wav.writeUInt16LE(8, 34);
+  wav.write("data", 36);
+  wav.writeUInt32LE(samples, 40);
+  return wav;
+}
 
 describe("core runtime browser contract", () => {
   let browser: Browser;
@@ -1418,6 +1437,291 @@ describe("core runtime browser contract", () => {
     },
     30_000,
   );
+
+  it.each([true, false])(
+    "skips rendering preview scenes far from the playhead, measuring them unchanged (scene parts: %s)",
+    async (sceneParts) => {
+      const dir = mkdtempSync(resolve(tmpdir(), "far-scenes-browser-"));
+      const scenePage = await browser.newPage();
+      try {
+        // Content-sized hosts, so a skipped one that lost its size would shrink what it holds.
+        const hosts = [0, 1, 2, 3, 4]
+          .map(
+            (i) =>
+              `<div data-composition-id="s${i}" data-composition-src="s${i}.html" data-start="${2 * i}" data-duration="2" style="position:absolute;top:${30 * i}px"></div>`,
+          )
+          .join("");
+        writeFileSync(
+          resolve(dir, "index.html"),
+          `<!doctype html><html><body><div data-composition-id="main" data-duration="10" data-width="320" data-height="180">${hosts}</div></body></html>`,
+        );
+        for (const i of [0, 1, 2, 3, 4])
+          writeFileSync(
+            resolve(dir, `s${i}.html`),
+            `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2"><p style="width:${40 + i}px;padding:3px">S${i}</p><i style="position:absolute;inset:0"></i></div></template>`,
+          );
+        await scenePage.setContent(
+          await bundleToSingleHtml(dir, { sceneParts, staticGuard: false }),
+        );
+        await scenePage.waitForFunction(() => window.__playerReady && window.__renderReady);
+        const result = await scenePage.evaluate(async () => {
+          const far = () =>
+            Array.from(document.querySelectorAll("[data-hf-far-scene]"), (el) =>
+              el.getAttribute("data-composition-id"),
+            );
+          const atStart = far();
+          window.__player!.seek(7);
+          await new Promise(requestAnimationFrame);
+          const afterSeek = far();
+          const skipped = Array.from(
+            document.querySelectorAll<HTMLElement>("[data-hf-far-scene]"),
+            (el) => getComputedStyle(el).contentVisibility,
+          );
+          const boxes = () =>
+            Array.from(
+              document.querySelectorAll<HTMLElement>(
+                "[data-hf-scene] :is(p, i), [data-hf-scene]:not(style, script)",
+              ),
+              (el) => {
+                const { x, y, width, height } = el.getBoundingClientRect();
+                return [
+                  x,
+                  y,
+                  width,
+                  height,
+                  el.offsetWidth,
+                  el.offsetHeight,
+                  getComputedStyle(el).width,
+                ];
+              },
+            );
+          const measured = boxes();
+          for (const el of document.querySelectorAll("[data-hf-far-scene]"))
+            el.removeAttribute("data-hf-far-scene");
+          return { atStart, afterSeek, skipped, measured, rendered: boxes() };
+        });
+        if (!sceneParts) {
+          expect(result.atStart).toEqual([]);
+          expect(result.afterSeek).toEqual([]);
+          return;
+        }
+        expect(result.atStart).toEqual(["s2", "s3", "s4"]);
+        expect(result.afterSeek).toEqual(["s0", "s1"]);
+        expect(result.skipped).toEqual(["hidden", "hidden"]);
+        expect(result.measured).toEqual(result.rendered);
+      } finally {
+        await scenePage.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
+
+  const builtAsItRuns = (i: number) =>
+    `const tl = gsap.timeline({ paused: true }); tl.to('[data-composition-id="s${i}"] b', { opacity: 0.5, duration: 1 }); window.__timelines["s${i}"] = tl;`;
+  it.each([
+    ["its timeline built as the script runs", builtAsItRuns],
+    [
+      "its timeline driving one built after a font wait",
+      (i: number) =>
+        `const tl = gsap.timeline({ paused: true }); Promise.all([document.fonts.load("16px serif")]).then(() => { const inner = gsap.timeline({ paused: true }); inner.to('[data-composition-id="s${i}"] b', { opacity: 0.5, duration: 1 }); tl.add(inner.tweenFromTo(0, 1), 0); window.__timelines["s${i}"] = tl; });`,
+    ],
+    [
+      "a timeline built after a font wait to pose it once",
+      (i: number) =>
+        `const tl = gsap.timeline({ paused: true }); window.__timelines["s${i}"] = tl; Promise.all([document.fonts.load("16px serif")]).then(() => { const pose = gsap.timeline({ paused: true }); pose.to('[data-composition-id="s${i}"] b', { opacity: 0.5, duration: 1 }); pose.time(0.5); });`,
+    ],
+  ])(
+    "lets go of each scene the preview mounts and unmounts while it plays, its captured audio included (%s)",
+    async (_, sceneScript) => {
+      const dir = mkdtempSync(resolve(tmpdir(), "scene-window-memory-"));
+      // Its own browser: Web Audio only captures media where the context may start without a gesture.
+      const audioBrowser = await puppeteer.launch({
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--autoplay-policy=no-user-gesture-required",
+        ],
+      });
+      try {
+        const scenes = [0, 1, 2, 3, 4, 5];
+        const hosts = scenes
+          .map(
+            (i) =>
+              `<div data-composition-id="s${i}" data-composition-src="s${i}.html" data-start="${2 * i}" data-duration="2" style="position:absolute;inset:0"></div>`,
+          )
+          .join("");
+        writeFileSync(
+          resolve(dir, "index.html"),
+          `<!doctype html><html><body><div data-composition-id="main" data-duration="12" data-width="320" data-height="180">${hosts}</div></body></html>`,
+        );
+        writeFileSync(resolve(dir, "tone.wav"), silentWav());
+        // s0 and s1 mount at open and their scripts run with the film's: a font wait's work there has no known scene.
+        for (const i of scenes)
+          writeFileSync(
+            resolve(dir, `s${i}.html`),
+            `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2">${"<b>x</b>".repeat(400)}<audio src="tone.wav" data-start="0" data-duration="1"></audio><script>${i < 2 ? builtAsItRuns(i) : sceneScript(i)}</script></div></template>`,
+          );
+        const html = addScenePartsManifest(
+          await bundleToSingleHtml(dir, { sceneParts: true, staticGuard: false }),
+        );
+        const page = await audioBrowser.newPage();
+        await page.evaluateOnNewDocument(
+          readFileSync(
+            resolve(import.meta.dirname, "../../../core/node_modules/gsap/dist/gsap.min.js"),
+            "utf8",
+          ),
+        );
+        await page.setRequestInterception(true);
+        page.on(
+          "request",
+          (request) => void request.respond({ contentType: "text/html", body: html }),
+        );
+        await page.goto("http://scenes.test/");
+        await page.waitForFunction(() => window.__playerReady && window.__renderReady);
+        const cdp = await page.createCDPSession();
+        await cdp.send("Performance.enable");
+        // DOM nodes alive but out of the page, after a full collection.
+        const kept = async () => {
+          await cdp.send("HeapProfiler.collectGarbage");
+          const { metrics } = await cdp.send("Performance.getMetrics");
+          const inPage = await page.evaluate(() => {
+            const walker = document.createTreeWalker(document, NodeFilter.SHOW_ALL);
+            let count = 1;
+            while (walker.nextNode()) count++;
+            return count;
+          });
+          return metrics.find((m) => m.name === "Nodes")!.value - inPage;
+        };
+        const before = await kept();
+        await page.evaluate(async () => {
+          const player = window.__player as unknown as {
+            play: () => void;
+            seek: (time: number, options: { keepPlaying: boolean }) => void;
+          };
+          player.play();
+          for (const time of [2.5, 4.5, 6.5, 8.5, 10.5]) {
+            player.seek(time, { keepPlaying: true });
+            await window.__hfWaitForSeekCompletion?.();
+            await new Promise((settle) => setTimeout(settle, 200));
+          }
+        });
+        // The window unmounts only once it has mounted what is ahead.
+        await page.waitForFunction(
+          () => document.querySelectorAll("[data-hf-parked-scene]").length >= 5,
+        );
+        // Five scenes went out of the window, each over 800 nodes. Chrome keeps a captured element alive while
+        // its audio context lives, so each scene's audio element stays, but nothing of the scene around it.
+        expect(
+          await page.evaluate(() => document.querySelectorAll("[data-hf-parked-scene]").length),
+        ).toBe(5);
+        expect((await kept()) - before).toBeLessThan(800);
+      } finally {
+        await audioBrowser.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
+
+  it("keeps a scene that draws on a 2D canvas mounted, and mounts a chained-timeline scene again as it was", async () => {
+    const dir = mkdtempSync(resolve(tmpdir(), "scene-window-canvas-"));
+    const scenePage = await browser.newPage();
+    try {
+      const scripts = [
+        // Drawn once, as the script runs: a mount would need the script to draw again.
+        `const g = document.querySelector("canvas").getContext('2d'); g.fillStyle = "#c33"; g.fillRect(10, 10, 60, 30); const tl = gsap.timeline({ paused: true }); tl.to({ t: 0 }, { t: 1, duration: 2 }); window.__timelines["s0"] = tl;`,
+        // Placed by its timeline, chained as it is registered.
+        `const box = document.querySelector(".box"); const clock = { t: 0 }; window.__timelines["s1"] = gsap.timeline({ paused: true, onUpdate: () => { box.style.transform = "translateX(" + Math.round(clock.t * 50) + "px)"; } }).to(clock, { t: 2, duration: 2, ease: "none" });`,
+        `window.__timelines["s2"] = gsap.timeline({ paused: true });`,
+      ];
+      writeFileSync(
+        resolve(dir, "index.html"),
+        `<!doctype html><html><body><div data-composition-id="main" data-duration="6" data-width="320" data-height="180">${scripts
+          .map(
+            (_, i) =>
+              `<div data-composition-id="s${i}" data-composition-src="s${i}.html" data-start="${2 * i}" data-duration="2" style="position:absolute;inset:0"></div>`,
+          )
+          .join("")}</div></body></html>`,
+      );
+      scripts.forEach((script, i) =>
+        writeFileSync(
+          resolve(dir, `s${i}.html`),
+          `<template id="s${i}-template"><div data-composition-id="s${i}" data-duration="2"><canvas width="320" height="180"></canvas><div class="box"></div><script>${script}</script></div></template>`,
+        ),
+      );
+      const html = addScenePartsManifest(
+        await bundleToSingleHtml(dir, { sceneParts: true, staticGuard: false }),
+      );
+      await scenePage.evaluateOnNewDocument(
+        readFileSync(
+          resolve(import.meta.dirname, "../../../core/node_modules/gsap/dist/gsap.min.js"),
+          "utf8",
+        ),
+      );
+      await scenePage.setRequestInterception(true);
+      scenePage.on(
+        "request",
+        (request) => void request.respond({ contentType: "text/html", body: html }),
+      );
+      await scenePage.goto("http://scenes.test/");
+      await scenePage.waitForFunction(() => window.__playerReady && window.__renderReady);
+      const refusals = () =>
+        scenePage.evaluate(() =>
+          ["s0", "s1"].map((s) =>
+            document
+              .querySelector(`[data-hf-scene="${s}"]:not(style, script)`)!
+              .getAttribute("data-hf-scene-no-swap"),
+          ),
+        );
+      expect(await refusals()).toEqual(["its script uses getContext", null]);
+      const seek = (time: number) =>
+        scenePage.evaluate(async (time) => {
+          window.__player!.seek(time);
+          await window.__hfWaitForSeekCompletion?.();
+          for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
+        }, time);
+      const canvas = () =>
+        scenePage.evaluate(() =>
+          document.querySelector<HTMLCanvasElement>('[data-hf-scene="s0"] canvas')!.toDataURL(),
+        );
+      const boxAt = async (time: number) => {
+        await seek(time);
+        return scenePage.evaluate(
+          () => document.querySelector<HTMLElement>('[data-hf-scene="s1"] .box')!.style.transform,
+        );
+      };
+      await seek(1);
+      const drawn = await canvas();
+      const placed = await boxAt(3.4);
+      await scenePage.evaluate(() => {
+        (window as unknown as { first: unknown }).first = window.__timelines!.s1;
+        window.__player!.seek(5);
+      });
+      await scenePage.waitForFunction(
+        () => document.querySelector('[data-hf-parked-scene][data-hf-scene="s1"]') !== null,
+      );
+      const parked = await scenePage.evaluate(() =>
+        [...document.querySelectorAll("[data-hf-parked-scene]")].map((el) =>
+          el.getAttribute("data-hf-scene"),
+        ),
+      );
+      expect(parked).not.toContain("s0");
+      await seek(1);
+      expect(await canvas()).toBe(drawn);
+      await scenePage.evaluate(() => window.__player!.seek(3.4));
+      // Mounted again once its script has run and registered a fresh timeline.
+      await scenePage.waitForFunction(() => {
+        const fresh = window.__timelines?.s1;
+        return fresh !== undefined && fresh !== (window as unknown as { first: unknown }).first;
+      });
+      expect(await boxAt(3.4)).toBe(placed);
+    } finally {
+      await scenePage.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("removes the control bridge during teardown", async () => {
     const result = await page.evaluate(async () => {
