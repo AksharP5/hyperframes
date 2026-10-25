@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import type { CompositionVariable, CompositionVariableType } from "@hyperframes/sdk";
-import { VARIABLES_INPUT_CLASS } from "./VariablesValueControls";
+import { variableDefaultText, VARIABLES_INPUT_CLASS } from "./VariablesValueControls";
 
 const VARIABLE_TYPES: CompositionVariableType[] = [
   "string",
@@ -53,12 +53,7 @@ export function draftFromDeclaration(decl: CompositionVariable): DeclarationDraf
     id: decl.id,
     label: decl.label,
     type: decl.type,
-    defaultRaw:
-      decl.type === "font" && typeof decl.default === "object"
-        ? decl.default.name
-        : decl.type === "image" && typeof decl.default === "object"
-          ? decl.default.url
-          : String(decl.default),
+    defaultRaw: variableDefaultText(decl),
     description: decl.description ?? "",
     min: numeric?.min !== undefined ? String(numeric.min) : "",
     max: numeric?.max !== undefined ? String(numeric.max) : "",
