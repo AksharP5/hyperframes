@@ -35,7 +35,7 @@ The producer can also run as a render server, accepting render requests over HTT
 import { startServer } from "@hyperframes/producer";
 
 await startServer({ port: 8080 });
-// POST /render or /render/stream with projectDir, html, or previewUrl and render options
+// POST /render or /render/stream with projectDir, html, or previewUrl (public HTTPS only) and render options
 ```
 
 Both HTTP routes accept optional `pageMotionBlur: "off"` to disable authored page

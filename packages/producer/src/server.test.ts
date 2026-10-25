@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -187,5 +187,56 @@ describe("prepareRenderBody — validation", () => {
     const { input } = (result as { prepared: { input: Record<string, unknown> } }).prepared;
     expect(input.variables).toEqual({ title: "Q4" });
     expect(input.outputResolution).toBe("landscape-4k");
+  });
+});
+
+describe("prepareRenderBody — previewUrl", () => {
+  const realFetch = globalThis.fetch;
+  const stubFetch = (impl: () => Promise<Response>) => {
+    const spy = mock(impl);
+    globalThis.fetch = spy as unknown as typeof fetch;
+    return spy;
+  };
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it.each([
+    "http://169.254.169.254/latest/meta-data/",
+    "https://169.254.169.254/latest/meta-data/",
+    "https://localhost:8080/index.html",
+    "https://[::1]/index.html",
+    "file:///etc/passwd",
+  ])("refuses %s without fetching it", async (previewUrl) => {
+    const fetchSpy = stubFetch(async () => new Response("secret"));
+
+    const result = await prepareRenderBody({ previewUrl });
+
+    expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toContain("Failed to fetch previewUrl");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses a public URL that redirects to a metadata address", async () => {
+    const fetchSpy = stubFetch(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://169.254.169.254/latest/meta-data/" },
+        }),
+    );
+
+    const result = await prepareRenderBody({ previewUrl: "https://example.com/index.html" });
+
+    expect(result).toHaveProperty("error");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the HTML of a public URL", async () => {
+    stubFetch(async () => new Response("<html><body>ok</body></html>"));
+
+    const result = await prepareRenderBody({ previewUrl: "https://example.com/index.html" });
+
+    expect(result).toHaveProperty("prepared");
   });
 });

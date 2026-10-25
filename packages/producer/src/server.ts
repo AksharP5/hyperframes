@@ -29,6 +29,7 @@ import crypto from "node:crypto";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
+import { fetchPublicHttpsText } from "@hyperframes/engine";
 import {
   RenderCancelledError,
   createRenderJob,
@@ -394,6 +395,8 @@ function validateOutputResolutionOverride(body: Record<string, unknown>): string
 
 type PrepareRenderResult = { prepared: PreparedRenderInput } | { error: string };
 
+const MAX_PREVIEW_HTML_BYTES = 20 * 1024 * 1024;
+
 function prepareProjectDirectory(
   projectDir: unknown,
   options: Omit<RenderInput, "projectDir">,
@@ -423,11 +426,7 @@ async function resolveInlineRenderHtml(body: Record<string, unknown>): Promise<
   if (!previewUrl)
     return { error: "Missing render source: provide projectDir, previewUrl, or html" };
   try {
-    const response = await fetch(previewUrl, { method: "GET" });
-    if (!response.ok) {
-      return { error: `Failed to fetch previewUrl: ${response.status} ${response.statusText}` };
-    }
-    return { html: await response.text() };
+    return { html: await fetchPublicHttpsText(previewUrl, { maxBytes: MAX_PREVIEW_HTML_BYTES }) };
   } catch (error) {
     return {
       error: `Failed to fetch previewUrl: ${error instanceof Error ? error.message : String(error)}`,
