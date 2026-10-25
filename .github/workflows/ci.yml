@@ -542,17 +542,7 @@ jobs:
         with:
           lfs: true
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-      - name: Install FFmpeg for catalog preview tests
-        uses: ./.github/actions/install-ffmpeg-linux
-      - uses: ./.github/actions/prepare-ffmpeg-bin
-      - run: bash scripts/ci/install-workspace-dependencies.sh
-      - run: bun run --filter '@hyperframes/{parsers,lint,studio-server}' build
-      - run: bun run --cwd packages/core build
-      - run: bun run --cwd packages/core build:hyperframes-runtime
+      - uses: ./.github/actions/setup-test-workspace
       - run: bun run --cwd packages/studio test
 
   test-runtime:
@@ -565,16 +555,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-      - uses: ./.github/actions/install-ffmpeg-linux
-      - uses: ./.github/actions/prepare-ffmpeg-bin
-      - run: bash scripts/ci/install-workspace-dependencies.sh
-      - run: bun run --filter '@hyperframes/{parsers,lint,studio-server}' build
-      - run: bun run --cwd packages/core build
-      - run: bun run --cwd packages/core build:hyperframes-runtime
+      - uses: ./.github/actions/setup-test-workspace
       - run: bun run --filter '@hyperframes/{core,engine}' test
 
   test-cli:
@@ -587,16 +568,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           lfs: true
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-      - uses: ./.github/actions/install-ffmpeg-linux
-      - uses: ./.github/actions/prepare-ffmpeg-bin
-      - run: bash scripts/ci/install-workspace-dependencies.sh
-      - run: bun run --filter '@hyperframes/{parsers,lint,studio-server}' build
-      - run: bun run --cwd packages/core build
-      - run: bun run --cwd packages/core build:hyperframes-runtime
+      - uses: ./.github/actions/setup-test-workspace
       - run: bun run --filter '@hyperframes/cli' test
 
   test-support:
@@ -610,27 +582,43 @@ jobs:
         with:
           lfs: true
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - id: workspace
+        uses: ./.github/actions/setup-test-workspace
         with:
-          node-version: 22
-      - uses: ./.github/actions/install-ffmpeg-linux
-      - uses: ./.github/actions/prepare-ffmpeg-bin
-      - run: bash scripts/ci/install-workspace-dependencies.sh
-      - run: bun run --filter '@hyperframes/{parsers,lint,studio-server}' build
-      - run: bun run --cwd packages/core build
-      - run: bun run --cwd packages/core build:hyperframes-runtime
-      - name: Install Chrome for catalog preview tests
-        id: catalog-chrome
-        uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce # v1
-        with:
-          chrome-version: stable
+          chrome: "true"
       - run: bun run generate:catalog
         if: needs.changes.outputs.docs_catalog == 'true'
       - run: bun run test:scripts
         env:
-          HYPERFRAMES_BROWSER_PATH: ${{ steps.catalog-chrome.outputs.chrome-path }}
+          HYPERFRAMES_BROWSER_PATH: ${{ steps.workspace.outputs.chrome-path }}
       - run: bun run --filter '@hyperframes/{lint,parsers,studio-server,sdk,player,aws-lambda,gcp-cloud-run,sdk-playground,shader-transitions,inspector}' test
+
+  flake-gate:
+    name: Flake gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          lfs: true
+          fetch-depth: 0
+      # HEAD is the PR merge ref; its first parent is the current base tip (see `changes`).
+      - name: Find changed test files
+        id: plan
+        run: |
+          echo "base=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+          node scripts/ci/flake-gate.mjs --list --base "$(git rev-parse HEAD^1)"
+      - id: workspace
+        if: steps.plan.outputs.any == 'true'
+        uses: ./.github/actions/setup-test-workspace
+        with:
+          chrome: "true"
+          engine: "true"
+      - if: steps.plan.outputs.any == 'true'
+        env:
+          HYPERFRAMES_BROWSER_PATH: ${{ steps.workspace.outputs.chrome-path }}
+        run: node scripts/ci/flake-gate.mjs --base "${{ steps.plan.outputs.base }}"
 
   test:
     name: Test
