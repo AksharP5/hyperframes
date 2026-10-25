@@ -10,7 +10,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   formatPreviewProxyBox,
@@ -542,6 +542,7 @@ const H264_ARGS = [
   "-movflags",
   "+faststart",
 ];
+const VP8_THREADS = String(Math.min(4, availableParallelism()));
 const VP8_ARGS = [
   "-c:v",
   "libvpx",
@@ -561,6 +562,8 @@ const VP8_ARGS = [
   "bt709",
   "-cpu-used",
   "4",
+  "-threads",
+  VP8_THREADS,
   "-auto-alt-ref",
   "0",
   "-metadata:s:v:0",

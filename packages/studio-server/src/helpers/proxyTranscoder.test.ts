@@ -11,7 +11,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { hdrToSdrToneMapFilter } from "@hyperframes/core";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
@@ -353,6 +353,7 @@ describe("resolveProxy", () => {
     expect(args[args.indexOf("-ac") + 1]).toBe("2");
     expect(args).not.toContain("-row-mt");
     expect(args).toContain("-cpu-used");
+    expect(args[args.indexOf("-threads") + 1]).toBe(String(Math.min(4, availableParallelism())));
     expect(args).not.toContain("-movflags");
     expect(args).not.toContain("+faststart");
     expect(args[args.indexOf("-vf") + 1]).toContain("format=yuva420p");
