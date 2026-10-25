@@ -1291,7 +1291,7 @@ jobs:
   studio-edit-accuracy-gate:
     name: "Studio: edit accuracy gate"
     needs: [changes, studio-edit-accuracy, studio-edit-accuracy-retry]
-    if: ${{ !cancelled() && needs.changes.outputs.edit_accuracy == 'true' }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.edit_accuracy == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
