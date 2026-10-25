@@ -218,6 +218,7 @@ export {
   resolveVideoExtractionWindow,
   rebaseVideoToWindow,
   resolveFinalFrameExtractionWindow,
+  resolveFrameFormat,
   resolveVideoExtractionDuration,
   resolvePlayableVideoDuration,
   extractionFrameCountForDuration,

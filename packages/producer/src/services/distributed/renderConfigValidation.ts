@@ -24,7 +24,11 @@ import {
 } from "@hyperframes/engine";
 import { DISTRIBUTED_FPS, isDistributedFps } from "@hyperframes/core";
 import { type DistributedFormat } from "./shared.js";
-import { type DistributedRenderConfig, MAX_PARALLEL_CHUNKS_CEILING } from "./plan.js";
+import {
+  type DistributedRenderConfig,
+  MAX_CHUNK_SIZE,
+  MAX_PARALLEL_CHUNKS_CEILING,
+} from "./plan.js";
 
 /**
  * `DistributedRenderConfig` minus the runtime-only fields (`logger`,
@@ -62,7 +66,6 @@ const ALLOWED_HDR_MODES = ["auto", "force-sdr"] as const;
 
 const MAX_DIMENSION = 7680;
 const MIN_DIMENSION = 16;
-const MAX_CHUNK_SIZE = 3600;
 
 /**
  * Throw an `InvalidConfigError` if `config` is not a valid

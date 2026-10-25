@@ -62,6 +62,7 @@ import {
 } from "../renderOrchestrator.js";
 import { closeFileServerSafely } from "../fileServer.js";
 import { measurePlanSecondsPerFrame } from "./planFrameCost.js";
+import { buildWeightedChunkSlices, planFrameWeights } from "./chunkWeights.js";
 import { runAudioStage } from "../render/stages/audioStage.js";
 import { runCompileStage } from "../render/stages/compileStage.js";
 import {
@@ -431,6 +432,8 @@ export const DEFAULT_MAX_PARALLEL_CHUNKS = 16;
  * outweighs the parallelism gain on tiny renders.
  */
 export const MIN_CHUNK_SIZE = 10;
+/** Largest `chunkSize`; `validateDistributedRenderConfig` enforces it, and cost-weighted chunks stay under it. */
+export const MAX_CHUNK_SIZE = 3600;
 /** Most chunks one render may plan; `validateDistributedRenderConfig` enforces it on `maxParallelChunks`. */
 export const MAX_PARALLEL_CHUNKS_CEILING = 256;
 // 0.11 s per megapixel-frame (~0.23 s per 1080p frame) was measured on one simple 1080p fixture on a
@@ -499,6 +502,14 @@ export class ChunkExceedsWorkerTimeoutError extends Error {
   }
 }
 
+/** Frames one chunk can capture inside the worker time limit, after the per-chunk overhead. */
+function framesWithinWorkerTimeout(workerTimeoutSeconds: number, secondsPerFrame: number): number {
+  return Math.floor(
+    (workerTimeoutSeconds * WORKER_TIMEOUT_MARGIN - ESTIMATED_CHUNK_OVERHEAD_SECONDS) /
+      secondsPerFrame,
+  );
+}
+
 /**
  * The `maxParallelChunks` a plan uses: an explicit value, else one wave across `workerConcurrency`
  * (16 if unknown), widened to fit `workerTimeoutSeconds` unless chunkSize/targetChunkFrames pin it.
@@ -531,10 +542,7 @@ export function resolveMaxParallelChunks(
   const wide = Math.max(1, Math.min(wave, Math.floor(totalFrames / minFramesPerChunk)));
   if (workerTimeoutSeconds === undefined) return wide;
 
-  const maxFramesPerChunk = Math.floor(
-    (workerTimeoutSeconds * WORKER_TIMEOUT_MARGIN - ESTIMATED_CHUNK_OVERHEAD_SECONDS) /
-      secondsPerFrame,
-  );
+  const maxFramesPerChunk = framesWithinWorkerTimeout(workerTimeoutSeconds, secondsPerFrame);
   const needed = maxFramesPerChunk < 1 ? Infinity : Math.ceil(totalFrames / maxFramesPerChunk);
   if (needed > MAX_PARALLEL_CHUNKS_CEILING) {
     const framesAtCeiling = Math.ceil(totalFrames / MAX_PARALLEL_CHUNKS_CEILING);
@@ -835,6 +843,29 @@ export function buildChunkSlices(
     slices.push({ index: i, startFrame, endFrame });
   }
   return slices;
+}
+
+/**
+ * The plan's chunk cut: auto-sized plans re-cut the same chunk count by estimated capture cost;
+ * explicit `chunkSize` or uniform cost keeps {@link buildChunkSlices}; `targetChunkFrames` and the time limit cap it.
+ */
+export function buildPlanChunkSlices(
+  frameWeights: Float64Array,
+  config: Pick<DistributedRenderConfig, "chunkSize" | "targetChunkFrames">,
+  chunkCount: number,
+  effectiveChunkSize: number,
+  maxFramesPerChunk = Infinity,
+): ChunkSliceJson[] {
+  const weighted =
+    config.chunkSize === undefined
+      ? buildWeightedChunkSlices(
+          frameWeights,
+          chunkCount,
+          MIN_CHUNK_SIZE,
+          Math.min(config.targetChunkFrames ?? MAX_CHUNK_SIZE, MAX_CHUNK_SIZE, maxFramesPerChunk),
+        )
+      : null;
+  return weighted ?? buildChunkSlices(frameWeights.length, chunkCount, effectiveChunkSize);
 }
 
 /**
@@ -1526,6 +1557,14 @@ export async function buildLocalExecutionPlan(
   const digests: PlanFileDigests = options.digests ?? new Map();
   const separateAudio = plansSeparateAudio(config, options);
   const chunksCarryAudio = !separateAudio && carriesChunkAudio(config, options);
+  const frameWeights = planFrameWeights({
+    videos: planVideosJson.videos,
+    extracted: planVideosJson.extracted,
+    totalFrames,
+    fps: config.fps,
+    width,
+    height,
+  });
   stageStarted = Date.now();
   const [audioOutcome, overlapOutcome, frameCostOutcome] = await Promise.allSettled([
     separateAudio
@@ -1580,7 +1619,18 @@ export async function buildLocalExecutionPlan(
     maxParallel,
     config.targetChunkFrames,
   );
-  const chunks = buildChunkSlices(totalFrames, chunkCount, effectiveChunkSize);
+  const chunks = buildPlanChunkSlices(
+    frameWeights,
+    config,
+    chunkCount,
+    effectiveChunkSize,
+    chunkSizingUsesFrameCost(config) && config.workerTimeoutSeconds !== undefined
+      ? framesWithinWorkerTimeout(
+          config.workerTimeoutSeconds,
+          estimateFrameSeconds(megapixels, frameCostOutcome.value),
+        )
+      : undefined,
+  );
   const audioResult = audioOutcome.value;
   if (audioResult?.audioError) {
     applyDistributedAudioWarningPolicy(job, audioResult.audioError, audioResult.audioFailures, log);
