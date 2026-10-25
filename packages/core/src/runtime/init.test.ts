@@ -6030,6 +6030,14 @@ describe("initSandboxRuntimeModular", () => {
       expect(cached()).toEqual(audios.map((a) => a.getAttribute("src")).sort());
       expect(fetchMock).toHaveBeenCalledTimes(12);
     });
+
+    it("plays the film when a clip's src cannot be read as a URL", async () => {
+      mountAudio("http://localhost:PORT/vo.mp3");
+
+      await startPlayback();
+
+      expect(window.__player?.isPlaying()).toBe(true);
+    });
   });
 
   // `el.volume` stops at 1, so a video's authored boost can only be carried by a Web Audio gain.

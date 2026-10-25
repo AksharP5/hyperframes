@@ -19,6 +19,7 @@ import { clampAudioGain } from "../audioGain.js";
 import { getDebugSurface } from "./globals.js";
 import { readElementPlaybackRate } from "./media.js";
 import { classifyWebAudioMediaRoute, reportWebAudioMediaRoute } from "./webAudioRoute.js";
+import { assetUrl } from "./assetUrl.js";
 
 const MASTER_FX_ATTRS: FxAttributes = { automation: null };
 
@@ -145,7 +146,15 @@ function isBufferSource(
   return source.sourceKind === "buffer";
 }
 
-const decodeKey = (el: HTMLMediaElement): string | null => el.currentSrc || el.getAttribute("src");
+const decodeKey = (el: HTMLMediaElement): string | null => {
+  const src = el.currentSrc || el.getAttribute("src");
+  if (!src) return null;
+  try {
+    return assetUrl(src);
+  } catch {
+    return src;
+  }
+};
 
 // A pause to scrub or a reschedule mid-play keeps the output awake; a real idle lets it sleep.
 const IDLE_SUSPEND_MS = 10000;

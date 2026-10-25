@@ -1597,6 +1597,8 @@ describe("WebAudioTransport", () => {
       }) as unknown as HTMLMediaElement;
     const failedSrcs = (t: WebAudioTransport) =>
       (t as unknown as { _failedSrcs: Set<string> })._failedSrcs;
+    // Keys are resolved against the document, so one asset has one key however it is written.
+    const key = (src: string) => new URL(src, document.baseURI).href;
 
     it("does NOT blacklist a transient fetch failure — a later play retries and succeeds", async () => {
       const transport = transportWithDecode(async () => ({}) as AudioBuffer);
@@ -1608,7 +1610,7 @@ describe("WebAudioTransport", () => {
 
       const first = await transport.decodeAudioElement(el("tts.wav"));
       expect(first).toBeNull();
-      expect(failedSrcs(transport).has("tts.wav")).toBe(false); // not permanently silenced
+      expect(failedSrcs(transport).has(key("tts.wav"))).toBe(false); // not permanently silenced
 
       const second = await transport.decodeAudioElement(el("tts.wav"));
       expect(second).not.toBeNull(); // self-heals once the asset is available
@@ -1627,12 +1629,44 @@ describe("WebAudioTransport", () => {
 
       const first = await transport.decodeAudioElement(el("corrupt.wav"));
       expect(first).toBeNull();
-      expect(failedSrcs(transport).has("corrupt.wav")).toBe(true); // bad data is permanent
+      expect(failedSrcs(transport).has(key("corrupt.wav"))).toBe(true); // bad data is permanent
 
       const second = await transport.decodeAudioElement(el("corrupt.wav"));
       expect(second).toBeNull();
       expect(fetchMock).toHaveBeenCalledTimes(1); // short-circuited, no re-fetch
       vi.unstubAllGlobals();
+    });
+
+    it("keeps a listed clip's decoded audio while its load is between resources", async () => {
+      // An in-place sub-composition reload resets the root voiceover's resource selection, so
+      // `currentSrc` reads empty and the relative attribute behind it keyed a second cache slot:
+      // the release pass then dropped the buffer of a clip it was handed as live.
+      const transport = transportWithDecode(async () => ({}) as AudioBuffer);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+      vi.stubGlobal("fetch", fetchMock);
+      const vo = document.createElement("audio");
+      vo.setAttribute("src", "vo.mp3");
+      let currentSrc = new URL("vo.mp3", document.baseURI).href;
+      Object.defineProperty(vo, "currentSrc", { configurable: true, get: () => currentSrc });
+
+      expect(await transport.decodeAudioElement(vo)).not.toBeNull();
+      currentSrc = "";
+      transport.releaseDecodedExcept([vo]);
+      currentSrc = new URL("vo.mp3", document.baseURI).href;
+
+      expect(await transport.decodeAudioElement(vo)).not.toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(1); // the buffer it was told to keep is still there
+      vi.unstubAllGlobals();
+    });
+
+    it("keys a clip whose src cannot be read as a URL without throwing", () => {
+      const transport = transportWithDecode(async () => ({}) as AudioBuffer);
+      const bad = document.createElement("audio");
+      bad.setAttribute("src", "http://localhost:PORT/vo.mp3");
+
+      expect(() => transport.releaseDecodedExcept([bad])).not.toThrow();
     });
   });
 });
