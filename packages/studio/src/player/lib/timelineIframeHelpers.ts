@@ -243,10 +243,7 @@ function resolveScrubAudioEl(doc: Document, music?: PreviewTarget | null): HTMLA
     const byId = previewElementFinder(doc, "audio")(music);
     if (isAudioNode(byId)) return byId;
   }
-  return (
-    doc.querySelector<HTMLAudioElement>("audio[data-timeline-role='music']") ??
-    doc.querySelector<HTMLAudioElement>("audio")
-  );
+  return doc.querySelector<HTMLAudioElement>("audio[data-timeline-role='music']");
 }
 
 /** The runtime stops any media running under a paused clock, and a scrub audition

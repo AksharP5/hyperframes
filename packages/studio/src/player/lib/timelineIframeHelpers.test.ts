@@ -241,6 +241,46 @@ describe("scrubPreviewAudio", () => {
     stopScrubPreviewAudio();
   });
 
+  /** An edit to a sub-composition rebuilds the media inside it, so the music row can
+   *  name a track that is not in the preview for a moment. Auditioning whatever audio
+   *  came first then previews the voiceover, which is not the track being scrubbed. */
+  it("previews nothing when the music row's own track is not in the preview", () => {
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    const previewDoc = iframe.contentDocument;
+    if (!previewDoc?.body) throw new Error("expected an iframe document");
+
+    const voiceover = previewDoc.createElement("audio");
+    voiceover.id = "voiceover";
+    voiceover.play = vi.fn(async () => {});
+    voiceover.pause = vi.fn();
+    previewDoc.body.append(voiceover);
+
+    scrubPreviewAudio(iframe, 0.5, { id: "music-bed" }, 1);
+
+    expect(voiceover.play).not.toHaveBeenCalled();
+    expect(voiceover.volume).toBe(1);
+    stopScrubPreviewAudio();
+  });
+
+  it("still previews the track marked as the music when the row's own id is gone", () => {
+    const iframe = document.createElement("iframe");
+    document.body.append(iframe);
+    const previewDoc = iframe.contentDocument;
+    if (!previewDoc?.body) throw new Error("expected an iframe document");
+    previewDoc.body.innerHTML =
+      '<audio id="voiceover"></audio><audio id="bed" data-timeline-role="music"></audio>';
+    const [voiceover, bed] = Array.from(previewDoc.querySelectorAll("audio"));
+    for (const audio of [voiceover, bed])
+      Object.assign(audio!, { play: vi.fn(async () => {}), pause: vi.fn() });
+
+    scrubPreviewAudio(iframe, 0.5, { id: "music-bed" }, 1);
+
+    expect(bed!.play).toHaveBeenCalled();
+    expect(voiceover!.play).not.toHaveBeenCalled();
+    stopScrubPreviewAudio();
+  });
+
   /** A scrub audition is media running under a paused clock, which the runtime now
    *  stops on sight. So it borrows the element. That a leased element survives the
    *  tick is asserted runtime-side in core's `transportPark.test.ts`; here the
