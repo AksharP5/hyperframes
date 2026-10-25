@@ -24,6 +24,7 @@ A crossfade is two clips on different tracks that overlap, each with a fade.
 
 - `target` is `volume`, `rate` (a speed ramp, 0.1–10, overrides `data-playback-rate`) or `fx.<nodeId>.<param>`.
 - `t` is seconds from the start of the clip, not of the composition. `v` is in the parameter's unit: 0..1 for volume, dB for a gain, Hz for a frequency.
+- A `volume` lane multiplies `data-volume` in preview and render, so write the level in one of them: `data-volume="0.5"` under a lane at `0.5` plays at `0.25`.
 - A lane holds its first value back to the clip's start and its last value to its end, so a bed that starts before the voice needs an explicit full-level point at `t: 0`.
 - `curve` (-1..1) bends the segment leaving a point. 512 points per lane at most.
 - Don't also tween `volume` with GSAP on a track that has a volume lane or a `data-volume`; lint flags both.
