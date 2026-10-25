@@ -201,6 +201,10 @@ Clip durations can still vary. See [Variables](/concepts/variables) for what may
 
 ## Render problems
 
+### "HyperFrames runtime failed"
+
+When a startup error includes `[thrown at: ...]`, use those script locations to find the failing code. The short trace shows where the error started and, when identifiable, where your composition called it. Locations come from the browser and may point to bundled code.
+
 ### The render looks different from preview
 
 Check fonts, remote media, browser-specific effects, and the actual exported file.
