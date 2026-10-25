@@ -3,8 +3,11 @@ export const PREVIEW_PROXY_BOX_PARAM = "hf-proxy-box";
 
 export type PreviewProxyBox = { width: number; height: number };
 
-// 256 * 2^(k/2), even: nearby boxes share one cached copy, and a rung overshoots by at most ~41%.
-const RUNGS = [256, 362, 512, 724, 1024, 1448, 2048, 2896, 4096, 5792, 8192];
+// 256 * 2^(k/4), even: nearby boxes share one cached copy, and a rung overshoots by at most ~19%.
+const RUNGS = [
+  256, 304, 362, 430, 512, 608, 724, 862, 1024, 1218, 1448, 1722, 2048, 2436, 2896, 3444, 4096,
+  4870, 5792, 6888, 8192,
+];
 
 function rungAtLeast(pixels: number): number | null {
   if (!(pixels > 0)) return null;

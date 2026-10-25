@@ -445,7 +445,7 @@ describe("serveStaticProjectHtml transparent media proxies", () => {
       undefined,
       true,
       expect.any(AbortSignal),
-      { width: 2048, height: 1448 },
+      { width: 2048, height: 1218 },
     );
   });
 

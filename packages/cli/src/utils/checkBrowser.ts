@@ -1,6 +1,6 @@
 import type { CheckDeadline } from "./checkDeadline.js";
 import { logCheckProgress } from "./checkProgress.js";
-import { BrowserCleanupError, closeManagedBrowser } from "../browser/launch.js";
+import { BrowserCleanupError, closeManagedBrowser, onStopSignal } from "../browser/launch.js";
 import { collectMotionBlurDrafts, dropMotionBlurConsoleEcho } from "./checkMotionBlur.js";
 import { checkSnapshotDirectory } from "./checkSnapshotDirectory.js";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -50,6 +50,7 @@ import {
   FfmpegUnavailableError,
   getProxyCachePath,
   resolveProxies,
+  type ProxyProgress,
 } from "@hyperframes/studio-server/proxy-transcoder";
 import { rectToBbox } from "./checkTypes.js";
 import type {
@@ -136,6 +137,43 @@ interface FinishedContrast {
   bg: string;
 }
 
+const COPY_HEARTBEAT_MS = 10_000;
+
+function elapsedText(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+/** Says on stderr how far each copy is, so a slow copy reads as slow and a stuck one as stuck. */
+function startCopyHeartbeat(
+  sources: ReadonlyArray<{ file: string }>,
+  cached: readonly boolean[],
+): {
+  progress: (index: number, progress: ProxyProgress) => void;
+  settled: (index: number) => void;
+  stop: () => void;
+} {
+  const startedAt = Date.now();
+  const latest = new Map<number, ProxyProgress>();
+  const timer = setInterval(() => {
+    for (const [index, { doneSeconds, totalSeconds }] of latest) {
+      if (cached[index]) continue;
+      const done = totalSeconds
+        ? `${Math.min(100, Math.floor((doneSeconds / totalSeconds) * 100))}%`
+        : "";
+      console.error(
+        `[hyperframes] browser-playable copy of ${sources[index]!.file}: ${done || `${Math.floor(doneSeconds)}s done`} (${elapsedText(Date.now() - startedAt)} so far)`,
+      );
+    }
+  }, COPY_HEARTBEAT_MS);
+  timer.unref();
+  return {
+    progress: (index, progress) => void latest.set(index, progress),
+    settled: (index) => void latest.delete(index),
+    stop: () => clearInterval(timer),
+  };
+}
+
 /**
  * Awaits the H.264 authoring proxy for every browser-hostile local video
  * asset in `html` BEFORE the timed render-ready wait starts. `check`'s
@@ -190,9 +228,22 @@ export async function preResolveHostileMediaProxies(
     );
   }
   let settled = 0;
-  const results = await resolveProxies(projectDir, sources, () => {
-    settled += 1;
-    if (toMake > 0) console.error(`[hyperframes] browser-playable copies: ${settled}/${total}`);
+  const heartbeat = startCopyHeartbeat(sources, cached);
+  const stopped = new AbortController();
+  const forgetStop = onStopSignal(() => stopped.abort());
+  const results = await resolveProxies(
+    projectDir,
+    sources,
+    (index) => {
+      settled += 1;
+      heartbeat.settled(index);
+      if (toMake > 0) console.error(`[hyperframes] browser-playable copies: ${settled}/${total}`);
+    },
+    heartbeat.progress,
+    stopped.signal,
+  ).finally(() => {
+    heartbeat.stop();
+    forgetStop();
   });
   const failures = sources.flatMap((source, index) => {
     const result = results[index]!;

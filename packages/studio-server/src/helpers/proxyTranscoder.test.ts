@@ -58,13 +58,20 @@ function meanLuma(path: string, filters = "", inputArgs: string[] = []): number 
 // this test file and the module are authored together).
 const MAX_CONCURRENT = 2;
 const MAX_QUEUED = 8;
+// Mirrors PROXY_CHUNK_SECONDS in proxyTranscoder.ts.
+const PIECE_SECONDS = 15;
 
-type FakeProc = EventEmitter & { stderr: EventEmitter; stdout: EventEmitter };
+type FakeProc = EventEmitter & {
+  stderr: EventEmitter;
+  stdout: EventEmitter;
+  kill: (signal?: string) => void;
+};
 
 function createFakeProc(): FakeProc {
   const proc = new EventEmitter() as FakeProc;
   proc.stderr = new EventEmitter();
   proc.stdout = new EventEmitter();
+  proc.kill = vi.fn((signal?: string) => void proc.emit("close", null, signal));
   return proc;
 }
 
@@ -166,6 +173,8 @@ async function loadModule(
 }
 
 describe("resolveProxy on a long source", () => {
+  // Three pieces: two full ones and a last that takes the remainder.
+  const LONG_SECONDS = 3 * PIECE_SECONDS + 5;
   const startsOf = (calls: SpawnCall[]): string[] =>
     calls
       .filter((call) => call.args.includes("-ss"))
@@ -179,7 +188,7 @@ describe("resolveProxy on a long source", () => {
       false,
       null,
       undefined,
-      200,
+      LONG_SECONDS,
     );
     const projectDir = tmpProject();
     const sourcePath = join(projectDir, "long.mov");
@@ -193,11 +202,14 @@ describe("resolveProxy on a long source", () => {
     await flush(50);
     calls[1]!.proc.emit("close", null, "SIGKILL");
     expect(await first).toBeInstanceOf(Error);
-    expect(startsOf(calls)).toEqual(["0", "60"]);
+    expect(startsOf(calls)).toEqual(["0", String(PIECE_SECONDS)]);
     expect(readdirSync(cacheDirectory)).toHaveLength(1);
 
     clearFailedTranscodesForTest();
-    const second = resolveProxy(projectDir, sourcePath);
+    const heard: Array<{ doneSeconds: number; totalSeconds?: number }> = [];
+    const second = resolveProxy(projectDir, sourcePath, "h264", undefined, {
+      onProgress: (progress) => heard.push(progress),
+    });
     for (let answered = calls.length; ; answered = calls.length) {
       await flush(50);
       if (calls.length === answered) break;
@@ -206,14 +218,22 @@ describe("resolveProxy on a long source", () => {
 
     expect(await second).toBe(cachePath);
     // Only the pieces that were missing were encoded again; the last one runs to the end.
-    expect(startsOf(calls)).toEqual(["0", "60", "60", "120"]);
+    expect(startsOf(calls)).toEqual([
+      "0",
+      String(PIECE_SECONDS),
+      String(PIECE_SECONDS),
+      String(2 * PIECE_SECONDS),
+    ]);
+    // The retry says at once how much the stopped run left done, then counts on from it.
+    expect(heard[0]).toEqual({ doneSeconds: PIECE_SECONDS, totalSeconds: LONG_SECONDS });
+    expect(heard.at(-1)).toEqual({ doneSeconds: LONG_SECONDS, totalSeconds: LONG_SECONDS });
     expect(calls.at(-1)!.args).toEqual(expect.arrayContaining(["-f", "concat", "-c", "copy"]));
     expect(readdirSync(cacheDirectory)).toEqual([cachePath.split("/").at(-1)]);
   });
 
   it("keeps a short source to one pass", async () => {
     const { spawn, calls } = createSpawnSpy();
-    const { resolveProxy } = await loadModule(spawn, FFMPEG_PATH, false, null, undefined, 80);
+    const { resolveProxy } = await loadModule(spawn, FFMPEG_PATH, false, null, undefined, 20);
     const projectDir = tmpProject();
     const sourcePath = join(projectDir, "short.mov");
     writeFileSync(sourcePath, "source-bytes");
@@ -436,6 +456,141 @@ describe("resolveProxy", () => {
 
     succeed(calls[1]!);
     await result;
+  });
+
+  it("resizes HDR input to the box before the tone map, so the map runs on the smaller frame", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy } = await loadModule(spawn, FFMPEG_PATH, true);
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "hdr.mov");
+    writeFileSync(sourcePath, "source-bytes");
+
+    const result = resolveProxy(projectDir, sourcePath, "h264", { width: 2048, height: 1218 });
+    await flush();
+    calls[0]!.proc.stdout.emit(
+      "data",
+      Buffer.from(" ..C zscale V->V zimg\n T.C tonemap V->V tone map\n"),
+    );
+    calls[0]!.proc.emit("close", 0);
+    await flush();
+
+    const filter = calls[1]!.args[calls[1]!.args.indexOf("-vf") + 1]!;
+    expect(filter.indexOf("zscale=w=")).toBeGreaterThanOrEqual(0);
+    expect(filter.indexOf("zscale=w=")).toBeLessThan(filter.indexOf("tonemap="));
+    expect(filter).toContain("2048/iw");
+    succeed(calls[1]!);
+    await result;
+  });
+
+  it("tells a listener how far the encode has got, from ffmpeg's own progress lines", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy } = await loadModule(spawn, FFMPEG_PATH, false, null, undefined, 20);
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "progress.mov");
+    writeFileSync(sourcePath, "source-bytes");
+    const heard: Array<{ doneSeconds: number; totalSeconds?: number }> = [];
+
+    const result = resolveProxy(projectDir, sourcePath, "h264", undefined, {
+      onProgress: (progress) => heard.push(progress),
+    });
+    await flush();
+    expect(calls[0]!.args).toEqual(expect.arrayContaining(["-progress", "pipe:1"]));
+    calls[0]!.proc.stdout.emit("data", Buffer.from("frame=10\nout_time_us=12000000\nprogre"));
+    calls[0]!.proc.stdout.emit(
+      "data",
+      Buffer.from("ss=continue\nout_time_us=18500000\nprogress=continue\n"),
+    );
+
+    expect(heard).toEqual([
+      { doneSeconds: 12, totalSeconds: 20 },
+      { doneSeconds: 18.5, totalSeconds: 20 },
+    ]);
+    succeed(calls[0]!);
+    await result;
+  });
+
+  describe("a copy that stops making progress", () => {
+    afterEach(() => vi.useRealTimers());
+
+    it("is ended once it makes no progress for the stall window, not before", async () => {
+      vi.useFakeTimers();
+      const { spawn, calls } = createSpawnSpy();
+      const { resolveProxy, TRANSCODE_STALL_MS } = await loadModule(
+        spawn,
+        FFMPEG_PATH,
+        false,
+        null,
+        undefined,
+        80,
+      );
+      const projectDir = tmpProject();
+      const sourcePath = join(projectDir, "hung.mov");
+      writeFileSync(sourcePath, "source-bytes");
+
+      const result = resolveProxy(projectDir, sourcePath).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(TRANSCODE_STALL_MS - 1);
+      expect(calls[0]!.proc.kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(calls[0]!.proc.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(await result).toEqual(
+        expect.objectContaining({ message: expect.stringMatching(/no progress/) }),
+      );
+    });
+
+    it("keeps going past the old fifteen minute cap while it moves on", async () => {
+      vi.useFakeTimers();
+      const { spawn, calls } = createSpawnSpy();
+      const { resolveProxy, TRANSCODE_STALL_MS } = await loadModule(
+        spawn,
+        FFMPEG_PATH,
+        false,
+        null,
+        undefined,
+        20,
+      );
+      const projectDir = tmpProject();
+      const sourcePath = join(projectDir, "slow.mov");
+      writeFileSync(sourcePath, "source-bytes");
+
+      const result = resolveProxy(projectDir, sourcePath);
+      await vi.advanceTimersByTimeAsync(0);
+      const step = TRANSCODE_STALL_MS / 2;
+      for (let at = 1; at <= (20 * 60_000) / step; at++) {
+        await vi.advanceTimersByTimeAsync(step);
+        calls[0]!.proc.stdout.emit("data", Buffer.from(`out_time_us=${at * 1_000_000}\n`));
+      }
+
+      expect(calls[0]!.proc.kill).not.toHaveBeenCalled();
+      succeed(calls[0]!);
+      await result;
+    });
+  });
+
+  it("hands the abort signal of a batch to its copies, so a stopped check ends them", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxies } = await loadModule(spawn, FFMPEG_PATH, false, null, undefined, 80);
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "stopped.mov");
+    writeFileSync(sourcePath, "source-bytes");
+    const stopped = new AbortController();
+
+    const results = resolveProxies(
+      projectDir,
+      [{ sourcePath, variant: "h264" }],
+      undefined,
+      undefined,
+      stopped.signal,
+    );
+    await flush();
+    expect(calls[0]!.options?.signal?.aborted).toBe(false);
+    stopped.abort();
+    await flush();
+
+    expect(calls[0]!.options?.signal?.aborted).toBe(true);
+    calls[0]!.proc.emit("close", null, "SIGKILL");
+    expect((await results)[0]!.status).toBe("rejected");
   });
 
   it("preserves alpha on HDR-tagged VP8 proxies by bypassing the opaque tonemap chain", async () => {

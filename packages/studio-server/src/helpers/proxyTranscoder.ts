@@ -35,7 +35,7 @@ import { mkdirWithinProject, realpath, realProjectRoot } from "./safePath.js";
  * dropped from the queue or its ffmpeg is killed.
  */
 
-export const PROXY_PARAMS_VERSION = "v5";
+export const PROXY_PARAMS_VERSION = "v6";
 
 export const CACHE_DIR_NAME = ".transcode-cache";
 
@@ -53,9 +53,15 @@ const MAX_CONCURRENT_TRANSCODES = boundedEnvInteger("HYPERFRAMES_PROXY_MAX_CONCU
 const MAX_QUEUED_TRANSCODES = boundedEnvInteger("HYPERFRAMES_PROXY_MAX_QUEUE", 8, 0, 256);
 
 const STDERR_TAIL_MAX_CHARS = 4000;
-export const TRANSCODE_TIMEOUT_MS = 15 * 60 * 1000;
-/** A longer source is copied in pieces this long; a stopped copy keeps its finished pieces. */
-const PROXY_CHUNK_SECONDS = 60;
+/** A copy that makes no progress this long is ended: a hung encode, not a slow one. */
+export const TRANSCODE_STALL_MS = boundedEnvInteger(
+  "HYPERFRAMES_PROXY_STALL_MS",
+  3 * 60 * 1000,
+  10_000,
+  60 * 60 * 1000,
+);
+/** A longer source is copied in pieces this long; a stopped copy keeps its finished pieces and loses at most one. */
+export const PROXY_CHUNK_SECONDS = 15;
 const CHUNK_PREFIX = ".part-";
 const CONCAT_TIMEOUT_MS = 2 * 60 * 1000;
 const FAILURE_CACHE_TTL_MS = 60 * 1000;
@@ -248,6 +254,19 @@ interface ProxyJob {
   /** Set while the job waits for a slot. */
   queued?: { start: () => void; drop: () => void };
   abandoned: AbortController;
+  progress: Set<(progress: ProxyProgress) => void>;
+  lastProgress?: ProxyProgress;
+}
+
+/** How far a copy has got: seconds of the source done, out of its length when that is known. */
+export interface ProxyProgress {
+  doneSeconds: number;
+  totalSeconds?: number;
+}
+
+function reportProgress(job: ProxyJob, progress: ProxyProgress): void {
+  job.lastProgress = progress;
+  for (const listener of job.progress) listener(progress);
 }
 
 class ProxyDroppedError extends ProxyTranscodeError {
@@ -411,11 +430,16 @@ export function clearFailedTranscodesForTest(): void {
 }
 
 /** Even dimensions; with a box, the source shrinks until its tighter side fills the box, never grows. */
-function proxyScaleFilter(box?: PreviewProxyBox): string {
-  if (!box) return "scale=trunc(iw/2)*2:trunc(ih/2)*2";
+function proxyScaleSize(box?: PreviewProxyBox): { width: string; height: string } {
+  if (!box) return { width: "trunc(iw/2)*2", height: "trunc(ih/2)*2" };
   const factor = `min(1\\,max(${box.width}/iw\\,${box.height}/ih))`;
   const side = (d: string) => `min(trunc(${d}/2)*2\\,ceil(${d}*${factor}/2)*2)`;
-  return `scale=${side("iw")}:${side("ih")}`;
+  return { width: side("iw"), height: side("ih") };
+}
+
+function proxyScaleFilter(box?: PreviewProxyBox): string {
+  const { width, height } = proxyScaleSize(box);
+  return `scale=${width}:${height}`;
 }
 
 const STDERR_ERROR_LINE = /error|invalid|denied|no space|not found|unknown/i;
@@ -448,15 +472,7 @@ function chunkRanges(durationSeconds: number | undefined): ChunkRange[] | null {
   }));
 }
 
-function ffmpegBudgetError(chunksKept: number, chunkCount: number): ProxyTranscodeError {
-  return new ProxyTranscodeError(
-    `ffmpeg ran out of its ${TRANSCODE_TIMEOUT_MS}ms budget with ${chunksKept}/${chunkCount} pieces done; the finished pieces are kept and the next attempt continues from them`,
-    null,
-    "",
-  );
-}
-
-type EncodeFn = (outputPath: string, timeoutMs: number, range?: ChunkRange) => Promise<void>;
+type EncodeFn = (outputPath: string, range?: ChunkRange) => Promise<void>;
 
 /** Copies a long source in pieces that stay in the cache, so a stopped copy continues from the first missing one. */
 async function encodeInChunks(
@@ -465,19 +481,24 @@ async function encodeInChunks(
   tempPath: string,
   encode: EncodeFn,
   concat: (listPath: string, target: string) => Promise<void>,
+  onDone: (doneSeconds: number) => void = () => {},
 ): Promise<void> {
   const extension = extname(tempPath);
-  const deadline = Date.now() + TRANSCODE_TIMEOUT_MS;
   const pieces = ranges.map((_, index) => `${chunkPrefix}${index}${extension}`);
+  let doneSeconds = 0;
+  for (const [index, range] of ranges.entries()) {
+    if (existsSync(pieces[index]!)) doneSeconds += range.lengthSeconds;
+  }
+  if (doneSeconds) onDone(doneSeconds);
   for (const [index, range] of ranges.entries()) {
     const piece = pieces[index]!;
     if (existsSync(piece)) continue;
-    const timeoutMs = deadline - Date.now();
-    if (timeoutMs <= 0) throw ffmpegBudgetError(index, ranges.length);
     const pieceTemp = join(dirname(piece), `.tmp-${randomUUID()}-${basename(piece)}`);
     try {
-      await encode(pieceTemp, timeoutMs, range);
+      await encode(pieceTemp, range);
       renameSync(pieceTemp, piece);
+      doneSeconds += range.lengthSeconds;
+      onDone(doneSeconds);
     } finally {
       if (existsSync(pieceTemp)) unlinkSync(pieceTemp);
     }
@@ -566,7 +587,7 @@ async function buildVideoFilter(
   // The tone map ends in RGB; older ffmpeg (seen on 5.1) converts it with BT.601 unless the matrix is named.
   return toneMap
     ? [
-        hdrToSdrToneMapFilter(metadata.color, firstFrame),
+        hdrToSdrToneMapFilter(metadata.color, firstFrame, box && proxyScaleSize(box)),
         `${evenScale}:out_color_matrix=bt709:out_range=tv`,
         `format=${pixelFormat}`,
       ].join(",")
@@ -580,6 +601,7 @@ async function runFfmpeg(
   variant: ProxyVariant,
   box: PreviewProxyBox | undefined,
   signal: AbortSignal,
+  onProgress: (progress: ProxyProgress) => void,
 ): Promise<void> {
   const metadata = await probeMediaMetadata(sourcePath);
   const ffmpegPath = findFfBinary("ffmpeg", { configuredMustExist: true });
@@ -590,11 +612,15 @@ async function runFfmpeg(
   const videoFilter = await buildVideoFilter(ffmpegPath, sourcePath, metadata, keepsAlpha, box);
   const alphaDecoder = keepsAlpha ? alphaDecoderFor(metadata.color.codecName) : null;
   const decoderArgs = alphaDecoder ? ["-c:v", alphaDecoder] : [];
-  const encode: EncodeFn = (target, timeoutMs, range) =>
+  const totalSeconds = metadata.durationSeconds;
+  const encode: EncodeFn = (target, range) =>
     spawnFfmpeg(
       ffmpegPath,
       [
         "-y",
+        "-progress",
+        "pipe:1",
+        "-nostats",
         ...(range ? ["-ss", String(range.startSeconds)] : []),
         ...decoderArgs,
         "-i",
@@ -605,13 +631,21 @@ async function runFfmpeg(
         ...(variant === "vp8" ? VP8_ARGS : H264_ARGS),
         target,
       ],
-      timeoutMs,
+      TRANSCODE_STALL_MS,
       signal,
+      (encodedSeconds) =>
+        onProgress({ doneSeconds: (range?.startSeconds ?? 0) + encodedSeconds, totalSeconds }),
     );
-  const ranges = chunkRanges(metadata.durationSeconds);
-  if (!ranges) return encode(outputPath, TRANSCODE_TIMEOUT_MS);
-  await encodeInChunks(ranges, chunkPrefix, outputPath, encode, (listPath, target) =>
-    spawnFfmpeg(ffmpegPath, concatArgs(listPath, target, variant), CONCAT_TIMEOUT_MS, signal),
+  const ranges = chunkRanges(totalSeconds);
+  if (!ranges) return encode(outputPath);
+  await encodeInChunks(
+    ranges,
+    chunkPrefix,
+    outputPath,
+    encode,
+    (listPath, target) =>
+      spawnFfmpeg(ffmpegPath, concatArgs(listPath, target, variant), CONCAT_TIMEOUT_MS, signal),
+    (doneSeconds) => onProgress({ doneSeconds, totalSeconds }),
   );
 }
 
@@ -631,43 +665,76 @@ function concatArgs(listPath: string, target: string, variant: ProxyVariant): st
   ];
 }
 
+/** ffmpeg's `-progress` lines name the output time reached, in microseconds. */
+const OUT_TIME = /^out_time_(?:us|ms)=(\d+)$/;
+
+/** Runs ffmpeg and ends it when it makes no progress for `stallMs`; a slow encode that moves on is left to finish.
+ * `onProgress` hears the seconds of output made so far (from `-progress pipe:1`). */
 function spawnFfmpeg(
   ffmpegPath: string,
   args: string[],
-  timeoutMs: number,
+  stallMs: number,
   signal: AbortSignal,
+  onProgress?: (encodedSeconds: number) => void,
 ): Promise<void> {
   return new Promise((resolvePromise, reject) => {
-    // Hard ceiling so a hung ffmpeg can never permanently occupy one of the
-    // global transcode slots: the child is killed and the slot released via
-    // the caller's finally. Generous because long assets transcode at
-    // roughly real time; a healthy encode of any authoring asset fits.
     signal.throwIfAborted();
     const proc = spawn(ffmpegPath, args, {
-      stdio: ["ignore", "ignore", "pipe"],
-      timeout: timeoutMs,
+      stdio: ["ignore", "pipe", "pipe"],
       killSignal: "SIGKILL",
       signal,
       windowsHide: true,
+    });
+    let stalled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const armStall = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        stalled = true;
+        proc.kill("SIGKILL");
+      }, stallMs);
+      timer.unref();
+    };
+    armStall();
+    let furthest = 0;
+    let lineTail = "";
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      const lines = (lineTail + chunk.toString()).split("\n");
+      lineTail = lines.pop() ?? "";
+      for (const line of lines) {
+        const reached = OUT_TIME.exec(line.trim());
+        if (!reached) continue;
+        const seconds = Number(reached[1]) / 1e6;
+        if (seconds <= furthest) continue;
+        furthest = seconds;
+        armStall();
+        onProgress?.(seconds);
+      }
     });
     let stderrTail = "";
     proc.stderr?.on("data", (chunk: Buffer) => {
       stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_MAX_CHARS);
     });
     proc.on("error", (err) => {
+      clearTimeout(timer);
       if (signal.aborted) return;
       reject(new FfmpegUnavailableError(`failed to spawn ffmpeg: ${err.message}`, stderrTail));
     });
-    proc.on("close", (code, signal) => {
+    proc.on("close", (code, killedBy) => {
+      clearTimeout(timer);
       if (code === 0) {
         resolvePromise();
-      } else if (signal) {
+      } else if (stalled) {
         reject(
           new ProxyTranscodeError(
-            `ffmpeg killed by ${signal} (timeout ${timeoutMs}ms or external kill)`,
+            `ffmpeg made no progress for ${Math.round(stallMs / 1000)}s and was ended; finished pieces are kept for the next attempt`,
             null,
             stderrTail,
           ),
+        );
+      } else if (killedBy) {
+        reject(
+          new ProxyTranscodeError(`ffmpeg killed by ${killedBy} (external kill)`, null, stderrTail),
         );
       } else {
         reject(
@@ -710,6 +777,7 @@ async function transcodeToCache(
         variant,
         box,
         job.abandoned.signal,
+        (progress) => reportProgress(job, progress),
       );
       renameSync(tempPath, cachePath);
       maintainProxyCache(cacheDir);
@@ -779,6 +847,7 @@ export async function resolveProxy(
       priority: options.priority === true,
       callers: 0,
       abandoned: new AbortController(),
+      progress: new Set(),
     };
     const promise = transcodeToCache(
       job,
@@ -802,15 +871,26 @@ export async function resolveProxy(
     inFlight.set(cachePath, entry);
   }
   if (options.priority) prioritize(entry.job);
-  return joinJob(entry.promise, entry.job, options.signal);
+  const listener = options.onProgress;
+  const joined = joinJob(entry.promise, entry.job, options.signal);
+  if (listener) {
+    entry.job.progress.add(listener);
+    if (entry.job.lastProgress) listener(entry.job.lastProgress);
+    const stop = (): void => void entry.job.progress.delete(listener);
+    joined.then(stop, stop);
+  }
+  return joined;
 }
 
 /** Batch resolve for check and publish: at most MAX_CONCURRENT_TRANSCODES of its own requests in
- * flight (other callers can still fill the queue); each waits at most TRANSCODE_TIMEOUT_MS. */
+ * flight (other callers can still fill the queue). A copy is ended only when it stops making
+ * progress (TRANSCODE_STALL_MS), so a long source that keeps moving is never cut by a clock. */
 export async function resolveProxies(
   projectDir: string,
   sources: ReadonlyArray<{ sourcePath: string; variant: ProxyVariant; box?: PreviewProxyBox }>,
-  onSettled: () => void = () => {},
+  onSettled: (index: number) => void = () => {},
+  onProgress: (index: number, progress: ProxyProgress) => void = () => {},
+  signal?: AbortSignal,
 ): Promise<PromiseSettledResult<string>[]> {
   const first = sources[0];
   if (first) {
@@ -827,14 +907,14 @@ export async function resolveProxies(
   const worker = async (): Promise<void> => {
     for (let index = next++; index < sources.length; index = next++) {
       const { sourcePath, variant, box } = sources[index]!;
-      results[index] = await waitForProxy(
-        resolveProxy(projectDir, sourcePath, variant, box),
-        TRANSCODE_TIMEOUT_MS,
-      ).then(
+      results[index] = await resolveProxy(projectDir, sourcePath, variant, box, {
+        onProgress: (progress) => onProgress(index, progress),
+        signal,
+      }).then(
         (value) => ({ status: "fulfilled", value }),
         (reason: unknown) => ({ status: "rejected", reason }),
       );
-      onSettled();
+      onSettled(index);
     }
   };
   const workers = Math.min(MAX_CONCURRENT_TRANSCODES, sources.length);
@@ -845,6 +925,8 @@ export async function resolveProxies(
 export interface ResolveProxyOptions {
   priority?: boolean;
   signal?: AbortSignal;
+  /** Hears how far the shared copy has got, from the first caller's start to the copy's end. */
+  onProgress?: (progress: ProxyProgress) => void;
 }
 
 function joinJob(promise: Promise<string>, job: ProxyJob, signal?: AbortSignal): Promise<string> {

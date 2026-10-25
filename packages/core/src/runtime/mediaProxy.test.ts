@@ -799,7 +799,7 @@ describe("a copy sized to how large the video shows", () => {
     // A 1080x1920 stage at half size on a 2x screen is 1080x1920 device pixels.
     setProxyDisplayScale(0.5);
     await settle();
-    expect(boxOf(el)).toBe("1448x2048");
+    expect(boxOf(el)).toBe("1218x2048");
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(el.src);
   });
 
@@ -807,7 +807,7 @@ describe("a copy sized to how large the video shows", () => {
     const { el, setProxyDisplayScale } = await framedVideo(2160, 3840);
     setProxyDisplayScale(0.5);
     await settle();
-    expect(boxOf(el)).toBe("2896x4096");
+    expect(boxOf(el)).toBe("2436x4096");
   });
 
   it("asks for the source-size copy when the host never says", async () => {
@@ -828,12 +828,12 @@ describe("a copy sized to how large the video shows", () => {
     setProxyDisplayScale(1);
     setProxyDisplayScale(1);
     await settle();
-    expect(boxOf(el)).toBe("2896x4096");
+    expect(boxOf(el)).toBe("2436x4096");
     expect(el.load).toHaveBeenCalledTimes(2);
 
     setProxyDisplayScale(0.25);
     await settle();
-    expect(boxOf(el)).toBe("2896x4096");
+    expect(boxOf(el)).toBe("2436x4096");
     expect(el.load).toHaveBeenCalledTimes(2);
   });
 
@@ -845,7 +845,7 @@ describe("a copy sized to how large the video shows", () => {
     setProxyDisplayScale(1);
     setProxyDisplayScale(2);
     await settle();
-    expect(boxOf(el)).toBe("5792x8192");
+    expect(boxOf(el)).toBe("4870x8192");
     expect(el.load).toHaveBeenCalledTimes(2);
   });
 
@@ -866,6 +866,6 @@ describe("a copy sized to how large the video shows", () => {
     setProxyDisplayScale(1);
     made = true;
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(boxOf(el)).toBe("2896x4096");
+    expect(boxOf(el)).toBe("2436x4096");
   });
 });
