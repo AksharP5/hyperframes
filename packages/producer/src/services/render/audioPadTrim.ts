@@ -379,6 +379,8 @@ export async function constrainAacTruePeak(input: {
   targetDurationSeconds: number;
   signal?: AbortSignal;
   timeoutMs?: number;
+  probeTruePeakDbfs?: (audioPath: string, signal?: AbortSignal) => Promise<number>;
+  encodeAac?: AacEncoder;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -388,15 +390,19 @@ export async function constrainAacTruePeak(input: {
   const timeoutMs = input.timeoutMs ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
   return enforceAacTruePeak({
     audioPath: input.audioPath,
+    sourcePath: input.sourcePath,
     targetDurationSeconds: input.targetDurationSeconds,
     signal: input.signal,
-    probeTruePeak: (audioPath, signal) => measureTruePeakDbfs(audioPath, { timeoutMs, signal }),
-    encode: defaultAacEncoder(timeoutMs, input.signal, input.sourcePath),
+    probeTruePeak:
+      input.probeTruePeakDbfs ??
+      ((audioPath, signal) => measureTruePeakDbfs(audioPath, { timeoutMs, signal })),
+    encode: input.encodeAac ?? defaultAacEncoder(timeoutMs, input.signal, input.sourcePath),
   });
 }
 
 interface EnforceAacTruePeakInput {
   audioPath: string;
+  sourcePath?: string;
   targetDurationSeconds: number;
   signal?: AbortSignal;
   probeTruePeak: (audioPath: string, signal?: AbortSignal) => Promise<number>;
@@ -415,6 +421,7 @@ async function enforceAacTruePeak(input: EnforceAacTruePeakInput): Promise<{
     const correctedPath = join(scratchDir, "audio.m4a");
     const measurements: string[] = [];
     let attenuationDb = 0;
+    let sourcePeakDbfs: number | undefined;
     let measuredPath = input.audioPath;
     for (let pass = 0; pass <= MAX_TRUE_PEAK_CORRECTION_PASSES; pass += 1) {
       const truePeakDbfs = await input.probeTruePeak(measuredPath, input.signal);
@@ -434,7 +441,13 @@ async function enforceAacTruePeak(input: EnforceAacTruePeakInput): Promise<{
       // Aim below the ceiling, twice as far each pass: the correction is another lossy AAC encode,
       // whose peak can stall or rise over a few dB of attenuation instead of falling dB for dB.
       const headroomDb = AAC_TRUE_PEAK_CORRECTION_HEADROOM_DB * 2 ** pass;
-      attenuationDb += AAC_DELIVERY_TRUE_PEAK_DBFS - headroomDb - truePeakDbfs;
+      // The encoder clips what is left above full scale, so the AAC under-reads a hotter PCM and a
+      // cut sized from it never gets the PCM under: size it from the louder of the two.
+      if (input.sourcePath && sourcePeakDbfs === undefined) {
+        sourcePeakDbfs = await input.probeTruePeak(input.sourcePath, input.signal);
+      }
+      const referenceDbfs = Math.max(truePeakDbfs, (sourcePeakDbfs ?? -Infinity) + attenuationDb);
+      attenuationDb += AAC_DELIVERY_TRUE_PEAK_DBFS - headroomDb - referenceDbfs;
       const result = await input.encode(
         input.audioPath,
         correctedPath,
