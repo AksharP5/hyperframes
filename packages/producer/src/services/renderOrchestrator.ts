@@ -597,7 +597,7 @@ export interface RenderPerfSummary {
   drawElement?: {
     /** Final capture mode: "drawelement" | "screenshot" | "beginframe" (|-joined if workers diverge). */
     mode: string;
-    /** Compile-time gate that disabled default DE: 3d | mix_blend_mode | shader_transitions. */
+    /** Compile-time gate that disabled default DE: 3d | ancestor_background_image | shader_transitions. */
     compileGate?: string;
     /** Producer clamp that disabled default DE: parallel | disk_path. */
     clampReason?: string;
