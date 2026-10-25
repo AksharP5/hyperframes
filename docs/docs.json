@@ -74,6 +74,14 @@
             "group": "Choose where to create",
             "pages": [
               "guides/choose-creation-path",
+              {
+                "group": "With your agent",
+                "pages": [
+                  "guides/with-claude-code",
+                  "guides/with-codex",
+                  "guides/with-cursor"
+                ]
+              },
               "guides/mcp",
               "guides/design-tools"
             ]
