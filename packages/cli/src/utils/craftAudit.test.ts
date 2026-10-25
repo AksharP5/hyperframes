@@ -81,6 +81,12 @@ describe("readingWords", () => {
     expect(readingWords("✓ — →")).toBe(0);
     expect(readingWords("今天天气很好")).toBeGreaterThan(1);
   });
+
+  it("counts a contraction as one word", () => {
+    expect(readingWords("a tooth can't get in")).toBe(5);
+    expect(readingWords("a tooth can’t get in")).toBe(5);
+    expect(readingWords("it's 'quoted'")).toBe(2);
+  });
 });
 
 describe("lineFloorSec", () => {
