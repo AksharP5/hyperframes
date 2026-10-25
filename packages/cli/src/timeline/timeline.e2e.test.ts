@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -625,6 +626,66 @@ describe("timeline edit command", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(spawnSync("ffprobe", ["-version"]).status !== 0).each([
+    { name: "natural source", sourceDuration: "", neighbourDuration: 'data-duration="1"' },
+    { name: "natural neighbour", sourceDuration: 'data-duration="1"', neighbourDuration: "" },
+    { name: "both natural", sourceDuration: "", neighbourDuration: "" },
+    {
+      name: "explicit durations",
+      sourceDuration: 'data-duration="1"',
+      neighbourDuration: 'data-duration="1"',
+    },
+  ])(
+    "duplicates with resolved timing and ripples a $name",
+    ({ sourceDuration, neighbourDuration }) => {
+      const dir = mkdtempSync(join(tmpdir(), "hf-timeline-duplicate-media-"));
+      try {
+        copyFileSync(
+          resolve(cliEntry, "..", "commands", "__fixtures__", "silent.mp4"),
+          join(dir, "silent.mp4"),
+        );
+        const indexPath = join(dir, "index.html");
+        const source = `<div data-composition-id="main" data-duration="12">
+        <video id="clip" src="silent.mp4" data-start="1" ${sourceDuration} data-track-index="0" muted></video>
+        <video id="neighbour" src="silent.mp4" data-start="2" ${neighbourDuration} data-track-index="0" muted></video>
+        <div id="other-track" data-start="2" data-duration="1" data-track-index="1"></div>
+      </div>`;
+        writeFileSync(indexPath, source);
+        const planned = run(dir, "duplicate", "#clip", "--plan");
+        expect(planned.status, planned.stderr).toBe(0);
+        expect(readFileSync(indexPath, "utf8")).toBe(source);
+        const expectedRows = [
+          expect.objectContaining({ ref: "#clip", start: 1, duration: 1, end: 2 }),
+          expect.objectContaining({ ref: "#clip-copy", start: 2, duration: 1, end: 3 }),
+          expect.objectContaining({ ref: "#neighbour", start: 3, duration: 1, end: 4 }),
+          expect.objectContaining({ ref: "#other-track", start: 2, duration: 1, end: 3 }),
+        ];
+        const plan = JSON.parse(planned.stdout);
+        expect(plan.after).toEqual(expect.arrayContaining(expectedRows));
+        const applied = run(dir, "duplicate", "#clip");
+        expect(applied.status, applied.stderr).toBe(0);
+        expect(JSON.parse(applied.stdout).after).toEqual(plan.after);
+        const reopened = spawnSync("bun", ["run", cliEntry, "timeline", dir, "--json"], {
+          cwd: dir,
+          encoding: "utf8",
+          timeout: 30_000,
+          env: { ...process.env, HYPERFRAMES_SKIP_UPDATE_CHECK: "1" },
+        });
+        expect(reopened.status, reopened.stderr).toBe(0);
+        expect(JSON.parse(reopened.stdout)).toMatchObject({
+          timeline: {
+            tracks: expect.arrayContaining([
+              expect.objectContaining({ rows: expect.arrayContaining(expectedRows.slice(0, 3)) }),
+              expect.objectContaining({ rows: expect.arrayContaining([expectedRows[3]]) }),
+            ]),
+          },
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("refuses a trim that would leave a clip one float rounding step long", () => {
     const dir = mkdtempSync(join(tmpdir(), "hf-timeline-cli-"));

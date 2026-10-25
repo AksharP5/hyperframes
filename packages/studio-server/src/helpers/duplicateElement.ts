@@ -20,11 +20,14 @@ export function duplicateElementInHtml(
   target: SourceMutationTarget,
   newId: string,
   at: number,
+  fallbackDuration = 0,
 ): DuplicateElementResult {
   const { document, wrappedFragment } = parseSourceDocument(source);
   const element = findTargetElement(document, target);
   if (!element || !element.parentElement) return { html: source, matched: false, newId: null };
-  const duration = numericAttribute(element, "data-duration");
+  const duration = element.hasAttribute("data-duration")
+    ? numericAttribute(element, "data-duration")
+    : fallbackDuration;
   const track = numericAttribute(element, "data-track-index") ?? 0;
   if (duration === null || numericAttribute(element, "data-start") === null) {
     return { html: source, matched: false, newId: null };
@@ -49,7 +52,7 @@ function rippleElements(
   duration: number,
   track: number,
 ): void {
-  for (const candidate of Array.from(document.querySelectorAll("[data-start][data-duration]"))) {
+  for (const candidate of Array.from(document.querySelectorAll("[data-start]"))) {
     if (candidate === element || candidate.getAttribute("data-track-index") !== String(track)) {
       continue;
     }
