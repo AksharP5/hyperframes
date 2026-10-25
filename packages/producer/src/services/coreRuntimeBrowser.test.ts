@@ -517,6 +517,27 @@ describe("core runtime browser contract", () => {
     }
   }, 30_000);
 
+  // HTML ignores `/>` on a custom element, so every later sibling ends up inside the group.
+  it.each([
+    ["an unmuted", 320 * 180, ""],
+    ["a muted", 0, " data-hidden"],
+  ])(
+    "a clip written after %s self-closed audio group paints %i red pixels",
+    async (_, red, mute) => {
+      const filmPage = await openFilm(
+        `<hf-audio-group id="sfx" data-label="SFX"${mute} />
+      <div class="clip" data-start="0" data-duration="3" style="position:absolute;inset:0;background:rgb(255,0,0)"></div>`,
+      );
+      try {
+        await filmPage.evaluate(() => window.__player!.renderSeek!(1));
+        expect(await redPixels(filmPage)).toBe(red);
+      } finally {
+        await filmPage.close();
+      }
+    },
+    30_000,
+  );
+
   it.each([
     ["an older shader build", 320 * 180, "window.HyperShader = {};"],
     ["a current shader build", 0, "window.HyperShader = {}; window.__hfClipRevealAware = true;"],

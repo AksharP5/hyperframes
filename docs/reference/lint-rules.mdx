@@ -528,6 +528,12 @@ Source: `packages/lint/src/rules/media.ts`.
 
 **Fix:** Remove `data-fx-carve` from the group and carve the bed clip instead.
 
+### `audio_group_holds_elements`
+
+**Warning.** Elements sit inside an `<hf-audio-group>`. Most often the group was written self-closed (`<hf-audio-group id="sfx" />`), which HTML does not close on a custom element, so every later sibling lands inside it. Being inside routes no audio through the bus, and while the group has `data-hidden` those elements are hidden and silenced in preview and render.
+
+**Fix:** Close the group with `</hf-audio-group>` right after its opening tag, and give clips meant for the bus `data-audio-group`.
+
 ### `audio_group_no_members`
 
 **Error.** An audio group exists that no clip joins, so its fader, effects and automation are silently dropped.

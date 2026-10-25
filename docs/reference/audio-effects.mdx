@@ -183,9 +183,11 @@ dangles.
   `data-audio-group` is ignored. Groups do not nest.
 - `data-audio-group=""` is no group at all.
 - The element must be inert. The runtime injects
-  `hf-audio-group{display:none!important}` so an unknown custom element cannot
-  take a flex gap or shift `:nth-child` — but author the rule yourself so a bare
-  preview never lays it out.
+  `hf-audio-group{display:contents!important}` so an unknown custom element cannot
+  take a flex gap, while anything inside it still renders unless the group is
+  muted (`data-hidden` hides it as before) — but author the rule
+  yourself so a bare preview never lays it out. Close it with
+  `</hf-audio-group>`: HTML ignores `/>` on a custom element.
 - Group ids and element ids share one namespace.
 
 ### The master bus: `data-fx-chain` on the composition root
