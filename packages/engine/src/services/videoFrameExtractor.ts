@@ -933,7 +933,7 @@ interface SegmentedExtraction {
   fps: number;
   segments: readonly FrameRange[];
   gate: typeof inExtractionSlot;
-  runOptions: { signal?: AbortSignal; stallTimeout: number };
+  runOptions: { signal?: AbortSignal; timeout: number };
 }
 
 /** Split runs so no single ffmpeg process extracts more than `segmentFrames` frames. */
@@ -1158,8 +1158,7 @@ async function extractVideoFramesRangeUnredacted(
   if (format === "png") encodeArgs.push("-compression_level", "1");
   encodeArgs.push("-y", outputPattern);
 
-  // A long 4K run can take far longer than the timeout and still be healthy; only a stall is a hang.
-  const runOptions = { signal, stallTimeout: ffmpegProcessTimeout };
+  const runOptions = { signal, timeout: ffmpegProcessTimeout };
   const filterArgsFor = (seek: number): string[] => {
     const filters = [...vfFilters];
     filters.splice(samplingAt, 0, ...samplingFilters(seek));

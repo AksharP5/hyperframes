@@ -822,7 +822,7 @@ describe("processCompositionAudio", () => {
     expect(groupMix).toContain("apad,asetpts=N/SR/TB,atrim=0:600[out]");
   });
 
-  it("names the deadline when a group sub-mix is killed for taking too long", async () => {
+  it("names the timeout when a group sub-mix is killed for making no progress", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
     const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
     tempDirs.push(baseDir, workDir);
@@ -833,7 +833,7 @@ describe("processCompositionAudio", () => {
             durationMs: 300_000,
             stderr: "Stream mapping:\n  Stream #0:0 -> #0:0 (pcm_s16le (native))",
             exitCode: 255,
-            terminationReason: "deadline",
+            terminationReason: "inactivity",
           }
         : { success: true, durationMs: 1, stderr: "", exitCode: 0 },
     );
@@ -1274,7 +1274,7 @@ describe("processCompositionAudio", () => {
     60_000,
   );
 
-  it("lets a mix's ffmpeg deadline grow with the film length", async () => {
+  it("gives a long film's mix the configured no-progress timeout, unscaled", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "hf-audio-base-"));
     const workDir = mkdtempSync(join(tmpdir(), "hf-audio-work-"));
     tempDirs.push(baseDir, workDir);
@@ -1305,7 +1305,7 @@ describe("processCompositionAudio", () => {
     };
 
     expect(await mixTimeout(60)).toBe(300_000);
-    expect(await mixTimeout(36_000)).toBe(3_600_000);
+    expect(await mixTimeout(36_000)).toBe(300_000);
   });
 
   it("preserves and classifies unsupported FFmpeg filter failures", async () => {

@@ -786,6 +786,7 @@ async function fetchToPartial(
   partialPath: string,
   controller: AbortController,
   options: UrlDownloadOptions,
+  onSizedBodyBytes: () => void,
 ): Promise<PartialIntegrity> {
   const { response, finalUrl } = await fetchWithValidatedRedirects(url, controller);
   const finalIdentity = safeDownloadUrlIdentity(finalUrl);
@@ -862,6 +863,7 @@ async function fetchToPartial(
   const inspector = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (declaredLength !== undefined) onSizedBodyBytes();
       receivedBytes += bytes.length;
       sha256.update(bytes);
       md5.update(bytes);
@@ -1025,17 +1027,27 @@ async function runDownloadAttempt(
     controller.abort();
   };
   signal?.addEventListener("abort", onCallerAbort, { once: true });
-  const timeoutId = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const armTimeout = (): void => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  };
+  armTimeout();
+  let sizedBodyStarted = false;
+  const extendTimeout = (): void => {
+    sizedBodyStarted = true;
+    armTimeout();
+  };
   const identity = safeDownloadUrlIdentity(url);
 
   try {
     if (callerAborted) {
       throw new UrlDownloadError("cancelled", false, "Download cancelled");
     }
-    const integrity = await fetchToPartial(url, partialPath, controller, options);
+    const integrity = await fetchToPartial(url, partialPath, controller, options, extendTimeout);
     let outcome = syncAndPublishPartial(partialPath, localPath);
     let publishedIntegrity = integrity;
     if (outcome === "race_reused") {
@@ -1094,7 +1106,9 @@ async function runDownloadAttempt(
       const classified = new UrlDownloadError(
         "timeout",
         true,
-        `Download timeout after ${timeoutMs / 1000}s`,
+        sizedBodyStarted
+          ? `Download stalled: no data for ${timeoutMs / 1000}s`
+          : `Download timeout after ${timeoutMs / 1000}s`,
       );
       emitDownloadTelemetry(options, {
         urlFingerprint: identity.urlFingerprint,

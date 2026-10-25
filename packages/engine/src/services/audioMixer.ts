@@ -463,7 +463,7 @@ function ffmpegFailure(
   } else if (result.terminationReason === "abort") {
     reason = "cancelled";
     owner = "user";
-  } else if (result.terminationReason === "deadline" || result.terminationReason === "inactivity") {
+  } else if (result.terminationReason === "inactivity") {
     reason = "ffmpeg_timeout";
     retryable = true;
   } else if (result.terminationReason === "spawn_error") {
@@ -890,17 +890,6 @@ async function generateSilence(
   };
 }
 
-/** A mix graph's work grows with the film length (about 11 ms per film second at 96 inputs); so does its deadline. */
-const MIX_TIMEOUT_MS_PER_FILM_SECOND = 100;
-
-function mixProcessTimeout(
-  config: Partial<Pick<EngineConfig, "ffmpegProcessTimeout">> | undefined,
-  totalDuration: number,
-): number {
-  const configured = config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
-  return Math.max(configured, Math.ceil(totalDuration * MIX_TIMEOUT_MS_PER_FILM_SECOND));
-}
-
 async function mixAudioTracksFlat(
   tracks: AudioTrack[],
   outputPath: string,
@@ -908,7 +897,7 @@ async function mixAudioTracksFlat(
   signal?: AbortSignal,
   config?: Partial<Pick<EngineConfig, "ffmpegProcessTimeout" | "audioGain">>,
 ): Promise<MixResult> {
-  const ffmpegProcessTimeout = mixProcessTimeout(config, totalDuration);
+  const ffmpegProcessTimeout = config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
   const masterOutputGain = config?.audioGain ?? DEFAULT_CONFIG.audioGain;
 
   if (tracks.length === 0) {
@@ -1107,7 +1096,7 @@ async function mixGroupMembersFlat(
   | { success: true; degradedAutomation?: boolean }
   | { success: false; error: string; failure: AudioProcessingFailure }
 > {
-  const ffmpegProcessTimeout = mixProcessTimeout(config, totalDuration);
+  const ffmpegProcessTimeout = config?.ffmpegProcessTimeout ?? DEFAULT_CONFIG.ffmpegProcessTimeout;
   const outputDir = dirname(outputPath);
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 

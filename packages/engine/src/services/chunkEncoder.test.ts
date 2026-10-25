@@ -62,7 +62,7 @@ const tinyEncodeOptions = {
 };
 
 function encodeTimeoutMessage(timeoutMs: number): string {
-  return `FFmpeg killed after exceeding ffmpegEncodeTimeout (${timeoutMs} ms)`;
+  return `FFmpeg killed after writing no new frame for ffmpegEncodeTimeout (${timeoutMs} ms)`;
 }
 
 type FakeProc = EventEmitter & {
@@ -177,11 +177,41 @@ describe("encodeFramesFromDir ffmpegEncodeTimeout", () => {
     expect(result.error).toContain("FFmpeg exited with code 143");
     expect(result.error).toContain("terminated by timeout");
     expect(result.error).toContain(encodeTimeoutMessage(1000));
-    // Regression: the timeout message used to just state what happened, leaving
-    // the user to independently discover FFMPEG_ENCODE_TIMEOUT_MS and
-    // PRODUCER_ENABLE_CHUNKED_ENCODE (both already existed) on their own.
     expect(result.error).toContain("FFMPEG_ENCODE_TIMEOUT_MS");
-    expect(result.error).toContain("PRODUCER_ENABLE_CHUNKED_ENCODE");
+    // Chunking does not help an encode that writes no frames, so it is no longer suggested.
+    expect(result.error).not.toContain("PRODUCER_ENABLE_CHUNKED_ENCODE");
+  });
+
+  it("keeps an encode going past the timeout while its frame count advances", async () => {
+    vi.useFakeTimers();
+    const { spawn, calls } = createSpawnSpy();
+    vi.resetModules();
+    vi.doMock("child_process", () => ({ spawn }));
+
+    const { encodeFramesFromDir } = await import("./chunkEncoder.js");
+    const { root, framesDir } = createFrameFixture();
+
+    const encodePromise = encodeFramesFromDir(
+      framesDir,
+      "frame_%06d.png",
+      join(root, "slow.mp4"),
+      tinyEncodeOptions,
+      undefined,
+      { ffmpegEncodeTimeout: 1000 },
+    );
+
+    const proc = calls[0]!.proc;
+    for (let frame = 1; frame <= 4; frame += 1) {
+      vi.advanceTimersByTime(900);
+      proc.stderr.emit(
+        "data",
+        Buffer.from(`frame=${frame} fps=1 q=28.0 time=00:00:0${frame}.00\r`),
+      );
+    }
+    expect(proc.kill).not.toHaveBeenCalled();
+    emitClose(proc, 0);
+
+    await expect(encodePromise).resolves.toMatchObject({ success: true, framesEncoded: 2 });
   });
 
   it("keeps non-timeout ffmpeg failures unchanged", async () => {

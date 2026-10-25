@@ -510,18 +510,6 @@ export async function runEncodeStage(input: EncodeStageInput): Promise<EncodeSta
   // ── Stage 5: Encode ───────────────────────────────────────────────
   const onFramesEncoded = startEncodeProgress(job, "Encoding video", onProgress);
 
-  // ffmpegEncodeTimeout is a total wall-clock cap, not an inactivity timeout.
-  // A fixed ten-minute cap reliably kills long high-quality disk-frame encodes
-  // that are still making progress. High-quality CPU presets are substantially
-  // slower, so reserve 24x source duration there while retaining the established
-  // 4x budget for draft/standard and preserving larger operator overrides.
-  const baseScaledEncodeTimeout = Math.ceil((job.duration ?? 0) * 4_000);
-  const scaledEncodeTimeout = baseScaledEncodeTimeout * (job.config.quality === "high" ? 6 : 1);
-  const videoEngineCfg =
-    scaledEncodeTimeout > engineCfg.ffmpegEncodeTimeout
-      ? { ...engineCfg, ffmpegEncodeTimeout: scaledEncodeTimeout }
-      : engineCfg;
-
   const frameExt = frameFileExtension(input.captureImageFormat);
   const framePattern = `frame_%06d.${frameExt}`;
   const encoderOpts = videoEncoderOptions(input, engineCfg);
@@ -533,7 +521,7 @@ export async function runEncodeStage(input: EncodeStageInput): Promise<EncodeSta
         encoderOpts,
         chunkedEncodeSize,
         abortSignal,
-        videoEngineCfg,
+        engineCfg,
         onFramesEncoded,
       )
     : await encodeFramesFromDir(
@@ -542,7 +530,7 @@ export async function runEncodeStage(input: EncodeStageInput): Promise<EncodeSta
         videoOnlyPath,
         encoderOpts,
         abortSignal,
-        videoEngineCfg,
+        engineCfg,
         onFramesEncoded,
       );
   assertNotAborted();

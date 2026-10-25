@@ -248,7 +248,7 @@ async function runAnimatedGifTranscode(request: AnimatedGifTranscodeRequest): Pr
       failureReason: result.failureReason,
     });
   }
-  if (result.terminationReason === "deadline") {
+  if (result.terminationReason === "inactivity") {
     throw new Error(`Animated GIF transcode timed out after ${timeout}ms`);
   }
   throw (

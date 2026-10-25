@@ -68,16 +68,10 @@ export interface EncoderPreset {
 
 function appendEncodeTimeoutMessage(error: string, timedOut: boolean, timeoutMs: number): string {
   if (!timedOut) return error;
-  // Two independent reports of this exact timeout, both resolved by env vars
-  // that already exist but aren't named anywhere the user would see them at
-  // the point of failure — they had to go find FFMPEG_ENCODE_TIMEOUT_MS and
-  // PRODUCER_ENABLE_CHUNKED_ENCODE themselves. Name both here instead of
-  // just stating what happened.
   return (
-    `${error}\nFFmpeg killed after exceeding ffmpegEncodeTimeout (${timeoutMs} ms). ` +
-    "Long or high-frame-count renders may need more time: set FFMPEG_ENCODE_TIMEOUT_MS " +
-    "to a higher value (ms), or set PRODUCER_ENABLE_CHUNKED_ENCODE=true to encode in " +
-    "smaller chunks instead of one long-running ffmpeg process."
+    `${error}\nFFmpeg killed after writing no new frame for ffmpegEncodeTimeout (${timeoutMs} ms). ` +
+    "An encode that is still writing frames is never stopped; if this encoder legitimately " +
+    "pauses longer between frames, raise FFMPEG_ENCODE_TIMEOUT_MS (ms)."
   );
 }
 
@@ -602,7 +596,7 @@ export async function encodeFramesFromDir(
       error: appendEncodeTimeoutMessage(
         frameReadFailure(result.stderr, framePattern, 0, framesRead, frameCount) +
           formatFfmpegError(result.exitCode, result.stderr),
-        result.terminationReason === "deadline",
+        result.terminationReason === "inactivity",
         encodeTimeout,
       ),
       failureReason: isExternalFfmpegInterruption(result) ? "external_interruption" : undefined,
@@ -676,7 +670,7 @@ export async function concatVideoFiles(
     success: false,
     error: appendEncodeTimeoutMessage(
       `Chunk concat failed: ${result.stderr.slice(-400)}`,
-      result.terminationReason === "deadline",
+      result.terminationReason === "inactivity",
       encodeTimeout,
     ),
     externalInterruption: isExternalFfmpegInterruption(result),
@@ -770,7 +764,7 @@ export async function encodeFramesChunkedConcat(
               framesRead,
               framesInChunk,
             ) + `Chunk ${i} encode failed: ${processResult.stderr.slice(-400)}`,
-            processResult.terminationReason === "deadline",
+            processResult.terminationReason === "inactivity",
             encodeTimeout,
           ),
     };

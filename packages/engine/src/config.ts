@@ -183,9 +183,9 @@ export interface EngineConfig {
   streamingEncodeDurationCapEnabled: boolean;
 
   // ── FFmpeg timeouts ──────────────────────────────────────────────────
-  /** Timeout for FFmpeg frame encoding (ms). Default: 600_000 */
+  /** How long a disk-frame encode may go without a new frame before it is stopped (ms). Default: 600_000 */
   ffmpegEncodeTimeout: number;
-  /** FFmpeg mux/faststart timeout (ms); extraction waits this long for each new frame. Default: 300_000 */
+  /** How long any other FFmpeg step (audio, mux, extraction) may go without progress (ms). Default: 300_000 */
   ffmpegProcessTimeout: number;
   /**
    * Inactivity timeout for FFmpeg streaming encode (ms). The timer resets on

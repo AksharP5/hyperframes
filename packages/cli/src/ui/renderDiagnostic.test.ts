@@ -122,14 +122,14 @@ const cases: Array<{ name: string; script?: string; expected: AudioFailureDiagno
     },
   },
   {
-    name: "deadline",
+    name: "inactivity",
     script: "setInterval(() => {}, 1000);",
     expected: {
       stage: "prepare",
       reason: "ffmpeg_timeout",
       owner: "system",
       retryable: true,
-      subprocess: { signal: "SIGTERM", terminationReason: "deadline" },
+      subprocess: { signal: "SIGTERM", terminationReason: "inactivity" },
     },
   },
   {
@@ -181,7 +181,7 @@ for (const scenario of cases) {
         join(root, "out.m4a"),
         1,
         undefined,
-        { ffmpegProcessTimeout: scenario.name === "deadline" ? 200 : 5_000 },
+        { ffmpegProcessTimeout: scenario.name === "inactivity" ? 200 : 5_000 },
       );
       expect(result.success).toBe(false);
       const job = buildSyntheticRenderJob({
