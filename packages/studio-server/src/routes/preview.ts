@@ -36,6 +36,11 @@ import {
 import { getMimeType } from "../helpers/mime.js";
 import { buildSubCompositionHtml, hasBaseElement } from "../helpers/subComposition.js";
 import {
+  htmlHasGsapCore,
+  insertGsapCoreBeforeHeadPlugin,
+  isGsapCoreUrl,
+} from "../helpers/gsapCoreScript.js";
+import {
   createProjectSignature,
   resolveProjectAndSignature,
   resolveProjectSignature,
@@ -138,18 +143,6 @@ function injectScriptTagIntoHead(html: string, scriptTag: string): string {
   return insertBeforeCloseTag(html, "head", `${scriptTag}\n`) ?? `${scriptTag}\n${html}`;
 }
 
-function htmlHasGsap(html: string): boolean {
-  // Only match GSAP references outside <template> elements — scripts inside
-  // templates are inert when cloned and don't make GSAP globally available.
-  const outsideTemplates = html.replace(/<template\b[^>]*>[\s\S]*?<\/template>/gi, "");
-  return (
-    /<script\b[^>]*src=["'][^"']*gsap/i.test(outsideTemplates) ||
-    /\/\*\s*inlined:.*gsap/i.test(outsideTemplates) ||
-    /\b(GreenSock|_gsScope)\b/.test(outsideTemplates) ||
-    /\bgsap\.(config|defaults|registerPlugin|version)\b/.test(outsideTemplates)
-  );
-}
-
 function htmlHasCustomEase(html: string): boolean {
   return (
     /<script\b[^>]*src=["'][^"']*CustomEase/i.test(html) ||
@@ -189,11 +182,6 @@ function injectMotionPathPluginIfNeeded(html: string, baseUrl: string): string {
     return html.slice(0, gsap.end) + "\n" + pluginTag + html.slice(gsap.end);
   }
   return injectScriptTagIntoHead(html, gsapScriptTag("MotionPathPlugin.min.js", baseUrl));
-}
-
-function isGsapCoreUrl(src: string): boolean {
-  const base = "http://localhost/";
-  return URL.canParse(src, base) && /\/gsap(\.min)?\.js$/i.test(new URL(src, base).pathname);
 }
 
 type GsapCoreScript = { src: string; type: string | null; defer: boolean; end: number };
@@ -238,28 +226,30 @@ function injectStudioMotionDependencies(
   const manifest = parseStudioMotionManifestContent(manifestContent);
   if (!manifest.hasMotion) return html;
   let next = html;
-  if (!htmlHasGsap(next))
-    next = injectScriptTagIntoHead(next, gsapScriptTag("gsap.min.js", baseUrl));
+  if (!htmlHasGsapCore(next)) {
+    const core = gsapScriptTag("gsap.min.js", baseUrl);
+    next = insertGsapCoreBeforeHeadPlugin(next, core) ?? injectScriptTagIntoHead(next, core);
+  }
   if (manifest.hasCustomEase && !htmlHasCustomEase(next)) {
     next = injectScriptTagIntoHead(next, gsapScriptTag("CustomEase.min.js", baseUrl));
   }
   return next;
 }
 
-function injectStudioMotionScript(
-  html: string,
+function readStudioMotion(
   projectDir: string,
   activeCompositionPath: string,
-  baseUrl: string,
-): string {
+): { manifestContent: string; script: string } | null {
   const manifestContent = readStudioMotionManifestContent(projectDir);
   const script = createStudioMotionRenderBodyScript(manifestContent, {
     activeCompositionPath,
   });
-  if (!script) return html;
-  const withDependencies = injectStudioMotionDependencies(html, manifestContent, baseUrl);
+  return script ? { manifestContent, script } : null;
+}
+
+function injectStudioMotionScript(html: string, script: string): string {
   const tag = `<script type="${AFTER_FONTS_SCRIPT_TYPE}">${script.replace(/<\/script/gi, "<\\/script")}</script>`;
-  return insertBeforeCloseTag(withDependencies, "body", tag) ?? `${withDependencies}${tag}`;
+  return insertBeforeCloseTag(html, "body", tag) ?? `${html}${tag}`;
 }
 
 const GSAP_FALLBACK_ATTR = "data-hf-gsap-fallback";
@@ -362,24 +352,27 @@ function injectStudioPreviewAugmentations(
         lazyPreviewImages(html),
         `<meta name="${STUDIO_PREVIEW_MARK_META}">${EARLY_ERRORS_SCRIPT}`,
       );
-  return injectStudioMotionScript(
-    injectMotionPathPluginIfNeeded(
-      injectGsapCdnFallback(
-        injectProjectSignature(
-          injectTagsAtHeadStart(
-            marked,
-            `<meta name="${GSAP_BASE_URL_META}" content="${escapeGsapUrl(options.gsapBaseUrl)}">`,
-          ),
-          resolveProjectSignature(adapter, projectDir),
-        ),
-        options.gsapBaseUrl,
+  const withFallback = injectGsapCdnFallback(
+    injectProjectSignature(
+      injectTagsAtHeadStart(
+        marked,
+        `<meta name="${GSAP_BASE_URL_META}" content="${escapeGsapUrl(options.gsapBaseUrl)}">`,
       ),
-      options.gsapBaseUrl,
+      resolveProjectSignature(adapter, projectDir),
     ),
-    projectDir,
-    activeCompositionPath,
     options.gsapBaseUrl,
   );
+  const studioMotion = readStudioMotion(projectDir, activeCompositionPath);
+  // Studio motion's GSAP core goes in first, so a MotionPathPlugin injected next lands after it.
+  const withMotionDependencies = studioMotion
+    ? injectStudioMotionDependencies(
+        withFallback,
+        studioMotion.manifestContent,
+        options.gsapBaseUrl,
+      )
+    : withFallback;
+  const withPlugin = injectMotionPathPluginIfNeeded(withMotionDependencies, options.gsapBaseUrl);
+  return studioMotion ? injectStudioMotionScript(withPlugin, studioMotion.script) : withPlugin;
 }
 
 async function transformPreviewHtml(

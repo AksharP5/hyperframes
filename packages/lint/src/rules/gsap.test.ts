@@ -1008,9 +1008,42 @@ describe("GSAP rules", () => {
     expect(finding).toBeUndefined();
   });
 
+  it("reports missing_gsap_script when only a GSAP plugin script is loaded", async () => {
+    const html = `
+<html><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080"></div>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/MotionPathPlugin.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    tl.to("#box", { x: 100, duration: 1 }, 0);
+    window.__timelines["main"] = tl;
+  </script>
+</body></html>`;
+    const result = await lintHyperframeHtml(html);
+    const finding = result.findings.find((f) => f.code === "missing_gsap_script");
+    expect(finding?.severity).toBe("error");
+  });
+
+  it.each(["/api/vendor/npm/gsap@3.15.0/dist/gsap.min.js", "assets/gsap-3.14.2.min.js"])(
+    "does not report missing_gsap_script for the local GSAP core %s",
+    async (src) => {
+      const html = `
+<html><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080"></div>
+  <script src="${src}"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    window.__timelines["main"] = gsap.timeline({ paused: true });
+  </script>
+</body></html>`;
+      const result = await lintHyperframeHtml(html);
+      expect(result.findings.find((f) => f.code === "missing_gsap_script")).toBeUndefined();
+    },
+  );
+
   it("does not report missing_gsap_script when GSAP is bundled inline", async () => {
-    // Simulate a large inline GSAP bundle (>5KB) with GreenSock marker
-    const fakeGsapLib = "/* GreenSock GSAP */" + " ".repeat(6000);
+    const fakeGsapLib = "/*!\n * GSAP 3.15.0\n * https://gsap.com\n */\n" + " ".repeat(6000);
     const html = `
 <html><body>
   <div data-composition-id="main" data-width="1920" data-height="1080"></div>
@@ -1025,6 +1058,34 @@ describe("GSAP rules", () => {
     const result = await lintHyperframeHtml(html);
     const finding = result.findings.find((f) => f.code === "missing_gsap_script");
     expect(finding).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "registerPlugin",
+      "gsap.registerPlugin(MotionPathPlugin);",
+      '<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/MotionPathPlugin.min.js"></script>',
+    ],
+    ["defaults", 'gsap.defaults({ ease: "none" });', ""],
+    ["a large GreenSock comment", "/* GreenSock */" + " ".repeat(6000), ""],
+    [
+      "an inlined plugin",
+      "/* inlined: https://cdn.jsdelivr.net/npm/gsap@3/dist/MotionPathPlugin.min.js */",
+      "",
+    ],
+  ])("reports missing_gsap_script when the only inline GSAP is %s", async (_name, inline, tag) => {
+    const html = `
+<html><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080"></div>
+  ${tag}
+  <script>${inline}</script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    window.__timelines["main"] = gsap.timeline({ paused: true });
+  </script>
+</body></html>`;
+    const result = await lintHyperframeHtml(html);
+    expect(result.findings.find((f) => f.code === "missing_gsap_script")?.severity).toBe("error");
   });
 
   it("does not report missing_gsap_script when producer inlined CDN script", async () => {

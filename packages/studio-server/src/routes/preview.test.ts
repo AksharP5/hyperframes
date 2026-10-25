@@ -359,6 +359,67 @@ describe("registerPreviewRoutes", () => {
     expect(html.indexOf("CustomEase.min.js")).toBeLessThan(html.indexOf("__hfStudioMotionApply"));
   });
 
+  it("injects GSAP core before the MotionPathPlugin when Studio motion and a motionPath share a page with no GSAP", async () => {
+    const projectDir = createProjectDir();
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!doctype html><html><head></head><body><div id="card"></div>
+        <script>
+          window.__hfPath = { motionPath: { path: [{ x: 0, y: 0 }, { x: 100, y: 50 }] } };
+        </script>
+      </body></html>`,
+    );
+    const manifestDir = join(projectDir, ".hyperframes");
+    mkdirSync(manifestDir, { recursive: true });
+    writeFileSync(
+      join(manifestDir, "studio-motion.json"),
+      `{"version":1,"motions":[{"kind":"gsap-motion","target":{"sourceFile":"index.html","id":"card"},"start":0,"duration":1,"ease":"power2.out","from":{"y":32},"to":{"y":0}}]}`,
+    );
+    const app = new Hono();
+    registerPreviewRoutes(app, createAdapter(projectDir));
+
+    const response = await app.request("http://localhost/projects/demo/preview");
+    const srcs = [...parseHTML(await response.text()).document.querySelectorAll("script[src]")].map(
+      (el) => el.getAttribute("src") ?? "",
+    );
+
+    expect(response.status).toBe(200);
+    const core = srcs.findIndex((src) => src.endsWith("/gsap.min.js"));
+    const plugin = srcs.findIndex((src) => src.endsWith("/MotionPathPlugin.min.js"));
+    expect(core).toBeGreaterThanOrEqual(0);
+    expect(plugin).toBeGreaterThan(core);
+  });
+
+  it.each([
+    ["", ""],
+    ["", "<script>gsap.registerPlugin(MotionPathPlugin);</script>"],
+    ["<script>var early = 1;</script>", "<script>gsap.registerPlugin(MotionPathPlugin);</script>"],
+  ])("injects GSAP core before an authored head MotionPathPlugin (%#)", async (before, after) => {
+    const projectDir = createProjectDir();
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!doctype html><html><head>${before}<script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/MotionPathPlugin.min.js"></script>${after}</head><body><div id="card"></div></body></html>`,
+    );
+    const manifestDir = join(projectDir, ".hyperframes");
+    mkdirSync(manifestDir, { recursive: true });
+    writeFileSync(
+      join(manifestDir, "studio-motion.json"),
+      `{"version":1,"motions":[{"kind":"gsap-motion","target":{"sourceFile":"index.html","id":"card"},"start":0,"duration":1,"ease":"power2.out","from":{"y":32},"to":{"y":0}}]}`,
+    );
+    const app = new Hono();
+    registerPreviewRoutes(app, createAdapter(projectDir));
+
+    const response = await app.request("http://localhost/projects/demo/preview");
+    const srcs = [...parseHTML(await response.text()).document.querySelectorAll("script[src]")].map(
+      (el) => el.getAttribute("src") ?? "",
+    );
+
+    expect(response.status).toBe(200);
+    const core = srcs.findIndex((src) => src.endsWith("/gsap.min.js"));
+    expect(core).toBeGreaterThanOrEqual(0);
+    expect(srcs.findIndex((src) => src.endsWith("/MotionPathPlugin.min.js"))).toBeGreaterThan(core);
+  });
+
   it("injects the GSAP MotionPathPlugin when the composition uses a motionPath", async () => {
     const projectDir = createProjectDir();
     writeFileSync(
