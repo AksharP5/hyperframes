@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, posix, relative } from "node:path";
 import AdmZip from "adm-zip";
+import { parseHTML } from "linkedom";
 
 const authMocks = vi.hoisted(() => ({
   tryResolveCredential: vi.fn(),
@@ -224,6 +225,51 @@ async function runAuthenticatedPublish(
 }
 
 describe("createPublishArchive", () => {
+  it.each([
+    { filename: "poster art.svg", reference: "poster%20art.svg" },
+    { filename: "封面.svg", reference: "%E5%B0%81%E9%9D%A2.svg" },
+    { filename: "100%.svg", reference: "100%.svg" },
+    { filename: "poster%20art.svg", reference: "poster%20art.svg" },
+    { filename: "poster#art.svg", reference: "poster%23art.svg" },
+    { filename: "poster#art.svg", reference: "poster#art.svg" },
+  ])("archives $filename referenced as $reference", ({ filename, reference }) => {
+    const projectDir = makeProjectDir();
+    const extDir = mkdtempSync(join(tmpdir(), "hf-ext-"));
+    try {
+      const entryPath = "compositions/scene.html";
+      const htmlDir = join(projectDir, dirname(entryPath));
+      mkdirSync(htmlDir, { recursive: true });
+      stageExternalAsset(extDir, htmlDir, filename, "POSTER_DATA");
+      if (reference !== filename) {
+        stageExternalAsset(extDir, htmlDir, reference, "LITERAL_DECOY");
+      }
+      const assetPath = relative(htmlDir, join(extDir, reference)).replaceAll("\\", "/");
+      const html = `<html><body><img src="${assetPath}"><video src="../clip.mp4" poster="${assetPath}"></video></body></html>`;
+      writeFileSync(join(projectDir, "index.html"), "<html></html>");
+      writeFileSync(join(projectDir, entryPath), html);
+      writeFileSync(join(projectDir, "clip.mp4"), "MP4_DATA");
+
+      const archive = createPublishArchive(projectDir);
+      const zip = new AdmZip(archive.buffer);
+      const { document } = parseHTML(zip.readAsText(entryPath));
+      const src = document.querySelector("img")?.getAttribute("src");
+      if (!src) throw new Error("Archived image has no src");
+      expect(document.querySelector("video")?.getAttribute("poster")).toBe(src);
+      const url = new URL(src, `https://archive.example/${entryPath}`);
+      expect(url.hash).toBe("");
+      expect(url.search).toBe("");
+      const archivedPath = decodeURIComponent(url.pathname.slice(1));
+      expect(archivedPath).toMatch(/^_ext\//);
+      expect(posix.basename(archivedPath)).toBe(filename);
+      expect(zip.readFile(archivedPath)).toEqual(Buffer.from("POSTER_DATA"));
+      expect(archive.fileCount).toBe(4);
+      expect(readFileSync(join(projectDir, entryPath), "utf-8")).toBe(html);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+      rmSync(extDir, { recursive: true, force: true });
+    }
+  });
+
   it.each(["index.html", "compositions/scene.html"])(
     "includes external video posters referenced from %s",
     (entryPath) => {
@@ -268,18 +314,21 @@ describe("createPublishArchive", () => {
     try {
       const posters = [
         "poster.png",
+        "poster%20art.png",
         "https://cdn.example.com/poster.png",
+        "https://cdn.example.com/poster%20art.png",
         "data:image/png;base64,AA==",
       ];
       const html = `<html><body>${posters.map((poster) => `<video src="clip.mp4" poster="${poster}"></video>`).join("")}</body></html>`;
       writeFileSync(join(projectDir, "index.html"), html);
       writeFileSync(join(projectDir, "poster.png"), "PNG_DATA");
+      writeFileSync(join(projectDir, "poster art.png"), "ENCODED_PNG_DATA");
       writeFileSync(join(projectDir, "clip.mp4"), "MP4_DATA");
 
       const archive = createPublishArchive(projectDir);
       const zip = new AdmZip(archive.buffer);
 
-      expect(archive.fileCount).toBe(3);
+      expect(archive.fileCount).toBe(4);
       expect(zip.readAsText("index.html")).toBe(html);
       expect(zip.getEntries().some((entry) => entry.entryName.startsWith("_ext/"))).toBe(false);
     } finally {
