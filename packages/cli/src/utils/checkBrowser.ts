@@ -259,8 +259,7 @@ function proxyFailedDraft(message: string): RuntimeDraft {
   return { code: "media_proxy_failed", severity: "warning", message, time: 0 };
 }
 
-/** Studio's capture mode loads only media near the playhead, so a long project's decoders cannot exhaust memory. */
-async function loadCheckHtml(dir: string): Promise<string> {
+async function loadCheckHtmlWithDeferredMedia(dir: string): Promise<string> {
   const { bundleWithLocalizedFonts } = await import("./bundleWithLocalizedFonts.js");
   return injectTagsAtHeadStart(
     await bundleWithLocalizedFonts(dir),
@@ -276,7 +275,7 @@ export async function runBrowserCheck(
   deadline?: CheckDeadline,
   prelaunched?: PrelaunchedBrowser,
 ): Promise<CheckBrowserResult> {
-  const html = await loadCheckHtml(project.dir);
+  const html = await loadCheckHtmlWithDeferredMedia(project.dir);
   deadline?.enter("copies");
   const { findings: drafts, failedPaths } = await preResolveHostileMediaProxies(
     project.dir,
@@ -509,7 +508,7 @@ export async function captureFindingCrops(
   deadline?: CheckDeadline,
 ): Promise<string[]> {
   if (requests.length === 0) return [];
-  const html = await loadCheckHtml(project.dir);
+  const html = await loadCheckHtmlWithDeferredMedia(project.dir);
   const server = await serveStaticProjectHtml(
     project.dir,
     html,
@@ -790,10 +789,6 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], clock: Runtime
   });
 }
 
-/**
- * A crashed or closed page never settles the calls pending on it, so a check waiting on one runs to
- * its deadline; every driver call settles with the page's death instead.
- */
 function failWhenPageDies(page: Page, driver: CheckAuditDriver): CheckAuditDriver {
   const dead = new Promise<never>((_, reject) => {
     page.on("error", (error) =>

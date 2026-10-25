@@ -1,4 +1,4 @@
-import { BrowserCleanupError } from "../browser/launch.js";
+import { BrowserCleanupError, onStopSignal } from "../browser/launch.js";
 import type { CheckProgress } from "./checkProgress.js";
 import { CheckDeadline, CheckDeadlineError, type CheckPhase } from "./checkDeadline.js";
 import {
@@ -1655,6 +1655,7 @@ export async function runCheckPipeline(
         : [];
 
     const deadline = new CheckDeadline();
+    const forgetStop = onStopSignal(deadline.stop);
     let outcome: { kind: "report"; report: CheckReport } | { kind: "failed"; error: unknown };
     try {
       let browser: CheckBrowserResult;
@@ -1691,6 +1692,7 @@ export async function runCheckPipeline(
     } catch (error) {
       outcome = { kind: "failed", error };
     }
+    forgetStop();
     try {
       await deadline.close();
     } catch (error) {

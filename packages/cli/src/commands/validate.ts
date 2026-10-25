@@ -164,8 +164,6 @@ export async function auditClipDurations(
     // snapshot. Elements that already have a duration resolve immediately, so
     // this adds no latency in the common case.
     const deadline = Date.now() + maxWaitMs;
-    // A page that defers media (check's) never loads an off-screen element, so its duration is read
-    // from a detached element on the same source instead.
     const reads = new Map<HTMLMediaElement, HTMLMediaElement>();
     await Promise.all(
       nodes.map((el) => {

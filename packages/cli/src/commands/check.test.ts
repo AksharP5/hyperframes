@@ -45,7 +45,7 @@ import {
   type MotionSpecResolution,
 } from "../utils/checkPipeline.js";
 import { resolveCompositionViewportFromHtml } from "../utils/compositionViewport.js";
-import { consumeCommandResult } from "../utils/commandResult.js";
+import { consumeCommandResult, registerRootExitRequester } from "../utils/commandResult.js";
 import { ambiguousIssue } from "../utils/motionAudit.js";
 import type { ProjectLintResult } from "../utils/lintProject.js";
 import type {
@@ -3119,4 +3119,40 @@ it("applies transition sample limits within the requested range", async () => {
   });
   expect(report.layout.transitionSamples).toEqual([7.8, 8]);
   expect(report.layout.transitionSamplesDropped).toBe(3);
+});
+
+describe("check stopped by a signal", () => {
+  it("SIGTERM prints the report so far, then exits 143", async () => {
+    const { deps, runBrowserCheck } = dependencies(fakeDriver());
+    const reachedBrowser = new Promise<void>((resolve) => {
+      runBrowserCheck.mockImplementation(() => {
+        resolve();
+        return new Promise<CheckBrowserResult>(() => undefined);
+      });
+    });
+    const order: string[] = [];
+    registerRootExitRequester((code) => order.push(`exit ${code}`));
+    const log = vi.spyOn(console, "log").mockImplementation((line) => {
+      order.push(`print ${String(line).slice(0, 1)}`);
+    });
+    const command = createCheckCommand({
+      resolveProject: () => PROJECT,
+      runPipeline: (project, options) => runCheckPipeline(project, options, deps),
+      prepareMedia: vi.fn(async () => []),
+      withMeta: (value) => value,
+    });
+
+    const running = runCommand(command, { rawArgs: ["--json"] });
+    await reachedBrowser;
+    process.emit("SIGTERM");
+    await running;
+    await vi.waitFor(() => expect(order).toContain("exit 143"));
+
+    const report = JSON.parse(String(log.mock.calls[0]?.[0]));
+    expect(report.ok).toBe(false);
+    expect(report.runtime.findings.map((finding: CheckFinding) => finding.message)).toContain(
+      "Check stopped before finishing (SIGTERM).",
+    );
+    expect(order).toEqual(["print {", "exit 143"]);
+  });
 });

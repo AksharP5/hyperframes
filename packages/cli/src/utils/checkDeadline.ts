@@ -33,6 +33,12 @@ export class CheckDeadlineError extends Error {
   }
 }
 
+export class CheckStoppedError extends Error {
+  constructor(signal: string) {
+    super(`Check stopped before finishing (${signal}).`);
+  }
+}
+
 /** Ends a check that makes no progress for CHECK_IDLE_MS; each phase entered or operation settled restarts it. */
 export class CheckDeadline {
   private readonly abort = new AbortController();
@@ -40,10 +46,10 @@ export class CheckDeadline {
   readonly signal = this.abort.signal;
   private readonly browsers = new Set<Browser>();
   private readonly scripts: string[] = [];
-  private expired: CheckDeadlineError | undefined;
+  private expired: Error | undefined;
   private timer: NodeJS.Timeout | undefined;
   private readonly expiry: Promise<never>;
-  private rejectExpiry!: (error: CheckDeadlineError) => void;
+  private rejectExpiry!: (error: Error) => void;
   private phase: "waiting" | "started" | "closed" = "waiting";
   private work: { phase: CheckPhase; since: number } | undefined;
   private readonly spent = new Map<CheckPhase, number>();
@@ -95,12 +101,23 @@ export class CheckDeadline {
   private rearm(): void {
     if (this.phase !== "started" || this.expired) return;
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      this.expired = new CheckDeadlineError(this.scripts.at(-1), this.describe());
-      this.rejectExpiry(this.expired);
-      this.abort.abort(this.expired);
-    }, CHECK_IDLE_MS);
+    this.timer = setTimeout(
+      () => this.expire(new CheckDeadlineError(this.scripts.at(-1), this.describe())),
+      CHECK_IDLE_MS,
+    );
   }
+
+  private expire(error: Error): void {
+    clearTimeout(this.timer);
+    this.expired = error;
+    this.rejectExpiry(error);
+    this.abort.abort(error);
+  }
+
+  stop = (signal: string): void => {
+    if (this.expired || this.phase === "closed") return;
+    this.expire(new CheckStoppedError(signal));
+  };
 
   ownBrowser = (browser: Browser): void => {
     if (this.expired) throw this.expired;

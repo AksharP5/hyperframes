@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { CheckDeadline, CheckDeadlineError } from "./checkDeadline.js";
+import { CheckDeadline, CheckDeadlineError, CheckStoppedError } from "./checkDeadline.js";
 
 afterEach(() => vi.useRealTimers());
 
@@ -154,6 +154,24 @@ it("an operation that settles restarts the idle clock", async () => {
     expect(deadline.signal.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(20_000);
     expect(deadline.signal.aborted).toBe(true);
+  } finally {
+    await deadline.close();
+  }
+});
+
+it("a stop ends the check at once, keeping what it already found", async () => {
+  vi.useFakeTimers();
+  const deadline = new CheckDeadline();
+  deadline.start();
+  deadline.keepPartial(() => ({ screenshots: [] }));
+  try {
+    const sample = deadline.run(() => rejectOnAbort(deadline.signal));
+    const failed = expect(sample).rejects.toThrow("Check stopped before finishing (SIGTERM).");
+    deadline.stop("SIGTERM");
+    await failed;
+    await expect(deadline.run(async () => "late")).rejects.toBeInstanceOf(CheckStoppedError);
+    expect(deadline.signal.aborted).toBe(true);
+    expect(deadline.partialResult()).toEqual({ screenshots: [] });
   } finally {
     await deadline.close();
   }

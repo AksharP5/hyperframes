@@ -17,6 +17,7 @@ import type { ArgsDef } from "citty";
 import type { Example } from "./_examples.js";
 import { parseAt } from "./layout.js";
 import { c } from "../ui/colors.js";
+import { registerBrowserSessionCleanup } from "../browser/launch.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { setCommandExitCode } from "../utils/commandResult.js";
 import { swallowedFlagUsageError } from "../utils/reject-unknown-flags.js";
@@ -272,6 +273,7 @@ export function createCheckCommand(
       const args = parseArgs(rawArgs, CHECK_COMMAND_ARGS);
       const asJson = args.json === true;
 
+      const reported = untilReported();
       try {
         const project = dependencies.resolveProject(args.dir);
         const options = parseCheckOptions(args);
@@ -307,9 +309,36 @@ export function createCheckCommand(
           console.error(`${c.error("✗")} Check failed: ${message}`);
         }
         setCommandExitCode(1);
+      } finally {
+        reported.done();
       }
     },
   });
+}
+
+const REPORT_GRACE_MS = 5_000;
+
+function untilReported(): { done: () => void } {
+  let done = (): void => undefined;
+  const printed = new Promise<void>((resolve) => {
+    done = resolve;
+  });
+  const forget = registerBrowserSessionCleanup(
+    () =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, REPORT_GRACE_MS);
+        void printed.then(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      }),
+  );
+  return {
+    done: () => {
+      done();
+      forget();
+    },
+  };
 }
 
 async function runPrepareMedia(

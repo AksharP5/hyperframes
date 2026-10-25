@@ -31,9 +31,18 @@ const EXIT_POLL_MS = 50;
 let listening = false;
 let shutdown: Promise<void> | undefined;
 
+const stopListeners = new Set<(signal: "SIGINT" | "SIGTERM") => void>();
+
+export function onStopSignal(listener: (signal: "SIGINT" | "SIGTERM") => void): () => void {
+  ownSignals();
+  stopListeners.add(listener);
+  return () => stopListeners.delete(listener);
+}
+
 /** CLI signals close browser admission and native processes before the root exits. */
 function stopForSignal(signal: "SIGINT" | "SIGTERM"): void {
   if (shutdown) return;
+  for (const listener of stopListeners) listener(signal);
   shutdown = closeManagedBrowsers();
   void shutdown.then(
     () => requestCliExit(signal === "SIGINT" ? 130 : 143),
