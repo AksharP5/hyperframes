@@ -51,6 +51,22 @@ describe("duplicateElementInHtml", () => {
     expect(document.getElementById("clip-copy")?.hasAttribute("data-duration")).toBe(false);
   });
 
+  it("shifts a rippled neighbour's absolute end on the same track", () => {
+    const source = `<div>
+      <video id="clip" data-start="1" data-duration="1" data-track-index="0"></video>
+      <video id="next" data-start="2" data-end="3" data-track-index="0"></video>
+      <video id="other" data-start="2" data-end="3" data-track-index="1"></video>
+    </div>`;
+
+    const result = duplicateElementInHtml(source, { id: "clip" }, "clip-copy", 2);
+    const { document } = parseSourceDocument(result.html);
+
+    expect(document.getElementById("next")?.getAttribute("data-start")).toBe("3");
+    expect(document.getElementById("next")?.getAttribute("data-end")).toBe("4");
+    expect(document.getElementById("other")?.getAttribute("data-start")).toBe("2");
+    expect(document.getElementById("other")?.getAttribute("data-end")).toBe("3");
+  });
+
   it("duplicates a target inside a nested template", () => {
     const source = `<!doctype html><html><body>
       <template data-composition-id="outer"><template data-composition-id="inner">

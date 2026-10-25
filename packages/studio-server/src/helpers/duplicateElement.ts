@@ -40,11 +40,7 @@ export function duplicateElementInHtml(
   clone.setAttribute("id", uniqueId);
   dedupeClonedCompositionId(document, clone);
   stripStableIds(clone);
-  clone.setAttribute("data-start", String(at));
-  if (clone.hasAttribute("data-end")) {
-    const end = numericAttribute(clone, "data-end");
-    if (end !== null) clone.setAttribute("data-end", String(end + (at - start)));
-  }
+  moveElementStart(clone, start, at);
   element.parentElement.insertBefore(clone, element.nextSibling);
   const html = wrappedFragment ? document.body.innerHTML || "" : document.toString();
   return { html: ensureHfIds(html), matched: true, newId: uniqueId };
@@ -65,8 +61,15 @@ function rippleElements(
     if (start === null) continue;
     const metInsertionPoint = sameInstant(start, at);
     if (start < at && !metInsertionPoint) continue;
-    candidate.setAttribute("data-start", String((metInsertionPoint ? at : start) + duration));
+    moveElementStart(candidate, start, (metInsertionPoint ? at : start) + duration);
   }
+}
+
+function moveElementStart(element: Element, start: number, nextStart: number): void {
+  element.setAttribute("data-start", String(nextStart));
+  if (!element.hasAttribute("data-end")) return;
+  const end = numericAttribute(element, "data-end");
+  if (end !== null) element.setAttribute("data-end", String(end + (nextStart - start)));
 }
 
 function stripStableIds(element: Element): void {
