@@ -1869,7 +1869,6 @@ describe("resolveDeviceScaleFactor", () => {
 describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
   const eligible = {
     workerCount: 5,
-    requestedWorkers: "auto" as const,
     useDrawElement: true,
     deCompileGate: undefined,
     forceScreenshot: false,
@@ -1930,7 +1929,6 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
 
     it("is NOT decisive when the render is ineligible for any other reason — the attribution cohort must exclude renders the band cannot affect", () => {
       for (const over of [
-        { requestedWorkers: 3 as const },
         { useDrawElement: false },
         { deCompileGate: "css_effect:filter" },
         { forceScreenshot: true },
@@ -2774,14 +2772,14 @@ describe("shouldPreferSingleWorkerDrawElement (DE priority inversion)", () => {
     });
   });
 
-  it("honors explicitly requested workers", () => {
-    expect(shouldPreferSingleWorkerDrawElement({ ...eligible, requestedWorkers: 3 })).toBe(false);
+  it("inverts whatever worker count the render asked for: an explicit --workers N is a ceiling", () => {
+    for (const workerCount of [2, 3, 4, 24]) {
+      expect(shouldPreferSingleWorkerDrawElement({ ...eligible, workerCount })).toBe(true);
+    }
   });
 
-  it("inverts for requestedWorkers undefined — the value production actually passes for auto", () => {
-    expect(shouldPreferSingleWorkerDrawElement({ ...eligible, requestedWorkers: undefined })).toBe(
-      true,
-    );
+  it("leaves a one-worker render alone", () => {
+    expect(shouldPreferSingleWorkerDrawElement({ ...eligible, workerCount: 1 })).toBe(false);
   });
 
   it("skips comps routed to layered/HDR/shader paths (drawElement never runs there)", () => {
