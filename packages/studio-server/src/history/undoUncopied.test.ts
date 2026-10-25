@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -121,6 +122,22 @@ describe("undoing a change that made or replaced media", () => {
     expect(redone).toMatchObject({ ok: true });
     for (const name of ["a.mp4", "b.mp4"])
       expect(readFileSync(join(projectDir, name)).equals(bytes)).toBe(true);
+  });
+
+  it("takes back a rename of a video, so the file is back at its old name, and redo renames it again", async () => {
+    const { history, media, projectDir } = await project();
+    const bytes = Buffer.alloc(2 * MiB, 10);
+    const renamed = join(projectDir, "sunset.mp4");
+    await change(history, "Place join", () => writeFileSync(media, bytes));
+    const moved = await change(history, "Rename", () => renameSync(media, renamed));
+
+    const undone = await history.undo(moved.id, { who: you });
+    expect(undone).toMatchObject({ ok: true });
+    expect([existsSync(renamed), readFileSync(media).equals(bytes)]).toEqual([false, true]);
+
+    const redone = await history.undo(undone.ok ? undone.entry!.id : "", { who: you });
+    expect(redone).toMatchObject({ ok: true });
+    expect([existsSync(media), readFileSync(renamed).equals(bytes)]).toEqual([false, true]);
   });
 
   it("does not fold the history away when the media it keeps is larger than the budget", async () => {

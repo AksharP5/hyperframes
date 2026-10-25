@@ -1107,7 +1107,12 @@ class Engine {
     const changes = [...target]
       .filter(([path, hash]) => (this.tracked.get(path)?.hash ?? null) !== hash)
       .sort(([, a], [, b]) => Number(a !== null) - Number(b !== null));
-    const gone = changes.find(([, hash]) => hash !== null && !this.blobs.has(hash));
+    const setAsideByDeletesFirst = new Set(
+      changes.filter(([, hash]) => hash === null).map(([path]) => this.tracked.get(path)?.hash),
+    );
+    const gone = changes.find(
+      ([, hash]) => hash !== null && !this.blobs.has(hash) && !setAsideByDeletesFirst.has(hash),
+    );
     if (gone)
       throw new Error(
         `An earlier version of ${gone[0]} is not kept, so this cannot be brought back.`,
