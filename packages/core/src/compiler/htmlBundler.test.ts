@@ -2102,23 +2102,75 @@ describe("bundleToSingleHtml", () => {
     expect(bundled).toContain(`url('${inlinedAs("image/png", "fake")}')`);
   });
 
-  it("preserves url() query strings and hash fragments during rebasing", async () => {
-    const dir = makeTempProject({
-      "index.html": `<!doctype html>
+  it.each([true, false])(
+    "handles CSS asset suffixes with inlineAssets %s",
+    async (inlineAssets) => {
+      const dir = makeTempProject({
+        "index.html": `<!doctype html>
 <html><body>
   <link rel="stylesheet" href="styles/icons.css">
   <div data-composition-id="root" data-width="320" data-height="180"></div>
   <script>window.__timelines = window.__timelines || {}; window.__timelines.root = {}</script>
 </body></html>`,
-      "styles/icons.css": `.icon { background: url('./sprite.png?v=2#section'); }`,
-      "styles/sprite.png": "fake-sprite",
-    });
+        "styles/icons.css": `.icon { background: url('./sprite.png?v=2#section'); }`,
+        "styles/sprite.png": "fake-sprite",
+      });
 
-    const bundled = await bundleToSingleHtml(dir);
+      try {
+        const bundled = await bundleToSingleHtml(dir, { inlineAssets });
+        const assetUrl = inlineAssets
+          ? `${inlinedAs("image/png", "fake-sprite")}#section`
+          : "styles/sprite.png?v=2#section";
+        expect(styleText(bundled)).toContain(`url('${assetUrl}')`);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
-    // The query/hash suffix rides along onto the inlined data URL.
-    expect(bundled).toContain(`url('${inlinedAs("image/png", "fake-sprite")}?v=2#section')`);
-  });
+  it.each(["?v=2", "#sprite", "?v=2#sprite"])(
+    "keeps inlined image bytes decodable with suffix %s",
+    async (suffix) => {
+      const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAHUlEQVR4AdzKMREAAACCQI/+nbWB7sL6yH00+gABAAD//9z6uLQAAAAGSURBVAMAa8EQAfftxdwAAAAASUVORK5CYII=",
+        "base64",
+      );
+      const dir = makeTempProject({
+        "index.html": `<div data-composition-id="root" data-width="320" data-height="180"><img id="photo" src="green.png${suffix}"></div>`,
+      });
+      writeFileSync(join(dir, "green.png"), png);
+      try {
+        const bundled = await bundleToSingleHtml(dir);
+        const { document } = parseHTML(bundled);
+        const src = document.getElementById("photo")?.getAttribute("src");
+        expect(src).toBe(
+          `data:image/png;base64,${png.toString("base64")}${suffix.includes("#") ? "#sprite" : ""}`,
+        );
+        const response = await fetch(src ?? "");
+        expect(response.headers.get("content-type")).toBe("image/png");
+        expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([true, false])(
+    "handles font query strings with inlineAssets %s",
+    async (inlineAssets) => {
+      const dir = makeTempProject({
+        "index.html": `<style>@font-face { font-family: Icon; src: url('icon.woff2?v=4.7.0'); }</style><div data-composition-id="root" data-width="320" data-height="180"></div>`,
+        "icon.woff2": "font-bytes",
+      });
+      try {
+        const bundled = await bundleToSingleHtml(dir, { inlineAssets });
+        const fontUrl = inlineAssets ? inlinedAs("font/woff2", "font-bytes") : "icon.woff2?v=4.7.0";
+        expect(styleText(bundled)).toContain(`url('${fontUrl}')`);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.each([true, false])(
     "preserves srcset URL commas with inlineAssets %s",
@@ -2159,7 +2211,7 @@ describe("bundleToSingleHtml", () => {
     async (inlineAssets) => {
       const dataUrl = inlinedAs("image/svg+xml", '<svg xmlns="http://www.w3.org/2000/svg"/>');
       const dir = makeTempProject({
-        "scenes/scene.html": `<html><body><div data-composition-id="root" data-width="320" data-height="180" data-duration="1" data-no-timeline><picture><source id="photo" srcset="${dataUrl} 160w, hero,blue.png 320w"><img src="hero,blue.png"></picture></div></body></html>`,
+        "scenes/scene.html": `<html><body><div data-composition-id="root" data-width="320" data-height="180" data-duration="1" data-no-timeline><picture><source id="photo" srcset="${dataUrl} 160w, hero,blue.png?v=2#sprite 320w"><img id="fallback" src="hero,blue.png" srcset="hero,blue.png?v=2 1x"></picture></div></body></html>`,
         "scenes/hero,blue.png": "blue-image-bytes",
       });
       try {
@@ -2172,7 +2224,10 @@ describe("bundleToSingleHtml", () => {
           ? inlinedAs("image/png", "blue-image-bytes")
           : "scenes/hero%2Cblue.png";
         expect(document.getElementById("photo")?.getAttribute("srcset")).toBe(
-          `${dataUrl} 160w, ${image} 320w`,
+          `${dataUrl} 160w, ${image}${inlineAssets ? "#sprite" : "?v=2#sprite"} 320w`,
+        );
+        expect(document.getElementById("fallback")?.getAttribute("srcset")).toBe(
+          `${image}${inlineAssets ? "" : "?v=2"} 1x`,
         );
       } finally {
         rmSync(dir, { recursive: true, force: true });
