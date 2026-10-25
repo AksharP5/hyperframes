@@ -39,6 +39,12 @@ function readPid(path: string): number {
   return pid;
 }
 
+function readLaunchedPids(pidFile: string): number[] {
+  return existsSync(`${pidFile}.launched`)
+    ? readFileSync(`${pidFile}.launched`, "utf8").split("\n").filter(Boolean).map(Number)
+    : [];
+}
+
 function readTree(path: string): JTDDataType<typeof treeSchema> {
   const tree = parseTree(readFileSync(path, "utf8"));
   if (!tree || tree.pid === 0 || tree.descendants.includes(0)) {
@@ -138,7 +144,7 @@ async function runWitness(inspectLinuxTree: boolean, inspectProfiles = false): P
       const descendants = existsSync(`${pidFile}.tree`)
         ? readTree(`${pidFile}.tree`).descendants
         : [];
-      await stopTestProcesses(child, [...descendants, ...pids]);
+      await stopTestProcesses(child, [...descendants, ...pids, ...readLaunchedPids(pidFile)]);
     }
     if (terminationFailure !== undefined) throw terminationFailure;
     await rm(dir, {
@@ -170,6 +176,7 @@ async function runWitness(inspectLinuxTree: boolean, inspectProfiles = false): P
   );
   const browserPid = readPid(pidFile);
   expect(testProcessIsAlive(browserPid)).toBe(false);
+  expect(readLaunchedPids(pidFile).filter(testProcessIsAlive)).toEqual([]);
   expect(readFileSync(`${pidFile}.profile`, "utf8")).not.toBe(join(dir, "profile"));
   expect(readFileSync(`${pidFile}.report-browser-alive`, "utf8")).toBe("false");
   expect(readFileSync(`${pidFile}.script`, "utf8")).toBe("started");
