@@ -328,6 +328,16 @@ jobs:
       - run: bash scripts/ci/install-workspace-dependencies.sh
       - run: bun run build
       - run: bun run verify:packed-manifests
+        env:
+          PACK_KEEP_DIR: ${{ startsWith(github.head_ref, 'release/v') && format('{0}/release-tarballs', runner.temp) || '' }}
+      - name: Keep the release tarballs
+        if: startsWith(github.head_ref, 'release/v')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-tarballs
+          path: ${{ runner.temp }}/release-tarballs/*.tgz
+          if-no-files-found: error
+          retention-days: 7
       - run: bun run check:cli-lazy-deps
       - name: Share the built CLI with the edit accuracy shards
         if: needs.changes.outputs.edit_accuracy == 'true'

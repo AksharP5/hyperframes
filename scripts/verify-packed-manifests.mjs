@@ -5,6 +5,7 @@
 
 import { execFileSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -659,6 +660,14 @@ function pinStandInLambdaAssets() {
   return restore;
 }
 
+/** Copy the packed tarballs out of the temp pack directory, for a job that uploads them. */
+export function keepPackedTarballs(packDir, keepDir) {
+  mkdirSync(keepDir, { recursive: true });
+  for (const name of readdirSync(packDir).filter((file) => file.endsWith(".tgz"))) {
+    copyFileSync(join(packDir, name), join(keepDir, name));
+  }
+}
+
 function main() {
   const packDir = mkdtempSync(join(tmpdir(), "hyperframes-pack-"));
   const unpinLambda = pinStandInLambdaAssets();
@@ -668,6 +677,7 @@ function main() {
       .filter(Boolean);
     verifyPackedConsumer(packDir, packedWorkspaces);
     verifyPackageSizes(packedWorkspaces);
+    if (process.env.PACK_KEEP_DIR) keepPackedTarballs(packDir, process.env.PACK_KEEP_DIR);
   } finally {
     unpinLambda();
     rmSync(packDir, { force: true, recursive: true });

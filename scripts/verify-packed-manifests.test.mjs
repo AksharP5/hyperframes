@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -11,6 +11,7 @@ import {
   CONSUMER_TSCONFIG,
   countTypeErrorsByPackage,
   installConsumer,
+  keepPackedTarballs,
   listPackedExportContracts,
   listPackageSizeIssues,
   listPackedJavaScriptImportIssues,
@@ -442,5 +443,18 @@ describe("packed consumer install", () => {
     await withRegistry("fake-dep", versions, (registry, dir) =>
       assert.throws(() => install(registry, dir, { "missing-dep": "^1.0.0" }), /missing-dep/),
     );
+  });
+});
+
+describe("keepPackedTarballs", () => {
+  it("copies the tarballs and nothing else", () => {
+    const from = mkdtempSync(join(tmpdir(), "keep-from-"));
+    const to = join(mkdtempSync(join(tmpdir(), "keep-to-")), "out");
+    writeFileSync(join(from, "a-1.0.0.tgz"), "a");
+    writeFileSync(join(from, "notes.txt"), "x");
+    keepPackedTarballs(from, to);
+    assert.deepEqual(readdirSync(to), ["a-1.0.0.tgz"]);
+    assert.equal(readFileSync(join(to, "a-1.0.0.tgz"), "utf8"), "a");
+    rmSync(from, { recursive: true, force: true });
   });
 });
