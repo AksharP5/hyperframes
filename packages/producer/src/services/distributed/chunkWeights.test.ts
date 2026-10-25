@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { buildWeightedChunkSlices, planFrameWeights } from "./chunkWeights.js";
+import {
+  buildWeightedChunkSlices,
+  effectiveChunkFrames,
+  planFrameWeights,
+} from "./chunkWeights.js";
 import {
   buildChunkSlices,
   buildPlanChunkSlices,
@@ -97,7 +101,9 @@ describe("buildPlanChunkSlices", () => {
 
   it("keeps the equal-frame cut when the caller passed a chunkSize", () => {
     const weights = weightsWithHeavyWindow(1500, 700, 783, 4);
-    expect(buildPlanChunkSlices(weights, { chunkSize: 84 }, 18, 84)).toEqual(
+    const ranges = (slices: Slices) =>
+      slices.map(({ index, startFrame, endFrame }) => ({ index, startFrame, endFrame }));
+    expect(ranges(buildPlanChunkSlices(weights, { chunkSize: 84 }, 18, 84))).toEqual(
       buildChunkSlices(1500, 18, 84),
     );
   });
@@ -204,5 +210,35 @@ describe("planFrameWeights", () => {
 
     const uncapped = buildPlanChunkSlices(weights, {}, chunkCount, effectiveChunkSize);
     expect(Math.max(...uncapped.map((s) => s.endFrame - s.startFrame))).toBeGreaterThan(90);
+  });
+});
+
+describe("chunk capture cost", () => {
+  const frames = 1500;
+  const weights = weightsWithHeavyWindow(frames, 700, 783, 4);
+  const { chunkCount, effectiveChunkSize } = resolveChunkPlan(frames, undefined, 22);
+  const slices = buildPlanChunkSlices(weights, {}, chunkCount, effectiveChunkSize);
+
+  it("stamps the costly window's chunks and leaves light chunks unmarked", () => {
+    const window = slices.filter((s) => s.startFrame < 783 && s.endFrame > 700);
+    expect(window.length).toBeGreaterThan(0);
+    for (const slice of window) expect(slice.captureCost).toBeGreaterThan(1);
+    expect(slices[0]?.captureCost).toBeUndefined();
+  });
+
+  it("sizes a short costly chunk like the longer light chunks beside it", () => {
+    const short = slices.filter(
+      (s) => s.captureCost !== undefined && s.endFrame - s.startFrame < 60,
+    );
+    expect(short.length).toBeGreaterThan(0);
+    for (const slice of short) {
+      expect(
+        effectiveChunkFrames(slice.endFrame - slice.startFrame, slice.captureCost),
+      ).toBeGreaterThanOrEqual(60);
+    }
+  });
+
+  it("keeps a light chunk's frame count as is", () => {
+    expect(effectiveChunkFrames(75, undefined)).toBe(75);
   });
 });

@@ -408,7 +408,12 @@ function parseChunkSlices(value: unknown): ChunkSliceJson[] {
       throw new PlanV2IntegrityError(`meta/chunks.json contains duplicate chunk index ${index}`);
     }
     indexes.add(index);
-    return { index, startFrame, endFrame };
+    if (chunk.captureCost === undefined) return { index, startFrame, endFrame };
+    const captureCost = chunk.captureCost;
+    if (typeof captureCost !== "number" || !Number.isFinite(captureCost) || captureCost <= 1) {
+      throw new PlanV2IntegrityError(`${field}.captureCost must be a number above 1`);
+    }
+    return { index, startFrame, endFrame, captureCost };
   });
 }
 

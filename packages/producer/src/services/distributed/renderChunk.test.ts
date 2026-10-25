@@ -19,6 +19,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { effectiveChunkFrames } from "./chunkWeights.js";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -1120,6 +1121,12 @@ describe("resolveChunkCaptureWorkers", () => {
   it("never lowers the machine-wide sizing", () => {
     expect(resolveChunkCaptureWorkers(121, 3, 1)).toBe(3);
     expect(resolveChunkCaptureWorkers(30, 2, 5)).toBe(2);
+  });
+
+  it("gives a 28-frame chunk of 3.6x frames three browsers; a light 75-frame chunk is unchanged", () => {
+    expect(resolveChunkCaptureWorkers(28, 1, 3)).toBe(1);
+    expect(resolveChunkCaptureWorkers(effectiveChunkFrames(28, 3.6), 1, 3)).toBe(3);
+    expect(resolveChunkCaptureWorkers(effectiveChunkFrames(75, undefined), 3, 3)).toBe(3);
   });
 });
 

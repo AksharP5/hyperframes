@@ -52,6 +52,23 @@ export function planFrameWeights(input: {
   return weights;
 }
 
+export function withChunkCaptureCost(
+  slices: ChunkSliceJson[],
+  weights: Float64Array,
+): ChunkSliceJson[] {
+  const lightest = weights.reduce((least, weight) => Math.min(least, weight), Infinity);
+  return slices.map((slice) => {
+    let sum = 0;
+    for (let frame = slice.startFrame; frame < slice.endFrame; frame++) sum += weights[frame]!;
+    const cost = Math.round((sum / (slice.endFrame - slice.startFrame) / lightest) * 100) / 100;
+    return cost > 1 ? { ...slice, captureCost: cost } : slice;
+  });
+}
+
+export function effectiveChunkFrames(frames: number, captureCost = 1): number {
+  return Math.round(frames * captureCost);
+}
+
 /**
  * Cut `[0, weights.length)` into `chunkCount` ranges of ~equal summed weight, each within
  * `[minFrames, maxFrames]` where the frame count allows. `null` when the cost is uniform.

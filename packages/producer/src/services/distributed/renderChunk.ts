@@ -95,6 +95,7 @@ import {
   type PlanVideosJson,
   readFfmpegVersion,
 } from "./shared.js";
+import { effectiveChunkFrames } from "./chunkWeights.js";
 import { chunkAudioSource, chunksWithSubRange, muxChunkWithAudio } from "./chunkAudio.js";
 import { DISTRIBUTED_RENDER_CAPABILITIES, readPlanProtocolV1 } from "./planProtocol.js";
 import { readValidatedPlanV2Materialization } from "./planV2.js";
@@ -730,9 +731,10 @@ export async function renderChunk(
     // `PlanJson` doesn't carry the compiled hints needed to call it
     // directly. The existing adaptive-retry path reduces workers if
     // compositor contention surfaces as CDP timeouts.
+    const captureFrames = effectiveChunkFrames(framesInChunk, slice.captureCost);
     const chunkWorkerCount = resolveChunkCaptureWorkers(
-      framesInChunk,
-      calculateOptimalWorkers(framesInChunk, undefined, cfg),
+      captureFrames,
+      calculateOptimalWorkers(captureFrames, undefined, cfg),
       options?.maxCaptureWorkers,
     );
 

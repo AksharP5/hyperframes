@@ -115,6 +115,7 @@ export interface ChunkSliceJson {
   startFrame: number;
   /** Exclusive upper bound — chunk workers iterate frames in `[startFrame, endFrame)`. */
   endFrame: number;
+  captureCost?: number;
 }
 
 /**

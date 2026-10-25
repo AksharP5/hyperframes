@@ -62,7 +62,11 @@ import {
 } from "../renderOrchestrator.js";
 import { closeFileServerSafely } from "../fileServer.js";
 import { measurePlanSecondsPerFrame } from "./planFrameCost.js";
-import { buildWeightedChunkSlices, planFrameWeights } from "./chunkWeights.js";
+import {
+  buildWeightedChunkSlices,
+  planFrameWeights,
+  withChunkCaptureCost,
+} from "./chunkWeights.js";
 import { runAudioStage } from "../render/stages/audioStage.js";
 import { runCompileStage } from "../render/stages/compileStage.js";
 import {
@@ -865,7 +869,10 @@ export function buildPlanChunkSlices(
           Math.min(config.targetChunkFrames ?? MAX_CHUNK_SIZE, MAX_CHUNK_SIZE, maxFramesPerChunk),
         )
       : null;
-  return weighted ?? buildChunkSlices(frameWeights.length, chunkCount, effectiveChunkSize);
+  return withChunkCaptureCost(
+    weighted ?? buildChunkSlices(frameWeights.length, chunkCount, effectiveChunkSize),
+    frameWeights,
+  );
 }
 
 /**
