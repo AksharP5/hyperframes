@@ -2870,7 +2870,12 @@ export function initSandboxRuntimeModular(): void {
     rootComp: HTMLElement | null,
   ) => {
     for (let node = from; node && node !== rootComp; node = node.parentElement)
-      if (isStylableElement(node) && node.hasAttribute("data-start") && !visibleAt(node, time))
+      if (
+        isStylableElement(node) &&
+        node.hasAttribute("data-start") &&
+        !isDiscoveryStamped(node) &&
+        !visibleAt(node, time)
+      )
         return false;
     return true;
   };

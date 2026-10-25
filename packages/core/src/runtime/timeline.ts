@@ -66,9 +66,10 @@ export function runtimeElementWindow(
       duration = liveDuration;
     }
   }
+  const isRoot = rawNode === findRootCompositionElement(rawNode.ownerDocument);
   return {
     start,
-    end: duration != null && duration > 0 ? start + duration : Number.POSITIVE_INFINITY,
+    end: !isRoot && duration != null && duration > 0 ? start + duration : Number.POSITIVE_INFINITY,
   };
 }
 
