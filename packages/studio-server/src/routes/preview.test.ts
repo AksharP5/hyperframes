@@ -2693,3 +2693,124 @@ describe("GSAP mirror configuration", () => {
     expect(html).not.toContain("cdn.jsdelivr.net");
   });
 });
+
+describe("bundled GSAP local root", () => {
+  const localRoot = "/api/vendor/npm";
+  const metaName = "hyperframes-gsap-base-url";
+  const previewUrl = "http://localhost/projects/demo/preview";
+
+  function appForHost(projectDir: string, env = "", overrides: Partial<StudioApiAdapter> = {}) {
+    vi.stubEnv("HYPERFRAMES_GSAP_BASE_URL", env);
+    const app = new Hono();
+    registerPreviewRoutes(
+      app,
+      createAdapter(projectDir, { gsapLocalRoot: localRoot, ...overrides }),
+    );
+    return app;
+  }
+
+  function writeMotionProject(projectDir: string): void {
+    mkdirSync(join(projectDir, ".hyperframes"));
+    writeFileSync(
+      join(projectDir, ".hyperframes", "studio-motion.json"),
+      JSON.stringify({
+        version: 1,
+        motions: [
+          {
+            kind: "gsap-motion",
+            target: { sourceFile: "index.html", id: "card" },
+            start: 0,
+            duration: 1,
+            customEase: { id: "custom", data: "M0,0 C0.18,0.9 0.32,1 1,1" },
+            from: { y: 32 },
+            to: { y: 0 },
+          },
+        ],
+      }),
+    );
+    writeFileSync(join(projectDir, "scene.html"), "<template><section>Scene</section></template>");
+  }
+
+  it("loads every GSAP dependency Studio adds from the host's bundled copy", async () => {
+    const projectDir = createProjectDir();
+    writeMotionProject(projectDir);
+    const app = appForHost(projectDir);
+    const html = await (await app.request(previewUrl)).text();
+    const root = parseHTML(html).document;
+    const urls = [...root.querySelectorAll("script[src]")].map((s) => s.getAttribute("src"));
+    expect(root.querySelector(`meta[name="${metaName}"]`)?.getAttribute("content")).toBe(localRoot);
+    expect(urls).toContain(`${localRoot}/gsap@3.15.0/dist/gsap.min.js`);
+    expect(urls).toContain(`${localRoot}/gsap@3.15.0/dist/CustomEase.min.js`);
+    expect(html).toContain(`var cdnBase="${localRoot}/gsap@3.15.0/dist/"`);
+    expect(html).not.toContain("jsdelivr");
+
+    const scene = await (await app.request(`${previewUrl}/comp/scene.html`)).text();
+    expect(
+      parseHTML(scene).document.querySelector('script[src$="/gsap.min.js"]')?.getAttribute("src"),
+    ).toBe(`${localRoot}/gsap@3.15.0/dist/gsap.min.js`);
+    expect(scene).not.toContain("jsdelivr");
+
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<html><head><script src="vendor/gsap.min.js"></script></head><body><script>gsap.to("#card", { motionPath: {} });</script></body></html>`,
+    );
+    const withPath = await (await app.request(previewUrl)).text();
+    expect(
+      parseHTML(withPath)
+        .document.querySelector('script[src*="MotionPathPlugin"]')
+        ?.getAttribute("src"),
+    ).toBe(`${localRoot}/gsap@3.15.0/dist/MotionPathPlugin.min.js`);
+    expect(withPath).not.toContain("jsdelivr");
+  });
+
+  it("loads a plugin for another GSAP version from jsDelivr", async () => {
+    const projectDir = createProjectDir();
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<html><head><script src="vendor/gsap@3.14.2/dist/gsap.min.js"></script></head><body><script>gsap.to("#card", { motionPath: {} });</script></body></html>`,
+    );
+    const html = await (await appForHost(projectDir).request(previewUrl)).text();
+    expect(
+      parseHTML(html)
+        .document.querySelector('script[src*="MotionPathPlugin"]')
+        ?.getAttribute("src"),
+    ).toBe("https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/MotionPathPlugin.min.js");
+  });
+
+  it("prefers HYPERFRAMES_GSAP_BASE_URL over the bundled copy", async () => {
+    const projectDir = createProjectDir();
+    writeMotionProject(projectDir);
+    const mirror = "https://mirror.example/npm";
+    const html = await (await appForHost(projectDir, mirror).request(previewUrl)).text();
+    const doc = parseHTML(html).document;
+    expect(doc.querySelector(`meta[name="${metaName}"]`)?.getAttribute("content")).toBe(mirror);
+    expect(doc.querySelector('script[src$="/gsap.min.js"]')?.getAttribute("src")).toBe(
+      `${mirror}/gsap@3.15.0/dist/gsap.min.js`,
+    );
+    expect(html).not.toContain(localRoot);
+    expect(html).not.toContain("jsdelivr");
+  });
+
+  it("changes the preview ETag when the bundled copy replaces jsDelivr", async () => {
+    const projectDir = createProjectDir();
+    vi.stubEnv("HYPERFRAMES_GSAP_BASE_URL", "");
+    const cdnApp = new Hono();
+    registerPreviewRoutes(cdnApp, createAdapter(projectDir));
+    const before = await cdnApp.request(previewUrl);
+    const after = await appForHost(projectDir).request(previewUrl, {
+      headers: { "If-None-Match": before.headers.get("ETag")! },
+    });
+    expect(after.status).toBe(200);
+    expect(after.headers.get("ETag")).not.toBe(before.headers.get("ETag"));
+  });
+
+  it("rejects a remote plain-HTTP mirror and a local root that leaves the origin", () => {
+    const projectDir = createProjectDir();
+    expect(() => appForHost(projectDir, "http://mirror.example/npm")).toThrow(
+      "HYPERFRAMES_GSAP_BASE_URL",
+    );
+    expect(() => appForHost(projectDir, "", { gsapLocalRoot: "//cdn.example/npm" })).toThrow(
+      "same-origin path",
+    );
+  });
+});

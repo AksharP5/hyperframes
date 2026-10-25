@@ -532,6 +532,25 @@ describe("ensureMotionPathPluginLoaded", () => {
     expect(appendedScripts).toHaveLength(1);
   });
 
+  it.each([
+    ["3.15.0", "/api/vendor/npm/gsap@3.15.0/dist/MotionPathPlugin.min.js"],
+    ["3.14.2", "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/MotionPathPlugin.min.js"],
+  ])(
+    "preloads gsap %s from the host's bundled copy only when it holds that version",
+    (version, url) => {
+      const { iframe, appendedScripts } = buildBootstrapIframe({
+        gsap: { version, registerPlugin: vi.fn() },
+      });
+      const meta = document.createElement("meta");
+      meta.name = "hyperframes-gsap-base-url";
+      meta.content = "/api/vendor/npm";
+      iframe.contentDocument!.head.appendChild(meta);
+      ensureMotionPathPluginLoaded(iframe);
+      expect(appendedScripts).toHaveLength(1);
+      expect(appendedScripts[0]!.getAttribute("src")).toBe(url);
+    },
+  );
+
   it("appends the plugin script once and registers it on load", () => {
     const { iframe, contentWindow, appendedScripts, registerPlugin } = buildBootstrapIframe();
     ensureMotionPathPluginLoaded(iframe);

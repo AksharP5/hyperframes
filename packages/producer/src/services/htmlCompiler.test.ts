@@ -3,7 +3,7 @@ import { describe, expect, it, mock, beforeAll } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { runInThisContext } from "node:vm";
 import { parseHTML } from "linkedom";
 import { interpolateVolumeGain } from "@hyperframes/core/media-volume-envelope";
@@ -3367,4 +3367,100 @@ describe("nested CDN integrity", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe("missing local GSAP in renders", () => {
+  const missingGsapEntry = `<!DOCTYPE html>
+<html><head><script src="node_modules/gsap/dist/gsap.min.js"></script></head><body>
+  <div data-composition-id="root" data-width="320" data-height="180"></div>
+</body></html>`;
+
+  async function compileMissingGsap(
+    base: string | undefined,
+    files: Record<string, string> = { "index.html": missingGsapEntry },
+  ): Promise<{
+    html: string;
+    fetched: string[];
+  }> {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-render-gsap-mirror-"));
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(projectDir, path)), { recursive: true });
+      writeFileSync(join(projectDir, path), content);
+    }
+    const fetched: string[] = [];
+    const originalFetch = globalThis.fetch;
+    const previous = process.env.HYPERFRAMES_GSAP_BASE_URL;
+    if (base === undefined) delete process.env.HYPERFRAMES_GSAP_BASE_URL;
+    else process.env.HYPERFRAMES_GSAP_BASE_URL = base;
+    globalThis.fetch = mock(async (input: string | URL | Request) => {
+      fetched.push(String(input instanceof Request ? input.url : input));
+      return new Response("window.gsap = {};", { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      const result = await compileForRender(projectDir, join(projectDir, "index.html"), projectDir);
+      return { html: result.html, fetched };
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (previous === undefined) delete process.env.HYPERFRAMES_GSAP_BASE_URL;
+      else process.env.HYPERFRAMES_GSAP_BASE_URL = previous;
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  }
+
+  it("loads it from HYPERFRAMES_GSAP_BASE_URL when set", async () => {
+    const { html, fetched } = await compileMissingGsap("http://127.0.0.1:8080/vendor/npm/");
+    expect(fetched).toContain("http://127.0.0.1:8080/vendor/npm/gsap@3.15.0/dist/gsap.min.js");
+    expect(fetched.some((url) => url.includes("jsdelivr"))).toBe(false);
+    expect(html).toContain(
+      "inlined: http://127.0.0.1:8080/vendor/npm/gsap@3.15.0/dist/gsap.min.js",
+    );
+  });
+
+  const scene = (id: string, inner = "") => `<template id="${id}-template">
+  <script src="node_modules/gsap/dist/gsap.min.js"></script>
+  <div data-composition-id="${id}" data-width="320" data-height="180">${inner}</div>
+</template>`;
+  const mount = (id: string, src: string) =>
+    `<div data-composition-id="${id}" data-composition-src="${src}" data-start="0" data-duration="1"></div>`;
+
+  it.each([
+    ["a sub-composition", { "compositions/scene.html": scene("scene") }],
+    [
+      "a nested sub-composition",
+      {
+        "compositions/scene.html": `<template id="scene-template"><div data-composition-id="scene" data-width="320" data-height="180">${mount("inner", "compositions/inner.html")}</div></template>`,
+        "compositions/inner.html": scene("inner"),
+      },
+    ],
+  ])("loads a missing GSAP script in %s from the mirror", async (_label, subFiles) => {
+    const { html, fetched } = await compileMissingGsap("http://127.0.0.1:8080/vendor/npm/", {
+      "index.html": `<!DOCTYPE html>
+<html><body><div data-composition-id="root" data-width="320" data-height="180">${mount("scene", "compositions/scene.html")}</div></body></html>`,
+      ...subFiles,
+    });
+    expect(fetched).toContain("http://127.0.0.1:8080/vendor/npm/gsap@3.15.0/dist/gsap.min.js");
+    expect(html).not.toContain("node_modules/gsap/dist/gsap.min.js");
+  });
+
+  it("keeps a sub-composition's GSAP that exists next to it", async () => {
+    const { fetched } = await compileMissingGsap("http://127.0.0.1:8080/vendor/npm/", {
+      "index.html": `<!DOCTYPE html>
+<html><body><div data-composition-id="root" data-width="320" data-height="180">${mount("scene", "compositions/scene.html")}</div></body></html>`,
+      "compositions/scene.html": scene("scene"),
+      "compositions/node_modules/gsap/dist/gsap.min.js": "window.gsap = {};",
+    });
+    expect(fetched).toEqual([]);
+  });
+
+  it("keeps jsDelivr when no mirror is set", async () => {
+    const { fetched } = await compileMissingGsap(undefined);
+    expect(fetched).toContain("https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js");
+  });
+
+  it.each(["http://mirror.example/npm", "/vendor/npm"])(
+    "fails the render on an invalid mirror instead of using jsDelivr: %s",
+    async (base) => {
+      await expect(compileMissingGsap(base)).rejects.toThrow("HYPERFRAMES_GSAP_BASE_URL");
+    },
+  );
 });

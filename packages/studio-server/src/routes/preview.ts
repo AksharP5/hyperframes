@@ -24,6 +24,7 @@ import {
   gsapCdnDist,
   motionPathPluginUrl,
   normalizeGsapBaseUrl,
+  normalizeGsapLocalRoot,
 } from "@hyperframes/core/gsap-cdn";
 import { findStartTags, injectTagsAtHeadStart } from "@hyperframes/core/compiler/html-document";
 import { isWithinProjectRoot } from "@hyperframes/parsers/asset-resolution";
@@ -435,16 +436,23 @@ const withPreviewBase = (html: string, projectId: string) =>
     ? html
     : injectTagsAtHeadStart(html, `<base href="${previewBaseHref(projectId)}">`);
 
-export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): void {
-  let gsapBaseUrl: string;
-  try {
-    gsapBaseUrl = normalizeGsapBaseUrl(process.env.HYPERFRAMES_GSAP_BASE_URL);
-  } catch (cause) {
-    throw new Error(
-      "Invalid HYPERFRAMES_GSAP_BASE_URL: use an absolute HTTP(S) npm mirror root without credentials, query, or fragment",
-      { cause },
-    );
+function resolvePreviewGsapBaseUrl(adapter: PreviewApiAdapter): string {
+  const configured = process.env.HYPERFRAMES_GSAP_BASE_URL;
+  if (configured?.trim() || !adapter.gsapLocalRoot) {
+    try {
+      return normalizeGsapBaseUrl(configured);
+    } catch (cause) {
+      throw new Error(
+        "Invalid HYPERFRAMES_GSAP_BASE_URL: use an absolute HTTPS npm mirror root (plain HTTP only for localhost) without credentials, query, or fragment",
+        { cause },
+      );
+    }
   }
+  return normalizeGsapLocalRoot(adapter.gsapLocalRoot);
+}
+
+export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): void {
+  const gsapBaseUrl = resolvePreviewGsapBaseUrl(adapter);
   const gsapEtagSalt = `:gsap:${createHash("sha1").update(gsapBaseUrl).digest("hex").slice(0, 12)}`;
   const previewCacheHeaders = (etag: string) => ({
     "Cache-Control": "private, no-cache",

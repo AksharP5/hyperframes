@@ -879,10 +879,12 @@ The server picks one of three modes by itself: **embedded** (the default for
 **monorepo** (the studio dev server, when you run from the source repo).
 `--background` works with the embedded server only.
 
-To load the GSAP dependencies Studio adds from a local or private mirror, set
-`HYPERFRAMES_GSAP_BASE_URL` before starting the server. See
-[Serve GSAP from your own mirror](/packages/studio-server#serve-gsap-from-your-own-mirror)
-for the directory layout, restart requirements, and authored-resource scope.
+The CLI ships GSAP, CustomEase, and MotionPathPlugin, so the GSAP scripts
+Studio adds to previews load from the preview server itself, not from jsDelivr.
+To use your own mirror instead, set `HYPERFRAMES_GSAP_BASE_URL` before starting
+the server. See
+[Where Studio loads GSAP from](/packages/studio-server#where-studio-loads-gsap-from)
+for the lookup order, the mirror layout, and what the setting does not cover.
 
 <Note>
   Preview plays in real time, so paint-heavy compositions can stutter on your

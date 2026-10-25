@@ -28,6 +28,7 @@ import {
   readMediaStart,
   redactTelemetryString,
   resolveNaturalMediaTimelineDurationFromValues,
+  rewriteAssetPath,
   rewriteAssetPaths,
   rewriteCssAssetUrls,
   rewriteInlineStyleAssetUrls,
@@ -38,7 +39,7 @@ import {
 import { MAX_AUDIO_GAIN } from "@hyperframes/core/audio-gain";
 import { readPlaybackRate } from "@hyperframes/parsers/media-duration";
 import { resolveRateSpec } from "@hyperframes/core/speed-ramp";
-import { gsapCdnDist } from "@hyperframes/core/gsap-cdn";
+import { gsapCdnDist, normalizeGsapBaseUrl } from "@hyperframes/core/gsap-cdn";
 import {
   assignBundledRuntimeCompositionIds,
   assignMediaRenderIds,
@@ -793,7 +794,7 @@ async function parseSubCompositions(
   const results = await Promise.all(
     workItems.map(async (item) => {
       const { html: compiledSub } = await compileHtmlFile(
-        item.rawSubHtml,
+        rewriteUnresolvableGsapToCdn(item.rawSubHtml, projectDir, item.srcPath),
         dirname(item.filePath),
         downloadDir,
         undefined,
@@ -1056,7 +1057,9 @@ function inlineSubCompositions(
         let compHtml = subCompositions.get(srcPath) || null;
         if (!compHtml) {
           const read = readProjectFile(resolve(projectDir, srcPath));
-          if (read.kind === "file") compHtml = read.text;
+          if (read.kind === "file") {
+            compHtml = rewriteUnresolvableGsapToCdn(read.text, projectDir, srcPath);
+          }
         }
         return compHtml;
       },
@@ -1954,19 +1957,34 @@ export interface CompileForRenderOptions {
   pageMotionBlur?: "off";
 }
 
-const GSAP_CDN_BASE = gsapCdnDist();
+/** Renders follow the same `HYPERFRAMES_GSAP_BASE_URL` mirror as Studio preview. */
+function renderGsapDist(): string {
+  try {
+    return gsapCdnDist(undefined, normalizeGsapBaseUrl(process.env.HYPERFRAMES_GSAP_BASE_URL));
+  } catch (cause) {
+    throw new Error(
+      "Invalid HYPERFRAMES_GSAP_BASE_URL: use an absolute HTTPS npm mirror root (plain HTTP only for localhost) without credentials, query, or fragment",
+      { cause },
+    );
+  }
+}
 
-function rewriteUnresolvableGsapToCdn(html: string, projectDir: string): string {
+/** `compSrcPath` resolves a sub-composition's script the way the inliner will hoist it. */
+function rewriteUnresolvableGsapToCdn(
+  html: string,
+  projectDir: string,
+  compSrcPath?: string,
+): string {
+  let gsapDist: string | undefined;
+  const exists = (path: string) => existsSync(resolve(projectDir, path));
   return html.replace(
     /(<script\b[^>]*\bsrc=["'])([^"']*gsap[^"']*\/dist\/([^"']+))(["'][^>]*>)/gi,
     (full, prefix, src, file, suffix) => {
       if (/^https?:\/\//i.test(src)) return full;
-      const absPath = resolve(projectDir, src);
-      if (existsSync(absPath)) return full;
-      defaultLogger.info(
-        `[Compiler] Rewriting missing gsap script to CDN: ${src} → ${GSAP_CDN_BASE}${file}`,
-      );
-      return `${prefix}${GSAP_CDN_BASE}${file}${suffix}`;
+      if (exists(compSrcPath ? rewriteAssetPath(compSrcPath, src, exists) : src)) return full;
+      gsapDist ??= renderGsapDist();
+      defaultLogger.info(`[Compiler] Rewriting missing gsap script: ${src} → ${gsapDist}${file}`);
+      return `${prefix}${gsapDist}${file}${suffix}`;
     },
   );
 }
