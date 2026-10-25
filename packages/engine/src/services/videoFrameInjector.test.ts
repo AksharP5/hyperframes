@@ -269,6 +269,29 @@ describe("createVideoFrameInjector cache hygiene against page-side skips", () =>
     expect(injectVideoFramesBatchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("hands out a fresh hook for a second page and leaves this hook's cache untouched", async () => {
+    const renderPage = { evaluate: async () => undefined } as unknown as Page;
+    const truthPage = { evaluate: async () => undefined } as unknown as Page;
+    const hook = createVideoFrameInjector(
+      fakeTable({ videoId: "pip", framePath: "/p", frameIndex: 5 }),
+      { frameSrcResolver: inlineResolver },
+    );
+    const fresh = hook?.fresh?.();
+    expect(fresh).toBeTruthy();
+
+    await hook!(renderPage, 0);
+    await fresh!(truthPage, 0);
+    // The fresh hook paints its own page even though the first hook already painted frame 5.
+    expect(injectVideoFramesBatchMock).toHaveBeenCalledTimes(2);
+    expect(injectVideoFramesBatchMock).toHaveBeenLastCalledWith(truthPage, [
+      { videoId: "pip", dataUri: "data:image/png;base64,fake-/p" },
+    ]);
+
+    await hook!(renderPage, 0);
+    // The first hook still remembers frame 5 on its page.
+    expect(injectVideoFramesBatchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("reinjects frame zero when a whole-chunk retry uses a fresh hook and page", async () => {
     const table = fakeTable({ videoId: "hero", framePath: "/frame-0", frameIndex: 0 });
     const beginFramePage = { evaluate: async () => undefined } as unknown as Page;

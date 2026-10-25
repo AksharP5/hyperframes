@@ -205,7 +205,7 @@ export function createVideoFrameInjector(
   }
 
   // fallow-ignore-next-line complexity
-  return async (page: Page, time: number, heldVideoTime?: number) => {
+  const inject: BeforeCaptureHook = async (page: Page, time: number, heldVideoTime?: number) => {
     for (const cacheDir of frameLookup.frameDirs()) renewCacheLease(cacheDir);
     const activePayloads = frameLookup.getActiveFramePayloads(time);
     if (heldVideoTime !== undefined) {
@@ -270,6 +270,7 @@ export function createVideoFrameInjector(
       }
     }
   };
+  return Object.assign(inject, { fresh: () => createVideoFrameInjector(frameLookup, config) });
 }
 
 // ── HDR compositing utilities ─────────────────────────────────────────────────
