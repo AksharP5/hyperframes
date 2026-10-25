@@ -253,6 +253,7 @@ export {
   isVideoFrameFormat,
   EXTRACT_CACHE_MIN_AGE_MS,
 } from "./services/videoFrameExtractor.js";
+export { isSelfOrAncestorHidden } from "./services/mediaHidden.js";
 export { directorySizeBytes, gcExtractionCache } from "./services/extractionCache.js";
 
 export {

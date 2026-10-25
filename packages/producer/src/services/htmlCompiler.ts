@@ -72,7 +72,7 @@ import {
 } from "@hyperframes/parsers/asset-resolution";
 import { extractMediaMetadata, extractAudioMetadata } from "../utils/ffprobe.js";
 import { isPathInside, toExternalAssetKey } from "../utils/paths.js";
-import { collectRenderMedia } from "./renderMediaCollector.js";
+import { collectHiddenVideoIds, collectRenderMedia } from "./renderMediaCollector.js";
 import {
   type VideoElement,
   type ImageElement,
@@ -664,9 +664,10 @@ async function compileHtmlFile(
   // Phase 2: Bound authored audio to playable source (parallel ffprobe).
   // Explicit video slots may outlive their source and hold the final frame.
   const preResolved = extractResolvedMedia(compiledHtml);
+  const hiddenVideoIds = collectHiddenVideoIds(compiledHtml);
   const clampResults = await Promise.all(
     preResolved
-      .filter((el) => !!el.src && !el.loop)
+      .filter((el) => !!el.src && !el.loop && !hiddenVideoIds.has(el.id))
       .map(async (el) => {
         const { duration: maxDuration } = await resolveMediaDuration(
           el.src!,
