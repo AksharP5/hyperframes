@@ -488,6 +488,16 @@ Source: `packages/lint/src/rules/gsap.ts`.
 
 **Fix:** Remove the CSS `stroke-dasharray` (decorative dashes belong on a separate element), or set the full two-component value in GSAP.
 
+### `svg_round_cap_hidden_dash`
+
+**Warning.** A round or square capped path is hidden with dasharray = gap = `pathLength` and dashoffset = dash.
+
+Chrome can leave a zero-length sliver at the path end there, and the cap paints it as a dot on some curves.
+
+**Fix:** Make the gap longer than the path (`stroke-dasharray="100 120"`, `stroke-dashoffset="110"`).
+
+Or keep the element `visibility: hidden` until its draw tween starts.
+
 ### `svg_measure_before_path_d`
 
 **Error / warning.** `getTotalLength()` is called on a path with no static `d` attribute, so it returns 0 and the dash animation dies. Error when no `d` assignment exists anywhere, warning when `d` is only assigned inside a function body.

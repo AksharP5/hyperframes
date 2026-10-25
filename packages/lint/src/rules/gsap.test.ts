@@ -3521,6 +3521,61 @@ describe("SVG draw-on rules", () => {
     ).toBeUndefined();
   });
 
+  // ── svg_round_cap_hidden_dash ──────────────────────────────────────────────
+
+  const hiddenDashHtml = (pathAttrs: string) => `<html><body>
+  <div data-composition-id="c1" data-width="1920" data-height="1080">
+    <svg><path d="M 0 0 C 100 0 100 100 200 100" fill="none" stroke="#fff" ${pathAttrs}/></svg>
+  </div>
+  <script>window.__timelines = {}; const tl = gsap.timeline({ paused: true }); window.__timelines["c1"] = tl;</script>
+</body></html>`;
+  const roundCapFinding = async (pathAttrs: string) =>
+    (await lintHyperframeHtml(hiddenDashHtml(pathAttrs))).findings.find(
+      (f) => f.code === "svg_round_cap_hidden_dash",
+    );
+
+  it.each([
+    ["round", 'pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"'],
+    ["square", 'pathLength="100" stroke-dasharray="100 100" stroke-dashoffset="100"'],
+    ["round", 'pathLength="100" style="stroke-dasharray: 100; stroke-dashoffset: 100"'],
+    ["round", 'pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"'],
+    ["round", 'pathLength="100" stroke-dasharray="100" stroke-dashoffset="300"'],
+  ])(
+    "svg_round_cap_hidden_dash: warns for a %s cap hidden at the path end (%s)",
+    async (cap, attrs) => {
+      const finding = await roundCapFinding(`stroke-linecap="${cap}" ${attrs}`);
+      expect(finding?.severity).toBe("warning");
+      expect(finding?.fixHint).toContain("visibility:hidden");
+    },
+  );
+
+  it.each([
+    [
+      "the safe form",
+      'stroke-linecap="round" pathLength="100" stroke-dasharray="100 120" stroke-dashoffset="110"',
+    ],
+    [
+      "a butt cap",
+      'stroke-linecap="butt" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"',
+    ],
+    ["no cap set", 'pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"'],
+    [
+      "a drawn path",
+      'stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"',
+    ],
+    [
+      "a partly drawn path",
+      'stroke-linecap="round" pathLength="100" stroke-dasharray="100" stroke-dashoffset="40"',
+    ],
+    ["no pathLength", 'stroke-linecap="round" stroke-dasharray="100" stroke-dashoffset="100"'],
+    [
+      "a decorative dash",
+      'stroke-linecap="round" pathLength="100" stroke-dasharray="4 6" stroke-dashoffset="0"',
+    ],
+  ])("svg_round_cap_hidden_dash: does NOT warn for %s", async (_name, attrs) => {
+    expect(await roundCapFinding(attrs)).toBeUndefined();
+  });
+
   // ── svg_measure_before_path_d ──────────────────────────────────────────────
 
   it("svg_measure_before_path_d: ERROR when no d assignment exists anywhere", async () => {
