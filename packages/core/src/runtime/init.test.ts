@@ -3275,12 +3275,9 @@ describe("initSandboxRuntimeModular", () => {
     expect(video.currentTime).toBe(0);
   });
 
-  it("activates sub-composition timelines at data-start near 0 during renderSeek", () => {
-    // Regression: sub-compositions starting at or near t=0 had their GSAP
-    // sub-timelines ignored during render because renderSeek did not
-    // activate (unpause) nested child timelines before seeking the root.
-    // The children were added to the root while paused, and GSAP's
-    // totalTime() does not propagate to paused children.
+  it("seeks sub-composition timelines at data-start near 0 during renderSeek", () => {
+    // Regression: sub-compositions starting at or near t=0 kept their initial CSS state
+    // in render. Each scene now gets its own seek, so the paused root need not reach it.
     const root = document.createElement("div");
     root.setAttribute("data-composition-id", "main");
     root.setAttribute("data-root", "true");
@@ -3316,9 +3313,7 @@ describe("initSandboxRuntimeModular", () => {
       tweet: tweetTimeline,
     };
 
-    // Record what the children looked like AT the root seek — that is the moment
-    // the activation exists for, and the only moment it is observable now that
-    // the seek restores them.
+    // A scene's callbacks must not run inside the root's pass, so the root sees it paused.
     const pausedDuringRootSeek: Array<[boolean, boolean]> = [];
     const rootTotalTime = rootTimeline.totalTime!;
     rootTimeline.totalTime = (time?: number, suppressEvents?: boolean) => {
@@ -3340,11 +3335,10 @@ describe("initSandboxRuntimeModular", () => {
     // Seek to 0.5s — well within the hook's window [0.001, 2.001]
     player?.renderSeek(0.5);
 
-    // renderSeek must activate (unpause) all child timelines before seeking the
-    // root. Without that, children stay paused and GSAP's totalTime()
-    // propagation skips them, leaving elements at initial CSS state (opacity: 0).
     expect(pausedDuringRootSeek.length).toBeGreaterThan(0);
-    for (const pausedPair of pausedDuringRootSeek) expect(pausedPair).toEqual([false, false]);
+    for (const pausedPair of pausedDuringRootSeek) expect(pausedPair).toEqual([true, true]);
+    expect(hookTimeline.time()).toBeCloseTo(0.499, 6);
+    expect(tweetTimeline.time()).toBe(0);
 
     // The hook host should be visible at t=0.5
     expect(hookHost.style.visibility).toBe("visible");

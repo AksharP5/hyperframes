@@ -24,6 +24,7 @@ import {
   quantizeTimeToFrame,
   fpsToNumber,
   resolveAuthoredTimingWindow,
+  SCENE_CALLBACK_ERROR_PREFIX,
   type RawAuthoredTiming,
 } from "@hyperframes/core";
 
@@ -2581,6 +2582,15 @@ function recordConsoleScriptError(session: CaptureSession, error: string | null)
   recordCaptureWarnings(session, [{ code: "vfx_failure", message, details: { sources: [error] } }]);
 }
 
+// Every worker page hits the same scene callback error; the render log names it once.
+function loggedEarlierInRender(session: CaptureSession, text: string): boolean {
+  if (!text.startsWith(SCENE_CALLBACK_ERROR_PREFIX)) return false;
+  const logged = (session.subTimelineWaitMemo.loggedSceneCallbackErrors ??= []);
+  if (logged.includes(text)) return true;
+  logged.push(text);
+  return false;
+}
+
 function recordPageError(session: CaptureSession, error: string | null): void {
   if (error && !session.pageErrors.includes(error)) session.pageErrors.push(error);
 }
@@ -2650,7 +2660,9 @@ export async function initializeSession(session: CaptureSession): Promise<void> 
     const text = msg.text();
     const locationUrl = msg.location()?.url ?? "";
     const diagnostic = formatConsoleDiagnostic(type, text, locationUrl);
-    if (!diagnostic.suppressHostLog) console.log(diagnostic.text);
+    if (!diagnostic.suppressHostLog && !loggedEarlierInRender(session, text)) {
+      console.log(diagnostic.text);
+    }
     appendBrowserDiagnostic(session, diagnostic.text);
 
     // A blocked script can never register its timeline (#3352); a thrown one may still, so it only counts on timeout.

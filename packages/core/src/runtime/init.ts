@@ -183,7 +183,7 @@ import type {
   SceneAnimation,
 } from "./types";
 import type { PlayerAPI } from "../core.types";
-import { recordStartupError, swallow } from "./diagnostics";
+import { recordStartupError, SCENE_CALLBACK_ERROR_PREFIX, swallow } from "./diagnostics";
 import { readTimelineDurationSeconds } from "./timelineDuration";
 import {
   CHANGE_DRIVEN_SERVICE_MIN_INTERVAL_MS,
@@ -4687,7 +4687,6 @@ export function initSandboxRuntimeModular(): void {
       state.isPlaying = false;
       state.mediaForceSyncNextTick = true;
       const pageAnimations = seekTimelineAndAdapters(state.currentTime, {
-        activateChildren: true,
         suppressEvents: options?.suppressEvents,
       });
       runAdapters("pause", 0, pageAnimations);
@@ -4969,10 +4968,11 @@ export function initSandboxRuntimeModular(): void {
           version: `${compositionTimingRevision}:${timeline.getChildren?.(false, true, true).length ?? 0}`,
         };
 
-  const seekRuntimeTimeline = (
+  const reportedSceneErrors = new Set<string>();
+  const seekSceneTimeline = (
+    compositionId: string,
     timeline: RuntimeTimelineLike,
     timeSeconds: number,
-    swallowLabel: string,
     options?: RuntimeSeekOptions,
   ) => {
     try {
@@ -4981,7 +4981,13 @@ export function initSandboxRuntimeModular(): void {
       pauseTimelineIfPossible(timeline);
       seekGsapTimeline(timeline, timeSeconds, suppressEvents, gsapStructureOf(timeline));
     } catch (err) {
-      swallow(swallowLabel, err);
+      // The scene's own callback threw. A warning, not a script error: it must not turn a
+      // timed-out timeline wait into a script failure.
+      const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      const key = `${compositionId}\n${detail}`;
+      if (reportedSceneErrors.has(key)) return;
+      reportedSceneErrors.add(key);
+      console.warn(`${SCENE_CALLBACK_ERROR_PREFIX} "${compositionId}" ${detail}`);
     }
   };
 
@@ -5049,7 +5055,7 @@ export function initSandboxRuntimeModular(): void {
   const seekStandaloneRegisteredTimelines = (
     timeSeconds: number,
     revision: number,
-    options?: RuntimeSeekOptions & { activateChildren?: boolean },
+    options?: RuntimeSeekOptions,
   ) => {
     if (sceneClocksRevision !== revision || renderCaptureSeekStarted) {
       sceneClocks = new WeakMap();
@@ -5067,12 +5073,7 @@ export function initSandboxRuntimeModular(): void {
         scene.playbackStart +
         sourceTimeAt(
           scene.rate,
-          // A rearmed child follows root propagation, so it rests nowhere the root would not.
-          Math.max(
-            0,
-            (options?.activateChildren ? timeSeconds : Math.min(timeSeconds, scene.hiddenFrom)) -
-              scene.start,
-          ),
+          Math.max(0, Math.min(timeSeconds, scene.hiddenFrom) - scene.start),
         );
       const localTime = Math.max(
         0,
@@ -5082,41 +5083,9 @@ export function initSandboxRuntimeModular(): void {
       );
       // A scene before or after its clip rests where the last frame left it: no redraw.
       if (!renderCaptureSeekStarted && restsAt(timeline, localTime)) continue;
-      seekRuntimeTimeline(timeline, localTime, "runtime.init.transport.childTimeline", options);
+      seekSceneTimeline(compositionId, timeline, localTime, options);
       restingAt.set(timeline, localTime);
     }
-  };
-
-  // Unpause all non-root timelines registered in window.__timelines (siblings
-  // in the registry, not GSAP child tweens). Matches the naming convention in
-  // player.ts:32 (forEachSiblingTimeline) and player.ts:89 (activateSiblingTimelines).
-  //
-  // The rearm is a means, not a resting state: GSAP will not propagate the root's
-  // totalTime() into a paused child. Returns what it touched so the caller can
-  // re-pause it; a sibling parented to gsap.globalTimeline free-runs on the global
-  // ticker the moment it is left unpaused. Mirrors player.ts's seek helper.
-  const activateSiblingTimelines = (masterTimeline: RuntimeTimelineLike): RuntimeTimelineLike[] => {
-    const timelines = (window.__timelines ?? {}) as Record<string, RuntimeTimelineLike | undefined>;
-    const rearmed: RuntimeTimelineLike[] = [];
-    for (const tl of Object.values(timelines)) {
-      if (!tl || tl === masterTimeline) continue;
-      // Recorded before the call: a play() that throws can still have unpaused.
-      rearmed.push(tl);
-      try {
-        tl.play();
-      } catch (err) {
-        swallow("runtime.init.activateSiblings", err);
-      }
-    }
-    if (rearmed.length === 0) return rearmed;
-    // GSAP leaves paused scenes out of the root's length and play() keeps that stale length.
-    try {
-      masterTimeline.shiftChildren?.(0);
-      masterTimeline.totalDuration?.();
-    } catch (err) {
-      swallow("runtime.init.remeasureRoot", err);
-    }
-    return rearmed;
   };
 
   const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
@@ -5183,32 +5152,24 @@ export function initSandboxRuntimeModular(): void {
   };
 
   /**
-   * Borrow, seek, return. Siblings are unpaused only across the seek; restored in
-   * `finally`, because a throw mid-seek is when a leaked one starts free-running.
+   * Scenes stay paused in the root's pass, in render as in preview: seekStandaloneRegisteredTimelines
+   * seeks each on its own clock, so a scene whose callback throws cannot stop the root's later tweens.
    */
   function seekTimelineAndAdapters(
     t: number,
-    opts?: { activateChildren?: boolean; suppressEvents?: boolean; revision?: number },
+    opts?: { suppressEvents?: boolean; revision?: number },
   ): () => Animation[] {
     const tl = state.capturedTimeline;
-    // Critical for a sub-composition whose data-start is at or near 0: it is added
-    // to the root while the root is paused and may never receive an explicit
-    // play(), so without the rearm it holds its initial CSS state (opacity:0).
-    const rearmed = tl && opts?.activateChildren ? activateSiblingTimelines(tl) : [];
-    try {
-      const animations = seekRootChildrenAndAdapters(tl, t, opts);
-      lastTransportSeekTime = t;
-      lastTransportSeekTimeline = tl;
-      return animations;
-    } finally {
-      for (const sibling of rearmed) pauseTimelineIfPossible(sibling);
-    }
+    const animations = seekRootChildrenAndAdapters(tl, t, opts);
+    lastTransportSeekTime = t;
+    lastTransportSeekTimeline = tl;
+    return animations;
   }
 
   function seekRootChildrenAndAdapters(
     tl: RuntimeTimelineLike | null,
     t: number,
-    opts?: { activateChildren?: boolean; suppressEvents?: boolean; revision?: number },
+    opts?: { suppressEvents?: boolean; revision?: number },
   ): () => Animation[] {
     const suppressEvents = opts?.suppressEvents === true;
     const revision = opts?.revision ?? readCompositionTimingRevision();
@@ -5224,6 +5185,9 @@ export function initSandboxRuntimeModular(): void {
       firstRenders && firstRendered?.size !== 0
         ? showHiddenClips(firstRendered ? (el) => firstRendered.has(el) : undefined)
         : null;
+    // Scenes first, each paused on its own clock, so the root's pass skips them and its later
+    // tweens on a shared property land last.
+    seekStandaloneRegisteredTimelines(t, revision, opts);
     if (tl) {
       // #10: when data-duration exceeds the timeline's intrinsic length the
       // engine requests frames past the last tween. Seeking a paused GSAP
@@ -5265,15 +5229,7 @@ export function initSandboxRuntimeModular(): void {
       } catch (err) {
         swallow("runtime.init.transport.seek", err);
       }
-      // Root propagation cannot represent an authored child source offset or
-      // playback rate. Re-seek registered children below with their host's
-      // explicit source-time contract.
     }
-    // A second `activateSiblingTimelines` used to follow this call. Dropping it is
-    // safe because nothing between frames READS a sibling's paused() — grepped over
-    // the deterministic adapters, syncTimedElementVisibility, the hf-timelines-built
-    // handler and __hfReseekGpu. It only ever moved the state the seek left behind.
-    seekStandaloneRegisteredTimelines(t, revision, opts);
     hideClipsAgain?.();
     tweensRenderedThrough.time = Math.max(tweensRenderedThrough.time, t);
     const pageAnimations = pageAnimationsForOnePass();

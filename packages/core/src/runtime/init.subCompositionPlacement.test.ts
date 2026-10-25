@@ -264,7 +264,7 @@ describe("runtime sub-composition placement", () => {
     }
   });
 
-  it("renders a scene past its clip's end where root propagation leaves it, replaying no callbacks", () => {
+  it("rests a scene past its clip's end at the clip's end in render, as preview does, replaying no callbacks", () => {
     document.body.innerHTML =
       `<div data-composition-id="main" data-root="true" data-duration="10">` +
       `<div id="host" class="clip" data-composition-id="scene" data-start="1" data-duration="2">` +
@@ -286,7 +286,7 @@ describe("runtime sub-composition placement", () => {
     initSandboxRuntimeModular();
 
     window.__player?.renderSeek(9.1);
-    expect(shownX()).toBe(100);
+    expect(shownX()).toBe(25);
     callbacks = 0;
     window.__player?.renderSeek(9.2);
     window.__player?.renderSeek(9.3, { suppressEvents: true });

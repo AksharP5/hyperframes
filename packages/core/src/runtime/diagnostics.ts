@@ -42,6 +42,9 @@ export function recordStartupError(error: unknown): void {
     `entries; if they look right, report this as a HyperFrames bug.`;
 }
 
+/** Starts the warning for a scene callback that threw; the render log shows it once per render. */
+export const SCENE_CALLBACK_ERROR_PREFIX = "[hyperframes] scene timeline callback threw:";
+
 export function swallow(label: string, error?: unknown): void {
   if (typeof window === "undefined") return;
   const w = getDebugSurface();

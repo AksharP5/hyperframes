@@ -93,7 +93,7 @@ export function seekGsapTimeline(
   structure?: GsapStructureKey,
 ): boolean {
   if (typeof timeline.totalTime !== "function") {
-    timeline.seek(t, suppressEvents);
+    if (typeof timeline.seek === "function") timeline.seek(t, suppressEvents);
     return false;
   }
   const from = Number(timeline.totalTime());

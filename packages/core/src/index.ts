@@ -334,6 +334,7 @@ export { formatRenderOutputTimestamp } from "./utils/renderOutputTimestamp.js";
 
 // Runtime helpers (composition-side)
 export { getVariables } from "./runtime/getVariables.js";
+export { SCENE_CALLBACK_ERROR_PREFIX } from "./runtime/diagnostics.js";
 export {
   parseStartExpression,
   parseNumeric,
