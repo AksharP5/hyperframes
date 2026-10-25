@@ -1749,7 +1749,7 @@ export function buildZeroDurationDiagnostic(diag: HfDiagnostic): string {
   );
 }
 
-async function evaluateHfDiagnostic(page: Page): Promise<HfDiagnostic> {
+export async function evaluateHfDiagnostic(page: Page): Promise<HfDiagnostic> {
   return (await page.evaluate(HF_READY_DIAGNOSTIC_EXPR)) as HfDiagnostic;
 }
 

@@ -43,6 +43,7 @@ vi.mock("../utils/staticProjectServer.js", () => ({
 }));
 
 vi.mock("@hyperframes/engine", () => ({
+  DEFAULT_CONFIG: { playerReadyTimeout: 45_000 },
   injectVideoFramesBatch: vi.fn(async () => []),
   syncVideoFrameVisibility: vi.fn(async () => undefined),
   extractMediaMetadata: vi.fn(),

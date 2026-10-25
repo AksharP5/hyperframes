@@ -58,6 +58,7 @@ import snapshotCommand, {
   formatSnapshotTimestamp,
   parseZoomScale,
   recaptureSnapshotComposite,
+  renderNotReadyError,
   requireSnapshotFfmpeg,
   resolveSnapshotVideoClipStart,
   resolveSnapshotVideoFrameTime,
@@ -1257,4 +1258,35 @@ it("addresses colliding scene videos by the capture page's render identity", asy
     vi.unstubAllGlobals();
     rmSync(project, { recursive: true, force: true });
   }
+});
+
+describe("renderNotReadyError", () => {
+  it("names the buildReady keys still pending and the time waited", async () => {
+    const page = {
+      evaluate: async () => ({
+        renderReady: false,
+        hasHf: true,
+        hasSeek: false,
+        hasPlayer: true,
+        duration: -1,
+        hasTimeline: true,
+        declaredDuration: 12,
+        pendingBuildReadyKeys: ["gltf"],
+        rejectedBuildReadyKeys: [],
+      }),
+    };
+    const error = await renderNotReadyError(page as never, 45_000);
+    expect(error.message).toContain("not render-ready after 45000ms");
+    expect(error.message).toContain("buildReady never resolved for: gltf");
+  });
+
+  it("still fails when the page cannot be asked why", async () => {
+    const page = {
+      evaluate: async () => {
+        throw new Error("Target closed");
+      },
+    };
+    const error = await renderNotReadyError(page as never, 5000);
+    expect(error.message).toContain("not render-ready after 5000ms");
+  });
 });

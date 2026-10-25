@@ -1,3 +1,9 @@
+import {
+  DEFAULT_CONFIG,
+  buildZeroDurationDiagnostic,
+  evaluateHfDiagnostic,
+} from "@hyperframes/engine";
+import type { Page } from "puppeteer-core";
 import { reportArtifacts } from "../utils/toolContext.js";
 import { withProjectLock } from "../utils/projectLock.js";
 import {
@@ -114,6 +120,14 @@ function orbitStageSource(): string {
  * `hyperframes snapshot` indefinitely. */
 const FFMPEG_EXTRACT_TIMEOUT_MS = 30_000;
 const FALLBACK_SEEK_LEAD_SECONDS = 5;
+const RENDER_READY_TIMEOUT_MS = DEFAULT_CONFIG.playerReadyTimeout;
+
+export async function renderNotReadyError(page: Page, timeoutMs: number): Promise<Error> {
+  const diagnostic = await evaluateHfDiagnostic(page).then(buildZeroDurationDiagnostic, () => "");
+  return new Error(
+    `The composition was not render-ready after ${timeoutMs}ms, so no frame was saved (raise --timeout if it loads slowly).\n${diagnostic}`,
+  );
+}
 /** Each 4K decode is already multi-threaded, so a few at once fill the cores without exhausting memory. */
 const VIDEO_FRAME_EXTRACT_CONCURRENCY = 4;
 
@@ -588,13 +602,14 @@ async function captureSnapshots(
       page,
       renderReadyTimedOut,
     } = await openSettledCompositionPage(html, server.url, {
-      renderReadyTimeoutMs: opts.timeout ?? 5000,
+      renderReadyTimeoutMs: opts.timeout ?? RENDER_READY_TIMEOUT_MS,
       renderReadyWarningSuffix: "snapshots may be inaccurate",
       browserGpuMode: opts.browserGpuMode,
     });
 
     try {
-      if (renderReadyTimedOut) warnings.push("Render readiness timed out");
+      if (renderReadyTimedOut)
+        throw await renderNotReadyError(page, opts.timeout ?? RENDER_READY_TIMEOUT_MS);
       // Font verification — split into loaded / errored / unused. Only status
       // "error" is a real failure; a face still "unloaded"/"loading" after
       // document.fonts.ready + the settle wait was simply never requested by any
@@ -1226,8 +1241,8 @@ export default defineCommand({
     },
     timeout: {
       type: "string",
-      description: "Ms to wait for runtime to initialize (default: 5000)",
-      default: "5000",
+      description: `Ms to wait for the composition to become render-ready (default: ${RENDER_READY_TIMEOUT_MS})`,
+      default: String(RENDER_READY_TIMEOUT_MS),
     },
     angle: {
       type: "string",
@@ -1346,7 +1361,7 @@ export default defineCommand({
       }
       failCommand();
     }
-    const timeout = parseInt(args.timeout as string, 10) || 5000;
+    const timeout = parseInt(args.timeout as string, 10) || RENDER_READY_TIMEOUT_MS;
     // Gemini frame analysis runs by default (silently skipped if
     // GEMINI_API_KEY is not set). `--describe "custom question"` overrides
     // the default prompt with a targeted question. `--describe false` opts
