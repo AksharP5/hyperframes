@@ -2203,6 +2203,49 @@ describe("createColorGradingRuntime", () => {
     expect(video.hasAttribute("data-hf-color-grading-source-hidden")).toBe(true);
     expect(video.style.getPropertyValue("opacity")).toBe("0");
   });
+
+  it("does not rescan the document when only text changes", async () => {
+    startRuntimeWithVideo();
+    const caption = document.createElement("p");
+    document.body.appendChild(caption);
+    await Promise.resolve();
+    const scan = vi.spyOn(document, "querySelectorAll");
+    caption.textContent = "Hello";
+    caption.append(document.createElement("span"));
+    await Promise.resolve();
+    expect(
+      scan.mock.calls.filter(([selector]) => selector.includes(HF_COLOR_GRADING_ATTR)),
+    ).toEqual([]);
+  });
+
+  it("still grades media inserted later and drops media removed", async () => {
+    startRuntimeWithVideo();
+    const wrapper = document.createElement("section");
+    const later = makeDrawableVideo();
+    later.id = "later-video";
+    wrapper.appendChild(later);
+    document.body.appendChild(wrapper);
+    await Promise.resolve();
+    expect(runtime!.isGraded(later)).toBe(true);
+    wrapper.remove();
+    await Promise.resolve();
+    expect(runtime!.isGraded(later)).toBe(false);
+  });
+
+  it("drops media graded through the API when a wrapper holding it is removed", async () => {
+    startRuntimeWithVideo();
+    const wrapper = document.createElement("section");
+    const live = makeDrawableVideo();
+    live.id = "live-video";
+    live.removeAttribute(HF_COLOR_GRADING_ATTR);
+    wrapper.appendChild(live);
+    document.body.appendChild(wrapper);
+    runtime!.setGrading(live, { adjust: { exposure: 0.5 } });
+    expect(runtime!.isGraded(live)).toBe(true);
+    wrapper.remove();
+    await Promise.resolve();
+    expect(runtime!.isGraded(live)).toBe(false);
+  });
 });
 
 describe("createColorGradingRuntime after a context loss", () => {

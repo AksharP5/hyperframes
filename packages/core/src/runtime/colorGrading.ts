@@ -42,6 +42,7 @@ import {
 import { copyMediaVisualStyles } from "../inline-scripts/parityContract";
 import { readVariablesForElement } from "./variableScope";
 import { swallow } from "./diagnostics";
+import { createRecordFilter } from "./mutationRecords";
 import { findInjectedRenderFrame } from "./renderFrameSibling";
 import {
   isCanvasElement,
@@ -4276,7 +4277,12 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   };
 
   if (document.body) {
-    observer = new MutationObserver(() => refresh());
+    const recordsTouchGrading = createRecordFilter(COLOR_GRADING_SOURCE_SELECTOR, (node) =>
+      Array.from(trackedElements).some((element) => node.contains(element)),
+    );
+    observer = new MutationObserver((records) => {
+      if (recordsTouchGrading(records)) refresh();
+    });
     observer.observe(document.body, {
       childList: true,
       subtree: true,

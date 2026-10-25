@@ -179,6 +179,7 @@ import { parseStrictFiniteTimingNumber, resolveMediaElementDurationSeconds } fro
 import { cutToHostSlots, MEDIA_START_BASIS_ATTR } from "../mediaTiming";
 import { settleFirstFrameCompositionReadiness } from "../compositionReadiness";
 import { AUTHORED_DURATION_ATTR, AUTHORED_END_ATTR } from "./authoredTiming";
+import { createTimingRecordFilter } from "./mutationRecords";
 import {
   clearRuntimeData,
   setRuntimeData,
@@ -1333,6 +1334,13 @@ export function initSandboxRuntimeModular(): void {
     "id",
     "src",
   ];
+  // Sizing inputs too: postTimeline applies them, and it runs when this revision moves.
+  const COMPOSITION_TIMING_ATTRIBUTES = [
+    ...DURATION_FLOOR_INPUT_ATTRIBUTES,
+    "data-width",
+    "data-height",
+  ];
+  const recordsMoveTiming = createTimingRecordFilter(COMPOSITION_TIMING_ATTRIBUTES);
   const COMPOSITION_TIMING_MEDIA_EVENTS = ["loadedmetadata", "durationchange", "emptied"] as const;
   let durationFloorsCache: DurationFloors | null = null;
   let durationFloorsRevision = -1;
@@ -1351,7 +1359,8 @@ export function initSandboxRuntimeModular(): void {
   const queryForTransport = (selector: string): Element[] => {
     if (!compositionTimingObserver || renderCaptureSeekStarted)
       return Array.from(document.querySelectorAll(selector));
-    if (compositionTimingObserver.takeRecords().length > 0) invalidateCompositionTimingCaches();
+    if (recordsMoveTiming(compositionTimingObserver.takeRecords()))
+      invalidateCompositionTimingCaches();
     const cached = queryCache.get(selector);
     if (cached?.revision === compositionTimingRevision) return cached.nodes;
     const nodes = Array.from(document.querySelectorAll(selector));
@@ -1400,7 +1409,10 @@ export function initSandboxRuntimeModular(): void {
     const pending = compositionTimingObserver?.takeRecords() ?? [];
     write();
     const ours = compositionTimingObserver?.takeRecords() ?? [];
-    if (pending.length > 0 || ours.some((record) => record.target !== el))
+    if (
+      recordsMoveTiming(pending) ||
+      recordsMoveTiming(ours.filter((record) => record.target !== el))
+    )
       invalidateCompositionTimingCaches();
   };
 
@@ -1408,18 +1420,19 @@ export function initSandboxRuntimeModular(): void {
     const pending = compositionTimingObserver?.takeRecords() ?? [];
     write();
     compositionTimingObserver?.takeRecords();
-    if (pending.length > 0) invalidateCompositionTimingCaches();
+    if (recordsMoveTiming(pending)) invalidateCompositionTimingCaches();
   };
 
   const watchCompositionTimingInputs = () => {
     if (compositionTimingObserver || typeof MutationObserver === "undefined") return;
-    compositionTimingObserver = new MutationObserver(invalidateCompositionTimingCaches);
+    compositionTimingObserver = new MutationObserver((records) => {
+      if (recordsMoveTiming(records)) invalidateCompositionTimingCaches();
+    });
     compositionTimingObserver.observe(document.documentElement, {
       childList: true,
       subtree: true,
       attributes: true,
-      // Sizing inputs too: postTimeline applies them, and it runs when this revision moves.
-      attributeFilter: [...DURATION_FLOOR_INPUT_ATTRIBUTES, "data-width", "data-height"],
+      attributeFilter: COMPOSITION_TIMING_ATTRIBUTES,
     });
     // Media duration changes are published as events, not DOM mutations, and
     // they do not bubble — so listen in the capture phase, which reaches every
@@ -1451,7 +1464,7 @@ export function initSandboxRuntimeModular(): void {
     // here makes the caches correct within a task, not just across tasks.
     // Taking the records suppresses the callback for them, which is exactly
     // equivalent since the callback only bumps the revision.
-    if (compositionTimingObserver && compositionTimingObserver.takeRecords().length > 0) {
+    if (compositionTimingObserver && recordsMoveTiming(compositionTimingObserver.takeRecords())) {
       invalidateCompositionTimingCaches();
     }
     // `window.__timelines` is a plain object: no MutationObserver and no event
