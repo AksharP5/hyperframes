@@ -172,6 +172,119 @@ describe("setPreviewRasterScale", () => {
     reads.mockRestore();
   });
 
+  it("reads no computed style for a mounted scene that nothing gives a hint", async () => {
+    setPreviewRasterScale(0.5);
+    const reads = vi.spyOn(window, "getComputedStyle");
+    const pageQueries = vi.spyOn(document, "querySelector");
+    const scene = document.createElement("div");
+    const sheet = document.createElement("style");
+    sheet.textContent = ".mc-layer { position: absolute }";
+    scene.append(sheet);
+    for (let i = 0; i < 50; i += 1)
+      layer("position: absolute; left: 4px", scene).className = "mc-layer";
+    document.body.append(scene);
+    await Promise.resolve();
+    document.body.append(layer("position: absolute", document.createElement("div")));
+    await Promise.resolve();
+    const counts = [reads.mock.calls.length, pageQueries.mock.calls.length];
+    reads.mockRestore();
+    pageQueries.mockRestore();
+    expect(counts).toEqual([0, 0]);
+  });
+
+  it("marks a layer added later that only a grouped stylesheet rule hints", async () => {
+    const sheet = document.createElement("style");
+    sheet.textContent = "@media all { .late-hinted { will-change: transform } }";
+    document.head.append(sheet);
+    setPreviewRasterScale(0.5);
+    const late = layer("position: absolute");
+    late.className = "late-hinted";
+    const plain = layer("position: absolute");
+    await Promise.resolve();
+    expect([late, plain].map(marked)).toEqual([true, false]);
+    sheet.remove();
+  });
+
+  it("reads the stylesheets once, not for every batch of added layers", async () => {
+    setPreviewRasterScale(0.5);
+    const sheetReads = vi.spyOn(Document.prototype, "styleSheets", "get");
+    for (let frame = 0; frame < 3; frame += 1) {
+      layer("position: absolute");
+      await Promise.resolve();
+    }
+    const reads = sheetReads.mock.calls.length;
+    sheetReads.mockRestore();
+    expect(reads).toBeLessThanOrEqual(1);
+  });
+
+  it("sees a hint rule from a style that arrives while the preview is small", async () => {
+    setPreviewRasterScale(0.5);
+    layer("position: absolute");
+    await Promise.resolve();
+    const sheet = document.createElement("style");
+    sheet.textContent = ".arrived-hint { will-change: transform }";
+    document.head.append(sheet);
+    await Promise.resolve();
+    const late = layer("position: absolute");
+    late.className = "arrived-hint";
+    await Promise.resolve();
+    expect(marked(late)).toBe(true);
+    sheet.remove();
+  });
+
+  it("walks no holders for a mounted scene with nothing marked in or around it", async () => {
+    setPreviewRasterScale(0.5);
+    const walks = vi.spyOn(Element.prototype, "closest");
+    const scene = document.createElement("div");
+    for (let i = 0; i < 50; i += 1) layer("position: absolute", scene);
+    document.body.append(scene);
+    await Promise.resolve();
+    const count = walks.mock.calls.length;
+    walks.mockRestore();
+    expect(count).toBeLessThanOrEqual(1);
+  });
+
+  it("does no work for attribute and style writes on a page that nothing hints", async () => {
+    const paths = Array.from({ length: 20 }, () => layer("position: absolute"));
+    setPreviewRasterScale(0.5);
+    const walks = vi.spyOn(Element.prototype, "querySelectorAll");
+    for (const path of paths) {
+      path.setAttribute("fill", "#fff");
+      path.style.left = "4px";
+    }
+    await Promise.resolve();
+    const count = walks.mock.calls.length;
+    walks.mockRestore();
+    expect(count).toBe(0);
+  });
+
+  it("gives the hint back to a marked layer re-attached after removal once a child needs it", async () => {
+    const words = layer(POSITIONED);
+    const child = layer("", words);
+    setPreviewRasterScale(0.5);
+    expect(marked(words)).toBe(true);
+    words.remove();
+    await Promise.resolve();
+    document.body.append(words);
+    await Promise.resolve();
+    child.style.position = "fixed";
+    await Promise.resolve();
+    expect(marked(words)).toBe(false);
+  });
+
+  it("follows a copy of a marked layer that arrives with the mark", async () => {
+    const words = layer(POSITIONED);
+    layer("", words);
+    setPreviewRasterScale(0.5);
+    const copy = words.cloneNode(true) as HTMLElement;
+    words.remove();
+    document.body.append(copy);
+    await Promise.resolve();
+    (copy.firstElementChild as HTMLElement).style.position = "fixed";
+    await Promise.resolve();
+    expect(marked(copy)).toBe(false);
+  });
+
   it("re-checks the page when a linked stylesheet loads", async () => {
     const sheet = document.createElement("style");
     document.head.append(sheet);
