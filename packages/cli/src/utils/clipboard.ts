@@ -9,6 +9,8 @@
 import { spawnSync } from "node:child_process";
 import { platform } from "node:os";
 
+const COPY_TIMEOUT_MS = 5000;
+
 interface ClipboardProvider {
   cmd: string;
   args: string[];
@@ -49,6 +51,8 @@ export function copyToClipboard(text: string): boolean {
     const res = spawnSync(provider.cmd, provider.args, {
       input: text,
       encoding: "utf-8",
+      stdio: ["pipe", "ignore", "ignore"],
+      timeout: COPY_TIMEOUT_MS,
     });
     return res.status === 0;
   } catch {
