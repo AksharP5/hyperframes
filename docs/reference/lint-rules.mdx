@@ -198,6 +198,14 @@ Source: `packages/lint/src/rules/composition.ts`.
 
 **Fix:** Give the root `id="root"` and style it with `#root` plus plain descendant selectors.
 
+### `subcomposition_style_outside_template`
+
+**Warning.** A sub-composition file with a `<template>` has a `<style>`, or a `<link rel="stylesheet">`
+outside `<head>`, that sits outside the template. Mounting keeps only the template's content and the
+stylesheet links in `<head>`, so those styles never apply in preview, snapshot or render.
+
+**Fix:** Move it inside `<template>`, next to the composition root.
+
 ### `template_literal_selector`
 
 **Error.** `querySelector` is called with a template-literal variable, which the bundler's CSS parser crashes on.

@@ -804,6 +804,56 @@ describe("composition rules", () => {
     });
   });
 
+  describe("subcomposition_style_outside_template", () => {
+    const scene = (head: string, beforeTemplate = "", inTemplate = "") => `<!doctype html>
+<html><head>${head}</head><body>${beforeTemplate}
+<template id="scene-template">${inTemplate}
+  <div data-composition-id="scene" data-width="1920" data-height="1080"></div>
+</template>
+</body></html>`;
+    const findings = async (html: string, isSubComposition = true) =>
+      (await lintHyperframeHtml(html, { isSubComposition })).findings.filter(
+        (f) => f.code === "subcomposition_style_outside_template",
+      );
+
+    it("warns on a head <style> the mount drops, and says to move it inside <template>", async () => {
+      const found = await findings(scene("<style>.title { color: red; }</style>"));
+      expect(found).toHaveLength(1);
+      expect(found[0]?.severity).toBe("warning");
+      expect(found[0]?.fixHint).toContain("Move it inside <template>");
+      expect(found[0]?.snippet).toContain("<style>");
+    });
+
+    it("warns on a <style> or stylesheet link in the body outside <template>", async () => {
+      const found = await findings(
+        scene("", '<style>.a { color: red; }</style><link rel="stylesheet" href="scene.css">'),
+      );
+      expect(found.map((f) => f.snippet)).toEqual([
+        "<style>",
+        '<link rel="stylesheet" href="scene.css">',
+      ]);
+    });
+
+    it("does not warn on styles inside <template> or a stylesheet link in <head>", async () => {
+      const html = scene(
+        '<link rel="stylesheet" href="fonts.css">',
+        "",
+        '<style>.a { color: red; }</style><link rel="stylesheet" href="scene.css">',
+      );
+      expect(await findings(html)).toEqual([]);
+    });
+
+    it("does not warn without a <template> or outside a sub-composition", async () => {
+      const head = "<style>.a { color: red; }</style>";
+      expect(
+        await findings(
+          `<html><head>${head}</head><body><div data-composition-id="scene"></div></body></html>`,
+        ),
+      ).toEqual([]);
+      expect(await findings(scene(head), false)).toEqual([]);
+    });
+  });
+
   describe("requestanimationframe_in_composition", () => {
     it("flags requestAnimationFrame usage in script content", async () => {
       const html = `
