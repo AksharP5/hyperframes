@@ -609,7 +609,7 @@ describe("initSandboxRuntimeModular", () => {
       }
     });
 
-    it("styles each hidden clip visible once, far scene included, so its cut does not do it first", () => {
+    it("styles a hidden clip visible once while playing toward its start, far scene included", () => {
       document.body.innerHTML =
         `<div data-composition-id="main" data-root="true" data-start="0" data-duration="10" data-width="1920" data-height="1080">` +
         `<div id="later" style="position: absolute" data-start="8" data-duration="1" data-hf-far-scene><p></p></div>` +
@@ -624,13 +624,28 @@ describe("initSandboxRuntimeModular", () => {
         if (el === later && shown && !later.hasAttribute("data-hf-far-scene")) styledVisible++;
         return original(el, pseudo);
       });
+      const raf = createManualRaf();
+      vi.spyOn(performance, "now").mockImplementation(() => raf.now());
+      window.requestAnimationFrame =
+        raf.requestAnimationFrame as typeof window.requestAnimationFrame;
+      window.cancelAnimationFrame = raf.cancelAnimationFrame as typeof window.cancelAnimationFrame;
       try {
         initSandboxRuntimeModular();
-        window.__player?.seek(1);
-        const once = styledVisible;
-        window.__player?.seek(2);
-        window.__player?.seek(3);
-        expect([once, styledVisible]).toEqual([1, 1]);
+        const counts: number[] = [];
+        const playFor = (ms: number) => {
+          for (let at = 0; at < ms; at += 100) raf.step(100);
+          counts.push(styledVisible);
+        };
+        for (const t of [6.5, 4]) {
+          window.__player?.seek(t);
+          counts.push(styledVisible);
+        }
+        window.__player?.play();
+        playFor(300);
+        playFor(1800);
+        playFor(1000);
+        window.__player?.pause();
+        expect(counts).toEqual([0, 0, 0, 1, 1]);
         expect([later.style.visibility, later.hasAttribute("data-hf-clip-hidden")]).toEqual([
           "hidden",
           true,

@@ -2894,14 +2894,19 @@ export function initSandboxRuntimeModular(): void {
       resolver: timingResolverFor(true),
     }),
   );
-  // A clip's first visible style pass is slow; each hidden clip gets it once on a seek, so its cut does not.
+  // A clip's first visible style pass is slow; playing, each hidden clip gets it once just before its start.
   const clipsNeverStyledVisible = new Set<StylableElement>();
   const clipsStyledVisible = new WeakSet<Element>();
-  const styleHiddenClipsVisibleOnce = () => {
-    const clips = Array.from(clipsNeverStyledVisible).filter(
-      (el) => el.isConnected && el.hasAttribute(CLIP_HIDDEN_ATTR),
-    );
-    clipsNeverStyledVisible.clear();
+  const styleClipsDueVisibleOnce = (t: number) => {
+    if (clipsNeverStyledVisible.size === 0 || !clock.isPlaying()) return;
+    const clips: StylableElement[] = [];
+    for (const el of clipsNeverStyledVisible) {
+      const start = resolveStartForElement(el, Number.NaN);
+      if (el.isConnected && el.hasAttribute(CLIP_HIDDEN_ATTR) && !(start <= t + LOOKAHEAD_SECONDS))
+        continue;
+      clipsNeverStyledVisible.delete(el);
+      if (el.isConnected && el.hasAttribute(CLIP_HIDDEN_ATTR) && start > t) clips.push(el);
+    }
     if (clips.length === 0) return;
     const farHosts = new Set(clips.flatMap((el) => el.closest(`[${FAR_SCENE_ATTR}]`) ?? []));
     for (const host of farHosts) host.removeAttribute(FAR_SCENE_ATTR);
@@ -5222,7 +5227,7 @@ export function initSandboxRuntimeModular(): void {
     const revision = opts?.revision ?? readCompositionTimingRevision();
     if (revision !== tweensRenderedThrough.revision)
       tweensRenderedThrough = { revision, time: Number.NEGATIVE_INFINITY };
-    styleHiddenClipsVisibleOnce();
+    styleClipsDueVisibleOnce(t);
     const firstRenders = t > tweensRenderedThrough.time;
     // Only clips holding a tween that renders for the first time on this seek need their authored style read.
     const firstRendered =
