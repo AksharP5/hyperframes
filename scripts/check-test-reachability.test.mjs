@@ -137,11 +137,21 @@ test("conditions in the first step key are never credited", () => {
   assert.match(check(tree)["scripts/parity.test.mjs"][0], /no CI runner/);
 });
 
-test("block dependency syntax fails closed instead of losing the dependency", () => {
+test("block and wrapped dependency lists gate a job like the one-line list", () => {
+  for (const needs of ["\n      - disabled", "\n      [\n        disabled,\n      ]"]) {
+    const tree = fixture("node --test scripts/parity.test.mjs", '"**"');
+    tree[".github/workflows/ci.yml"] =
+      tree[".github/workflows/ci.yml"].replace("    needs: changes", `    needs:${needs}`) +
+      "  disabled:\n    if: false\n    steps: []\n";
+    assert.match(check(tree)["scripts/parity.test.mjs"].join("\n"), /CI filters exclude/);
+  }
+});
+
+test("a dependency mapping fails closed instead of losing the dependency", () => {
   const tree = fixture();
   tree[".github/workflows/ci.yml"] = tree[".github/workflows/ci.yml"].replace(
     "needs: changes",
-    "needs:\n      - disabled",
+    "needs:\n      disabled: x",
   );
   assert.throws(() => check(tree), /Block job/);
 });

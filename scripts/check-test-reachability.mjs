@@ -58,24 +58,29 @@ function jobField(body, key) {
   return body.match(new RegExp(`^    ${key}: (.*)$`, "m"))?.[1] ?? "";
 }
 
+// `needs` as a one-line list, a multi-line list or a block list, whichever the formatter wrote.
+function jobNeeds(body) {
+  const value = body.match(/^    needs:(.*(?:\n(?:      .*| *))*)/m)?.[1] ?? "";
+  return value
+    .replace(/#.*$/gm, "")
+    .replace(/^\s*- /gm, "")
+    .split(/[\s,[\]]+/)
+    .filter(Boolean);
+}
+
 function readJob(block) {
   const name = block.match(/^  ([\w-]+):/)[1];
   const body = block.slice(block.indexOf("\n") + 1);
   const condition = jobField(body, "if");
-  const needs = jobField(body, "needs");
-  return {
-    name,
-    body,
-    condition,
-    needs: needs.replace(/[[\]]/g, "").split(/,\s*/).filter(Boolean),
-  };
+  const needs = jobNeeds(body);
+  return { name, body, condition, needs };
 }
 
 // Reject unsupported control syntax instead of treating it as an unconditional job.
 export function readWorkflow(source) {
   if (/^\s+(?:paths|paths-ignore|branches-ignore):/m.test(source.split("jobs:\n")[0]))
     throw new Error("Workflow trigger restrictions need an explicit reachability model");
-  if (/^    (?:needs|if):\s*$/m.test(source))
+  if (/^    if:\s*$/m.test(source) || /^    needs:\s*\n      (?![-[])/m.test(source))
     throw new Error("Block job conditions and dependencies need an explicit reachability model");
   if (/^\s+(?:- )?working-directory:/m.test(source))
     throw new Error("Working-directory overrides need an explicit reachability model");
