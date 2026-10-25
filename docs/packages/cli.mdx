@@ -1365,6 +1365,8 @@ npx hyperframes timeline delete '#outro' --start 6 --end 7   # cut one second ou
 `duplicate` shifts clips at or after the insertion time on the same track by
 the copied clip's length. Video and audio clips can use their source length
 without `data-duration`, including clips shifted by the insertion.
+For a clip with `data-end`, the copy's end shifts with its start to keep the
+same length.
 
 A time is seconds (`4.5`), an offset from the clip's start (`+1`, `-0.5`),
 frames (`30f`), `end`, or an anchor on another clip: `after:#intro`,

@@ -28,8 +28,9 @@ export function duplicateElementInHtml(
   const duration = element.hasAttribute("data-duration")
     ? numericAttribute(element, "data-duration")
     : fallbackDuration;
+  const start = numericAttribute(element, "data-start");
   const track = numericAttribute(element, "data-track-index") ?? 0;
-  if (duration === null || numericAttribute(element, "data-start") === null) {
+  if (duration === null || start === null) {
     return { html: source, matched: false, newId: null };
   }
   const uniqueId = nextUniqueId(document, newId);
@@ -40,6 +41,10 @@ export function duplicateElementInHtml(
   dedupeClonedCompositionId(document, clone);
   stripStableIds(clone);
   clone.setAttribute("data-start", String(at));
+  if (clone.hasAttribute("data-end")) {
+    const end = numericAttribute(clone, "data-end");
+    if (end !== null) clone.setAttribute("data-end", String(end + (at - start)));
+  }
   element.parentElement.insertBefore(clone, element.nextSibling);
   const html = wrappedFragment ? document.body.innerHTML || "" : document.toString();
   return { html: ensureHfIds(html), matched: true, newId: uniqueId };

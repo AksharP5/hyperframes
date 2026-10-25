@@ -636,9 +636,15 @@ describe("timeline edit command", () => {
       sourceDuration: 'data-duration="1"',
       neighbourDuration: 'data-duration="1"',
     },
+    {
+      name: "absolute end shorter than the source",
+      sourceDuration: 'data-end="1.5"',
+      neighbourDuration: 'data-duration="1"',
+      duration: 0.5,
+    },
   ])(
     "duplicates with resolved timing and ripples a $name",
-    ({ sourceDuration, neighbourDuration }) => {
+    ({ sourceDuration, neighbourDuration, duration = 1 }) => {
       const dir = mkdtempSync(join(tmpdir(), "hf-timeline-duplicate-media-"));
       try {
         copyFileSync(
@@ -648,7 +654,7 @@ describe("timeline edit command", () => {
         const indexPath = join(dir, "index.html");
         const source = `<div data-composition-id="main" data-duration="12">
         <video id="clip" src="silent.mp4" data-start="1" ${sourceDuration} data-track-index="0" muted></video>
-        <video id="neighbour" src="silent.mp4" data-start="2" ${neighbourDuration} data-track-index="0" muted></video>
+        <video id="neighbour" src="silent.mp4" data-start="${1 + duration}" ${neighbourDuration} data-track-index="0" muted></video>
         <div id="other-track" data-start="2" data-duration="1" data-track-index="1"></div>
       </div>`;
         writeFileSync(indexPath, source);
@@ -656,9 +662,19 @@ describe("timeline edit command", () => {
         expect(planned.status, planned.stderr).toBe(0);
         expect(readFileSync(indexPath, "utf8")).toBe(source);
         const expectedRows = [
-          expect.objectContaining({ ref: "#clip", start: 1, duration: 1, end: 2 }),
-          expect.objectContaining({ ref: "#clip-copy", start: 2, duration: 1, end: 3 }),
-          expect.objectContaining({ ref: "#neighbour", start: 3, duration: 1, end: 4 }),
+          expect.objectContaining({ ref: "#clip", start: 1, duration, end: 1 + duration }),
+          expect.objectContaining({
+            ref: "#clip-copy",
+            start: 1 + duration,
+            duration,
+            end: 1 + 2 * duration,
+          }),
+          expect.objectContaining({
+            ref: "#neighbour",
+            start: 1 + 2 * duration,
+            duration: 1,
+            end: 2 + 2 * duration,
+          }),
           expect.objectContaining({ ref: "#other-track", start: 2, duration: 1, end: 3 }),
         ];
         const plan = JSON.parse(planned.stdout);

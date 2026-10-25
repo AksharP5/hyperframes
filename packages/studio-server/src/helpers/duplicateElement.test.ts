@@ -35,6 +35,22 @@ describe("duplicateElementInHtml", () => {
     expect(document.getElementById("clip-copy")?.getAttribute("data-duration")).toBe("2");
   });
 
+  it.each([0, 4])("shifts the copied absolute end when inserted at %s", (at) => {
+    const source = `<div>
+      <video id="clip" src="red.mp4" data-start="1" data-end="2" data-track-index="0"></video>
+    </div>`;
+
+    const result = duplicateElementInHtml(source, { id: "clip" }, "clip-copy", at, 1);
+    const { document } = parseSourceDocument(result.html);
+
+    expect(result.matched).toBe(true);
+    expect(document.getElementById("clip")?.getAttribute("data-start")).toBe("1");
+    expect(document.getElementById("clip")?.getAttribute("data-end")).toBe("2");
+    expect(document.getElementById("clip-copy")?.getAttribute("data-start")).toBe(String(at));
+    expect(document.getElementById("clip-copy")?.getAttribute("data-end")).toBe(String(at + 1));
+    expect(document.getElementById("clip-copy")?.hasAttribute("data-duration")).toBe(false);
+  });
+
   it("duplicates a target inside a nested template", () => {
     const source = `<!doctype html><html><body>
       <template data-composition-id="outer"><template data-composition-id="inner">
