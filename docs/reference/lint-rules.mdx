@@ -258,6 +258,15 @@ Source: `packages/lint/src/rules/core.ts`.
 
 **Fix:** Rename the id to start with a letter (recommended), or build selectors with `CSS.escape(id)` at runtime.
 
+### `inline_style_attribute_selector`
+
+**Error.** A selector reads the inline `style` attribute (`[style]`, `[style*=...]` and the other forms).
+GSAP writes inline styles every frame, and each write then restyles far more than the animated element.
+The preview slows to a crawl.
+
+**Fix:** Let the runtime hide hidden clips; it already hides their contents.
+For a state of your own, toggle a class or data attribute from your script and select on that.
+
 ### `invalid_inline_script_syntax`
 
 **Error.** An inline `<script>` is closed with malformed syntax.
@@ -304,7 +313,8 @@ Source: `packages/lint/src/rules/core.ts`.
 
 **Error.** A selector observes the runtime-owned hidden style (used to hide native video during frame copying) and forces `opacity` to zero, which breaks the video replacement pipeline.
 
-**Fix:** Restrict the guard to sub-composition hosts (for example `[data-composition-src][style*="visibility: hidden"]`) and do not derive element or media opacity from the runtime's hidden style.
+**Fix:** Remove the rule; the runtime already hides a hidden clip and its contents.
+To fade or hide something yourself, animate it on the timeline, or toggle a class or data attribute and select on that.
 
 ### `scoped_css_missing_wrapper`
 
