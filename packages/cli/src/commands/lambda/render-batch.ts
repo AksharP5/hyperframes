@@ -38,7 +38,7 @@ import {
   validateVariablesAgainstSchema,
 } from "../../utils/variables.js";
 import { normalizeErrorMessage } from "../../utils/errorMessage.js";
-import { warnOnDimensionMismatch } from "./_dimensions.js";
+import { resolveOutputResolutionFromSize } from "./_dimensions.js";
 import { runWithConcurrencyLimit } from "../../utils/concurrency.js";
 import { requireStack } from "./state.js";
 
@@ -177,13 +177,15 @@ export async function runRenderBatch(args: RenderBatchArgs): Promise<void> {
     failCommand();
   }
 
-  warnOnDimensionMismatch({
-    projectDir,
-    cliWidth: args.width,
-    cliHeight: args.height,
-    outputResolution: args.outputResolution,
-    quiet: args.json,
-  });
+  args = {
+    ...args,
+    outputResolution: resolveOutputResolutionFromSize({
+      projectDir,
+      cliWidth: args.width,
+      cliHeight: args.height,
+      outputResolution: args.outputResolution,
+    }),
+  };
 
   // Pre-validate every entry's variables against the composition's
   // schema. Mismatches print as warnings; strict mode aborts before any

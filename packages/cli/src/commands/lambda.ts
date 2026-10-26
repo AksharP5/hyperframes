@@ -130,8 +130,15 @@ export default defineCommand({
 
     // sites / render
     "site-id": { type: "string", description: "Explicit site id (overrides content hash)" },
-    width: { type: "string", description: "Render width in pixels" },
-    height: { type: "string", description: "Render height in pixels" },
+    width: {
+      type: "string",
+      description:
+        "Output width in pixels: the composition's width, or a whole-number multiple of it (3840 on a 1920x1080 composition renders at scale 2)",
+    },
+    height: {
+      type: "string",
+      description: "Output height in pixels, at the same multiple as --width",
+    },
     "output-resolution": {
       type: "string",
       description:

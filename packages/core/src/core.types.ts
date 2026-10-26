@@ -182,6 +182,7 @@ export {
   isAspectAgnosticResolutionAlias,
   resolveResolutionFlagPair,
   checkOutputResolutionCompatibility,
+  outputResolutionForSize,
   suggestMatchingPreset,
   COMPOSITION_VARIABLE_TYPES,
   TIMELINE_COLORS,

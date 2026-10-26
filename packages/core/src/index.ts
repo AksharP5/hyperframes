@@ -66,6 +66,7 @@ export {
   isAspectAgnosticResolutionAlias,
   resolveResolutionFlagPair,
   checkOutputResolutionCompatibility,
+  outputResolutionForSize,
   suggestMatchingPreset,
   parseFps,
   parseFpsWithDefault,
