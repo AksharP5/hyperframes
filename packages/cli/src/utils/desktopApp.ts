@@ -35,9 +35,8 @@ export const desktopDownloadUrl = (
 export const downloadHint = (url: string): string =>
   `Keep editing by chatting with Framey in the HyperFrames desktop app → ${url}`;
 
-// ponytail: the Mac app takes a handed-over folder since b254 (hyperframes-internal#2601); Windows and Linux join
-// once its folder-argv change ships. Until then every surface offers the download and writes no hand-off.
-export const HANDOFF_READY = process.platform === "darwin";
+// Every build of the app takes a handed-over folder: macOS as open-file, Windows and Linux on their command line.
+export const HANDOFF_READY = true;
 
 export interface AgentSession {
   engine: "claude" | "codex" | "grok";
