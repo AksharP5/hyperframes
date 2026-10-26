@@ -1,0 +1,18 @@
+{
+  "phase": "after",
+  "scenario": "paused",
+  "browser": "Chrome/156.0.8078.47",
+  "beforeClick": {
+    "paused": true,
+    "playbackRate": 2,
+    "currentTime": 3.0082,
+    "duration": 10,
+    "button": "Play",
+    "speed": "2x",
+    "time": "0:03 / 0:10"
+  },
+  "afterClick": {
+    "paused": false
+  },
+  "errors": []
+}
