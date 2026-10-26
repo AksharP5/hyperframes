@@ -521,23 +521,11 @@
 
   function visibleTextLineRects(element, rects, style, clip, tolerance) {
     const metrics = horizontalTextMetrics(element, style);
-    const fontHeight = metrics ? metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent : 0;
-    const lineHeight = parsePx(style.lineHeight) || fontHeight;
     return rects.flatMap((rect) => {
       if (!metrics) return intersectsTextWindow(rect, clip, tolerance) ? [rect] : [];
-      const scale = rect.height / fontHeight;
-      if (!intersectsTextWindow(inkRect(rect, metrics), clip, tolerance)) return [];
-      // Negative leading belongs outside the used line box. Font metrics scale
-      // with the Range rect, so zoomed cards retain the same clipping decision.
-      const inset = Math.max(0, (rect.height - lineHeight * scale) / 2);
-      return [
-        toRect({
-          ...rect,
-          top: rect.top + inset,
-          bottom: rect.bottom - inset,
-          height: rect.height - 2 * inset,
-        }),
-      ];
+      // The glyphs' ink is what a clip cuts; a line box with negative leading hides descenders from it.
+      const ink = inkRect(rect, metrics);
+      return intersectsTextWindow(ink, clip, tolerance) ? [toRect(ink)] : [];
     });
   }
 

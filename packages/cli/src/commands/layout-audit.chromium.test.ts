@@ -336,6 +336,13 @@ describe.runIf(executablePath)("layout audit in Chromium", () => {
     },
     { name: "partial cut", css: "height:60px", textStyle: "", error: true },
     {
+      name: "descenders cut at rest by a one-line mask",
+      css: "height:120px",
+      textStyle: "",
+      text: "gypsy",
+      error: true,
+    },
+    {
       name: "scaled partial cut",
       css: "height:60px;transform:scale(.5);transform-origin:top left",
       textStyle: "",
@@ -353,11 +360,11 @@ describe.runIf(executablePath)("layout audit in Chromium", () => {
       textStyle: "",
       error: true,
     },
-  ])("handles $name", async ({ css, textStyle, error }) => {
+  ])("handles $name", async ({ css, textStyle, error, text = "HELLO" }) => {
     const codes = await auditCodes(`
         <div data-composition-id="main" data-width="1000" data-height="800" style="width:1000px;height:800px">
           <div style="position:absolute;left:100px;top:100px;width:400px;overflow:hidden;font:120px/1 Arial;${css}">
-            <div style="${textStyle}">HELLO</div>
+            <div style="${textStyle}">${text}</div>
           </div>
         </div>`);
     expect(codes.includes("text_box_overflow")).toBe(error);

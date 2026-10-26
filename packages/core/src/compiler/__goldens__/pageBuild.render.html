@@ -442,12 +442,16 @@ window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {},
   var __hfRootSelector = '[data-composition-id="card__hf1"]';
   var __hfRoot = null;
   var __hfRootSelectorPattern = `\\[\\s*data-composition-id\\s*=\\s*(?:"card"|'card')\\s*\\]`;
+  var __hfTimelineRootSelectorPattern = `\\[\\s*data-composition-id\\s*=\\s*(?:"card__hf1"|'card__hf1')\\s*\\]`;
   var __hfTimingSelectorPattern = `\\s*\\[\\s*data-(?:start|duration)\\s*=\\s*(?:"[^"]*"|'[^']*')\\s*\\]`;
   var __hfAuthoredRootSelector = __hfAuthoredRootId ? "[" + __hfAuthoredRootAttr + '="' + __hfEscapeAttr(__hfAuthoredRootId) + '"]' : "";
   var __hfAuthoredRootEntries = __hfAuthoredRootSelector ? [{ id: __hfAuthoredRootId, replacement: __hfAuthoredRootSelector }] : [];
   var __hfNormalizeSelector = function(selector) {
     if (!__hfCompId || typeof selector !== "string") return selector;
-    var normalized = selector.replace(new RegExp(__hfRootSelectorPattern + "(?:" + __hfTimingSelectorPattern + ")+", "g"), __hfRootSelector).replace(new RegExp("(?:" + __hfTimingSelectorPattern + ")+" + __hfRootSelectorPattern, "g"), __hfRootSelector);
+    var normalized = selector.replace(new RegExp(__hfRootSelectorPattern + "(?:" + __hfTimingSelectorPattern + ")+", "g"), __hfRootSelector).replace(new RegExp("(?:" + __hfTimingSelectorPattern + ")+" + __hfRootSelectorPattern, "g"), __hfRootSelector).replace(new RegExp(__hfRootSelectorPattern, "g"), __hfRootSelector);
+    if (__hfTimelineCompId !== __hfCompId) {
+      normalized = normalized.replace(new RegExp(__hfTimelineRootSelectorPattern, "g"), __hfRootSelector);
+    }
     return window.__hfSvgSelectorAliases.rewrite(normalized, __hfAuthoredRootEntries);
   };
   var __hfFindRoot = function() {
@@ -987,12 +991,16 @@ window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {},
   var __hfRootSelector = '[data-composition-id="card__hf2"]';
   var __hfRoot = null;
   var __hfRootSelectorPattern = `\\[\\s*data-composition-id\\s*=\\s*(?:"card"|'card')\\s*\\]`;
+  var __hfTimelineRootSelectorPattern = `\\[\\s*data-composition-id\\s*=\\s*(?:"card__hf2"|'card__hf2')\\s*\\]`;
   var __hfTimingSelectorPattern = `\\s*\\[\\s*data-(?:start|duration)\\s*=\\s*(?:"[^"]*"|'[^']*')\\s*\\]`;
   var __hfAuthoredRootSelector = __hfAuthoredRootId ? "[" + __hfAuthoredRootAttr + '="' + __hfEscapeAttr(__hfAuthoredRootId) + '"]' : "";
   var __hfAuthoredRootEntries = __hfAuthoredRootSelector ? [{ id: __hfAuthoredRootId, replacement: __hfAuthoredRootSelector }] : [];
   var __hfNormalizeSelector = function(selector) {
     if (!__hfCompId || typeof selector !== "string") return selector;
-    var normalized = selector.replace(new RegExp(__hfRootSelectorPattern + "(?:" + __hfTimingSelectorPattern + ")+", "g"), __hfRootSelector).replace(new RegExp("(?:" + __hfTimingSelectorPattern + ")+" + __hfRootSelectorPattern, "g"), __hfRootSelector);
+    var normalized = selector.replace(new RegExp(__hfRootSelectorPattern + "(?:" + __hfTimingSelectorPattern + ")+", "g"), __hfRootSelector).replace(new RegExp("(?:" + __hfTimingSelectorPattern + ")+" + __hfRootSelectorPattern, "g"), __hfRootSelector).replace(new RegExp(__hfRootSelectorPattern, "g"), __hfRootSelector);
+    if (__hfTimelineCompId !== __hfCompId) {
+      normalized = normalized.replace(new RegExp(__hfTimelineRootSelectorPattern, "g"), __hfRootSelector);
+    }
     return window.__hfSvgSelectorAliases.rewrite(normalized, __hfAuthoredRootEntries);
   };
   var __hfFindRoot = function() {
@@ -1532,12 +1540,16 @@ window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {},
   var __hfRootSelector = '[data-composition-id="card__hf3"]';
   var __hfRoot = null;
   var __hfRootSelectorPattern = `\\[\\s*data-composition-id\\s*=\\s*(?:"card"|'card')\\s*\\]`;
+  var __hfTimelineRootSelectorPattern = `\\[\\s*data-composition-id\\s*=\\s*(?:"card__hf3"|'card__hf3')\\s*\\]`;
   var __hfTimingSelectorPattern = `\\s*\\[\\s*data-(?:start|duration)\\s*=\\s*(?:"[^"]*"|'[^']*')\\s*\\]`;
   var __hfAuthoredRootSelector = __hfAuthoredRootId ? "[" + __hfAuthoredRootAttr + '="' + __hfEscapeAttr(__hfAuthoredRootId) + '"]' : "";
   var __hfAuthoredRootEntries = __hfAuthoredRootSelector ? [{ id: __hfAuthoredRootId, replacement: __hfAuthoredRootSelector }] : [];
   var __hfNormalizeSelector = function(selector) {
     if (!__hfCompId || typeof selector !== "string") return selector;
-    var normalized = selector.replace(new RegExp(__hfRootSelectorPattern + "(?:" + __hfTimingSelectorPattern + ")+", "g"), __hfRootSelector).replace(new RegExp("(?:" + __hfTimingSelectorPattern + ")+" + __hfRootSelectorPattern, "g"), __hfRootSelector);
+    var normalized = selector.replace(new RegExp(__hfRootSelectorPattern + "(?:" + __hfTimingSelectorPattern + ")+", "g"), __hfRootSelector).replace(new RegExp("(?:" + __hfTimingSelectorPattern + ")+" + __hfRootSelectorPattern, "g"), __hfRootSelector).replace(new RegExp(__hfRootSelectorPattern, "g"), __hfRootSelector);
+    if (__hfTimelineCompId !== __hfCompId) {
+      normalized = normalized.replace(new RegExp(__hfTimelineRootSelectorPattern, "g"), __hfRootSelector);
+    }
     return window.__hfSvgSelectorAliases.rewrite(normalized, __hfAuthoredRootEntries);
   };
   var __hfFindRoot = function() {

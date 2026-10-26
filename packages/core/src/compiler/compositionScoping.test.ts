@@ -487,6 +487,37 @@ body { margin: 0; }
     expect(fakeWindow.__capturedMountCharsType).toBe("function");
   });
 
+  it("scopes a selector naming the authored composition id to each mount of a shared scene", () => {
+    const { document } = parseHTML(`
+      <div data-composition-id="step__hf1"><i class="sc">first</i></div>
+      <div data-composition-id="step__hf2"><i class="sc">second</i></div>
+    `);
+    const gsapTargets: string[][] = [];
+    const fakeWindow = {
+      document,
+      __timelines: {},
+      gsap: {
+        timeline: () => ({
+          to(targets: Element[]) {
+            gsapTargets.push(Array.from(targets).map((target) => target.textContent || ""));
+            return this;
+          },
+        }),
+      },
+    };
+    const wrapped = wrapScopedCompositionScript(
+      `gsap.timeline({ paused: true }).to('[data-composition-id="step"] .sc', { x: 1 });`,
+      "step",
+      undefined,
+      '[data-composition-id="step__hf2"]',
+      "step__hf2",
+    );
+
+    new Function("window", "gsap", wrapped)(fakeWindow, fakeWindow.gsap);
+
+    expect(gsapTargets).toEqual([["second"]]);
+  });
+
   it("executes document and GSAP selectors inside the composition root", () => {
     const { document } = parseHTML(`
       <div data-composition-id="scene" data-start="intro"><h1 class="title">Scene</h1></div>

@@ -407,6 +407,9 @@ export function wrapScopedCompositionScript(
   const rootSelectorPatternLiteral = jsonScriptLiteral(
     String.raw`\[\s*data-composition-id\s*=\s*(?:"${escapedCompositionId}"|'${escapedCompositionId}')\s*\]`,
   );
+  const timelineRootSelectorPatternLiteral = jsonScriptLiteral(
+    String.raw`\[\s*data-composition-id\s*=\s*(?:"${escapeRegExp(timelineCompositionId)}"|'${escapeRegExp(timelineCompositionId)}')\s*\]`,
+  );
   const timingSelectorPatternLiteral = jsonScriptLiteral(
     String.raw`\s*\[\s*data-(?:start|duration)\s*=\s*(?:"[^"]*"|'[^']*')\s*\]`,
   );
@@ -427,6 +430,7 @@ export function wrapScopedCompositionScript(
     : "");
   var __hfRoot = null;
   var __hfRootSelectorPattern = ${rootSelectorPatternLiteral};
+  var __hfTimelineRootSelectorPattern = ${timelineRootSelectorPatternLiteral};
   var __hfTimingSelectorPattern = ${timingSelectorPatternLiteral};
   var __hfAuthoredRootSelector = __hfAuthoredRootId
     ? "[" + __hfAuthoredRootAttr + '="' + __hfEscapeAttr(__hfAuthoredRootId) + '"]'
@@ -438,7 +442,11 @@ export function wrapScopedCompositionScript(
     if (!__hfCompId || typeof selector !== "string") return selector;
     var normalized = selector
       .replace(new RegExp(__hfRootSelectorPattern + '(?:' + __hfTimingSelectorPattern + ')+', 'g'), __hfRootSelector)
-      .replace(new RegExp('(?:' + __hfTimingSelectorPattern + ')+' + __hfRootSelectorPattern, 'g'), __hfRootSelector);
+      .replace(new RegExp('(?:' + __hfTimingSelectorPattern + ')+' + __hfRootSelectorPattern, 'g'), __hfRootSelector)
+      .replace(new RegExp(__hfRootSelectorPattern, 'g'), __hfRootSelector);
+    if (__hfTimelineCompId !== __hfCompId) {
+      normalized = normalized.replace(new RegExp(__hfTimelineRootSelectorPattern, 'g'), __hfRootSelector);
+    }
     return window.__hfSvgSelectorAliases.rewrite(normalized, __hfAuthoredRootEntries);
   };
   var __hfFindRoot = function() {
