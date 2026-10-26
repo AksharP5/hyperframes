@@ -27,6 +27,8 @@ import {
 import { warnUnknownEnumValues } from "../runtime/getVariables";
 import {
   createCompositionCssScoper,
+  AUTHORED_SOURCE_BEGIN,
+  AUTHORED_SOURCE_END,
   wrapInlineScriptWithErrorBoundary,
   scopedModulePrelude,
   wrapScopedCompositionScript,
@@ -627,7 +629,9 @@ export function inlineSubCompositions(
         const prelude = scriptCompositionId
           ? scopedModulePrelude(runtimeCompId || scopeCompId || scriptCompositionId, src)
           : "";
-        moduleScripts.push(prelude + (scriptEl.textContent || ""));
+        moduleScripts.push(
+          `${prelude}${AUTHORED_SOURCE_BEGIN}\n${scriptEl.textContent || ""}\n${AUTHORED_SOURCE_END}`,
+        );
       } else if (externalSrc) {
         if (!externalScriptSrcs.includes(externalSrc)) {
           externalScriptSrcs.push(externalSrc);

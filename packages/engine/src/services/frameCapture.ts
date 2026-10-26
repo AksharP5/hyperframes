@@ -25,6 +25,9 @@ import {
   quantizeTimeToFrame,
   fpsToNumber,
   resolveAuthoredTimingWindow,
+  AUTHORED_SOURCE_BEGIN,
+  AUTHORED_SOURCE_END,
+  RUNTIME_BOOTSTRAP_ATTR,
   SCENE_CALLBACK_ERROR_PREFIX,
   type RawAuthoredTiming,
 } from "@hyperframes/core";
@@ -2062,6 +2065,52 @@ export interface IsolatedComposition {
   elementId: string | null;
 }
 
+// Runs in the page. False once every inline, template and same-origin script is read and none
+// mentions __timelines or imports code; an unreadable or module script, or a page still loading, answers true.
+export async function authorScriptsMayRegisterTimelines(
+  runtimeAttr: string,
+  authoredBegin: string,
+  authoredEnd: string,
+): Promise<boolean> {
+  if (document.readyState !== "complete") return true;
+  const memo = globalThis as { __hfAuthorScan?: boolean };
+  memo.__hfAuthorScan ??= await (async () => {
+    const scripts = [
+      ...Array.from(document.querySelectorAll("script")),
+      ...Array.from(document.querySelectorAll("template")).flatMap((t) =>
+        Array.from(t.content.querySelectorAll("script")),
+      ),
+    ].filter((script) => !script.hasAttribute(runtimeAttr));
+    // Code that imports another file may register through it, which is not read here.
+    const mayRegister = (code: string) =>
+      code.includes("__timelines") || /\bimport\s*\(|^\s*import\s*[\w{*"']/m.test(code);
+    for (const script of scripts) {
+      if (script.type === "module") return true;
+      if (!script.src) {
+        const text = script.textContent ?? "";
+        const authored = text.includes(authoredBegin)
+          ? text
+              .split(authoredBegin)
+              .slice(1)
+              .map((region) => region.split(authoredEnd)[0])
+              .join("\n")
+          : text;
+        if (mayRegister(authored)) return true;
+        continue;
+      }
+      const url = new URL(script.src, location.href);
+      if (url.origin !== location.origin) return true;
+      try {
+        if (mayRegister(await (await fetch(url)).text())) return true;
+      } catch {
+        return true;
+      }
+    }
+    return false;
+  })();
+  return memo.__hfAuthorScan;
+}
+
 export interface SubTimelinePollOptions {
   intervalMs?: number;
   // Fail-fast: a script resource that failed to load can never register its timeline,
@@ -2117,13 +2166,22 @@ export async function pollSubCompositionTimelines(
   // A page error is given its grace from when it first appeared, not from when the poll began.
   let errorSeenAt: number | undefined;
   for (;;) {
-    ready = Boolean(await page.evaluate(expression));
-    if (ready || shouldStop?.()) break;
-    const now = Date.now();
-    if (now >= deadline) break;
     const failures = getScriptLoadFailures?.() ?? [];
     const errors = getPageErrors?.() ?? [];
     const failed = failures.length > 0 ? failures : errors;
+    // A failed script keeps the wait, so the failure is still named; only a quiet page is ready early.
+    ready =
+      Boolean(await page.evaluate(expression)) ||
+      (failed.length === 0 &&
+        !(await page.evaluate(
+          authorScriptsMayRegisterTimelines,
+          RUNTIME_BOOTSTRAP_ATTR,
+          AUTHORED_SOURCE_BEGIN,
+          AUTHORED_SOURCE_END,
+        )));
+    if (ready || shouldStop?.()) break;
+    const now = Date.now();
+    if (now >= deadline) break;
     const graceMs = failures.length > 0 ? scriptFailureGraceMs : scriptErrorGraceMs;
     if (failed.length > 0) errorSeenAt ??= now;
     const sinceFailure = failures.length > 0 ? now - start : now - (errorSeenAt ?? now);

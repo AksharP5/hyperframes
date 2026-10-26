@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { parseHTML } from "linkedom";
 import { JSDOM } from "jsdom";
 import {
+  AUTHORED_SOURCE_BEGIN,
+  AUTHORED_SOURCE_END,
   buildVariablesByCompScript,
   dedupeFontFaceRules,
   scopeCssToComposition,
@@ -1534,5 +1536,15 @@ describe("composition scoping – renamed-id selector runtime", () => {
     );
     expect(captured.hash).toBe("rect");
     expect(captured.bracket).toBe("circle");
+  });
+});
+
+describe("wrapScopedCompositionScript — authored source delimiters", () => {
+  it("puts exactly the authored source between the markers, apart from the wrapper's own __timelines use", () => {
+    const wrapped = wrapScopedCompositionScript("draw();", "scene");
+    const authored = wrapped.split(AUTHORED_SOURCE_BEGIN)[1]!.split(AUTHORED_SOURCE_END)[0]!;
+    expect(authored.trim()).toBe("draw();");
+    expect(wrapped).toContain("__timelines");
+    expect(wrapped.replace(authored, "")).toContain("__timelines");
   });
 });

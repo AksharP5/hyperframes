@@ -375,6 +375,9 @@ const SCOPED_HYPERFRAMES_EXPRESSION = `!__hfBaseHyperframes
         },
       })`;
 
+export const AUTHORED_SOURCE_BEGIN = "/*hf-authored-begin*/";
+export const AUTHORED_SOURCE_END = "/*hf-authored-end*/";
+
 export function scopedModulePrelude(
   timelineCompositionId: string,
   compositionSrc?: string | null,
@@ -677,7 +680,9 @@ export function wrapScopedCompositionScript(
     if (typeof report === "function") report("start", __hfCompositionSrc || "index.html");
     try {
       (function(document, gsap, window, __hyperframes) {
+${AUTHORED_SOURCE_BEGIN}
 ${source.replace(/<\/(script)/gi, "<\\/$1")}
+${AUTHORED_SOURCE_END}
       }).call(window, __hfScopedDocument, __hfScopedGsap, __hfScopedWindow, __hfScopedHyperframes);
     } catch (_err) {
       console.error(__hfErrorLabel, __hfCompId, _err);
