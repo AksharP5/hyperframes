@@ -375,6 +375,47 @@ describe("snapshot contact sheet failures", () => {
       vi.unstubAllEnvs();
     }
   });
+
+  it.each([
+    ["no --describe flag", [], null],
+    ["--describe false", ["--describe", "false"], null],
+    ["a bare --describe", ["--describe"], "Describe this video composition frame"],
+    ["--describe with a question", ["--describe", "Is the logo visible?"], "Is the logo visible?"],
+  ])("with a Gemini key set, %s", async (_, describeArgs, prompt) => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("GOOGLE_API_KEY", "test-key");
+    const generateContent = vi.fn(async (_request: unknown) => ({ text: "a described frame" }));
+    const loadOptionalPackage = vi.fn(async () => ({
+      GoogleGenAI: class {
+        models = { generateContent };
+      },
+    }));
+    vi.doMock("../utils/optionalPackages.js", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../utils/optionalPackages.js")>()),
+      loadInstalledSharp: () => null,
+      loadOptionalPackage,
+    }));
+    const { default: command } = await import("./snapshot.js");
+    const output = join(project, "snapshots");
+
+    try {
+      await runCommand(command, {
+        rawArgs: [project, ...["--at", "0.5,1", "--no-end", "-o", output], ...describeArgs],
+      });
+
+      if (prompt === null) {
+        expect(loadOptionalPackage).not.toHaveBeenCalled();
+        expect(generateContent).not.toHaveBeenCalled();
+        expect(existsSync(join(output, "descriptions.md"))).toBe(false);
+      } else {
+        expect(generateContent).toHaveBeenCalledTimes(2);
+        expect(JSON.stringify(generateContent.mock.calls[0]?.[0])).toContain(prompt);
+        expect(readFileSync(join(output, "descriptions.md"), "utf8")).toContain(prompt);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe("snapshot --keep", () => {
