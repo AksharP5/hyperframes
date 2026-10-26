@@ -30,6 +30,8 @@ import {
 } from "./htmlCompiler.js";
 import { validateNoSystemFonts } from "./render/planValidation.js";
 
+const PAGE_URL = "http://localhost:4000/index.html";
+
 describe("discoverMediaFromBrowser", () => {
   async function discover(
     html: string,
@@ -56,6 +58,7 @@ describe("discoverMediaFromBrowser", () => {
     }
     const previousDocument = Reflect.get(globalThis, "document");
     Reflect.set(globalThis, "document", document);
+    Reflect.set(globalThis, "location", { href: PAGE_URL });
     try {
       return await discoverMediaFromBrowser({
         evaluate: async (collect) => {
@@ -128,32 +131,21 @@ describe("discoverMediaFromBrowser", () => {
     });
   });
 
-  it("reports no source for a blank src even though the browser resolves it to the page URL", async () => {
-    const { document } = parseHTML(
-      `<video id="empty" src="" data-start="0" data-end="1"></video>
-       <video id="real" src="clip.mp4" data-start="0" data-end="1"></video>`,
-    );
-    const resolved = {
-      empty: "http://localhost:4000/index.html",
-      real: "http://localhost:4000/clip.mp4",
-    };
-    for (const [id, value] of Object.entries(resolved)) {
-      const element = document.getElementById(id);
-      if (element) Object.defineProperty(element, "src", { value });
-    }
-    const previousDocument = Reflect.get(globalThis, "document");
-    Reflect.set(globalThis, "document", document);
-    try {
-      const media = await discoverMediaFromBrowser({
-        evaluate: async (collect) => collect(),
-      } as never);
-      expect(media.find((item) => item.id === "empty")?.src).toBe("");
+  it.each(["", " ", "#", "#t=1", "?", "?x=1"])(
+    "reports no source for src=%j, which the browser resolves to the page URL",
+    async (authored) => {
+      const media = await discover(
+        `<video id="page" src="${authored}" data-start="0" data-end="1"></video>
+         <video id="real" src="clip.mp4" data-start="0" data-end="1"></video>`,
+        {
+          page: `http://localhost:4000/index.html${authored.trim()}`,
+          real: "http://localhost:4000/clip.mp4",
+        },
+      );
+      expect(media.find((item) => item.id === "page")?.src).toBe("");
       expect(media.find((item) => item.id === "real")?.src).toBe("http://localhost:4000/clip.mp4");
-    } finally {
-      if (previousDocument === undefined) Reflect.deleteProperty(globalThis, "document");
-      else Reflect.set(globalThis, "document", previousDocument);
-    }
-  });
+    },
+  );
 
   it("keeps strict timing parsing self-contained after Puppeteer serializes the callback", async () => {
     const media = await discover(

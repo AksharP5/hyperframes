@@ -2356,10 +2356,10 @@ export async function discoverMediaFromBrowser(page: Page): Promise<BrowserMedia
       if (!id) return;
 
       // currentSrc is authoritative for <video>/<audio><source> and responsive images.
-      const ownSrc = htmlEl.getAttribute("src");
-      const blankSrc =
-        ownSrc !== null && ownSrc.trim() === "" && !htmlEl.querySelector("source[src]");
-      const src = blankSrc ? "" : htmlEl.currentSrc || htmlEl.src || ownSrc || "";
+      const resolvedSrc = htmlEl.currentSrc || htmlEl.src || htmlEl.getAttribute("src") || "";
+      const withoutQueryAndHash = (url: string) => url.replace(/[?#][\s\S]*$/, "");
+      const isPageItself = withoutQueryAndHash(resolvedSrc) === withoutQueryAndHash(location.href);
+      const src = isPageItself ? "" : resolvedSrc;
       const start = parseFloat(htmlEl.getAttribute("data-start") || "0");
       const endRaw = htmlEl.getAttribute("data-end");
       const durationRaw = htmlEl.getAttribute("data-duration");
