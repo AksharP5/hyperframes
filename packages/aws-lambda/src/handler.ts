@@ -647,6 +647,7 @@ async function handleRenderChunk(
 
     const result: ChunkResult = await primitive(planDir, event.ChunkIndex, chunkOutputBase, {
       maxCaptureWorkers: lambdaMaxCaptureWorkers(),
+      interleaveCapture: true,
     });
     logEvent({
       event: "chunk_capture",
@@ -703,6 +704,7 @@ async function handleRenderChunkV2(
     );
     const result = await primitive(planDir, event.ChunkIndex, chunkOutputBase, {
       maxCaptureWorkers: lambdaMaxCaptureWorkers(),
+      interleaveCapture: true,
     });
     logEvent({
       event: "chunk_capture",

@@ -221,6 +221,11 @@ export interface RenderChunkOptions {
    * this many, one browser per 20 frames; never lowers it.
    */
   maxCaptureWorkers?: number;
+  interleaveCapture?: boolean;
+}
+
+export function interleavesCapture(overlapping: boolean, options?: RenderChunkOptions): boolean {
+  return overlapping && options?.interleaveCapture === true;
 }
 
 /** A browser starts in about 3 s, a small share of 20 frames' capture. */
@@ -999,7 +1004,7 @@ export async function renderChunk(
             assertNotAborted: () => {},
             frameRange: range,
             onFrameLanded: (frame) => overlap.current?.onFrameLanded(frame),
-            interleaveFrames: overlap.current !== null,
+            interleaveFrames: interleavesCapture(overlap.current !== null, options),
           }).catch(async (captureError: unknown) => {
             await overlap.current?.abort();
             overlap.current = null;
