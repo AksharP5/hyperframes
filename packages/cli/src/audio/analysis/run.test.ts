@@ -12,12 +12,17 @@ const dir = mkdtempSync(join(tmpdir(), "hf-audio-run-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 /** A stereo 32-bit float WAV of `seconds`, each sample from `fill`. */
-function wav(name: string, seconds: number, fill: (t: number) => number): string {
+function wav(
+  name: string,
+  seconds: number,
+  fill: (t: number) => number,
+  sampleRate = RATE,
+): string {
   seed = 3;
-  const frames = Math.round(seconds * RATE);
+  const frames = Math.round(seconds * sampleRate);
   const data = Buffer.alloc(frames * 8);
   for (let i = 0; i < frames; i++) {
-    const v = fill(i / RATE);
+    const v = fill(i / sampleRate);
     data.writeFloatLE(v, i * 8);
     data.writeFloatLE(v, i * 8 + 4);
   }
@@ -28,8 +33,8 @@ function wav(name: string, seconds: number, fill: (t: number) => number): string
   header.writeUInt32LE(16, 16);
   header.writeUInt16LE(3, 20);
   header.writeUInt16LE(2, 22);
-  header.writeUInt32LE(RATE, 24);
-  header.writeUInt32LE(RATE * 8, 28);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 8, 28);
   header.writeUInt16LE(8, 32);
   header.writeUInt16LE(32, 34);
   header.write("data", 36);
@@ -108,6 +113,25 @@ describe.skipIf(!ffmpeg)("analyzeTargets", () => {
       "the loudest part of margin.wav is in the first 0.65 s, which is skipped",
     ]);
   });
+
+  it.each([1, 1800])(
+    "measures a long recording after skipping %s seconds and warns about its louder head",
+    async (skip) => {
+      const file = `long-${skip}.wav`;
+      const path = wav(file, 1802, (t) => (t < skip ? 0.5 : 0.25), 100);
+      const report = await analyzeTargets([await previewTarget(path, file, 4, skip)], {
+        capabilities: ["moments"],
+      });
+
+      expect(report.items[0]).toMatchObject({
+        duration: 1802,
+        window: { from: skip, to: 1802 },
+        moments: { onset: skip },
+        warnings: [`the loudest part of ${file} is in the first ${skip} s, which is skipped`],
+      });
+      expect(report.items[0]?.error).toBeUndefined();
+    },
+  );
 
   it("finds no hit where a window cuts into a sound that is already playing", async () => {
     const chord = (t: number) =>

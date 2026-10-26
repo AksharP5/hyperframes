@@ -103,7 +103,10 @@ function decodeSpan(target: AudioTarget, stream: AudioStreamInfo) {
 }
 
 const loudest = (signal: AudioSignal) =>
-  Math.max(0, ...envelope(signal, { hopMs: 10, scale: "linear" }).values);
+  envelope(signal, { hopMs: 10, scale: "linear" }).values.reduce(
+    (max, value) => Math.max(max, value),
+    0,
+  );
 
 /** The decoded span without the margin added so an onset at the window edge is not the cut. */
 function retained(signal: AudioSignal, before: number, after: number): AudioSignal {
