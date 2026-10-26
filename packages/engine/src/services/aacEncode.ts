@@ -4,7 +4,8 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { removeScratch } from "../utils/removeScratch.js";
 import { dirname, join } from "node:path";
 import { getFfmpegBinary } from "../utils/ffmpegBinaries.js";
 import { runFfmpeg, type RunFfmpegResult } from "../utils/runFfmpeg.js";
@@ -166,6 +167,6 @@ export async function encodeAac(
     const slowest = Math.max(...results.map((result) => result.durationMs));
     return { ...muxed, durationMs: slowest + muxed.durationMs };
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    removeScratch(dir);
   }
 }

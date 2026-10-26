@@ -2,6 +2,7 @@
 import { isSelfOrAncestorHidden, memberGroupKey, isMemberGroupHidden } from "./mediaHidden.js";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from "fs";
 import { renameWithRetry } from "../utils/renameWithRetry.js";
+import { removeScratch } from "../utils/removeScratch.js";
 import { join, dirname, isAbsolute, relative } from "path";
 import { parseHTML } from "linkedom";
 import { extractAudioMetadata, type AudioMetadata } from "../utils/ffprobe.js";
@@ -751,7 +752,7 @@ async function extractAudioSegment(
         failure,
       };
     } finally {
-      rmSync(cycleDir, { recursive: true, force: true });
+      removeScratch(cycleDir);
     }
   }
   const inputSeek = mediaStart >= (metadata?.latestStreamLeadSeconds ?? 0);
@@ -979,7 +980,7 @@ async function mixAudioTracksFlat(
       currentArgs[currentArgs.indexOf("-filter_complex_script")] = "-/filter_complex";
       return await runFfmpeg(currentArgs, { signal, timeout: ffmpegProcessTimeout });
     } finally {
-      rmSync(scriptDir, { recursive: true, force: true });
+      removeScratch(scriptDir);
     }
   };
 
@@ -1163,7 +1164,7 @@ async function mixGroupMembersFlat(
       currentArgs[currentArgs.indexOf("-filter_complex_script")] = "-/filter_complex";
       return await runFfmpeg(currentArgs, { signal, timeout: ffmpegProcessTimeout });
     } finally {
-      rmSync(scriptDir, { recursive: true, force: true });
+      removeScratch(scriptDir);
     }
   };
 
@@ -1249,8 +1250,8 @@ async function sumInSlices(
       signal,
       config,
     );
-    rmSync(running.srcPath, { force: true });
-    rmSync(slicePath, { force: true });
+    removeScratch(running.srcPath);
+    removeScratch(slicePath);
     if (!folded.success) return folded;
     running = wavTrack(id, foldedPath);
   }
@@ -1273,10 +1274,10 @@ async function mixGroupMembers(
   try {
     const summed = await sumInSlices(memberTracks, scratchDir, totalDuration, signal, config);
     if (!summed.success) return summed;
-    renameWithRetry(summed.track.srcPath, outputPath);
+    renameWithRetry(summed.track.srcPath, outputPath, { copyFallback: true });
     return { success: true, degradedAutomation: summed.degradedAutomation };
   } finally {
-    rmSync(scratchDir, { recursive: true, force: true });
+    removeScratch(scratchDir);
   }
 }
 
@@ -1321,7 +1322,7 @@ async function mixAudioTracks(
         }
       : mixed;
   } finally {
-    rmSync(scratchDir, { recursive: true, force: true });
+    removeScratch(scratchDir);
   }
 }
 
@@ -1374,7 +1375,8 @@ async function mixThroughFloatSum(
       failures: [failure],
     };
   }
-  if (config?.keepEncoderInputAt) renameWithRetry(encoderInput, config.keepEncoderInputAt);
+  if (config?.keepEncoderInputAt)
+    renameWithRetry(encoderInput, config.keepEncoderInputAt, { copyFallback: true });
   return {
     ...sum,
     outputPath,

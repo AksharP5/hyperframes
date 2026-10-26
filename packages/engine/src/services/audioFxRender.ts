@@ -19,7 +19,6 @@ import {
   openSync,
   readFileSync,
   readSync,
-  rmSync,
   statSync,
   writeFileSync,
   writeSync,
@@ -30,6 +29,7 @@ import { pathToFileURL } from "node:url";
 import { getAudioFxRuntimeScript } from "@hyperframes/core/audio-fx-runtime";
 import { enabledAudioFxNodes, type HfAudioFxChain } from "@hyperframes/core/audio-fx";
 import { serializeAutomation, type HfAutomation } from "@hyperframes/core/audio-automation";
+import { removeScratch } from "../utils/removeScratch.js";
 import { acquireBrowser } from "./browserManager.js";
 import { createEnvelopeWalker } from "./audioVolumeEnvelope.js";
 import { riffChunks, wavFormatTag } from "./wavChunks.js";
@@ -630,7 +630,7 @@ async function withFxBrowser<T>(
       `Audio FX failed for track ${options.trackId}: ${(err as Error).message}`,
     );
   } finally {
-    rmSync(hostDir, { recursive: true, force: true });
+    removeScratch(hostDir);
     await lease?.release().catch(() => undefined);
   }
 }
