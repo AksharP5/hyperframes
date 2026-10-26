@@ -999,6 +999,7 @@ export async function renderChunk(
             assertNotAborted: () => {},
             frameRange: range,
             onFrameLanded: (frame) => overlap.current?.onFrameLanded(frame),
+            interleaveFrames: overlap.current !== null,
           }).catch(async (captureError: unknown) => {
             await overlap.current?.abort();
             overlap.current = null;

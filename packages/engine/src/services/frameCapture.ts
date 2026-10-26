@@ -4629,6 +4629,13 @@ async function captureAccumulatedFrame(
   };
 }
 
+function framesAreStatic(staticFrames: ReadonlySet<number>, from: number, to: number): boolean {
+  for (let frame = from; frame <= to; frame++) {
+    if (!staticFrames.has(frame)) return false;
+  }
+  return true;
+}
+
 async function captureFrameCore(
   session: CaptureSession,
   frameIndex: number,
@@ -4655,7 +4662,8 @@ async function captureFrameCore(
   if (
     session.staticFrames?.has(absFrameIndex) &&
     session.lastFrameBuffer &&
-    session.lastFrameAbsoluteIndex === absFrameIndex - 1 &&
+    session.lastFrameAbsoluteIndex !== undefined &&
+    framesAreStatic(session.staticFrames, session.lastFrameAbsoluteIndex + 1, absFrameIndex) &&
     (!session.motionBlur ||
       motionBlurWindowIsStatic(session.motionBlur, absFrameIndex, session.staticFrames))
   ) {
@@ -4828,13 +4836,7 @@ export async function captureFrameToBufferPipelined(
     // same pixels. Sequential capture reduces to has(i) (gap = {i}); the
     // interleaved parallel stride makes the gap N frames wide.
     const lastIdx = session.lastEncodeResultFrame ?? frameIndex - 1;
-    let gapStatic = true;
-    for (let j = lastIdx + 1; j <= frameIndex; j++) {
-      if (!session.staticFrames.has(j)) {
-        gapStatic = false;
-        break;
-      }
-    }
+    const gapStatic = framesAreStatic(session.staticFrames, lastIdx + 1, frameIndex);
     if (gapStatic) {
       session.staticDedupCount = (session.staticDedupCount ?? 0) + 1;
       session.capturePerf.frames += 1;
