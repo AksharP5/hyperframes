@@ -1,12 +1,23 @@
 import { BrowserCleanupError, onStopSignal } from "../browser/launch.js";
 import type { CheckProgress } from "./checkProgress.js";
-import { CheckDeadline, CheckDeadlineError, type CheckPhase } from "./checkDeadline.js";
+import {
+  CheckDeadline,
+  CheckDeadlineError,
+  CheckStoppedError,
+  type CheckPhase,
+} from "./checkDeadline.js";
 import {
   checkSnapshotDirectory,
   beginCheckSnapshots,
   finishCheckSnapshots,
 } from "./checkSnapshotDirectory.js";
 import { findingElementKey, groupSampledFindings } from "./checkFindings.js";
+import {
+  MAX_FINDING_FRAME_TIMES,
+  selectFindingFrames,
+  withFindingFrameFields,
+} from "./checkFindingFrames.js";
+export { selectFindingFrames } from "./checkFindingFrames.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { PrelaunchedBrowser } from "../capture/captureCompositionFrame.js";
@@ -58,6 +69,7 @@ import type {
   CheckDependencies,
   CheckFinding,
   CheckFindingCropRequest,
+  CheckFindingFrameRequest,
   CheckGeometryCandidate,
   CheckOptions,
   CheckReport,
@@ -84,6 +96,7 @@ export type {
   CheckDependencies,
   CheckFinding,
   CheckFindingCropRequest,
+  CheckFindingFrameRequest,
   CheckOptions,
   CheckReport,
   CheckSection,
@@ -1688,9 +1701,15 @@ export async function runCheckPipeline(
       );
       outcome = {
         kind: "report",
-        report: options.snapshots
-          ? await withFindingCrops(dependencies, project, options, report, deadline)
-          : report,
+        report: await withOptionalFindingFrames(
+          dependencies,
+          project,
+          options,
+          options.snapshots
+            ? await withFindingCrops(dependencies, project, options, report, deadline)
+            : report,
+          deadline,
+        ),
       };
     } catch (error) {
       outcome = { kind: "failed", error };
@@ -1771,6 +1790,37 @@ async function withFindingCrops(
     // (a second Chrome launch failing/timing out) without failing the run.
     console.error("   finding crops skipped: " + normalizeErrorMessage(error));
     trackCommandFailure("check-finding-crops", error);
+    return report;
+  }
+}
+
+async function withOptionalFindingFrames(
+  dependencies: CheckDependencies,
+  project: ProjectDir,
+  options: CheckOptions,
+  report: CheckReport,
+  deadline: CheckDeadline,
+): Promise<CheckReport> {
+  if (!options.findingFrames || deadline.signal.aborted) return report;
+  const plan = selectFindingFrames(report);
+  if (plan.requests.length === 0) return report;
+  if (plan.skipped > 0) {
+    console.error(
+      `   finding frames: ${plan.skipped} finding(s) left out past ${MAX_FINDING_FRAME_TIMES} distinct times`,
+    );
+  }
+  const capture = dependencies.captureFindingFrames ?? captureFindingFrames;
+  try {
+    deadline.enter("frames");
+    const written = await deadline.run(() => capture(project, options, plan.requests, deadline));
+    return withFindingFrameFields(report, plan, written);
+  } catch (error) {
+    if (error instanceof CheckDeadlineError || error instanceof CheckStoppedError) {
+      const finding = runtimeFailure(error);
+      return { ...report, ok: false, runtime: section([...report.runtime.findings, finding]) };
+    }
+    console.error("   finding frames skipped: " + normalizeErrorMessage(error));
+    trackCommandFailure("check-finding-frames", error);
     return report;
   }
 }
@@ -2232,6 +2282,16 @@ async function writeSnapshot(
   return relative(projectDir, path);
 }
 
+async function captureFindingFrames(
+  project: ProjectDir,
+  options: CheckOptions,
+  requests: CheckFindingFrameRequest[],
+  deadline?: CheckDeadline,
+): Promise<string[]> {
+  const module = await import("./checkBrowser.js");
+  return module.captureFindingFrames(project, options, requests, deadline);
+}
+
 async function captureFindingCrops(
   project: ProjectDir,
   options: CheckOptions,
@@ -2250,5 +2310,6 @@ const DEFAULT_DEPENDENCIES: CheckDependencies = {
   prelaunchBrowser,
   writeSnapshot,
   captureFindingCrops,
+  captureFindingFrames,
   inspectHdrAutoPromotion,
 };

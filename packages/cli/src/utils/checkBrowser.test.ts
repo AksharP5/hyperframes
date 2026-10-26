@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // fallow-ignore-file code-duplication
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,6 +12,7 @@ import {
 } from "../capture/captureCompositionFrame.js";
 import { DEFAULT_CHECK_OPTIONS, runAuditGrid } from "./checkPipeline.js";
 import {
+  captureFindingFrames,
   matchComponentFindings,
   captureOverviewShot,
   keepBrokenImageAborts,
@@ -22,6 +23,8 @@ import {
   mergeHelperDrafts,
   samplingBrowserCount,
 } from "./checkBrowser.js";
+import { CheckDeadline } from "./checkDeadline.js";
+import { closeManagedBrowser } from "../browser/launch.js";
 import type { ProjectDir } from "./project.js";
 
 const mocks = vi.hoisted(() => ({
@@ -67,6 +70,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../browser/launch.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../browser/launch.js")>()),
+  closeManagedBrowser: vi.fn(
+    (await importOriginal<typeof import("../browser/launch.js")>()).closeManagedBrowser,
+  ),
   onStopSignal: (listener: () => void) => {
     mocks.stopListeners.add(listener);
     return () => mocks.stopListeners.delete(listener);
@@ -1900,5 +1906,92 @@ describe("motion blur findings in the check output (T6)", () => {
       runAuditGrid,
     );
     expect(blurCodes(result.runtimeFindings)).toEqual([]);
+  });
+});
+
+describe("finding frame capture", () => {
+  it("keeps a progressing frame batch alive past 120 seconds", async () => {
+    vi.useFakeTimers();
+    const dir = mkdtempSync(join(tmpdir(), "finding-frames-progress-"));
+    const deadline = new CheckDeadline();
+    const page = Object.assign(fakePage(), { evaluateOnNewDocument: vi.fn(async () => undefined) });
+    page.screenshot.mockImplementation(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+      deadline.signal.throwIfAborted();
+      return "frame";
+    });
+    installSessionMock(page);
+    const requests = Array.from({ length: 40 }, (_, index) => ({
+      time: index,
+      filename: `frame-${index}.png`,
+    }));
+    try {
+      const result = await deadline
+        .run(() =>
+          captureFindingFrames({ ...PROJECT, dir }, DEFAULT_CHECK_OPTIONS, requests, deadline),
+        )
+        .catch((error: unknown) => error);
+      expect(result).toHaveLength(40);
+      expect(deadline.signal.aborted).toBe(false);
+    } finally {
+      await deadline.close();
+      vi.useRealTimers();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("seeks each requested time, writes its screenshot and closes the session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "finding-frames-"));
+    const page = fakePage();
+    installSessionMock(page);
+    const closeCalls = mocks.serverClose.mock.calls.length;
+    const requests = [
+      { time: 1, filename: "finding-frame-00.png" },
+      { time: 2, filename: "finding-frame-01.png" },
+    ];
+    try {
+      const paths = await captureFindingFrames(
+        { ...PROJECT, dir },
+        DEFAULT_CHECK_OPTIONS,
+        requests,
+      );
+      expect(paths).toHaveLength(2);
+      for (const [index, path] of paths.entries()) {
+        expect(readFileSync(path, "utf8")).toBe("c3R1Yg==");
+        expect(seekCompositionTimeline).toHaveBeenCalledWith(
+          page,
+          requests[index]?.time,
+          SCREENSHOT_SEEK_OPTIONS,
+        );
+      }
+      expect(mocks.serverClose.mock.calls.length).toBe(closeCalls + 1);
+      const session = await vi.mocked(openSettledCompositionPage).mock.results.at(-1)?.value;
+      expect(closeManagedBrowser).toHaveBeenCalledWith(session.browser);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("closes the session when a later screenshot fails", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "finding-frames-failure-"));
+    const page = fakePage();
+    page.screenshot
+      .mockResolvedValueOnce("first")
+      .mockRejectedValueOnce(new Error("capture failed"));
+    installSessionMock(page);
+    const closeCalls = mocks.serverClose.mock.calls.length;
+    try {
+      await expect(
+        captureFindingFrames({ ...PROJECT, dir }, DEFAULT_CHECK_OPTIONS, [
+          { time: 1, filename: "first.png" },
+          { time: 2, filename: "second.png" },
+        ]),
+      ).rejects.toThrow("capture failed");
+      expect(mocks.serverClose.mock.calls.length).toBe(closeCalls + 1);
+      const session = await vi.mocked(openSettledCompositionPage).mock.results.at(-1)?.value;
+      expect(closeManagedBrowser).toHaveBeenCalledWith(session.browser);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -51,10 +51,12 @@ describe("readToolContext", () => {
   it("reads check-review switches as booleans that default to false", () => {
     expect(
       readToolContext(context({ "check-review": { skipContrastInMotion: true, other: 1 } })),
-    ).toEqual({ checkReview: { skipContrastInMotion: true } });
-    expect(readToolContext(context({ "check-review": { skipContrastInMotion: 1 } }))).toEqual({
-      checkReview: { skipContrastInMotion: false },
-    });
+    ).toEqual({ checkReview: { skipContrastInMotion: true, findingFrames: false } });
+    expect(
+      readToolContext(
+        context({ "check-review": { skipContrastInMotion: 1, findingFrames: true } }),
+      ),
+    ).toEqual({ checkReview: { skipContrastInMotion: false, findingFrames: true } });
     expect(readToolContext(context({ "check-review": true }))).toEqual({});
   });
 });

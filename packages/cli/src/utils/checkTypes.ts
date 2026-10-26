@@ -25,6 +25,7 @@ export interface CheckOptions {
   skipContrastInMotion?: boolean;
   strict: boolean;
   snapshots: boolean;
+  findingFrames?: boolean;
   captionZone?: CaptionZoneOptions;
   frameCheck?: FrameCheckOptions;
   /** Opt-in layout-audit knobs (`--layout "proseCoverageFloor=0.05"`). Defaults stay in the browser audit. */
@@ -78,6 +79,8 @@ export interface CheckAnchor {
   time: number;
   times?: number[];
   componentMatch?: boolean;
+  frame?: string;
+  frameTime?: number;
 }
 
 export interface CheckFinding extends CheckAnchor {
@@ -136,6 +139,11 @@ export interface CheckFindingCropRequest {
   filename: string;
   time: number;
   bbox: CheckBbox;
+}
+
+export interface CheckFindingFrameRequest {
+  time: number;
+  filename: string;
 }
 
 export interface CheckGeometryCandidate extends CheckAnchor {
@@ -399,6 +407,12 @@ export interface CheckDependencies {
     project: ProjectDir,
     options: CheckOptions,
     requests: CheckFindingCropRequest[],
+    deadline?: CheckDeadline,
+  ): Promise<string[]>;
+  captureFindingFrames?(
+    project: ProjectDir,
+    options: CheckOptions,
+    requests: CheckFindingFrameRequest[],
     deadline?: CheckDeadline,
   ): Promise<string[]>;
   inspectHdrAutoPromotion?(project: ProjectDir): Promise<CheckReport["hdr"]["autoPromotion"]>;

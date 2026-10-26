@@ -396,6 +396,7 @@ function parseCheckOptions(args: Record<string, unknown>): CheckOptions {
     ...(checkReview()?.skipContrastInMotion ? { skipContrastInMotion: true } : {}),
     strict: args.strict === true,
     snapshots: args.snapshots === true,
+    ...(checkReview()?.findingFrames ? { findingFrames: true } : {}),
     captionZone: parseCaptionZone(args["caption-zone"]),
     frameCheck: parseFrameCheck(args["frame-check"]),
     layout: parseLayout(args.layout),

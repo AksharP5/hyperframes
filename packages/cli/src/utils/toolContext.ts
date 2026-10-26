@@ -6,7 +6,7 @@ const TOOL_CONTEXT_VERSION = 1;
 export interface ToolContext {
   events?: { path: string };
   projectLock?: { waitMs: number };
-  checkReview?: { skipContrastInMotion: boolean };
+  checkReview?: { skipContrastInMotion: boolean; findingFrames: boolean };
 }
 
 export type ArtifactRole = "contact-sheet" | "frame" | "finding" | "check-report";
@@ -37,7 +37,10 @@ function parseProjectLock(value: unknown): ToolContext["projectLock"] {
 
 function parseCheckReview(value: unknown): ToolContext["checkReview"] {
   if (!isRecord(value)) return undefined;
-  return { skipContrastInMotion: value.skipContrastInMotion === true };
+  return {
+    skipContrastInMotion: value.skipContrastInMotion === true,
+    findingFrames: value.findingFrames === true,
+  };
 }
 
 export function readToolContext(raw = process.env.HF_TOOL_CONTEXT): ToolContext {

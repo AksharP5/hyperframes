@@ -16,6 +16,7 @@ const PHASE_LABELS = {
   samples: "checking samples",
   overlap: "running the overlap pass",
   crops: "capturing finding crops",
+  frames: "capturing finding frames",
 } as const;
 export type CheckPhase = keyof typeof PHASE_LABELS;
 const BEFORE_DEADLINE: ReadonlySet<CheckPhase> = new Set(["copies", "launch"]);
