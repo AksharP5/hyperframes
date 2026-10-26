@@ -3643,8 +3643,8 @@ export function initSandboxRuntimeModular(): void {
         cueAheadSeconds,
         getCompositionDuration: () =>
           getSafeTimelineDurationSeconds(state.capturedTimeline, 0, timingRevision),
-        onElementVolume: (el, _effectiveVolume, authorVolume, clipGain) =>
-          webAudio.setElementVolume(el, authorVolume, clipGain),
+        onElementVolume: (el, _effectiveVolume, authorVolume, clipGain, unfadedVolume) =>
+          webAudio.setElementVolume(el, authorVolume, clipGain, unfadedVolume),
         isWebAudioOwned: (el) => webAudio.ownsElement(el),
         isWebAudioRouted: (el) => webAudio.routesElement(el),
         onAutoplayBlocked: () => {
@@ -5793,6 +5793,7 @@ export function initSandboxRuntimeModular(): void {
               vol,
               gen,
               state.playbackRate,
+              clipDuration,
             )
           : Promise.resolve(null);
       void capture.then((scheduled) => {

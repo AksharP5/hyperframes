@@ -1721,3 +1721,126 @@ describe("WebAudioTransport", () => {
     });
   });
 });
+
+describe("WebAudioTransport clip fades on the audio clock", () => {
+  type Param = {
+    value: number;
+    setValueAtTime: ReturnType<typeof vi.fn>;
+    linearRampToValueAtTime: ReturnType<typeof vi.fn>;
+    cancelScheduledValues: ReturnType<typeof vi.fn>;
+  };
+  const param = (): Param => ({
+    value: 1,
+    setValueAtTime: vi.fn(),
+    linearRampToValueAtTime: vi.fn(),
+    cancelScheduledValues: vi.fn(),
+  });
+  /** A context whose gains record their automation; the element gain is the first one made. */
+  function setup(currentTime = 100) {
+    const { transport, mock, gen } = setupTransport(currentTime);
+    const gains: {
+      gain: Param;
+      connect: ReturnType<typeof vi.fn>;
+      disconnect: ReturnType<typeof vi.fn>;
+    }[] = [];
+    mock.ctx.createGain = vi.fn(() => {
+      const node = { gain: param(), connect: vi.fn(), disconnect: vi.fn() };
+      gains.push(node);
+      return node;
+    }) as never;
+    const booked = () => gains.find((g) => g.gain.setValueAtTime.mock.calls.length > 0)?.gain;
+    return { transport, mock, gen, gains, booked };
+  }
+  const faded = (fadeIn = "0.02", fadeOut = "0.02") =>
+    ({
+      muted: false,
+      volume: 1,
+      paused: true,
+      addEventListener: () => {},
+      getAttribute: (name: string) =>
+        ({ "data-playback-rate": "1", "data-fade-in": fadeIn, "data-fade-out": fadeOut })[name] ??
+        null,
+    }) as unknown as HTMLMediaElement;
+
+  it("a decoded clip ramps in over its fade-in from its start and out to silence at its end", async () => {
+    const { transport, gen, booked } = setup(100);
+    await transport.schedulePlayback(faded(), mockBuffer, 5, 0, () => 5, 1, gen, 1, 1);
+    const gain = booked();
+    expect(gain?.setValueAtTime.mock.calls).toEqual([
+      [0, 100],
+      [1, expect.closeTo(100.98, 9)],
+    ]);
+    expect(gain?.linearRampToValueAtTime.mock.calls).toEqual([
+      [1, expect.closeTo(100.02, 9)],
+      [0, expect.closeTo(101, 9)],
+    ]);
+  });
+
+  it("a clip started halfway through its fade-in starts at half level", async () => {
+    const { transport, gen, booked } = setup(100);
+    await transport.schedulePlayback(faded(), mockBuffer, 5, 0, () => 5.01, 1, gen, 1, 1);
+    const gain = booked();
+    expect(gain?.setValueAtTime.mock.calls[0]).toEqual([expect.closeTo(0.5, 9), 100]);
+    expect(gain?.linearRampToValueAtTime.mock.calls[0]).toEqual([1, expect.closeTo(100.01, 9)]);
+  });
+
+  it("a captured media element books its fades the same way", async () => {
+    const { transport, gen, booked } = setup(100);
+    await transport.scheduleMediaElementPlayback(faded(), 5, 0, 5, 1, gen, 1, 1);
+    expect(booked()?.linearRampToValueAtTime.mock.calls).toEqual([
+      [1, expect.closeTo(100.02, 9)],
+      [0, expect.closeTo(101, 9)],
+    ]);
+  });
+
+  it("a clip scheduled ahead of its start holds its fade-in's first level until it starts", async () => {
+    const { transport, gen, booked } = setup(100);
+    await transport.schedulePlayback(faded(), mockBuffer, 5, 0, () => 4.9, 1, gen, 1, 1);
+    const gain = booked();
+    expect(gain?.value).toBe(0);
+    expect(gain?.setValueAtTime.mock.calls[0]).toEqual([0, expect.closeTo(100.1, 9)]);
+  });
+
+  it("a fade-out with no clip end books nothing, so the per-tick volume keeps the fade", async () => {
+    const { transport, gen, gains, booked } = setup(100);
+    const el = faded("0.02", "2");
+    await transport.scheduleMediaElementPlayback(el, 5, 0, 5, 1, gen, 1);
+    expect(booked()).toBeUndefined();
+    transport.setElementVolume(el, 0.4, 1, 0.8);
+    expect(gains[0]!.gain.value).toBeCloseTo(0.4, 9);
+  });
+
+  it("a rate change rebooks the fades on the new rate from where the clip is", async () => {
+    const { transport, mock, gen, booked } = setup(100);
+    await transport.scheduleMediaElementPlayback(faded("0.02", "1"), 5, 0, 5, 1, gen, 2, 10);
+    const gain = booked()!;
+    mock.ctx.currentTime = 101;
+    transport.setRate(1);
+    expect(gain.cancelScheduledValues).toHaveBeenCalled();
+    expect(gain.linearRampToValueAtTime.mock.calls.at(-1)).toEqual([
+      0,
+      expect.closeTo(101 + (10 - 2), 9),
+    ]);
+  });
+
+  it("a clip without fades books nothing", async () => {
+    const { transport, gen, booked } = setup(100);
+    await transport.schedulePlayback(faded("", ""), mockBuffer, 5, 0, () => 5, 1, gen, 1, 1);
+    expect(booked()).toBeUndefined();
+  });
+
+  it("the per-tick volume leaves out the fade where it is booked, and keeps it where it is not", async () => {
+    const { transport, gen, gains } = setup(100);
+    const withFades = faded();
+    await transport.schedulePlayback(withFades, mockBuffer, 5, 0, () => 5, 1, gen, 1, 1);
+    const elementGain = gains[0]!.gain;
+    transport.setElementVolume(withFades, 0.4, 1, 0.8);
+    expect(elementGain.value).toBeCloseTo(0.8, 9);
+
+    const second = setup(100);
+    const plain = faded("", "");
+    await second.transport.schedulePlayback(plain, mockBuffer, 5, 0, () => 5, 1, second.gen, 1, 1);
+    second.transport.setElementVolume(plain, 0.4, 1, 0.8);
+    expect(second.gains[0]!.gain.value).toBeCloseTo(0.4, 9);
+  });
+});

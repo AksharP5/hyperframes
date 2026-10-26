@@ -376,6 +376,7 @@ export function syncRuntimeMedia(params: {
     effectiveVolume: number,
     authorVolume: number,
     clipGain: number,
+    unfadedVolume?: number,
   ) => void;
   /** Is THIS element owned by the Web Audio transport? Owned → mute it (transport
    *  plays it); not owned → leave audible (HTMLMedia fallback). Per-element, not a
@@ -507,6 +508,7 @@ export function syncRuntimeMedia(params: {
       }
 
       // Clip-local fade on top of the resolved level, matching render's afade-after-volume.
+      const unfadedVolume = authorVolume;
       const fades = clip.fades ?? NO_FADES;
       if (fades.fadeIn > 0 || fades.fadeOut > 0) {
         authorVolume *= fadeGain(
@@ -529,7 +531,9 @@ export function syncRuntimeMedia(params: {
       const effectiveVolume = silencedByHidden ? 0 : clampVolume(authorVolume * userVol);
       if (Math.abs(el.volume - effectiveVolume) > 1e-6) el.volume = effectiveVolume;
       lastRuntimeAppliedVolume.set(el, effectiveVolume);
-      params.onElementVolume?.(el, effectiveVolume, authorVolume, preFxGain);
+      if (unfadedVolume === authorVolume)
+        params.onElementVolume?.(el, effectiveVolume, authorVolume, preFxGain);
+      else params.onElementVolume?.(el, effectiveVolume, authorVolume, preFxGain, unfadedVolume);
       // Mute only when force-muted or the transport owns this element; an unclaimed
       // track stays audible via the HTMLMedia fallback.
       if ((forceMuteAll || params.isWebAudioOwned?.(el)) && !el.muted) el.muted = true;
