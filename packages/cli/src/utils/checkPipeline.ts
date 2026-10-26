@@ -603,9 +603,12 @@ async function collectContrastAt(
   collected: GridSamples,
 ): Promise<void> {
   const contrastStart = Date.now();
-  const capture = options.snapshots
-    ? await driver.collectContrast(time, annotationBoxesFrom(issuesAtTime))
-    : await driver.collectContrast(time);
+  const annotations = options.snapshots ? annotationBoxesFrom(issuesAtTime) : undefined;
+  const capture = options.skipContrastInMotion
+    ? await driver.collectContrast(time, annotations, true)
+    : options.snapshots
+      ? await driver.collectContrast(time, annotations)
+      : await driver.collectContrast(time);
   collected.contrastMs += Date.now() - contrastStart;
   collected.contrastEntries.push(...capture.entries);
   if (capture.pngBase64) collected.screenshots.push({ time, pngBase64: capture.pngBase64 });

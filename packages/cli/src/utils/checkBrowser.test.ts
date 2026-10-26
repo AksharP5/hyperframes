@@ -687,6 +687,136 @@ it.each([
   },
 );
 
+describe("skipContrastInMotion", () => {
+  type Tween = { target: string; start: number; duration: number; repeat?: number };
+
+  async function contrastFindings(
+    tweens: Tween[],
+    skipContrastInMotion: boolean | undefined,
+    snapshots = false,
+  ) {
+    vi.spyOn(Date, "now").mockReturnValue(100);
+    mountCanvasFixture(`<div id="scene"><div id="headline">Low contrast copy</div></div>`);
+    const root = document.querySelector("[data-composition-id]");
+    const headline = document.querySelector("#headline");
+    if (!root || !headline) throw new Error("Contrast fixture failed to mount");
+    vi.spyOn(root, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 640, 360));
+    vi.spyOn(headline, "getBoundingClientRect").mockReturnValue(new DOMRect(50, 50, 300, 40));
+    vi.spyOn(window, "getComputedStyle").mockImplementation(
+      () =>
+        ({
+          display: "block",
+          visibility: "visible",
+          opacity: "1",
+          color: "rgb(250,250,250)",
+          fill: "",
+          backgroundColor: "rgba(0,0,0,0)",
+          backgroundImage: "none",
+          fontSize: "32px",
+          fontWeight: "700",
+        }) as unknown as CSSStyleDeclaration,
+    );
+    class MockImage {
+      onload: (() => void) | null = null;
+      naturalWidth = 640;
+      naturalHeight = 360;
+      set src(_value: string) {
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal("Image", MockImage);
+    const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, "getContext") as unknown as {
+      mockReturnValue(value: CanvasRenderingContext2D): void;
+    };
+    getContextSpy.mockReturnValue({
+      drawImage() {},
+      getImageData() {
+        return { data: new Uint8ClampedArray(640 * 360 * 4).fill(255) };
+      },
+    } as unknown as CanvasRenderingContext2D);
+    const main = {
+      time: () => 5,
+      repeat: () => 0,
+      globalTime: (local: number) => local,
+      getChildren: () => children,
+    };
+    const children = tweens.map((tween) => ({
+      parent: main,
+      targets: () => [document.querySelector(tween.target)],
+      duration: () => tween.duration,
+      totalDuration: () => tween.duration * ((tween.repeat ?? 0) + 1),
+      repeat: () => tween.repeat ?? 0,
+      globalTime: (local: number) => tween.start + local,
+      startTime: () => tween.start,
+      endTime: () => tween.start + tween.duration,
+      timeScale: () => 1,
+      paused: () => false,
+    }));
+    if (tweens.length > 0) {
+      Reflect.set(window, "__timelines", {
+        main,
+      });
+    }
+    const page = fakePage();
+    const annotations: string[] = [];
+    page.screenshot = vi.fn(async () => {
+      annotations.push(document.getElementById("__hyperframesCheckAnnotations")?.textContent ?? "");
+      return "c3R1Yg==";
+    });
+    installSessionMock(page);
+    try {
+      const result = await runBrowserCheck(
+        PROJECT,
+        { ...DEFAULT_CHECK_OPTIONS, samples: 1, contrast: true, skipContrastInMotion, snapshots },
+        { kind: "none" },
+        runAuditGrid,
+      );
+      return { ...result, annotations };
+    } finally {
+      Reflect.deleteProperty(window, "__timelines");
+    }
+  }
+
+  const fadingIn: Tween[] = [{ target: "#headline", start: 4.8, duration: 0.6 }];
+
+  it("drops a failure measured mid-tween only when enabled", async () => {
+    const off = await contrastFindings(fadingIn, undefined);
+    expect(off.contrastFindings).toEqual([
+      expect.objectContaining({ selector: "#headline", severity: "error" }),
+    ]);
+    expect(off.contrastFindings[0]).not.toHaveProperty("inMotion");
+    expect((await contrastFindings(fadingIn, true)).contrastFindings).toEqual([]);
+  });
+
+  it("removes filtered failures from checked counts and snapshot annotations", async () => {
+    const off = await contrastFindings(fadingIn, undefined, true);
+    expect(off.contrastChecked).toBe(1);
+    expect(off.annotations.some((text) => text.includes("contrast_aa_failure"))).toBe(true);
+    const on = await contrastFindings(fadingIn, true, true);
+    expect(on.contrastChecked).toBe(0);
+    expect(on.contrastPassed).toBe(0);
+    expect(on.annotations.every((text) => !text.includes("contrast_aa_failure"))).toBe(true);
+    expect(on.screenshots).toHaveLength(1);
+  });
+
+  it("still reports the same text once its tween has ended", async () => {
+    const settled: Tween[] = [{ target: "#headline", start: 1, duration: 0.6 }];
+    expect((await contrastFindings(settled, true)).contrastFindings).toHaveLength(1);
+  });
+
+  it("still reports text under only ambient tweens on an ancestor", async () => {
+    const ambient: Tween[] = [
+      { target: "#scene", start: 0, duration: 10 },
+      { target: "#scene", start: 0, duration: 2, repeat: -1 },
+    ];
+    expect((await contrastFindings(ambient, true)).contrastFindings).toHaveLength(1);
+  });
+
+  it("still reports text on a page without GSAP", async () => {
+    expect((await contrastFindings([], true)).contrastFindings).toHaveLength(1);
+  });
+});
+
 it("carries validate's clip-duration audit into the runtime findings", async () => {
   vi.spyOn(Date, "now").mockReturnValue(100);
   mountCanvasFixture();

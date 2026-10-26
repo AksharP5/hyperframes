@@ -432,6 +432,56 @@ describe("check --prepare-media", () => {
   });
 });
 
+describe("skip contrast in motion", () => {
+  async function parsedOptions(rawArgs: string[]): Promise<CheckOptions | undefined> {
+    const { report } = await runScenario(fakeDriver());
+    const runPipeline = vi.fn(async (_project: ProjectDir, _options: CheckOptions) => report);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    await runCommand(
+      createCheckCommand({
+        resolveProject: () => PROJECT,
+        runPipeline,
+        prepareMedia: vi.fn(async () => []),
+        withMeta: (value) => value,
+      }),
+      { rawArgs: ["--json", ...rawArgs] },
+    );
+    return runPipeline.mock.calls[0]?.[1];
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("is off unless the flag or the environment turns it on", async () => {
+    vi.stubEnv("HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION", "");
+    expect(await parsedOptions([])).not.toHaveProperty("skipContrastInMotion");
+    expect(await parsedOptions(["--skip-contrast-in-motion"])).toMatchObject({
+      skipContrastInMotion: true,
+    });
+    vi.stubEnv("HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION", "1");
+    expect(await parsedOptions([])).toMatchObject({ skipContrastInMotion: true });
+    expect(await parsedOptions(["--no-skip-contrast-in-motion"])).toMatchObject({
+      skipContrastInMotion: true,
+    });
+    vi.stubEnv("HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION", "0");
+    expect(await parsedOptions([])).not.toHaveProperty("skipContrastInMotion");
+  });
+
+  it("asks the driver to skip in-motion contrast only when enabled", async () => {
+    const off = fakeDriver();
+    await runScenario(off);
+    for (const call of vi.mocked(off.collectContrast).mock.calls) expect(call).toHaveLength(1);
+
+    const on = fakeDriver();
+    await runScenario(on, { skipContrastInMotion: true });
+    expect(vi.mocked(on.collectContrast).mock.calls.length).toBeGreaterThan(0);
+    for (const call of vi.mocked(on.collectContrast).mock.calls) {
+      expect(call).toEqual([expect.any(Number), undefined, true]);
+    }
+  });
+});
+
 it("parses the caption-zone grammar and enables the frame gate", async () => {
   const { report } = await runScenario(fakeDriver());
   const runPipeline = vi.fn(async (_project: ProjectDir, _options: CheckOptions) => report);
@@ -2749,6 +2799,33 @@ describe("contrast persistence", () => {
     expect(bySelector.get("#hero")).toBe("error");
     expect(bySelector.get("#entrance")).toBe("warning");
     expect(checkExitCode(report)).toBe(1);
+  });
+
+  it("uses only retained samples for contrast persistence when motion filtering is enabled", async () => {
+    const driver = fakeDriver({
+      collectContrast: vi.fn(async (time: number, _annotations, skipInMotion) => ({
+        entries: [
+          contrastEntry({ time, selector: "#passing", ratio: 8, wcagAA: true }),
+          ...(skipInMotion && time < 1 ? [] : [contrastEntry({ time })]),
+        ],
+      })),
+    });
+    const { report: off } = await runScenario(driver, { at: [0.5, 1.5] });
+    const { report: on } = await runScenario(driver, {
+      at: [0.5, 1.5],
+      skipContrastInMotion: true,
+    });
+    expect(off.contrast.errorCount).toBe(1);
+    expect(checkExitCode(off)).toBe(1);
+    expect(on.contrast).toMatchObject({ errorCount: 0, warningCount: 1, checked: 3, passed: 2 });
+    expect(on.ok).toBe(true);
+    expect(checkExitCode(on)).toBe(0);
+    const { report: strict } = await runScenario(driver, {
+      at: [0.5, 1.5],
+      skipContrastInMotion: true,
+      strict: true,
+    });
+    expect(checkExitCode(strict)).toBe(1);
   });
 
   it("keeps full severity when only one sample time exists", async () => {

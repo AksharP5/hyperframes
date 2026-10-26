@@ -22,6 +22,7 @@ export interface CheckOptions {
   tolerance: number;
   timeout: number;
   contrast: boolean;
+  skipContrastInMotion?: boolean;
   strict: boolean;
   snapshots: boolean;
   captionZone?: CaptionZoneOptions;
@@ -267,6 +268,7 @@ export interface CheckAuditDriver {
   collectContrast(
     time: number,
     snapshotAnnotations?: CheckAnnotationBox[],
+    skipInMotion?: boolean,
   ): Promise<ContrastCapture>;
   /** Craft section: text, stillness and paint at the current seek. A driver without it skips the section. */
   collectCraftFrame?(time: number): Promise<CraftFrame>;

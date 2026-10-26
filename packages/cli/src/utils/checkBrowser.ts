@@ -33,6 +33,11 @@ import { ambiguousIssue, type MotionFrame } from "./motionAudit.js";
 import type { LayoutIssue, LayoutIssueCode, LayoutRect } from "./layoutAudit.js";
 import { serveStaticProjectHtml } from "./staticProjectServer.js";
 import { collectTweenRecords, findTweenTails, tweenTailMessage } from "./gsapTweenTails.js";
+import {
+  measuredInMotion,
+  readContrastMotion,
+  type ContrastMotionSample,
+} from "./contrastMotion.js";
 import { resolveAutoProxy } from "./projectConfig.js";
 import { findStageProxyBox } from "./compositionViewport.js";
 import type { PreviewProxyBox } from "@hyperframes/core";
@@ -125,6 +130,7 @@ interface PreparedContrast {
   candidate: ContrastCandidate;
   knownBackdrop: boolean;
   anchor: CheckAnchor;
+  motion: ContrastMotionSample | null;
 }
 
 interface FinishedContrast {
@@ -919,7 +925,8 @@ export function createPageDriver(
     collectMotionFrame: (time, selectors, scopes) =>
       collectMotionFrame(page, time, selectors, scopes),
     anchorMotionIssues: (issues) => anchorLayoutIssues(page, issues),
-    collectContrast: (time, annotations) => collectContrast(page, time, annotations),
+    collectContrast: (time, annotations, skipInMotion) =>
+      collectContrast(page, time, annotations, skipInMotion),
     collectCraftFrame: (time) => collectCraftFrame(page, time),
     collectCraftFilm: () => collectCraftFilm(page),
   });
@@ -1504,10 +1511,13 @@ async function collectContrast(
   page: Page,
   time: number,
   snapshotAnnotations?: CheckAnnotationBox[],
+  skipInMotion = false,
 ): Promise<ContrastCapture> {
   let prepared: PreparedContrast[] = [];
   try {
-    prepared = parsePreparedContrast(await prepareContrast(page, time));
+    const candidates = await prepareContrast(page, time);
+    const motion = skipInMotion ? await page.evaluate(readContrastMotion).catch(() => []) : [];
+    prepared = parsePreparedContrast(candidates, motion);
     if (prepared.length === 0 && !snapshotAnnotations) return { entries: [] };
     // This screenshot is the one contrast math is sampled from below — it must
     // stay untouched by the annotation overlay (finishContrast reads real
@@ -1767,14 +1777,25 @@ async function finishContrast(
   );
 }
 
-function parsePreparedContrast(raw: unknown[]): PreparedContrast[] {
-  return raw.flatMap((value) => {
+function parsePreparedContrast(
+  raw: unknown[],
+  motion: (ContrastMotionSample | null)[],
+): PreparedContrast[] {
+  return raw.flatMap((value, index) => {
     if (!isRecord(value)) return [];
     const raw = Reflect.get(value, "candidate");
     const candidate = parseContrastCandidate(raw);
     const anchor = parseAnchor(Reflect.get(value, "anchor"));
     return candidate && anchor
-      ? [{ raw, candidate, anchor, knownBackdrop: knownBackdrop(raw) }]
+      ? [
+          {
+            raw,
+            candidate,
+            anchor,
+            knownBackdrop: knownBackdrop(raw),
+            motion: motion[index] ?? null,
+          },
+        ]
       : [];
   });
 }
@@ -1829,7 +1850,9 @@ function joinContrastEntries(
         candidate.candidate.selector === entry.selector && candidate.candidate.text === entry.text,
     );
     const match = index >= 0 ? remaining.splice(index, 1)[0] : undefined;
-    return match ? [{ ...entry, ...match.anchor }] : [];
+    if (!match) return [];
+    if (!entry.wcagAA && match.motion && measuredInMotion(match.motion)) return [];
+    return [{ ...entry, ...match.anchor }];
   });
 }
 
