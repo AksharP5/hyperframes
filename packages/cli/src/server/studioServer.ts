@@ -569,11 +569,21 @@ export function createStudioServer(options: StudioServerOptions): StudioServer {
       const { injectDeterministicFontFaces } = await import("@hyperframes/core/fonts/embed");
       const { prepareAnimatedGifInputs } =
         await import("../../../producer/src/services/animatedGifPrep.js");
+      const { prepareHeifImageInputs } =
+        await import("../../../producer/src/services/heifImagePrep.js");
       const { downloadToTemp, writeUrlDownloadTelemetry } =
         await import("../../../producer/src/utils/urlDownloader.js");
       const gifOutputDir = join(project.dir, ".hyperframes", "prepared-assets", "gif");
       const gifDownloadDir = join(project.dir, ".hyperframes", "prepared-assets", "downloads");
-      const prepared = await prepareAnimatedGifInputs(html, {
+      const heifOutputDir = join(project.dir, ".hyperframes", "prepared-assets", "heif");
+      const { html: htmlWithJpegs } = await prepareHeifImageInputs(html, {
+        projectDir: project.dir,
+        downloadDir: gifDownloadDir,
+        outputDir: heifOutputDir,
+        outputSrcPrefix: ".hyperframes/prepared-assets/heif",
+        onFailure: (error) => console.warn(`[studio] ${error.message}`),
+      });
+      const prepared = await prepareAnimatedGifInputs(htmlWithJpegs, {
         projectDir: project.dir,
         downloadDir: gifDownloadDir,
         outputDir: gifOutputDir,

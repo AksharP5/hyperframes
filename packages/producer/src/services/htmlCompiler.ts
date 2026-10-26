@@ -100,6 +100,7 @@ import {
   normalizeSystemFontPrimaryFamilies,
 } from "@hyperframes/core/fonts/embed";
 import { prepareAnimatedGifInputs } from "./animatedGifPrep.js";
+import { prepareHeifImageInputs } from "./heifImagePrep.js";
 import { createStudioPositionSeekReapplyScript } from "@hyperframes/studio-server/manual-edits-render-script";
 import { getPositionEditsRenderScript } from "@hyperframes/core/runtime/position-edits-render";
 import { defaultLogger, type ProducerLogger } from "../logger.js";
@@ -1941,10 +1942,7 @@ export interface CompileForRenderOptions {
   allowSystemFontCapture?: boolean;
   /** Caller cancellation propagated through compile-time font fetches. */
   abortSignal?: AbortSignal;
-  /**
-   * Optional persistent cache directory for prep-time animated GIF → WebM
-   * transcodes. When omitted, the render's downloadDir is used.
-   */
+  /** Persistent cache directory for the animated GIF and HEIC prep transcodes; defaults to downloadDir. */
   animatedGifCacheDir?: string;
   /** FFmpeg timeout for animated GIF transcodes. */
   ffmpegProcessTimeout?: number;
@@ -2165,12 +2163,29 @@ export async function compileForRender(
   const { html: htmlWithLocalizedFonts, remoteMediaAssets: remoteFontAssets } =
     await localizeRemoteFontFaces(htmlWithLocalBg, downloadDir);
 
+  // Chrome cannot decode HEIC, and ffprobe reads a tiled one as video streams,
+  // so convert to JPEG before the media-type preflight sees it.
+  const {
+    html: htmlWithJpegs,
+    preparedAssets: preparedHeifAssets,
+    preparedImages: preparedHeifImages,
+  } = await prepareHeifImageInputs(htmlWithLocalizedFonts, {
+    projectDir,
+    downloadDir,
+    cacheDir: options.animatedGifCacheDir,
+    sourceAssets: remoteImageAssets,
+    timeoutMs: options.ffmpegProcessTimeout,
+  });
+  if (preparedHeifImages.length > 0) {
+    defaultLogger.info(`[Compiler] Converted ${preparedHeifImages.length} HEIC image(s) to JPEG`);
+  }
+
   const gifSourceAssets = new Map<string, string>(remoteImageAssets);
   const {
     html: htmlWithPreparedGifs,
     preparedAssets: preparedGifAssets,
     preparedGifs,
-  } = await prepareAnimatedGifInputs(htmlWithLocalizedFonts, {
+  } = await prepareAnimatedGifInputs(htmlWithJpegs, {
     projectDir,
     downloadDir,
     cacheDir: options.animatedGifCacheDir,
@@ -2201,6 +2216,9 @@ export async function compileForRender(
     externalAssets.set(relPath, absPath);
   }
   for (const [relPath, absPath] of preparedGifAssets) {
+    externalAssets.set(relPath, absPath);
+  }
+  for (const [relPath, absPath] of preparedHeifAssets) {
     externalAssets.set(relPath, absPath);
   }
 

@@ -56,7 +56,7 @@ function sanitizeFfprobeDiagnostic(stderr: string, filePath: string): string {
 }
 
 /** Spawn ffprobe with given args, return stdout. Throws on non-zero exit or missing binary. */
-async function runFfprobe(
+export async function runFfprobe(
   filePath: string,
   argsWithoutInput: string[],
   signal?: AbortSignal,

@@ -89,6 +89,7 @@ export {
 } from "./services/fileServer.js";
 
 export { prepareAnimatedGifInputs } from "./services/animatedGifPrep.js";
+export { prepareHeifImageInputs } from "./services/heifImagePrep.js";
 
 // ── Video frame injection (Hyperframes-specific hook) ───────────────────────
 export { createVideoFrameInjector } from "@hyperframes/engine";
