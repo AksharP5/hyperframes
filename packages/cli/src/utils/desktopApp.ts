@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, win32 } from "node:path";
 import { isHyperframesProject } from "@hyperframes/core";
-import { addCatchUpNote, markSeen, readSeen } from "./appHistory.js";
+import { addCatchUpNote, markSeen, readSeen, seenPath } from "./appHistory.js";
 import { createProjectConfig } from "./projectConfig.js";
 import { writeRecord } from "./projectRecords.js";
 
@@ -131,7 +131,9 @@ function leaveHandoff(dir: string, session: AgentSession | null): AgentSession |
   if (!session || !writeRecord(dir, "agent-handoff.json", JSON.stringify(session))) return null;
   const now = Date.now();
   if (!readSeen(dir).at && !markSeen(dir, { at: now, checked: now }))
-    console.warn("◇  Couldn't note the hand-off in ~/.hyperframes, so `catch-up` won't see it.");
+    console.warn(
+      `◇  Couldn't note the hand-off in ${seenPath(dir)}, so \`catch-up\` won't see it.`,
+    );
   addCatchUpNote(dir);
   return session;
 }
