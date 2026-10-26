@@ -48,7 +48,7 @@ import { existsSync } from "node:fs";
 // `hyperframes --version` near-instant (~10ms vs ~80ms).
 import { VERSION } from "./version.js";
 
-const argv = process.argv.slice(2);
+let argv = process.argv.slice(2);
 const commandArg = argv[0];
 const rootVersionRequested =
   commandArg === "--version" ||
@@ -63,11 +63,7 @@ if (rootVersionRequested) {
 // Capture treats CWD as project data too: its early loader must use the same
 // allowlist/opt-out as output ancestors, before browser selection can observe it.
 const { applyDotEnv, CAPTURE_ENV_KEYS } = await import("./utils/dotEnv.js");
-// The root has no value-taking options: Citty skips flags up to the first
-// positional command, and stops subcommand selection at the -- separator.
-const separator = argv.indexOf("--");
-const commandArgs = separator < 0 ? argv : argv.slice(0, separator);
-const captureEnv = commandArgs.find((arg) => !arg.startsWith("-")) === "capture";
+const captureEnv = argv[commandWordIndex(argv)] === "capture";
 if (!captureEnv || process.env.HYPERFRAMES_NO_CAPTURE_DOTENV !== "1") {
   try {
     const { readFileSync } = await import("node:fs");
@@ -104,6 +100,7 @@ import {
   type CommandResult,
 } from "./utils/commandResult.js";
 import { registerRunningCli } from "./utils/runningCli.js";
+import { commandWordIndex, openShortcutArgv } from "./utils/projectShortcut.js";
 
 registerRunningCli();
 
@@ -182,6 +179,13 @@ const commandLoaders = {
   auth: () => import("./commands/auth.js").then((m) => m.default),
   figma: () => import("./commands/figma.js").then((m) => m.default),
 };
+
+// `hyperframes <dir>` is `hyperframes open <dir>`; every later read of the command sees `open`.
+process.argv = [
+  ...process.argv.slice(0, 2),
+  ...openShortcutArgv(argv, new Set(Object.keys(commandLoaders))),
+];
+argv = process.argv.slice(2);
 
 const subCommands = Object.fromEntries(
   Object.entries(commandLoaders).map(([name, load]) => [name, trackCommandFailures(load)]),

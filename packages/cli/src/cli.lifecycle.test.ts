@@ -145,6 +145,32 @@ describe("CLI lifecycle", () => {
     });
   });
 
+  it("runs `open` for a bare project folder, and keeps `render` a command", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-cli-shortcut-"));
+    const run = vi.fn();
+    try {
+      for (const [name, argv] of [
+        ["open", [dir]],
+        ["open", ["--verbose", dir]],
+        ["render", ["render"]],
+      ] as const) {
+        vi.doMock(`./commands/${name}.js`, () => ({
+          default: { meta: { name }, args: { dir: { type: "positional", required: false } }, run },
+        }));
+        mockTelemetry();
+        process.argv = ["node", "cli.ts", ...argv];
+        await import("./cli.js");
+        await vi.dynamicImportSettled();
+        vi.doUnmock(`./commands/${name}.js`);
+        vi.resetModules();
+      }
+      expect(run.mock.calls.map(([ctx]) => ctx.rawArgs)).toEqual([[dir], [dir], []]);
+      expect(process.argv.slice(2)).toEqual(["render"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("hands queued events to flushSync even after finalizeCli has run", async () => {
     const flushSync = vi.fn();
     const trackCommandResult = vi.fn();

@@ -948,8 +948,9 @@ ownership.
 `open` opens a project in the HyperFrames desktop app and adds it to Home.
 
 ```bash
-npx hyperframes open            # the project in the current directory
-npx hyperframes open ./my-video
+npx hyperframes .               # the project in the current directory
+npx hyperframes ./my-video      # any folder that isn't a command name
+npx hyperframes open            # the same, naming the command
 npx hyperframes open --json     # for agents
 ```
 
