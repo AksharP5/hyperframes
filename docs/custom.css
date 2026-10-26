@@ -57,30 +57,30 @@
  * the "Copy page" dropdown panel in light mode).
  */
 
-/* Light mode is hyperframes.dev's Studio ground: ink #131109 at hyperframes.dev's own
- * opacities over the beige light (studioRedesign.css `--sr-*` in hyperframes-internal). */
+/* Light mode is the Studio app's light palette (packages/desktop/src/index.css :root,
+ * "Graphite"): warm paper, near-white cards and ink on hue 70. */
 :root {
-  --hf-background: #cfc7b4;
-  --hf-background-light: rgb(255 250 242 / 0.72);
-  --hf-surface2: rgb(255 250 242 / 0.5);
-  --hf-border-color: rgb(19 17 9 / 0.14);
-  --hf-border-color-light: rgb(19 17 9 / 0.2);
-  --hf-text: rgb(19 17 9 / 0.86);
-  --hf-text-secondary: rgb(19 17 9 / 0.68);
-  --hf-text-tertiary: rgb(19 17 9 / 0.66);
-  --hf-heading: #131109;
-  --hf-code-bg: rgb(255 250 242 / 0.72);
-  --hf-ui-border: rgb(19 17 9 / 0.12);
-  --hf-sidebar-rail: rgb(19 17 9 / 0.14);
-  --hf-sidebar-text: rgb(19 17 9 / 0.68);
-  --hf-floating-input-shadow: 0 8px 28px rgba(19, 17, 9, 0.12), 0 1px 4px rgba(19, 17, 9, 0.1);
+  --hf-background: #f2f0ed;
+  --hf-background-light: oklch(0.987 0.005 70);
+  --hf-surface2: oklch(1 0 70);
+  --hf-border-color: oklch(0.205 0.003 70 / 0.08);
+  --hf-border-color-light: oklch(0.205 0.003 70 / 0.15);
+  --hf-text: oklch(0.205 0.003 70);
+  --hf-text-secondary: oklch(0.403 0.003 70);
+  --hf-text-tertiary: oklch(0.503 0.003 70);
+  --hf-heading: oklch(0.205 0.003 70);
+  --hf-code-bg: oklch(0.987 0.005 70);
+  --hf-ui-border: oklch(0.205 0.003 70 / 0.08);
+  --hf-sidebar-rail: oklch(0.205 0.003 70 / 0.15);
+  --hf-sidebar-text: oklch(0.403 0.003 70);
+  --hf-floating-input-shadow: 0 1px 2px oklch(0.2 0.01 70 / 0.06), 0 10px 30px oklch(0.2 0.01 70 / 0.06);
   --mintlify-slot-header-height: 3rem;
-  /* The mint accent is for dark grounds; on the beige it takes hyperframes.dev's deep green. */
-  --hf-brand: #05563f;
-  --hf-brand-soft: rgba(5, 86, 63, 0.1);
+  /* The mint accent is for dark grounds; on paper links take the app's light accent ink. */
+  --hf-brand: oklch(0.45 0.096 164);
+  --hf-brand-soft: color-mix(in oklch, oklch(0.536 0.114 164) 13%, transparent);
   --hf-video-accent: #3ce6ac;
-  --hf-glass: rgb(247 236 211 / 0.65);
-  --hf-chip: rgb(255 255 255 / 0.45);
+  --hf-glass: rgb(242 240 237 / 0.82);
+  --hf-chip: oklch(1 0 70);
 
   --hf-accent-green: #1a7a0a;
   --hf-accent-green-light: rgba(26, 122, 10, 0.07);
@@ -591,7 +591,7 @@ samp {
 }
 
 /* Every structural hairline (header bottom, content rules, footer) is the palette's line,
- * never a light gray that would draw a pale stripe on the beige ground. */
+ * never a light gray that would draw a pale stripe on the paper. */
 [class*="border-gray-200"],
 [class*="border-gray-100"] {
   border-color: var(--hf-ui-border) !important;
@@ -1334,7 +1334,7 @@ div.h-px.bg-gray-100 {
     margin-left: 16px;
   }
 
-  /* The Download pill is hyperframes.dev's: ink with cream text (`.sr-pill`). */
+  /* The Download pill is ink with paper text, like hyperframes.dev's `.sr-pill`. */
   #navbar a.group > span.bg-primary-dark {
     background: var(--hf-heading) !important;
     border-radius: 999px;
@@ -1399,17 +1399,7 @@ h2 { clear: both; }
 
 .hf-spot.hf-spot-inline { width: 100%; margin: 0; }
 
-/* ── Studio ground: hyperframes.dev's look (light mode) ──
- * The page sits on the same beige light as hyperframes.dev: a still of its ground
- * (StudioGround + its 80% veil), fixed so the light stays put while text scrolls.
- * Dark mode keeps its plain ground. */
-html:not(.dark) {
-  background: #cfc7b4
-    url("https://static.heygen.ai/hyperframes-oss/docs/images/look/studio-ground-v1.jpg") center
-    top / cover fixed no-repeat !important;
-}
-
-/* The header is frosted glass over the ground, as hyperframes.dev's `.sr-nav`. */
+/* The header is frosted glass over the paper. */
 #navbar > div.bg-background-light {
   background: var(--hf-glass) !important;
   backdrop-filter: blur(20px);
@@ -1449,15 +1439,14 @@ div:has(> div > #page-title) + .prose > p {
   color: var(--hf-heading);
 }
 
-/* Cards and films float on the ground: frosted cream, hairline, soft shadow. */
+/* Cards are the app's cards on the paper: near-white, hairline, its card shadow. */
 html:not(.dark) #content-area .card {
   background: var(--hf-background-light) !important;
   border-color: var(--hf-ui-border) !important;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--hf-floating-input-shadow);
 }
 
-/* Calm callouts are frosted cream on the ground (a Night card in dark mode); their icon keeps its colour.
+/* Calm callouts are a card on the paper (a Night card in dark mode); their icon keeps its colour.
  * Warnings and danger keep Mintlify's tint so they still stand out. */
 .callout:is([data-callout-type="note"], [data-callout-type="info"], [data-callout-type="tip"], [data-callout-type="check"]) {
   background: var(--hf-background-light) !important;
@@ -1469,17 +1458,17 @@ html:not(.dark) #content-area .card {
   color: inherit !important;
 }
 
-/* Catalog pages draw with their own --ve-* greys; on the ground they take the ink values. */
+/* Catalog pages draw with their own --ve-* greys; on the paper they take the app's values. */
 html:not(.dark) .hf-ve {
-  --ve-fg: #131109;
-  --ve-muted: rgb(19 17 9 / 0.68);
-  --ve-line: rgb(19 17 9 / 0.14);
-  --ve-surface: #fffaf2;
-  --ve-sunken: rgb(255 250 242 / 0.6);
-  --ve-hover: rgb(255 255 255 / 0.45);
-  --ve-on-bg: #131109;
-  --ve-on-fg: #f4f1ea;
-  --ve-ring: rgb(19 17 9 / 0.14);
+  --ve-fg: var(--hf-text);
+  --ve-muted: var(--hf-text-secondary);
+  --ve-line: var(--hf-border-color-light);
+  --ve-surface: var(--hf-background-light);
+  --ve-sunken: var(--hf-background);
+  --ve-hover: var(--hf-chip);
+  --ve-on-bg: var(--hf-heading);
+  --ve-on-fg: var(--hf-background);
+  --ve-ring: var(--hf-border-color-light);
 }
 
 /* ── One palette for every colour on the page ──
@@ -1503,8 +1492,8 @@ html:not(.dark) .hf-ve {
   --code-block-background: var(--hf-code-bg);
 }
 
-/* The beige ground is darker than the page these steps were made for: in light mode
- * the mid grays go darker so small text passes 4.5:1 (icons 3:1) on the darkest beige. */
+/* In light mode the mid grays go darker so small text passes 4.5:1 (icons 3:1) on the paper:
+ * the app's gray-500 step would read 4.3:1 there. */
 html:not(.dark) {
   --gray-400: 108 105 102;
   --gray-500: 80 77 74;
@@ -1574,7 +1563,7 @@ html.dark .hf-ve {
   color: var(--hf-text);
 }
 
-/* Footer links and "Powered by" read at the secondary ink (Mintlify's 50% ink fails on the beige). */
+/* Footer links and "Powered by" read at the secondary ink (Mintlify's 50% ink fails on the paper). */
 #footer a,
 #footer :where(p, span, div) {
   color: var(--hf-text-secondary);
@@ -1596,6 +1585,12 @@ html.dark .hf-ve {
 /* ── Code colours: the browser editor's (packages/studio theme.css --color-code-*) ──
  * Mintlify highlights code with fixed themes (GitHub light, VS Code dark) and its hosted build ignores a custom
  * code theme, so each of those themes' colours is mapped by role to the editor's colour for the same role. */
+/* Plain code text (GitHub light's default ink) is the page ink. */
+html:not(.dark) pre [style*="color: rgb(31, 35, 40)"],
+html:not(.dark) pre[style*="color: rgb(31, 35, 40)"] {
+  color: var(--hf-text) !important;
+}
+
 html:not(.dark) pre span[style*="color: rgb(10, 48, 105)"] {
   color: oklch(0.468 0.142 143) !important;
 }
@@ -1704,16 +1699,13 @@ pre.shiki {
 .hf-film-track {
   display: flex;
   width: max-content;
-  animation: hf-film-drift 90s linear infinite;
+  cursor: grab;
+  /* Vertical swipes still scroll the page; sideways ones drag the row (film-rows.jsx). */
+  touch-action: pan-y;
 }
-.hf-film-row.is-reverse .hf-film-track {
-  animation-direction: reverse;
-  animation-duration: 105s;
-}
-@keyframes hf-film-drift {
-  to {
-    transform: translateX(-50%);
-  }
+.hf-film-track.is-dragging {
+  cursor: grabbing;
+  user-select: none;
 }
 .hf-film-card {
   position: relative;
@@ -1797,7 +1789,8 @@ pre.shiki {
 }
 @media (prefers-reduced-motion: reduce) {
   .hf-film-track {
-    animation: none;
+    cursor: auto;
+    touch-action: auto;
   }
   .hf-film-row {
     overflow-x: auto;
@@ -1809,11 +1802,23 @@ pre.shiki {
   }
 }
 
-.hf-film-rows.is-paused .hf-film-track { animation-play-state: paused; }
 .hf-film-pause { display: block; margin: 0.5rem 0 0 auto; padding: 0.25rem 0.75rem; border: 1px solid var(--hf-border-color-light);
   border-radius: 999px; font-size: 0.8125rem; font-weight: 600; background: transparent; color: inherit; }
 
-/* Remix cards in the docs palette: frosted cream on the ground (a Night card in dark mode), ink text, black pill. */
+/* Remix shelves are columns that each stack their cards, so cards of different shapes leave no holes. */
+.hf-remix-shelf {
+  columns: 2 16rem;
+  column-gap: 1rem;
+}
+.hf-remix-shelf.is-tall {
+  columns: 3 9.5rem;
+}
+.hf-remix-shelf > * {
+  break-inside: avoid;
+  margin-bottom: 1rem;
+}
+
+/* Remix cards in the docs palette: an app card on the paper (a Night card in dark mode), ink text, ink pill. */
 .hf-remix-card { background: var(--hf-background-light); border-color: var(--hf-ui-border); backdrop-filter: blur(12px); }
 .hf-remix-media { background: var(--hf-surface2); }
 .hf-remix-name { color: var(--hf-heading); }

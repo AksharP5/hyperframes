@@ -1,7 +1,9 @@
 /**
  * The homepage's showcase on a docs page: two rows of films made with HyperFrames, drifting in opposite directions.
- * The card nearest the middle plays its 720p copy, the others show their poster; a click opens the full film with
- * sound. Reduced motion holds the rows still on their posters.
+ * As on the homepage (web-marketing HyperFramesShowcase), a row can be dragged, swiped sideways on a trackpad or moved
+ * with shift+wheel, and keyboard focus brings a card into view. The card nearest the middle plays its 720p copy, the
+ * others show their poster; a click opens the full film with sound. Reduced motion holds the rows still on their
+ * posters and lets them scroll natively.
  */
 export const FilmRows = () => {
   // Keep data inside the component: Mintlify compiles only the named export.
@@ -71,6 +73,8 @@ export const FilmRows = () => {
   const dialogRef = useRef(null);
   const [open, setOpen] = useState(null);
   const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   // Known on the first render, so nothing loads or moves before the preference is read.
   const [still, setStill] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -127,6 +131,110 @@ export const FilmRows = () => {
     };
     const tick = setInterval(pick, 1000);
     return () => { seen.disconnect(); clearInterval(tick); };
+  }, [still]);
+
+  // Each row drifts by a transform the script moves (seconds per loop: 90 and 105), so a hand can move it too.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || still) return;
+    const ac = new AbortController();
+    const on = { signal: ac.signal };
+    const stops = [...root.querySelectorAll(".hf-film-track")].map((row, r) => {
+      const dir = r ? 1 : -1;
+      const seconds = r ? 105 : 90;
+      let x = 0;
+      let fling = 0;
+      let last = 0;
+      let raf = 0;
+      let moved = 0;
+      let focused = false;
+      let drag = null;
+      // one loop = from a card to its twin in the second copy, gap included
+      const period = () => {
+        const cards = row.children;
+        return cards[cards.length / 2].offsetLeft - cards[0].offsetLeft;
+      };
+      const tick = (now) => {
+        const dt = Math.min(0.05, (now - last) / 1000);
+        last = now;
+        const loop = period();
+        if (!drag?.on) {
+          x += fling;
+          fling = Math.abs(fling) < 0.05 ? 0 : fling * 0.86;
+          if (!pausedRef.current && !focused) x += (loop / seconds) * dt;
+        }
+        x = ((x % loop) + loop) % loop;
+        row.parentElement.scrollLeft = 0; // focus may scroll the clipped row; the transform alone places it
+        row.style.transform = `translateX(${(dir < 0 ? -x : x - loop).toFixed(1)}px)`;
+        raf = requestAnimationFrame(tick);
+      };
+      // only animates on screen
+      const seen = new IntersectionObserver(([entry]) => {
+        cancelAnimationFrame(raf);
+        if (entry.isIntersecting) {
+          last = performance.now();
+          raf = requestAnimationFrame(tick);
+        }
+      });
+      seen.observe(row);
+      // a keyboard-focused card holds the row still, centred
+      row.addEventListener("focusin", (e) => {
+        if (!e.target.matches(":focus-visible")) return;
+        focused = true;
+        const into = (row.parentElement.clientWidth - e.target.offsetWidth) / 2;
+        const shift = Math.max(0.5, e.target.offsetLeft - into);
+        x = dir < 0 ? shift : period() - shift;
+      }, on);
+      row.addEventListener("focusout", () => (focused = false), on);
+      // a press is a click until it moves 6px; then the row takes the pointer and becomes a drag
+      row.addEventListener("pointerdown", (e) => {
+        drag = { x: e.clientX, x0: x, id: e.pointerId, on: false };
+        moved = 0;
+        fling = 0;
+      }, on);
+      row.addEventListener("pointermove", (e) => {
+        if (!drag) return;
+        const dx = e.clientX - drag.x;
+        moved = Math.max(moved, Math.abs(dx));
+        if (!drag.on && moved > 6) {
+          drag.on = true;
+          row.setPointerCapture(drag.id);
+          row.classList.add("is-dragging");
+        }
+        if (drag.on) x = drag.x0 + dx * dir;
+      }, on);
+      const end = () => {
+        drag = null;
+        row.classList.remove("is-dragging");
+      };
+      window.addEventListener("pointerup", end, on);
+      window.addEventListener("pointercancel", end, on);
+      row.addEventListener("lostpointercapture", end, on);
+      // the click that ends a drag doesn't open a film; Enter and Space (detail 0) always do
+      row.addEventListener("click", (e) => {
+        if (e.detail > 0 && moved > 6) {
+          e.stopPropagation();
+          e.preventDefault();
+        }
+        moved = 0;
+      }, { capture: true, signal: ac.signal });
+      // a sideways swipe or shift+wheel moves the row; a plain vertical wheel still scrolls the page
+      row.addEventListener("wheel", (e) => {
+        const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.shiftKey ? e.deltaY : 0;
+        if (!d) return;
+        e.preventDefault();
+        fling += d * -dir;
+      }, { passive: false, signal: ac.signal });
+      return () => {
+        cancelAnimationFrame(raf);
+        seen.disconnect();
+        row.style.transform = "";
+      };
+    });
+    return () => {
+      ac.abort();
+      for (const stop of stops) stop();
+    };
   }, [still]);
 
   useEffect(() => {

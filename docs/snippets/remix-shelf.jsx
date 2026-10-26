@@ -123,7 +123,7 @@ export const RemixShelf = ({ items, tall = false }) => {
     );
   };
   return (
-    <div ref={shelfRef} className={`not-prose my-6 grid gap-4 ${tall ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"}`}>
+    <div ref={shelfRef} className={`hf-remix-shelf not-prose my-6${tall ? " is-tall" : ""}`}>
       {items.map((item) => <RemixCard key={item.id} item={item} />)}
     </div>
   );
