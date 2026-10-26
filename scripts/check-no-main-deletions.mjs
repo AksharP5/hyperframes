@@ -810,6 +810,31 @@ export const ALLOWED_DELETIONS = new Map([
     "docs/guides/color-grading.mdx",
     "color grading is now the 'Fix and grade the color' section of the media effects guide; the old URL 301s there (docs.json)",
   ],
+  // One troubleshooting page and start-page folds
+  [
+    "docs/guides/troubleshooting.mdx",
+    "one Troubleshooting page for the whole site (help.mdx) holds this page section by section; the old URL 301s there",
+  ],
+  [
+    "docs/studio/troubleshooting.mdx",
+    "its sections are the browser editor part of the one Troubleshooting page (help.mdx); the old URL 301s there",
+  ],
+  [
+    "docs/studio-app/troubleshooting.mdx",
+    "its sections are the Studio app part of the one Troubleshooting page (help.mdx); update notes already live on the install page; the old URL 301s there",
+  ],
+  [
+    "docs/guides/feedback.mdx",
+    "its sections are the Share feedback part of the one Troubleshooting page (help.mdx); the old URL 301s there",
+  ],
+  [
+    "docs/go-further.mdx",
+    "its one point (agent for big changes, hands-on edits for small ones) is the Edit a video with the agent page; the old URL 301s there",
+  ],
+  [
+    "docs/guides/choose-creation-path.mdx",
+    "the quickstart is the three-door start page that answers the same question; the old URL 301s there",
+  ],
   // Browser editor docs as six pages
   [
     "docs/studio/animation.mdx",

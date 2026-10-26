@@ -48,7 +48,7 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Make a video",
         "icon": "book-open",
         "groups": [
           {
@@ -56,38 +56,46 @@
             "pages": [
               "introduction",
               "quickstart",
-              "go-further",
-              "developers/index"
+              "examples"
             ]
           },
           {
-            "group": "Explore",
+            "group": "Make a video",
             "pages": [
-              "examples",
-              "thirty-days",
-              "product-updates",
-              "weekly-updates",
-              "changelog"
+              "workflows",
+              "guides/product-launch-video",
+              "guides/faceless-explainer",
+              "guides/motion-graphics",
+              "guides/captions-and-recuts",
+              "guides/music-to-video",
+              "prompting/data-and-maps",
+              "guides/avatar-presenter",
+              "guides/pr-to-video",
+              "guides/slideshow",
+              "guides/general-video"
             ]
           },
           {
-            "group": "Choose where to create",
+            "group": "Use it with your agent",
             "pages": [
-              "guides/choose-creation-path",
-              {
-                "group": "With your agent",
-                "pages": [
-                  "guides/with-claude-code",
-                  "guides/with-codex",
-                  "guides/with-cursor"
-                ]
-              },
+              "guides/with-claude-code",
+              "guides/with-codex",
+              "guides/with-cursor",
               "guides/mcp",
+              "guides/skills",
+              "guides/plugins",
               "guides/design-tools"
             ]
           },
           {
-            "group": "Prompt Guide",
+            "group": "Compare",
+            "pages": [
+              "guides/hyperframes-vs-remotion",
+              "prompting/remotion-migration"
+            ]
+          },
+          {
+            "group": "Tips for better videos",
             "pages": [
               "prompting/overview",
               "prompting/motion",
@@ -107,49 +115,16 @@
             ]
           },
           {
-            "group": "Make a video",
+            "group": "Images, sound and footage",
             "pages": [
-              "workflows",
-              "guides/product-launch-video",
-              "guides/faceless-explainer",
-              "guides/pr-to-video",
-              "guides/captions-and-recuts",
-              "guides/motion-graphics",
-              "guides/music-to-video",
-              "prompting/data-and-maps",
-              "guides/slideshow",
-              "guides/general-video",
-              "guides/hyperframes-vs-remotion",
-              "prompting/remotion-migration"
-            ]
-          },
-          {
-            "group": "Build the project",
-            "pages": [
-              "concepts/index",
               "guides/media",
               "guides/video-components",
-              "guides/avatar-presenter",
               "guides/voice-and-audio",
               "guides/remove-background",
               "guides/media-effects",
               "guides/export-and-share"
             ]
           },
-          {
-            "group": "Help",
-            "pages": [
-              "help",
-              "guides/troubleshooting",
-              "guides/feedback"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Browser editor",
-        "icon": "palette",
-        "groups": [
           {
             "group": "Browser editor",
             "pages": [
@@ -158,8 +133,17 @@
               "studio/timeline",
               "studio/audio-effects",
               "studio/assets-and-blocks",
-              "studio/export",
-              "studio/troubleshooting"
+              "studio/export"
+            ]
+          },
+          {
+            "group": "Help and updates",
+            "pages": [
+              "help",
+              "thirty-days",
+              "product-updates",
+              "weekly-updates",
+              "changelog"
             ]
           }
         ]
@@ -181,8 +165,7 @@
               "studio-app/workspace",
               "studio-app/connect-your-agent",
               "studio-app/export",
-              "studio-app/share",
-              "studio-app/troubleshooting"
+              "studio-app/share"
             ]
           }
         ]
@@ -864,7 +847,9 @@
           {
             "group": "Start here",
             "pages": [
-              "developers/overview"
+              "developers/overview",
+              "developers/index",
+              "concepts/index"
             ]
           },
           {
@@ -974,8 +959,6 @@
             "group": "Agent setup",
             "pages": [
               "guides/authentication",
-              "guides/plugins",
-              "guides/skills",
               "guides/webmcp"
             ]
           },
@@ -1092,7 +1075,7 @@
     },
     {
       "source": "/guides/common-mistakes",
-      "destination": "/guides/troubleshooting"
+      "destination": "/help"
     },
     {
       "source": "/guides/create-with-agent",
@@ -1357,6 +1340,36 @@
     {
       "source": "/studio/voiceover-carve",
       "destination": "/studio/audio-effects#make-music-sit-under-narration",
+      "permanent": true
+    },
+    {
+      "source": "/guides/troubleshooting",
+      "destination": "/help",
+      "permanent": true
+    },
+    {
+      "source": "/studio/troubleshooting",
+      "destination": "/help#in-the-preview-and-browser-editor",
+      "permanent": true
+    },
+    {
+      "source": "/studio-app/troubleshooting",
+      "destination": "/help#in-the-studio-app",
+      "permanent": true
+    },
+    {
+      "source": "/guides/feedback",
+      "destination": "/help#share-feedback",
+      "permanent": true
+    },
+    {
+      "source": "/go-further",
+      "destination": "/studio-app/edit-with-the-agent",
+      "permanent": true
+    },
+    {
+      "source": "/guides/choose-creation-path",
+      "destination": "/quickstart",
       "permanent": true
     }
   ],

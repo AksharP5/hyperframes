@@ -1011,7 +1011,7 @@ unless you pass `--verbose`, which keeps output clean for agents and CI.
 `--json` adds `errorCount`, `warningCount`, `infoCount`, and a `findings` array.
 
 The linter catches missing attributes, missing adapter libraries (GSAP, Lottie,
-Three.js), and structural problems. [Troubleshooting](/guides/troubleshooting)
+Three.js), and structural problems. [Troubleshooting](/help)
 explains each rule.
 
 ### `check`
@@ -1826,10 +1826,10 @@ scripts.
 With `--file-issue`, the CLI publishes a minimal repro to a public URL — with
 your consent — and opens a pre-filled `bug` issue draft that you review and
 submit yourself. No token, no backend. See
-[Share feedback](/guides/feedback#report-a-reproducible-bug).
+[Share feedback](/help#report-a-reproducible-bug).
 
 Agents can call this after a render;
-[About feedback data](/guides/feedback#about-feedback-data) covers what the
+[About feedback data](/help#about-feedback-data) covers what the
 surface includes. An app that launches the CLI can attach its signed-in
 person's email with the `HYPERFRAMES_FEEDBACK_EMAIL` environment variable. It
 is never a flag and never read from a project `.env`, and it goes only into
@@ -1867,7 +1867,7 @@ account has no email — is linked to your usage, and your prior anonymous usage
 is stitched to it. Nothing else personal, and only once you choose to sign in.
 
 Turn it all off with `HYPERFRAMES_NO_TELEMETRY=1` or the command above.
-[Feedback collection](/guides/feedback) explains the post-render prompt and the
+[Feedback collection](/help#share-feedback) explains the post-render prompt and the
 Studio feedback bar.
 
 One consequence worth knowing: turning telemetry off also opts the install out
