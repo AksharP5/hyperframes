@@ -84,6 +84,27 @@ describe("BeginFrame capability probe", () => {
 
     expect(result.supported).toBe(false);
     expect(result.detail).toMatch(/returned 0 bytes after \d+ attempts in \d+ms/);
+    expect(result.timedOut).toBe(true);
+  });
+
+  it("reports frames that are not a PNG as unsupported, not as a slow start", async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
+    const send = vi.fn().mockResolvedValue({ screenshotData: jpeg.toString("base64") });
+    const browser = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(null),
+        createCDPSession: vi.fn().mockResolvedValue({
+          send,
+          detach: vi.fn().mockResolvedValue(undefined),
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as Browser;
+
+    const result = await _probeBeginFrameSupportForTests(browser, 120);
+
+    expect(result.supported).toBe(false);
+    expect(result.timedOut).toBe(false);
   });
 
   it("keeps trying a renderer that has not drawn its first surface yet, up to the probe deadline", async () => {
@@ -163,6 +184,30 @@ describe("BeginFrame capability probe", () => {
 
     expect(result.supported).toBe(true);
     expect(result.detail).toContain("probe page cleanup timed out");
+  });
+
+  it("marks a probe that ran out of time as timed out, and a rejection as not", async () => {
+    const stuck = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockReturnValue(new Promise<never>(() => {})),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as Browser;
+    const rejecting = {
+      newPage: vi.fn().mockResolvedValue({
+        goto: vi.fn().mockResolvedValue(null),
+        createCDPSession: vi.fn().mockResolvedValue({
+          send: vi.fn().mockRejectedValue(new Error("'HeadlessExperimental.enable' wasn't found")),
+          detach: vi.fn().mockResolvedValue(undefined),
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as Browser;
+
+    expect((await _probeBeginFrameSupportForTests(stuck, 25)).timedOut).toBe(true);
+    const rejected = await _probeBeginFrameSupportForTests(rejecting);
+    expect(rejected.supported).toBe(false);
+    expect(rejected.timedOut).toBe(false);
   });
 
   it("force-kills and disconnects when graceful browser cleanup never resolves", async () => {
@@ -1685,5 +1730,80 @@ describe("browser pool", () => {
 
     // The acquire should still resolve (the launch completed before drain closed it)
     await acquirePromise.catch(() => {});
+  });
+});
+
+describe.runIf(process.platform === "linux")("BeginFrame launch on a slow first start", () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const BEGINFRAME_ARGS = ["--no-sandbox", "--enable-begin-frame-control"];
+  // chromePath must exist for the launch to request BeginFrame; the mocked launch never runs it.
+  const BEGINFRAME_CONFIG = { enableBrowserPool: false, chromePath: process.execPath };
+  const base = {
+    connected: true,
+    version: vi.fn().mockResolvedValue("HeadlessChrome/131.0.0.0"),
+    close: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn(),
+    process: () => ({ kill: vi.fn(), killed: false }),
+  };
+  const healthyPage = () => ({
+    goto: vi.fn().mockResolvedValue(null),
+    createCDPSession: vi.fn().mockResolvedValue({
+      send: vi
+        .fn()
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({})
+        .mockResolvedValue({ hasDamage: true, screenshotData: png.toString("base64") }),
+      detach: vi.fn().mockResolvedValue(undefined),
+    }),
+    close: vi.fn().mockResolvedValue(undefined),
+  });
+  const slowPage = () => ({
+    goto: vi.fn().mockReturnValue(new Promise<never>(() => {})),
+    close: vi.fn().mockResolvedValue(undefined),
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await drainBrowserPool();
+    _setPuppeteerForTests(undefined);
+  });
+
+  it("probes again on a fresh launch instead of falling back to screenshot capture", async () => {
+    _resetBrowserPoolForTests();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const pages = [slowPage(), healthyPage()];
+    const launch = vi.fn().mockImplementation(async () => ({
+      ...base,
+      newPage: vi.fn().mockResolvedValue(pages.shift()),
+    }));
+    _setPuppeteerForTests({ launch } as unknown as PuppeteerNode);
+
+    vi.useFakeTimers();
+    const pending = acquireBrowser(BEGINFRAME_ARGS, BEGINFRAME_CONFIG);
+    await vi.advanceTimersByTimeAsync(3000);
+    const result = await pending;
+
+    expect(result.captureMode).toBe("beginframe");
+    expect(launch).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to screenshot capture when the longer probe also fails", async () => {
+    _resetBrowserPoolForTests();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const launch = vi.fn().mockImplementation(async () => ({
+      ...base,
+      newPage: vi.fn().mockResolvedValue(slowPage()),
+    }));
+    _setPuppeteerForTests({ launch } as unknown as PuppeteerNode);
+
+    vi.useFakeTimers();
+    const pending = acquireBrowser(BEGINFRAME_ARGS, BEGINFRAME_CONFIG);
+    await vi.advanceTimersByTimeAsync(12000);
+    const result = await pending;
+
+    expect(result.captureMode).toBe("screenshot");
+    expect(launch).toHaveBeenCalledTimes(3);
   });
 });
