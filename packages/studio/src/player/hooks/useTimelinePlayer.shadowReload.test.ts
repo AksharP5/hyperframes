@@ -5,6 +5,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SHADOW_READY_BUDGETS, SHADOW_READY_TIMEOUT_MS } from "./useShadowPreviewReload";
+import { refusedPreviewMessage } from "@hyperframes/core/studio-preview-mark";
 import { usePlayerStore } from "../store/playerStore";
 import { isPreviewChanging } from "../previewReloading";
 import { NLEProvider, useNLEContext, type NLEContextValue } from "../../components/nle/NLEContext";
@@ -636,6 +637,26 @@ describe("shadow reload readiness and failure", () => {
     expect(onPreviewReloadFailed).toHaveBeenCalledWith(
       expect.stringContaining("Composition timeline not found after 8s"),
     );
+    unmount(root);
+  });
+
+  // An agent's edit moves the page away for a few saves: each reload is refused until it is back.
+  it.each([
+    [404, "warn"],
+    [500, "error"],
+  ] as const)("reports a reload the server refused with %i as a console %s", (status, level) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onPreviewReloadFailed = vi.fn();
+    const { getApi, live, gen, root } = beginReload({ onPreviewReloadFailed });
+
+    act(() => getApi().onShadowError(gen, refusedPreviewMessage(status)));
+
+    expect(getApi().iframeRef.current).toBe(live);
+    expect(onPreviewReloadFailed).toHaveBeenCalledOnce();
+    const said = (spy: typeof warn) =>
+      spy.mock.calls.some(([text]) => String(text).includes(`(HTTP ${status})`));
+    expect([said(warn), said(error)]).toEqual([level === "warn", level === "error"]);
     unmount(root);
   });
 

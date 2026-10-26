@@ -8,6 +8,7 @@ import {
   isStudioManualEditGestureLiveIn,
   studioManualEditSavesIn,
 } from "../../components/editor/manualEditsDom";
+import { refusedPreviewStatus } from "@hyperframes/core/studio-preview-mark";
 import { logReload } from "../../utils/reloadDebug";
 import {
   useTimelineSyncCallbacks,
@@ -131,7 +132,9 @@ export function useShadowPreviewReload({
       setPreviewReloading(false);
       const message = `The preview did not reload (${cause}). It was still waiting for ${waitingFor}. The previous preview is still showing.`;
       logReload("shadow-failed", { cause, waitingFor });
-      console.error(`[studio] ${message}`);
+      const refused = refusedPreviewStatus(cause);
+      const pageMissingNow = refused !== null && refused < 500;
+      (pageMissingNow ? console.warn : console.error)(`[studio] ${message}`);
       onReloadFailedRef.current?.(message);
     },
     [stopPendingShadow, isRefreshingRef, pendingSeekRef],
