@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { parseHTML } from "linkedom";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { stripSdrPngColourTags } from "@hyperframes/core/compiler/png-colour-tags";
 import { Readable } from "node:stream";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
@@ -789,10 +790,13 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
     // file on each one. The full read also blocked the event loop, so every
     // other Studio request (SSE, saves, the voice track) waited behind it.
     const textBuffer = isText ? Buffer.from(readFileSync(file, "utf-8"), "utf-8") : null;
-    const totalSize = textBuffer ? textBuffer.length : statSync(servedPath).size;
+    const heldBuffer =
+      textBuffer ??
+      (contentType === "image/png" ? stripSdrPngColourTags(readFileSync(file)) : null);
+    const totalSize = heldBuffer ? heldBuffer.length : statSync(servedPath).size;
     const bodyFor = (start: number, end: number): BodyInit =>
-      textBuffer
-        ? new Uint8Array(textBuffer.subarray(start, end + 1))
+      heldBuffer
+        ? new Uint8Array(heldBuffer.subarray(start, end + 1))
         : // Node's web stream type and the DOM one do not overlap for tsc on
           // every platform's lib set; the double cast is the documented bridge.
           (Readable.toWeb(

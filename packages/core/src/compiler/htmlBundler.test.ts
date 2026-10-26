@@ -2128,6 +2128,26 @@ describe("bundleToSingleHtml", () => {
     },
   );
 
+  it("inlines a BT.709-tagged PNG without its tag, so the file's own values show", async () => {
+    const tagged = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAABGNJQ1ABAQABlXPCVgAAAAxJREFUeJxj0NfXBwABHgCOTp25kgAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const dir = makeTempProject({
+      "index.html": `<div data-composition-id="root" data-width="320" data-height="180"><img id="photo" src="tagged.png"></div>`,
+    });
+    writeFileSync(join(dir, "tagged.png"), tagged);
+    try {
+      const { document } = parseHTML(await bundleToSingleHtml(dir));
+      const src = document.getElementById("photo")?.getAttribute("src") ?? "";
+      const inlined = Buffer.from(src.slice(src.indexOf(",") + 1), "base64");
+      expect(inlined.includes("cICP")).toBe(false);
+      expect(inlined.includes("IDAT")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.each(["?v=2", "#sprite", "?v=2#sprite"])(
     "keeps inlined image bytes decodable with suffix %s",
     async (suffix) => {

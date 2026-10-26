@@ -28,6 +28,7 @@ import { Readable } from "node:stream";
 import { join, extname, resolve, sep } from "node:path";
 import { injectScriptsAtHeadStart, injectScriptsIntoHtml } from "@hyperframes/core/compiler";
 import { fpsToNumber, type Fps } from "@hyperframes/core";
+import { stripSdrPngColourTags } from "@hyperframes/core/compiler/png-colour-tags";
 import { getVerifiedHyperframeRuntimeSource } from "./hyperframeRuntimeLoader.js";
 import { getHfEarlyStub } from "../generated/hf-early-stub-inline.js";
 import { defaultLogger, type ProducerLogger } from "../logger.js";
@@ -836,6 +837,19 @@ export function createFileServer(options: FileServerOptions): Promise<FileServer
         return c.text(html, 200, { "Content-Type": contentType });
       }
 
+      if (ext === ".png") {
+        const untagged = stripSdrPngColourTags(await readFileAsync(fd));
+        if (untagged) {
+          const headers = {
+            "Content-Type": contentType,
+            "Content-Length": String(untagged.length),
+          };
+          return new Response(c.req.method === "HEAD" ? null : new Uint8Array(untagged), {
+            headers,
+          });
+        }
+      }
+
       // Stream binary file content rather than buffering it with readFileSync.
       // On video-heavy compositions Chrome requests several 32MB video files
       // back-to-back through this server; each readFileSync(32MB) blocked the
@@ -882,7 +896,8 @@ export function createFileServer(options: FileServerOptions): Promise<FileServer
       const stream = createReadStream(filePath, {
         fd,
         autoClose: true,
-        ...(range ? { start: range.start, end: range.end } : {}),
+        start: range?.start ?? 0,
+        ...(range ? { end: range.end } : {}),
       });
       streamOwnsFd = true;
       try {

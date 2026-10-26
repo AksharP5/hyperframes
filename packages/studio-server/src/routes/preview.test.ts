@@ -103,6 +103,11 @@ async function getPreviewSignature(projectDir: string): Promise<string> {
   return match![1]!;
 }
 
+const TAGGED_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAABGNJQ1ABAQABlXPCVgAAAAxJREFUeJxj0NfXBwABHgCOTp25kgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 describe("registerPreviewRoutes", () => {
   it("adds its <base> even when a script mentions one, and keeps an authored <base>", async () => {
     const projectDir = createProjectDir();
@@ -2893,5 +2898,21 @@ describe("bundled GSAP local root", () => {
     expect(() => appForHost(projectDir, "", { gsapLocalRoot: "//cdn.example/npm" })).toThrow(
       "same-origin path",
     );
+  });
+});
+
+describe("preview asset colour tags", () => {
+  it("serves a BT.709-tagged PNG without the tag, so the file's own values show", async () => {
+    const projectDir = createProjectDir();
+    writeFileSync(join(projectDir, "tagged.png"), TAGGED_PNG);
+    const app = new Hono();
+    registerPreviewRoutes(app, createAdapter(projectDir));
+
+    const response = await app.request("http://localhost/projects/demo/preview/tagged.png");
+
+    const body = Buffer.from(await response.arrayBuffer());
+    expect(body.includes("cICP")).toBe(false);
+    expect(body.includes("IDAT")).toBe(true);
+    expect(response.headers.get("Content-Length") ?? String(body.length)).toBe(String(body.length));
   });
 });

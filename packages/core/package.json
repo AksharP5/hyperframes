@@ -429,6 +429,12 @@
       "import": "./src/compiler/htmlDocument.ts",
       "types": "./src/compiler/htmlDocument.ts"
     },
+    "./compiler/png-colour-tags": {
+      "bun": "./src/compiler/pngColourTags.ts",
+      "node": "./dist/compiler/pngColourTags.js",
+      "import": "./src/compiler/pngColourTags.ts",
+      "types": "./src/compiler/pngColourTags.ts"
+    },
     "./runtime/position-edits": {
       "bun": "./src/runtime/positionEdits.ts",
       "node": "./dist/runtime/positionEdits.js",
@@ -858,6 +864,10 @@
       "./compiler/html-document": {
         "import": "./dist/compiler/htmlDocument.js",
         "types": "./dist/compiler/htmlDocument.d.ts"
+      },
+      "./compiler/png-colour-tags": {
+        "import": "./dist/compiler/pngColourTags.js",
+        "types": "./dist/compiler/pngColourTags.d.ts"
       },
       "./runtime/position-edits": {
         "import": "./dist/runtime/positionEdits.js",

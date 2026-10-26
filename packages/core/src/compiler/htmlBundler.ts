@@ -17,6 +17,7 @@ import {
   planCompositionAssembly,
 } from "./compositionAssembly";
 import { SCENE_FONTS_ATTR, SCENE_PART_ATTR } from "../sceneParts";
+import { stripSdrPngColourTags } from "./pngColourTags";
 import {
   ensureExternalScriptTag,
   readExternalScriptAttributes,
@@ -392,7 +393,8 @@ function createAssetInliner(
     // just to be discarded.
     const byteLength = safeStatSize(filePath);
     if (byteLength !== null && byteLength > MAX_INLINE_ASSET_BYTES) return { tooLarge: byteLength };
-    const content = safeReadFileBuffer(filePath);
+    const read = safeReadFileBuffer(filePath);
+    const content = read && mimeType === "image/png" ? (stripSdrPngColourTags(read) ?? read) : read;
     return {
       dataUrl: content === null ? null : `data:${mimeType};base64,${content.toString("base64")}`,
     };

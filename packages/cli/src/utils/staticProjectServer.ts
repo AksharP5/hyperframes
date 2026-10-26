@@ -1,6 +1,7 @@
 import { createServer, request as httpRequest, type Server, type ServerResponse } from "node:http";
 import { Duplex } from "node:stream";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { stripSdrPngColourTags } from "@hyperframes/core/compiler/png-colour-tags";
 import { isAbsolute, relative, resolve } from "node:path";
 import {
   PREVIEW_PROXY_BOX_PARAM,
@@ -115,6 +116,15 @@ const inProcessAnswers = new Map<
 /** The in-process answer for a URL served by `serveStaticProjectHtml` when listen() was refused, else undefined. */
 export function inProcessAnswer(url: string) {
   return inProcessAnswers.get(new URL(url).origin);
+}
+
+function serveUntaggedPng(filePath: string, res: ServerResponse): boolean {
+  if (getMimeType(filePath) !== "image/png") return false;
+  const untagged = stripSdrPngColourTags(readFileSync(filePath));
+  if (!untagged) return false;
+  res.writeHead(200, { "Content-Type": "image/png", "Content-Length": String(untagged.length) });
+  res.end(untagged);
+  return true;
 }
 
 /**
@@ -323,7 +333,8 @@ export async function serveStaticProjectHtml(
             copies.signal,
           );
         } else {
-          serveFileWithRange(filePath, req.headers.range, res);
+          if (!serveUntaggedPng(filePath, res))
+            serveFileWithRange(filePath, req.headers.range, res);
         }
         return;
       }
