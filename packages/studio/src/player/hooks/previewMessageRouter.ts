@@ -69,15 +69,24 @@ function acceptedPreviewMessage(
   return acceptStudioRuntimeMessage(data) ? data : null;
 }
 
+/** Whether enrichment is due: no timeline message and no enrichment of ours for 500 ms. Marks it run. */
+function enrichDue(lastTimelineMessage: number, enriched: { at: number }): boolean {
+  const now = Date.now();
+  if (now - lastTimelineMessage <= 500 || now - enriched.at <= 500) return false;
+  enriched.at = now;
+  return true;
+}
+
 /**
  * A `state` tick doubles as a recovery hook: if the store still has no
  * elements, read the manifest straight off the iframe, and if no `timeline`
- * message has arrived recently, re-run enrichment.
+ * message has arrived recently, re-run enrichment (at most every 500 ms: it queries the whole document).
  */
 function handleStateMessage(
   deps: PreviewMessageRouterDeps,
   iframe: HTMLIFrameElement | null,
   playingHoldsClipListPosts: boolean,
+  enriched: { at: number },
 ): void {
   try {
     if (usePlayerStore.getState().elements.length === 0) {
@@ -86,7 +95,7 @@ function handleStateMessage(
         deps.processTimelineMessageRef.current(manifest);
       }
     }
-    if (!playingHoldsClipListPosts && Date.now() - deps.lastTimelineMessageRef.current > 500) {
+    if (!playingHoldsClipListPosts && enrichDue(deps.lastTimelineMessageRef.current, enriched)) {
       deps.enrichMissingCompositionsRef.current();
     }
   } catch {}
@@ -135,11 +144,13 @@ function applyStoreReport(data: PreviewMessage): boolean {
 export function createPreviewMessageHandler(
   deps: PreviewMessageRouterDeps,
 ): (e: MessageEvent) => void {
+  const enriched = { at: 0 };
   return (e: MessageEvent) => {
     const iframe = deps.iframeRef.current;
     const data = acceptedPreviewMessage(e, iframe);
     if (!data) return;
-    if (data.type === "state") return handleStateMessage(deps, iframe, data.isPlaying === true);
+    if (data.type === "state")
+      return handleStateMessage(deps, iframe, data.isPlaying === true, enriched);
     if (applyStoreReport(data)) return;
     if (data.type === "ready") {
       const level = usePlayerStore.getState().previewQuality;

@@ -23,6 +23,40 @@ describe("preview state messages", () => {
   });
 });
 
+describe("preview state messages while a scrub posts them", () => {
+  it("re-reads the preview for missing compositions at most every 500 ms", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10_000);
+      const enrich = vi.fn();
+      const handle = createPreviewMessageHandler({
+        iframeRef: { current: null },
+        processTimelineMessageRef: { current: vi.fn() },
+        enrichMissingCompositionsRef: { current: enrich },
+        lastTimelineMessageRef: { current: 0 },
+        getAdapter: () => null,
+        syncTimelineElements: vi.fn(),
+      });
+      const state = () =>
+        handle(
+          new MessageEvent("message", {
+            data: { source: "hf-preview", type: "state", isPlaying: false },
+          }),
+        );
+      state();
+      vi.advanceTimersByTime(100);
+      state();
+      state();
+      expect(enrich).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(500);
+      state();
+      expect(enrich).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("preview quality messages", () => {
   function routeMessage(data: unknown, frame?: { postMessage: (message: unknown) => void }) {
     const iframe = frame ? ({ contentWindow: frame } as unknown as HTMLIFrameElement) : null;
