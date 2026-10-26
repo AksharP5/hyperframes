@@ -1688,3 +1688,135 @@ pre.shiki {
 
 .hf-day-play { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 0.5rem; }
 .hf-day-play:focus-visible { outline: 2px solid var(--hf-brand); outline-offset: 2px; }
+
+/* Showcase rows: two tracks of films drifting in opposite directions, each track twice its films for a seamless loop. */
+.hf-film-rows {
+  display: grid;
+  gap: 0.6rem;
+  margin: 1.25rem 0 1.5rem;
+  overflow: hidden;
+  border-radius: 0.6rem;
+  mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+}
+.hf-film-row {
+  overflow: hidden;
+}
+.hf-film-track {
+  display: flex;
+  width: max-content;
+  animation: hf-film-drift 90s linear infinite;
+}
+.hf-film-row.is-reverse .hf-film-track {
+  animation-direction: reverse;
+  animation-duration: 105s;
+}
+@keyframes hf-film-drift {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.hf-film-card {
+  position: relative;
+  height: 11.5rem;
+  margin: 0 0.6rem 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: #1a1a1a;
+  cursor: pointer;
+  flex: none;
+}
+.hf-film-card video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hf-film-card:focus-visible {
+  outline: 2px solid var(--hf-brand);
+  outline-offset: 2px;
+}
+.hf-film-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1.2rem 0.6rem 0.45rem;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-align: left;
+  color: #fff;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.7));
+}
+.hf-film-label b {
+  display: block;
+  font-weight: 600;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.62rem;
+}
+.hf-film-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  width: min(92vw, 1100px);
+  padding: 0;
+  border: 0;
+  border-radius: 0.75rem;
+  background: #111;
+  color: #fff;
+}
+.hf-film-dialog::backdrop {
+  background: rgb(0 0 0 / 0.7);
+}
+.hf-film-dialog video {
+  display: block;
+  width: 100%;
+  max-height: 80vh;
+  background: #000;
+}
+.hf-film-dialog-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+}
+.hf-film-dialog-bar button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 0.4);
+  border-radius: 999px;
+  padding: 0.25rem 0.8rem;
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hf-film-track {
+    animation: none;
+  }
+  .hf-film-row {
+    overflow-x: auto;
+  }
+}
+@media (max-width: 640px) {
+  .hf-film-card {
+    height: 9rem;
+  }
+}
+
+.hf-film-rows.is-paused .hf-film-track { animation-play-state: paused; }
+.hf-film-pause { display: block; margin: 0.5rem 0 0 auto; padding: 0.25rem 0.75rem; border: 1px solid var(--hf-border-color-light);
+  border-radius: 999px; font-size: 0.8125rem; font-weight: 600; background: transparent; color: inherit; }
+
+/* Remix cards in the docs palette: frosted cream on the ground (a Night card in dark mode), ink text, black pill. */
+.hf-remix-card { background: var(--hf-background-light); border-color: var(--hf-ui-border); backdrop-filter: blur(12px); }
+.hf-remix-media { background: var(--hf-surface2); }
+.hf-remix-name { color: var(--hf-heading); }
+.hf-remix-credit, .hf-remix-help { color: var(--hf-text-secondary); }
+.hf-remix-credit a { color: inherit; }
+.hf-remix-btn { background: var(--hf-heading); color: var(--hf-background); }
