@@ -15,9 +15,10 @@ const STUDIO_PAGE = "https://hyperframes.dev/studio";
 const DOWNLOADS: Partial<Record<NodeJS.Platform, string>> = {
   darwin: `${STUDIO_PAGE}/download`,
   linux: `${STUDIO_PAGE}/download?os=linux`,
+  win32: `${STUDIO_PAGE}/download?os=windows`,
 };
 
-/** This machine's build of the app; null where there is none yet (Windows). */
+/** This machine's build of the app; null where there is none. */
 export const desktopDownloadUrl = (platform = process.platform): string | null =>
   DOWNLOADS[platform] ?? null;
 
