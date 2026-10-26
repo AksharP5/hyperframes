@@ -1614,6 +1614,9 @@ class HyperframesPlayer extends HTMLElement {
       },
       this._isAudioLocked(),
     );
+    this.controlsApi.updateTime(this._currentTime, this._duration);
+    this.controlsApi.updatePlaying(!this._paused);
+    this.controlsApi.updateSpeed(this.playbackRate);
   }
 
   // Test-instrumentation pass-throughs (match original field names).

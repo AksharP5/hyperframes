@@ -3546,6 +3546,42 @@ describe("HyperframesPlayer video mode", () => {
     expect(withControls.duration).toBe(0);
   });
 
+  it("shows a playback rate configured before controls are created", () => {
+    player = createPlayer({ type: "video/mp4", src: FILM, "playback-rate": "2", controls: "" });
+
+    const speed = player.shadowRoot?.querySelector(".hfp-speed-btn");
+    expect(speed?.textContent).toBe("2x");
+    expect(speed?.getAttribute("aria-label")).toBe("Playback speed: 2x");
+    expect(player.shadowRoot?.querySelector(".hfp-speed-option.hfp-active")?.textContent).toBe(
+      "2x",
+    );
+  });
+
+  it.each([false, true])("restores current controls state with paused=%s", (paused) => {
+    loadMetadata(videoOf(player), 60);
+    player.playbackRate = 2;
+    player.seek(15);
+    if (!paused) player.play();
+
+    for (let i = 0; i < 2; i++) {
+      player.setAttribute("controls", "");
+
+      const button = player.shadowRoot?.querySelector<HTMLButtonElement>(".hfp-play-btn");
+      expect(button?.getAttribute("aria-label")).toBe(paused ? "Play" : "Pause");
+      expect(player.shadowRoot?.querySelector(".hfp-time")?.textContent).toBe("0:15 / 1:00");
+      expect(player.shadowRoot?.querySelector<HTMLElement>(".hfp-progress")?.style.width).toBe(
+        "25%",
+      );
+      expect(player.shadowRoot?.querySelector(".hfp-speed-btn")?.textContent).toBe("2x");
+
+      player.removeAttribute("controls");
+    }
+
+    player.setAttribute("controls", "");
+    player.shadowRoot?.querySelector<HTMLButtonElement>(".hfp-play-btn")?.click();
+    expect(player.paused).toBe(!paused);
+  });
+
   it("stops playing when the video fails", () => {
     const video = videoOf(player);
     loadMetadata(video);
