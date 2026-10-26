@@ -12,7 +12,12 @@
 import { usePlayerStore, type TimelineElement } from "../store/playerStore";
 import type { ClipManifestClip, IframeWindow, PlaybackAdapter } from "../lib/playbackTypes";
 import { hasTimelinePerformanceFixtureLease } from "../lib/timelinePerformanceFixture";
-import { acceptStudioRuntimeMessage } from "../lib/runtimeProtocol";
+import { acceptStudioRuntimeMessage, postRuntimeControlMessage } from "../lib/runtimeProtocol";
+import {
+  parsePlaybackHealth,
+  parsePreviewCopies,
+  parsePreviewFacts,
+} from "../store/previewQualitySlice";
 import { parseTimelineFromDOM } from "../lib/timelineDOM";
 
 /** What `processTimelineMessage` accepts — the clip-manifest postMessage. */
@@ -30,6 +35,9 @@ interface PreviewMessage {
   type?: string;
   clips?: unknown;
   isPlaying?: unknown;
+  copies?: unknown;
+  health?: unknown;
+  facts?: unknown;
 }
 
 export interface PreviewMessageRouterDeps {
@@ -107,6 +115,23 @@ function handleTimelineMessage(
   } catch {}
 }
 
+function applyStoreReport(data: PreviewMessage): boolean {
+  const store = usePlayerStore.getState();
+  switch (data.type) {
+    case "preview-copies":
+      store.setPreviewCopies(parsePreviewCopies(data.copies));
+      return true;
+    case "preview-health":
+      store.setPlaybackHealth(parsePlaybackHealth(data.health));
+      return true;
+    case "preview-facts":
+      store.setPreviewFacts(parsePreviewFacts(data.facts));
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function createPreviewMessageHandler(
   deps: PreviewMessageRouterDeps,
 ): (e: MessageEvent) => void {
@@ -115,6 +140,12 @@ export function createPreviewMessageHandler(
     const data = acceptedPreviewMessage(e, iframe);
     if (!data) return;
     if (data.type === "state") return handleStateMessage(deps, iframe, data.isPlaying === true);
+    if (applyStoreReport(data)) return;
+    if (data.type === "ready") {
+      const level = usePlayerStore.getState().previewQuality;
+      postRuntimeControlMessage(iframe?.contentWindow, "set-preview-quality", { level });
+      return;
+    }
     if (data.type === "timeline" && Array.isArray(data.clips)) {
       handleTimelineMessage(deps, iframe, data as unknown as ClipManifestMessage);
     }

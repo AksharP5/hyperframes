@@ -1378,6 +1378,8 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
   >;
 
   async function loadPreviewModule(opts: {
+    copyProgress?: number;
+    retried?: string[];
     resolveProxyImpl?: (
       projectDir: string,
       absoluteSourcePath: string,
@@ -1412,6 +1414,8 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       waitForProxy,
       ProxyWaitTimeoutError,
       PROXY_PENDING_RETRY_AFTER_SECONDS,
+      proxyCopyProgress: () => opts.copyProgress,
+      retryProxyCopy: (_dir: string, file: string) => void opts.retried?.push(file),
       ProxyTranscodeError: FakeProxyTranscodeError,
       ProxyCapacityError: FakeProxyCapacityError,
       PROXY_PARAMS_VERSION: "v1",
@@ -1896,6 +1900,28 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       expect(ready.status).toBe(200);
       expect(await ready.text()).toBe("proxy-bytes");
       expect(mediaProxyDemand().proxyRequests - before).toBe(1);
+    });
+
+    it("says how far a copy has got on the 202, and forgets a failure when asked to retry", async () => {
+      const projectDir = createProjectDir();
+      writeFileSync(join(projectDir, "clip.mp4"), "original-hevc-bytes");
+      const retried: string[] = [];
+      const { registerPreviewRoutes: register } = await loadPreviewModule({
+        resolveProxyImpl: () => new Promise<string>(() => {}),
+        copyProgress: 0.4249,
+        retried,
+      });
+      const app = new Hono();
+      register(app, createAdapter(projectDir));
+      const url = "http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264";
+
+      const first = await app.request(url);
+      expect(first.status).toBe(202);
+      expect(first.headers.get("X-HF-Proxy-Progress")).toBe("0.425");
+      expect(retried).toEqual([]);
+
+      await app.request(`${url}&hf-proxy-box=1448x2048&hf-proxy-retry=1`);
+      expect(retried).toEqual([join(projectDir, "clip.mp4")]);
     });
 
     it("rejects a path-traversal attempt through the proxied path (404, no transcode)", async () => {

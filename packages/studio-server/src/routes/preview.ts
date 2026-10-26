@@ -21,6 +21,8 @@ import {
 import {
   PREVIEW_PROXY_BOX_PARAM,
   PREVIEW_PROXY_LIGHT_PARAM,
+  PREVIEW_PROXY_PROGRESS_HEADER,
+  PREVIEW_PROXY_RETRY_PARAM,
   parsePreviewProxyBox,
 } from "@hyperframes/core";
 import {
@@ -64,7 +66,9 @@ import {
 import { isVariablesPayload, VARIABLES_PAYLOAD_ERROR } from "../helpers/variablesPayload.js";
 import { injectPreviewVariables } from "../helpers/previewVariables.js";
 import {
+  proxyCopyProgress,
   resolveProxy,
+  retryProxyCopy,
   waitForProxy,
   ProxyCapacityError,
   ProxyTranscodeError,
@@ -752,12 +756,17 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
       try {
         // A cached copy settles before any timer; a transcode never holds one of
         // the browser's few connections to this host. 202 until the copy lands.
+        if (c.req.query(PREVIEW_PROXY_RETRY_PARAM) !== undefined) {
+          retryProxyCopy(project.dir, file, proxyVariant, proxyBox);
+        }
         servedPath = await waitForProxy(resolveProxy(project.dir, file, proxyVariant, proxyBox), 0);
       } catch (err) {
         if (err instanceof ProxyWaitTimeoutError) {
+          const progress = proxyCopyProgress(project.dir, file, proxyVariant, proxyBox);
           return c.text("media proxy is being made", 202, {
-            "Retry-After": String(PROXY_PENDING_RETRY_AFTER_SECONDS),
+            "Retry-After": progress === undefined ? String(PROXY_PENDING_RETRY_AFTER_SECONDS) : "1",
             "Cache-Control": "no-store",
+            ...(progress !== undefined && { [PREVIEW_PROXY_PROGRESS_HEADER]: progress.toFixed(3) }),
           });
         }
         if (err instanceof ProxyCapacityError) {

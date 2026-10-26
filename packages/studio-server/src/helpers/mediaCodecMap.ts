@@ -408,7 +408,7 @@ export async function scanProjectMedia(
   const scan: ProjectMediaScan = { codecMap: {}, sourceFacts: {} };
   for (const [pathname, facts] of await probeProjectAssets(projectDir, htmlSources, options)) {
     if (facts?.browserHostile) scan.codecMap[pathname] = facts;
-    if (facts?.source) scan.sourceFacts[pathname] = facts.source;
+    if (facts?.source) scan.sourceFacts[pathname] = { ...facts.source, codec: facts.codecName };
   }
   return scan;
 }

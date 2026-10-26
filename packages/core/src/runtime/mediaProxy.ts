@@ -5,14 +5,18 @@ import { findInjectedRenderFrame } from "./renderFrameSibling";
 import type { RuntimeJson } from "./types";
 import { isVideoElement } from "./domRealm";
 import { swappedElements } from "./proxySrc";
+import { restartPlaybackHealth } from "./playbackHealth";
+import { failedCopyElements, noteCopy, setCopyReportingLevel } from "./previewCopies";
 import { waitForServedProxy } from "./proxyWait";
 import { registerSeekCompletion } from "./adapters/seek-dispatch";
 import {
   formatPreviewProxyBox,
   isHeavyForPreview,
   isPreviewQuality,
+  PREVIEW_QUALITY_LEVELS,
   PREVIEW_PROXY_BOX_PARAM,
   PREVIEW_PROXY_LIGHT_PARAM,
+  PREVIEW_PROXY_RETRY_PARAM,
   quantizePreviewProxyBox,
   scalePreviewProxyBox,
   type PreviewProxyBox,
@@ -73,6 +77,8 @@ function currentSrcValue(el: HTMLMediaElement): string {
 // Below 1, heavy files get lighter copies at the shown box times this level; 1 is the preview as it always was.
 let previewQuality: PreviewQuality = 1;
 const lightElements = new WeakSet<HTMLMediaElement>();
+// Elements whose next ask for a copy tells the server to forget its failure first.
+const retryNext = new WeakSet<HTMLMediaElement>();
 
 // How large the host shows this document, in its CSS pixels per ours (player fit x page zoom).
 // A top-level page shows itself at 1; a framed one waits for its host to say.
@@ -172,15 +178,25 @@ function growOnly(needed: PreviewProxyBox, current: PreviewProxyBox): PreviewPro
 }
 
 function requestBox(el: HTMLMediaElement, copy: BoxedCopy, box: PreviewProxyBox | null): void {
-  const href = appendProxyParam(copy.originalSrc, copy.variant, box, copy.light);
+  const href = appendProxyParam(
+    copy.originalSrc,
+    copy.variant,
+    box,
+    copy.light,
+    retryNext.delete(el),
+  );
   if (pendingUpgrades.get(el) === href) return;
   pendingUpgrades.set(el, href);
   const wanted = () =>
     pendingUpgrades.get(el) === href && el.isConnected && el.getAttribute("src") === copy.href;
-  void waitForServedProxy(href, wanted).then((served) => {
-    if (served && wanted()) loadProxy(el, href, copy.originalSrc, copy.variant, box, copy.light);
-    if (pendingUpgrades.get(el) === href) pendingUpgrades.delete(el);
-  });
+  noteCopy(el, "making");
+  void waitForServedProxy(href, wanted, (fraction) => noteCopy(el, "making", fraction)).then(
+    (served) => {
+      if (wanted()) noteCopy(el, served ? "ready" : "failed");
+      if (served && wanted()) loadProxy(el, href, copy.originalSrc, copy.variant, box, copy.light);
+      if (pendingUpgrades.get(el) === href) pendingUpgrades.delete(el);
+    },
+  );
 }
 
 /** Puts a video that only got a lighter copy back on its original. */
@@ -191,6 +207,7 @@ function restoreOriginal(el: HTMLMediaElement): void {
   }
   lightElements.delete(el);
   evictMediaSyncState(el);
+  restartPlaybackHealth();
   if (original === null) el.removeAttribute("src");
   else el.setAttribute("src", original);
   el.load();
@@ -208,6 +225,7 @@ function loadProxy(
   else boxedElements.delete(el);
   // Sync state measured on the previous file would read the new file's buffering as drift.
   evictMediaSyncState(el);
+  restartPlaybackHealth();
   el.src = href;
   el.load();
 }
@@ -315,11 +333,13 @@ function appendProxyParam(
   variant: string,
   box: PreviewProxyBox | null,
   light = false,
+  retry = false,
 ): string {
   const url = new URL(src, document.baseURI);
   url.searchParams.set(PROXY_QUERY_PARAM, variant);
   if (box) url.searchParams.set(PREVIEW_PROXY_BOX_PARAM, formatPreviewProxyBox(box));
   if (light && box) url.searchParams.set(PREVIEW_PROXY_LIGHT_PARAM, "1");
+  if (retry) url.searchParams.set(PREVIEW_PROXY_RETRY_PARAM, "1");
   return url.href;
 }
 
@@ -382,8 +402,17 @@ async function makeCopy(el: HTMLMediaElement, job: CopyJob, scale: number | null
     if (proxyRequested.get(el) === originalAttr) proxyRequested.delete(el);
     return;
   }
-  const proxiedSrc = appendProxyParam(originalSrc, variant, box, lightFacts !== undefined);
-  const served = await waitForServedProxy(proxiedSrc, live);
+  const proxiedSrc = appendProxyParam(
+    originalSrc,
+    variant,
+    box,
+    lightFacts !== undefined,
+    retryNext.delete(el),
+  );
+  noteCopy(el, "making");
+  const served = await waitForServedProxy(proxiedSrc, live, (fraction) =>
+    noteCopy(el, "making", fraction),
+  );
   if (!live()) {
     if (proxyRequested.get(el) === originalAttr) proxyRequested.delete(el);
     if (lightFacts && el.isConnected && el.getAttribute("src") === originalAttr) {
@@ -392,9 +421,11 @@ async function makeCopy(el: HTMLMediaElement, job: CopyJob, scale: number | null
     return;
   }
   if (!served) {
+    noteCopy(el, "failed");
     emitUnavailableDiagnostic(el, "proxy_playback_failed", originalSrc);
     return;
   }
+  noteCopy(el, "ready");
   swappedElements.set(el, originalAttr);
   if (lightFacts) lightElements.add(el);
   loadProxy(el, proxiedSrc, originalSrc, variant, box, lightFacts !== undefined);
@@ -500,7 +531,64 @@ function applyPreviewQuality(el: HTMLMediaElement): void {
 export function setPreviewQuality(level: number): void {
   if (!isPreviewQuality(level) || level === previewQuality) return;
   previewQuality = level;
+  setCopyReportingLevel(level);
+  restartPlaybackHealth();
   for (const el of document.querySelectorAll("video")) applyPreviewQuality(el);
+}
+
+/** The lower levels at which at least one video would get a lighter copy, by the same rule that makes them. */
+export function levelsWithLighterCopies(): PreviewQuality[] {
+  if (displayScale === null) return [];
+  const sized = [...document.querySelectorAll("video")].flatMap((el) => {
+    const facts = sourceFactsOf(el);
+    const shown = facts && shownBox(el, displayScale ?? 1);
+    return facts && shown ? [{ facts, shown }] : [];
+  });
+  return PREVIEW_QUALITY_LEVELS.filter(
+    (level) =>
+      level < 1 &&
+      sized.some(({ facts, shown }) =>
+        isHeavyForPreview(facts, scalePreviewProxyBox(shown, level)),
+      ),
+  );
+}
+
+/** The video files the composition plays, grouped by what they are, never by name. */
+export function describeVideoSources(): Array<{
+  codec: string;
+  width: number;
+  height: number;
+  bitDepth: number;
+  count: number;
+}> {
+  const groups = new Map<string, ReturnType<typeof describeVideoSources>[number]>();
+  for (const el of document.querySelectorAll("video")) {
+    const key = deriveCodecMapKey(el);
+    const map = window.__HF_MEDIA_CODEC_MAP__;
+    const { width = 0, height = 0, bitDepth = 0, codec: probed } = sourceFactsOf(el) ?? {};
+    const hostile = map && key !== null ? lookupCodecMapEntry(key, map)?.codecName : undefined;
+    const codec = probed ?? hostile ?? "unknown";
+    const id = `${codec}|${width}|${height}|${bitDepth}`;
+    const group = groups.get(id) ?? { codec, width, height, bitDepth, count: 0 };
+    group.count += 1;
+    groups.set(id, group);
+  }
+  return [...groups.values()];
+}
+
+/** Asks again for the copies that failed, telling the server to forget why they did. */
+export function retryPreviewCopies(): void {
+  for (const el of failedCopyElements()) {
+    retryNext.add(el);
+    proxyRequested.delete(el);
+    pendingUpgrades.delete(el);
+    const map = window.__HF_MEDIA_CODEC_MAP__;
+    const key = deriveCodecMapKey(el);
+    const entry = map && key !== null ? lookupCodecMapEntry(key, map) : null;
+    if (boxedElements.has(el) && displayScale !== null) keepSized(el, displayScale);
+    else if (entry?.browserHostile) swapToProxy(el, entry, "reactive");
+    else lightenIfHeavy(el, entry);
+  }
 }
 
 /**

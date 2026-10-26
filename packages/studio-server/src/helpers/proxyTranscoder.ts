@@ -875,6 +875,29 @@ async function transcodeToCache(
   }
 }
 
+export function proxyCopyProgress(
+  projectDir: string,
+  absoluteSourcePath: string,
+  variant: ProxyVariant,
+  box?: PreviewProxyBox,
+): number | undefined {
+  const source = canonicalizeProxySource(projectDir, absoluteSourcePath);
+  const progress = inFlight.get(getCanonicalProxyCachePath(source, variant, box))?.job.lastProgress;
+  return progress?.totalSeconds
+    ? Math.min(1, progress.doneSeconds / progress.totalSeconds)
+    : undefined;
+}
+
+export function retryProxyCopy(
+  projectDir: string,
+  absoluteSourcePath: string,
+  variant: ProxyVariant,
+  box?: PreviewProxyBox,
+): void {
+  const source = canonicalizeProxySource(projectDir, absoluteSourcePath);
+  failedTranscodes.delete(getCanonicalProxyCachePath(source, variant, box));
+}
+
 let proxyActivity = 0;
 
 /** Null while this project has a copy in progress; otherwise a mark that moves when any copy finishes or is refused. */

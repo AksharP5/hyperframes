@@ -1482,6 +1482,42 @@ describe("resolveProxy", () => {
     expect(leftover).toEqual([]);
   });
 
+  it("says how far the copy being made has got, and makes a failed one again when told to retry", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy, proxyCopyProgress, retryProxyCopy } = await loadModule(
+      spawn,
+      FFMPEG_PATH,
+      false,
+      null,
+      undefined,
+      20,
+    );
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "video.mov");
+    writeFileSync(sourcePath, "source-bytes");
+
+    const first = resolveProxy(projectDir, sourcePath).catch((error: unknown) => error);
+    await flush();
+    expect(proxyCopyProgress(projectDir, sourcePath, "h264")).toBeUndefined();
+    calls[0]!.proc.stdout.emit("data", Buffer.from("out_time_us=5000000\n"));
+    expect(proxyCopyProgress(projectDir, sourcePath, "h264")).toBeCloseTo(0.25);
+    fail(calls[0]!, 1, "boom");
+    await first;
+    expect(proxyCopyProgress(projectDir, sourcePath, "h264")).toBeUndefined();
+
+    const stillFailed = resolveProxy(projectDir, sourcePath).catch((error: unknown) => error);
+    await flush();
+    expect(calls).toHaveLength(1);
+    await stillFailed;
+
+    retryProxyCopy(projectDir, sourcePath, "h264");
+    const again = resolveProxy(projectDir, sourcePath);
+    await flush();
+    expect(calls).toHaveLength(2);
+    succeed(calls[1]!);
+    await again;
+  });
+
   it("remembers a failure per cache key: a second call rethrows without respawning ffmpeg", async () => {
     const { spawn, calls } = createSpawnSpy();
     const { resolveProxy, ProxyTranscodeError, clearFailedTranscodesForTest } = await loadModule(

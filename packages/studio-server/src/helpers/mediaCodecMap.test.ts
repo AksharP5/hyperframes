@@ -398,6 +398,8 @@ describe("a lighter copy of a file Chrome can play", () => {
 
     expect(Object.keys(scan.codecMap)).toEqual(["/broll.mov"]);
     expect(Object.keys(scan.sourceFacts).sort()).toEqual(["/broll.mov", "/cam.mp4"]);
+    expect(scan.sourceFacts["/cam.mp4"]?.codec).toBe("h264");
+    expect(scan.sourceFacts["/broll.mov"]?.codec).toBe("hevc");
   });
 });
 

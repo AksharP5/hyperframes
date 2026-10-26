@@ -122,6 +122,12 @@
       "types": "./dist/motionBlurSettings.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./preview-quality": {
+      "source": "./src/previewProxyBox.ts",
+      "runtime": "./dist/previewProxyBox.js",
+      "types": "./dist/previewProxyBox.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./gsap-cdn": {
       "source": "./src/gsapCdn.ts",
       "runtime": "./dist/gsapCdn.js",

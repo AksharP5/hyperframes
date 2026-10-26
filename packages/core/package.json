@@ -134,6 +134,12 @@
       "import": "./src/motionBlurSettings.ts",
       "types": "./src/motionBlurSettings.ts"
     },
+    "./preview-quality": {
+      "bun": "./src/previewProxyBox.ts",
+      "node": "./dist/previewProxyBox.js",
+      "import": "./src/previewProxyBox.ts",
+      "types": "./src/previewProxyBox.ts"
+    },
     "./gsap-cdn": {
       "bun": "./src/gsapCdn.ts",
       "node": "./dist/gsapCdn.js",
@@ -649,6 +655,10 @@
       "./motion-blur-settings": {
         "import": "./dist/motionBlurSettings.js",
         "types": "./dist/motionBlurSettings.d.ts"
+      },
+      "./preview-quality": {
+        "import": "./dist/previewProxyBox.js",
+        "types": "./dist/previewProxyBox.d.ts"
       },
       "./gsap-cdn": {
         "import": "./dist/gsapCdn.js",

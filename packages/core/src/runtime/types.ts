@@ -23,6 +23,8 @@ type RuntimeBridgeControlActionBase =
   | "set-idle-heartbeat"
   | "set-display-scale"
   | "set-preview-quality"
+  | "retry-preview-copies"
+  | "request-preview-facts"
   | "set-root-duration"
   | "set-play-range"
   | "stop-media"
@@ -248,8 +250,58 @@ export type RuntimeGroupLevelsMessage = {
   levels: Array<{ groupId: string; level: number; clipped: boolean }>;
 };
 
+export type RuntimePreviewCopiesMessage = {
+  source: "hf-preview";
+  type: "preview-copies";
+  /** The lighter copies wanted at the current quality; null when none are. */
+  copies: {
+    total: number;
+    ready: number;
+    failed: number;
+    progress: number;
+    error: string | null;
+  } | null;
+};
+
+export type RuntimePreviewHealthMessage = {
+  source: "hf-preview";
+  type: "preview-health";
+  /** How playback went over the last few seconds of play; null while paused, seeking or warming up. */
+  health: {
+    droppedShare: number;
+    seconds: number;
+    choppy: boolean;
+    fps: number;
+    worstFrameMs: number;
+    mode: "play";
+  } | null;
+};
+
+export type RuntimePreviewFactsMessage = {
+  source: "hf-preview";
+  type: "preview-facts";
+  facts: {
+    sceneCount: number;
+    mountedElementCount: number;
+    durationSeconds: number;
+    videos: Array<{
+      codec: string;
+      width: number;
+      height: number;
+      bitDepth: number;
+      count: number;
+    }>;
+    /** The lower levels at which at least one video gets a lighter copy. */
+    lighterAt: number[];
+    copiesReady: boolean;
+  };
+};
+
 export type RuntimeOutboundMessage =
   | RuntimeStateMessage
+  | RuntimePreviewCopiesMessage
+  | RuntimePreviewHealthMessage
+  | RuntimePreviewFactsMessage
   | RuntimeTimelineMessage
   | RuntimeDiagnosticMessage
   | RuntimePickerHoveredMessage
