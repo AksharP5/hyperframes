@@ -484,6 +484,11 @@ export function detectShaderTransitionUsage(html: string): boolean {
   return false;
 }
 
+type SourceProbe = { profile: MediaProbeProfile; fileDuration: number | null } | { error: unknown };
+
+/** One probe per unique source for a whole compile, whatever number of elements point at it. */
+type SourceProbes = Map<string, Promise<SourceProbe>>;
+
 async function resolveMediaDuration(
   src: string,
   mediaStart: number,
@@ -494,6 +499,7 @@ async function resolveMediaDuration(
   elementIdentity: string,
   log?: ProducerLogger,
   urlByAbsentLocalPath?: ReadonlyMap<string, string>,
+  probes?: SourceProbes,
 ): Promise<{ duration: number | null; resolvedPath: string }> {
   let filePath = src;
 
@@ -544,64 +550,62 @@ async function resolveMediaDuration(
     return wrapped;
   };
 
-  return withMediaProbeSlot(async () => {
-    let profile: MediaProbeProfile;
-    try {
-      // Payload sniff (STUDIO-5433): if an authoring bug hands us a text
-      // payload (e.g. an unresolved nested-composition preview URL), fail with
-      // a typed NotMediaPayloadError instead of letting ffprobe emit an opaque
-      // `[mov,mp4,...] moov atom not found` that routes as a codec bug.
-      // Deliberately inside this try: the audio/video split below is the
-      // contract, so a bad audio src must still degrade to duration 0 rather
-      // than take down the whole render.
-      await assertMediaPayload(filePath, elementIdentity);
-      profile = await probeMediaProfile(filePath);
-    } catch (error) {
-      // Preserve the historical split: invalid video sources surface their
-      // probe failure, while invalid/unreadable audio sources resolve to zero
-      // duration and are excluded by the compiler.
-      if (tagName !== "video") {
-        if (error instanceof NotMediaPayloadError) {
-          // Dropping it silently is what let STUDIO-5433 resurface downstream
-          // as `prepare/ffmpeg_failed` with owner "system".
-          log?.warn(
-            `[compile] Audio "${elementIdentity}" (${src}) is a text document, not a media ` +
-              "file, so the element is dropped from the render. Point it at a rendered media file.",
-          );
+  const probe = () =>
+    withMediaProbeSlot(async (): Promise<SourceProbe> => {
+      try {
+        // Payload sniff (STUDIO-5433): if an authoring bug hands us a text
+        // payload (e.g. an unresolved nested-composition preview URL), fail with
+        // a typed NotMediaPayloadError instead of letting ffprobe emit an opaque
+        // `[mov,mp4,...] moov atom not found` that routes as a codec bug.
+        await assertMediaPayload(filePath, elementIdentity);
+        const profile = await probeMediaProfile(filePath);
+        if (tagName === "video") {
+          return { profile, fileDuration: (await extractMediaMetadata(filePath)).durationSeconds };
         }
-        return { duration: null, resolvedPath: filePath };
-      }
-      throw withSrcContext(error);
-    }
-    assertAssetMediaTypeProfile(tagName === "video" ? "video" : "audio", profile, elementIdentity);
-
-    let metadata: { durationSeconds: number };
-    if (tagName === "video") {
-      try {
-        metadata = await extractMediaMetadata(filePath);
+        try {
+          return { profile, fileDuration: (await extractAudioMetadata(filePath)).durationSeconds };
+        } catch {
+          // Source file has no audio stream (e.g. a silent video used as an audio src).
+          // Duration 0 excludes the element from the composition, as missing files do.
+          return { profile, fileDuration: null };
+        }
       } catch (error) {
-        throw withSrcContext(error);
+        return { error };
       }
-    } else {
-      try {
-        metadata = await extractAudioMetadata(filePath);
-      } catch {
-        // Source file has no audio stream (e.g. a silent video used as an audio src).
-        // Return duration 0 so the element is excluded from the composition gracefully,
-        // matching how missing files and failed downloads are already handled above.
-        return { duration: null, resolvedPath: filePath };
+    });
+  const key = `${tagName}\0${filePath}`;
+  let probed = probes?.get(key);
+  if (!probed) {
+    probed = probe();
+    probes?.set(key, probed);
+  }
+  const outcome = await probed;
+  if ("error" in outcome) {
+    // Invalid video sources surface their probe failure; invalid or unreadable
+    // audio sources resolve to zero duration and are excluded by the compiler.
+    if (tagName !== "video") {
+      if (outcome.error instanceof NotMediaPayloadError) {
+        log?.warn(
+          `[compile] Audio "${elementIdentity}" (${src}) is a text document, not a media ` +
+            "file, so the element is dropped from the render. Point it at a rendered media file.",
+        );
       }
+      return { duration: null, resolvedPath: filePath };
     }
-
-    const fileDuration = metadata.durationSeconds;
-    const duration = resolveNaturalMediaTimelineDurationFromValues(
-      fileDuration,
-      mediaStart,
-      playbackRate,
-    );
-
-    return { duration, resolvedPath: filePath };
-  });
+    throw withSrcContext(outcome.error);
+  }
+  assertAssetMediaTypeProfile(
+    tagName === "video" ? "video" : "audio",
+    outcome.profile,
+    elementIdentity,
+  );
+  if (outcome.fileDuration === null) return { duration: null, resolvedPath: filePath };
+  const duration = resolveNaturalMediaTimelineDurationFromValues(
+    outcome.fileDuration,
+    mediaStart,
+    playbackRate,
+  );
+  return { duration, resolvedPath: filePath };
 }
 
 /**
@@ -631,6 +635,7 @@ async function compileHtmlFile(
   downloadDir: string,
   log?: ProducerLogger,
   urlByAbsentLocalPath?: ReadonlyMap<string, string>,
+  probes?: SourceProbes,
 ): Promise<{ html: string; unresolvedCompositions: UnresolvedElement[] }> {
   const { html: staticCompiled, unresolved } = compileTimingAttrs(html);
 
@@ -653,6 +658,7 @@ async function compileHtmlFile(
         el.id,
         log,
         urlByAbsentLocalPath,
+        probes,
       ).then(({ duration }) => ({ id: el.id, duration })),
     ),
   );
@@ -681,6 +687,8 @@ async function compileHtmlFile(
           el.tagName,
           el.id,
           log,
+          undefined,
+          probes,
         );
         return { id: el.id, tagName: el.tagName, duration: el.duration, maxDuration, src: el.src! };
       }),
@@ -749,6 +757,7 @@ async function parseSubCompositions(
   downloadDir: string,
   visited: Set<string> = new Set(),
   urlByAbsentLocalPath?: ReadonlyMap<string, string>,
+  probes?: SourceProbes,
 ): Promise<{ subCompositions: Map<string, string> }> {
   const subCompositions = new Map<string, string>();
 
@@ -795,6 +804,7 @@ async function parseSubCompositions(
         downloadDir,
         undefined,
         urlByAbsentLocalPath,
+        probes,
       );
 
       const nested = await parseSubCompositions(
@@ -803,6 +813,7 @@ async function parseSubCompositions(
         downloadDir,
         item.nestedVisited,
         urlByAbsentLocalPath,
+        probes,
       );
 
       return {
@@ -2046,12 +2057,14 @@ export async function compileForRender(
   // start.
   assertSubCompositionsUsable(rawHtml, projectDir);
 
+  const probes: SourceProbes = new Map();
   const { html: compiledHtml, unresolvedCompositions } = await compileHtmlFile(
     rawHtml,
     projectDir,
     downloadDir,
     options.log,
     options.urlByAbsentLocalPath,
+    probes,
   );
 
   // Compile each referenced sub-composition so the inliner can hoist it.
@@ -2061,6 +2074,7 @@ export async function compileForRender(
     downloadDir,
     undefined,
     options.urlByAbsentLocalPath,
+    probes,
   );
 
   // Ensure the HTML is a full document before inlining sub-compositions.
@@ -2234,9 +2248,12 @@ export async function compileForRender(
   // ffprobe subprocesses and should not block compilation since they only produce warnings.
   // The two probes run in sequence rather than in parallel: the keyframe analysis needs
   // the video stream's own duration to classify a single-keyframe (single-GOP) file.
+  const advised = new Set<string>();
   for (const video of videos) {
     if (isHttpUrl(video.src)) continue;
     const videoPath = resolve(projectDir, video.src);
+    if (advised.has(videoPath)) continue;
+    advised.add(videoPath);
     const reencode = `ffmpeg -i "${video.src}" -c:v libx264 -r 30 -g 30 -keyint_min 30 -movflags +faststart -c:a copy output.mp4`;
     (async () => {
       const metadata = await withMediaProbeSlot(() => extractMediaMetadata(videoPath));
