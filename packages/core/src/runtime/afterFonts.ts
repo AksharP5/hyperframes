@@ -10,8 +10,11 @@ export const FONT_WAIT_TIMEOUT_MS = 5000;
 export async function waitForFonts(): Promise<void> {
   const fonts = document.fonts;
   if (!fonts) return;
-  // Layout starts loading the faces laid-out text uses; with none loading, ready resolves at once.
+  // Layout starts the faces laid-out text uses; load() starts the rest so ready covers them too.
   void document.body?.offsetHeight;
+  for (const face of Array.from(fonts)) {
+    if (face.status === "unloaded") void face.load().catch(() => {});
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = await Promise.race([
     fonts.ready.then(() => false),
