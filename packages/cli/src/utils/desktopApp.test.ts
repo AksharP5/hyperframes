@@ -24,7 +24,7 @@ import {
 
 // The live path (ready) is what ships once the app takes handed-over folders; CI exercises it here.
 const LIVE = { ready: true, platform: "darwin" as const, env: {}, installed: () => true };
-const MAC_DOWNLOAD = "https://hyperframes.dev/studio/download";
+const MAC_DOWNLOAD = "https://hyperframes.dev/studio/download?src=cli";
 const MAC_HINT = `Keep editing by chatting with Framey in the HyperFrames desktop app → ${MAC_DOWNLOAD}`;
 const FILM = resolve("films", "a");
 const never = () => {
@@ -143,7 +143,7 @@ describe("openInDesktop on Windows", () => {
     expect(missing).toEqual({
       opened: false,
       reason: "not-installed",
-      downloadUrl: `${MAC_DOWNLOAD}?os=windows`,
+      downloadUrl: "https://hyperframes.dev/studio/download?os=windows&src=cli",
     });
     const failed = openInDesktop(FILM, { ...WIN, exists: () => true, launch: () => false });
     expect(failed).toMatchObject({ opened: false, reason: "open-failed" });
@@ -187,7 +187,7 @@ describe("openInDesktop on Linux", () => {
     const gone = { ...LINUX, read: (p: string) => moved[p] ?? null, exists: () => false };
     expect(openInDesktop(FILM, { ...gone, launch: never })).toMatchObject({
       reason: "not-installed",
-      downloadUrl: `${MAC_DOWNLOAD}?os=linux`,
+      downloadUrl: "https://hyperframes.dev/studio/download?os=linux&src=cli",
     });
     expect(openInDesktop(FILM, { ...LINUX, read: () => "{", launch: never })).toMatchObject({
       reason: "not-installed",
@@ -329,9 +329,9 @@ describe("desktopHint", () => {
 
   it("offers the Linux and Windows builds there, and nothing where there is no build", () => {
     expect(desktopHint(process.cwd(), { env: {}, platform: "linux", installed: false })).toBe(
-      `Keep editing by chatting with Framey in the HyperFrames desktop app → ${MAC_DOWNLOAD}?os=linux`,
+      `Keep editing by chatting with Framey in the HyperFrames desktop app → https://hyperframes.dev/studio/download?os=linux&src=cli`,
     );
-    const windowsHint = `Keep editing by chatting with Framey in the HyperFrames desktop app → ${MAC_DOWNLOAD}?os=windows`;
+    const windowsHint = `Keep editing by chatting with Framey in the HyperFrames desktop app → https://hyperframes.dev/studio/download?os=windows&src=cli`;
     expect(desktopHint(process.cwd(), { env: {}, platform: "win32", installed: false })).toBe(
       windowsHint,
     );

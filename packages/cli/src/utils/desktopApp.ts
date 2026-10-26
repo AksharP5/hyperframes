@@ -18,9 +18,19 @@ const DOWNLOADS: Partial<Record<NodeJS.Platform, string>> = {
   win32: `${STUDIO_PAGE}/download?os=windows`,
 };
 
-/** This machine's build of the app; null where there is none. */
-export const desktopDownloadUrl = (platform = process.platform): string | null =>
-  DOWNLOADS[platform] ?? null;
+export type DownloadSource = "cli" | "browser-editor";
+
+const tagged = (url: string, src: DownloadSource) =>
+  `${url}${url.includes("?") ? "&" : "?"}src=${src}`;
+
+/** This machine's build of the app, tagged with where the link is shown; null where there is none. */
+export const desktopDownloadUrl = (
+  platform = process.platform,
+  src: DownloadSource = "cli",
+): string | null => {
+  const url = DOWNLOADS[platform];
+  return url ? tagged(url, src) : null;
+};
 
 export const downloadHint = (url: string): string =>
   `Keep editing by chatting with Framey in the HyperFrames desktop app → ${url}`;
@@ -161,9 +171,11 @@ export function openInDesktop(
     installed = () => desktopInstalled({ platform }),
     env = process.env,
     cta,
+    src = "cli",
     ...where
   }: AppLookup & {
     cta?: string;
+    src?: DownloadSource;
     ready?: boolean;
     open?: (bundleId: string, dir: string) => boolean;
     launch?: (executable: string, dir: string) => boolean;
@@ -175,7 +187,7 @@ export function openInDesktop(
   ): DesktopOpenResult => ({
     opened: false,
     reason,
-    downloadUrl: desktopDownloadUrl(platform) ?? STUDIO_PAGE,
+    downloadUrl: desktopDownloadUrl(platform, src) ?? STUDIO_PAGE,
   });
   const opened = (canary: boolean): DesktopOpenResult => {
     if (cta) writeRecord(dir, DESKTOP_CTA_RECORD, JSON.stringify({ cta, at: Date.now() }));
