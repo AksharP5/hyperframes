@@ -57,6 +57,7 @@ Builds `packages/aws-lambda/dist/handler.zip` and SAM-deploys the stack (Lambda 
 | `--chrome-source` | `sparticuz`                     | `sparticuz` or `chrome-headless-shell` |
 | `--memory`        | `10240`                         | Lambda memory in MB                    |
 | `--skip-build`    | off                             | Reuse existing `handler.zip`           |
+| `--no-warm`       | warm                            | Skip the warm-up call after deploy     |
 
 ## Upload a reusable site
 
