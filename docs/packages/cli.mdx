@@ -1058,7 +1058,6 @@ cover every finding from the full check.
 | `--tolerance`                                | Allowed overflow in px before reporting (default 2)                                                                         |
 | `--timeout`                                  | Render-ready budget in ms; also raises page navigation above its 10s floor (default 3000)                                   |
 | `--no-contrast`                              | Skip the WCAG pass while iterating                                                                                         |
-| `--skip-contrast-in-motion`                  | Leave out contrast failures measured mid-animation (see below); also `HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION=1`         |
 | `--strict`                                   | Exit non-zero on warnings too (default: errors only)                                                                        |
 | `--caption-zone "<x0=..;y0=..;x1=..;y1=..>"` | Opt-in band gate. Flags a text element's DOM box that overlaps the fractional band. Optional `severity` and `seek`.         |
 | `--frame-check`                              | Opt-in out-of-frame detection for `img`, `svg`, `video`, and `canvas`                                                       |
@@ -1098,9 +1097,10 @@ Contrast failures are errors, and each one reports the sampled foreground and
 background colours, the measured ratio against the required one, and a
 compliant colour you could use instead.
 
-`--skip-contrast-in-motion`, or `HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION=1` in the
-environment, leaves out a contrast failure measured while a GSAP tween on the text
-or an ancestor is running, or while the text's opacity multiplied up its ancestors
+An agent harness can turn on `skipContrastInMotion` in the `check-review`
+capability of [`HF_TOOL_CONTEXT`](/developers/harness-tool-context). It leaves
+out a contrast failure measured while a GSAP tween on the text or an ancestor
+is running, or while the text's opacity multiplied up its ancestors
 is below 1. The failure is not reported, and the counts and `ok` leave it out.
 Repeating tweens, tweens inside infinitely repeating timelines, and tweens of
 4s or longer, such as a slow camera drift, do not count as motion. The opacity

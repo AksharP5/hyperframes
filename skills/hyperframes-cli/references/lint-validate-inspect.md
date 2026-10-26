@@ -38,7 +38,6 @@ npx hyperframes check --at-transitions   # also sample every tween start/end bou
 npx hyperframes check --tolerance 4      # allowed overflow px before reporting (default 2)
 npx hyperframes check --timeout 30000    # initial render-ready + navigation minimum in ms (defaults: 3000 / 10000)
 npx hyperframes check --no-contrast      # skip the WCAG audit while iterating
-npx hyperframes check --skip-contrast-in-motion  # leave out contrast failures measured mid-animation (or HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION=1)
 npx hyperframes check --strict           # exit non-zero on warnings too (default: only errors)
 ```
 

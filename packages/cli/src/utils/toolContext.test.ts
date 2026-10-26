@@ -47,6 +47,16 @@ describe("readToolContext", () => {
       readToolContext(context({ events: { transport: { type: "http", path: "/x" } } })),
     ).toEqual({});
   });
+
+  it("reads check-review switches as booleans that default to false", () => {
+    expect(
+      readToolContext(context({ "check-review": { skipContrastInMotion: true, other: 1 } })),
+    ).toEqual({ checkReview: { skipContrastInMotion: true } });
+    expect(readToolContext(context({ "check-review": { skipContrastInMotion: 1 } }))).toEqual({
+      checkReview: { skipContrastInMotion: false },
+    });
+    expect(readToolContext(context({ "check-review": true }))).toEqual({});
+  });
 });
 
 describe("reportArtifacts", () => {

@@ -11,7 +11,7 @@ import {
 } from "@hyperframes/studio-server/history";
 import { formatFindingTimes } from "../utils/checkFindings.js";
 import { withProjectLock } from "../utils/projectLock.js";
-import { reportArtifacts } from "../utils/toolContext.js";
+import { readToolContext, reportArtifacts, type ToolContext } from "../utils/toolContext.js";
 import { defineCommand, parseArgs } from "citty";
 import type { ArgsDef } from "citty";
 import type { Example } from "./_examples.js";
@@ -37,7 +37,6 @@ import {
 } from "../utils/checkPipeline.js";
 import type { CaptionZoneOptions, FrameCheckOptions, LayoutOptions } from "../utils/checkTypes.js";
 import { resolveLocalBrowserGpuMode } from "../browser/gpuPolicy.js";
-import { envFlagEnabled } from "../utils/attendedTerminal.js";
 import { preResolveHostileMediaProxies, type PreparedMediaFile } from "../utils/checkBrowser.js";
 
 export const examples: Example[] = [
@@ -216,12 +215,6 @@ const CHECK_COMMAND_ARGS = {
     description: "Run the WCAG AA contrast pass (enabled by default)",
     default: true,
   },
-  "skip-contrast-in-motion": {
-    type: "boolean",
-    description:
-      "Leave out contrast failures measured while a GSAP tween moves the text or an ancestor, or at partial opacity (also HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION=1)",
-    default: false,
-  },
   strict: {
     type: "boolean",
     description: "Exit non-zero on warnings too",
@@ -382,6 +375,10 @@ async function runPrepareMedia(
   setCommandExitCode(failed.length === 0 ? 0 : 1);
 }
 
+function checkReview(): ToolContext["checkReview"] {
+  return readToolContext().checkReview;
+}
+
 function parseCheckOptions(args: Record<string, unknown>): CheckOptions {
   const maxTransitionSamples = positiveInteger(args["max-transition-samples"], 0);
   return {
@@ -396,10 +393,7 @@ function parseCheckOptions(args: Record<string, unknown>): CheckOptions {
     tolerance: nonNegativeNumber(args.tolerance, DEFAULT_CHECK_OPTIONS.tolerance),
     timeout: Math.max(500, positiveInteger(args.timeout, DEFAULT_CHECK_OPTIONS.timeout)),
     contrast: args.contrast !== false,
-    ...(args["skip-contrast-in-motion"] === true ||
-    envFlagEnabled("HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION")
-      ? { skipContrastInMotion: true }
-      : {}),
+    ...(checkReview()?.skipContrastInMotion ? { skipContrastInMotion: true } : {}),
     strict: args.strict === true,
     snapshots: args.snapshots === true,
     captionZone: parseCaptionZone(args["caption-zone"]),

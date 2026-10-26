@@ -453,18 +453,19 @@ describe("skip contrast in motion", () => {
     vi.unstubAllEnvs();
   });
 
-  it("is off unless the flag or the environment turns it on", async () => {
-    vi.stubEnv("HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION", "");
+  it("is off unless HF_TOOL_CONTEXT's check-review capability turns it on", async () => {
+    const review = (value: unknown) =>
+      vi.stubEnv(
+        "HF_TOOL_CONTEXT",
+        JSON.stringify({ version: 1, capabilities: { "check-review": value } }),
+      );
+    vi.stubEnv("HF_TOOL_CONTEXT", "");
     expect(await parsedOptions([])).not.toHaveProperty("skipContrastInMotion");
-    expect(await parsedOptions(["--skip-contrast-in-motion"])).toMatchObject({
-      skipContrastInMotion: true,
-    });
-    vi.stubEnv("HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION", "1");
+    review({ skipContrastInMotion: true });
     expect(await parsedOptions([])).toMatchObject({ skipContrastInMotion: true });
-    expect(await parsedOptions(["--no-skip-contrast-in-motion"])).toMatchObject({
-      skipContrastInMotion: true,
-    });
-    vi.stubEnv("HYPERFRAMES_CHECK_SKIP_CONTRAST_IN_MOTION", "0");
+    review({ skipContrastInMotion: "1" });
+    expect(await parsedOptions([])).not.toHaveProperty("skipContrastInMotion");
+    review({});
     expect(await parsedOptions([])).not.toHaveProperty("skipContrastInMotion");
   });
 

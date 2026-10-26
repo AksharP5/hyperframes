@@ -77,6 +77,20 @@ id, and says to delete it to continue. The lock is the file `.hyperframes/projec
 Choose `waitMs` below your tool call's own timeout, so a wait ends in the CLI's message rather than
 the harness killing the call.
 
+## `check-review`: review switches for `check`
+
+```json
+{ "skipContrastInMotion": true }
+```
+
+Each field is a boolean and defaults to `false`; a value that is not `true` is
+off, and unknown fields are ignored. Without the capability, `check` output is
+the same as in a terminal.
+
+| Field | What it does |
+| --- | --- |
+| `skipContrastInMotion` | Leaves out contrast failures measured while a GSAP tween moves the text or an ancestor, or while the text is partly transparent (see [check](/packages/cli#check)). Counts, `ok` and persistence leave them out too. |
+
 ## Hooks that run code
 
 Running your own command before or after a CLI command is not a `HF_TOOL_CONTEXT` capability and
