@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { mediaElementTime } from "./mediaClock";
 import {
   isRenderFrameVideo,
   preloadMedia,
@@ -152,13 +153,13 @@ describe("preparing upcoming video playback", () => {
     const element = video();
     prepareUpcomingMedia(element, () => true);
     element.dispatchEvent(new Event("loadedmetadata"));
-    expect(element.currentTime).toBe(6);
+    expect(element.currentTime).toBe(mediaElementTime(6));
     element.currentTime = 0;
     releaseMedia(element);
 
     prepareUpcomingMedia(element, () => true);
     element.dispatchEvent(new Event("loadedmetadata"));
-    expect(element.currentTime).toBe(6);
+    expect(element.currentTime).toBe(mediaElementTime(6));
     element.remove();
   });
 
@@ -176,7 +177,7 @@ describe("preparing upcoming video playback", () => {
     prepareUpcomingMedia(element, () => true);
     element.setAttribute("data-media-start", "8");
     element.dispatchEvent(new Event("loadedmetadata"));
-    expect(element.currentTime).toBe(8);
+    expect(element.currentTime).toBe(mediaElementTime(8));
     element.remove();
   });
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { mediaElementTime } from "./mediaClock";
 import { syncRuntimeMedia, type RuntimeMediaClip } from "./media";
 
 function fixture(overrides: Partial<RuntimeMediaClip> = {}, tag = "video") {
@@ -43,7 +44,7 @@ describe("hidden incoming video preparation", () => {
     tick(0);
     expect(seek).not.toHaveBeenCalled();
     tick(2.5);
-    expect(el.currentTime).toBe(8);
+    expect(el.currentTime).toBe(mediaElementTime(8));
     expect(el.play).not.toHaveBeenCalled();
     tick(3);
     tick(4);
@@ -62,7 +63,7 @@ describe("hidden incoming video preparation", () => {
     expect(seek).not.toHaveBeenCalled();
     Object.defineProperty(el, "seeking", { value: false, configurable: true });
     tick(2.7);
-    expect(el.currentTime).toBe(8);
+    expect(el.currentTime).toBe(mediaElementTime(8));
   });
 
   it.each([
@@ -72,7 +73,7 @@ describe("hidden incoming video preparation", () => {
   ])("prepares the activation source position for %j", ({ expected, ...fields }) => {
     const { el, seek, tick } = fixture(fields);
     tick(3);
-    expect(el.currentTime).toBe(expected);
+    expect(el.currentTime).toBe(mediaElementTime(expected));
     tick(4);
     expect(seek).toHaveBeenCalledTimes(1);
   });
@@ -80,7 +81,7 @@ describe("hidden incoming video preparation", () => {
   it("uses wall-time lookahead at a faster transport rate", () => {
     const { el, tick } = fixture();
     tick(1, true, 2);
-    expect(el.currentTime).toBe(8);
+    expect(el.currentTime).toBe(mediaElementTime(8));
   });
 
   it.each(["audio", "paused", "past", "export", "injected", "playing", "disconnected"])(

@@ -1,5 +1,6 @@
 import { swallow } from "./diagnostics";
 import { isClipVisibleAt, isInClipWindow } from "./clipWindow";
+import { mediaElementTime } from "./mediaClock";
 import { sameInstant } from "../clipFacts";
 import { interpolateVolumeGain, type VolumeKeyframe } from "./mediaVolumeEnvelope.js";
 import { elementVolumeLaneGain } from "./audioAutomationVolume.js";
@@ -304,7 +305,7 @@ function prepareUpcomingVideo(
   try {
     // A trimmed video exposed during its in-point seek has no current frame at the cut.
     // Hidden preparation must not hold the visible-frame seek barrier.
-    el.currentTime = target;
+    el.currentTime = mediaElementTime(target);
   } catch (err) {
     swallow("runtime.media.preseek", err);
   }
@@ -647,7 +648,7 @@ export function syncRuntimeMedia(params: {
         const skipForInjectedVideo = el.tagName === "VIDEO" && !!findInjectedRenderFrame(el);
         if (!skipForInjectedVideo) {
           try {
-            el.currentTime = relTime;
+            el.currentTime = mediaElementTime(relTime);
           } catch (err) {
             swallow("runtime.media.site2", err);
           }
@@ -655,7 +656,7 @@ export function syncRuntimeMedia(params: {
             seekLoadRetried.add(el);
             el.load();
             try {
-              el.currentTime = relTime;
+              el.currentTime = mediaElementTime(relTime);
             } catch (err) {
               swallow("runtime.media.site3", err);
             }

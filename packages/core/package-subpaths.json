@@ -386,6 +386,12 @@
       "types": "./dist/runtime/clipWindow.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./runtime/media-clock": {
+      "source": "./src/runtime/mediaClock.ts",
+      "runtime": "./dist/runtime/mediaClock.js",
+      "types": "./dist/runtime/mediaClock.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./runtime/clip-reveal": {
       "source": "./src/runtime/clipReveal.ts",
       "runtime": "./dist/runtime/clipReveal.js",

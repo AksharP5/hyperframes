@@ -41,6 +41,7 @@ import {
 } from "../colorLuts";
 import { copyMediaVisualStyles } from "../inline-scripts/parityContract";
 import { readVariablesForElement } from "./variableScope";
+import { mediaElementTime } from "./mediaClock";
 import { swallow } from "./diagnostics";
 import { createRecordFilter } from "./mutationRecords";
 import { findInjectedRenderFrame } from "./renderFrameSibling";
@@ -4254,7 +4255,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
       element.pause();
       element.loop = loop;
       element.muted = muted;
-      element.currentTime = time;
+      element.currentTime = mediaElementTime(time);
     };
   };
 

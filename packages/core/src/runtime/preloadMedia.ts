@@ -3,6 +3,7 @@ import { createRuntimeStartTimeResolver } from "./startResolver";
 import { readMediaRenderId } from "./renderFrameSibling";
 import { defersMedia } from "./timedClipHide";
 import { swallow } from "./diagnostics";
+import { mediaElementTime } from "./mediaClock";
 
 type PreloadableMedia = Pick<
   HTMLMediaElement,
@@ -39,7 +40,7 @@ export function prepareUpcomingMedia(media: HTMLMediaElement, isUpcoming: () => 
     const start = readMediaStart(media);
     if (Math.abs(media.currentTime - start) <= 0.02) return;
     try {
-      media.currentTime = start;
+      media.currentTime = mediaElementTime(start);
     } catch (error) {
       swallow("runtime.preload.playbackStart", error);
     }

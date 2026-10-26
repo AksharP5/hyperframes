@@ -29,6 +29,7 @@ import { copiesReady } from "./previewCopies";
 import { installRuntimeControlBridge, postRuntimeMessage, setRuntimeProtocolFps } from "./bridge";
 import { instantTolerance } from "../clipFacts";
 import { isInClipWindow } from "./clipWindow";
+import { mediaElementTime } from "./mediaClock";
 import {
   CLIP_HIDDEN_ATTR,
   revealTimedClipsAfterFirstPass,
@@ -5720,7 +5721,7 @@ export function initSandboxRuntimeModular(): void {
       // A seek flushes the decoder even when it lands where the video already is.
       if (Math.abs(clip.el.currentTime - target) <= 0.001) continue;
       try {
-        clip.el.currentTime = target;
+        clip.el.currentTime = mediaElementTime(target);
       } catch {
         // ignore seek restrictions
       }

@@ -1,4 +1,5 @@
 import { afterEach, describe, it, expect } from "vitest";
+import { mediaElementTime } from "@hyperframes/core/runtime/media-clock";
 import { ParentMediaManager, type ProxyEntry } from "./parent-media";
 
 // A fake media element whose paused state is driven by play()/pause() stubs.
@@ -132,7 +133,7 @@ describe("ParentMediaManager audio-src proxy lifecycle", () => {
     mgr.scrubAll(2); // playhead at 2s
 
     // in-window proxy: positioned at rel time and AUDIBLE (the point of scrub-audio)
-    expect(inWin.currentTime).toBe(2);
+    expect(inWin.currentTime).toBe(mediaElementTime(2));
     expect(inWin.paused).toBe(false);
     // out-of-window proxy: paused, not blipped
     expect(outWin.paused).toBe(true);

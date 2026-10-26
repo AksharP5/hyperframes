@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { mediaElementTime } from "./mediaClock";
 import { initSandboxRuntimeModular } from "./init";
 import { createMockTimeline, resetRuntimeFixtureDom } from "./runtimeSeekFixture.test-helpers";
 
@@ -45,7 +46,7 @@ it("prepares a hidden video when playback enters its lookahead, after metadata a
   Object.defineProperty(video, "readyState", { value: 4, configurable: true });
   step();
   expect(video.style.visibility).toBe("hidden");
-  expect(video.currentTime).toBe(8);
+  expect(video.currentTime).toBe(mediaElementTime(8));
   expect(play).not.toHaveBeenCalled();
   for (let i = 0; i < 11; i++) step();
   expect(video.style.visibility).toBe("visible");

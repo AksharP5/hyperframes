@@ -1,5 +1,6 @@
 // fallow-ignore-file code-duplication
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mediaElementTime } from "./mediaClock";
 import {
   HF_COLOR_GRADING_ATTR,
   HF_COLOR_GRADING_EFFECT_KEYS,
@@ -494,7 +495,7 @@ describe("createColorGradingRuntime", () => {
     video.currentTime = 6;
     stop?.();
     expect(pause).toHaveBeenCalledTimes(1);
-    expect(video.currentTime).toBe(3.25);
+    expect(video.currentTime).toBe(mediaElementTime(3.25));
     expect(video.loop).toBe(false);
     expect(video.muted).toBe(false);
   });

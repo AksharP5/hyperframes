@@ -4317,6 +4317,14 @@ describe("getFrameAtTime — IEEE 754 boundary precision", () => {
     expect(frame).toBe("frame-7.jpg");
   });
 
+  it("picks the frame the preview shows when a clip starts a hair after a frame instant", () => {
+    // 449/30 written with six decimals starts the clip a third of a microsecond late. The preview's
+    // <video> still shows the take's second frame at output frame 450, so the render must too.
+    const extracted = makeExtracted(30, 100);
+    expect(getFrameAtTime(extracted, 450 / 30, 14.966667, false, 4.3)).toBe("frame-1.jpg");
+    expect(getFrameAtTime(extracted, 460 / 30, 14.966667, false, 4.3)).toBe("frame-11.jpg");
+  });
+
   it("mediaStart does not offset frame index (extractor handles trim via -ss)", () => {
     const extracted = makeExtracted(25, 100);
     const frame = getFrameAtTime(extracted, 0, 0, false, 1.0);

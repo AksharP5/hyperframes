@@ -12,6 +12,7 @@
 import { selectMediaObserverTargets } from "./mediaObserverScope.js";
 import { isRealmElement, isRealmHtmlMediaElement } from "./media-element-guards.js";
 import { isInClipWindow } from "@hyperframes/core/runtime/clip-window";
+import { mediaElementTime } from "@hyperframes/core/runtime/media-clock";
 import { readClipTiming } from "@hyperframes/core/composition-contract";
 
 /** Minimum absolute drift before a currentTime correction is attempted. */
@@ -195,7 +196,8 @@ export class ParentMediaManager {
       // Re-read live bounds so a trim/move just before a paused scrub gates and
       // positions against the current clip window, not the adopt-time one.
       this._refreshEntryBounds(m);
-      if (this._inWindow(m, timeInSeconds)) m.el.currentTime = timeInSeconds - m.start;
+      if (this._inWindow(m, timeInSeconds))
+        m.el.currentTime = mediaElementTime(timeInSeconds - m.start);
     }
   }
 
@@ -210,7 +212,7 @@ export class ParentMediaManager {
     for (const m of this._entries) {
       this._refreshEntryBounds(m);
       if (this._inWindow(m, timeInSeconds)) {
-        m.el.currentTime = timeInSeconds - m.start;
+        m.el.currentTime = mediaElementTime(timeInSeconds - m.start);
         this._playEntry(m);
       } else if (!m.el.paused) {
         m.el.pause();
@@ -233,7 +235,7 @@ export class ParentMediaManager {
       if (Math.abs(m.el.currentTime - relTime) > MIRROR_DRIFT_THRESHOLD_SECONDS) {
         m.driftSamples += 1;
         if (force || m.driftSamples >= MIRROR_REQUIRED_CONSECUTIVE_DRIFT_SAMPLES) {
-          m.el.currentTime = relTime;
+          m.el.currentTime = mediaElementTime(relTime);
           m.driftSamples = 0;
         }
       } else {

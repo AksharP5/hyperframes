@@ -30,6 +30,7 @@ import {
   exportClipWindow,
   hasClipStarted,
   isInClipWindow,
+  mediaElementTime,
   parseStrictFiniteTimingNumber,
   readMediaStart,
   toFps,
@@ -2717,9 +2718,9 @@ function getFrameIndexAtTime(
     const cycle = Math.max(0, resolvePlayableVideoDuration(extracted.metadata) - mediaStart);
     if (cycle > 0 && sourceTime >= cycle) sourceTime %= cycle;
   }
-  // Add epsilon before flooring to avoid IEEE 754 boundary errors where
-  // e.g. 0.28 * 25 === 6.999999999999999 instead of 7.
-  const frameIndex = Math.floor(sourceTime * extracted.fps + 1e-9);
+  // The frame the preview's <video> shows at this source time, so render and preview pick the same one.
+  const shownTime = mediaElementTime(mediaStart + sourceTime) - mediaStart;
+  const frameIndex = Math.floor(shownTime * extracted.fps);
   if (frameIndex < 0 || extracted.totalFrames <= 0) return null;
   if (
     isVideoHiddenBeforeStreamStart(
