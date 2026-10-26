@@ -22,6 +22,7 @@ type RuntimeBridgeControlActionBase =
   | "set-web-audio-media-disabled"
   | "set-idle-heartbeat"
   | "set-display-scale"
+  | "set-preview-quality"
   | "set-root-duration"
   | "set-play-range"
   | "stop-media"
@@ -41,6 +42,7 @@ type RuntimeBridgeControlMessageBase = {
   disabled?: boolean;
   slow?: boolean;
   scale?: number;
+  level?: number;
   playbackRate?: number;
   target?: HfColorGradingTarget | string | null;
   grading?: RuntimeJson;

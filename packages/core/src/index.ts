@@ -268,11 +268,20 @@ export {
   type ToneMapSourceColour,
 } from "./hdrToneMap";
 export {
+  HEAVY_BITRATE,
+  HEAVY_PIXEL_SHARE,
   PREVIEW_PROXY_BOX_PARAM,
+  PREVIEW_PROXY_LIGHT_PARAM,
+  PREVIEW_QUALITY_LEVELS,
   formatPreviewProxyBox,
+  isHeavyForPreview,
+  isPreviewQuality,
   parsePreviewProxyBox,
   quantizePreviewProxyBox,
+  scalePreviewProxyBox,
   type PreviewProxyBox,
+  type PreviewQuality,
+  type PreviewSourceFacts,
 } from "./previewProxyBox";
 
 // Inline scripts

@@ -18,7 +18,11 @@ import {
   STUDIO_PREVIEW_MARK_META,
   STUDIO_PREVIEW_ERRORS,
 } from "@hyperframes/core/studio-preview-mark";
-import { PREVIEW_PROXY_BOX_PARAM, parsePreviewProxyBox } from "@hyperframes/core";
+import {
+  PREVIEW_PROXY_BOX_PARAM,
+  PREVIEW_PROXY_LIGHT_PARAM,
+  parsePreviewProxyBox,
+} from "@hyperframes/core";
 import {
   GSAP_BASE_URL_META,
   gsapCdnDist,
@@ -697,7 +701,12 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
     const proxyParam = c.req.query("hf-proxy");
     const boxParam = c.req.query(PREVIEW_PROXY_BOX_PARAM);
     const proxyBox = boxParam === undefined ? undefined : parsePreviewProxyBox(boxParam);
-    if (proxyBox === null || (proxyBox && proxyParam === undefined)) {
+    const lightRequested = c.req.query(PREVIEW_PROXY_LIGHT_PARAM) !== undefined;
+    if (
+      proxyBox === null ||
+      (proxyBox && proxyParam === undefined) ||
+      (lightRequested && !proxyBox)
+    ) {
       return c.text("not found", 404);
     }
     let proxyVariant: ProxyVariant | undefined;
@@ -710,7 +719,7 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
         return c.text("not found", 404);
       }
       const facts = await probeAssetCodec(file, undefined, mediaCodecProbeCache);
-      const eligibility = decideMediaProxyEligibility(facts);
+      const eligibility = decideMediaProxyEligibility(facts, lightRequested ? proxyBox : undefined);
       if (!eligibility.eligible) {
         return c.text(`media proxy unavailable: ${eligibility.reason}`, 422);
       }

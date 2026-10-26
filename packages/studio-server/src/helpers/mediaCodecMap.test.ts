@@ -10,6 +10,7 @@ import {
   probeAssetCodec,
   proxyVariantFor,
   resolveProxyVariantRequest,
+  scanProjectMedia,
   scanProjectMediaCodecMap,
   shouldPrewarmProxy,
   type AssetCodecFacts,
@@ -24,7 +25,14 @@ const FAKE_FFPROBE_PATH = process.execPath;
 function makeRunner(
   codecByPath: Record<
     string,
-    string | { codecName: string; pixFmt?: string; tags?: Record<string, string> }
+    | string
+    | {
+        codecName: string;
+        pixFmt?: string;
+        tags?: Record<string, string>;
+        size?: [number, number];
+        bitRate?: string;
+      }
   >,
 ): FfprobeRunner {
   return (_command, args) => {
@@ -38,6 +46,9 @@ function makeRunner(
             codec_name: normalized.codecName,
             pix_fmt: normalized.pixFmt,
             tags: normalized.tags,
+            width: normalized.size?.[0],
+            height: normalized.size?.[1],
+            bit_rate: normalized.bitRate,
           },
         ]
       : [];
@@ -325,6 +336,68 @@ describe("decideMediaProxyEligibility", () => {
         hasAlpha: true,
       }),
     ).toEqual({ eligible: true });
+  });
+});
+
+describe("a lighter copy of a file Chrome can play", () => {
+  const playable = {
+    codecName: "h264",
+    browserHostile: false,
+    representativeMime: null,
+    hasAlpha: false,
+    source: { width: 3840, height: 2160, bitDepth: 8, bitrate: 10_000_000 },
+  };
+
+  it("is allowed only for the box it is asked at, and only when the file is heavy there", () => {
+    expect(decideMediaProxyEligibility(playable)).toEqual({
+      eligible: false,
+      reason: "browser_safe_codec",
+    });
+    expect(decideMediaProxyEligibility(playable, { width: 724, height: 362 })).toEqual({
+      eligible: true,
+    });
+    expect(
+      decideMediaProxyEligibility(
+        { ...playable, source: { ...playable.source, width: 1920, height: 1080 } },
+        { width: 2048, height: 1218 },
+      ),
+    ).toEqual({ eligible: false, reason: "browser_safe_codec" });
+  });
+
+  it("reads the size, bit depth and bitrate off the probe, and keeps them with the codec facts", async () => {
+    const project = tmpProject();
+    const videoPath = join(project, "cam.mov");
+    writeFileSync(videoPath, "fake video bytes");
+
+    const facts = await probeAssetCodec(
+      videoPath,
+      makeRunner({
+        [videoPath]: {
+          codecName: "hevc",
+          pixFmt: "yuv420p10le",
+          size: [3840, 2160],
+          bitRate: "60000000",
+        },
+      }),
+    );
+
+    expect(facts?.source).toEqual({ width: 3840, height: 2160, bitDepth: 10, bitrate: 60_000_000 });
+  });
+
+  it("scans the sizes of the playable videos too, while the codec map keeps only the hostile ones", async () => {
+    const project = tmpProject();
+    writeFileSync(join(project, "cam.mp4"), "fake video bytes");
+    writeFileSync(join(project, "broll.mov"), "fake video bytes");
+
+    const scan = await scanProjectMedia(project, [{ html: videoHtml("cam.mp4", "broll.mov") }], {
+      runner: makeRunner({
+        [join(project, "cam.mp4")]: { codecName: "h264", size: [1920, 1080] },
+        [join(project, "broll.mov")]: { codecName: "hevc", size: [3840, 2160] },
+      }),
+    });
+
+    expect(Object.keys(scan.codecMap)).toEqual(["/broll.mov"]);
+    expect(Object.keys(scan.sourceFacts).sort()).toEqual(["/broll.mov", "/cam.mp4"]);
   });
 });
 

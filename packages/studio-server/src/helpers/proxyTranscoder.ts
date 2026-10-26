@@ -35,7 +35,7 @@ import { mkdirWithinProject, realpath, realProjectRoot } from "./safePath.js";
  * dropped from the queue or its ffmpeg is killed.
  */
 
-export const PROXY_PARAMS_VERSION = "v6";
+export const PROXY_PARAMS_VERSION = "v7";
 
 export const CACHE_DIR_NAME = ".transcode-cache";
 
@@ -595,6 +595,7 @@ async function encodeInChunks(
   for (const piece of pieces) if (existsSync(piece)) unlinkSync(piece);
 }
 
+const KEYFRAME_EVERY_SECOND_ARGS = ["-force_key_frames", "expr:gte(t,n_forced*1)"];
 // Fixed recipe; changing either array means bumping PROXY_PARAMS_VERSION.
 const H264_ARGS = [
   "-c:v",
@@ -717,6 +718,7 @@ async function runFfmpeg(
         ...(range ? ["-t", String(range.lengthSeconds)] : []),
         "-vf",
         videoFilter,
+        ...KEYFRAME_EVERY_SECOND_ARGS,
         ...(keepsAlpha ? [...VP8_ARGS, ...vp8Threads(range ? gate.size : 1)] : H264_ARGS),
         target,
       ],

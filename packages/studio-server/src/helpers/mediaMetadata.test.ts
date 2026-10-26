@@ -120,6 +120,33 @@ describe("probeMediaMetadata", () => {
     expect(flac.kind).toBe("audio");
   });
 
+  it("reads the size, bit depth and bitrate a lighter copy is judged by", async () => {
+    const probe = (stream: object, format: object = {}) =>
+      probeMediaMetadata("/tmp/clip.mp4", () => ({
+        status: 0,
+        stdout: JSON.stringify({ streams: [{ codec_type: "video", ...stream }], format }),
+        stderr: "",
+      }));
+
+    expect(
+      (await probe({ width: 3840, height: 2160, pix_fmt: "yuv420p10le", bit_rate: "9" })).source,
+    ).toEqual({
+      width: 3840,
+      height: 2160,
+      bitDepth: 10,
+      bitrate: 9,
+    });
+    expect(
+      (await probe({ width: 1920, height: 1080, pix_fmt: "yuv420p" }, { bit_rate: "55000000" }))
+        .source,
+    ).toEqual({ width: 1920, height: 1080, bitDepth: 8, bitrate: 55_000_000 });
+    expect(
+      (await probe({ width: 1920, height: 1080, pix_fmt: "yuv420p", bits_per_raw_sample: "12" }))
+        .source?.bitDepth,
+    ).toBe(12);
+    expect((await probe({ pix_fmt: "yuv420p" })).source).toBeUndefined();
+  });
+
   it("ignores attached cover art and reads the real video stream", async () => {
     const metadata = await probeMediaMetadata("/tmp/clip.mp4", () => ({
       status: 0,

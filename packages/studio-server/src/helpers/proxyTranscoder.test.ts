@@ -451,6 +451,22 @@ describe("resolveProxy", () => {
     await expect(resultPromise).resolves.toBe(vp8Path);
   });
 
+  it("puts a keyframe every second into a copy, so scrubbing lands close", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy } = await loadModule(spawn, FFMPEG_PATH);
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "clip.mov");
+    writeFileSync(sourcePath, "source-bytes");
+
+    const result = resolveProxy(projectDir, sourcePath);
+    await flush();
+
+    const args = calls[0]!.args;
+    expect(args[args.indexOf("-force_key_frames") + 1]).toBe("expr:gte(t,n_forced*1)");
+    succeed(calls[0]!);
+    await result;
+  });
+
   it("decodes a VP9 alpha source with libvpx-vp9 so the VP8 proxy keeps its alpha", async () => {
     const { spawn, calls } = createSpawnSpy();
     const { resolveProxy } = await loadModule(spawn, FFMPEG_PATH, false, null, "vp9");

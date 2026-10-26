@@ -869,3 +869,133 @@ describe("a copy sized to how large the video shows", () => {
     expect(boxOf(el)).toBe("2436x4096");
   });
 });
+
+describe("preview quality: lighter copies of heavy files", () => {
+  const HEAVY = { width: 3840, height: 2160, bitDepth: 8, bitrate: 10_000_000 };
+  const LIGHT = { width: 1280, height: 720, bitDepth: 8, bitrate: 10_000_000 };
+
+  // A framed page showing a 1920x1080 stage at full size on a 1x screen: a 2048x1218 box.
+  async function stage(facts: Record<string, typeof HEAVY>, codecMap?: Record<string, unknown>) {
+    vi.resetModules();
+    vi.spyOn(window, "parent", "get").mockReturnValue({} as Window);
+    const mod = await import("./mediaProxy");
+    window.__HF_MEDIA_SOURCE_FACTS__ = facts;
+    if (codecMap) window.__HF_MEDIA_CODEC_MAP__ = codecMap as never;
+    Object.defineProperty(document.documentElement, "clientWidth", {
+      configurable: true,
+      value: 1920,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      configurable: true,
+      value: 1080,
+    });
+    vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(1);
+    const video = (src = "/video.mp4") => {
+      const el = createVideo(src);
+      stubCanPlayType(el, "probably");
+      el.getBoundingClientRect = () => ({ width: 1920, height: 1080 }) as DOMRect;
+      return el;
+    };
+    mod.setProxyDisplayScale(1);
+    return { ...mod, video };
+  }
+
+  const params = (el: HTMLMediaElement) => new URL(el.src, document.baseURI).searchParams;
+
+  afterEach(() => {
+    delete (window as { __HF_MEDIA_SOURCE_FACTS__?: unknown }).__HF_MEDIA_SOURCE_FACTS__;
+  });
+
+  it("changes nothing at full quality", async () => {
+    const { video, setPreviewQuality, maybeProxyProactively } = await stage({
+      "/video.mp4": HEAVY,
+    });
+    const el = video();
+    maybeProxyProactively(el);
+    setPreviewQuality(1);
+    await settle();
+
+    expect(isProxied(el)).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("swaps a heavy file Chrome can play to a copy at the shown box times the level", async () => {
+    const { video, setPreviewQuality } = await stage({ "/video.mp4": HEAVY });
+    const el = video();
+
+    setPreviewQuality(0.5);
+    await settle();
+
+    expect(params(el).get("hf-proxy")).toBe("auto");
+    expect(params(el).get("hf-proxy-box")).toBe("1024x724");
+    expect(params(el).get("hf-proxy-light")).toBe("1");
+  });
+
+  it("leaves a file alone that is not heavy at that box", async () => {
+    const { video, setPreviewQuality } = await stage({ "/video.mp4": LIGHT });
+    const el = video();
+
+    setPreviewQuality(0.5);
+    await settle();
+
+    expect(isProxied(el)).toBe(false);
+  });
+
+  it("puts the original back at full quality", async () => {
+    const { video, setPreviewQuality } = await stage({ "/video.mp4": HEAVY });
+    const el = video();
+    setPreviewQuality(0.5);
+    await settle();
+    expect(isProxied(el)).toBe(true);
+
+    setPreviewQuality(1);
+
+    expect(el.getAttribute("src")).toBe("/video.mp4");
+    expect(el.load).toHaveBeenCalledTimes(2);
+  });
+
+  it("lightens a video that appears after the level was lowered", async () => {
+    const { video, setPreviewQuality, maybeProxyProactively } = await stage({
+      "/video.mp4": HEAVY,
+    });
+    setPreviewQuality(0.25);
+    const el = video();
+
+    maybeProxyProactively(el);
+    await settle();
+
+    expect(params(el).get("hf-proxy-box")).toBe("512x362");
+  });
+
+  it("sizes the copy a file cannot play without by the level too, and resizes it as the level moves", async () => {
+    const { video, setPreviewQuality, maybeProxyProactively } = await stage(
+      { "/video.mp4": HEAVY },
+      { "/video.mp4": HEVC_ENTRY },
+    );
+    const el = video();
+    stubCanPlayType(el, "");
+    maybeProxyProactively(el);
+    await settle();
+    expect(params(el).get("hf-proxy-box")).toBe("2048x1218");
+    expect(params(el).has("hf-proxy-light")).toBe(false);
+
+    setPreviewQuality(0.5);
+    await settle();
+    expect(params(el).get("hf-proxy-box")).toBe("1024x724");
+    expect(params(el).has("hf-proxy-light")).toBe(false);
+
+    setPreviewQuality(1);
+    await settle();
+    expect(params(el).get("hf-proxy-box")).toBe("2048x1218");
+  });
+
+  it("ignores a level that is not one of the four", async () => {
+    const { video, setPreviewQuality } = await stage({ "/video.mp4": HEAVY });
+    const el = video();
+
+    setPreviewQuality(0.7);
+    await settle();
+
+    expect(isProxied(el)).toBe(false);
+  });
+});

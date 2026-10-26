@@ -95,6 +95,7 @@ import {
   handleMetadataForProxy,
   isRenderMode,
   maybeProxyProactively,
+  setPreviewQuality,
   setProxyDisplayScale,
 } from "./mediaProxy";
 import {
@@ -5973,6 +5974,7 @@ export function initSandboxRuntimeModular(): void {
       setProxyDisplayScale(scale);
       setPreviewRasterScale(scale);
     },
+    onSetPreviewQuality: setPreviewQuality,
     onSetIdleHeartbeat: (slow) => {
       slowIdleHeartbeat = slow;
       wakeTransport();

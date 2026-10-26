@@ -1390,6 +1390,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       browserHostile: boolean;
       representativeMime: string | null;
       hasAlpha: boolean;
+      source?: { width: number; height: number; bitDepth: number; bitrate: number };
     } | null>;
   }): Promise<typeof import("./preview.js")> {
     vi.resetModules();
@@ -1424,7 +1425,10 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       ...(await vi.importActual<typeof import("../helpers/mediaCodecMap.js")>(
         "../helpers/mediaCodecMap.js",
       )),
-      scanProjectMediaCodecMap: opts.scanMapImpl ?? (async () => ({})),
+      scanProjectMedia: async (...args: Parameters<ScanMapImpl>) => ({
+        codecMap: await (opts.scanMapImpl ?? (async () => ({})))(...args),
+        sourceFacts: {},
+      }),
       createMediaCodecProbeCache: () => new Map(),
       probeAssetCodec:
         opts.probeAssetCodecImpl ??
@@ -1434,18 +1438,6 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
           representativeMime: null,
           hasAlpha: false,
         })),
-      decideMediaProxyEligibility: (
-        facts: {
-          browserHostile: boolean;
-          hasAlpha: boolean;
-        } | null,
-      ) => {
-        if (!facts) return { eligible: false, reason: "unknown_codec" };
-        if (!facts.browserHostile) {
-          return { eligible: false, reason: "browser_safe_codec" };
-        }
-        return { eligible: true };
-      },
       isProxyVariant: (value: string) => value === "h264" || value === "vp8",
       isProxyVariantRequest: (value: string) =>
         value === "auto" || value === "h264" || value === "vp8",
@@ -1578,9 +1570,72 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       expect(sized.headers.get("ETag")).not.toBe(full.headers.get("ETag"));
     });
 
+    describe("a lighter copy of a file Chrome can play", () => {
+      const playable = (width: number, height: number) => async () => ({
+        codecName: "h264",
+        browserHostile: false,
+        representativeMime: null,
+        hasAlpha: false,
+        source: { width, height, bitDepth: 8, bitrate: 10_000_000 },
+      });
+
+      it("is made at the asked box when the file is heavy there", async () => {
+        const projectDir = createProjectDir();
+        writeFileSync(join(projectDir, "clip.mp4"), "original-bytes");
+        const resolveProxyMock = vi.fn(async () => {
+          const proxyPath = join(projectDir, "light.mp4");
+          writeFileSync(proxyPath, "light-bytes");
+          return proxyPath;
+        });
+        const { registerPreviewRoutes: register } = await loadPreviewModule({
+          resolveProxyImpl: resolveProxyMock,
+          probeAssetCodecImpl: playable(3840, 2160),
+        });
+        const app = new Hono();
+        register(app, createAdapter(projectDir));
+
+        const res = await app.request(
+          "http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264&hf-proxy-light=1&hf-proxy-box=724x362",
+        );
+
+        expect(res.status).toBe(200);
+        expect(await res.text()).toBe("light-bytes");
+        expect(resolveProxyMock).toHaveBeenCalledWith(
+          projectDir,
+          join(projectDir, "clip.mp4"),
+          "h264",
+          { width: 724, height: 362 },
+        );
+      });
+
+      it("is refused when the file is not heavy at that box, and without the ask", async () => {
+        const projectDir = createProjectDir();
+        writeFileSync(join(projectDir, "clip.mp4"), "original-bytes");
+        const resolveProxyMock = vi.fn(async () => "should-not-be-called");
+        const { registerPreviewRoutes: register } = await loadPreviewModule({
+          resolveProxyImpl: resolveProxyMock,
+          probeAssetCodecImpl: playable(1920, 1080),
+        });
+        const app = new Hono();
+        register(app, createAdapter(projectDir));
+
+        const small = await app.request(
+          "http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264&hf-proxy-light=1&hf-proxy-box=2048x1218",
+        );
+        const unasked = await app.request(
+          "http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264&hf-proxy-box=724x362",
+        );
+
+        expect(small.status).toBe(422);
+        expect(unasked.status).toBe(422);
+        expect(resolveProxyMock).not.toHaveBeenCalled();
+      });
+    });
+
     it.each([
       ["a size off the ladder", "?hf-proxy=h264&hf-proxy-box=1000x2000"],
       ["a size without a copy", "?hf-proxy-box=1448x2048"],
+      ["a lighter copy without a size", "?hf-proxy=h264&hf-proxy-light=1"],
     ])("refuses %s before making anything", async (_name, query) => {
       const projectDir = createProjectDir();
       writeFileSync(join(projectDir, "clip.mp4"), "original-hevc-bytes");

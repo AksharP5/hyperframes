@@ -3,6 +3,7 @@ import { extname } from "node:path";
 import {
   firstFrameColourArgs,
   parseFirstFrameColour,
+  type PreviewSourceFacts,
   type ToneMapSourceColour,
 } from "@hyperframes/core";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
@@ -77,6 +78,7 @@ export interface MediaMetadata {
   /** Video stream carries alpha (pix_fmt or the VP8/VP9 alpha_mode tag). */
   hasAlpha?: boolean;
   durationSeconds?: number;
+  source?: PreviewSourceFacts;
   probeError?: string;
 }
 
@@ -89,6 +91,9 @@ interface FfprobeStream {
   color_transfer?: string;
   color_primaries?: string;
   bits_per_raw_sample?: string;
+  width?: number;
+  height?: number;
+  bit_rate?: string;
   disposition?: { attached_pic?: number };
   tags?: Record<string, string | undefined>;
 }
@@ -192,6 +197,27 @@ export async function probeFirstFrameColour(
   return result.status === 0 ? parseFirstFrameColour(String(result.stderr)) : {};
 }
 
+function bitDepthOf(stream: FfprobeStream): number {
+  const raw = Number(stream.bits_per_raw_sample);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  const suffixed = /(\d{1,3})(?:le|be)$/.exec(stream.pix_fmt ?? "");
+  return suffixed ? Number(suffixed[1]) : 8;
+}
+
+function sourceFactsOf(
+  stream: FfprobeStream | undefined,
+  formatBitrate: string | undefined,
+): PreviewSourceFacts | undefined {
+  if (!stream?.width || !stream.height) return undefined;
+  const bitrate = Number(stream.bit_rate ?? formatBitrate);
+  return {
+    width: stream.width,
+    height: stream.height,
+    bitDepth: bitDepthOf(stream),
+    bitrate: Number.isFinite(bitrate) ? bitrate : 0,
+  };
+}
+
 export async function probeMediaMetadata(
   filePath: string,
   runner: FfprobeRunner = execFileRunner,
@@ -216,7 +242,7 @@ export async function probeMediaMetadata(
       "-v",
       "error",
       "-show_entries",
-      "stream=codec_type,codec_name,profile,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample:stream_disposition=attached_pic:stream_tags=alpha_mode:format=duration",
+      "stream=codec_type,codec_name,profile,pix_fmt,color_space,color_transfer,color_primaries,bits_per_raw_sample,width,height,bit_rate:stream_disposition=attached_pic:stream_tags=alpha_mode:format=duration,bit_rate",
       "-of",
       "json",
       "--",
@@ -235,7 +261,7 @@ export async function probeMediaMetadata(
   try {
     const parsed = JSON.parse(String(result.stdout || "{}")) as {
       streams?: FfprobeStream[];
-      format?: { duration?: string };
+      format?: { duration?: string; bit_rate?: string };
     };
     const stream = parsed.streams?.find((item) => {
       if (kind === "image") return item.codec_type === "video";
@@ -247,6 +273,7 @@ export async function probeMediaMetadata(
       metadata.hasAlpha = stream !== undefined && videoStreamHasAlpha(stream);
       const duration = Number(parsed.format?.duration);
       if (Number.isFinite(duration) && duration > 0) metadata.durationSeconds = duration;
+      metadata.source = sourceFactsOf(stream, parsed.format?.bit_rate);
     }
     return metadata;
   } catch {
