@@ -143,7 +143,7 @@ describe("openInDesktop on Windows", () => {
     expect(missing).toEqual({
       opened: false,
       reason: "not-installed",
-      downloadUrl: "https://hyperframes.dev/studio",
+      downloadUrl: `${MAC_DOWNLOAD}?os=windows`,
     });
     const failed = openInDesktop(FILM, { ...WIN, exists: () => true, launch: () => false });
     expect(failed).toMatchObject({ opened: false, reason: "open-failed" });
@@ -327,12 +327,20 @@ describe("desktopHint", () => {
     expect(desktopHint(process.cwd(), { ...mac, ready: true, installed: false })).toBe(MAC_HINT);
   });
 
-  it("offers the Linux build on Linux, and nothing on Windows without the app", () => {
+  it("offers the Linux and Windows builds there, and nothing where there is no build", () => {
     expect(desktopHint(process.cwd(), { env: {}, platform: "linux", installed: false })).toBe(
       `Keep editing by chatting with Framey in the HyperFrames desktop app → ${MAC_DOWNLOAD}?os=linux`,
     );
-    expect(desktopHint(process.cwd(), { env: {}, platform: "win32", installed: false })).toBeNull();
-    expect(desktopHint(process.cwd(), { env: {}, platform: "win32", ready: true })).toBeNull();
+    const windowsHint = `Keep editing by chatting with Framey in the HyperFrames desktop app → ${MAC_DOWNLOAD}?os=windows`;
+    expect(desktopHint(process.cwd(), { env: {}, platform: "win32", installed: false })).toBe(
+      windowsHint,
+    );
+    expect(desktopHint(process.cwd(), { env: {}, platform: "win32", ready: true })).toBe(
+      windowsHint,
+    );
+    expect(
+      desktopHint(process.cwd(), { env: {}, platform: "freebsd", installed: false }),
+    ).toBeNull();
   });
 
   it("points an installed Windows app to `hyperframes open`", () => {
