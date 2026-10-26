@@ -33,7 +33,7 @@ import {
 } from "@hyperframes/core";
 
 import { holdRenderFrameVideos } from "./renderFrameVideoHold.js";
-import { DrawElementCaptureError } from "./drawElementCaptureError.js";
+import { asDrawElementCaptureFailure, DrawElementCaptureError } from "./drawElementCaptureError.js";
 import { encodePng } from "../utils/alphaBlit.js";
 import {
   DEFAULT_SAMPLES_PER_FRAME,
@@ -4973,13 +4973,14 @@ export async function captureFrameToBufferPipelined(
     // syncToPaintEvent = true); see initDrawElementOrTransparentBackground. The
     // BeginFrame branch present in the synchronous captureFrameCore is therefore
     // unreachable here and intentionally omitted.
-    const { encodeResult } = await produceDrawElementFrame(
+    const produced = await produceDrawElementFrame(
       page,
       options.width,
       options.height,
       options.quality ?? 80,
       true,
     );
+    const encodeResult = asDrawElementCaptureFailure(frameIndex, produced.encodeResult);
 
     const captureTimeMs = Date.now() - startTime;
 
@@ -5124,7 +5125,10 @@ export async function captureFramesBatchPipelined(
     const frameIndex = frameIndices[i];
     const encodeResult = encodeResults[i];
     if (frameIndex === undefined || !encodeResult) break;
-    results.push({ frameIndex, encodeResult });
+    results.push({
+      frameIndex,
+      encodeResult: asDrawElementCaptureFailure(frameIndex, encodeResult),
+    });
   }
 
   if (failedAt !== null) {
