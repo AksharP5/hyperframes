@@ -508,6 +508,7 @@ interface OffloadContext {
   opts: OffloadOptions;
   cachePath: string;
   cache: Record<string, CacheEntry>;
+  cachedSizes: Set<number>;
   fetchImpl: typeof fetch;
   reencoder: Reencoder;
   tempFiles: string[];
@@ -517,7 +518,7 @@ interface OffloadContext {
 }
 
 interface FilePlan {
-  key: string;
+  key?: string;
   preset?: PresetName;
   sourcePath: string;
   contentType?: string;
@@ -532,11 +533,14 @@ async function planFile(
   const kind = mediaKind(path);
   const size = stagedSize(file);
   if (!kind || size < OFFLOAD_MIN_BYTES) return null;
-  const sha256 = await stagedSha256(file);
-  const keyFor = (variant: string) => `${ctx.opts.apiBaseUrl} ${sha256} ${variant}`;
   const accepted = ACCEPTED[extname(path).toLowerCase()];
-  if (accepted && size <= accepted.maxBytes) {
-    return { key: keyFor("as-is"), sourcePath: "", contentType: accepted.contentType };
+  const asIs = accepted !== undefined && size <= accepted.maxBytes;
+  const mayBeCached =
+    ctx.opts.upload !== undefined || (asIs ? ctx.cachedSizes.has(size) : ctx.cachedSizes.size > 0);
+  const sha256 = mayBeCached ? await stagedSha256(file) : undefined;
+  const keyFor = (variant: string) => sha256 && `${ctx.opts.apiBaseUrl} ${sha256} ${variant}`;
+  if (asIs) {
+    return { key: keyFor("as-is"), sourcePath: "", contentType: accepted?.contentType };
   }
   const sourcePath = snapshotPath(path, file, ctx.tempFiles);
   const preset = await ctx.reencoder.choose(sourcePath, kind);
@@ -591,7 +595,7 @@ async function offloadFile(
       trimmed_to_seconds: plan.segments.reduce((sum, s) => sum + s.end - s.start, 0),
     }),
   };
-  const hit = ctx.cache[plan.key];
+  const hit = plan.key === undefined ? undefined : ctx.cache[plan.key];
   if (hit && (!ctx.opts.upload || (await stillServed(hit, ctx.fetchImpl)))) {
     return { ...item, action: "cached", url: hit.url };
   }
@@ -617,12 +621,10 @@ async function uploadPlanned(
   assertFitsAsset(path, file.filename, size);
   const asset = await upload(file);
   if (!Buffer.isBuffer(staged)) assertUnchanged(staged);
-  ctx.cache[plan.key] = {
-    asset_id: asset.asset_id,
-    url: asset.url,
-    size_bytes: size,
-  };
-  writeCache(ctx.cachePath, ctx.cache);
+  if (plan.key !== undefined) {
+    ctx.cache[plan.key] = { asset_id: asset.asset_id, url: asset.url, size_bytes: size };
+    writeCache(ctx.cachePath, ctx.cache);
+  }
   return asset.url;
 }
 
@@ -691,11 +693,18 @@ export async function offloadHeavyMedia(
   opts: OffloadOptions,
 ): Promise<OffloadedMedia[]> {
   const cachePath = opts.cachePath ?? defaultOffloadCachePath();
+  const cache = readCache(cachePath);
+  const apiPrefix = `${opts.apiBaseUrl} `;
   const ctx: OffloadContext = {
     absDir: resolve(projectDir),
     opts,
     cachePath,
-    cache: readCache(cachePath),
+    cache,
+    cachedSizes: new Set(
+      Object.entries(cache).flatMap(([key, entry]) =>
+        key.startsWith(apiPrefix) ? [entry.size_bytes] : [],
+      ),
+    ),
     fetchImpl: opts.fetchImpl ?? fetch,
     reencoder: opts.reencoder ?? ffmpegReencoder,
     tempFiles: [],

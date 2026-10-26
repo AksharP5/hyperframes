@@ -662,9 +662,8 @@ async function offloadMedia(
       apiBaseUrl: resolveCloudBaseUrl(),
       upload,
       entryPath,
-      onFile: asJson
-        ? undefined
-        : (item) => console.log(c.dim(`   ${describeOffload(item, !upload)}`)),
+      onFile: (item) =>
+        (asJson ? console.error : console.log)(c.dim(`   ${describeOffload(item, !upload)}`)),
     });
   } catch (err) {
     reportApiError("Media upload failed", err);
