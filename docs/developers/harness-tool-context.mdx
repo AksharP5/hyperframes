@@ -80,7 +80,7 @@ the harness killing the call.
 ## `check-review`: review switches for `check`
 
 ```json
-{ "skipContrastInMotion": true, "findingFrames": true }
+{ "skipContrastInMotion": true, "findingFrames": true, "inspect": true }
 ```
 
 Each field is a boolean and defaults to `false`; a value that is not `true` is
@@ -91,6 +91,7 @@ the same as in a terminal.
 | --- | --- |
 | `skipContrastInMotion` | Leaves out contrast failures measured while a GSAP tween moves the text or an ancestor, or while the text is partly transparent (see [check](/packages/cli#check)). Counts, `ok` and persistence leave them out too. |
 | `findingFrames` | Saves one plain, unannotated full frame for each distinct `frameTime` of the error and warning findings in `layout` and `contrast` that have a bbox (not `motion` or `craft`), and adds two fields to each of those findings: `frameTime`, the middle sample of the longest held run in its `times` (the same gap rule as `heldMs`), and `frame`, the absolute path of that PNG, shared by every finding at that time. The `bbox` is measured at the finding's `time`, so an element that moves can sit elsewhere on the frame. Only finite, nonnegative sample times are eligible; a finding with no eligible time gets no frame. At most 60 distinct times are captured, errors first. The frames go in the run's snapshot folder but are not listed in `snapshots`, not recorded in project history and not reported as `events`. |
+| `inspect` | Only with `findingFrames` on; alone it does nothing. While each frame is on screen, runs the [component inspector](https://github.com/heygen-com/hyperframes/tree/main/packages/inspector) on every finding framed at that time and adds its report, unchanged, as the finding's `inspect` field: `results` (the element, how many GSAP animations target it), and `snippets`, each with its source `id` (`file:start-end`), `kind` (`html opening tag`, `matched CSS candidate`, `animation creation` and so on) and the exact source `code`. The target is the finding's `data-hf-id` when it has one, else its `selector`, without descendants, under the inspector's default 12,000-byte budget. A selector that matches multiple elements is treated as an inspection failure, so unrelated source snippets are not attached. A finding whose inspection fails gets `inspect: { "error": "<message>" }` instead; the check itself never fails because of it. Inspection counts toward the `frames` phase of the check deadline. A timeout or stop ends capture without attaching frame or inspection fields. Only GSAP animations are seen, not CSS animations, Web Animations or canvas drawing. |
 
 ## Hooks that run code
 

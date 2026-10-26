@@ -225,7 +225,7 @@ jobs:
         run: bun install --frozen-lockfile --linker=hoisted
 
       # The CLI bundle consumes Engine and Producer from source, but copies the
-      # built Studio and Player artifacts. Build only that dependency chain;
+      # built Studio, Player and Inspector artifacts. Build only that dependency chain;
       # cloud adapters, SDK playground, and other publish-only packages are not
       # exercised by this Windows render smoke test.
       - name: Build render prerequisites
@@ -235,6 +235,7 @@ jobs:
           bun run --cwd packages/core build
           bun run --filter @hyperframes/player build
           bun run --filter @hyperframes/studio build
+          bun run --filter @hyperframes/inspector build
           bun run --filter @hyperframes/cli build
 
       # -----------------------------------------------------------------

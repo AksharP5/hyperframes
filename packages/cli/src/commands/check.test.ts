@@ -336,7 +336,8 @@ function dependencies(
         ),
       ),
     captureFindingCrops: options.captureFindingCrops ?? vi.fn(async () => []),
-    captureFindingFrames: options.captureFindingFrames ?? vi.fn(async () => []),
+    captureFindingFrames:
+      options.captureFindingFrames ?? vi.fn(async () => ({ written: [], inspected: [] })),
     inspectHdrAutoPromotion: options.inspectHdrAutoPromotion ?? vi.fn(async () => null),
   };
   return { deps, runBrowserCheck };
@@ -610,6 +611,32 @@ it("turns finding frames on only from HF_TOOL_CONTEXT's check-review capability"
   expect(runPipeline.mock.calls[0]?.[1]).not.toHaveProperty("findingFrames");
   expect(runPipeline.mock.calls[1]?.[1]).toMatchObject({ findingFrames: true });
   expect(runPipeline.mock.calls[1]?.[1]).not.toHaveProperty("skipContrastInMotion");
+  expect(runPipeline.mock.calls[1]?.[1]).not.toHaveProperty("inspect");
+});
+
+it("turns inspect on only from HF_TOOL_CONTEXT's check-review capability", async () => {
+  const { report } = await runScenario(fakeDriver());
+  const runPipeline = vi.fn(async (_project: ProjectDir, _options: CheckOptions) => report);
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
+  const command = createCheckCommand({
+    resolveProject: () => PROJECT,
+    runPipeline,
+    prepareMedia: vi.fn(async () => []),
+    withMeta: (value) => value,
+  });
+  try {
+    vi.stubEnv(
+      "HF_TOOL_CONTEXT",
+      JSON.stringify({
+        version: 1,
+        capabilities: { "check-review": { findingFrames: true, inspect: true } },
+      }),
+    );
+    await runViaCli(command, { rawArgs: ["--json"] });
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  expect(runPipeline.mock.calls[0]?.[1]).toMatchObject({ findingFrames: true, inspect: true });
 });
 
 it("prints a dash-prefixed --frame-check value's parse failure exactly once, not doubled", async () => {
@@ -1384,7 +1411,10 @@ it("adds frame metadata only for paths returned by successful captures", () => {
     },
   });
   const plan = selectFindingFrames(report);
-  const framed = withFindingFrameFields(report, plan, ["/run/" + plan.requests[0]?.filename]);
+  const framed = withFindingFrameFields(report, plan, {
+    written: ["/run/" + plan.requests[0]?.filename],
+    inspected: [],
+  });
   expect(framed.layout.findings[0]?.frameTime).toBe(1);
   expect(framed.layout.findings[1]).toEqual(report.layout.findings[1]);
   expect(report.layout.findings[0]).not.toHaveProperty("frame");
@@ -1860,7 +1890,7 @@ describe("check pipeline", () => {
   });
 
   it("does not capture finding frames when no finding qualifies", async () => {
-    const capture = vi.fn(async () => []);
+    const capture = vi.fn(async () => ({ written: [], inspected: [] }));
     await runScenario(fakeDriver(), { findingFrames: true }, { captureFindingFrames: capture });
     expect(capture).not.toHaveBeenCalled();
   });
@@ -1938,8 +1968,14 @@ describe("check pipeline", () => {
         collectLayout: vi.fn(async (time: number) => [layoutIssue("error", { time })]),
       });
     const capture = vi.fn(
-      async (_project: ProjectDir, _options: CheckOptions, requests: CheckFindingFrameRequest[]) =>
-        requests.map((request) => `/run/${request.filename}`),
+      async (
+        _project: ProjectDir,
+        _options: CheckOptions,
+        requests: CheckFindingFrameRequest[],
+      ) => ({
+        written: requests.map((request) => `/run/${request.filename}`),
+        inspected: [],
+      }),
     );
     const plain = await runScenario(driver(), {}, { captureFindingFrames: capture });
     expect(capture).not.toHaveBeenCalled();
@@ -1962,6 +1998,90 @@ describe("check pipeline", () => {
     const { layout: plainLayout, ...plainRest } = plain.report;
     expect(rest).toEqual(plainRest);
     expect({ ...layout, findings: [] }).toEqual({ ...plainLayout, findings: [] });
+  });
+
+  describe("inspect", () => {
+    const hfIssue = (time: number) => ({
+      ...layoutIssue("error", { time }),
+      selector: "#hero",
+      dataAttributes: { "data-hf-id": "hf-1" },
+    });
+    const twoFindings = () =>
+      fakeDriver({
+        collectLayout: vi.fn(async (time: number) => [
+          hfIssue(time),
+          { ...layoutIssue("error", { time }), selector: "#sub", text: "Sub" },
+        ]),
+      });
+    const inspectingCapture = (failing?: string) =>
+      vi.fn(
+        async (
+          _project: ProjectDir,
+          _options: CheckOptions,
+          requests: CheckFindingFrameRequest[],
+        ) => ({
+          written: requests.map((request) => `/run/${request.filename}`),
+          inspected: requests.flatMap((request) =>
+            (request.inspect ?? []).map((target) => ({
+              time: request.time,
+              target,
+              inspect:
+                JSON.stringify(target) === failing
+                  ? { error: "inspector_unavailable" }
+                  : ({ results: [{ target: 0, status: "found" }], snippets: [] } as never),
+            })),
+          ),
+        }),
+      );
+
+    it("asks for an hfId target when the finding has data-hf-id, else its selector", async () => {
+      const capture = inspectingCapture();
+      await runScenario(
+        twoFindings(),
+        { findingFrames: true, inspect: true },
+        { captureFindingFrames: capture },
+      );
+      const requests = capture.mock.calls[0]?.[2];
+      expect(requests?.map((request) => request.inspect)).toEqual([
+        [{ hfId: "hf-1" }, { selector: "#sub" }],
+      ]);
+    });
+
+    it("attaches the inspector's result to each framed finding, and an error only to the one that failed", async () => {
+      const { report } = await runScenario(
+        twoFindings(),
+        { findingFrames: true, inspect: true },
+        { captureFindingFrames: inspectingCapture(JSON.stringify({ selector: "#sub" })) },
+      );
+      const [hero, sub] = report.layout.findings;
+      expect(hero?.inspect).toEqual({ results: [{ target: 0, status: "found" }], snippets: [] });
+      expect(sub?.inspect).toEqual({ error: "inspector_unavailable" });
+      expect(sub?.frame).toBeDefined();
+      expect(report.ok).toBe(false);
+      expect(report.runtime.findings).toEqual([]);
+    });
+
+    it("asks for nothing and attaches nothing without findingFrames, or without inspect", async () => {
+      const capture = inspectingCapture();
+      const plain = await runScenario(twoFindings(), {}, { captureFindingFrames: capture });
+      const inspectOnly = await runScenario(
+        twoFindings(),
+        { inspect: true },
+        { captureFindingFrames: capture },
+      );
+      expect(capture).not.toHaveBeenCalled();
+      expect(JSON.stringify(inspectOnly.report)).toBe(JSON.stringify(plain.report));
+
+      const framed = await runScenario(
+        twoFindings(),
+        { findingFrames: true },
+        { captureFindingFrames: capture },
+      );
+      expect(capture.mock.calls[0]?.[2].every((request) => request.inspect === undefined)).toBe(
+        true,
+      );
+      expect(framed.report.layout.findings.some((finding) => "inspect" in finding)).toBe(false);
+    });
   });
 
   it("reports the total deadline during crops while retaining the audit failure", async () => {

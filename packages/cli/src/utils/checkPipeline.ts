@@ -16,6 +16,7 @@ import {
   MAX_FINDING_FRAME_TIMES,
   selectFindingFrames,
   withFindingFrameFields,
+  findingFrameRequests,
 } from "./checkFindingFrames.js";
 export { selectFindingFrames } from "./checkFindingFrames.js";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -70,6 +71,7 @@ import type {
   CheckFinding,
   CheckFindingCropRequest,
   CheckFindingFrameRequest,
+  CheckFindingFrames,
   CheckGeometryCandidate,
   CheckOptions,
   CheckReport,
@@ -1812,8 +1814,9 @@ async function withOptionalFindingFrames(
   const capture = dependencies.captureFindingFrames ?? captureFindingFrames;
   try {
     deadline.enter("frames");
-    const written = await deadline.run(() => capture(project, options, plan.requests, deadline));
-    return withFindingFrameFields(report, plan, written);
+    const requests = findingFrameRequests(report, plan, options.inspect);
+    const captured = await deadline.run(() => capture(project, options, requests, deadline));
+    return withFindingFrameFields(report, plan, captured);
   } catch (error) {
     if (error instanceof CheckDeadlineError || error instanceof CheckStoppedError) {
       const finding = runtimeFailure(error);
@@ -2287,7 +2290,7 @@ async function captureFindingFrames(
   options: CheckOptions,
   requests: CheckFindingFrameRequest[],
   deadline?: CheckDeadline,
-): Promise<string[]> {
+): Promise<CheckFindingFrames> {
   const module = await import("./checkBrowser.js");
   return module.captureFindingFrames(project, options, requests, deadline);
 }

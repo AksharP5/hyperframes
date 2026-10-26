@@ -6,7 +6,7 @@ const TOOL_CONTEXT_VERSION = 1;
 export interface ToolContext {
   events?: { path: string };
   projectLock?: { waitMs: number };
-  checkReview?: { skipContrastInMotion: boolean; findingFrames: boolean };
+  checkReview?: { skipContrastInMotion: boolean; findingFrames: boolean; inspect: boolean };
 }
 
 export type ArtifactRole = "contact-sheet" | "frame" | "finding" | "check-report";
@@ -40,6 +40,7 @@ function parseCheckReview(value: unknown): ToolContext["checkReview"] {
   return {
     skipContrastInMotion: value.skipContrastInMotion === true,
     findingFrames: value.findingFrames === true,
+    inspect: value.inspect === true,
   };
 }
 
