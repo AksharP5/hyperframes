@@ -678,13 +678,14 @@ async function waitingQuad(page, map) {
   return quad;
 }
 
-export async function sample(ctx, gesture, point, pointerScreen) {
+/** The box as the preview shows it: the waiting marker's quad while a press waits for its replay, else the element. */
+export async function measureShown(ctx, gesture, read = measure, quadOf = contentQuad) {
   for (;;) {
     const waiting = await ctx.page.$("[data-dom-edit-press-waiting]");
     try {
-      const m = await measure(ctx);
+      const m = await read(ctx);
       if (gesture === "crop") m.outline = await cropOutline(ctx, m.map);
-      const quad = waiting && (await contentQuad(waiting)).map(m.map.toComp);
+      const quad = waiting && (await quadOf(waiting)).map(m.map.toComp);
       // Replay removes the marker before moving the element. Do not combine a pre-replay
       // element read with a post-replay marker read into a position nobody displayed.
       if (
@@ -692,12 +693,16 @@ export async function sample(ctx, gesture, point, pointerScreen) {
         !(await waiting.evaluate((e) => e.hasAttribute("data-dom-edit-press-waiting")))
       )
         continue;
-      const shown = quad ? { ...m, quad, visible: quad } : m;
-      return { m: shown, actual: m.visible, p: point(shown), c: m.map.toComp(pointerScreen) };
+      return { m: quad ? { ...m, quad, visible: quad } : m, actual: m.visible };
     } finally {
       await waiting?.dispose();
     }
   }
+}
+
+export async function sample(ctx, gesture, point, pointerScreen) {
+  const { m, actual } = await measureShown(ctx, gesture);
+  return { m, actual, p: point(m), c: m.map.toComp(pointerScreen) };
 }
 
 const TRACE_CATEGORIES = ["toplevel", "devtools.timeline", "blink.user_timing"];

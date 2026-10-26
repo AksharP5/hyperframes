@@ -10,6 +10,7 @@ import {
   chord,
   controlDrag,
   measure,
+  measureShown,
   nextFrame,
   openStudio,
   pointerGesture,
@@ -272,8 +273,13 @@ async function driveStep(ctx, step, state) {
   }
   const name = step.element ?? "A";
   const c = ctx[name];
-  // In flight: pressed where the last drag let go, without reading the preview first.
-  let pre = step.inFlight ? state.last.lastMeasure : await measure(c);
+  // In flight: pressed where the last drag let go, without reading the preview first. The waiting
+  // marker belongs to the selected element, so another element is read bare until it is selected.
+  let pre = step.inFlight
+    ? state.last.lastMeasure
+    : name === state.selected
+      ? (await measureShown(c)).m
+      : await measure(c);
   if (name !== state.selected) {
     await selectTarget(c, pre);
     state.selected = name;
