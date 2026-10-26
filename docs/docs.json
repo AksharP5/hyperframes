@@ -56,7 +56,8 @@
             "pages": [
               "introduction",
               "quickstart",
-              "examples"
+              "examples",
+              "faq"
             ]
           },
           {
@@ -82,6 +83,7 @@
               "guides/with-codex",
               "guides/with-cursor",
               "guides/mcp",
+              "guides/free-agents",
               "guides/skills",
               "guides/plugins",
               "guides/design-tools"
