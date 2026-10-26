@@ -246,4 +246,15 @@ describe("resolveAspectRatioForSubmit — local dir", () => {
       ),
     ).toThrow(CliRuntimeError);
   });
+
+  it("names the resolved entry path and project directory when the entry is missing", () => {
+    const dir = writeComposition(1920, 1080);
+    const printed = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() =>
+      resolveAspectRatioForSubmit({ kind: "dir", dir }, "missing.html", undefined, true),
+    ).toThrow(CliRuntimeError);
+    const output = printed.mock.calls.flat().join("\n");
+    expect(output).toContain(`resolves to ${resolve(dir, "missing.html")}`);
+    expect(output).toContain(`project directory ${resolve(dir)}`);
+  });
 });

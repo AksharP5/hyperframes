@@ -22,13 +22,15 @@ import { parseEnumFlag } from "../../cloud/parsing.js";
 import { failUsage } from "../../utils/commandResult.js";
 import { resolveProject } from "../../utils/project.js";
 import {
-  hasExplicitCompositionArg,
   parseGifLoopArg,
   parseHlsSegmentSecondsArg,
   resolveBrowserTimeoutMsArg,
-  resolveCompositionEntryArg,
   resolveDefaultFpsArg,
 } from "../../utils/renderArgs.js";
+import {
+  hasExplicitCompositionArg,
+  resolveCompositionEntryArg,
+} from "../../utils/compositionEntry.js";
 import { normalizeSkillSlug } from "../../telemetry/skill.js";
 import { loadProjectConfig } from "../../utils/projectConfig.js";
 import { type CatalogUsage, summarizeCatalogUsage } from "../../utils/catalogUsage.js";

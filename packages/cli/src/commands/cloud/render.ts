@@ -79,7 +79,11 @@ import type {
   HyperframesRenderDetail,
 } from "../../cloud/index.js";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
+import {
+  compositionEntryErrorMessage,
+  parseCompositionEntryArg,
+} from "../../utils/compositionEntry.js";
 
 const VALID_QUALITY = ["draft", "standard", "high"] as const;
 const VALID_FORMAT = ["mp4", "webm", "mov"] as const;
@@ -461,17 +465,14 @@ export function resolveAspectRatioForSubmit(
   }
 
   const dir = project.dir ?? ".";
-  const entryRelative = compositionArg ?? "index.html";
-  const entryPath = resolvePath(dir, entryRelative);
-
-  if (!existsSync(entryPath)) {
-    errorBox(
-      "Composition not found",
-      `Entry file "${entryRelative}" does not exist in ${dir}.`,
-      "Pass --composition with a path that exists inside the project, or omit it to use index.html.",
-    );
+  const entry = parseCompositionEntryArg(compositionArg ?? "index.html", dir, statSync);
+  if (!entry.ok) {
+    const { title, message, hint } = compositionEntryErrorMessage(entry.error);
+    errorBox(title, message, hint);
     failCommand();
   }
+  const entryRelative = entry.value ?? "index.html";
+  const entryPath = resolvePath(dir, entryRelative);
 
   const detection = detectAspectRatioFromHtml(entryPath);
 
