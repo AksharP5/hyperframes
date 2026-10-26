@@ -103,9 +103,8 @@ it("leaves no Chrome process behind when the CLI is killed mid-render", async ()
   ]);
   await waitForTestCondition(() => {
     run.record();
-    return run.seen.chrome.size >= 3;
+    return alive(run.seen.chrome).length >= 3;
   }, 60_000);
-  expect(alive(run.seen.chrome).length).toBeGreaterThan(0);
   run.child.kill("SIGKILL");
   await waitForTestCondition(() => alive(run.seen.chrome).length === 0, 30_000);
 }, 120_000);
