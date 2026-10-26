@@ -2,6 +2,8 @@ import {
   DEFAULT_CONFIG,
   buildZeroDurationDiagnostic,
   evaluateHfDiagnostic,
+  extractMediaMetadata,
+  sdrCanvasColourFilters,
 } from "@hyperframes/engine";
 import type { Page } from "puppeteer-core";
 import { reportArtifacts } from "../utils/toolContext.js";
@@ -394,6 +396,16 @@ async function probeSeekLanding(
   }
 }
 
+let warnedColourUnknown = false;
+
+function warnColourUnknownOnce(): void {
+  if (warnedColourUnknown) return;
+  warnedColourUnknown = true;
+  console.warn(
+    `   ${c.warn("⚠")} snapshot colours may differ from render: install ffmpeg/ffprobe so video colours can be matched`,
+  );
+}
+
 class FrameExtractTimeoutError extends Error {}
 
 export async function extractVideoFrameToBuffer(
@@ -419,6 +431,9 @@ export async function extractVideoFrameToBuffer(
     args.push("-i", videoPath, "-map", "0:v:0");
     const filters: string[] = [];
     if (seek.select !== undefined) filters.push(`select=gte(t-start_t\\,${seek.select})`);
+    const metadata = findFFprobe() ? await extractMediaMetadata(videoPath) : null;
+    if (metadata) filters.push(...sdrCanvasColourFilters(metadata));
+    else warnColourUnknownOnce();
     // Shrink so the short side still covers the displayed box at any rotation or fit; never enlarge.
     if (displayedPixels > 0) {
       filters.push(

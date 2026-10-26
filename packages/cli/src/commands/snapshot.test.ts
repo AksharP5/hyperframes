@@ -446,6 +446,20 @@ describe("containingSourceFrameIndex", () => {
   });
 });
 
+/** The pixel data of a PNG: the colour-tag chunks a retag adds are not part of the picture. */
+function samePixels(actual: Buffer | null | undefined, expected: Buffer): boolean {
+  const idat = (png: Buffer): Buffer => {
+    const chunks: Buffer[] = [];
+    for (let at = 8; at < png.length; at += 12 + png.readUInt32BE(at)) {
+      if (png.toString("latin1", at + 4, at + 8) === "IDAT") {
+        chunks.push(png.subarray(at + 8, at + 8 + png.readUInt32BE(at)));
+      }
+    }
+    return Buffer.concat(chunks);
+  };
+  return !!actual && idat(actual).equals(idat(expected));
+}
+
 describe("extractVideoFrameToBuffer", () => {
   const ffmpeg = findFFmpeg();
   const ffprobe = findFFprobe();
@@ -491,7 +505,7 @@ describe("extractVideoFrameToBuffer", () => {
           expected,
         ]);
         const actual = await extractVideoFrameToBuffer(clip, time);
-        expect(actual?.equals(readFileSync(expected))).toBe(true);
+        expect(samePixels(actual, readFileSync(expected))).toBe(true);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -532,7 +546,7 @@ describe("extractVideoFrameToBuffer", () => {
         "-y",
         expected,
       ]);
-      expect((await extractVideoFrameToBuffer(clip, 0.3))?.equals(readFileSync(expected))).toBe(
+      expect(samePixels(await extractVideoFrameToBuffer(clip, 0.3), readFileSync(expected))).toBe(
         true,
       );
     } finally {
@@ -576,7 +590,7 @@ describe("extractVideoFrameToBuffer", () => {
           ...["-i", clip, "-vf", `select=eq(n\\,${index})`, "-frames:v", "1", "-y", expected],
         ]);
         const actual = await extractVideoFrameToBuffer(clip, (index + 0.5) / 30);
-        expect(actual?.equals(readFileSync(expected)), `frame ${index}`).toBe(true);
+        expect(samePixels(actual, readFileSync(expected)), `frame ${index}`).toBe(true);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -594,7 +608,17 @@ describe("extractVideoFrameToBuffer", () => {
         execFileSync(ffmpeg!, [
           ...quiet,
           ...["-f", "lavfi", "-i", "testsrc2=d=70:r=30:s=160x90", "-pix_fmt", "yuv420p"],
-          ...["-c:v", "libx265", "-x265-params", x265, "-tag:v", "hvc1", source],
+          ...[
+            "-c:v",
+            "libx265",
+            "-preset",
+            "ultrafast",
+            "-x265-params",
+            x265,
+            "-tag:v",
+            "hvc1",
+            source,
+          ],
         ]);
         const clip = join(dir, "cut.mov");
         execFileSync(ffmpeg!, [...quiet, ...["-ss", "31.77", "-i", source, "-c", "copy", clip]]);
@@ -608,7 +632,7 @@ describe("extractVideoFrameToBuffer", () => {
           ...["-i", clip, "-vf", "select=eq(n\\,1056)", "-frames:v", "1", "-y", expected],
         ]);
         const actual = await extractVideoFrameToBuffer(clip, 1056.5 / 30);
-        expect(actual?.equals(readFileSync(expected))).toBe(true);
+        expect(samePixels(actual, readFileSync(expected))).toBe(true);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -716,9 +740,9 @@ describe("extractVideoFrameToBuffer", () => {
           "-y",
           expected,
         ]);
-        expect((await extractVideoFrameToBuffer(clip, time))?.equals(readFileSync(expected))).toBe(
-          true,
-        );
+        expect(
+          samePixels(await extractVideoFrameToBuffer(clip, time), readFileSync(expected)),
+        ).toBe(true);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -760,7 +784,7 @@ describe("extractVideoFrameToBuffer", () => {
             ...["-i", clip, "-vf", `select=eq(n\\,${index})`, "-frames:v", "1", "-y", expected],
           ]);
           const actual = await extractVideoFrameToBuffer(clip, index / 24);
-          expect(actual?.equals(readFileSync(expected)), `frame ${index}`).toBe(true);
+          expect(samePixels(actual, readFileSync(expected)), `frame ${index}`).toBe(true);
         }
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -790,7 +814,7 @@ describe("extractVideoFrameToBuffer", () => {
             ...["-i", clip, "-vf", `select=eq(n\\,${index})`, "-frames:v", "1", "-y", expected],
           ]);
           const actual = await extractVideoFrameToBuffer(clip, index / 24);
-          expect(actual?.equals(readFileSync(expected)), `frame ${index}`).toBe(true);
+          expect(samePixels(actual, readFileSync(expected)), `frame ${index}`).toBe(true);
         }
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -843,7 +867,7 @@ describe("extractVideoFrameToBuffer", () => {
           ...["-frames:v", "1", "-y", expected],
         ]);
         const actual = await extractVideoFrameToBuffer(clip, time);
-        expect(actual?.equals(readFileSync(expected)), `t=${time}`).toBe(true);
+        expect(samePixels(actual, readFileSync(expected)), `t=${time}`).toBe(true);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -851,6 +875,7 @@ describe("extractVideoFrameToBuffer", () => {
   });
 
   it.skipIf(noProbe)("selects frames in a TS whose timestamps start below zero", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-negative-"));
     try {
       const clip = join(dir, "clip.ts");
@@ -875,7 +900,7 @@ describe("extractVideoFrameToBuffer", () => {
           ...["-i", clip, "-vf", `select=eq(n\\,${index})`, "-frames:v", "1", "-y", expected],
         ]);
         const actual = await extractVideoFrameToBuffer(clip, time);
-        expect(actual?.equals(readFileSync(expected)), `t=${time}`).toBe(true);
+        expect(samePixels(actual, readFileSync(expected)), `t=${time}`).toBe(true);
       };
       for (const [time, index] of [
         [0, 0],
@@ -894,7 +919,10 @@ describe("extractVideoFrameToBuffer", () => {
         [1, 30],
       ] as const)
         await frameAt(time, index);
+      // Colours cannot be matched to render without ffprobe: said once, not per frame.
+      expect(warn.mock.calls.filter(([m]) => /colours may differ/.test(String(m)))).toHaveLength(1);
     } finally {
+      warn.mockRestore();
       vi.unstubAllEnvs();
       rmSync(dir, { recursive: true, force: true });
     }
@@ -924,8 +952,23 @@ describe("extractVideoFrameToBuffer", () => {
           ...["-i", clip, "-vf", `select=eq(n\\,${index})`, "-frames:v", "1", "-y", expected],
         ]);
         const actual = await extractVideoFrameToBuffer(clip, time);
-        expect(actual?.equals(readFileSync(expected)), `t=${time}`).toBe(true);
+        expect(samePixels(actual, readFileSync(expected)), `t=${time}`).toBe(true);
       }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(noProbe)("retags SDR footage as sRGB, as render does", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-retag-"));
+    try {
+      const clip = join(dir, "clip.mp4");
+      execFileSync(ffmpeg!, [
+        ...["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=d=1:r=24:s=160x90"],
+        ...["-pix_fmt", "yuv420p", "-colorspace", "bt709", "-color_trc", "bt709", clip],
+      ]);
+      const png = await extractVideoFrameToBuffer(clip, 0.5);
+      expect(png?.includes("sRGB", 0, "latin1")).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -945,7 +988,7 @@ describe("extractVideoFrameToBuffer", () => {
         ...["-hide_banner", "-loglevel", "error", "-i", clip, "-vf", "select=eq(n\\,12)"],
         ...["-frames:v", "1", "-y", expected],
       ]);
-      expect((await extractVideoFrameToBuffer(clip, 0.5))?.equals(readFileSync(expected))).toBe(
+      expect(samePixels(await extractVideoFrameToBuffer(clip, 0.5), readFileSync(expected))).toBe(
         true,
       );
     } finally {
