@@ -48,7 +48,7 @@ export function setHostHandlesSigint(owned: boolean): void {
   hostHandlesSigint = owned;
 }
 
-export const sigintLaunchOptions = () => ({ handleSIGINT: !hostHandlesSigint });
+export const ownedLaunchOptions = () => ({ handleSIGINT: !hostHandlesSigint, pipe: true });
 
 interface WebGlProbeInfo {
   hasWebGL: boolean;
@@ -110,7 +110,7 @@ async function probeHardwareWebGlInfo(
   let probeBrowser: Browser | undefined;
   try {
     const launchOptions: LaunchOptions = {
-      ...sigintLaunchOptions(),
+      ...ownedLaunchOptions(),
       headless: true,
       args: withHyperframesBrowserMarker(options.args),
       defaultViewport: { width: 64, height: 64 },
@@ -886,7 +886,7 @@ async function launchBrowser(
   let browser: Browser | undefined;
   const launch = (args: readonly string[]) =>
     ppt.launch({
-      ...sigintLaunchOptions(),
+      ...ownedLaunchOptions(),
       headless: true,
       args: withHyperframesBrowserMarker(args),
       defaultViewport: null,
