@@ -147,6 +147,26 @@ describe("probeMediaMetadata", () => {
     expect((await probe({ pix_fmt: "yuv420p" })).source).toBeUndefined();
   });
 
+  it("lists every stream with its flags, for a failure report", async () => {
+    const metadata = await probeMediaMetadata("/tmp/clip.mov", () => ({
+      status: 0,
+      stdout: JSON.stringify({
+        streams: [
+          { codec_type: "video", codec_name: "hevc", disposition: { default: 1, attached_pic: 0 } },
+          { codec_type: "video", codec_name: "mjpeg", disposition: { attached_pic: 1 } },
+          { codec_type: "data", disposition: {} },
+        ],
+      }),
+      stderr: "",
+    }));
+
+    expect(metadata.streams).toEqual([
+      "video:hevc[default]",
+      "video:mjpeg[attached_pic]",
+      "data:?[]",
+    ]);
+  });
+
   it("ignores attached cover art and reads the real video stream", async () => {
     const metadata = await probeMediaMetadata("/tmp/clip.mp4", () => ({
       status: 0,

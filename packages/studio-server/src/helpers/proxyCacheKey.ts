@@ -62,6 +62,19 @@ export async function contentCopyKey(
   return digest(hash.digest("hex"), version, variant, boxPart(box));
 }
 
+export function sourceSizeBytes(sourcePath: string): number | undefined {
+  try {
+    const fd = openSync(sourcePath, "r");
+    try {
+      return fstatSync(fd).size;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 export function fastIndexPath(cachePath: string): string {
   return join(dirname(cachePath), `.fast-${basename(cachePath, extname(cachePath))}`);
 }
