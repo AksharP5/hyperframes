@@ -25,6 +25,8 @@ import * as clack from "@clack/prompts";
 import { c } from "../ui/colors.js";
 import { resolveProject, type ProjectDir } from "../utils/project.js";
 import { resolveAutoProxy } from "../utils/projectConfig.js";
+import { normalizeErrorMessage } from "../utils/errorMessage.js";
+import { parsePort } from "../utils/port.js";
 import {
   openBrowser,
   parseRemoteDebuggingPort,
@@ -84,8 +86,15 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    let startPort: number;
+    try {
+      startPort = parsePort(args.port ?? "3003");
+    } catch (error) {
+      clack.log.error(normalizeErrorMessage(error));
+      setCommandExitCode(1);
+      return;
+    }
     const project = resolveProject(args.dir);
-    const startPort = parseInt(args.port ?? "3003", 10);
 
     // Validation: --user-data-dir requires --browser-path
     if (args["user-data-dir"] && !args["browser-path"]) {

@@ -14,6 +14,8 @@ import { resolve } from "node:path";
 import * as clack from "@clack/prompts";
 import { c } from "../ui/colors.js";
 import { resolveProject, type ProjectDir } from "../utils/project.js";
+import { normalizeErrorMessage } from "../utils/errorMessage.js";
+import { parsePort } from "../utils/port.js";
 import type { Hono } from "hono";
 import { requestSubPath } from "@hyperframes/studio-server";
 import {
@@ -48,8 +50,15 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    let startPort: number;
+    try {
+      startPort = parsePort(args.port ?? "3004");
+    } catch (error) {
+      clack.log.error(normalizeErrorMessage(error));
+      setCommandExitCode(1);
+      return;
+    }
     const project = resolveProject(args.dir);
-    const startPort = parseInt(args.port ?? "3004", 10);
 
     if (args["user-data-dir"] && !args["browser-path"]) {
       clack.log.error("--user-data-dir requires --browser-path");

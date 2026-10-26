@@ -80,6 +80,7 @@ import {
   type PreviewLifecycleSession,
 } from "./previewLifecycleOutput.js";
 import { resolveLocalBrowserGpuMode, type BrowserGpuMode } from "../browser/gpuPolicy.js";
+import { parsePort } from "../utils/port.js";
 
 interface BrowserLaunchOptions {
   noOpen?: boolean;
@@ -693,10 +694,12 @@ export function previewLaunchModeError(options: {
 }
 
 export function previewPortError(port: string | undefined): string | null {
-  const value = port ?? "3002";
-  if (!/^\d+$/.test(value)) return "--port must be an integer between 1 and 65535";
-  const parsed = Number(value);
-  return parsed >= 1 && parsed <= 65535 ? null : "--port must be an integer between 1 and 65535";
+  try {
+    parsePort(port ?? "3002");
+    return null;
+  } catch (error) {
+    return errorMessage(error);
+  }
 }
 
 export function publicPreviewPid(
