@@ -312,6 +312,7 @@ function dependencies(
     captureFindingCrops?: CheckDependencies["captureFindingCrops"];
     captureFindingFrames?: CheckDependencies["captureFindingFrames"];
     inspectHdrAutoPromotion?: NonNullable<CheckDependencies["inspectHdrAutoPromotion"]>;
+    inspectAudio?: NonNullable<CheckDependencies["inspectAudio"]>;
   } = {},
 ): { deps: CheckDependencies; runBrowserCheck: ReturnType<typeof vi.fn> } {
   const runBrowserCheck = vi.fn(
@@ -338,7 +339,9 @@ function dependencies(
     captureFindingCrops: options.captureFindingCrops ?? vi.fn(async () => []),
     captureFindingFrames:
       options.captureFindingFrames ?? vi.fn(async () => ({ written: [], inspected: [] })),
+    collectMedia: vi.fn(async () => ({ videos: [], images: [], audios: [], html: "" })),
     inspectHdrAutoPromotion: options.inspectHdrAutoPromotion ?? vi.fn(async () => null),
+    inspectAudio: options.inspectAudio ?? vi.fn(async () => []),
   };
   return { deps, runBrowserCheck };
 }
@@ -717,6 +720,69 @@ it("distinguishes unavailable HDR inspection from no promotion", async () => {
   );
 
   expect(report.hdr).toEqual({ autoPromotion: null, inspection: "unavailable" });
+});
+
+it("fails the check on an audio error and reports it in its own section", async () => {
+  const unreadable: CheckFinding = {
+    code: "audio_source_unreadable",
+    severity: "error",
+    message: "voice.wav has no audio the render can read",
+    selector: "#voice",
+    dataAttributes: {},
+    sourceFile: "index.html",
+    bbox: { x: 0, y: 0, width: 0, height: 0 },
+    time: 1,
+  };
+  const { report } = await runScenario(
+    fakeDriver(),
+    {},
+    { inspectAudio: vi.fn(async () => [unreadable]) },
+  );
+
+  expect(report.audio).toMatchObject({ errorCount: 1, findings: [unreadable] });
+  expect(report.ok).toBe(false);
+});
+
+it("still checks audio when lint errors skip the browser pass", async () => {
+  const { report, browser } = await runScenario(
+    fakeDriver(),
+    {},
+    {
+      lint: lintWith("error", "missing_timeline_registry", "No timeline"),
+      inspectAudio: vi.fn(async () => [
+        {
+          code: "audio_none",
+          severity: "info" as const,
+          message: "The film has no sound",
+          selector: "[data-composition-id]",
+          dataAttributes: {},
+          sourceFile: "index.html",
+          bbox: { x: 0, y: 0, width: 0, height: 0 },
+          time: 0,
+        },
+      ]),
+    },
+  );
+
+  expect(browser).not.toHaveBeenCalled();
+  expect(report.audio).toMatchObject({ infoCount: 1, findings: [{ code: "audio_none" }] });
+});
+
+it("reports an audio check that could not run instead of failing the check", async () => {
+  const { report } = await runScenario(
+    fakeDriver(),
+    {},
+    { inspectAudio: vi.fn(async () => Promise.reject(new Error("ffprobe unavailable"))) },
+  );
+
+  expect(report.audio.findings).toMatchObject([
+    {
+      code: "audio_check_unavailable",
+      severity: "info",
+      message: expect.stringContaining("ffprobe unavailable"),
+    },
+  ]);
+  expect(report.ok).toBe(true);
 });
 
 it("threads --no-proxy into the browser check options", async () => {
@@ -1276,6 +1342,7 @@ function reportWithFindings(overrides: Partial<CheckReport> = {}): CheckReport {
     motion: { ...emptySection(), enabled: false, samples: 0 },
     contrast: { ...emptySection(), enabled: true, samples: [], checked: 0, passed: 0 },
     craft: { ...emptySection(), enabled: false, step: 0, samples: 0 },
+    audio: emptySection(),
     hdr: { autoPromotion: null, inspection: "available" },
     snapshots: { enabled: false, files: [], times: [], findingFiles: [] },
     ...overrides,

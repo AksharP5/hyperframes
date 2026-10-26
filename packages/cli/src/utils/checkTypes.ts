@@ -5,6 +5,7 @@ import type { LayoutIssue, LayoutOverflow, LayoutRect } from "./layoutAudit.js";
 import type { Canvas, MotionFrame } from "./motionAudit.js";
 import type { MotionSpec } from "./motionSpec.js";
 import type { ProjectDir } from "./project.js";
+import type { ProjectMedia } from "./projectMedia.js";
 import type { BrowserGpuMode } from "../browser/gpuPolicy.js";
 import type { HdrAutoPromotion } from "@hyperframes/engine";
 import type { ComponentReport } from "@hyperframes/inspector/live";
@@ -399,6 +400,7 @@ export interface CheckReport {
     passed: number;
   };
   craft: CheckSection<CraftFinding> & { enabled: boolean; step: number; samples: number };
+  audio: CheckSection;
   hdr: { autoPromotion: HdrAutoPromotion | null; inspection: "available" | "unavailable" };
   snapshots: { enabled: boolean; files: string[]; times: number[]; findingFiles: string[] };
 }
@@ -435,7 +437,12 @@ export interface CheckDependencies {
     requests: CheckFindingFrameRequest[],
     deadline?: CheckDeadline,
   ): Promise<CheckFindingFrames>;
-  inspectHdrAutoPromotion?(project: ProjectDir): Promise<CheckReport["hdr"]["autoPromotion"]>;
+  collectMedia?(project: ProjectDir): Promise<ProjectMedia>;
+  inspectHdrAutoPromotion?(
+    project: ProjectDir,
+    media: ProjectMedia,
+  ): Promise<CheckReport["hdr"]["autoPromotion"]>;
+  inspectAudio?(project: ProjectDir, media: ProjectMedia): Promise<CheckFinding[]>;
 }
 
 export function rectToBbox(rect: {

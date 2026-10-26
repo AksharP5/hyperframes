@@ -646,6 +646,7 @@ function printHumanReport(report: CheckReport): void {
   printSection("Motion", report.motion);
   printContrastSection(report);
   printCraftSection(report);
+  printSection("Audio", report.audio);
   printSnapshotSection(report);
   console.log();
   const label = report.ok ? c.success("Check passed") : c.error("Check failed");

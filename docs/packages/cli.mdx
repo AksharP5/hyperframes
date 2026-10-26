@@ -1022,7 +1022,7 @@ did, in one command and one browser session.
 
 ```bash
 npx hyperframes check [dir]
-npx hyperframes check [dir] --json         # {ok, browserSkipped, scope, lint, runtime, layout, motion, contrast, craft, hdr, snapshots}
+npx hyperframes check [dir] --json         # {ok, browserSkipped, scope, lint, runtime, layout, motion, contrast, craft, audio, hdr, snapshots}
 npx hyperframes check [dir] --snapshots
 npx hyperframes check [dir] --at 1.5,4,7.25
 npx hyperframes check [dir] --strict       # warnings fail too
@@ -1034,6 +1034,11 @@ running every audit at every sample: runtime console errors and failed requests,
 layout defects (overflow, clipping, held overlaps, occlusion, coordinate-frame
 drift), `*.motion.json` assertions, WCAG AA contrast, and craft warnings
 (see [Craft warnings](#craft-warnings)).
+
+The `audio` section reads every clip the render mixes, while the browser runs:
+a source with no audio track or that cannot be read as audio (error: render
+stops), a clip that starts past the end of its file, a clip whose played part is
+silent (warnings), and a film with no sound at all (info).
 
 When the browser never ran (lint errors, a linter crash, or a browser launch
 failure), `browserSkipped` is `true` and the `layout`, `motion` and `contrast`
