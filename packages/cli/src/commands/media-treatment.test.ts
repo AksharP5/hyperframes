@@ -662,6 +662,40 @@ describe("applyMediaTreatmentToHtml", () => {
     }
   });
 
+  it("finds a clip inside a mounted scene and edits it in its own file", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-media-scene-"));
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const root = `<!doctype html><html><body><div data-composition-id="main"><div data-composition-id="intro" data-composition-src="compositions/intro.html"></div></div></body></html>`;
+    mkdirSync(join(project, "compositions"));
+    writeFileSync(join(project, "index.html"), root);
+    writeFileSync(join(project, "compositions", "intro.html"), VIDEO);
+    try {
+      await runCommand(mediaTreatmentCommand, {
+        rawArgs: [
+          "--project",
+          project,
+          "--selector",
+          "#hero",
+          "--grading",
+          '{"preset":"warm-daylight"}',
+          "--apply",
+          "--json",
+        ],
+      });
+      expect(JSON.parse(String(log.mock.calls.at(-1)?.[0]))).toMatchObject({
+        ok: true,
+        file: "compositions/intro.html",
+      });
+      expect(
+        gradingsOf(readFileSync(join(project, "compositions", "intro.html"), "utf8")),
+      ).not.toEqual([null]);
+      expect(readFileSync(join(project, "index.html"), "utf8")).toBe(root);
+    } finally {
+      log.mockRestore();
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
   it("reports how many elements an --apply treated", async () => {
     const project = mkdtempSync(join(tmpdir(), "hf-media-all-"));
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);

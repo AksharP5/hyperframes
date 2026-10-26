@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { relative } from "node:path";
+import { relative, resolve } from "node:path";
 import {
   absoluteLoudnessPlan,
   audioNormalizationPlan,
@@ -14,8 +14,10 @@ import {
   type AudioTag,
   type LoudnessLimit,
 } from "@hyperframes/studio-server/loudness";
+import { resolveAuthoredAssetFile } from "@hyperframes/parsers/asset-resolution";
 import { defineCommand } from "citty";
 import { c } from "../ui/colors.js";
+import { projectCompositionFiles } from "../utils/mountedCompositions.js";
 import { resolveProject } from "../utils/project.js";
 import { failCommand } from "../utils/commandResult.js";
 import type { Example } from "./_examples.js";
@@ -37,11 +39,22 @@ function fail(message: string, json: boolean, cause?: unknown): never {
   failCommand(1, cause);
 }
 
-function byId(tags: readonly AudioTag[], rawId: string, role: string): AudioTag {
+type ProjectAudioTag = AudioTag & { file: string };
+
+function projectAudioTags(projectDir: string): ProjectAudioTag[] {
+  return projectCompositionFiles(projectDir).flatMap((file) =>
+    audioTags(readFileSync(resolve(projectDir, file), "utf8")).map((tag) => ({ ...tag, file })),
+  );
+}
+
+function byId(tags: readonly ProjectAudioTag[], rawId: string, role: string): ProjectAudioTag {
   const id = rawId.trim().replace(/^#/, "");
-  const tag = tags.find((candidate) => candidate.id === id);
-  if (!tag) throw new Error(`${role} audio #${id} was not found`);
-  return tag;
+  const matches = tags.filter((candidate) => candidate.id === id);
+  if (matches.length > 1) {
+    throw new Error(`${role} audio #${id} is declared in ${matches.map((m) => m.file).join(", ")}`);
+  }
+  if (!matches[0]) throw new Error(`${role} audio #${id} was not found`);
+  return matches[0];
 }
 
 interface NormalizeAudioOptions {
@@ -58,13 +71,12 @@ interface WriteOutcome {
   wrote: boolean;
   withinTolerance: boolean;
   tolerance: number;
-  indexPath: string;
+  filePath: string;
 }
 
 type NormalizeAudioResult = WriteOutcome & ModePlan;
 
-function selectedTags(html: string, referenceId: string, targetId: string) {
-  const tags = audioTags(html);
+function selectedTags(tags: readonly ProjectAudioTag[], referenceId: string, targetId: string) {
   const referenceTag = byId(tags, referenceId, "Reference");
   const targetTag = byId(tags, targetId, "Target");
   if (referenceTag.id === targetTag.id) {
@@ -73,8 +85,10 @@ function selectedTags(html: string, referenceId: string, targetId: string) {
   return { referenceTag, targetTag };
 }
 
-function existingAudioFile(projectDir: string, tag: AudioTag): string {
-  const file = resolveLocalAudioPath(projectDir, tag.src);
+function existingAudioFile(projectDir: string, tag: ProjectAudioTag): string {
+  const file =
+    resolveAuthoredAssetFile(projectDir, tag.file, tag.src) ??
+    resolveLocalAudioPath(projectDir, tag.src);
   if (!existsSync(file)) {
     throw new Error(`Audio #${tag.id} file was not found: ${relative(projectDir, file)}`);
   }
@@ -83,8 +97,8 @@ function existingAudioFile(projectDir: string, tag: AudioTag): string {
 
 async function measuredPlan(
   projectDir: string,
-  referenceTag: AudioTag,
-  targetTag: AudioTag,
+  referenceTag: ProjectAudioTag,
+  targetTag: ProjectAudioTag,
 ): Promise<AudioNormalizationPlan> {
   const ffmpegPath = requiredFfmpeg();
   const referenceFile = existingAudioFile(projectDir, referenceTag);
@@ -121,7 +135,7 @@ function parsedLufs(raw: string): number {
 
 async function measuredAbsolutePlan(
   projectDir: string,
-  targetTag: AudioTag,
+  targetTag: ProjectAudioTag,
   targetLufs: number,
 ): Promise<AbsoluteLoudnessPlan> {
   const measurement = await measureAudio(
@@ -141,17 +155,17 @@ type ModePlan =
 
 async function plannedNormalization(
   projectDir: string,
-  html: string,
+  tags: readonly ProjectAudioTag[],
   options: NormalizeAudioOptions,
   tolerance: number,
-): Promise<{ targetTag: AudioTag; withinTolerance: boolean; plan: ModePlan }> {
+): Promise<{ targetTag: ProjectAudioTag; withinTolerance: boolean; plan: ModePlan }> {
   if (options.reference === undefined) {
-    const targetTag = byId(audioTags(html), options.target, "Target");
+    const targetTag = byId(tags, options.target, "Target");
     const plan = await measuredAbsolutePlan(projectDir, targetTag, parsedLufs(options.lufs));
     const withinTolerance = targetTag.volume > 0 && Math.abs(plan.changeDb) <= tolerance;
     return { targetTag, withinTolerance, plan: { mode: "absolute", ...plan } };
   }
-  const { referenceTag, targetTag } = selectedTags(html, options.reference, options.target);
+  const { referenceTag, targetTag } = selectedTags(tags, options.reference, options.target);
   const plan = await measuredPlan(projectDir, referenceTag, targetTag);
   const withinTolerance = Math.abs(plan.referenceLufs - plan.targetLufs) <= tolerance;
   return { targetTag, withinTolerance, plan: { mode: "reference", ...plan } };
@@ -159,22 +173,23 @@ async function plannedNormalization(
 
 async function normalizeAudio(options: NormalizeAudioOptions): Promise<NormalizeAudioResult> {
   const project = resolveProject(options.dir);
-  const html = readFileSync(project.indexPath, "utf8");
+  const tags = projectAudioTags(project.dir);
   const tolerance = parsedTolerance(options.tolerance);
   const { targetTag, withinTolerance, plan } = await plannedNormalization(
     project.dir,
-    html,
+    tags,
     options,
     tolerance,
   );
+  const filePath = resolve(project.dir, targetTag.file);
   const wrote = options.write && !withinTolerance;
   if (wrote) {
     writeAtomically(
-      project.indexPath,
-      updateAudioVolume(readFileSync(project.indexPath, "utf8"), targetTag.id, plan.volume),
+      filePath,
+      updateAudioVolume(readFileSync(filePath, "utf8"), targetTag.id, plan.volume),
     );
   }
-  return { ok: true, wrote, withinTolerance, tolerance, indexPath: project.indexPath, ...plan };
+  return { ok: true, wrote, withinTolerance, tolerance, filePath, ...plan };
 }
 
 const LIMIT_TEXT: Record<LoudnessLimit, string> = {
@@ -212,7 +227,7 @@ function printHumanResult(result: NormalizeAudioResult): void {
   );
   console.log(
     result.wrote
-      ? c.success(`Updated ${relative(process.cwd(), result.indexPath) || "index.html"}.`)
+      ? c.success(`Updated ${relative(process.cwd(), result.filePath) || "index.html"}.`)
       : c.dim("Dry run only. Pass --write to persist this gain."),
   );
 }
@@ -279,7 +294,7 @@ export default defineCommand({
         write: args.write,
       });
       if (args.json) {
-        const { indexPath: _, ...jsonResult } = result;
+        const { filePath: _, ...jsonResult } = result;
         console.log(JSON.stringify(jsonResult, null, 2));
         return;
       }
