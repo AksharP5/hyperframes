@@ -10,7 +10,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { availableParallelism, tmpdir } from "node:os";
+import { availableParallelism, tmpdir, totalmem } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   formatPreviewProxyBox,
@@ -472,7 +472,53 @@ function chunkRanges(durationSeconds: number | undefined): ChunkRange[] | null {
   }));
 }
 
-type EncodeFn = (outputPath: string, range?: ChunkRange) => Promise<void>;
+type EncodeFn = (
+  outputPath: string,
+  range: ChunkRange | undefined,
+  signal: AbortSignal,
+  onEncoded: (encodedSeconds: number) => void,
+) => Promise<void>;
+
+interface PieceGate {
+  size: number;
+  acquire: (signal: AbortSignal) => Promise<void>;
+  release: () => void;
+}
+
+const UNGATED: PieceGate = { size: 1, acquire: async () => {}, release: () => {} };
+
+/** Every alpha copy draws its pieces from this one pool, so two copies together stay within the cap. */
+function createPieceGate(size: number): PieceGate {
+  let free = size;
+  const waiters: Array<() => void> = [];
+  return {
+    size,
+    acquire: (signal) => {
+      signal.throwIfAborted();
+      if (free > 0) {
+        free--;
+        return Promise.resolve();
+      }
+      return new Promise((resolve, reject) => {
+        const grant = (): void => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        };
+        const onAbort = (): void => {
+          waiters.splice(waiters.indexOf(grant), 1);
+          reject(signal.reason);
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        waiters.push(grant);
+      });
+    },
+    release: () => {
+      const next = waiters.shift();
+      if (next) next();
+      else free++;
+    },
+  };
+}
 
 /** Copies a long source in pieces that stay in the cache, so a stopped copy continues from the first missing one. */
 async function encodeInChunks(
@@ -481,28 +527,58 @@ async function encodeInChunks(
   tempPath: string,
   encode: EncodeFn,
   concat: (listPath: string, target: string) => Promise<void>,
+  signal: AbortSignal,
+  gate: PieceGate,
   onDone: (doneSeconds: number) => void = () => {},
 ): Promise<void> {
   const extension = extname(tempPath);
   const pieces = ranges.map((_, index) => `${chunkPrefix}${index}${extension}`);
+  const pending = ranges.flatMap((_, index) => (existsSync(pieces[index]!) ? [] : [index]));
   let doneSeconds = 0;
   for (const [index, range] of ranges.entries()) {
-    if (existsSync(pieces[index]!)) doneSeconds += range.lengthSeconds;
+    if (!pending.includes(index)) doneSeconds += range.lengthSeconds;
   }
   if (doneSeconds) onDone(doneSeconds);
-  for (const [index, range] of ranges.entries()) {
-    const piece = pieces[index]!;
-    if (existsSync(piece)) continue;
-    const pieceTemp = join(dirname(piece), `.tmp-${randomUUID()}-${basename(piece)}`);
-    try {
-      await encode(pieceTemp, range);
-      renameSync(pieceTemp, piece);
-      doneSeconds += range.lengthSeconds;
-      onDone(doneSeconds);
-    } finally {
-      if (existsSync(pieceTemp)) unlinkSync(pieceTemp);
+  const inFlight = new Map<number, number>();
+  const stop = new AbortController();
+  const pieceSignal = AbortSignal.any([signal, stop.signal]);
+  let failure: unknown;
+  let cursor = 0;
+  const work = async (): Promise<void> => {
+    for (;;) {
+      await gate.acquire(pieceSignal);
+      try {
+        if (cursor >= pending.length) return;
+        const index = pending[cursor++]!;
+        const range = ranges[index]!;
+        const piece = pieces[index]!;
+        const pieceTemp = join(dirname(piece), `.tmp-${randomUUID()}-${basename(piece)}`);
+        try {
+          await encode(pieceTemp, range, pieceSignal, (encodedSeconds) => {
+            inFlight.set(index, encodedSeconds);
+            onDone(doneSeconds + [...inFlight.values()].reduce((sum, seconds) => sum + seconds, 0));
+          });
+          renameSync(pieceTemp, piece);
+          inFlight.delete(index);
+          doneSeconds += range.lengthSeconds;
+          onDone(doneSeconds);
+        } finally {
+          if (existsSync(pieceTemp)) unlinkSync(pieceTemp);
+        }
+      } finally {
+        gate.release();
+      }
     }
-  }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(gate.size, pending.length) }, () =>
+      work().catch((error: unknown) => {
+        failure ??= error;
+        stop.abort();
+      }),
+    ),
+  );
+  if (failure !== undefined) throw failure;
   const listDir = mkdtempSync(join(tmpdir(), "hf-proxy-join-"));
   try {
     const listPath = join(listDir, "pieces.txt");
@@ -542,7 +618,13 @@ const H264_ARGS = [
   "-movflags",
   "+faststart",
 ];
-const VP8_THREADS = String(Math.min(4, availableParallelism()));
+const CORES = availableParallelism();
+const PIECE_MEMORY_BYTES = 3 * 1024 ** 3;
+
+/** One core stays free for the editor; a 4K piece holds ~1.2 GB, so the copies stay within a third of RAM. */
+const ALPHA_PIECE_GATE = createPieceGate(
+  Math.max(1, Math.min(4, CORES - 1, Math.floor(totalmem() / PIECE_MEMORY_BYTES))),
+);
 const VP8_ARGS = [
   "-c:v",
   "libvpx",
@@ -562,8 +644,6 @@ const VP8_ARGS = [
   "bt709",
   "-cpu-used",
   "4",
-  "-threads",
-  VP8_THREADS,
   "-auto-alt-ref",
   "0",
   "-metadata:s:v:0",
@@ -616,7 +696,13 @@ async function runFfmpeg(
   const alphaDecoder = keepsAlpha ? alphaDecoderFor(metadata.color.codecName) : null;
   const decoderArgs = alphaDecoder ? ["-c:v", alphaDecoder] : [];
   const totalSeconds = metadata.durationSeconds;
-  const encode: EncodeFn = (target, range) =>
+  // libvpx scales poorly across threads, so alpha pieces run side by side with the cores shared out.
+  const gate = keepsAlpha ? ALPHA_PIECE_GATE : UNGATED;
+  const vp8Threads = (pieces: number) => [
+    "-threads",
+    String(Math.min(4, Math.floor(CORES / pieces))),
+  ];
+  const encode: EncodeFn = (target, range, pieceSignal, onEncoded) =>
     spawnFfmpeg(
       ffmpegPath,
       [
@@ -631,16 +717,19 @@ async function runFfmpeg(
         ...(range ? ["-t", String(range.lengthSeconds)] : []),
         "-vf",
         videoFilter,
-        ...(variant === "vp8" ? VP8_ARGS : H264_ARGS),
+        ...(keepsAlpha ? [...VP8_ARGS, ...vp8Threads(range ? gate.size : 1)] : H264_ARGS),
         target,
       ],
       TRANSCODE_STALL_MS,
-      signal,
-      (encodedSeconds) =>
-        onProgress({ doneSeconds: (range?.startSeconds ?? 0) + encodedSeconds, totalSeconds }),
+      pieceSignal,
+      onEncoded,
     );
   const ranges = chunkRanges(totalSeconds);
-  if (!ranges) return encode(outputPath);
+  if (!ranges) {
+    return encode(outputPath, undefined, signal, (encodedSeconds) =>
+      onProgress({ doneSeconds: encodedSeconds, totalSeconds }),
+    );
+  }
   await encodeInChunks(
     ranges,
     chunkPrefix,
@@ -648,6 +737,8 @@ async function runFfmpeg(
     encode,
     (listPath, target) =>
       spawnFfmpeg(ffmpegPath, concatArgs(listPath, target, variant), CONCAT_TIMEOUT_MS, signal),
+    signal,
+    gate,
     (doneSeconds) => onProgress({ doneSeconds, totalSeconds }),
   );
 }

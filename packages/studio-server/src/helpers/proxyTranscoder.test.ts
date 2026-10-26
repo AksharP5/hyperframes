@@ -11,7 +11,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { availableParallelism, tmpdir } from "node:os";
+import { availableParallelism, tmpdir, totalmem } from "node:os";
 import { basename, join } from "node:path";
 import { hdrToSdrToneMapFilter } from "@hyperframes/core";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
@@ -229,6 +229,95 @@ describe("resolveProxy on a long source", () => {
     expect(heard.at(-1)).toEqual({ doneSeconds: LONG_SECONDS, totalSeconds: LONG_SECONDS });
     expect(calls.at(-1)!.args).toEqual(expect.arrayContaining(["-f", "concat", "-c", "copy"]));
     expect(readdirSync(cacheDirectory)).toEqual([cachePath.split("/").at(-1)]);
+  });
+
+  it("copies alpha pieces side by side, shares the cores out, and counts them together", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy } = await loadModule(
+      spawn,
+      FFMPEG_PATH,
+      false,
+      null,
+      undefined,
+      LONG_SECONDS,
+    );
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "long.webm");
+    writeFileSync(sourcePath, "source-bytes");
+    const cores = availableParallelism();
+    const workers = Math.max(1, Math.min(4, cores - 1, Math.floor(totalmem() / (3 * 1024 ** 3))));
+    const side = Math.min(workers, 3);
+
+    const heard: number[] = [];
+    const result = resolveProxy(projectDir, sourcePath, "vp8", undefined, {
+      onProgress: (progress) => heard.push(progress.doneSeconds),
+    });
+    await flush(50);
+
+    expect(calls).toHaveLength(side);
+    for (const call of calls) {
+      expect(call.args[call.args.indexOf("-threads") + 1]).toBe(
+        String(Math.min(4, Math.floor(cores / workers))),
+      );
+    }
+    calls[0]!.proc.stdout.emit("data", Buffer.from("out_time_us=4000000\n"));
+    if (side > 1) calls[1]!.proc.stdout.emit("data", Buffer.from("out_time_us=6000000\n"));
+    expect(heard.at(-1)).toBe(side > 1 ? 10 : 4);
+    await answerUntilIdle(calls, (call) => succeed(call, "fake-vp8-bytes"));
+    await result;
+    expect(heard.at(-1)).toBe(LONG_SECONDS);
+  });
+
+  it("keeps two alpha copies running together within one cap of pieces", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy } = await loadModule(
+      spawn,
+      FFMPEG_PATH,
+      false,
+      null,
+      undefined,
+      LONG_SECONDS,
+    );
+    const projectDir = tmpProject();
+    const sources = ["a.webm", "b.webm"].map((name) => join(projectDir, name));
+    for (const source of sources) writeFileSync(source, "source-bytes");
+    const cap = Math.max(
+      1,
+      Math.min(4, availableParallelism() - 1, Math.floor(totalmem() / (3 * 1024 ** 3))),
+    );
+
+    const results = sources.map((source) => resolveProxy(projectDir, source, "vp8"));
+    await flush(50);
+
+    expect(calls).toHaveLength(cap);
+    await answerUntilIdle(calls, (call) => succeed(call, "fake-vp8-bytes"));
+    await Promise.all(results);
+    expect(calls.filter((call) => call.args.includes("-ss"))).toHaveLength(6);
+  });
+
+  it("ends the pieces still running when one of them fails, and reports that failure", async () => {
+    const { spawn, calls } = createSpawnSpy();
+    const { resolveProxy } = await loadModule(
+      spawn,
+      FFMPEG_PATH,
+      false,
+      null,
+      undefined,
+      LONG_SECONDS,
+    );
+    const projectDir = tmpProject();
+    const sourcePath = join(projectDir, "long.webm");
+    writeFileSync(sourcePath, "source-bytes");
+
+    const result = resolveProxy(projectDir, sourcePath, "vp8").catch((error: unknown) => error);
+    await flush(50);
+    fail(calls[0]!, 1, "bad piece");
+    await flush(50);
+    for (const call of calls.slice(1)) {
+      expect(call.options?.signal?.aborted).toBe(true);
+      call.proc.kill("SIGKILL");
+    }
+    expect(String(await result)).toContain("bad piece");
   });
 
   it("keeps a short source to one pass", async () => {
