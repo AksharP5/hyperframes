@@ -63,6 +63,10 @@ The CLI also renders in batches and from variables, writes image sequences and
 several video formats, and runs in the cloud — managed, on AWS Lambda, or on
 Google Cloud Run. Most commands take `--json` when you need to read the result from a script.
 
+Browser installation and the media probes used by `snapshot` and
+`remove-background` preserve Unicode filenames and non-English text in
+subprocess diagnostics.
+
 Start with the simple command, then open the [full reference](/packages/cli) for the exact options needed by automation or infrastructure.
 
 Before preview and render, HyperFrames stops headless Chrome processes left
