@@ -351,6 +351,12 @@ Use Docker when you need a pinned rendering environment:
 npx hyperframes render --docker --output output.mp4
 ```
 
+### Repeated scene fonts make export HTML very large
+
+Before embedding local font files, the render compiler removes duplicate top-level `@font-face` declarations from active, unconditional styles. The last copy stays in place, so its order relative to other font faces is kept. Conditional rules and alternate styles are left alone, and your source scene files are not changed.
+
+Only declarations with the same family, `src`, and descriptors count as duplicates. If the export is still large, make repeated scene font rules match exactly, or declare the font once in a shared root style.
+
 ### Every render takes about 45 seconds longer than expected
 
 A composition that never registers a GSAP timeline still makes the producer wait

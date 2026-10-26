@@ -68,6 +68,7 @@ export {
   AFTER_FONTS_SCRIPT_TYPE,
   compositionStyle,
   cssStyleMergeKey,
+  isAlwaysAppliedStyle,
   deferScriptsUntilFonts,
   headStyleRuns,
   inlineScriptRuns,
@@ -87,6 +88,7 @@ export {
 // Composition isolation helpers
 export {
   buildVariablesByCompScript,
+  dedupeFontFaceRules,
   scopeCssToComposition,
   wrapScopedCompositionScript,
 } from "./compositionScoping";

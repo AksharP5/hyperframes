@@ -1311,6 +1311,66 @@ describe("system-primary font normalization", () => {
 });
 
 describe("local font embedding", () => {
+  it("deduplicates assembled scene fonts before embedding and keeps the last descriptor order", async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-repeated-scene-fonts-"));
+    mkdirSync(join(projectDir, "fonts"));
+    writeFileSync(join(projectDir, "fonts/shared.woff2"), Buffer.alloc(128 * 1024, 0x41));
+    const face = (display: string) =>
+      `@font-face { font-family: "SceneFont"; src: url("fonts/shared.woff2"); font-display: ${display}; }`;
+    for (let i = 0; i < 3; i++) {
+      writeFileSync(
+        join(projectDir, `scene-${i}.html`),
+        `<html><head><style>${face(i === 1 ? "block" : "swap")}</style></head><body>
+          <div data-composition-id="scene-${i}" data-width="640" data-height="360" data-duration="1">Scene ${i}</div>
+        </body></html>`,
+      );
+    }
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<html><head></head><body><div data-composition-id="root" data-width="640" data-height="360" data-duration="3">
+        ${Array.from({ length: 3 }, (_, i) => `<div class="clip" data-composition-id="scene-${i}" data-composition-src="scene-${i}.html" data-start="${i}" data-duration="1"></div>`).join("")}
+      </div></body></html>`,
+    );
+    try {
+      const compiled = await compileForRender(
+        projectDir,
+        join(projectDir, "index.html"),
+        projectDir,
+      );
+      const { document } = parseHTML(compiled.html);
+      const css = [...document.querySelectorAll("style")].map((el) => el.textContent).join("\n");
+      expect(css.match(/font-display:\s*swap/g)).toHaveLength(1);
+      expect(css.match(/font-display:\s*block/g)).toHaveLength(1);
+      expect(css.indexOf("block")).toBeLessThan(css.indexOf("swap"));
+      expect(Buffer.byteLength(compiled.html)).toBeLessThan(450 * 1024);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("retains font rules inside conditional and inactive styles", async () => {
+    const projectDir = mkdtempSync(join(tmpdir(), "hf-conditional-fonts-"));
+    const face =
+      '@font-face { font-family: "SceneFont"; src: url("data:font/woff2;base64,QQ=="); }';
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<html><head>
+      <style>${face}</style><style media="print">${face}</style>
+      <style>@media print { ${face} }</style><style title="alternate">${face}</style>
+      </head><body><div data-composition-id="root" data-width="640" data-height="360" data-duration="1">Text</div>
+      <template><style>${face}</style></template></body></html>`,
+    );
+    try {
+      const compiled = await compileForRender(
+        projectDir,
+        join(projectDir, "index.html"),
+        projectDir,
+      );
+      expect(compiled.html.match(/@font-face/g)).toHaveLength(5);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
   it("embeds one font file once when sub-compositions use equivalent relative paths", async () => {
     const projectDir = mkdtempSync(join(tmpdir(), "hf-local-font-dedupe-"));
     const assetsDir = join(projectDir, "assets");

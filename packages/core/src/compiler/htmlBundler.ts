@@ -3,7 +3,7 @@ import {
   compositionStyle,
   cssStyleMergeKey,
   deferScriptsUntilFonts,
-  UNCONDITIONAL_CSS_KEY,
+  isAlwaysAppliedStyle,
   headStyleRuns,
   INLINED_FILE_ATTR,
   inlineScriptRuns,
@@ -723,10 +723,6 @@ function placeSceneStylesLikeRender(document: Document): void {
   const holder = document.createElement("style");
   holder.textContent = hoisted;
   first.before(holder);
-}
-
-function isAlwaysAppliedStyle(el: Element): boolean {
-  return cssStyleMergeKey(el) === UNCONDITIONAL_CSS_KEY && !el.closest("template, noscript, svg");
 }
 
 type PartRun<T> = { scene?: string; chunks: T[] };
