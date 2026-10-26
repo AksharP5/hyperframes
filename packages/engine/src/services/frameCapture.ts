@@ -1410,7 +1410,6 @@ async function installMediaPageHooks(page: Page, options: CaptureOptions): Promi
   }
 }
 
-// fallow-ignore-next-line unit-size
 export async function createCaptureSession(
   serverUrl: string,
   outputDir: string,
@@ -2650,7 +2649,6 @@ export function classifyPageError(
   return urls.some(owned) ? `runtime-error:${firstLine}` : null;
 }
 
-// fallow-ignore-next-line unit-size
 export async function initializeSession(session: CaptureSession): Promise<void> {
   const { page, serverUrl } = session;
 
@@ -5135,7 +5133,7 @@ export async function closeCaptureSession(session: CaptureSession): Promise<void
     session.chromeMemory.stop();
     // One last sample so the summary reflects the session's end state, not a
     // point up to `intervalMs` earlier. Best effort; the page may be gone.
-    await session.chromeMemory.sampleOnce();
+    await waitForCloseWithTimeout(session.chromeMemory.sampleOnce());
   }
   if (session.page && !session.pageReleased) {
     const blur = await describePageMotionBlurAtEnd(session.page);

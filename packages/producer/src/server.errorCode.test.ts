@@ -3,6 +3,7 @@ import { extractSafeRenderErrorCode, extractSafeRenderErrorMetadata } from "./se
 import { VideoExtractionStageError } from "./services/render/stages/extractVideosStage.js";
 import { AssetMediaTypeMismatchError } from "./services/assetMediaType.js";
 import { EncoderInterruptedError } from "./services/render/encoderInterruption.js";
+import { RenderStageStalledError } from "./services/render/observability.js";
 
 describe("extractSafeRenderErrorCode", () => {
   it("preserves allowlisted typed extraction codes", () => {
@@ -45,6 +46,20 @@ describe("extractSafeRenderErrorCode", () => {
       retryable: true,
     });
     expect(error.message).not.toContain("private ffmpeg stderr");
+  });
+
+  it("transports the stalled-stage contract", () => {
+    const error = new RenderStageStalledError("capture_disk", 60_000, 12);
+    expect([error.code, error.owner, error.retryable]).toEqual([
+      "RENDER_STAGE_STALLED",
+      "system",
+      false,
+    ]);
+    expect(extractSafeRenderErrorMetadata(error)).toEqual({
+      errorCode: "RENDER_STAGE_STALLED",
+      errorOwner: "system",
+      retryable: false,
+    });
   });
 
   it("transports producer-authored public metadata without interpreting its schema", () => {

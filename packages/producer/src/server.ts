@@ -124,6 +124,7 @@ interface PreparedRenderInput {
 }
 
 const DEFAULT_SERVER_FPS = { num: 30, den: 1 } as const;
+const SSE_KEEPALIVE_MS = 30_000;
 const SAFE_RENDER_ERROR_CODES = new Set<string>([
   "ASSET_MEDIA_TYPE_MISMATCH",
   "NOT_MEDIA_PAYLOAD",
@@ -132,6 +133,7 @@ const SAFE_RENDER_ERROR_CODES = new Set<string>([
   "VIDEO_EXTRACTION_FAILED",
   "ENCODER_INTERRUPTED",
   "RENDER_TOO_SLOW",
+  "RENDER_STAGE_STALLED",
 ]);
 
 /**
@@ -859,6 +861,10 @@ export function createRenderHandlers(options: HandlerOptions = {}): RenderHandle
           }),
         });
       }
+      const reportProgress = createSseProgressReporter(stream, requestId);
+      const keepalive = setInterval(() => {
+        Promise.resolve(reportProgress(job, job.currentStage)).catch(() => {});
+      }, SSE_KEEPALIVE_MS);
       const release = await renderSemaphore.acquire();
 
       try {
@@ -866,9 +872,10 @@ export function createRenderHandlers(options: HandlerOptions = {}): RenderHandle
           job,
           input.projectDir,
           absoluteOutputPath,
-          createSseProgressReporter(stream, requestId),
+          reportProgress,
           abortController.signal,
-        );
+        ).finally(release);
+        clearInterval(keepalive);
 
         const fileSize = outputFileSize(absoluteOutputPath);
         const outputToken = store.register(absoluteOutputPath);
@@ -889,6 +896,7 @@ export function createRenderHandlers(options: HandlerOptions = {}): RenderHandle
           }),
         });
       } catch (error) {
+        clearInterval(keepalive);
         await writeRenderStreamFailure({
           error,
           job,
@@ -898,7 +906,6 @@ export function createRenderHandlers(options: HandlerOptions = {}): RenderHandle
           log,
         });
       } finally {
-        release();
         c.req.raw.signal.removeEventListener("abort", onRequestAbort);
         cleanupTempDir(cleanupProjectDir, log);
       }
