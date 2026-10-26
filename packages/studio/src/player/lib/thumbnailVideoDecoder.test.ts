@@ -2,8 +2,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeVideoThumbnail, videoThumbnailTimestamps } from "./thumbnailVideoDecoder";
+import { MediaFetchError } from "./mediaFetch";
 
 const dispose = vi.fn();
+const sourceRetryRules: string[] = [];
 const canvasesAtTimestamps = vi.fn();
 const getKeyPacket = vi.fn(async (_time: number) => null as { timestamp: number } | null);
 const input = {
@@ -14,7 +16,12 @@ const input = {
 vi.mock("mediabunny", () => ({
   ALL_FORMATS: {},
   UrlSource: class {
-    constructor(readonly url: string) {}
+    constructor(
+      readonly url: string,
+      readonly options?: { getRetryDelay?: unknown },
+    ) {
+      sourceRetryRules.push(typeof options?.getRetryDelay);
+    }
   },
   Input: class {
     getPrimaryVideoTrack = input.getPrimaryVideoTrack;
@@ -369,6 +376,22 @@ describe("decodeVideoThumbnail", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
     two.dispose?.();
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(5);
+  });
+
+  it("reports a failed range fetch as one typed line and rethrows it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    sourceRetryRules.length = 0;
+    input.getPrimaryVideoTrack.mockRejectedValue(
+      new MediaFetchError("thumbnail", null, "TypeError"),
+    );
+    await expect(
+      decodeVideoThumbnail({ source: "/locked.mp4", frameCount: 1 }, new AbortController().signal),
+    ).rejects.toBeInstanceOf(MediaFetchError);
+    expect(sourceRetryRules).toEqual(["function"]);
+    expect(warn.mock.calls).toEqual([
+      ["[Studio] thumbnail range fetch failed: network TypeError after 0 retries"],
+    ]);
+    warn.mockRestore();
   });
 
   it("releases input and degrades when the source has no video track", async () => {

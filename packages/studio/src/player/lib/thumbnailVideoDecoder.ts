@@ -4,6 +4,7 @@ import {
   type ThumbnailLoadedResult,
   type ThumbnailValue,
 } from "./thumbnailScheduler";
+import { mediaUrlSourceOptions, reportMediaFetchFailure } from "./mediaFetch";
 
 export interface VideoThumbnailDecodeRequest {
   source: string;
@@ -260,6 +261,7 @@ export async function decodeVideoThumbnail(
     return await decodeMissingFrames(request, signal, budgets, keyOf, resources);
   } catch (error) {
     releaseDecodedResources(resources);
+    reportMediaFetchFailure(error);
     throw error;
   }
 }
@@ -275,7 +277,7 @@ async function decodeMissingFrames(
   throwIfAborted(signal);
 
   const input = new mediabunny.Input({
-    source: new mediabunny.UrlSource(request.source),
+    source: new mediabunny.UrlSource(request.source, mediaUrlSourceOptions("thumbnail")),
     formats: mediabunny.ALL_FORMATS,
   });
   try {
