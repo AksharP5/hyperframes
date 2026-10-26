@@ -1,4 +1,4 @@
-import { PREVIEW_ONLY_ATTRS } from "@hyperframes/core/studio-preview-mark";
+import { isClipHiddenByRuntime, PREVIEW_ONLY_ATTRS } from "@hyperframes/core/studio-preview-mark";
 import { knownSourceAnswer, probeSourceElement, type ProbeTarget } from "./probeSourceElement";
 import { isAudibleVideoNode } from "../../player/lib/timelineElementHelpers";
 import type { PatchOperation } from "../../utils/sourcePatcher";
@@ -454,7 +454,7 @@ export function collectDomEditLayerItems(
   const items: DomEditLayerItem[] = [];
   // fallow-ignore-next-line complexity
   const visit = (el: HTMLElement, depth: number) => {
-    if (items.length >= maxItems) return;
+    if (items.length >= maxItems || isClipHiddenByRuntime(el)) return;
 
     const entry = readDomEditLayerWalkEntry(el, options.activeCompositionPath, cache);
     if (entry) {
