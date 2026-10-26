@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   linkSync,
@@ -8,6 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { uptime } from "node:os";
 import { join } from "node:path";
 
 export class HistoryBusyError extends Error {
@@ -23,6 +25,7 @@ export class HistoryBusyError extends Error {
 const WINDOWS_BUSY = new Set(["EPERM", "EBUSY", "EACCES"]);
 const NO_HARD_LINKS = new Set(["ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EPERM"]);
 const TAKING_MS = 2_000;
+const BOOT_SLACK_MS = 60_000;
 
 function busyOnWindows(error: unknown): boolean {
   return (
@@ -37,6 +40,53 @@ function alive(pid: number): boolean {
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** What identifies `pid`'s process among those that ever had the number: its start time. Null where unreadable. */
+export function processStart(pid: number): string | null {
+  try {
+    if (process.platform === "linux") {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf-8");
+      return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? null;
+    }
+    if (process.platform === "win32") return null;
+    const ps = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf-8",
+      env: { ...process.env, LC_ALL: "C" },
+    });
+    return ps.status === 0 ? ps.stdout.trim() || null : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordedStart(file: string, pid: number): string | null {
+  try {
+    const [owner, ...start] = readFileSync(`${file}.start`, "utf-8").split("\n");
+    return Number(owner) === pid && start.length > 0 ? start.join("\n") : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordStart(file: string): void {
+  const start = processStart(process.pid);
+  if (start) writeFileSync(`${file}.start`, `${process.pid}\n${start}`);
+}
+
+/** Whether `pid` still runs the process that took `file`: its recorded start matches, else the lock postdates boot. */
+function holdsLock(file: string, pid: number): boolean {
+  if (!alive(pid)) return false;
+  const recorded = recordedStart(file, pid);
+  if (recorded !== null) {
+    const now = processStart(pid);
+    return now === null || now === recorded;
+  }
+  try {
+    return statSync(file).mtimeMs > Date.now() - uptime() * 1000 - BOOT_SLACK_MS;
+  } catch {
+    return true;
   }
 }
 
@@ -62,7 +112,7 @@ function beingTaken(file: string): boolean {
 }
 
 function deadHolder(file: string, pid: number): boolean {
-  return !alive(pid) && !beingTaken(file);
+  return !holdsLock(file, pid) && !beingTaken(file);
 }
 
 /** Takes `file` if nobody holds it: linked in whole, or created in place where links fail. */
@@ -71,6 +121,7 @@ function claim(file: string): boolean {
   writeFileSync(draft, String(process.pid));
   try {
     linkSync(draft, file);
+    recordStart(file);
     return true;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? "";
@@ -85,6 +136,7 @@ function claim(file: string): boolean {
 function createExclusively(file: string): boolean {
   try {
     writeFileSync(file, String(process.pid), { flag: "wx" });
+    recordStart(file);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -94,7 +146,9 @@ function createExclusively(file: string): boolean {
 
 /** Removes `file` only while it names this process, so a release never takes a later owner's lock. */
 function releaseOwn(file: string): void {
-  if (ownerOf(file) === process.pid) rmSync(file, { force: true });
+  if (ownerOf(file) !== process.pid) return;
+  rmSync(file, { force: true });
+  rmSync(`${file}.start`, { force: true });
 }
 
 /**
@@ -110,7 +164,10 @@ function evictDeadOwner(file: string): boolean {
   }
   try {
     const pid = ownerOf(file);
-    if (pid !== null && deadHolder(file, pid)) rmSync(file, { force: true });
+    if (pid !== null && deadHolder(file, pid)) {
+      rmSync(file, { force: true });
+      rmSync(`${file}.start`, { force: true });
+    }
     return true;
   } finally {
     releaseOwn(evictor);
@@ -129,7 +186,7 @@ function advertise(urlFile: string, url: string | undefined): void {
 function servedBy(file: string, urlFile: string, pid: number): string | undefined {
   try {
     const said = JSON.parse(readFileSync(urlFile, "utf-8")) as { pid?: unknown; url?: unknown };
-    const live = said.pid === pid && alive(pid) && ownerOf(file) === pid;
+    const live = said.pid === pid && holdsLock(file, pid) && ownerOf(file) === pid;
     return live && typeof said.url === "string" ? said.url : undefined;
   } catch {
     return undefined;
