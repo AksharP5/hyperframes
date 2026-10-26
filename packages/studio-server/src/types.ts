@@ -165,7 +165,7 @@ export interface StudioApiAdapter {
   startRender(opts: {
     project: ResolvedProject;
     outputPath: string;
-    format: "mp4" | "webm" | "mov";
+    format: "mp4" | "webm" | "mov" | "gif";
     /**
      * Frame rate as an exact rational. The HTTP layer (POST
      * `/projects/:id/render`) accepts either a JSON number (integer fps,
@@ -175,6 +175,7 @@ export interface StudioApiAdapter {
      */
     fps: import("@hyperframes/core").Fps;
     quality: string;
+    gifLoop?: number;
     crf?: number;
     videoBitrate?: string;
     videoFrameFormat?: "auto" | "jpg" | "png";
