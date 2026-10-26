@@ -478,13 +478,13 @@ is going somewhere ([motion](/prompting/motion)); a title that has landed holds 
 The distinction that trips people up: the **HTML-in-Canvas blocks are not CSS**. The device mockups, liquid-glass stages, and `vfx-*` blocks render live DOM into WebGL textures via the experimental `drawElementImage` API — which needs a Chrome flag. The [HTML-in-Canvas guide](/guides/html-in-canvas) documents the real behavior:
 
 - **Rendering enables CanvasDrawElement automatically** (`--enable-features=CanvasDrawElement`), including inside Docker. That is enough for CanvasDrawElement-only blocks. Liquid-glass blocks that combine it with WebGPU still need a compatible browser such as Brave or Chrome Canary configured through `PRODUCER_HEADLESS_SHELL_PATH`; the bundled headless shell cannot run that combination.
-- **Live preview in the Studio needs the flag turned on manually** (`chrome://flags/#canvas-draw-element` → *Enabled* → restart). Without it, these blocks fall back rather than showing the effect in preview.
+- **Live preview in the browser editor needs the flag turned on manually** (`chrome://flags/#canvas-draw-element` → *Enabled* → restart). Without it, these blocks fall back rather than showing the effect in preview.
 - The blocks **feature-detect and degrade gracefully**, so a browser without the flag won't crash — it just won't show the WebGL treatment.
 
-The Effects components above have none of this — they're plain CSS and animate everywhere, preview included. So if you need something visible in Studio preview today with zero setup, prefer the CSS Effects; the HTML-in-Canvas group is where the flag caveat lives.
+The Effects components above have none of this — they're plain CSS and animate everywhere, preview included. So if you need something visible in the browser editor preview today with zero setup, prefer the CSS Effects; the HTML-in-Canvas group is where the flag caveat lives.
 
 <Warning>
-  Don't promise a stakeholder a live Studio preview of a liquid-glass or device block without confirming the Chrome flag is enabled on that machine — the rendered MP4 is unaffected, but the in-browser preview may fall back. See the [HTML-in-Canvas guide](/guides/html-in-canvas).
+  Don't promise a stakeholder a live the browser editor preview of a liquid-glass or device block without confirming the Chrome flag is enabled on that machine — the rendered MP4 is unaffected, but the in-browser preview may fall back. See the [HTML-in-Canvas guide](/guides/html-in-canvas).
 </Warning>
 
 #### Where to go next
@@ -496,7 +496,7 @@ The Effects components above have none of this — they're plain CSS and animate
 
 This clause from a [longer HyperFrames film](/prompting/capstone#the-prompt-word-for-word) produced the shot below. You can lift the wording for your own video:
 
-> Inside: frosted-glass inspector panels (real translucency — blur over what's behind; the product's Studio design language) hover above the wire carrying live values (`ease: power3.out`, a color token, an fps readout) […] Glass surfaces use the file's `--glass-*` tokens with real backdrop blur.
+> Inside: frosted-glass inspector panels (real translucency — blur over what's behind; the product's the browser editor design language) hover above the wire carrying live values (`ease: power3.out`, a color token, an fps readout) […] Glass surfaces use the file's `--glass-*` tokens with real backdrop blur.
 
 <DocsVideo
   title="Capstone region surface"

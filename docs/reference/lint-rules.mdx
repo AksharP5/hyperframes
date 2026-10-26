@@ -20,7 +20,7 @@ Severities:
 
 Source: `packages/lint/src/rules/structure.ts`.
 
-The five codes marked **Warning or error** are warnings when the CLI lints a project, and errors when Studio
+The five codes marked **Warning or error** are warnings when the CLI lints a project, and errors when the browser editor
 lints the file it is editing.
 
 ### `nested_structure_needs_subcomposition`
@@ -100,7 +100,7 @@ Source: `packages/lint/src/rules/composition.ts`.
 
 **Error.** The legacy `data-layer` attribute is used.
 
-**Fix:** Replace it with `data-track-index`, the canonical name Studio and the linter read.
+**Fix:** Replace it with `data-track-index`, the canonical name the browser editor and the linter read.
 
 ### `duplicate_composition_id`
 
@@ -214,7 +214,7 @@ stylesheet links in `<head>`, so those styles never apply in preview, snapshot o
 
 ### `timed_element_missing_clip_class`
 
-**Warning.** An element has timing attributes but no `class="clip"`. The runtime still times it, but Studio and the clip-ownership rules use `.clip` to recognise it, so it is harder to edit and to lint.
+**Warning.** An element has timing attributes but no `class="clip"`. The runtime still times it, but the browser editor and the clip-ownership rules use `.clip` to recognise it, so it is harder to edit and to lint.
 
 **Fix:** Add `class="clip"` to the element.
 
@@ -324,9 +324,9 @@ To fade or hide something yourself, animate it on the timeline, or toggle a clas
 
 ### `studio_missing_editable_id`
 
-**Warning.** A timeline-visible element has no `id`, so Studio cannot target it stably for timeline and canvas edits.
+**Warning.** A timeline-visible element has no `id`, so the browser editor cannot target it stably for timeline and canvas edits.
 
-**Fix:** Add a stable, human-readable id such as `id="hero-title"` to elements that agents or Studio should edit.
+**Fix:** Add a stable, human-readable id such as `id="hero-title"` to elements that agents or the browser editor should edit.
 
 ### `timeline_id_mismatch`
 
@@ -406,7 +406,7 @@ Source: `packages/lint/src/rules/gsap.ts`.
 
 ### `gsap_group_selector_keyframes`
 
-**Warning.** A GSAP tween targets several elements with shared keyframes, so editing one element's keyframes in Studio changes all of them.
+**Warning.** A GSAP tween targets several elements with shared keyframes, so editing one element's keyframes in the browser editor changes all of them.
 
 **Fix:** Replace the group selector with individual `tl.to()` calls per element.
 
@@ -614,7 +614,7 @@ wrapper or an element with a CSS background. The shader runtime only grades real
 
 ### `media_crossorigin_breaks_preview`
 
-**Error.** The element has `crossorigin`, which forces a CORS-checked fetch; if the host omits CORS headers, the load fails silently in Studio preview (blank media) while renders still work.
+**Error.** The element has `crossorigin`, which forces a CORS-checked fetch; if the host omits CORS headers, the load fails silently in the browser editor preview (blank media) while renders still work.
 
 **Fix:** Remove `crossorigin` unless you read the media back through canvas, WebGL or WebAudio from a host known to send CORS headers.
 
@@ -698,7 +698,7 @@ wrapper or an element with a CSS background. The shader runtime only grades real
 
 ### `video_muted_with_declared_audio`
 
-**Error.** A `<video>` declares `data-has-audio="true"` but also carries `muted`, so Studio preview silences the audio the declaration promises.
+**Error.** A `<video>` declares `data-has-audio="true"` but also carries `muted`, so the browser editor preview silences the audio the declaration promises.
 
 **Fix:** Remove `muted` if the video should be audible, or drop `data-has-audio` and use `data-volume="0"` for silent visual video.
 
@@ -750,7 +750,7 @@ Source: `packages/lint/src/rules/captions.ts`.
 
 ### `caption_transcript_not_inline`
 
-**Error.** A captions composition loads its transcript with `fetch()`, but the Studio caption editor needs an inline `var TRANSCRIPT = [...]` array to detect and edit captions.
+**Error.** A captions composition loads its transcript with `fetch()`, but the browser editor caption editor needs an inline `var TRANSCRIPT = [...]` array to detect and edit captions.
 
 **Fix:** Embed the transcript inline as `var TRANSCRIPT = [...]` with JSON-quoted keys.
 

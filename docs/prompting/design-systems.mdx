@@ -140,7 +140,7 @@ many fills.
 
 There are seven variable types: `string`, `number`, `color`, `boolean`, `enum`,
 `font`, and `image`. Each one validates differently at render time. In
-[Studio](/packages/studio), `boolean`, `enum`, `color`, and `number` each get
+the [browser editor](/studio), `boolean`, `enum`, `color`, and `number` each get
 their own control, while `string`, `font`, and `image` use a plain text input.
 
 You don't write the JSON yourself. But naming the type in the prompt removes a
@@ -153,7 +153,7 @@ guess:
 
 The engine rationale: an `enum` with declared options is checked against that
 list at render time, so `enum-out-of-range` gets caught. A `number` can carry
-`min`, `max`, `step`, and a `unit` label, which is what gives Studio a real
+`min`, `max`, `step`, and a `unit` label, which is what gives the browser editor a real
 slider instead of a bare text box. Say "editable" and you leave the agent to
 pick a type. A mistyped value then surfaces much later.
 

@@ -6,13 +6,13 @@ description: "Start with what you can see, try the smallest useful fix, and get 
 
 Find the symptom that looks like yours below.
 
-## Studio will not open
+## The browser editor will not open
 
 The browser never opens, the page is unreachable, or the project does not load.
 
 1. Open a terminal in the HyperFrames project folder.
 2. Run `npx hyperframes preview`.
-3. Keep that process running while Studio is open.
+3. Keep that process running while the browser editor is open.
 4. Use the local URL printed in the terminal.
 
 If the command cannot find a project, check that you are inside the project folder rather than its parent.
@@ -23,7 +23,7 @@ A change is missing, playback looks old, or the preview is blank. Preview's Code
 editor and visual controls save automatically. If you edited the project in another
 application, save that file first.
 
-1. Wait for the project refresh, then reload Studio once.
+1. Wait for the project refresh, then reload the browser editor once.
 2. Check the terminal for a build or runtime error.
 3. Run the project checks:
 
@@ -43,7 +43,7 @@ Selection, canvas controls, timing, or an Inspector field is unavailable.
 - Check whether the visual lives inside a nested composition.
 - Ask the agent when the change affects source structure rather than one visible element.
 
-[Open Studio troubleshooting →](/studio/troubleshooting)
+[Open Browser editor troubleshooting →](/studio/troubleshooting)
 
 ## Media is missing or black
 
@@ -72,12 +72,12 @@ Run `npx hyperframes check`, then give your agent the smallest affected scene an
 
 ## Render failed or differs from preview
 
-Export stops, produces the wrong result, or disagrees with Studio.
+Export stops, produces the wrong result, or disagrees with the browser editor.
 
 1. Preserve the complete render error.
 2. Run `npx hyperframes check`.
 3. Confirm fonts and media are local and load before capture.
-4. Check the affected timestamp in Studio.
+4. Check the affected timestamp in the browser editor.
 5. Try the normal MP4 preset before changing codecs or advanced flags.
 
 The [complete troubleshooting guide](/guides/troubleshooting) covers codec, browser, FFmpeg, GPU, HDR, and deployment-specific failures.
@@ -97,7 +97,7 @@ What happened instead:
 
 Exact error:
 
-Where it happens: Studio / lint / check / render
+Where it happens: the browser editor / lint / check / render
 
 Does it happen every time?
 
@@ -127,5 +127,5 @@ Add a screenshot or short recording when the failure is visual. Never paste acce
 ## Related topics
 
 - [Troubleshoot a project, preview, or render](/guides/troubleshooting)
-- [Recover from a Studio problem](/studio/troubleshooting)
+- [Recover from a browser editor problem](/studio/troubleshooting)
 - [Finish and share a video](/guides/export-and-share)

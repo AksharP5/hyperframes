@@ -5,7 +5,7 @@ description: "Check a project and render MP4, MOV, WebM, GIF, or PNG output."
 
 import { DocsVideo } from "/snippets/docs-video.jsx";
 
-Studio is the simplest place to export a project. Use the command line when an agent, script, CI job, or advanced delivery workflow needs to control the render.
+The browser editor is the simplest place to export a project. Use the command line when an agent, script, CI job, or advanced delivery workflow needs to control the render.
 
 <DocsVideo
   title="One command turns the project into an MP4"
@@ -119,7 +119,7 @@ lock that fixed-length segments depend on. Cloud rendering (`lambda`,
 
 ## Input video codecs
 
-Studio, preview, `check`, and published projects normally create cached browser
+The browser editor, preview, `check`, and published projects normally create cached browser
 proxies for local video that Chrome cannot decode reliably, including common
 HEVC and ProRes inputs. The original file stays in the project and remains the
 render source.
@@ -353,5 +353,5 @@ Keep the first exact error rather than only the final “render failed” messag
 ## Related topics
 
 - [Compare local, hosted, and self-managed rendering](/deploy/overview)
-- [Render and export from Studio](/studio/export)
+- [Render and export from the browser editor](/studio/export)
 - [Diagnose a failed render](/guides/troubleshooting)

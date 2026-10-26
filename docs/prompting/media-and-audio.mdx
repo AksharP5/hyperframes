@@ -188,7 +188,7 @@ case, straight off an iPhone or a screen recorder. The framework probes the
 asset and builds a bounded H.264 proxy automatically, cached under
 `.transcode-cache/`.
 
-`preview`, `play`, Studio, and published player pages use that proxy for
+`preview`, `play`, the browser editor, and published player pages use that proxy for
 playback. A render always decodes the original file, so nothing about final
 quality or color is touched. `snapshot` also reads frames from the original with
 FFmpeg, so it makes no proxy unless you pass `--proxy`.

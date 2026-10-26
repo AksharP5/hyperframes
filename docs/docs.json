@@ -147,53 +147,19 @@
         ]
       },
       {
-        "tab": "Studio",
+        "tab": "Browser editor",
         "icon": "palette",
         "groups": [
           {
-            "group": "Start in Studio",
+            "group": "Browser editor",
             "pages": [
-              "studio/index"
-            ]
-          },
-          {
-            "group": "Edit",
-            "pages": [
+              "studio/index",
               "studio/canvas",
               "studio/timeline",
-              "studio/animation",
-              "studio/captions"
-            ]
-          },
-          {
-            "group": "Audio",
-            "pages": [
               "studio/audio-effects",
-              "studio/voiceover-carve",
-              "studio/audio-groups",
-              "studio/audio-automation"
-            ]
-          },
-          {
-            "group": "Build and reuse",
-            "pages": [
               "studio/assets-and-blocks",
-              "studio/variables",
-              "studio/slideshows"
-            ]
-          },
-          {
-            "group": "Finish and recover",
-            "pages": [
               "studio/export",
               "studio/troubleshooting"
-            ]
-          },
-          {
-            "group": "Reference",
-            "pages": [
-              "studio/source",
-              "studio/shortcuts"
             ]
           }
         ]
@@ -1058,7 +1024,7 @@
         "header": "Build",
         "items": [
           {
-            "label": "Studio",
+            "label": "Browser editor",
             "href": "/studio"
           },
           {
@@ -1158,7 +1124,7 @@
     },
     {
       "source": "/guides/video-editor-cheatsheet",
-      "destination": "/studio/shortcuts"
+      "destination": "/studio/index#keyboard-shortcuts"
     },
     {
       "source": "/guides/timeline-editing",
@@ -1215,12 +1181,12 @@
     },
     {
       "source": "/guides/keyframes",
-      "destination": "/studio/animation",
+      "destination": "/studio/canvas#animate-with-keyframes",
       "permanent": true
     },
     {
       "source": "/studio/lint-and-agent",
-      "destination": "/studio/source",
+      "destination": "/studio/canvas#edit-the-source",
       "permanent": true
     },
     {
@@ -1346,6 +1312,51 @@
     {
       "source": "/prompting/overlays-and-lower-thirds",
       "destination": "/prompting/captions-catalog#overlays-and-lower-thirds",
+      "permanent": true
+    },
+    {
+      "source": "/studio/animation",
+      "destination": "/studio/canvas#animate-with-keyframes",
+      "permanent": true
+    },
+    {
+      "source": "/studio/audio-automation",
+      "destination": "/studio/audio-effects#automate-over-time",
+      "permanent": true
+    },
+    {
+      "source": "/studio/audio-groups",
+      "destination": "/studio/audio-effects#group-tracks",
+      "permanent": true
+    },
+    {
+      "source": "/studio/captions",
+      "destination": "/studio/assets-and-blocks#edit-captions",
+      "permanent": true
+    },
+    {
+      "source": "/studio/shortcuts",
+      "destination": "/studio/index#keyboard-shortcuts",
+      "permanent": true
+    },
+    {
+      "source": "/studio/slideshows",
+      "destination": "/studio/export#build-a-slideshow",
+      "permanent": true
+    },
+    {
+      "source": "/studio/source",
+      "destination": "/studio/canvas#edit-the-source",
+      "permanent": true
+    },
+    {
+      "source": "/studio/variables",
+      "destination": "/studio/assets-and-blocks#use-variables",
+      "permanent": true
+    },
+    {
+      "source": "/studio/voiceover-carve",
+      "destination": "/studio/audio-effects#make-music-sit-under-narration",
       "permanent": true
     }
   ],

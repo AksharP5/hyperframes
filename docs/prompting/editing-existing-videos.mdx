@@ -23,7 +23,7 @@ Every timeline verb resolves to a `data-*` attribute or an inline style. This is
 | "the audio bed is too loud" | Level | `data-volume` |
 
 <Note>
-  The mental model the Studio timeline uses: **move** changes when a clip *starts*, **right trim** changes when it *ends*, and **front trim** only exists for media clips — a `<video>` or `<audio>` can skip into its own content, but a GSAP-driven `<div>` can't start halfway through its animation. See [Studio timeline](/studio/timeline) for the full clip-type breakdown. One more surface the map can't show: retiming a scene that spans the whole composition also needs the root's `data-duration` bumped — the root governs total length, so a longer child never renders past it.
+  The mental model the browser editor timeline uses: **move** changes when a clip *starts*, **right trim** changes when it *ends*, and **front trim** only exists for media clips — a `<video>` or `<audio>` can skip into its own content, but a GSAP-driven `<div>` can't start halfway through its animation. See [browser editor timeline](/studio/timeline) for the full clip-type breakdown. One more surface the map can't show: retiming a scene that spans the whole composition also needs the root's `data-duration` bumped — the root governs total length, so a longer child never renders past it.
 </Note>
 
 ## Trim, move, and restack
@@ -57,7 +57,7 @@ Bound moves by the composition's length — a 4-second clip moved to 0:08 in a 1
 
 ## Split a scene
 
-The Studio timeline exposes move and trim as drag gestures but does **not** yet offer split, slip, slide, ripple, or roll. You can still split by directing the agent, because it edits the HTML directly — a split is just one clip becoming two with adjusted `data-start` / `data-duration`:
+The browser editor timeline can move, trim and split clips, and ripple-delete on the main track; it has no slip, slide or roll yet. You can also split by directing the agent, because it edits the HTML directly — a split is just one clip becoming two with adjusted `data-start` / `data-duration`:
 
 > Split scene 2 at 0:04 so I can drop a transition between the two halves.
 
@@ -88,13 +88,13 @@ Change one scene's feel per render so you can attribute what helped. If a scene 
 
 ## Adjust a keyframe
 
-Individual animation properties are editable — the value, the ease, the timing of any tween. You can direct these by prompt, or edit them yourself in the Studio Design Panel; either way they resolve to the same GSAP code.
+Individual animation properties are editable — the value, the ease, the timing of any tween. You can direct these by prompt, or edit them yourself in the browser editor Design Panel; either way they resolve to the same GSAP code.
 
 > The title slides in from too far — change its entrance to travel 40px, not 200.
 
 > Give the add-to-cart item an arc instead of a straight diagonal, like it's being tossed into the cart.
 
-State the property target absolutely (`Move X = 40`, `arc curviness ≈ 1.5`). [Animation and keyframes](/studio/animation) covers what's editable, motion paths, and gesture recording.
+State the property target absolutely (`Move X = 40`, `arc curviness ≈ 1.5`). [Animation and keyframes](/studio/canvas#animate-with-keyframes) covers what's editable, motion paths, and gesture recording.
 
 <Tip>
   For an element-specific edit, the Design Panel's clipboard icon copies structured context — the element's id, position, size, and current animation — ready to paste into your prompt. It gives the agent exact spatial context instead of a vague "the title."
@@ -134,7 +134,7 @@ Visual tweaks — color, size, weight, position of a single element — are wher
 <CardGroup cols={2}>
   <Card title="Iterating" href="/prompting/overview#iterate-toward-the-look">One variable per edit, absolute targets, freeze what works</Card>
   <Card title="Motion words" href="/prompting/motion#words-for-how-motion-feels">Pacing and easing words that retime the *feel* of a scene</Card>
-  <Card title="Studio timeline" href="/studio/timeline">Move, trim, split, and navigate clips</Card>
+  <Card title="Browser editor timeline" href="/studio/timeline">Move, trim, split, and navigate clips</Card>
   <Card title="Data attributes" href="/concepts/data-attributes">The `data-*` timing contract</Card>
 </CardGroup>
 
