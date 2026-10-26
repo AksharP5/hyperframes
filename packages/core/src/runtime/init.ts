@@ -3093,6 +3093,7 @@ export function initSandboxRuntimeModular(): void {
   // plain inline hidden on a clip in its window is the script's, except on a clip authored that way.
   const clipsSeen = new WeakSet<Element>();
   const authoredInlineHidden = new WeakSet<Element>();
+  const scriptVisibility = new WeakMap<Element, string>();
   const hiddenByScript = (el: StylableElement): boolean =>
     el.style.visibility === "hidden" &&
     el.style.getPropertyPriority("visibility") !== "important" &&
@@ -3236,12 +3237,16 @@ export function initSandboxRuntimeModular(): void {
         clipsSeen.add(rawNode);
         if (rawNode.style.visibility === "hidden") authoredInlineHidden.add(rawNode);
       }
-      if (!isRuntimeStamped && !(isVisibleNow && hiddenByScript(rawNode)))
-        rawNode.style.setProperty(
-          "visibility",
-          isVisibleNow ? "visible" : "hidden",
-          isVisibleNow ? "" : "important",
-        );
+      if (!isRuntimeStamped && !(isVisibleNow && hiddenByScript(rawNode))) {
+        const style = rawNode.style;
+        const passHid = style.getPropertyPriority("visibility") === "important";
+        if (!isVisibleNow && !passHid && !authoredInlineHidden.has(rawNode))
+          scriptVisibility.set(rawNode, style.getPropertyValue("visibility"));
+        const shown = isVisibleNow
+          ? (passHid && scriptVisibility.get(rawNode)) || "visible"
+          : "hidden";
+        style.setProperty("visibility", shown, isVisibleNow ? "" : "important");
+      }
       rawNode.toggleAttribute(CLIP_HIDDEN_ATTR, !isRuntimeStamped && !isVisibleNow);
       if (!isRuntimeStamped && !isVisibleNow && !clipsStyledVisible.has(rawNode))
         clipsNeverStyledVisible.add(rawNode);
