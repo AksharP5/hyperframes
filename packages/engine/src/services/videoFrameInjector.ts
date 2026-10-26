@@ -215,14 +215,19 @@ export function createVideoFrameInjector(
     }
 
     const updates: Array<{ videoId: string; dataUri: string; frameIndex: number }> = [];
+    const restyleIds: string[] = [];
     const activeIds = new Set<string>();
+    const isBlurSubSample = heldVideoTime !== undefined && heldVideoTime !== time;
     if (activePayloads.size > 0) {
       const pendingReads: Array<Promise<{ videoId: string; dataUri: string; frameIndex: number }>> =
         [];
       for (const [videoId, payload] of activePayloads) {
         activeIds.add(videoId);
         const lastFrameIndex = lastInjectedFrameByVideo.get(videoId);
-        if (lastFrameIndex === payload.frameIndex) continue;
+        if (lastFrameIndex === payload.frameIndex) {
+          if (!isBlurSubSample) restyleIds.push(videoId);
+          continue;
+        }
         pendingReads.push(
           frameCache
             .get(payload.framePath)
@@ -239,7 +244,7 @@ export function createVideoFrameInjector(
     }
 
     await syncVideoFrameVisibility(page, Array.from(activeIds));
-    if (updates.length > 0) {
+    if (updates.length > 0 || restyleIds.length > 0) {
       // Only record cache entries for videos the page actually painted.
       // injectVideoFramesBatch skips any video whose visual ancestor is
       // hidden (sub-comp host out-of-window) and returns the subset of ids
@@ -250,6 +255,7 @@ export function createVideoFrameInjector(
         await injectVideoFramesBatch(
           page,
           updates.map((u) => ({ videoId: u.videoId, dataUri: u.dataUri })),
+          restyleIds,
         ),
       );
       for (const update of updates) {
