@@ -742,6 +742,10 @@ const FALLOW_PRUNE_REASON =
 
 export const ALLOWED_DELETIONS = new Map([
   [
+    "docs/guides/color-grading.mdx",
+    "color grading is now the 'Fix and grade the color' section of the media effects guide; the old URL 301s there (docs.json)",
+  ],
+  [
     "docs/public/images/studio-app/export.jpg",
     "the Studio app docs show Export as a recorded demo with its own poster; nothing links this still any more",
   ],

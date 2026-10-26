@@ -178,7 +178,6 @@
               "guides/avatar-presenter",
               "guides/voice-and-audio",
               "guides/remove-background",
-              "guides/color-grading",
               "guides/media-effects",
               "guides/export-and-share"
             ]
@@ -1308,6 +1307,11 @@
     {
       "source": "/prompting/motion-graphics",
       "destination": "/guides/motion-graphics#prompts-that-work",
+      "permanent": true
+    },
+    {
+      "source": "/guides/color-grading",
+      "destination": "/guides/media-effects#fix-and-grade-the-color",
       "permanent": true
     }
   ],
