@@ -1,26 +1,30 @@
 import { spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
   renameSync,
   rmSync,
-  statSync,
   unlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { availableParallelism, tmpdir, totalmem } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import {
-  formatPreviewProxyBox,
-  hdrToSdrToneMapFilter,
-  type PreviewProxyBox,
-} from "@hyperframes/core";
+import { hdrToSdrToneMapFilter, type PreviewProxyBox } from "@hyperframes/core";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
 import { alphaDecoderFor } from "@hyperframes/parsers/media-alpha";
 import { probeFirstFrameColour, probeMediaMetadata } from "./mediaMetadata.js";
 import { cleanupProxyCache } from "./proxyCache.js";
+import {
+  contentCopyKey,
+  contentIndexPath,
+  fastCopyKey,
+  fastIndexPath,
+  readCopyIndex,
+  writeCopyIndex,
+} from "./proxyCacheKey.js";
+import { acquireCopyLock } from "./proxyLock.js";
 import { PROXY_VARIANT_CONFIG, type ProxyVariant } from "./mediaCodecMap.js";
 import { mkdirWithinProject, realpath, realProjectRoot } from "./safePath.js";
 
@@ -146,18 +150,12 @@ export async function waitForProxy<T>(
 }
 
 /**
- * Cache key inputs per the plan: project-relative source path (portable across
- * checkouts), canonical source identity (so retargeted external symlinks do
- * not reuse a proxy), mtime and file size (mtime alone can collide on
- * same-second re-exports on coarse-timestamp filesystems; size catches nearly
- * all such cases at zero cost), and a params version token so changing the
- * ffmpeg recipe below invalidates every cached proxy cleanly.
+ * A copy is found by its source's place and time at no cost; when that misses, by the whole file's hash, once,
+ * and an index file makes the next lookup free. A params version invalidates every copy when the recipe changes.
  */
 type CanonicalProxySource = {
   projectDir: string;
   sourcePath: string;
-  relativePath: string;
-  cacheIdentity: string;
 };
 
 function canonicalizeProxySource(
@@ -174,52 +172,22 @@ function canonicalizeProxySource(
   ) {
     throw new ProxySourceOutsideProjectError();
   }
-
-  const canonicalProjectDir = realProjectRoot(projectDir);
-  const canonicalSourcePath = realpath(absoluteSourcePath);
-  const canonicalRelativePath = relative(canonicalProjectDir, canonicalSourcePath);
-  const sourceIsInsideCanonicalProject =
-    canonicalRelativePath !== ".." &&
-    !canonicalRelativePath.startsWith(`..${sep}`) &&
-    !isAbsolute(canonicalRelativePath);
-  return {
-    projectDir: canonicalProjectDir,
-    sourcePath: canonicalSourcePath,
-    relativePath: requestedRelativePath.normalize("NFC"),
-    // An external target needs a stable identity in addition to its project-local
-    // symlink path, otherwise retargeting the link can reuse an unrelated proxy.
-    cacheIdentity: (sourceIsInsideCanonicalProject
-      ? canonicalRelativePath
-      : canonicalSourcePath
-    ).normalize("NFC"),
-  };
+  return { projectDir: realProjectRoot(projectDir), sourcePath: realpath(absoluteSourcePath) };
 }
 
-function buildProxyCacheKey(
-  source: CanonicalProxySource,
-  variant: ProxyVariant,
-  box: PreviewProxyBox | undefined,
-): string {
-  const stat = statSync(source.sourcePath);
-  const size = box ? `\0${formatPreviewProxyBox(box)}` : "";
-  return createHash("sha256")
-    .update(
-      `${source.relativePath}\0${source.cacheIdentity}\0${stat.mtimeMs}\0${stat.size}\0${PROXY_PARAMS_VERSION}\0${variant}${size}`,
-    )
-    .digest("hex");
-}
-
+/** The copy for this source: the one at its fast name, the one its fast index names, or where a new one goes. */
 function getCanonicalProxyCachePath(
   source: CanonicalProxySource,
   variant: ProxyVariant,
   box?: PreviewProxyBox,
 ): string {
-  const key = buildProxyCacheKey(source, variant, box);
-  return join(
+  const key = fastCopyKey(source.sourcePath, PROXY_PARAMS_VERSION, variant, box);
+  const made = join(
     source.projectDir,
     CACHE_DIR_NAME,
     `${key}${PROXY_VARIANT_CONFIG[variant].extension}`,
   );
+  return existsSync(made) ? made : (readCopyIndex(fastIndexPath(made)) ?? made);
 }
 
 /**
@@ -860,6 +828,23 @@ async function transcodeToCache(
 
     const cacheDir = dirname(cachePath);
     mkdirWithinProject(projectDir, cacheDir);
+    const contentIndex = contentIndexPath(
+      cacheDir,
+      await contentCopyKey(
+        absoluteSourcePath,
+        PROXY_PARAMS_VERSION,
+        variant,
+        box,
+        job.abandoned.signal,
+      ),
+    );
+    const sameContent = readCopyIndex(contentIndex);
+    if (sameContent) {
+      writeCopyIndex(fastIndexPath(cachePath), sameContent);
+      return sameContent;
+    }
+    const release = await acquireCopyLock(cachePath, job.abandoned.signal);
+    if (!release) return cachePath;
     const tempPath = join(cacheDir, `.tmp-${randomUUID()}-${basename(cachePath)}`);
     try {
       const chunkPrefix = join(
@@ -876,12 +861,14 @@ async function transcodeToCache(
         (progress) => reportProgress(job, progress),
       );
       renameSync(tempPath, cachePath);
+      writeCopyIndex(contentIndex, cachePath);
       maintainProxyCache(cacheDir);
       return cachePath;
     } finally {
       // No partial files: if anything above threw, remove whatever ffmpeg
       // may have partially written under the temp name.
       if (existsSync(tempPath)) unlinkSync(tempPath);
+      release();
     }
   } finally {
     releaseSlot();
