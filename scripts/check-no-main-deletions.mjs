@@ -741,6 +741,71 @@ const FALLOW_PRUNE_REASON =
   "fallow 3 reuses one audit snapshot per checkout and the hook prunes with `fallow audit-cache prune`, replacing this script";
 
 export const ALLOWED_DELETIONS = new Map([
+  // Prompt Guide as six topic pages
+  [
+    "docs/prompting/anatomy.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/audio-effects.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/code-blocks.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/generated-artwork.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/iterating.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/overlays-and-lower-thirds.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/rules-and-anti-patterns.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/runtimes-and-3d.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/specification-dial.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/storyboards.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/transitions.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/variables-and-templating.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/vfx-and-liquid-glass.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/visual-specs.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/vocabulary.mdx",
+    "the Prompt Guide is six topic pages now; this page's content is a section of one of them, and the old URL 301s there (docs.json)",
+  ],
+  [
+    "docs/prompting/rendering-and-output.mdx",
+    "moved into the CLI rendering guide as 'Ask the agent for the right output'; the old URL 301s there (docs.json)",
+  ],
   [
     "docs/guides/color-grading.mdx",
     "color grading is now the 'Fix and grade the color' section of the media effects guide; the old URL 301s there (docs.json)",
