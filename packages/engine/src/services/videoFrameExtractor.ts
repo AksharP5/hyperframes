@@ -66,7 +66,10 @@ import {
   writeUrlDownloadTelemetry,
 } from "../utils/urlDownloader.js";
 import { runFfmpeg, type RunFfmpegResult } from "../utils/runFfmpeg.js";
-import { isFfmpegFilterAvailable } from "../utils/psnrFilterAvailability.js";
+import {
+  isFfmpegFilterAvailable,
+  isFfmpegHwaccelAvailable,
+} from "../utils/psnrFilterAvailability.js";
 import { DEFAULT_CONFIG, type EngineConfig } from "../config.js";
 import { unwrapTemplate } from "../utils/htmlTemplate.js";
 import {
@@ -1075,7 +1078,13 @@ async function extractVideoFramesRangeUnredacted(
   const isHdr = isHdrColorSpaceUtil(metadata.colorSpace);
   const isMacOS = process.platform === "darwin";
   const toneMappedToSdr = options.toneMapHdrToSdr === true && isHdr && (await toneMapsWithZscale());
-  const decodeWithVideoToolbox = isHdr && isMacOS && !toneMappedToSdr;
+  const keepsHdrForChrome = isHdr && isMacOS && !toneMappedToSdr;
+  const decodeWithVideoToolbox =
+    keepsHdrForChrome ||
+    (isMacOS &&
+      !metadata.hasAlpha &&
+      !codecMayHaveAlpha(metadata.videoCodec) &&
+      (await isFfmpegHwaccelAvailable("videotoolbox")));
 
   const sampleAtOutputFps = !options.finalFrameOnly;
   if (options.frameRanges && (!sampleAtOutputFps || metadata.isVFR)) {
@@ -1112,7 +1121,7 @@ async function extractVideoFramesRangeUnredacted(
   }
 
   const vfFilters: string[] = [];
-  if (decodeWithVideoToolbox) {
+  if (keepsHdrForChrome) {
     vfFilters.push("format=nv12");
   }
   const samplingAt = vfFilters.length;
