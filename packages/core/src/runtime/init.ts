@@ -191,6 +191,7 @@ import type {
   SceneAnimation,
 } from "./types";
 import type { PlayerAPI } from "../core.types";
+import { parseFps } from "../fps";
 import { recordStartupError, SCENE_CALLBACK_ERROR_PREFIX, swallow } from "./diagnostics";
 import { readTimelineDurationSeconds } from "./timelineDuration";
 import {
@@ -287,6 +288,11 @@ function resolveExportRenderFps(): ExportRenderFpsResolution {
     rawFps,
     fallbackReason: config.fpsFallbackReason,
   };
+}
+
+function compositionFps(): number | null {
+  const declared = parseFps(findRootCompositionElement()?.getAttribute("data-fps") ?? "");
+  return declared.ok ? declared.value.num / declared.value.den : null;
 }
 
 function samePromiseSet(a: PromiseLike<unknown>[], b: PromiseLike<unknown>[] | null): boolean {
@@ -538,7 +544,7 @@ export function initSandboxRuntimeModular(): void {
   // captured frame ever sees the group as a layout item.
   ensureAudioGroupInertStyle(document);
   const exportRenderFps = resolveExportRenderFps();
-  state.canonicalFps = exportRenderFps.fps ?? state.canonicalFps;
+  state.canonicalFps = exportRenderFps.fps ?? compositionFps() ?? state.canonicalFps;
   setRuntimeProtocolFps(state.canonicalFps);
   if (window.__HF_EXPORT_RENDER_SEEK_CONFIG) {
     const fpsDetail = JSON.stringify({

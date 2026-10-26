@@ -9,6 +9,7 @@ import {
   SKIPPED_CLIP,
 } from "./timedClipHide";
 import { applyAuthoredTiming, STUDIO_PREVIEW_MARK_META } from "../studioPreviewMark";
+import { runtimeProtocolMetadata } from "./protocol";
 import { collectRuntimeTimelinePayload } from "./timeline";
 import { TYPEGPU_PRESENT_HEARTBEAT_MS } from "./adapters/typegpu";
 import { WebAudioTransport } from "./webAudioTransport";
@@ -1429,6 +1430,45 @@ describe("initSandboxRuntimeModular", () => {
     // Frame export never passes `exact`, so its seeks keep flooring onto the frame grid.
     it.each(sweep)("a default renderSeek to $at still floors to $grid", ({ at, grid }) => {
       expect(seekOnNtscProject(at)).toBeCloseTo(grid, 9);
+    });
+  });
+
+  describe("a preview seek lands on the composition's own frame grid", () => {
+    // Frame 7 on a 30 fps grid would be 7/30: earlier than frame 7 at 25 and 29.97 fps.
+    const rates = [
+      { dataFps: "25", fps: 25 },
+      { dataFps: "30000/1001", fps: 30_000 / 1_001 },
+    ];
+
+    function previewTimeline(dataFps: string): RuntimeTimelineLike {
+      document.body.innerHTML = `<div data-composition-id="main" data-root="true" data-start="0" data-duration="20" data-fps="${dataFps}" data-width="1920" data-height="1080"></div>`;
+      const timeline = createMockTimeline(20);
+      window.__timelines = { main: timeline };
+      initSandboxRuntimeModular();
+      return timeline;
+    }
+
+    it.each(rates)("player.seek to frame 7 at $dataFps fps", ({ dataFps, fps }) => {
+      const timeline = previewTimeline(dataFps);
+      window.__player?.seek(7 / fps);
+      expect(timeline.time()).toBeCloseTo(7 / fps, 9);
+    });
+
+    it.each(rates)("a parent frame seek to frame 7 at $dataFps fps", ({ dataFps, fps }) => {
+      const timeline = previewTimeline(dataFps);
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: window.parent,
+          data: {
+            source: "hf-parent",
+            type: "control",
+            action: "seek",
+            frame: 7,
+            ...runtimeProtocolMetadata(fps),
+          },
+        }),
+      );
+      expect(timeline.time()).toBeCloseTo(7 / fps, 9);
     });
   });
 

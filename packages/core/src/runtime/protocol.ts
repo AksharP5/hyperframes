@@ -44,7 +44,8 @@ function greatestCommonDivisor(a: number, b: number): number {
 
 export function runtimeProtocolFpsFromNumber(value: number): RuntimeProtocolFps {
   const safe = Number.isFinite(value) && value > 0 ? value : 30;
-  const denominator = Number.isInteger(safe) ? 1 : 1_000_000;
+  const isNtscRate = Math.abs(safe * 1001 - Math.round(safe * 1001)) < 1e-6;
+  const denominator = Number.isInteger(safe) ? 1 : isNtscRate ? 1001 : 1_000_000;
   const numerator = Math.round(safe * denominator);
   const divisor = greatestCommonDivisor(numerator, denominator);
   return { numerator: numerator / divisor, denominator: denominator / divisor };
