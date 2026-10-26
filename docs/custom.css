@@ -4,6 +4,15 @@
 
 @font-face {
   font-family: "TT Norms Pro";
+  src: url("https://www-static-assets.heygen.com/fonts/tt-norms/TT_Norms_Pro_Light.woff2")
+    format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "TT Norms Pro";
   src: url("https://www-static-assets.heygen.com/fonts/tt-norms/TT_Norms_Pro_Normal.woff2")
     format("woff2");
   font-weight: 400;
@@ -48,25 +57,30 @@
  * the "Copy page" dropdown panel in light mode).
  */
 
+/* Light mode is hyperframes.dev's Studio ground: ink #131109 at hyperframes.dev's own
+ * opacities over the beige light (studioRedesign.css `--sr-*` in hyperframes-internal). */
 :root {
-  --hf-background: #f6f5f1;
-  --hf-background-light: #ffffff;
-  --hf-surface2: #eeedea;
-  --hf-border-color: #e0dfdb;
-  --hf-border-color-light: #d0cfcb;
-  --hf-text: #1a1a1a;
-  --hf-text-secondary: #6b6b6b;
-  --hf-text-tertiary: #999999;
-  --hf-heading: #0a0a0a;
-  --hf-code-bg: #ffffff;
-  --hf-ui-border: #eeeeee;
-  --hf-sidebar-rail: #eeeeee;
-  --hf-sidebar-text: #707070;
-  --hf-floating-input-shadow: 0 8px 28px rgba(10, 10, 10, 0.08), 0 1px 4px rgba(10, 10, 10, 0.08);
+  --hf-background: #cfc7b4;
+  --hf-background-light: rgb(255 250 242 / 0.72);
+  --hf-surface2: rgb(255 250 242 / 0.5);
+  --hf-border-color: rgb(19 17 9 / 0.14);
+  --hf-border-color-light: rgb(19 17 9 / 0.2);
+  --hf-text: rgb(19 17 9 / 0.86);
+  --hf-text-secondary: rgb(19 17 9 / 0.68);
+  --hf-text-tertiary: rgb(19 17 9 / 0.66);
+  --hf-heading: #131109;
+  --hf-code-bg: rgb(255 250 242 / 0.72);
+  --hf-ui-border: rgb(19 17 9 / 0.12);
+  --hf-sidebar-rail: rgb(19 17 9 / 0.14);
+  --hf-sidebar-text: rgb(19 17 9 / 0.68);
+  --hf-floating-input-shadow: 0 8px 28px rgba(19, 17, 9, 0.12), 0 1px 4px rgba(19, 17, 9, 0.1);
   --mintlify-slot-header-height: 3rem;
-  --hf-brand: #16785b;
-  --hf-brand-soft: rgba(22, 120, 91, 0.1);
+  /* The mint accent is for dark grounds; on the beige it takes hyperframes.dev's deep green. */
+  --hf-brand: #05563f;
+  --hf-brand-soft: rgba(5, 86, 63, 0.1);
   --hf-video-accent: #3ce6ac;
+  --hf-glass: rgb(247 236 211 / 0.65);
+  --hf-chip: rgb(255 255 255 / 0.45);
 
   --hf-accent-green: #1a7a0a;
   --hf-accent-green-light: rgba(26, 122, 10, 0.07);
@@ -83,24 +97,28 @@
 
 /* ── Dark mode ── */
 
+/* Dark mode is the Studio app's Night palette (packages/desktop/src/index.css,
+ * :root[data-chrome="night"]): warm paper, cards and ink on hue 70. */
 .dark,
 [data-theme="dark"] {
-  --hf-background: #0a0a0a;
-  --hf-background-light: #141414;
-  --hf-surface2: #1a1a1a;
-  --hf-border-color: #2a2a2a;
-  --hf-border-color-light: #3a3a3a;
-  --hf-text: #e5e5e5;
-  --hf-text-secondary: #a0a0a0;
-  --hf-text-tertiary: #666666;
-  --hf-heading: #f5f5f5;
-  --hf-code-bg: #141414;
-  --hf-ui-border: #2a2a2a;
-  --hf-sidebar-rail: #2a2a2a;
-  --hf-sidebar-text: #a0a0a0;
+  --hf-background: #201e1c;
+  --hf-background-light: #272522;
+  --hf-surface2: #2f2c29;
+  --hf-border-color: rgb(245 243 241 / 0.1);
+  --hf-border-color-light: rgb(245 243 241 / 0.16);
+  --hf-text: #e2e0de;
+  --hf-text-secondary: #b8b6b4;
+  --hf-text-tertiary: #979593;
+  --hf-heading: #f5f3f1;
+  --hf-code-bg: #24211e;
+  --hf-ui-border: rgb(245 243 241 / 0.075);
+  --hf-sidebar-rail: rgb(245 243 241 / 0.1);
+  --hf-sidebar-text: #b8b6b4;
   --hf-floating-input-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), 0 1px 4px rgba(0, 0, 0, 0.4);
   --hf-brand: #3ce6ac;
   --hf-brand-soft: rgba(60, 230, 172, 0.12);
+  --hf-glass: rgb(32 30 28 / 0.72);
+  --hf-chip: rgb(255 255 255 / 0.08);
 
   --hf-accent-green: #22c55e;
   --hf-accent-green-light: rgba(34, 197, 94, 0.1);
@@ -327,6 +345,8 @@ samp {
 .hf-install-command code {
   background: none;
   border-radius: 0;
+  border-color: var(--hf-ui-border) !important;
+  color: var(--hf-heading) !important;
 }
 
 /*
@@ -570,10 +590,15 @@ samp {
   }
 }
 
-/* Use main's quieter structural border color across Aspen surfaces. */
-#body-content [class*="border-gray-200"],
-#body-content [class*="border-gray-100"] {
+/* Every structural hairline (header bottom, content rules, footer) is the palette's line,
+ * never a light gray that would draw a pale stripe on the beige ground. */
+[class*="border-gray-200"],
+[class*="border-gray-100"] {
   border-color: var(--hf-ui-border) !important;
+}
+
+div.h-px.bg-gray-100 {
+  background-color: var(--hf-ui-border) !important;
 }
 
 /* Keep the floating agent input noticeable against the page background. */
@@ -630,7 +655,10 @@ samp {
 #navigation-items .sidebar-group > li[data-active-nav-item="true"] > a,
 #navigation-items .sidebar-group > li > a[aria-current="page"] {
   border-left-color: currentColor;
+  background: var(--hf-chip) !important;
+  border-radius: 0 999px 999px 0;
   color: var(--hf-heading);
+  font-weight: 500;
 }
 
 /* Aspen inserts horizontal separators; main uses the same space without a rule. */
@@ -1306,17 +1334,16 @@ samp {
     margin-left: 16px;
   }
 
-  /* Paint the Playground pill with the HyperFrames mark's own cyan→green gradient
-     (#06E3FA → #4FDB5E) instead of the muted primary-dark, with dark text for contrast. */
+  /* The Download pill is hyperframes.dev's: ink with cream text (`.sr-pill`). */
   #navbar a.group > span.bg-primary-dark {
-    background: linear-gradient(100deg, #06e3fa 0%, #4fdb5e 100%) !important;
+    background: var(--hf-heading) !important;
+    border-radius: 999px;
   }
-  #navbar a.group:has(> span.bg-primary-dark) {
-    color: #0a2a20 !important;
-  }
+  #navbar a.group:has(> span.bg-primary-dark),
   #navbar a.group:has(> span.bg-primary-dark) span:not(.bg-primary-dark),
   #navbar a.group:has(> span.bg-primary-dark) svg {
-    color: #0a2a20 !important;
+    color: var(--hf-background) !important;
+    font-weight: 700;
   }
 }
 
@@ -1371,3 +1398,275 @@ header.is-frame ~ #body-content #content-area {
 h2 { clear: both; }
 
 .hf-spot.hf-spot-inline { width: 100%; margin: 0; }
+
+/* ── Studio ground: hyperframes.dev's look (light mode) ──
+ * The page sits on the same beige light as hyperframes.dev: a still of its ground
+ * (StudioGround + its 80% veil), fixed so the light stays put while text scrolls.
+ * Dark mode keeps its plain ground. */
+html:not(.dark) {
+  background: #cfc7b4
+    url("https://static.heygen.ai/hyperframes-oss/docs/images/look/studio-ground-v1.jpg") center
+    top / cover fixed no-repeat !important;
+}
+
+/* The header is frosted glass over the ground, as hyperframes.dev's `.sr-nav`. */
+#navbar > div.bg-background-light {
+  background: var(--hf-glass) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+@media (min-width: 1024px) {
+  #navbar .nav-tabs-item.text-primary {
+    background: var(--hf-chip);
+  }
+}
+
+/* Headlines: hyperframes.dev's heavy, tight TT Norms. */
+#page-title {
+  font-size: clamp(2.25rem, 4vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  color: var(--hf-heading);
+}
+
+#content-area :is(h2, h3) {
+  color: var(--hf-heading);
+}
+
+#content-area h2 {
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+/* The page's one-line description reads like hyperframes.dev's subtitle: light and larger. */
+div:has(> div > #page-title) + .prose > p {
+  font-size: 1.375rem;
+  font-weight: 300;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  color: var(--hf-heading);
+}
+
+/* Cards and films float on the ground: frosted cream, hairline, soft shadow. */
+html:not(.dark) #content-area .card {
+  background: var(--hf-background-light) !important;
+  border-color: var(--hf-ui-border) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Calm callouts are frosted cream on the ground (a Night card in dark mode); their icon keeps its colour.
+ * Warnings and danger keep Mintlify's tint so they still stand out. */
+.callout:is([data-callout-type="note"], [data-callout-type="info"], [data-callout-type="tip"], [data-callout-type="check"]) {
+  background: var(--hf-background-light) !important;
+  border-color: var(--hf-ui-border) !important;
+  color: var(--hf-text) !important;
+}
+
+.callout:is([data-callout-type="note"], [data-callout-type="info"], [data-callout-type="tip"], [data-callout-type="check"]) :where(p, div, code) {
+  color: inherit !important;
+}
+
+/* Catalog pages draw with their own --ve-* greys; on the ground they take the ink values. */
+html:not(.dark) .hf-ve {
+  --ve-fg: #131109;
+  --ve-muted: rgb(19 17 9 / 0.68);
+  --ve-line: rgb(19 17 9 / 0.14);
+  --ve-surface: #fffaf2;
+  --ve-sunken: rgb(255 250 242 / 0.6);
+  --ve-hover: rgb(255 255 255 / 0.45);
+  --ve-on-bg: #131109;
+  --ve-on-fg: #f4f1ea;
+  --ve-ring: rgb(19 17 9 / 0.14);
+}
+
+/* ── One palette for every colour on the page ──
+ * Mintlify draws text, borders, fills and step markers from its gray scale; these are the
+ * same lightness steps on the Studio app's warm hue (oklch chroma 0.006, hue 70), so
+ * gray-900 is the app's --ink. Shared by light and dark mode. */
+:root {
+  --gray-50: 246 242 239;
+  --gray-100: 241 237 234;
+  --gray-200: 226 222 219;
+  --gray-300: 209 205 202;
+  --gray-400: 162 159 155;
+  --gray-500: 114 112 108;
+  --gray-600: 82 80 77;
+  --gray-700: 65 63 60;
+  --gray-800: 39 37 34;
+  --gray-900: 25 23 20;
+  --gray-950: 12 10 8;
+  /* Read by snippets that fall back to neutral greys. */
+  --border-color: var(--hf-border-color);
+  --code-block-background: var(--hf-code-bg);
+}
+
+/* The beige ground is darker than the page these steps were made for: in light mode
+ * the mid grays go darker so small text passes 4.5:1 (icons 3:1) on the darkest beige. */
+html:not(.dark) {
+  --gray-400: 108 105 102;
+  --gray-500: 80 77 74;
+  --gray-600: 67 65 62;
+}
+
+/* Article text: the typography plugin's cool grays become the same tokens. */
+.prose {
+  --tw-prose-body: var(--hf-text);
+  --tw-prose-headings: var(--hf-heading);
+  --tw-prose-lead: var(--hf-text-secondary);
+  --tw-prose-links: var(--hf-heading);
+  --tw-prose-bold: var(--hf-heading);
+  --tw-prose-counters: var(--hf-text-secondary);
+  --tw-prose-bullets: var(--hf-text-tertiary);
+  --tw-prose-hr: var(--hf-border-color);
+  --tw-prose-quotes: var(--hf-heading);
+  --tw-prose-quote-borders: var(--hf-border-color);
+  --tw-prose-captions: var(--hf-text-secondary);
+  --tw-prose-code: var(--hf-heading);
+  --tw-prose-th-borders: var(--hf-border-color-light);
+  --tw-prose-td-borders: var(--hf-border-color);
+  --tw-prose-invert-body: var(--hf-text);
+  --tw-prose-invert-headings: var(--hf-heading);
+  --tw-prose-invert-lead: var(--hf-text-secondary);
+  --tw-prose-invert-links: var(--hf-heading);
+  --tw-prose-invert-bold: var(--hf-heading);
+  --tw-prose-invert-counters: var(--hf-text-secondary);
+  --tw-prose-invert-bullets: var(--hf-text-tertiary);
+  --tw-prose-invert-hr: var(--hf-border-color);
+  --tw-prose-invert-quotes: var(--hf-heading);
+  --tw-prose-invert-quote-borders: var(--hf-border-color);
+  --tw-prose-invert-captions: var(--hf-text-secondary);
+  --tw-prose-invert-code: var(--hf-heading);
+  --tw-prose-invert-th-borders: var(--hf-border-color-light);
+  --tw-prose-invert-td-borders: var(--hf-border-color);
+}
+
+html.dark .hf-ve {
+  --ve-fg: #f5f3f1;
+  --ve-muted: #b8b6b4;
+  --ve-line: rgb(245 243 241 / 0.1);
+  --ve-surface: #272522;
+  --ve-sunken: #24211e;
+  --ve-hover: #2f2c29;
+  --ve-on-bg: #f5f3f1;
+  --ve-on-fg: #201e1c;
+  --ve-ring: rgb(245 243 241 / 0.16);
+}
+
+/* Scrollbars, the install box and other small chrome take the same tokens. */
+[data-component-part="scroll-area-scrollbar"] {
+  background: var(--hf-chip) !important;
+}
+
+[data-component-part="scroll-area-scrollbar"] > div {
+  background: color-mix(in srgb, var(--hf-heading) 28%, transparent) !important;
+}
+
+.hf-install-command {
+  border-color: var(--hf-ui-border) !important;
+  background: var(--hf-code-bg) !important;
+}
+
+/* Body copy in dark mode is the app's second ink, not Mintlify's dim gray-400. */
+.dark .mdx-content {
+  color: var(--hf-text);
+}
+
+/* Footer links and "Powered by" read at the secondary ink (Mintlify's 50% ink fails on the beige). */
+#footer a,
+#footer :where(p, span, div) {
+  color: var(--hf-text-secondary);
+}
+
+#footer a:hover {
+  color: var(--hf-heading);
+}
+
+/* Table rules use the same lines: the header rule a touch stronger than the rows. */
+#content-area thead {
+  border-bottom-color: var(--hf-border-color-light) !important;
+}
+
+#content-area tbody tr {
+  border-bottom-color: var(--hf-ui-border) !important;
+}
+
+/* ── Code colours: the browser editor's (packages/studio theme.css --color-code-*) ──
+ * Mintlify highlights code with fixed themes (GitHub light, VS Code dark) and its hosted build ignores a custom
+ * code theme, so each of those themes' colours is mapped by role to the editor's colour for the same role. */
+html:not(.dark) pre span[style*="color: rgb(10, 48, 105)"] {
+  color: oklch(0.468 0.142 143) !important;
+}
+
+html:not(.dark) pre span[style*="color: rgb(207, 34, 46)"] {
+  color: oklch(0.509 0.211 329) !important;
+}
+
+html:not(.dark) pre span[style*="color: rgb(110, 119, 129)"] {
+  color: oklch(0.48 0.009 279) !important;
+}
+
+html:not(.dark) pre span[style*="color: rgb(130, 80, 223)"],
+html:not(.dark) pre span[style*="color: rgb(149, 56, 0)"] {
+  color: oklch(0.492 0.193 263) !important;
+}
+
+html:not(.dark) pre span[style*="color: rgb(5, 80, 174)"] {
+  color: oklch(0.495 0.13 50) !important;
+}
+
+html:not(.dark) pre span[style*="color: rgb(17, 99, 41)"] {
+  color: oklch(0.48 0.12 92) !important;
+}
+
+.dark pre span[style*="--shiki-dark: #CE9178"] {
+  color: oklch(0.793 0.11 133) !important;
+}
+
+.dark pre span[style*="--shiki-dark: #569CD6"],
+.dark pre span[style*="--shiki-dark: #C586C0"] {
+  color: oklch(0.829 0.164 318) !important;
+}
+
+.dark pre span[style*="--shiki-dark: #DCDCAA"] {
+  color: oklch(0.805 0.121 245) !important;
+}
+
+.dark pre span[style*="--shiki-dark: #9CDCFE"] {
+  color: oklch(0.856 0.145 17) !important;
+}
+
+.dark pre span[style*="--shiki-dark: #6A9955"] {
+  color: oklch(0.806 0.03 262) !important;
+}
+
+.dark pre span[style*="--shiki-dark: #B5CEA8"],
+.dark pre span[style*="--shiki-dark: #4FC1FF"] {
+  color: oklch(0.815 0.11 50) !important;
+}
+
+.dark pre span[style*="--shiki-dark: #D7BA7D"] {
+  color: oklch(0.805 0.1 92) !important;
+}
+
+.dark pre span[style*="--shiki-dark: #808080"] {
+  color: var(--hf-text-tertiary) !important;
+}
+
+/* Code blocks sit on the code token (frosted cream in light mode, the Night field in dark), not the theme's own. */
+[class*="dark:bg-codeblock"],
+html.dark body .code-block-background,
+.code-block {
+  background-color: var(--hf-code-bg) !important;
+}
+
+pre.shiki {
+  background-color: transparent !important;
+}
+
+/* The fade that hides long lines under the copy button fades into the same code token. */
+.code-block-fade-overlay {
+  background-image: linear-gradient(to right, transparent, var(--hf-code-bg) 24px) !important;
+}

@@ -3,14 +3,14 @@
   "name": "HyperFrames",
   "theme": "aspen",
   "colors": {
-    "primary": "#16785B",
+    "primary": "#131109",
     "light": "#3CE6AC",
-    "dark": "#16785B"
+    "dark": "#131109"
   },
   "background": {
     "color": {
-      "light": "#f6f5f1",
-      "dark": "#0a0a0a"
+      "light": "#cfc7b4",
+      "dark": "#201e1c"
     }
   },
   "fonts": {
