@@ -134,17 +134,13 @@ const VENDOR_RULES: VendorRule[] = [
     name: "hermes",
     check: (env) => typeof env["HERMES_QUIET"] === "string",
   },
-  // openclaw — multi-channel AI gateway. When openclaw spawns a CLI
-  // subprocess it builds the child env with OPENCLAW_STATE_DIR /
-  // OPENCLAW_CONFIG_PATH / OPENCLAW_DISABLE_AUTO_UPDATE set explicitly
-  // (extensions/qa-matrix/src/runners/contract/scenario-runtime-cli.ts:344-351).
-  // We key on OPENCLAW_STATE_DIR since it's a path scope-bound to openclaw.
+  // openclaw — multi-channel AI gateway. It sets OPENCLAW_CONFIG_PATH on the
+  // CLI subprocesses it spawns. Never name its state-dir var here: endpoint
+  // scanners flag that string as an IoC and quarantine the bundle (#5245).
   // Source: https://github.com/openclaw/openclaw
   {
     name: "openclaw",
-    check: (env) =>
-      typeof env["OPENCLAW_STATE_DIR"] === "string" ||
-      typeof env["OPENCLAW_CONFIG_PATH"] === "string",
+    check: (env) => typeof env["OPENCLAW_CONFIG_PATH"] === "string",
   },
   // Pi coding agent (https://pi.dev, https://github.com/earendil-works/pi).
   // packages/coding-agent/src/cli.ts:13 unconditionally executes

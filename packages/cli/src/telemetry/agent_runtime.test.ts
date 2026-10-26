@@ -22,7 +22,6 @@ const VENDOR_ENV_KEYS = [
   "REPL_ID",
   "REPLIT_USER",
   "HERMES_QUIET",
-  "OPENCLAW_STATE_DIR",
   "OPENCLAW_CONFIG_PATH",
   "PI_CODING_AGENT",
   "CLINE_ACTIVE",
@@ -220,8 +219,8 @@ describe("detectAgentRuntime — Replit / Hermes / openclaw / Pi", () => {
     expect(detectAgentRuntime()).toBe("hermes");
   });
 
-  it("detects openclaw via inherited OPENCLAW_STATE_DIR", async () => {
-    process.env["OPENCLAW_STATE_DIR"] = "/tmp/openclaw";
+  it("detects openclaw via inherited OPENCLAW_CONFIG_PATH", async () => {
+    process.env["OPENCLAW_CONFIG_PATH"] = "/tmp/openclaw/openclaw.json";
     const { detectAgentRuntime } = await import("./agent_runtime.js");
     expect(detectAgentRuntime()).toBe("openclaw");
   });
