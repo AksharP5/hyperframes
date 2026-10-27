@@ -1984,9 +1984,13 @@ describe("syncRuntimeMedia", () => {
     expect(clip.el.currentTime).toBe(mediaElementTime(5));
   });
 
-  describe("playing video drift", () => {
-    function playingVideoAt(currentTime: number, playbackRate = 1) {
-      const clip = createMockClip({ start: 0, end: 20, duration: 20 });
+  describe("playing media drift", () => {
+    function playingVideoAt(
+      currentTime: number,
+      playbackRate = 1,
+      tag: "audio" | "video" = "video",
+    ) {
+      const clip = createMockClip({ start: 0, end: 20, duration: 20 }, tag);
       Object.defineProperty(clip.el, "paused", { value: false, writable: true });
       Object.defineProperty(clip.el, "currentTime", { value: currentTime, writable: true });
       clip.el.playbackRate = playbackRate;
@@ -2001,13 +2005,15 @@ describe("syncRuntimeMedia", () => {
         getCompositionDuration: () => 20,
       });
 
-    it("runs a video lagging past the sync tolerance 3% fast instead of seeking it", () => {
-      const clip = playingVideoAt(4.908);
-      tick(clip, 5);
-      tick(clip, 5);
-      expect(clip.el.playbackRate).toBeCloseTo(1.03, 9);
-      expect(clip.el.currentTime).toBe(4.908);
-    });
+    it.each(["video", "audio"] as const)(
+      "runs a playing %s lagging past the sync tolerance 3% fast instead of seeking it",
+      (tag) => {
+        const clip = playingVideoAt(4.908, 1, tag);
+        for (let i = 0; i < 4; i++) tick(clip, 5);
+        expect(clip.el.playbackRate).toBeCloseTo(1.03, 9);
+        expect(clip.el.currentTime).toBe(4.908);
+      },
+    );
 
     it("runs a video that is ahead 3% slow", () => {
       const clip = playingVideoAt(5.06);
@@ -2105,6 +2111,53 @@ describe("syncRuntimeMedia", () => {
       clip.el.currentTime = 4.93;
       tick(clip, 5);
       expect(clip.el.playbackRate).toBeCloseTo(1.03, 9);
+    });
+
+    describe("sounding audio past a gentle nudge", () => {
+      const tickDipping = (clip: RuntimeMediaClip, timeSeconds: number, dips: boolean) => {
+        const seekUnderDip = vi.fn(() => dips);
+        syncRuntimeMedia({
+          clips: [clip],
+          timeSeconds,
+          playing: true,
+          playbackRate: 1,
+          getCompositionDuration: () => 20,
+          seekUnderDip,
+        });
+        return seekUnderDip;
+      };
+
+      it("never nudges audio past 10% while its lag still grows", () => {
+        const clip = playingVideoAt(4.6, 1, "audio");
+        tickDipping(clip, 5, true);
+        const seekUnderDip = tickDipping(clip, 5.02, true);
+        expect(clip.el.playbackRate).toBeCloseTo(1.1, 9);
+        expect(seekUnderDip).not.toHaveBeenCalled();
+      });
+
+      it("seeks audio that holds a lag past 100 ms under a dip, at its authored rate", () => {
+        const clip = playingVideoAt(4.85, 1, "audio");
+        tickDipping(clip, 5, true);
+        const seekUnderDip = tickDipping(clip, 5, true);
+        expect(seekUnderDip).toHaveBeenCalledWith(clip.el, 5);
+        expect(clip.el.currentTime).toBe(4.85);
+        expect(clip.el.playbackRate).toBe(1);
+      });
+
+      it("seeks it plainly when it has no dip to hide the seek under", () => {
+        const clip = playingVideoAt(4.85, 1, "audio");
+        tickDipping(clip, 5, false);
+        tickDipping(clip, 5, false);
+        expect(clip.el.currentTime).toBe(mediaElementTime(5));
+      });
+
+      it("leaves video on its steps", () => {
+        const clip = playingVideoAt(4.85);
+        tickDipping(clip, 5, true);
+        const seekUnderDip = tickDipping(clip, 5, true);
+        expect(seekUnderDip).not.toHaveBeenCalled();
+        expect(clip.el.playbackRate).toBeCloseTo(1.1, 9);
+      });
     });
 
     it("steers a video that is far ahead slower, by the same steps", () => {

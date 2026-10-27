@@ -392,6 +392,12 @@
       "types": "./dist/runtime/mediaClock.d.ts",
       "environments": ["browser", "bun", "node"]
     },
+    "./runtime/media-steer": {
+      "source": "./src/runtime/mediaSteer.ts",
+      "runtime": "./dist/runtime/mediaSteer.js",
+      "types": "./dist/runtime/mediaSteer.d.ts",
+      "environments": ["browser", "bun", "node"]
+    },
     "./runtime/clip-reveal": {
       "source": "./src/runtime/clipReveal.ts",
       "runtime": "./dist/runtime/clipReveal.js",

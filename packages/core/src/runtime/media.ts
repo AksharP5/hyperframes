@@ -13,6 +13,13 @@ import { findInjectedRenderFrame } from "./renderFrameSibling.js";
 import { isRenderFrameVideo } from "./preloadMedia.js";
 import { registerSeekCompletion } from "./adapters/seek-dispatch.js";
 import { cutToHostSlots, type HostSlot } from "../mediaTiming.js";
+import {
+  forgetSteering,
+  isSteering,
+  MEDIA_SYNC_TOLERANCE_SECONDS,
+  steerMedia,
+} from "./mediaSteer.js";
+export { MEDIA_SYNC_TOLERANCE_SECONDS } from "./mediaSteer.js";
 export {
   readElementPlaybackRate,
   readElementRateSpec,
@@ -250,7 +257,7 @@ export function evictMediaSyncState(el: HTMLMediaElement): void {
   strictDriftSamples.delete(el);
   seekLoadRetried.delete(el);
   lastRuntimeAppliedVolume.delete(el);
-  videoSteering.delete(el);
+  forgetSteering(el);
 }
 
 /** Test-only seam: whether any per-source sync state is still tracked for `el`. */
@@ -261,12 +268,12 @@ export function hasMediaSyncStateForTest(el: HTMLMediaElement): boolean {
     strictDriftSamples.has(el) ||
     seekLoadRetried.has(el) ||
     lastRuntimeAppliedVolume.has(el) ||
-    videoSteering.has(el)
+    isSteering(el)
   );
 }
 
 export const MEDIA_HARD_SYNC_SECONDS = 0.5;
-export const VIDEO_PRESEEK_SECONDS = 1.5;
+export const MEDIA_PRESEEK_SECONDS = 1.5;
 
 export function mediaSourceTimeAt(clip: RuntimeMediaClip, timeSeconds: number): number {
   const elapsed = Math.max(0, Math.min(timeSeconds, clip.end) - (clip.origin ?? clip.start));
@@ -280,7 +287,7 @@ export function mediaSourceTimeAt(clip: RuntimeMediaClip, timeSeconds: number): 
   return target;
 }
 
-function prepareUpcomingVideo(
+function prepareUpcomingMedia(
   clip: RuntimeMediaClip,
   time: number,
   playing: boolean,
@@ -290,9 +297,8 @@ function prepareUpcomingVideo(
   const dueIn = clip.start - time;
   if (
     !playing ||
-    el.tagName !== "VIDEO" ||
     dueIn <= 0 ||
-    dueIn > VIDEO_PRESEEK_SECONDS * rate ||
+    dueIn > MEDIA_PRESEEK_SECONDS * rate ||
     !el.paused ||
     el.seeking ||
     el.readyState < el.HAVE_METADATA ||
@@ -303,7 +309,7 @@ function prepareUpcomingVideo(
   const target = mediaSourceTimeAt(clip, clip.start);
   if (!Number.isFinite(target) || target < 0 || Math.abs(el.currentTime - target) <= 0.001) return;
   try {
-    // A trimmed video exposed during its in-point seek has no current frame at the cut.
+    // A trimmed clip seeked as it opens shows no frame and plays late, then is seeked again while it sounds.
     // Hidden preparation must not hold the visible-frame seek barrier.
     el.currentTime = mediaElementTime(target);
   } catch (err) {
@@ -311,38 +317,8 @@ function prepareUpcomingVideo(
   }
 }
 
-/** Drift a playing audio element may carry before sync pulls it back onto the playhead. */
-export const MEDIA_SYNC_TOLERANCE_SECONDS = 0.04;
-
 // Chromium refuses a slower playbackRate (NotSupportedError).
 const MIN_NATIVE_PLAYBACK_RATE = 1 / 16;
-
-// A playing video is steered back by rate, not seeked (a seek resets its decoder).
-// Its rate is written only when steering starts or stops: every write costs a frame.
-const VIDEO_STEER = 0.03;
-// A video that starts a cut late closes its lag over one clip at 3%; a bigger lag steers harder, in steps so the rate is written rarely.
-const VIDEO_STEER_STEPS: readonly (readonly [lag: number, steer: number])[] = [
-  [0.3, 0.25],
-  [0.1, 0.1],
-];
-const VIDEO_STEER_RELEASE_SECONDS = 0.01;
-
-/** Direction (+1 fast, -1 slow) a video is being steered in; absent when it plays at its authored rate. */
-const videoSteering = new WeakMap<HTMLMediaElement, number>();
-
-/** Rate for a playing video `offset` seconds behind (+) or ahead (-) of the playhead. */
-function steeredVideoRate(el: HTMLMediaElement, offset: number, baseRate: number): number {
-  const direction = Math.sign(offset);
-  const steering = videoSteering.get(el);
-  if (Math.abs(offset) > MEDIA_SYNC_TOLERANCE_SECONDS) videoSteering.set(el, direction);
-  else if (steering !== direction || Math.abs(offset) <= VIDEO_STEER_RELEASE_SECONDS) {
-    videoSteering.delete(el);
-    return baseRate;
-  }
-  const lag = Math.abs(offset);
-  const steer = VIDEO_STEER_STEPS.find(([from]) => lag > from)?.[1] ?? VIDEO_STEER;
-  return baseRate * (1 + direction * steer);
-}
 
 // fallow-ignore-next-line complexity
 export function syncRuntimeMedia(params: {
@@ -389,6 +365,8 @@ export function syncRuntimeMedia(params: {
   forceSync?: boolean;
   /** How far the next tick will move the playhead: an audio clip due within it starts now. */
   cueAheadSeconds?: number;
+  /** Seeks a sounding element under a gain dip; false when it has no dip stage and the sync seeks it plainly. */
+  seekUnderDip?: (el: HTMLMediaElement, target: number) => boolean;
   /** Lets a video clip that runs to the composition end hold its last frame at the terminal time.
    *  A thunk, because deriving the duration is only worth it for a clip past its own end. */
   getCompositionDuration: () => number;
@@ -589,12 +567,11 @@ export function syncRuntimeMedia(params: {
         (el.ended && canSeekEndedMediaBackward && drift > 0.001) ||
         staleAudioOnFirstTick ||
         (drift > MEDIA_HARD_SYNC_SECONDS && (firstTickOfClip || offsetJumped || catastrophicDrift));
-      // Playing videos use the browser's decoder for timing. Seeking one resets the decoder: a
-      // ~150ms freeze while it re-buffers, as the monotonic clock advances, which loops into a
-      // seek→freeze→drift→seek stutter. So a playing video skips strict and force sync; only hard
-      // sync (>0.5s) warrants the decoder-reset cost. A paused transport pauses this video below,
-      // so a seek that pauses mid-playback still lands it.
-      const isPlayingVideo = el.tagName === "VIDEO" && !el.paused && playing;
+      // Seeking playing media resets a video's decoder (a ~150ms freeze that loops into a
+      // seek→freeze→drift→seek stutter) and jumps sounding audio (a click). So playing media skips
+      // strict and force sync and is steered by rate; hard sync (>0.5s) and audio past its steer
+      // limit seek. A paused transport pauses it below, so a seek that pauses mid-playback lands it.
+      const isPlayingMedia = !el.paused && playing;
       // Only apply strict sync when offset has stabilized (not growing).
       // During initial buffering, offset grows ~16ms/tick as the timeline
       // advances while media stays at 0. Accumulated drift from pause/play
@@ -604,7 +581,7 @@ export function syncRuntimeMedia(params: {
         heldBelowFloor || (prevOffset !== undefined && Math.abs(offset - prevOffset) < 0.004);
       let strictSync = false;
       if (
-        !isPlayingVideo &&
+        !isPlayingMedia &&
         !hardSync &&
         !firstTickOfClip &&
         offsetStabilized &&
@@ -619,21 +596,22 @@ export function syncRuntimeMedia(params: {
       } else if (drift <= MEDIA_SYNC_TOLERANCE_SECONDS) {
         strictDriftSamples.set(el, 0);
       }
-      const forceSync = !isPlayingVideo && params.forceSync && drift > 0.02;
+      const forceSync = !isPlayingMedia && params.forceSync && drift > 0.02;
+      const steered =
+        isPlayingMedia && !hardSync ? steerMedia(el, offset, baseRate, offsetStabilized) : null;
+      const steerSeeks = steered?.seek === true;
+      const dipped = steerSeeks && params.seekUnderDip?.(el, relTime) === true;
       try {
-        // A hard sync lands the video on the playhead, so its pre-seek offset says nothing.
-        if (!isPlayingVideo || hardSync) videoSteering.delete(el);
-        const rate = Math.max(
-          MIN_NATIVE_PLAYBACK_RATE,
-          isPlayingVideo && !hardSync ? steeredVideoRate(el, offset, baseRate) : baseRate,
-        );
+        // A hard sync lands the element on the playhead, so its pre-seek offset says nothing.
+        if (!steered) forgetSteering(el);
+        const rate = Math.max(MIN_NATIVE_PLAYBACK_RATE, steered?.rate ?? baseRate);
         // Some engines read a rate back at lower precision; an equal-enough rate is not rewritten.
         if (Math.abs(el.playbackRate - rate) > 1e-6) el.playbackRate = rate;
       } catch (err) {
         // ignore unsupported playbackRate
         swallow("runtime.media.site1", err);
       }
-      if (hardSync || strictSync || forceSync) {
+      if (hardSync || strictSync || forceSync || (steerSeeks && !dipped)) {
         // Skip the per-tick seek (and the `el.load()` drift-recovery retry
         // below) for `<video>` elements that have a sibling
         // `<img id="__render_frame_<id>__">`. The sibling is created only
@@ -712,6 +690,6 @@ export function syncRuntimeMedia(params: {
     evictMediaSyncState(el);
     if (remainsInsideAuthoredWindow) lastRelativeTime.set(el, relTime);
     if (!el.paused) el.pause();
-    prepareUpcomingVideo(clip, params.timeSeconds, params.playing, params.playbackRate);
+    prepareUpcomingMedia(clip, params.timeSeconds, params.playing, params.playbackRate);
   }
 }

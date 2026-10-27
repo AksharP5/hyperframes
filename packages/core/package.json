@@ -399,6 +399,12 @@
       "import": "./src/runtime/mediaClock.ts",
       "types": "./src/runtime/mediaClock.ts"
     },
+    "./runtime/media-steer": {
+      "bun": "./src/runtime/mediaSteer.ts",
+      "node": "./dist/runtime/mediaSteer.js",
+      "import": "./src/runtime/mediaSteer.ts",
+      "types": "./src/runtime/mediaSteer.ts"
+    },
     "./runtime/clip-reveal": {
       "bun": "./src/runtime/clipReveal.ts",
       "node": "./dist/runtime/clipReveal.js",
@@ -844,6 +850,10 @@
       "./runtime/media-clock": {
         "import": "./dist/runtime/mediaClock.js",
         "types": "./dist/runtime/mediaClock.d.ts"
+      },
+      "./runtime/media-steer": {
+        "import": "./dist/runtime/mediaSteer.js",
+        "types": "./dist/runtime/mediaSteer.d.ts"
       },
       "./runtime/clip-reveal": {
         "import": "./dist/runtime/clipReveal.js",
