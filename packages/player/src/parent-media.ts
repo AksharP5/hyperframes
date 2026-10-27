@@ -413,6 +413,8 @@ export class ParentMediaManager {
 
     const el = tag === "video" ? document.createElement("video") : new Audio();
     el.preload = "auto";
+    const crossOrigin = source?.getAttribute("crossorigin");
+    if (crossOrigin != null) el.setAttribute("crossorigin", crossOrigin);
     el.src = src;
     el.load();
     el.muted = this._getMuted();

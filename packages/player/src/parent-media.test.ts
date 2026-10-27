@@ -597,3 +597,36 @@ describe("ParentMediaManager drift policy", () => {
     expect(writes[1]).toBeCloseTo(mediaElementTime(5.43 + 0.23), 9);
   });
 });
+
+describe("proxy crossorigin", () => {
+  it.each(["audio", "video"] as const)("a %s proxy carries its source's crossorigin", (tag) => {
+    const created: HTMLMediaElement[] = [];
+    const real = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((t: string) => {
+      const el = real(t);
+      if (t === "video") created.push(el as HTMLMediaElement);
+      return el;
+    });
+    const OrigAudio = globalThis.Audio;
+    globalThis.Audio = function () {
+      const el = real("audio");
+      created.push(el);
+      return el;
+    } as unknown as typeof Audio;
+    const source = real(tag);
+    source.setAttribute("crossorigin", "anonymous");
+    const parent = Object.create(ParentMediaManager.prototype) as ParentMediaManager;
+    Object.assign(parent, {
+      _entries: [],
+      _urlTaken: () => false,
+      _getMuted: () => false,
+      _getVolume: () => 1,
+      _getPlaybackRate: () => 1,
+    });
+    (parent as any)._createEntry("https://x/a.mp3", tag, 0, 5, source);
+    const proxy = created.find((e) => e.tagName.toLowerCase() === tag)!;
+    globalThis.Audio = OrigAudio;
+    vi.restoreAllMocks();
+    expect(proxy.getAttribute("crossorigin")).toBe("anonymous");
+  });
+});
