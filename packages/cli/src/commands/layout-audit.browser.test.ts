@@ -3251,6 +3251,17 @@ describe("layout-audit.browser occlusion", () => {
     expect(issues.some((issue) => issue.code === "text_occluded")).toBe(false);
   });
 
+  it("does not count an element marked data-layout-ignore as covering the text", () => {
+    const style = { backgroundColor: "rgb(10, 10, 10)" };
+    const issues = (overlayAttrs?: string) =>
+      auditOcclusionScene({ overlayAttrs, overlayStyle: style, topmostId: "overlay" });
+
+    expect(issues().some((issue) => issue.code === "text_occluded")).toBe(true);
+    expect(issues("data-layout-ignore").some((issue) => issue.code === "text_occluded")).toBe(
+      false,
+    );
+  });
+
   it("respects the data-layout-allow-occlusion opt-out", () => {
     const issues = auditOcclusionScene({
       headlineAttrs: "data-layout-allow-occlusion",
@@ -3636,13 +3647,14 @@ function auditCoverageScene(options: {
 
 function auditOcclusionScene(options: {
   headlineAttrs?: string;
+  overlayAttrs?: string;
   overlayStyle: Partial<Record<string, string>>;
   topmostId: string;
 }): ReturnType<typeof runAudit> {
   document.body.innerHTML = `
     <div id="root" data-composition-id="main" data-width="1920" data-height="1080">
       <div id="headline" ${options.headlineAttrs ?? ""}>Headline copy</div>
-      <div id="overlay"></div>
+      <div id="overlay" ${options.overlayAttrs ?? ""}></div>
     </div>
   `;
   installOcclusionGeometry({

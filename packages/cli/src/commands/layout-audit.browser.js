@@ -1348,6 +1348,7 @@
     for (const hit of stack) {
       if (!isForeignElement(element, hit)) return null;
       // Pair-specific exemptions excuse this hit only; keep walking for deeper occluders.
+      if (hasIgnoreFlag(hit)) continue;
       if (sharedPreserve3d(element, hit)) continue;
       if (isCrossSceneTransitionOverlap(element, hit)) continue;
       const matte = seenMattes && matteFrameFor(hit);
