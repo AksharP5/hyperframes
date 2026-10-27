@@ -1,6 +1,6 @@
 import type { Span } from "@hyperframes/core/audio-analysis";
 
-export const READ_VERSION = 2;
+export const READ_VERSION = 3;
 
 export type Separation = "stems" | "mix";
 
@@ -88,17 +88,29 @@ export interface Music {
   energy: { start: number; end: number; db: number }[];
 }
 
+export interface Ambience {
+  start: number;
+  end: number;
+  db: number;
+}
+
+export interface AudibleStem {
+  name: string;
+  db: number;
+}
+
 export interface ReadAudio {
   version: typeof READ_VERSION;
   file: string;
   sha256: string;
   duration: number;
   separation: Separation;
-  stems: string[];
+  stems: AudibleStem[];
   transcript: string | null;
   /** Null when the mix alone cannot tell speech from music: no stems and no transcript. */
   voice: Voice | null;
   effects: Effects | null;
   music: Music | null;
+  ambience: Ambience[] | null;
   warnings: string[];
 }

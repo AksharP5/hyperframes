@@ -267,6 +267,7 @@ export interface EffectInput {
   sampleRate: number;
   /** The music without drums, to say how far an effect stands over it. */
   music: Float32Array | null;
+  musicSegments?: readonly Span[];
   /** The whole recording, when the source is a stem: an effect far under it is separation residue nobody hears. */
   heard: Float32Array | null;
   beats: readonly number[];
@@ -308,9 +309,14 @@ function effectOf(
   group: string,
   kind: EffectKind,
   musicDb: Float32Array | null,
+  musicSegments: readonly Span[] | undefined,
 ): Effect {
   const musicLevel = musicDb?.[Math.round(m.peak / HOP)];
-  const musicPlays = musicLevel !== undefined && musicLevel > MUSIC_OUT_DB;
+  const musicPlays =
+    musicLevel !== undefined &&
+    musicLevel > MUSIC_OUT_DB &&
+    (musicSegments === undefined ||
+      musicSegments.some((span) => m.peak >= span.start && m.peak < span.end));
   return {
     t: round(m.t),
     end: round(m.end),
@@ -349,7 +355,10 @@ export function findEffects(input: EffectInput): Effects {
     if (previous?.group === group && m.t - previous.end <= TRAIN_GAP) {
       previous.end = round(m.end);
       previous.count++;
-    } else events.push(effectOf(m, group, kindOfGroup.get(group) ?? m.kind, musicDb));
+    } else
+      events.push(
+        effectOf(m, group, kindOfGroup.get(group) ?? m.kind, musicDb, input.musicSegments),
+      );
   }
   const drumHits = [...drums].reduce((n, id) => n + members.get(id)!.length, 0);
   return { events, groups, drumHits };

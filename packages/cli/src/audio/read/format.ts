@@ -1,9 +1,20 @@
 import type { Span } from "@hyperframes/core/audio-analysis";
 import { semitones } from "./pitch.js";
-import type { Effect, Entry, MusicSegment, ReadAudio, Sentence, Voice } from "./types.js";
+import type {
+  Ambience,
+  Effect,
+  Effects,
+  Entry,
+  Music,
+  MusicSegment,
+  ReadAudio,
+  Sentence,
+  Voice,
+} from "./types.js";
 
 const PITCH_NOTE_SEMITONES = 3;
-const KIND_WIDTH = 7;
+const KIND_WIDTH = 8;
+const QUIET_DB = -45;
 
 interface Line {
   start: number;
@@ -58,8 +69,8 @@ function effectLine(effect: Effect, pauses: readonly Span[], musicRead: boolean)
 
 const ENTRY: Record<Entry, string> = {
   start: "",
-  new: ", first appearance after a break",
-  resumes: ", resumes after a break",
+  new: ", first appearance",
+  resumes: ", resumes",
   returns: ", returns",
 };
 
@@ -68,12 +79,27 @@ function musicLine(segment: MusicSegment, analysis: ReadAudio): Line {
   const about = [piece.instruments.join(", "), segment.bpm ? `${segment.bpm} BPM` : null]
     .filter(Boolean)
     .join(" · ");
+  const afterBreak =
+    (segment.entry === "new" || segment.entry === "resumes") &&
+    analysis.music!.breaks.some((gap) => gap.end === segment.start)
+      ? " after a break"
+      : "";
   const fade = segment.fadeFrom !== null ? `, fades from ${s(segment.fadeFrom)}` : "";
   return {
     start: segment.start,
     end: segment.end,
     kind: "music",
-    text: `piece ${piece.id}${about ? ` (${about})` : ""}${ENTRY[segment.entry]}${fade}`,
+    text: `piece ${piece.id}${about ? ` (${about})` : ""}${ENTRY[segment.entry]}${afterBreak}${fade}`,
+  };
+}
+
+function ambienceLine(ambience: Ambience): Line {
+  const level = `${ambience.db} dBFS`;
+  return {
+    start: ambience.start,
+    end: ambience.end,
+    kind: "ambience",
+    text: ambience.db < QUIET_DB ? `quiet, ${level}` : level,
   };
 }
 
@@ -82,34 +108,45 @@ function overlaps(line: Line, range?: [number, number]): boolean {
   return line.start < range[1] && (line.end ?? line.start) >= range[0];
 }
 
+function separation(analysis: ReadAudio): string {
+  if (analysis.separation !== "stems") return "not separated";
+  const heard = analysis.stems.map((stem) => `${stem.name} ${stem.db} dB`).join(", ");
+  return `stems: ${heard || "all silent"}`;
+}
+
+function voiceSummary(voice: Voice): string {
+  const rate = voice.meanRate !== null ? `mean ${voice.meanRate} ${voice.unit}/s` : null;
+  const pitch = voice.medianPitchHz !== null ? `median pitch ${voice.medianPitchHz} Hz` : null;
+  return `voice: ${voice.sentences.length} lines, ${voice.pauses.length} pauses${[rate, pitch]
+    .filter(Boolean)
+    .map((p) => `, ${p}`)
+    .join("")}`;
+}
+
+function effectsSummary(effects: Effects): string {
+  const top = effects.groups
+    .slice(0, 6)
+    .map((g) => `${g.id} ${g.kind} ×${g.count}`)
+    .join(", ");
+  return `effects: ${effects.events.length} in ${effects.groups.length} sounds${top ? ` (${top})` : ""}${
+    effects.drumHits ? `; ${effects.drumHits} drum hits on the beat left out` : ""
+  }`;
+}
+
+const musicSummary = (music: Music) =>
+  music.pieces.length
+    ? `music: ${music.pieces.length} pieces, ${music.breaks.length} breaks`
+    : "music: none";
+
 function header(analysis: ReadAudio): string[] {
-  const { voice, effects, music } = analysis;
-  const separated =
-    analysis.separation === "stems" ? `stems: ${analysis.stems.join(", ")}` : "not separated";
-  const lines = [`${analysis.file} · ${s(analysis.duration)} s · ${separated}`];
-  if (voice) {
-    const rate = voice.meanRate !== null ? `mean ${voice.meanRate} ${voice.unit}/s` : null;
-    const pitch = voice.medianPitchHz !== null ? `median pitch ${voice.medianPitchHz} Hz` : null;
-    lines.push(
-      `voice: ${voice.sentences.length} lines, ${voice.pauses.length} pauses${[rate, pitch]
-        .filter(Boolean)
-        .map((p) => `, ${p}`)
-        .join("")}`,
-    );
-  }
-  if (effects) {
-    const top = effects.groups
-      .slice(0, 6)
-      .map((g) => `${g.id} ${g.kind} ×${g.count}`)
-      .join(", ");
-    lines.push(
-      `effects: ${effects.events.length} in ${effects.groups.length} sounds${top ? ` (${top})` : ""}${
-        effects.drumHits ? `; ${effects.drumHits} drum hits on the beat left out` : ""
-      }`,
-    );
-  }
-  if (music) lines.push(`music: ${music.pieces.length} pieces, ${music.breaks.length} breaks`);
-  return lines;
+  const { voice, effects, music, ambience } = analysis;
+  return [
+    `${analysis.file} · ${s(analysis.duration)} s · ${separation(analysis)}`,
+    voice && voiceSummary(voice),
+    effects && effectsSummary(effects),
+    music && musicSummary(music),
+    ambience?.length && `ambience: ${ambience.length} stretches`,
+  ].filter((line): line is string => typeof line === "string");
 }
 
 /** The recording as time-stamped lines, all of it or the events overlapping `range`. */
@@ -132,6 +169,7 @@ export function formatRead(analysis: ReadAudio, range?: [number, number]): strin
       kind: "music",
       text: `break ${(b.end - b.start).toFixed(1)} s`,
     })) ?? []),
+    ...(analysis.ambience?.map(ambienceLine) ?? []),
   ]
     .filter((line) => overlaps(line, range))
     .sort((a, b) => a.start - b.start || (a.end ?? a.start) - (b.end ?? b.start));
