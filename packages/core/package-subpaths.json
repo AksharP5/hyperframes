@@ -68,6 +68,12 @@
       "types": "./dist/atomicFile.d.ts",
       "environments": ["bun", "node"]
     },
+    "./remove-tree": {
+      "source": "./src/removeTree.ts",
+      "runtime": "./dist/removeTree.js",
+      "types": "./dist/removeTree.d.ts",
+      "environments": ["bun", "node"]
+    },
     "./project-folders": {
       "source": "./src/projectFolders.ts",
       "runtime": "./dist/projectFolders.js",

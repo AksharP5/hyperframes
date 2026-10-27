@@ -80,6 +80,12 @@
       "import": "./src/atomicFile.ts",
       "types": "./src/atomicFile.ts"
     },
+    "./remove-tree": {
+      "bun": "./src/removeTree.ts",
+      "node": "./dist/removeTree.js",
+      "import": "./src/removeTree.ts",
+      "types": "./src/removeTree.ts"
+    },
     "./project-folders": {
       "bun": "./src/projectFolders.ts",
       "node": "./dist/projectFolders.js",
@@ -637,6 +643,10 @@
       "./atomic-file": {
         "import": "./dist/atomicFile.js",
         "types": "./dist/atomicFile.d.ts"
+      },
+      "./remove-tree": {
+        "import": "./dist/removeTree.js",
+        "types": "./dist/removeTree.d.ts"
       },
       "./project-folders": {
         "import": "./dist/projectFolders.js",

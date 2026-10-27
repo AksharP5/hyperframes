@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
@@ -51,6 +51,25 @@ describe("capture browser transport lifecycle", () => {
       mocks.browserClose.mock.invocationCallOrder[0] ?? 0,
     );
   });
+  // A profile directory the OS refuses to empty stands in for Windows' locked Chrome lockfile.
+  it.runIf(process.platform !== "win32" && process.getuid?.() !== 0)(
+    "finishes a close whose profile directory cannot be removed, with a warning",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const session = await launchCaptureBrowser(options);
+      const profile = mocks.launch.mock.calls[0]?.[1].userDataDir;
+      const locked = join(profile, "Default");
+      chmodSync(locked, 0o500);
+      try {
+        await expect(session.close()).resolves.toBeUndefined();
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(profile));
+      } finally {
+        chmodSync(locked, 0o700);
+        warn.mockRestore();
+      }
+    },
+  );
+
   it("closes proxy when launch fails", async () => {
     mocks.launch.mockRejectedValue(new Error("launch failed"));
     await expect(launchCaptureBrowser(options)).rejects.toThrow("launch failed");

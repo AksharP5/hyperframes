@@ -1,5 +1,5 @@
 import type { Browser } from "puppeteer-core";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
 } from "../browser/launch.js";
 import { captureBrowserArgs } from "./browserLaunchArgs.js";
 import { startCaptureProxy } from "./captureProxy.js";
+import { removeTreeBestEffortAsync } from "@hyperframes/core/remove-tree";
 
 /** The launch-wide proxy covers pages, popups, workers and both extraction passes. */
 export async function launchCaptureBrowser(options: {
@@ -30,7 +31,7 @@ export async function launchCaptureBrowser(options: {
         if (browser) await closeManagedBrowser(browser);
       } finally {
         try {
-          if (profile) await rm(profile, { recursive: true, force: true });
+          if (profile) await removeTreeBestEffortAsync(profile);
         } finally {
           unregister?.();
         }
