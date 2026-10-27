@@ -15,7 +15,7 @@ it("closes the browser's pipes when it exits, so an orphaned helper cannot hold 
     stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"],
   });
   const puppeteer = {
-    launch: async (_options: LaunchOptions) => ({ process: () => child }),
+    launch: async (_options: LaunchOptions) => ({ process: () => child, close: async () => {} }),
   } as unknown as PuppeteerNode;
   await launchManagedBrowser(puppeteer, { headless: true }, { diagnose: false });
   await expect

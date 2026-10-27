@@ -33,14 +33,12 @@ it.each(["SIGINT", "SIGTERM"] as const)(
       exitCode: null as number | null,
       signalCode: null,
     });
-    const browser = Object.assign(new EventEmitter(), {
-      process: () => child,
-      close: vi.fn(async () => {
-        child.exitCode = 0;
-        child.emit("exit", 0);
-        browser.emit("disconnected");
-      }),
+    const close = vi.fn(async () => {
+      child.exitCode = 0;
+      child.emit("exit", 0);
+      browser.emit("disconnected");
     });
+    const browser = Object.assign(new EventEmitter(), { process: () => child, close });
     mocks.launch.mockResolvedValue(browser);
     mocks.proxyClose.mockResolvedValue(undefined);
     const { launchCaptureBrowser } = await import("./launchCaptureBrowser.js");
@@ -62,6 +60,6 @@ it.each(["SIGINT", "SIGTERM"] as const)(
     expect(await exit).toEqual({ code: signal === "SIGINT" ? 130 : 143, profileExists: false });
     await session.close();
     await session.close();
-    expect(browser.close).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
   },
 );

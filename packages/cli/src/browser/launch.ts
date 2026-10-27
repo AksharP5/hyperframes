@@ -26,6 +26,7 @@ export class BrowserCleanupError extends AggregateError {}
 const browsers = new Set<Browser>();
 const closing = new WeakMap<Browser, Promise<void>>();
 const watchdogs = new WeakMap<Browser, ChromeWatchdog>();
+const gracefulClose = new WeakMap<Browser, () => Promise<void>>();
 const pending = new Map<Promise<Browser>, AbortController>();
 const diagnosing = new Set<AbortController>();
 const sessionCleanups = new Set<() => Promise<void>>();
@@ -193,6 +194,8 @@ async function launchOwnedBrowser(
     browsers.add(browser);
     const watchdog = watchChromeTree(child, launchedAt);
     if (watchdog) watchdogs.set(browser, watchdog);
+    gracefulClose.set(browser, browser.close.bind(browser));
+    browser.close = () => closeManagedBrowser(browser);
     child.once("exit", () => {
       browsers.delete(browser);
       destroyBrowserPipes(child);
@@ -273,6 +276,10 @@ async function descendantsToReap(pid: number | undefined) {
   return chromeDescendants(pid).catch(() => []);
 }
 
+function closeGracefully(browser: Browser): Promise<void> {
+  return (gracefulClose.get(browser) ?? (() => browser.close()))();
+}
+
 async function closedWithoutKill(browser: Browser): Promise<boolean> {
   const child = browser.process();
   if (!child) throw new Error("A managed browser lost its owned process.");
@@ -286,7 +293,9 @@ async function closedWithoutKill(browser: Browser): Promise<boolean> {
   });
   try {
     await Promise.race([
-      browser.close().catch((error: unknown) => console.warn("Browser close failed:", error)),
+      closeGracefully(browser).catch((error: unknown) =>
+        console.warn("Browser close failed:", error),
+      ),
       grace,
     ]);
     const clean = child.exitCode !== null || child.signalCode !== null;
