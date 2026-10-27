@@ -334,6 +334,7 @@ export interface CheckBrowserResult {
   craft: CraftResult;
   screenshots: CheckScreenshot[];
   timings: CheckTimings;
+  renderReadyTimedOut: boolean;
   skipped: boolean;
 }
 

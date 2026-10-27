@@ -119,7 +119,7 @@ export const DEFAULT_CHECK_OPTIONS: CheckOptions = {
   maxIssues: 80,
   collapseStatic: true,
   tolerance: 2,
-  timeout: 3000,
+  timeout: 10_000,
   contrast: true,
   strict: false,
   snapshots: false,
@@ -1631,6 +1631,7 @@ export async function runAuditGrid(
       overlapMs: collected.overlapMs,
     },
     skipped: false,
+    renderReadyTimedOut: false,
   };
 }
 
@@ -2066,6 +2067,7 @@ function buildReport(
     contrastWarnings: contrastSection.warningCount,
     craftWarnings: craftSection.warningCount,
     launchSettleMs: browser.timings.launchSettleMs,
+    renderReadyTimedOut: browser.renderReadyTimedOut,
     seekLoopMs: browser.timings.seekLoopMs,
     contrastMs: browser.timings.contrastMs,
     gridMs: browser.timings.gridMs,
@@ -2206,6 +2208,7 @@ function emptyBrowserResult(): CheckBrowserResult {
       overlapMs: 0,
     },
     skipped: true,
+    renderReadyTimedOut: false,
   };
 }
 

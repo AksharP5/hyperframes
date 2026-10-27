@@ -1113,6 +1113,7 @@ export function trackCheckReport(props: {
   contrastWarnings: number;
   craftWarnings: number;
   launchSettleMs: number;
+  renderReadyTimedOut: boolean;
   seekLoopMs: number;
   contrastMs: number;
   gridMs: number;
@@ -1143,6 +1144,7 @@ export function trackCheckReport(props: {
     contrast_warnings: props.contrastWarnings,
     craft_warnings: props.craftWarnings,
     launch_settle_ms: props.launchSettleMs,
+    render_ready_timed_out: props.renderReadyTimedOut,
     seek_loop_ms: props.seekLoopMs,
     contrast_ms: props.contrastMs,
     grid_ms: props.gridMs,

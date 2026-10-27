@@ -208,8 +208,8 @@ const CHECK_COMMAND_ARGS = {
   timeout: {
     type: "string",
     description:
-      "Initial render-ready timeout in ms, or with a unit (45s, 2m); also sets the navigation minimum (10s floor, default: 3000)",
-    default: "3000",
+      "Initial render-ready timeout in ms, or with a unit (45s, 2m); also sets the navigation minimum (10s floor, default: 10000)",
+    default: "10000",
   },
   contrast: {
     type: "boolean",

@@ -373,7 +373,8 @@ export async function runBrowserCheck(
     const session = await openSettledCompositionPage(html, server.url, {
       navigationTimeoutMs: options.timeout,
       renderReadyTimeoutMs: options.timeout,
-      renderReadyWarningSuffix: "checking the current page state",
+      renderReadyWarningSuffix:
+        "the scene may still be building, so results can miss late content; raise --timeout (for example 20s)",
       prelaunched,
       browserGpuMode: options.browserGpuMode ?? resolveCliChromeGpuMode(),
       signal: deadline?.signal,
@@ -430,6 +431,7 @@ export async function runBrowserCheck(
     return {
       ...result,
       timings: { ...result.timings, launchSettleMs },
+      renderReadyTimedOut: session.renderReadyTimedOut,
       runtimeFindings: dropFailedProxyEchoes(
         dropMotionBlurConsoleEcho(keepBrokenImageAborts(merged, broken), blur),
         failedPaths,
@@ -524,7 +526,8 @@ async function openHelperSession(
   const session = await openSettledCompositionPage(html, url, {
     navigationTimeoutMs: options.timeout,
     renderReadyTimeoutMs: options.timeout,
-    renderReadyWarningSuffix: "checking the current page state",
+    renderReadyWarningSuffix:
+      "the scene may still be building, so results can miss late content; raise --timeout (for example 20s)",
     browserGpuMode: options.browserGpuMode ?? resolveCliChromeGpuMode(),
     signal: owner.signal,
     onBrowser: owner.onBrowser,
