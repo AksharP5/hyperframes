@@ -1,3 +1,4 @@
+import { explainChromeLaunchFailure } from "@hyperframes/engine/chrome-startup";
 import type { Browser, LaunchOptions, PuppeteerNode } from "puppeteer-core";
 import { withHyperframesBrowserMarker } from "@hyperframes/core/browser-marker";
 import {
@@ -24,9 +25,11 @@ const browsers = new Set<Browser>();
 const closing = new WeakMap<Browser, Promise<void>>();
 const watchdogs = new WeakMap<Browser, ChromeWatchdog>();
 const pending = new Map<Promise<Browser>, AbortController>();
+const diagnosing = new Set<AbortController>();
 const sessionCleanups = new Set<() => Promise<void>>();
 const CLOSE_GRACE_MS = 1_000;
 const LAUNCH_TIMEOUT_MS = 30_000;
+const SLOW_START_NOTICE_MS = 5_000;
 const EXIT_POLL_MS = 50;
 let listening = false;
 let shutdown: Promise<void> | undefined;
@@ -75,11 +78,15 @@ export async function resolveManagedGpuMode(
   return resolveCaptureBrowserGpuMode(requestedMode, chromePath, {
     launch: async (puppeteer, options) => {
       context.signal?.throwIfAborted();
-      const browser = await launchManagedBrowser(puppeteer, {
-        ...options,
-        ...(context.noListen ? oneProcessOverPipe(options) : {}),
-        signal: context.signal,
-      });
+      const browser = await launchManagedBrowser(
+        puppeteer,
+        {
+          ...options,
+          ...(context.noListen ? oneProcessOverPipe(options) : {}),
+          signal: context.signal,
+        },
+        { diagnose: false },
+      );
       try {
         context.onBrowser?.(browser);
       } catch (error) {
@@ -95,6 +102,7 @@ export async function resolveManagedGpuMode(
 export async function launchManagedBrowser(
   puppeteer: PuppeteerNode,
   options: LaunchOptions,
+  { diagnose = true }: { diagnose?: boolean } = {},
 ): Promise<Browser> {
   const sandboxed = isOneProcessOverPipe(options) || inAgentSandbox();
   try {
@@ -103,12 +111,37 @@ export async function launchManagedBrowser(
     const unnamedSeatbelt =
       !sandboxed &&
       (machServiceDenied(normalizeErrorMessage(error)) || pipeLaunchClosedOnMac(error));
-    if (!unnamedSeatbelt) throw withRemediation(error);
+    if (!unnamedSeatbelt)
+      throw await withStartupDiagnosis(withRemediation(error), puppeteer, options, diagnose);
     return launchOwnedBrowser(puppeteer, oneProcessOverPipe(options)).catch(
-      (retryError: unknown) => {
-        throw withRemediation(retryError);
+      async (retryError: unknown) => {
+        throw await withStartupDiagnosis(withRemediation(retryError), puppeteer, options, diagnose);
       },
     );
+  }
+}
+
+async function withStartupDiagnosis(
+  error: unknown,
+  puppeteer: PuppeteerNode,
+  options: LaunchOptions,
+  diagnose: boolean,
+): Promise<unknown> {
+  if (!diagnose || !options.executablePath || options.signal?.aborted || shutdown) return error;
+  if (!(error instanceof Error)) return error;
+  if (sandboxDeniedRemediation(normalizeErrorMessage(error))) return error;
+  const args = await (async () =>
+    puppeteer.defaultArgs({
+      headless: options.headless ?? true,
+      args: withHyperframesBrowserMarker(options.args),
+    }))().catch(() => undefined);
+  if (!args) return error;
+  const abort = new AbortController();
+  diagnosing.add(abort);
+  try {
+    return await explainChromeLaunchFailure(error, options.executablePath, args, abort.signal);
+  } finally {
+    diagnosing.delete(abort);
   }
 }
 
@@ -145,6 +178,7 @@ async function launchOwnedBrowser(
           limit,
         )
       : undefined;
+  const slow = setTimeout(() => console.error("Chrome is still starting..."), SLOW_START_NOTICE_MS);
   pending.set(launch, abort);
   try {
     const browser = await launch;
@@ -157,6 +191,7 @@ async function launchOwnedBrowser(
     return browser;
   } finally {
     clearTimeout(timer);
+    clearTimeout(slow);
     pending.delete(launch);
   }
 }
@@ -174,7 +209,7 @@ function untilLaunchOrAbort(launch: Promise<Browser>, signal: AbortSignal): Prom
 
 /** Resolved launches keep their signal live; only pending launches are aborted during shutdown. */
 async function closeManagedBrowsers(): Promise<void> {
-  for (const abort of pending.values()) abort.abort();
+  for (const abort of [...pending.values(), ...diagnosing]) abort.abort();
   await Promise.allSettled(pending.keys());
   const results = await Promise.allSettled([...browsers].map(closeManagedBrowser));
   results.push(...(await Promise.allSettled([...sessionCleanups].map((cleanup) => cleanup()))));

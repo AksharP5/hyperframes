@@ -103,6 +103,7 @@ var __dirname = __hf_dirname(__filename);`,
       ...sourceAliases(resolve(__dirname, "../engine"), [
         ".",
         "./chrome-host-ceiling",
+        "./chrome-startup",
         "./shader-transitions",
         "./system-memory",
         "./wsl-host",

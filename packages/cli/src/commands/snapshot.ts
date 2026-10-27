@@ -135,10 +135,16 @@ const FFMPEG_EXTRACT_TIMEOUT_MS = 30_000;
 const FALLBACK_SEEK_LEAD_SECONDS = 5;
 const RENDER_READY_TIMEOUT_MS = DEFAULT_CONFIG.playerReadyTimeout;
 
+export function timeoutUnitHint(timeoutMs: number): string {
+  return timeoutMs < 1_000
+    ? ` --timeout is in milliseconds, so ${timeoutMs} is ${timeoutMs} ms; 45000 is 45 s.`
+    : "";
+}
+
 export async function renderNotReadyError(page: Page, timeoutMs: number): Promise<Error> {
   const diagnostic = await evaluateHfDiagnostic(page).then(buildZeroDurationDiagnostic, () => "");
   return new Error(
-    `The composition was not render-ready after ${timeoutMs}ms, so no frame was saved (raise --timeout if it loads slowly).\n${diagnostic}`,
+    `The composition was not render-ready after ${timeoutMs}ms, so no frame was saved (raise --timeout if it loads slowly).${timeoutUnitHint(timeoutMs)}\n${diagnostic}`,
   );
 }
 /** Each 4K decode is already multi-threaded, so a few at once fill the cores without exhausting memory. */

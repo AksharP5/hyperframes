@@ -6,6 +6,7 @@
  * launch args, pooled browser acquisition/release.
  */
 
+import { explainChromeLaunchFailure } from "./chromeStartup.js";
 import { withHyperframesBrowserMarker } from "@hyperframes/core/browser-marker";
 import { scanHtmlOpeningTags } from "@hyperframes/parsers/html-attribute-spans";
 import type { Browser, LaunchOptions, Page, PuppeteerNode } from "puppeteer-core";
@@ -885,16 +886,24 @@ async function launchBrowser(
   let captureMode = fingerprint.requestedCaptureMode;
   let browser: Browser | undefined;
   const launch = (args: readonly string[]) =>
-    ppt.launch({
-      ...ownedLaunchOptions(),
-      headless: true,
-      args: withHyperframesBrowserMarker(args),
-      defaultViewport: null,
-      executablePath: fingerprint.executablePath,
-      env,
-      timeout: fingerprint.browserTimeoutMs,
-      protocolTimeout: fingerprint.protocolTimeoutMs,
-    });
+    ppt
+      .launch({
+        ...ownedLaunchOptions(),
+        headless: true,
+        args: withHyperframesBrowserMarker(args),
+        defaultViewport: null,
+        executablePath: fingerprint.executablePath,
+        env,
+        timeout: fingerprint.browserTimeoutMs,
+        protocolTimeout: fingerprint.protocolTimeoutMs,
+      })
+      .catch(async (error: unknown) => {
+        const defaults = await ppt.defaultArgs({
+          headless: true,
+          args: withHyperframesBrowserMarker(args),
+        });
+        throw await explainChromeLaunchFailure(error, fingerprint.executablePath, defaults);
+      });
   const probe = (target: Browser, timeoutMs?: number) =>
     probeBeginFrameSupport(target, timeoutMs).catch((error) => ({
       supported: true,

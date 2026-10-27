@@ -30,6 +30,11 @@
       "import": "./src/services/chromeHostCeiling.ts",
       "types": "./src/services/chromeHostCeiling.ts"
     },
+    "./chrome-startup": {
+      "bun": "./src/services/chromeStartup.ts",
+      "import": "./src/services/chromeStartup.ts",
+      "types": "./src/services/chromeStartup.ts"
+    },
     "./system-memory": {
       "bun": "./src/services/systemMemory.ts",
       "import": "./src/services/systemMemory.ts",
@@ -61,6 +66,10 @@
       "./chrome-host-ceiling": {
         "import": "./dist/services/chromeHostCeiling.js",
         "types": "./dist/services/chromeHostCeiling.d.ts"
+      },
+      "./chrome-startup": {
+        "import": "./dist/services/chromeStartup.js",
+        "types": "./dist/services/chromeStartup.d.ts"
       },
       "./system-memory": {
         "import": "./dist/services/systemMemory.js",
