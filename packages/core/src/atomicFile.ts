@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { realpath } from "./safePath.js";
+import { renameWithRetry } from "./renameWithRetry.js";
 
 type SiblingFileSystem = Pick<typeof fs, "writeFileSync" | "chmodSync" | "unlinkSync">;
 type DirectFileSystem = SiblingFileSystem & Pick<typeof fs, "openSync" | "closeSync">;
@@ -9,9 +10,6 @@ type DirectFileSystem = SiblingFileSystem & Pick<typeof fs, "openSync" | "closeS
 // Codes a volume without hard links (FAT, exFAT, some network shares) answers link() with.
 // EISDIR: libuv maps Windows ERROR_INVALID_FUNCTION (FAT/exFAT refusing a link) to it; nodejs/node#65817.
 const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "EISDIR"]);
-// Windows refuses a rename while another process briefly holds the target open.
-const BUSY_RENAME = new Set(["EPERM", "EBUSY", "EACCES"]);
-const RENAME_RETRY_DELAYS_MS = [10, 20, 30, 40];
 const MAX_LINK_HOPS = 40;
 const TEMP_NAME_TRIES = 3;
 const TEMP_SUFFIX = /\.hf[0-9a-f]{6}\.tmp$/;
@@ -52,7 +50,7 @@ export function replaceFileAtomically(
   traceWrite(filePath, content);
   // Node fs.rename uses libuv uv_fs_rename; win32 calls MoveFileExW with MOVEFILE_REPLACE_EXISTING.
   publishSibling(filePath, content, mode, operations, (tempPath) =>
-    renameWithRetry(operations, tempPath, filePath),
+    renameWithRetry(tempPath, filePath, { rename: operations.renameSync }),
   );
 }
 
@@ -170,23 +168,6 @@ function writeTempSibling(
         // Preserve the write error; cleanup is best effort.
       }
       throw error;
-    }
-  }
-}
-
-function renameWithRetry(
-  operations: Pick<typeof fs, "renameSync">,
-  from: string,
-  to: string,
-): void {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      operations.renameSync(from, to);
-      return;
-    } catch (error) {
-      const delay = RENAME_RETRY_DELAYS_MS[attempt];
-      if (delay === undefined || !BUSY_RENAME.has(errorCode(error))) throw error;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
     }
   }
 }

@@ -398,8 +398,8 @@ export {
 } from "./utils/ffmpegBinaries.js";
 
 export { trackChildProcess, killTrackedProcesses } from "./utils/processTracker.js";
-export { renameWithRetry, renameWithRetryAsync } from "./utils/renameWithRetry.js";
-export { removeScratch, collectScratchLeftovers } from "./utils/removeScratch.js";
+export { renameWithRetry, renameWithRetryAsync } from "@hyperframes/core/rename-retry";
+export { removeScratch, collectScratchLeftovers } from "@hyperframes/core/remove-scratch";
 
 // drawElement self-verify comparison — shared by the streaming drain
 // (producer) and the parallel disk-path verify (parallelCoordinator).

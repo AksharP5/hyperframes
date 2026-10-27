@@ -86,6 +86,18 @@
       "import": "./src/removeTree.ts",
       "types": "./src/removeTree.ts"
     },
+    "./rename-retry": {
+      "bun": "./src/renameWithRetry.ts",
+      "node": "./dist/renameWithRetry.js",
+      "import": "./src/renameWithRetry.ts",
+      "types": "./src/renameWithRetry.ts"
+    },
+    "./remove-scratch": {
+      "bun": "./src/removeScratch.ts",
+      "node": "./dist/removeScratch.js",
+      "import": "./src/removeScratch.ts",
+      "types": "./src/removeScratch.ts"
+    },
     "./project-folders": {
       "bun": "./src/projectFolders.ts",
       "node": "./dist/projectFolders.js",
@@ -647,6 +659,14 @@
       "./remove-tree": {
         "import": "./dist/removeTree.js",
         "types": "./dist/removeTree.d.ts"
+      },
+      "./rename-retry": {
+        "import": "./dist/renameWithRetry.js",
+        "types": "./dist/renameWithRetry.d.ts"
+      },
+      "./remove-scratch": {
+        "import": "./dist/removeScratch.js",
+        "types": "./dist/removeScratch.d.ts"
       },
       "./project-folders": {
         "import": "./dist/projectFolders.js",

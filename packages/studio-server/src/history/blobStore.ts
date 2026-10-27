@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants, createReadStream, createWriteStream, renameSync } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { constants, createReadStream, createWriteStream } from "node:fs";
+import { copyFile, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { atomicTempPath } from "@hyperframes/core/atomic-file";
+import { renameWithRetry, renameWithRetryAsync } from "@hyperframes/core/rename-retry";
 
 /** File contents stored once by sha256, text and binary alike. */
 export interface BlobStore {
@@ -53,7 +54,7 @@ async function cloneOrCopy(from: string, to: string, beforeReplace?: () => void)
   try {
     await copyFile(from, temp, constants.COPYFILE_FICLONE);
     beforeReplace?.();
-    renameSync(temp, to);
+    renameWithRetry(temp, to);
   } catch (error) {
     await rm(temp, { force: true });
     throw error;
@@ -117,7 +118,7 @@ export async function openBlobStore(dir: string): Promise<BlobStore> {
       }
       await mkdir(dirname(blobPath(dir, hash)), { recursive: true });
       const size = (await stat(temp)).size;
-      await rename(temp, blobPath(dir, hash));
+      await renameWithRetryAsync(temp, blobPath(dir, hash));
       sizes.set(hash, size);
       total += size;
       return hash;
@@ -144,7 +145,7 @@ export async function openBlobStore(dir: string): Promise<BlobStore> {
       await mkdir(dirname(to), { recursive: true });
       const moved =
         remove &&
-        (await rename(absPath, to).then(
+        (await renameWithRetryAsync(absPath, to).then(
           () => true,
           () => false,
         ));
@@ -154,7 +155,7 @@ export async function openBlobStore(dir: string): Promise<BlobStore> {
           await rm(temp, { force: true });
           throw error;
         });
-        await rename(temp, to);
+        await renameWithRetryAsync(temp, to);
       }
       asideSizes.set(hash, (await stat(to)).size);
       holds.set(hash, new Set([path]));

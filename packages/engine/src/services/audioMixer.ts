@@ -1,8 +1,8 @@
 // fallow-ignore-file complexity code-duplication
 import { isSelfOrAncestorHidden, memberGroupKey, isMemberGroupHidden } from "./mediaHidden.js";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from "fs";
-import { renameWithRetry } from "../utils/renameWithRetry.js";
-import { removeScratch } from "../utils/removeScratch.js";
+import { renameWithRetry } from "@hyperframes/core/rename-retry";
+import { removeScratch } from "@hyperframes/core/remove-scratch";
 import { join, dirname, isAbsolute, relative } from "path";
 import { parseHTML } from "linkedom";
 import { extractAudioMetadata, type AudioMetadata } from "../utils/ffprobe.js";

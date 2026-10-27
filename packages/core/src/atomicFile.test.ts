@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import { lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -381,9 +381,15 @@ describe("createFileAtomically", () => {
   });
 });
 
+// Only Windows holds a file a moment after its reader is done, so only there is a refused rename tried again.
 describe("replaceFileAtomically on a busy target", () => {
   const dirs: string[] = [];
+  const platform = process.platform;
+  beforeEach(() =>
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true }),
+  );
   afterEach(() => {
+    Object.defineProperty(process, "platform", { value: platform, configurable: true });
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
@@ -414,11 +420,11 @@ describe("replaceFileAtomically on a busy target", () => {
     expect(attempts()).toBe(3);
   });
 
-  it("gives up after five attempts and keeps the old file", () => {
+  it("gives up after eight attempts and keeps the old file", () => {
     const { dir, file, operations, attempts } = renamingAfter(Infinity, "EBUSY");
 
     expect(() => replaceFileAtomically(file, "new", 0o644, operations)).toThrow("EBUSY");
-    expect(attempts()).toBe(5);
+    expect(attempts()).toBe(8);
     expect(readFileSync(file, "utf-8")).toBe("old");
     expect(fs.readdirSync(dir)).toEqual(["index.html"]);
   });

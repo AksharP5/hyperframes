@@ -5,7 +5,7 @@
 
 import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { removeScratch } from "../utils/removeScratch.js";
+import { removeScratch } from "@hyperframes/core/remove-scratch";
 import { dirname, join } from "node:path";
 import { getFfmpegBinary } from "../utils/ffmpegBinaries.js";
 import { runFfmpeg, type RunFfmpegResult } from "../utils/runFfmpeg.js";

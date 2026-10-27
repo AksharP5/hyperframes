@@ -8,7 +8,7 @@
 import { cpus, freemem } from "os";
 import { existsSync, mkdirSync, readdirSync } from "fs";
 import { copyFile, readFile } from "fs/promises";
-import { renameWithRetryAsync } from "../utils/renameWithRetry.js";
+import { renameWithRetryAsync } from "@hyperframes/core/rename-retry";
 import { join } from "path";
 import { getHeapStatistics } from "v8";
 

@@ -29,7 +29,7 @@ import { pathToFileURL } from "node:url";
 import { getAudioFxRuntimeScript } from "@hyperframes/core/audio-fx-runtime";
 import { enabledAudioFxNodes, type HfAudioFxChain } from "@hyperframes/core/audio-fx";
 import { serializeAutomation, type HfAutomation } from "@hyperframes/core/audio-automation";
-import { removeScratch } from "../utils/removeScratch.js";
+import { removeScratch } from "@hyperframes/core/remove-scratch";
 import { acquireBrowser, buildChromeArgs } from "./browserManager.js";
 import { createEnvelopeWalker } from "./audioVolumeEnvelope.js";
 import { riffChunks, wavFormatTag } from "./wavChunks.js";

@@ -74,6 +74,18 @@
       "types": "./dist/removeTree.d.ts",
       "environments": ["bun", "node"]
     },
+    "./rename-retry": {
+      "source": "./src/renameWithRetry.ts",
+      "runtime": "./dist/renameWithRetry.js",
+      "types": "./dist/renameWithRetry.d.ts",
+      "environments": ["bun", "node"]
+    },
+    "./remove-scratch": {
+      "source": "./src/removeScratch.ts",
+      "runtime": "./dist/removeScratch.js",
+      "types": "./dist/removeScratch.d.ts",
+      "environments": ["bun", "node"]
+    },
     "./project-folders": {
       "source": "./src/projectFolders.ts",
       "runtime": "./dist/projectFolders.js",
