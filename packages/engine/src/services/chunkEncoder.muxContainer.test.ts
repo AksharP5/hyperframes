@@ -62,7 +62,7 @@ describe.skipIf(!HAS_FFMPEG)("WebM audio muxing", () => {
 
       const probe = spawnSync(
         getFfprobeBinary(),
-        ["-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", output],
+        ["-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0", "--", output],
         { encoding: "utf8" },
       );
       expect(probe.status, probe.stderr).toBe(0);
