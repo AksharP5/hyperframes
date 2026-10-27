@@ -882,8 +882,12 @@ describe("Studio file-change SSE", () => {
     );
     server = createStudioServer({ projectDir });
     const projectUrl = `/api/projects/${encodeURIComponent(basename(projectDir))}`;
-    expect((await server.app.request(`${projectUrl}/preview`)).status).toBe(200);
-    expect((await server.app.request(`${projectUrl}/preview/assets/logo.png`)).status).toBe(200);
+    // An unread asset body keeps logo.png open, and Windows refuses to move a folder holding an open file.
+    for (const path of [`${projectUrl}/preview`, `${projectUrl}/preview/assets/logo.png`]) {
+      const response = await server.app.request(path);
+      expect(response.status).toBe(200);
+      await response.arrayBuffer();
+    }
     return { projectDir, projectUrl };
   }
 
