@@ -209,6 +209,27 @@ describe("createStudioServer project history (D-491)", () => {
     },
   );
 
+  // A preview an agent starts inside a host app's run can outlive it; holding the lock, it refused every later run.
+  it("never opens the history inside a host app's run, which owns it", async () => {
+    const opens: unknown[] = [];
+    historyState.open = async (options) => {
+      opens.push(options);
+      throw new Error("the history was opened");
+    };
+    vi.stubEnv("HYPERFRAMES_DESKTOP_PROJECT", "/a/project");
+    try {
+      const projectDir = tmpProject();
+      server = createStudioServer({ projectDir, historyRoot: tmpProject() });
+      const historyUrl = `/api/projects/${encodeURIComponent(basename(projectDir))}/history`;
+      expect((await server.app.request(historyUrl)).status).toBe(404);
+      expect(opens).toEqual([]);
+      await server.shutdown();
+    } finally {
+      vi.unstubAllEnvs();
+      historyState.open = null;
+    }
+  });
+
   it("never makes a request wait on another process's history lock again once it was busy", async () => {
     const waits: unknown[] = [];
     historyState.open = async (options) => {
