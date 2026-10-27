@@ -1,16 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  linkSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { linkSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { uptime } from "node:os";
 import { join } from "node:path";
+import { replaceFileAtomically } from "@hyperframes/core/atomic-file";
 
 export class HistoryBusyError extends Error {
   constructor(
@@ -177,9 +170,7 @@ function evictDeadOwner(file: string): boolean {
 /** The owner's url sits beside owner.pid, so readers of owner.pid from older versions see no change. */
 function advertise(urlFile: string, url: string | undefined): void {
   if (!url) return rmSync(urlFile, { force: true });
-  const draft = `${urlFile}-${process.pid}-${randomUUID()}.tmp`;
-  writeFileSync(draft, JSON.stringify({ pid: process.pid, url }));
-  renameSync(draft, urlFile);
+  replaceFileAtomically(urlFile, JSON.stringify({ pid: process.pid, url }));
 }
 
 /** The url `pid` advertised, only while `pid` is alive and still holds `file`. */
@@ -227,7 +218,12 @@ export async function takeHistoryOwnership(
     if (next === "claimed") break;
     if (next === "wait") await new Promise((settle) => setTimeout(settle, 50));
   }
-  advertise(urlFile, url);
+  try {
+    advertise(urlFile, url);
+  } catch (error) {
+    releaseOwn(file);
+    throw error;
+  }
   let held = true;
   return () => {
     if (held && servedBy(file, urlFile, process.pid)) rmSync(urlFile, { force: true });

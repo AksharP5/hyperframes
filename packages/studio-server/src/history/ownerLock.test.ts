@@ -5,6 +5,8 @@ import {
   linkSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
+  renameSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -16,10 +18,15 @@ import { HistoryBusyError, processStart, takeHistoryOwnership } from "./ownerLoc
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, linkSync: vi.fn(actual.linkSync) };
+  return {
+    ...actual,
+    linkSync: vi.fn(actual.linkSync),
+    renameSync: vi.fn(actual.renameSync),
+  };
 });
 
-const { linkSync: realLinkSync } = await vi.importActual<typeof import("node:fs")>("node:fs");
+const { linkSync: realLinkSync, renameSync: realRenameSync } =
+  await vi.importActual<typeof import("node:fs")>("node:fs");
 
 const platform = process.platform;
 const homes: string[] = [];
@@ -28,6 +35,7 @@ const canRefuseRead = process.platform !== "win32" && process.getuid?.() !== 0;
 
 afterEach(() => {
   vi.mocked(linkSync).mockImplementation(realLinkSync);
+  vi.mocked(renameSync).mockImplementation(realRenameSync);
   Object.defineProperty(process, "platform", { value: platform });
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
@@ -192,6 +200,41 @@ describe.skipIf(!startable)("takeHistoryOwnership when a pid has been reused", (
     utimesSync(lock, beforeBoot, beforeBoot);
     const release = await takeHistoryOwnership(home, 100);
     expect(readFileSync(lock, "utf-8")).toBe(String(process.pid));
+    release();
+  });
+});
+
+describe("takeHistoryOwnership publishing its url on Windows", () => {
+  const busy = () =>
+    Object.assign(new Error("EBUSY: resource busy or locked, rename"), { code: "EBUSY" });
+
+  it("rides out a rename the indexer holds once", async () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    vi.mocked(renameSync).mockImplementationOnce(() => {
+      throw busy();
+    });
+    const home = newHome();
+    const release = await takeHistoryOwnership(home, 1_000, "http://127.0.0.1:1234");
+    expect(JSON.parse(readFileSync(join(home, "owner-url.json"), "utf-8"))).toEqual({
+      pid: process.pid,
+      url: "http://127.0.0.1:1234",
+    });
+    release();
+    expect(existsSync(join(home, "owner.pid"))).toBe(false);
+  });
+
+  it("releases owner.pid when the url can never be published", async () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    vi.mocked(renameSync).mockImplementation(() => {
+      throw busy();
+    });
+    const home = newHome();
+    await expect(takeHistoryOwnership(home, 1_000, "http://127.0.0.1:1234")).rejects.toThrow(
+      /EBUSY/,
+    );
+    expect(readdirSync(home)).toEqual([]);
+    vi.mocked(renameSync).mockImplementation(realRenameSync);
+    const release = await takeHistoryOwnership(home, 100);
     release();
   });
 });
