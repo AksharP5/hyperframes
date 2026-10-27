@@ -65,6 +65,7 @@ import { REMOTE_MEDIA_SUBDIR } from "../../htmlCompiler.js";
 import { resolveRenderFpsConfig } from "../../fileServer.js";
 import type { ProducerLogger } from "../../../logger.js";
 import { encoderFailureError } from "../encoderInterruption.js";
+import { rendersSdrOnly } from "../hdrMode.js";
 import {
   compareExtractionFailureGroups,
   extractionFailureGroupIdentityKey,
@@ -513,7 +514,7 @@ export async function runExtractVideosStage(
         fps: job.config.fps,
         outputDir: join(compiledDir, "__hyperframes_video_frames"),
         format: job.config.videoFrameFormat ?? "auto",
-        toneMapHdrToSdr: job.config.hdrMode === "force-sdr",
+        toneMapHdrToSdr: rendersSdrOnly(job.config),
         timelineEnd: composition.duration,
         maxTransientRetries: extractionPolicy.maxTransientRetries,
         collectProbeFailures: extractionPolicy.failureMode === "enforce",

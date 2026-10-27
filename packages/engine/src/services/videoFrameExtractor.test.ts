@@ -3283,6 +3283,22 @@ describe.skipIf(!HAS_FFMPEG)("extractAllVideoFrames on a VFR source", () => {
     ).toBe(false);
   }, 60_000);
 
+  it("leaves SDR clips alone in a mixed timeline that tone-maps to SDR", async () => {
+    const SDR = await synthCfrClip("sdr-tonemap-peer.mp4", 1);
+    const HDR = await synthHdrTaggedClip("hdr-tonemap-peer.mp4", 1);
+    const outputDir = join(FIXTURE_DIR, "out-hdr-tonemap-mixed");
+    mkdirSync(outputDir, { recursive: true });
+
+    const result = await extractAllVideoFrames(
+      [cfrClipElement("sdr", SDR, 1), { ...cfrClipElement("hdr", HDR, 1), start: 1, end: 2 }],
+      FIXTURE_DIR,
+      { fps: 30, outputDir, toneMapHdrToSdr: true },
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.phaseBreakdown.hdrPreflightCount).toBe(0);
+  }, 60_000);
+
   it("keeps a finite SDR past-EOF slot in a mixed HDR timeline", async () => {
     const SDR_SHORT = await synthCfrClip("sdr-past-eof.mp4", 1);
     const HDR_SHORT = await synthHdrTaggedClip("hdr-past-eof-peer.mp4", 1);
