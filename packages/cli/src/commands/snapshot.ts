@@ -319,6 +319,14 @@ export function containingSourceFrameIndex(timestamps: readonly number[], time: 
   return index;
 }
 
+class FrameExtractError extends Error {}
+
+const lastLine = (text: string) => text.trim().split("\n").at(-1) ?? "";
+const processStderr = (error: unknown) =>
+  error instanceof Error && "stderr" in error && typeof error.stderr === "string"
+    ? error.stderr
+    : "";
+
 /** Keyframe seek plus the decoded-time threshold that selects the frame containing `time`, or null. */
 export async function probeContainingSourceFrameSeek(
   videoPath: string,
@@ -346,9 +354,10 @@ export async function probeContainingSourceFrameSeek(
       return typeof parsed === "object" && parsed !== null
         ? (parsed as Record<string, unknown>)
         : null;
-    } catch {
-      // An unreadable source blanks this one video, as a failed ffmpeg extraction does.
-      return null;
+    } catch (error) {
+      throw new FrameExtractError(
+        `FFprobe could not read ${videoPath}: ${lastLine(processStderr(error) || String(error))}`,
+      );
     }
   };
   const data = await probe("%+#1", "stream=time_base,start_pts:format=start_time,duration");
@@ -473,8 +482,6 @@ function warnNoHdrFiltersOnce(): void {
   );
 }
 
-class FrameExtractTimeoutError extends Error {}
-
 export async function extractVideoFrameToBuffer(
   videoPath: string,
   timeSeconds: number,
@@ -536,12 +543,17 @@ export async function extractVideoFrameToBuffer(
       warnNoHdrFiltersOnce();
       result = await runFfmpegOnce(ffmpegPath, frameArgs(null), FFMPEG_EXTRACT_TIMEOUT_MS);
     }
+    const frameOf = `the frame of ${videoPath} at ${timeSeconds.toFixed(2)}s`;
     if (result.timedOut) {
-      throw new FrameExtractTimeoutError(
-        `FFmpeg timed out after ${FFMPEG_EXTRACT_TIMEOUT_MS / 1000}s extracting the frame of ${videoPath} at ${timeSeconds.toFixed(2)}s`,
+      throw new FrameExtractError(
+        `FFmpeg timed out after ${FFMPEG_EXTRACT_TIMEOUT_MS / 1000}s extracting ${frameOf}`,
       );
     }
-    if (result.code !== 0 || !existsSync(outPath)) return null;
+    if (result.code !== 0 || !existsSync(outPath)) {
+      throw new FrameExtractError(
+        `FFmpeg could not extract ${frameOf}: ${lastLine(result.stderr) || `exit code ${result.code}`}`,
+      );
+    }
     return readFileSync(outPath);
   } finally {
     try {
@@ -552,7 +564,7 @@ export async function extractVideoFrameToBuffer(
   }
 }
 
-/** A timed-out clip becomes a finding naming it, so the other frames of the snapshot still land. */
+/** A clip whose frame fails becomes a finding naming it and why, so the other frames of the snapshot still land. */
 export async function extractVideoFrameOrWarn(
   warnings: string[],
   ...args: Parameters<typeof extractVideoFrameToBuffer>
@@ -560,7 +572,7 @@ export async function extractVideoFrameOrWarn(
   try {
     return await extractVideoFrameToBuffer(...args);
   } catch (error) {
-    if (!(error instanceof FrameExtractTimeoutError)) throw error;
+    if (!(error instanceof FrameExtractError)) throw error;
     warnings.push(error.message);
     console.warn(`   ${c.warn("⚠")} ${error.message}`);
     return null;
@@ -1133,7 +1145,7 @@ async function captureSnapshots(
         if (opts.against) {
           // Frame-exact reference frame beside the render, so a rebuild can be
           // checked against its footage without hand-rolled ffmpeg + montage.
-          const refPng = await extractVideoFrameToBuffer(opts.against, time);
+          const refPng = await extractVideoFrameOrWarn(warnings, opts.against, time);
           if (!refPng) {
             console.error(
               `   ${c.warn("⚠")} --against has no frame at ${timeLabel} — reference pair skipped`,

@@ -17,6 +17,7 @@ const snapshotState = vi.hoisted(() => ({
   settle: vi.fn(async (_page: unknown, _options?: unknown) => ({ pending: [], failed: [] })),
   closeServer: vi.fn(async () => undefined),
   ffmpegTimesOut: false,
+  ffmpegFails: false,
   noFfmpeg: false,
 }));
 
@@ -38,7 +39,13 @@ vi.mock("../capture/captureCompositionFrame.js", async (importOriginal) => {
     runFfmpegOnce: (...args: Parameters<typeof actual.runFfmpegOnce>) =>
       snapshotState.ffmpegTimesOut
         ? Promise.resolve({ code: null, timedOut: true, stderr: "" })
-        : actual.runFfmpegOnce(...args),
+        : snapshotState.ffmpegFails
+          ? Promise.resolve({
+              code: 1,
+              timedOut: false,
+              stderr: "\nError while decoding stream #0:0\n",
+            })
+          : actual.runFfmpegOnce(...args),
   };
 });
 
@@ -126,7 +133,7 @@ describe("transparent snapshot capture", () => {
   it("pairs every frame with the frame-exact reference frame under --against", () => {
     const source = readFileSync(new URL("./snapshot.ts", import.meta.url), "utf8");
     expect(source).toContain("against: {");
-    expect(source).toContain("extractVideoFrameToBuffer(opts.against, time)");
+    expect(source).toContain("extractVideoFrameOrWarn(warnings, opts.against, time)");
     expect(source).toContain('labels: ["render", "reference"]');
   });
 
@@ -650,22 +657,37 @@ describe("extractVideoFrameToBuffer", () => {
     },
   );
 
+  const oneSecondClip = (dir: string) => {
+    const clip = join(dir, "clip.mp4");
+    execFileSync(ffmpeg!, [
+      ...["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=d=1:r=24:s=160x90"],
+      ...["-pix_fmt", "yuv420p", clip],
+    ]);
+    return clip;
+  };
+
+  it.skipIf(noProbe)(
+    "records the clip, time and FFmpeg's reason when the extract fails",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-fails-"));
+      snapshotState.ffmpegFails = true;
+      try {
+        const warnings: string[] = [];
+        expect(await extractVideoFrameOrWarn(warnings, oneSecondClip(dir), 0.5)).toBeNull();
+        expect(warnings).toEqual([
+          expect.stringMatching(/clip\.mp4 at 0\.50s: Error while decoding stream #0:0$/),
+        ]);
+      } finally {
+        snapshotState.ffmpegFails = false;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.skipIf(noProbe)("names the clip and time when FFmpeg times out", async () => {
     const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-timeout-"));
     try {
-      const clip = join(dir, "clip.mp4");
-      execFileSync(ffmpeg!, [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "lavfi",
-        "-i",
-        "testsrc=d=1:r=24:s=160x90",
-        "-pix_fmt",
-        "yuv420p",
-        clip,
-      ]);
+      const clip = oneSecondClip(dir);
       snapshotState.ffmpegTimesOut = true;
       await expect(extractVideoFrameToBuffer(clip, 0.5)).rejects.toThrow(/clip\.mp4 at 0\.50s/);
     } finally {
@@ -679,19 +701,7 @@ describe("extractVideoFrameToBuffer", () => {
     async () => {
       const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-finding-"));
       try {
-        const clip = join(dir, "clip.mp4");
-        execFileSync(ffmpeg!, [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-f",
-          "lavfi",
-          "-i",
-          "testsrc=d=1:r=24:s=160x90",
-          "-pix_fmt",
-          "yuv420p",
-          clip,
-        ]);
+        const clip = oneSecondClip(dir);
         snapshotState.ffmpegTimesOut = true;
         const warnings: string[] = [];
         expect(await extractVideoFrameOrWarn(warnings, clip, 0.5)).toBeNull();
@@ -761,14 +771,19 @@ describe("extractVideoFrameToBuffer", () => {
   );
 
   it.skipIf(noProbe)(
-    "leaves an unreadable video blank instead of failing the snapshot",
+    "leaves an unreadable video blank, naming it and why, instead of failing the snapshot",
     async () => {
       const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-unreadable-"));
       try {
         const garbage = join(dir, "garbage.mp4");
         writeFileSync(garbage, "not a video");
-        expect(await extractVideoFrameToBuffer(join(dir, "missing.mp4"), 1)).toBeNull();
-        expect(await extractVideoFrameToBuffer(garbage, 1)).toBeNull();
+        const warnings: string[] = [];
+        expect(await extractVideoFrameOrWarn(warnings, join(dir, "missing.mp4"), 1)).toBeNull();
+        expect(await extractVideoFrameOrWarn(warnings, garbage, 1)).toBeNull();
+        expect(warnings).toEqual([
+          expect.stringMatching(/FFprobe could not read .*missing\.mp4: .*No such file/),
+          expect.stringMatching(/FFprobe could not read .*garbage\.mp4: .*Invalid data found/),
+        ]);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
