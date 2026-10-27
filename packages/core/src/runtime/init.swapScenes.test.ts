@@ -81,6 +81,7 @@ interface Scene {
   hash: string;
   extraAttrs?: string;
   script?: string;
+  duration?: number;
 }
 
 function preview(scenes: Scene[], shared = "s1", sharedMarkup = "") {
@@ -92,11 +93,11 @@ function preview(scenes: Scene[], shared = "s1", sharedMarkup = "") {
     `<meta name="hf-scene-parts" content="${manifest}"><style>.shared{}</style>` +
     scenes.map((s) => `<style data-hf-scene="${s.id}">${s.css}</style>`).join("");
   const body =
-    `<div data-composition-id="main" data-root="true" data-start="0" data-duration="${Math.max(6, ...scenes.map((s) => s.start + 2))}">${sharedMarkup}` +
+    `<div data-composition-id="main" data-root="true" data-start="0" data-duration="${Math.max(6, ...scenes.map((s) => s.start + (s.duration ?? 2)))}">${sharedMarkup}` +
     scenes
       .map(
         (s) =>
-          `<div data-composition-id="${s.id}" data-hf-scene="${s.id}" data-start="${s.start}" data-duration="2"${s.extraAttrs ?? ""}>${s.body}</div>`,
+          `<div data-composition-id="${s.id}" data-hf-scene="${s.id}" data-start="${s.start}" data-duration="${s.duration ?? 2}"${s.extraAttrs ?? ""}>${s.body}</div>`,
       )
       .join("") +
     `</div>` +
@@ -1949,6 +1950,22 @@ describe("the preview's scene window", () => {
     expect(sceneHost("s2").textContent).toBe("two, edited");
   });
 
+  it("retimes a parked scene an edit moves, for when it mounts and as it mounts", async () => {
+    bootWindowed([S0, S1, S2], trackingRoot().root);
+    await tick();
+    // From 4 s to 1 s, and 3 s long: paused at 1.5 it plays, where before it was not even next.
+    const moved: Scene = { ...S2, start: 1, duration: 3, hash: "h2b" };
+    await window.__hfSwapScenes!(preview([S0, S1, moved]).html);
+    expect(parked()).toEqual(["s2"]);
+    await seekAndSettle(1.5);
+    const host = sceneHost("s2");
+    expect([
+      host.textContent,
+      host.getAttribute("data-start"),
+      host.getAttribute("data-hf-authored-duration"),
+    ]).toEqual(["two", "1", "3"]);
+  });
+
   it("still mounts parked scenes after an edit to a mounted one", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
     await tick();
@@ -1972,7 +1989,10 @@ describe("the preview's scene window", () => {
       body: '<audio src="/two.mp3" data-start="0"></audio>',
       hash: "h2c",
     };
-    for (const edit of [fetching, untrimmed])
+    // The window times a parked scene by its host's own seconds: a reference start or no length has none.
+    const referenceStart: Scene = { ...S2, start: "s1" as unknown as number, hash: "h2d" };
+    const noLength: Scene = { ...S2, duration: 0, hash: "h2e" };
+    for (const edit of [fetching, untrimmed, referenceStart, noLength])
       await expect(window.__hfSwapScenes!(preview([S0, S1, edit]).html)).rejects.toThrow("s2");
     await seekAndSettle(5);
     expect(sceneHost("s2").textContent).toBe("two");

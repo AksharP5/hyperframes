@@ -3,6 +3,7 @@ import { setPreviewRasterScale } from "./previewRasterHints";
 import { createFarSceneSkip } from "./farScenes";
 import {
   clipLengthsWritten,
+  ownWindow,
   hostOf as sceneHostOf,
   isParked,
   parkedClips,
@@ -4288,6 +4289,8 @@ export function initSandboxRuntimeModular(): void {
       if (refusal !== null) throw new Error(`scene ${name} cannot be swapped: ${refusal}`);
       if (!clipLengthsWritten(host))
         throw new Error(`scene ${name} cannot be swapped: a clip's length is not written`);
+      if (!ownWindow(host))
+        throw new Error(`scene ${name} cannot be swapped: its start or length is not in seconds`);
       const oldStyles = styles(partsOf(document, name));
       if (oldStyles.length !== styles(parts).length)
         throw new Error(`scene ${name} cannot be swapped: its styles moved`);
@@ -4308,6 +4311,7 @@ export function initSandboxRuntimeModular(): void {
       document
         .querySelector(`meta[name="${SCENE_PARTS_META}"]`)
         ?.setAttribute("content", JSON.stringify(nextParts));
+      windowScenes = windowedScenes();
       postTimeline();
       return;
     }
