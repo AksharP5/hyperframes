@@ -1604,6 +1604,93 @@
     };
   }
 
+  // canvas_covered: an opaque element over most of the canvas with every other painted clip beneath it.
+  const COVER_CANVAS_SHARE = 0.9;
+  const COVERED_CONTENT_SHARE = 0.9;
+
+  function paintsOwnContent(element) {
+    return (
+      hasOwnTextCandidate(element, true) ||
+      FRAME_MEDIA_TAGS.has(element.tagName.toUpperCase()) ||
+      hasPaint(getComputedStyle(element))
+    );
+  }
+
+  function onCanvasRect(element, rootRect) {
+    const rect = toRect(element.getBoundingClientRect());
+    const left = Math.max(rect.left, rootRect.left);
+    const top = Math.max(rect.top, rootRect.top);
+    const right = Math.min(rect.right, rootRect.right);
+    const bottom = Math.min(rect.bottom, rootRect.bottom);
+    return right > left && bottom > top
+      ? rectFromOrigin(left, top, right - left, bottom - top)
+      : null;
+  }
+
+  // Topmost first, and a centre probe before the grid: a backdrop under its content clears on the first clip.
+  function isBuried(element, rootRect) {
+    const rect = onCanvasRect(element, rootRect);
+    if (!rect) return true;
+    if (!occluderAt(element, rect.left + rect.width / 2, rect.top + rect.height / 2)) return false;
+    return occlusionCoverage(element, [rect]).coveredFraction >= COVERED_CONTENT_SHARE;
+  }
+
+  function spansCanvas(element, rootRect) {
+    const rect = toRect(element.getBoundingClientRect());
+    return intersectionArea(rect, rootRect) >= rectArea(rootRect) * COVER_CANVAS_SHARE;
+  }
+
+  function visibleElementsIn(root) {
+    return Array.from(root.querySelectorAll("*")).filter((element) =>
+      isVisibleElement(element, 0.05),
+    );
+  }
+
+  // Only frame 0 asks: the craft sweep samples at 8 fps and the scan restores hit testing on every node.
+  function canvasCoverAt(root, rootRect) {
+    const restoreHits = restoreHitTesting(root);
+    try {
+      return canvasCoveredIssue(root, rootRect, visibleElementsIn(root), 0);
+    } finally {
+      restoreHits();
+    }
+  }
+
+  function canvasCoveredIssue(root, rootRect, elements, time) {
+    for (const cover of elements) {
+      if (cover === root || hasAllowOcclusionFlag(cover) || !spansCanvas(cover, rootRect)) continue;
+      // A buried backdrop is not a lost clip: full-frame b-roll over a background is the film.
+      const beneath = elements.filter(
+        (element) =>
+          element !== cover &&
+          !element.contains(cover) &&
+          paintsOwnContent(element) &&
+          !spansCanvas(element, rootRect),
+      );
+      if (
+        beneath.length === 0 ||
+        !beneath.reverse().every((element) => isBuried(element, rootRect))
+      )
+        continue;
+      // Last: an opaque check reads a video's frame, which a backdrop under its content never needs.
+      const rect = toRect(cover.getBoundingClientRect());
+      if (!isOpaqueOccluder(cover, rect.left + rect.width / 2, rect.top + rect.height / 2))
+        continue;
+      return {
+        code: "canvas_covered",
+        severity: "error",
+        time,
+        selector: uniqueSelectorFor(cover),
+        message:
+          "An opaque element covers the canvas above every other visible clip, so the frame shows only it.",
+        rect: toRect(cover.getBoundingClientRect()),
+        fixHint:
+          "Move the full-frame element below the content (earlier in the DOM or a lower z-index / track), or mark a deliberate full-frame card with data-layout-allow-occlusion.",
+      };
+    }
+    return null;
+  }
+
   function layoutOffset(element) {
     let left = 0;
     let top = 0;
@@ -2410,9 +2497,7 @@
       document.querySelector("[data-composition-id]") ||
       document.body;
     const rootRect = rootRectFor(root);
-    const elements = Array.from(root.querySelectorAll("*")).filter((element) =>
-      isVisibleElement(element, 0.05),
-    );
+    const elements = visibleElementsIn(root);
     const issues = [];
     const matteResults = new Map();
     videoAlphaFrames = new Map();
@@ -2429,6 +2514,8 @@
         const invisible = invisibleTextIssue(element, time);
         if (invisible) issues.push(invisible);
       }
+      const covered = canvasCoveredIssue(root, rootRect, elements, time);
+      if (covered) issues.push(covered);
     } finally {
       restoreHits();
     }
@@ -2617,13 +2704,14 @@
     return false;
   }
 
-  window.__hyperframesCraftSample = function collectCraftSample() {
+  window.__hyperframesCraftSample = function collectCraftSample(options) {
     const root =
       document.querySelector("[data-composition-id][data-width][data-height]") ||
       document.querySelector("[data-composition-id]") ||
       document.body;
     const rootRect = rootRectFor(root);
     const parts = craftTextParts(root, rootRect);
+    const cover = options && options.withCover ? canvasCoverAt(root, rootRect) : null;
     const holds = [root, ...Array.from(root.querySelectorAll("[data-hold]"))].filter((element) =>
       element.hasAttribute("data-hold"),
     );
@@ -2632,6 +2720,7 @@
       parts,
       held: holds.some((element) => isPaintedBox(element, rootRect)),
       painted: paintsContent(root, rootRect, parts),
+      coveredBy: cover ? cover.selector : null,
       signature: shared
         ? shared.compositionSignature(shared.compositionRoot(), { quantize: true })
         : "",

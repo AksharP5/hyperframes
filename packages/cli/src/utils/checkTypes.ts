@@ -237,6 +237,7 @@ export interface CraftFrame {
   /** A data-hold element is on screen: stillness here is deliberate. */
   held: boolean;
   painted: boolean;
+  coveredBy?: string;
   signature: string;
 }
 

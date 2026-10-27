@@ -115,7 +115,17 @@ function filmFinding(
 
 export function detectFirstFrameEmpty(frames: CraftFrame[]): CraftFinding[] {
   const first = frames[0];
-  if (!first || first.time > 1e-3 || first.painted) return [];
+  if (!first || first.time > 1e-3) return [];
+  if (first.coveredBy) {
+    return [
+      filmFinding(
+        "first_frame_empty",
+        0,
+        `Frame 0 is covered by ${first.coveredBy}: an opaque element over the canvas hides every other clip, and the first frame is the thumbnail on social players. Move it below the content; see canvas_covered.`,
+      ),
+    ];
+  }
+  if (first.painted) return [];
   return [
     filmFinding(
       "first_frame_empty",

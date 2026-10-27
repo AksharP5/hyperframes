@@ -18,6 +18,7 @@ export type LayoutIssueCode =
   | "content_overlap"
   | "visibility_escapes_segment"
   | "text_occluded"
+  | "canvas_covered"
   | "video_alpha_unread"
   | "text_not_painted"
   | "caption_zone_collision"
@@ -263,7 +264,7 @@ export function collapseStaticLayoutIssues(
   const multiSampleRun = sampleCount > 1;
 
   return [...groups.values()].map(({ issue, firstSeen, lastSeen, occurrences, times }) =>
-    applyPersistenceTier(
+    tierIssue(
       {
         ...issue,
         firstSeen,
@@ -273,6 +274,7 @@ export function collapseStaticLayoutIssues(
         times: [...new Set(times)].sort((a, b) => a - b),
       },
       multiSampleRun,
+      sampleCount,
     ),
   );
 }
@@ -296,6 +298,16 @@ export function longestContiguousRun(times: number[]): number[] {
     run.push(current);
   }
   return longest.length === 0 || span(run) > span(longest) ? run : longest;
+}
+
+/** A full-frame card or a fade to colour covers the canvas briefly; most of the film is a blank stage. */
+function coverTier(issue: LayoutIssue, sampleCount: number): LayoutIssue {
+  return (issue.occurrences ?? 1) * 2 >= sampleCount ? issue : { ...issue, severity: "info" };
+}
+
+function tierIssue(issue: LayoutIssue, multiSampleRun: boolean, sampleCount: number): LayoutIssue {
+  if (multiSampleRun && issue.code === "canvas_covered") return coverTier(issue, sampleCount);
+  return applyPersistenceTier(issue, multiSampleRun);
 }
 
 /**

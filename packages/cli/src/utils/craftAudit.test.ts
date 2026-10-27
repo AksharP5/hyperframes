@@ -254,6 +254,12 @@ describe("first_frame_empty", () => {
     expect(findings[0]?.message).toContain("references/review.md");
   });
 
+  it("names the element covering frame 0, even when content is painted beneath it", () => {
+    const findings = detectFirstFrameEmpty([frameAt(0, [], { coveredBy: "#bg-rect" })]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("covered by #bg-rect");
+  });
+
   it("does not warn when the title is already on screen at 0 s", () => {
     expect(detectFirstFrameEmpty([frameAt(0, [], { painted: true })])).toEqual([]);
     expect(detectFirstFrameEmpty([frameAt(0.5, [], { painted: false })])).toEqual([]);

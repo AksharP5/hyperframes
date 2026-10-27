@@ -1001,17 +1001,19 @@ export function createPageDriver(
 }
 
 async function collectCraftFrame(page: Page, time: number): Promise<CraftFrame> {
-  const raw = await page.evaluate(() => {
+  const raw = await page.evaluate((withCover: boolean) => {
     const sample = Reflect.get(window, "__hyperframesCraftSample");
-    return typeof sample === "function" ? Reflect.apply(sample, window, []) : null;
-  });
+    return typeof sample === "function" ? Reflect.apply(sample, window, [{ withCover }]) : null;
+  }, time <= 1e-3);
   const record = isRecord(raw) ? raw : {};
   const parts = Reflect.get(record, "parts");
+  const coveredBy = stringValue(record, "coveredBy");
   return {
     time,
     parts: Array.isArray(parts) ? parts.flatMap(parseCraftTextPart) : [],
     held: booleanValue(record, "held") ?? false,
     painted: booleanValue(record, "painted") ?? true,
+    ...(coveredBy ? { coveredBy } : {}),
     signature: stringValue(record, "signature") ?? "",
   };
 }
@@ -2119,6 +2121,7 @@ const LAYOUT_ISSUE_CODES: readonly LayoutIssueCode[] = [
   "content_overlap",
   "visibility_escapes_segment",
   "text_occluded",
+  "canvas_covered",
   "video_alpha_unread",
   "text_not_painted",
   "caption_zone_collision",
