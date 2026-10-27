@@ -1,4 +1,4 @@
-// Studio download links name this visitor's PostHog id (`ph_id`), so hyperframes.dev counts the download under the
+// Studio download links name this visitor's PostHog id (`ph_id`), so hyperframes.studio counts the download under the
 // same person as these docs' pageviews. Both sites send to one PostHog project, but each domain has its own cookie,
 // so the download site cannot read this one. Mintlify runs every .js file in docs/ on every page
 // (mintlify.com/docs/customize/custom-scripts). The id is added at click time only, so a copied link never carries it,
@@ -10,7 +10,7 @@
   // default, in a cookie when a site configures that, so both are read.
   var OPT_OUT = "__ph_opt_in_out_" + TOKEN;
   // The one download address the docs link to (docs.json navbar and footer, quickstart.mdx).
-  var DOWNLOAD = { protocol: "https:", hostname: "hyperframes.dev", pathname: "/studio/download" };
+  var DOWNLOAD = { protocol: "https:", hostname: "hyperframes.studio", pathname: "/studio/download" };
   var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   function cookie(name) {

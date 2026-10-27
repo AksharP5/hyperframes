@@ -1031,7 +1031,7 @@
           },
           {
             "label": "Download the Studio app",
-            "href": "https://hyperframes.dev/studio/download?src=docs-footer"
+            "href": "https://hyperframes.studio/studio/download?src=docs-footer"
           },
           {
             "label": "GitHub",
@@ -1051,7 +1051,7 @@
     "primary": {
       "type": "button",
       "label": "Download Studio",
-      "href": "https://hyperframes.dev/studio/download?src=docs-navbar"
+      "href": "https://hyperframes.studio/studio/download?src=docs-navbar"
     }
   },
   "redirects": [

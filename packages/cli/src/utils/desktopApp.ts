@@ -11,7 +11,7 @@ import { writeRecord } from "./projectRecords.js";
 const DESKTOP_BUNDLE_IDS = ["dev.hyperframes.desktop", "dev.hyperframes.desktop.canary"] as const;
 const DESKTOP_APP_NAMES = ["HyperFrames.app", "HyperFrames Canary.app"];
 const APP_NAMES = ["HyperFrames", "HyperFrames Canary"] as const;
-const STUDIO_PAGE = "https://hyperframes.dev/studio";
+const STUDIO_PAGE = "https://hyperframes.studio/studio";
 const DOWNLOADS: Partial<Record<NodeJS.Platform, string>> = {
   darwin: `${STUDIO_PAGE}/download`,
   linux: `${STUDIO_PAGE}/download?os=linux`,

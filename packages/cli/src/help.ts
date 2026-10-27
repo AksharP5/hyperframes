@@ -118,7 +118,7 @@ import type { Example } from "./commands/_examples.js";
 const ROOT_EXAMPLES: Example[] = [
   ["Create a new project", "hyperframes init my-video"],
   ["Start the live preview studio", "hyperframes preview"],
-  ["Publish to hyperframes.dev", "hyperframes publish"],
+  ["Publish to hyperframes.studio", "hyperframes publish"],
   ["Render to MP4", "hyperframes render -o out.mp4"],
   ["Transparent WebM overlay", "hyperframes render --format webm -o out.webm"],
   ["Validate your composition", "hyperframes lint"],

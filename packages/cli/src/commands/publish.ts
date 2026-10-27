@@ -313,7 +313,7 @@ export default defineCommand({
         console.log(`  ${c.dim("Access")}     ${c.accent("Sign in required to claim")}`);
         console.log();
         console.log(
-          `  ${c.dim("Open the claim URL on hyperframes.dev, sign in, and claim the project to continue editing.")}`,
+          `  ${c.dim("Open the claim URL on hyperframes.studio, sign in, and claim the project to continue editing.")}`,
         );
         console.log();
         const visibilityTip =
