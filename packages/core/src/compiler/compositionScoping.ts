@@ -756,3 +756,15 @@ export function buildVariablesByCompScript(
   const json = jsonScriptLiteral(variablesByComp);
   return `window.__hfVariablesByComp = Object.assign({}, window.__hfVariablesByComp || {}, ${json});`;
 }
+
+/** Writes the table in <head>, so it exists before the composition scripts, which wait for web fonts. */
+export function emitVariablesByCompScript(
+  document: Document,
+  variablesByComp: Record<string, Record<string, unknown>>,
+): void {
+  const text = buildVariablesByCompScript(variablesByComp);
+  if (!text || !document.head) return;
+  const script = document.createElement("script");
+  script.textContent = text;
+  document.head.appendChild(script);
+}

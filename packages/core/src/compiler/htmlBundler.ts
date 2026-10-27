@@ -53,7 +53,7 @@ import {
 } from "./htmlDocument";
 // rewriteSubCompPaths functions are used by inlineSubCompositions (shared module)
 import {
-  buildVariablesByCompScript,
+  emitVariablesByCompScript,
   dedupeFontFaceRules,
   hoistFontFaceRules,
   scopeCssToComposition,
@@ -1395,11 +1395,7 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
 
   for (const css of compStyleChunks) pushRun(styleRuns, undefined, css);
   for (const chunk of compScriptChunks) pushRun(scriptRuns, undefined, chunk);
-  const variablesByCompScript = buildVariablesByCompScript(compVariablesByComp);
-  if (variablesByCompScript) {
-    if (scriptRuns[0] && !scriptRuns[0].scene) scriptRuns[0].chunks.unshift(variablesByCompScript);
-    else scriptRuns.unshift({ chunks: [variablesByCompScript] });
-  }
+  emitVariablesByCompScript(document, compVariablesByComp);
   for (const { scene, chunks } of styleRuns) {
     const join = scene ? joinCssHoistingImports : (css: string[]) => css.join("\n\n");
     for (const style of styleElementsFor(document, chunks, join)) {

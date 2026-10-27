@@ -44,7 +44,7 @@ import {
   assignBundledRuntimeCompositionIds,
   assignMediaRenderIds,
   type BundledHostCompositionIdentity,
-  buildVariablesByCompScript,
+  emitVariablesByCompScript,
   inlineSubCompositions as inlineSubCompositionsShared,
   ensureExternalLinkTag,
   ensureExternalScriptTag,
@@ -1144,17 +1144,11 @@ function inlineSubCompositions(
     }
   }
 
-  // Append collected inline scripts to <body>. The per-instance variables
-  // table MUST be written before the sub-comp scripts run — their scoped
-  // getVariables() reads window.__hfVariablesByComp[compId]. htmlBundler
-  // (preview/snapshot) prepends this; the render path emitted only the CSS
-  // custom properties (below) and dropped the JS table, so getVariables()
-  // returned {} during render and parametrized sub-comps shipped blank/default
-  // text (issue #2064). Same shared builder as the bundler so they stay in
-  // lockstep.
-  const variablesByCompScript = buildVariablesByCompScript(result.variablesByComp);
+  // The per-instance variables table must exist before the sub-comp scripts run (their scoped getVariables() reads
+  // it); the render path once dropped it (issue #2064). Same shared emitter as the bundler so they stay in lockstep.
+  emitVariablesByCompScript(document as unknown as Document, result.variablesByComp);
   if (body) {
-    let pending = variablesByCompScript ? [variablesByCompScript] : [];
+    let pending: string[] = [];
     const flushInline = () => {
       if (!pending.length) return;
       const joined = pending.join("\n;\n");

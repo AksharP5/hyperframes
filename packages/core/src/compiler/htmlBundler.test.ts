@@ -1225,6 +1225,14 @@ describe("bundleToSingleHtml", () => {
     const bundled = await bundleToSingleHtml(dir);
 
     expect(bundled).toMatch(/__hfVariablesByComp = Object\.assign\([^;]*assets\/blk\/one\.jpg/);
+    const { document } = parseHTML(bundled);
+    const tables = [...document.querySelectorAll("script")].filter((s) =>
+      s.textContent?.includes("__hfVariablesByComp = Object.assign"),
+    );
+    // In <head>, so the runtime binds each instance's text before the composition scripts, which wait for fonts.
+    expect(tables.map((s) => [s.parentElement?.tagName, s.getAttribute("type")])).toEqual([
+      ["HEAD", null],
+    ]);
   });
 
   it("emits per-instance scoped variables for bundled sub-compositions", async () => {
@@ -2722,7 +2730,7 @@ describe("bundleToSingleHtml unknown enum values", () => {
     const bundled = await bundleToSingleHtml(makeSubCompProject('{"accent":"orange"}'));
 
     expect(bundled).toContain("window.__hfVariablesByComp = Object.assign({}, ");
-    expect(bundled).toContain('{ "card": { "accent": "orange" } }');
+    expect(bundled).toContain('{"card":{"accent":"orange"}}');
     expect(bundled).toMatch(/\[data-composition-id="card"\]\s*\{[^}]*--accent:\s*orange/);
     expect(bundled).not.toContain("--accent: green");
   });

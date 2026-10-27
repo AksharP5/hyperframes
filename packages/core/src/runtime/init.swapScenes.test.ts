@@ -160,6 +160,11 @@ const sceneHost = (id: string) =>
 const scoped = window as unknown as {
   __hfVariablesByComp?: Record<string, Record<string, unknown>>;
 };
+// A scene script that splits its bound text into one span per letter, as a letter animation does.
+const splitLetters = (id: string) =>
+  `var p = document.querySelector('[data-hf-scene="${id}"]:not(style):not(script) [data-var-text]');` +
+  `if (p) p.replaceChildren(...Array.from(p.textContent).map(function (c) {` +
+  `var s = document.createElement("span"); s.textContent = c; return s; }));`;
 const quietMedia = () => {
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
@@ -488,6 +493,18 @@ describe("__hfSwapScenes", () => {
     await tick();
     const videos = Array.from(sceneHost("a").querySelectorAll("video"));
     expect(videos.map((v) => v.src)).toEqual([proxied, proxied]);
+  });
+
+  it("binds a swapped scene's variable text before its script splits it into letters", async () => {
+    const { root } = trackingRoot();
+    scoped.__hfVariablesByComp = { a: { title: "Hi" } };
+    const titled = { ...A1, body: '<p data-var-text="title">x</p>' };
+    boot([titled, B], root);
+    await tick();
+    const split = { ...titled, label: "a2", hash: "ha2", script: splitLetters("a") };
+    await window.__hfSwapScenes!(preview([split, B]).html);
+    const p = sceneHost("a").querySelector("p")!;
+    expect([p.textContent, p.childElementCount]).toEqual(["Hi", 2]);
   });
 
   it("leaves the bound text of a scene the edit did not touch as it is", async () => {
@@ -1807,6 +1824,20 @@ describe("the preview's scene window", () => {
     expect(document.querySelector('script[data-hf-scene="s2"]')).toBeNull();
     expect(window.__timelines?.s2).toBeUndefined();
     expect(sceneHost("s0").textContent).toBe("zero");
+  });
+
+  it("binds a far scene's variable text before its script splits it into letters as it mounts", async () => {
+    scoped.__hfVariablesByComp = { s2: { title: "Hi" } };
+    try {
+      const body = '<p data-var-text="title">x</p><i data-start="0.5" data-duration="1"></i>';
+      bootWindowed([S0, S1, { ...S2, body, script: splitLetters("s2") }], trackingRoot().root);
+      await tick();
+      await seekAndSettle(5);
+      const p = sceneHost("s2").querySelector("p")!;
+      expect([p.textContent, p.childElementCount]).toEqual(["Hi", 2]);
+    } finally {
+      delete scoped.__hfVariablesByComp;
+    }
   });
 
   it("mounts the scene a seek lands in before the seek counts as done, then parks the far ones", async () => {

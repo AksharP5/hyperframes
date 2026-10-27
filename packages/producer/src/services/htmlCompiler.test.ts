@@ -2850,6 +2850,18 @@ describe("sub-composition variable injection (render path, #2064)", () => {
     expect(compiled.html).toContain("#00ff00");
   });
 
+  it("writes the table in <head>, so it runs before the composition scripts that wait for fonts", async () => {
+    const projectDir = writeSubCompVarProject(`data-variable-values='{"color":"#00ff00"}'`);
+    const compiled = await compileForRender(projectDir, join(projectDir, "index.html"), projectDir);
+    const { document } = parseHTML(compiled.html);
+    const tables = [...document.querySelectorAll("script")].filter((s) =>
+      s.textContent?.includes("__hfVariablesByComp = Object.assign"),
+    );
+    expect(tables.map((s) => [s.parentElement?.tagName, s.getAttribute("type")])).toEqual([
+      ["HEAD", null],
+    ]);
+  });
+
   it("still injects the declared default even with no per-instance override", async () => {
     const projectDir = writeSubCompVarProject("");
     const compiled = await compileForRender(projectDir, join(projectDir, "index.html"), projectDir);
