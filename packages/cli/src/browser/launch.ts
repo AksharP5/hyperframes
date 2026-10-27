@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { explainChromeLaunchFailure } from "@hyperframes/engine/chrome-startup";
 import type { Browser, LaunchOptions, PuppeteerNode } from "puppeteer-core";
 import { withHyperframesBrowserMarker } from "@hyperframes/core/browser-marker";
@@ -151,6 +152,10 @@ function withRemediation(error: unknown): unknown {
   return remediation ? new Error(remediation, { cause: error }) : error;
 }
 
+function destroyBrowserPipes(child: ChildProcess): void {
+  for (const pipe of child.stdio ?? []) pipe?.destroy();
+}
+
 async function launchOwnedBrowser(
   puppeteer: PuppeteerNode,
   options: LaunchOptions,
@@ -188,7 +193,10 @@ async function launchOwnedBrowser(
     browsers.add(browser);
     const watchdog = watchChromeTree(child, launchedAt);
     if (watchdog) watchdogs.set(browser, watchdog);
-    child.once("exit", () => browsers.delete(browser));
+    child.once("exit", () => {
+      browsers.delete(browser);
+      destroyBrowserPipes(child);
+    });
     return browser;
   } finally {
     clearTimeout(timer);
