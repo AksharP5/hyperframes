@@ -6,6 +6,7 @@ import {
   isNavigationTimeoutError,
   navigateForCapture,
   networkIdleAttemptTimeoutMs,
+  settleAcrossNavigation,
   waitForPageReady,
   NETWORK_IDLE_ATTEMPT_MS,
 } from "./navigateForCapture.js";
@@ -414,5 +415,53 @@ describe("gotoWhenSent", () => {
     chrome.finish("css");
     await vi.advanceTimersByTimeAsync(10_000);
     await failed;
+  });
+});
+
+describe("settleAcrossNavigation", () => {
+  const destroyed = () =>
+    new Error("Execution context was destroyed, most likely because of a navigation.");
+
+  function stubPage(failures: Error[]) {
+    const waitForNetworkIdle = vi.fn(async () => undefined);
+    const read = () => "html";
+    const reads = vi.fn();
+    const evaluate = vi.fn(async (fn: unknown) => {
+      if (fn !== read) return false;
+      reads();
+      const failure = failures.shift();
+      if (failure) throw failure;
+      return "html";
+    });
+    const page = { evaluate, waitForNetworkIdle } as unknown as Page;
+    settleAcrossNavigation(page);
+    return { page, read, reads, waitForNetworkIdle };
+  }
+
+  it("settles the new document and reads again when a navigation lands mid-read", async () => {
+    const { page, read, reads, waitForNetworkIdle } = stubPage([destroyed()]);
+    await expect(page.evaluate(read)).resolves.toBe("html");
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(waitForNetworkIdle).toHaveBeenCalled();
+  });
+
+  it("reads once when nothing navigates", async () => {
+    const { page, read, reads, waitForNetworkIdle } = stubPage([]);
+    await expect(page.evaluate(read)).resolves.toBe("html");
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(waitForNetworkIdle).not.toHaveBeenCalled();
+  });
+
+  it("gives up after one more try, so a page that never stops navigating still fails", async () => {
+    const { page, read, reads } = stubPage([destroyed(), destroyed()]);
+    await expect(page.evaluate(read)).rejects.toThrow(/Execution context was destroyed/);
+    expect(reads).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry any other error", async () => {
+    const { page, read, reads, waitForNetworkIdle } = stubPage([new Error("boom")]);
+    await expect(page.evaluate(read)).rejects.toThrow("boom");
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(waitForNetworkIdle).not.toHaveBeenCalled();
   });
 });

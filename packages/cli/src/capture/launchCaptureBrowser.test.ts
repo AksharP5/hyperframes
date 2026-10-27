@@ -28,7 +28,11 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.proxyClose.mockResolvedValue(undefined);
   mocks.browserClose.mockResolvedValue(undefined);
-  mocks.launch.mockResolvedValue({ close: mocks.browserClose, once: mocks.once });
+  mocks.launch.mockResolvedValue({
+    close: mocks.browserClose,
+    once: mocks.once,
+    newPage: vi.fn(),
+  });
 });
 describe("capture browser transport lifecycle", () => {
   it("forces proxy for loopback and disables direct UDP routes", async () => {
@@ -98,6 +102,27 @@ describe("capture browser transport lifecycle", () => {
     expect(event).toBe("disconnected");
     callback();
     expect(mocks.proxyClose).toHaveBeenCalledOnce();
+    await session.close();
+  });
+});
+
+describe("pages the capture browser opens", () => {
+  it("ride out a navigation that destroys the execution context mid-read", async () => {
+    const evaluate = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error("Execution context was destroyed, most likely because of a navigation."),
+      )
+      .mockResolvedValue("ok");
+    const rawPage = { evaluate, waitForNetworkIdle: vi.fn(async () => undefined) };
+    mocks.launch.mockResolvedValue({
+      close: mocks.browserClose,
+      once: mocks.once,
+      newPage: vi.fn(async () => rawPage),
+    });
+    const session = await launchCaptureBrowser(options);
+    const page = await session.browser.newPage();
+    await expect(page.evaluate(() => "read")).resolves.toBe("ok");
     await session.close();
   });
 });

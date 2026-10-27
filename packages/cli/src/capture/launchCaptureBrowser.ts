@@ -8,6 +8,7 @@ import {
   registerBrowserSessionCleanup,
 } from "../browser/launch.js";
 import { captureBrowserArgs } from "./browserLaunchArgs.js";
+import { settleAcrossNavigation } from "./navigateForCapture.js";
 import { startCaptureProxy } from "./captureProxy.js";
 import { removeTreeBestEffortAsync } from "@hyperframes/core/remove-tree";
 
@@ -66,6 +67,8 @@ export async function launchCaptureBrowser(options: {
         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
       ],
     });
+    const newPage = browser.newPage.bind(browser);
+    browser.newPage = async () => settleAcrossNavigation(await newPage());
     browser.once("disconnected", () => void proxy.close());
     return {
       browser,

@@ -38,7 +38,11 @@ it.each(["SIGINT", "SIGTERM"] as const)(
       child.emit("exit", 0);
       browser.emit("disconnected");
     });
-    const browser = Object.assign(new EventEmitter(), { process: () => child, close });
+    const browser = Object.assign(new EventEmitter(), {
+      process: () => child,
+      close,
+      newPage: vi.fn(),
+    });
     mocks.launch.mockResolvedValue(browser);
     mocks.proxyClose.mockResolvedValue(undefined);
     const { launchCaptureBrowser } = await import("./launchCaptureBrowser.js");
