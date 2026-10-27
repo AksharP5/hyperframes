@@ -1236,3 +1236,40 @@ describe("sub-composition files", () => {
     );
   });
 });
+
+describe("a media file whose own name holds # or ?", () => {
+  const name = "track #1.mp3";
+
+  async function findingFor(tag: string, code: string) {
+    const project = makeProject(`<html><body>
+  <div data-composition-id="main" data-width="1920" data-height="1080" data-start="0" data-duration="10"></div>
+  ${tag}
+</body></html>`);
+    mkdirSync(join(project, "assets"), { recursive: true });
+    writeFileSync(join(project, "assets", name), "");
+    writeFileSync(join(project, "assets", "pic #2.png"), "");
+    const { results } = await lintProject(project);
+    return results.flatMap((entry) => entry.result.findings).find((f) => f.code === code);
+  }
+
+  it("tells an audio src the name is cut at the # and how to write it", async () => {
+    const finding = await findingFor(
+      `<audio id="a1" class="clip" data-start="0" data-duration="3" data-track-index="10" src="assets/${name}"></audio>`,
+      "audio_src_not_found",
+    );
+    expect(finding?.fixHint).toContain('"assets/track%20%231.mp3"');
+  });
+
+  it("tells an image src the same", async () => {
+    const finding = await findingFor(`<img src="assets/pic #2.png" />`, "missing_local_asset");
+    expect(finding?.fixHint).toContain('"assets/pic%20%232.png"');
+  });
+
+  it("keeps the add-the-file hint when no file by that name exists", async () => {
+    const finding = await findingFor(
+      `<audio id="a1" class="clip" data-start="0" data-duration="3" data-track-index="10" src="assets/nope #1.mp3"></audio>`,
+      "audio_src_not_found",
+    );
+    expect(finding?.fixHint).toContain("Add the file");
+  });
+});

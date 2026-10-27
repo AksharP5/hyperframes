@@ -33,6 +33,7 @@ import {
   resolveLocalAssetCandidates,
   resolveProjectRelativeSrc,
 } from "@hyperframes/parsers/asset-resolution";
+import { encodeUrlPath } from "@hyperframes/parsers";
 import {
   collectLocalVideoCandidates,
   lintHevcPreviewCodec,
@@ -385,6 +386,18 @@ function lintProjectAudioFiles(
   return findings;
 }
 
+/** The src that loads a project file whose own name holds `#` or `?`, which a URL cuts the name at; null when the raw
+ * src names no such file. */
+function urlSafeSrcOf(projectDir: string, rootRelative: string): string | null {
+  if (!/[?#]/.test(rootRelative)) return null;
+  const literal = resolve(projectDir, rootRelative.replace(/^\//, ""));
+  if (!existsSync(literal)) return null;
+  return encodeUrlPath(rootRelative);
+}
+
+const urlSafeHint = (safe: string) =>
+  `The file exists, but a "#" or "?" in a src ends the file name there. Write the src as "${safe}".`;
+
 function lintAudioSrcNotFound(
   projectDir: string,
   htmlSources: HtmlSource[],
@@ -394,6 +407,7 @@ function lintAudioSrcNotFound(
   const audioSrcRe = mediaSrcTagRe("audio");
 
   const missingByFile = new Map<string, Set<string>>();
+  const urlSafe = new Map<string, string>();
   for (const { html, compSrcPath } of htmlSources) {
     const scannable = maskNonScannableRanges(html);
     let match: RegExpExecArray | null;
@@ -405,6 +419,8 @@ function lintAudioSrcNotFound(
         ? rewriteAssetPath(compSrcPath, src, (path) => existsSync(join(projectDir, path)))
         : src;
       if (!existsSync(resolveProjectRelativeSrc(rootRelative, projectDir))) {
+        const safe = urlSafeSrcOf(projectDir, rootRelative);
+        if (safe) urlSafe.set(src, safe);
         const file = sourceFile(projectDir, compSrcPath);
         missingByFile.set(file, (missingByFile.get(file) ?? new Set()).add(src));
       }
@@ -419,9 +435,11 @@ function lintAudioSrcNotFound(
       file,
       message: `<audio> element references file(s) not found in the project: ${unique.join(", ")}. The rendered video will be silent.`,
       fixHint:
-        unique.length === 1
-          ? `Add the file "${unique[0]}" to the project directory, or update the src attribute to point to an existing file.`
-          : `Add the missing files to the project directory, or update the src attributes to point to existing files.`,
+        unique.length === 1 && urlSafe.has(unique[0]!)
+          ? urlSafeHint(urlSafe.get(unique[0]!)!)
+          : unique.length === 1
+            ? `Add the file "${unique[0]}" to the project directory, or update the src attribute to point to an existing file.`
+            : `Add the missing files to the project directory, or update the src attributes to point to existing files.`,
     });
   }
 
@@ -441,6 +459,7 @@ function lintMissingLocalAsset(
     string,
     { file: string; tagName: string; byResolved: Map<string, string> }
   >();
+  const urlSafe = new Map<string, string>();
 
   for (const { html, compSrcPath } of htmlSources) {
     const scannable = maskNonScannableRanges(html);
@@ -460,6 +479,14 @@ function lintMissingLocalAsset(
       const resolvedAsset = resolveExistingLocalAsset(projectDir, rootRelative);
       if (resolvedAsset) continue;
 
+      const rawRoot = rawSrc.trim();
+      const safe = urlSafeSrcOf(
+        projectDir,
+        compSrcPath
+          ? rewriteAssetPath(compSrcPath, rawRoot, (path) => existsSync(join(projectDir, path)))
+          : rawRoot,
+      );
+      if (safe) urlSafe.set(src, safe);
       const resolvedKey = resolve(projectDir, rootRelative);
       const file = sourceFile(projectDir, compSrcPath);
       const bucketKey = `${file}\0${tagName}`;
@@ -482,12 +509,14 @@ function lintMissingLocalAsset(
         `<${tagName}> element references local file(s) not found in the project: ${unique.join(", ")}. ` +
         "The renderer will silently skip these and produce a video with missing visuals.",
       fixHint:
-        unique.length === 1
-          ? `Add "${unique[0]}" to the project directory, or update the src attribute to point to an existing file. ` +
-            "Common cause: captured asset filenames are unreliable (heygen-logo.svg often contains Google, nvidia-logo.svg may contain Autodesk, etc.). " +
-            "Open the contact sheets and verify the file actually exists at this path before referencing it."
-          : "Add the missing files to the project directory, or update the src attributes to point to existing files. " +
-            "Captured asset filenames are unreliable. Verify against capture/contact-sheets/ and capture/extracted/asset-descriptions.md.",
+        unique.length === 1 && urlSafe.has(unique[0]!)
+          ? urlSafeHint(urlSafe.get(unique[0]!)!)
+          : unique.length === 1
+            ? `Add "${unique[0]}" to the project directory, or update the src attribute to point to an existing file. ` +
+              "Common cause: captured asset filenames are unreliable (heygen-logo.svg often contains Google, nvidia-logo.svg may contain Autodesk, etc.). " +
+              "Open the contact sheets and verify the file actually exists at this path before referencing it."
+            : "Add the missing files to the project directory, or update the src attributes to point to existing files. " +
+              "Captured asset filenames are unreliable. Verify against capture/contact-sheets/ and capture/extracted/asset-descriptions.md.",
     });
   }
 
