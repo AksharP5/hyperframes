@@ -271,6 +271,7 @@ export default defineCommand({
       args["variables-file"],
       args["strict-variables"] ?? false,
       project,
+      args.composition,
     );
 
     const client = await createCloudClient();
@@ -538,6 +539,7 @@ function resolveVariablesAndValidateIfLocal(
   filePath: string | undefined,
   strict: boolean,
   source: ProjectInputSource,
+  composition: string | undefined,
 ): Record<string, unknown> | undefined {
   const variables = resolveVariablesArg(inline, filePath);
   if (!variables || Object.keys(variables).length === 0) return variables;
@@ -546,11 +548,9 @@ function resolveVariablesAndValidateIfLocal(
   // lives on the server side, so we send the variables as-is and let
   // the API surface any mismatch via `hyperframes_project_invalid`.
   if (source.kind !== "dir") return variables;
-  // `resolveProject` calls process.exit on a missing/invalid dir, so
-  // there's no need to wrap this in try/catch — if it returns, the
-  // index.html is present. The earlier impl had a dead try/catch.
-  const { indexPath } = resolveProject(source.dir);
-  const issues = validateVariablesAgainstProject(indexPath, variables);
+  const project = resolveProject(source.dir);
+  const entryPath = resolvePath(project.dir, composition ?? "index.html");
+  const issues = validateVariablesAgainstProject(entryPath, variables);
   reportVariableIssues(issues, { strict, quiet: false });
   return variables;
 }
