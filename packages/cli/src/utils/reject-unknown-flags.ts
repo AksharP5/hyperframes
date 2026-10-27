@@ -43,8 +43,18 @@ function longFlagName(tok: string): string {
   return name.startsWith("no-") ? name.slice(3) : name;
 }
 
+// A negative number (`-18`, `-0.5`) is a value: no flag is spelled with digits.
+function isNegativeNumber(tok: string): boolean {
+  return /^-(\d+\.?\d*|\.\d+)$/.test(tok);
+}
+
+// Dash-prefixed and not a bare `-` (stdin) or a negative number: the only tokens that can name a flag.
+function canNameFlag(tok: string): boolean {
+  return tok.startsWith("-") && tok !== "-" && !isNegativeNumber(tok);
+}
+
 function unknownFlagIn(tok: string, known: Set<string>): string | null {
-  if (tok === "-" || !tok.startsWith("-")) return null; // positional or flag value
+  if (!canNameFlag(tok)) return null; // positional or flag value
   if (tok.startsWith("--")) {
     const name = longFlagName(tok);
     return name && !known.has(name) ? `--${name}` : null;
@@ -135,7 +145,7 @@ export interface SwallowGuardResult {
 
 // End of argv and a bare `-` (stdin) are never a swallow; `--` or a known flag spelling is.
 function looksLikeSwallowedFlag(next: string | undefined, known: Set<string>): boolean {
-  if (next === undefined || next === "-") return false;
+  if (next === undefined || next === "-" || isNegativeNumber(next)) return false;
   return next === "--" || (next.startsWith("-") && unknownFlagIn(next, known) === null);
 }
 
