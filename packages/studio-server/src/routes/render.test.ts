@@ -374,6 +374,20 @@ describe("POST /projects/:id/render — crf", () => {
     expect(both.opts).toBeUndefined();
   });
 
+  it("forwards the keyframe interval and the rate cap to the render adapter", async () => {
+    const { res, opts } = await post({
+      format: "mp4",
+      keyframeIntervalSeconds: 2,
+      maxBitrate: "8M",
+      bufferSize: "12M",
+    });
+    expect(res.status).toBe(200);
+    expect(opts).toMatchObject({ keyframeIntervalSeconds: 2, maxBitrate: "8M", bufferSize: "12M" });
+    const webm = await post({ format: "webm", maxBitrate: "8M" });
+    expect(webm.res.status).toBe(400);
+    expect(webm.opts).toBeUndefined();
+  });
+
   it.each([
     ["mp4", 52],
     ["mp4", -1],

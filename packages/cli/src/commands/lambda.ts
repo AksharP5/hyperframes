@@ -16,6 +16,7 @@ import { parseOutputResolutionFlag } from "../utils/parseOutputResolution.js";
 import type { Example } from "./_examples.js";
 import type { VideoArch } from "./lambda/videoImage.js";
 import { c } from "../ui/colors.js";
+import { deliveryFlagArgs, parseDeliveryFlags } from "../utils/deliveryFlags.js";
 import { defaultCloudFps } from "../utils/compositionFps.js";
 import { isMissingPackageError, missingPackageMessage } from "../utils/missingPackage.js";
 
@@ -153,6 +154,7 @@ export default defineCommand({
     format: { type: "string", description: "mp4 | mov | png-sequence | webm (default: mp4)" },
     codec: { type: "string", description: "h264 | h265 (mp4 only)" },
     quality: { type: "string", description: "draft | standard | high" },
+    ...deliveryFlagArgs,
     "chunk-size": {
       type: "string",
       description:
@@ -340,6 +342,7 @@ export default defineCommand({
           format: parseFormat(args.format),
           codec: parseCodec(args.codec),
           quality: parseQuality(args.quality),
+          ...parseDeliveryFlags(args),
           chunkSize: parsePositiveInt(args["chunk-size"], "--chunk-size"),
           maxParallelChunks: parsePositiveInt(args["max-parallel-chunks"], "--max-parallel-chunks"),
           targetChunkFrames: parsePositiveInt(args["target-chunk-frames"], "--target-chunk-frames"),
@@ -397,6 +400,7 @@ export default defineCommand({
           format: parseFormat(args.format),
           codec: parseCodec(args.codec),
           quality: parseQuality(args.quality),
+          ...parseDeliveryFlags(args),
           chunkSize: parsePositiveInt(args["chunk-size"], "--chunk-size"),
           maxParallelChunks: parsePositiveInt(args["max-parallel-chunks"], "--max-parallel-chunks"),
           targetChunkFrames: parsePositiveInt(args["target-chunk-frames"], "--target-chunk-frames"),

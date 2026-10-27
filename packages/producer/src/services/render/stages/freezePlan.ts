@@ -56,6 +56,9 @@ export interface LockedRenderConfig extends Pick<RenderRequestOptions, "pageMoti
   preset: string;
   crf?: number;
   bitrate?: string;
+  maxBitrate?: string;
+  bufferSize?: string;
+  keyframeIntervalFrames?: number;
   /**
    * VP9-only: new WebM plans persist the resolved libvpx-vp9 `-cpu-used`
    * value so distributed workers reproduce the controller's speed/quality

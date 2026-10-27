@@ -143,6 +143,18 @@ MOV is an alpha-preserving editing intermediate and always uses the fixed
 ProRes 4444 profile. `--crf` and `--video-bitrate` do not map to that profile
 and are rejected for MOV; choose MP4 or WebM when you need those controls.
 
+For delivery to a player or platform, an MP4 render can also set how often a
+keyframe lands and how high the bitrate may peak. `--keyframe-interval 2` puts a
+keyframe at least every two seconds. `--max-bitrate 8M` caps the peak while the
+quality target still decides the rest, and `--buffer-size` (default twice the cap)
+sets the window the cap is measured over. Left out, the encode is unchanged.
+On Lambda the interval is a maximum, because joining chunks adds keyframes, and
+the cap holds per chunk, so a join can burst up to one buffer.
+
+```bash
+npx hyperframes render --keyframe-interval 2 --max-bitrate 8M --output delivery.mp4
+```
+
 ```bash
 # Faster review version
 npx hyperframes render --quality draft --output review.mp4

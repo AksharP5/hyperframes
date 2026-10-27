@@ -25,6 +25,7 @@
   "src/services/htmlCompiler.mediaType.test.ts",
   "src/services/htmlCompiler.naturalDuration.test.ts",
   "src/services/htmlCompiler.probeCount.test.ts",
+  "src/services/render/deliveryRender.integration.test.ts",
   "src/services/render/firstFrameStartingState.integration.test.ts",
   "src/services/render/hlsRender.integration.test.ts",
   "src/services/render/motionBlurVideo.integration.test.ts",

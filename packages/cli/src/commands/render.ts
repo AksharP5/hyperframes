@@ -6,6 +6,7 @@ import type { Example } from "./_examples.js";
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { createRenderPlan, resolveBrowserGpuForCli, type RenderFormat } from "./render/plan.js";
 import { seedProjectAuthoringSkill } from "../utils/projectConfig.js";
+import { deliveryFlagArgs } from "../utils/deliveryFlags.js";
 import type { CatalogUsage } from "../utils/catalogUsage.js";
 import { presentRenderPlan } from "./render/present.js";
 import { executeRenderPlan, renderLintContinuationHint, runRenderLint } from "./render/execute.js";
@@ -261,6 +262,7 @@ export default defineCommand({
       description:
         "Target MP4/WebM video bitrate such as 10M. Mutually exclusive with --crf; unsupported for MOV.",
     },
+    ...deliveryFlagArgs,
     "vp9-cpu-used": {
       type: "string",
       description:
@@ -516,6 +518,9 @@ export interface RenderOptions {
   crf?: number;
   vp9CpuUsed?: number;
   videoBitrate?: string;
+  keyframeIntervalSeconds?: number;
+  maxBitrate?: string;
+  bufferSize?: string;
   videoFrameFormat?: VideoFrameFormat;
   pageMotionBlur?: "off";
   quiet: boolean;
@@ -846,6 +851,9 @@ async function renderDocker(
       crf: options.crf,
       vp9CpuUsed: options.vp9CpuUsed,
       videoBitrate: options.videoBitrate,
+      keyframeIntervalSeconds: options.keyframeIntervalSeconds,
+      maxBitrate: options.maxBitrate,
+      bufferSize: options.bufferSize,
       videoFrameFormat: options.videoFrameFormat,
       pageMotionBlur: options.pageMotionBlur,
       quiet: options.quiet,
@@ -1125,6 +1133,9 @@ async function executeLocalRender(
       hdrMode: options.hdrMode,
       crf: options.crf,
       videoBitrate: options.videoBitrate,
+      keyframeIntervalSeconds: options.keyframeIntervalSeconds,
+      maxBitrate: options.maxBitrate,
+      bufferSize: options.bufferSize,
       videoFrameFormat: options.videoFrameFormat,
       pageMotionBlur: options.pageMotionBlur,
       variables: options.variables,

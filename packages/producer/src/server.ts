@@ -91,6 +91,9 @@ interface RenderInput {
   maxRenderMs?: number;
   crf?: number;
   videoBitrate?: string;
+  keyframeIntervalSeconds?: number;
+  maxBitrate?: string;
+  bufferSize?: string;
   useGpu: boolean;
   debug: boolean;
   strictness: RenderConfig["strictness"];
@@ -245,7 +248,8 @@ export function parseRenderOptions(body: Record<string, unknown>): Omit<RenderIn
     parseServerOutputDynamicRange(body.outputDynamicRange) ??
     fromRenderHdrMode(parseLegacyServerHdrMode(body.hdrMode));
   const encoder = parseEncoderOptions(body, format ?? "mp4");
-  const { crf, videoBitrate, videoFrameFormat } = encoder.ok ? encoder.options : {};
+  const { crf, videoBitrate, videoFrameFormat, keyframeIntervalSeconds, maxBitrate, bufferSize } =
+    encoder.ok ? encoder.options : {};
 
   const { variables, outputResolution, outputResolutionAspectAgnostic } =
     parseRenderOverrides(body);
@@ -258,6 +262,9 @@ export function parseRenderOptions(body: Record<string, unknown>): Omit<RenderIn
     maxRenderMs,
     crf,
     videoBitrate,
+    keyframeIntervalSeconds,
+    maxBitrate,
+    bufferSize,
     useGpu,
     debug,
     strictness,
@@ -320,6 +327,9 @@ function buildRenderJobConfig(input: RenderInput, outputPath: string, log: Produ
       maxRenderMs: input.maxRenderMs,
       crf: input.crf,
       videoBitrate: input.videoBitrate,
+      keyframeIntervalSeconds: input.keyframeIntervalSeconds,
+      maxBitrate: input.maxBitrate,
+      bufferSize: input.bufferSize,
       useGpu: input.useGpu,
       debug: input.debug,
       strictness: input.strictness,

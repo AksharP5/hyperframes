@@ -222,6 +222,19 @@ describe("createRenderPlan", () => {
     ).toBe("10M");
   });
 
+  it("carries the delivery options into the plan for MP4 and refuses them for other formats", () => {
+    const flags = { "keyframe-interval": "2", "max-bitrate": "8M", "buffer-size": "12M" };
+    expect(createRenderPlan({ dir: projectDir, format: "mp4", ...flags })).toMatchObject({
+      keyframeIntervalSeconds: 2,
+      maxBitrate: "8M",
+      bufferSize: "12M",
+    });
+    expect(createRenderPlan({ dir: projectDir }).maxBitrate).toBeUndefined();
+    for (const format of ["webm", "mov", "gif", "hls"]) {
+      expect(() => createRenderPlan({ dir: projectDir, format, ...flags })).toThrow(CliUsageError);
+    }
+  });
+
   it("rejects batch and single-render variables before execution", () => {
     expect(() =>
       createRenderPlan({ dir: projectDir, batch: "rows.json", variables: '{"name":"Ada"}' }),

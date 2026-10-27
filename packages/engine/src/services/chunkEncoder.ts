@@ -225,6 +225,43 @@ export function lockedGopCodecParams(codec: "h264" | "h265", gopSize: number): s
   return codec === "h264" ? shared : `keyint=${gopSize}:min-keyint=${gopSize}:${shared}`;
 }
 
+/** Frames per keyframe interval: the nearest whole frame, never below one. */
+export function keyframeIntervalToGopSize(fps: Fps, seconds: number): number {
+  return Math.max(1, Math.round(fpsToNumber(fps) * seconds));
+}
+
+const BITRATE_PATTERN = /^(\d+(?:\.\d+)?)([kKmMgG]?)$/;
+
+function bitrateToBitsPerSecond(value: string): number {
+  const match = BITRATE_PATTERN.exec(value);
+  if (!match) throw new Error(`[chunkEncoder] invalid bitrate ${JSON.stringify(value)}`);
+  const unit = match[2]!.toLowerCase();
+  const scale = { g: 1_000_000_000, m: 1_000_000, k: 1_000 }[unit] ?? 1;
+  return Number(match[1]) * scale;
+}
+
+/** `-maxrate` / `-bufsize` for the VBV cap, written once for both arg builders. Buffer defaults to 2x. */
+export function appendRateCapArgs(
+  args: string[],
+  options: { codec?: string; maxBitrate?: string; bufferSize?: string },
+): void {
+  const { maxBitrate, bufferSize } = options;
+  if (maxBitrate === undefined) {
+    if (bufferSize !== undefined) throw new Error("[chunkEncoder] bufferSize requires maxBitrate");
+    return;
+  }
+  const codec = options.codec ?? "h264";
+  if (codec !== "h264" && codec !== "h265") {
+    throw new Error(`[chunkEncoder] maxBitrate is not supported for codec ${codec}`);
+  }
+  const cap = bitrateToBitsPerSecond(maxBitrate);
+  const buffer = bufferSize !== undefined ? bitrateToBitsPerSecond(bufferSize) : cap * 2;
+  if (cap <= 0 || buffer <= 0) {
+    throw new Error("[chunkEncoder] maxBitrate and bufferSize must be positive");
+  }
+  args.push("-maxrate", String(Math.round(cap)), "-bufsize", String(Math.round(buffer)));
+}
+
 export function buildEncoderArgs(
   options: EncoderOptions,
   inputArgs: string[],
@@ -257,6 +294,7 @@ export function buildEncoderArgs(
   // Without -xerror, ffmpeg ends the video at the first frame file it cannot read and still exits 0.
   const args: string[] = ["-xerror", ...inputArgs, "-r", fpsToFfmpegArg(fps)];
   const shouldUseGpu = useGpu && gpuEncoder !== null;
+  appendRateCapArgs(args, options);
 
   if (codec === "h264" || codec === "h265") {
     if (shouldUseGpu) {

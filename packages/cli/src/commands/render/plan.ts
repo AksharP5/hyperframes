@@ -18,6 +18,7 @@ import {
   type VideoFrameFormat,
 } from "@hyperframes/engine";
 import { errorBox } from "../../ui/format.js";
+import { parseDeliveryFlags } from "../../utils/deliveryFlags.js";
 import { parseEnumFlag } from "../../cloud/parsing.js";
 import { failUsage } from "../../utils/commandResult.js";
 import { resolveProject } from "../../utils/project.js";
@@ -83,6 +84,9 @@ export interface RenderCommandArgs {
   sdr?: boolean;
   crf?: string;
   "video-bitrate"?: string;
+  "keyframe-interval"?: string;
+  "max-bitrate"?: string;
+  "buffer-size"?: string;
   "vp9-cpu-used"?: string;
   gpu?: boolean;
   "browser-gpu"?: boolean;
@@ -161,6 +165,9 @@ export interface RenderPlan {
   crf?: number;
   vp9CpuUsed?: number;
   videoBitrate?: string;
+  keyframeIntervalSeconds?: number;
+  maxBitrate?: string;
+  bufferSize?: string;
   hdrMode: HdrMode;
   pageSideCompositing: boolean;
   experimentalFastCapture: boolean;
@@ -516,6 +523,16 @@ export function createRenderPlan(args: RenderCommandArgs, now = new Date()): Ren
     failUsage();
   }
 
+  const delivery = parseDeliveryFlags(args);
+  if (Object.keys(delivery).length > 0 && format !== "mp4") {
+    errorBox(
+      "Delivery options apply to MP4",
+      "--keyframe-interval, --max-bitrate and --buffer-size set how the MP4 encoder delivers the file.",
+      "Remove them, or render --format mp4.",
+    );
+    failUsage();
+  }
+
   const quiet = args.quiet ?? false;
   const batchJson = args.json ?? false;
   return Object.freeze({
@@ -562,6 +579,7 @@ export function createRenderPlan(args: RenderCommandArgs, now = new Date()): Ren
     crf,
     vp9CpuUsed,
     videoBitrate,
+    ...delivery,
     hdrMode: args.sdr ? "force-sdr" : args.hdr ? "force-hdr" : "auto",
     pageSideCompositing: args["page-side-compositing"] !== false,
     experimentalFastCapture: args["experimental-fast-capture"] === true,

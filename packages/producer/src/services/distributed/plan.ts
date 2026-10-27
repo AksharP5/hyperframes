@@ -47,6 +47,7 @@ import {
   type EngineConfig,
   type VideoFrameFormat,
   getEncoderPreset,
+  keyframeIntervalToGopSize,
   normalizeVp9CpuUsed,
   resolveConfig,
   type AudioProcessingFailure,
@@ -155,6 +156,12 @@ export interface DistributedRenderConfig extends Pick<RenderRequestOptions, "pag
   crf?: number;
   /** Target video bitrate (e.g. `"10M"`); mutually exclusive with `crf`. */
   bitrate?: string;
+  /** Longest gap between keyframes, in seconds (mp4). Chunk joins add keyframes, so this is a maximum. */
+  keyframeIntervalSeconds?: number;
+  /** Peak bitrate cap (mp4), per chunk. */
+  maxBitrate?: string;
+  /** Rate-cap buffer; defaults to twice `maxBitrate`. */
+  bufferSize?: string;
   /**
    * Source-video frame extraction format. Defaults to `"auto"`, matching the
    * in-process renderer: alpha/alpha-capable sources extract as PNG, other
@@ -950,6 +957,12 @@ function buildLockedRenderConfig(input: {
     preset,
     crf: config.crf,
     bitrate: config.bitrate,
+    maxBitrate: config.maxBitrate,
+    bufferSize: config.bufferSize,
+    keyframeIntervalFrames:
+      config.keyframeIntervalSeconds === undefined
+        ? undefined
+        : keyframeIntervalToGopSize({ num: config.fps, den: 1 }, config.keyframeIntervalSeconds),
     ...locksVp9CpuUsed,
     // GOP === chunkSize so every chunk's first frame is an IDR keyframe and
     // ffmpeg concat-copy round-trips losslessly.

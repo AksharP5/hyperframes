@@ -34,6 +34,7 @@
  * In-process renders (`executeRenderJob`) leave them off.
  */
 
+import { chunkGopFrames } from "../render/deliveryEncoder.js";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { cpus } from "node:os";
@@ -946,7 +947,9 @@ export async function renderChunk(
         // first frame is an IDR keyframe and concat-copy at assemble time
         // round-trips losslessly.
         lockGopForChunkConcat: !isPngSequence,
-        gopSize: framesInChunk,
+        gopSize: chunkGopFrames(framesInChunk, encoder.keyframeIntervalFrames),
+        maxBitrate: encoder.maxBitrate,
+        bufferSize: encoder.bufferSize,
       };
       const captureStarted = Date.now();
       captureMode = await runCaptureWithScreenshotFallback({

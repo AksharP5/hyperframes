@@ -178,6 +178,9 @@ export interface StudioApiAdapter {
     gifLoop?: number;
     crf?: number;
     videoBitrate?: string;
+    keyframeIntervalSeconds?: number;
+    maxBitrate?: string;
+    bufferSize?: string;
     videoFrameFormat?: "auto" | "jpg" | "png";
     hdrMode?: "auto" | "force-hdr" | "force-sdr";
     jobId: string;

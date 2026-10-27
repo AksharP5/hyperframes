@@ -111,6 +111,8 @@ export interface EncodeStageInput {
   preset: ReturnType<typeof getEncoderPreset>;
   effectiveQuality: number;
   effectiveBitrate: string | undefined;
+  maxBitrate?: string;
+  bufferSize?: string;
   /** Producer config — enables the chunked-concat encoder when on. */
   enableChunkedEncode: boolean;
   chunkedEncodeSize: number;
@@ -276,6 +278,8 @@ function videoEncoderOptions(input: EncodeStageInput, engineCfg: Pick<EngineConf
     preset: preset.preset,
     quality: input.effectiveQuality,
     bitrate: input.effectiveBitrate,
+    maxBitrate: input.maxBitrate,
+    bufferSize: input.bufferSize,
     pixelFormat: preset.pixelFormat,
     vp9CpuUsed: engineCfg.vp9CpuUsed,
     useGpu: job.config.useGpu,

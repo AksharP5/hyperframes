@@ -78,6 +78,7 @@ import { runHybridLayeredFrameLoop } from "./captureHdrHybridLoop.js";
 import { wrapCaptureStageError } from "../captureStageError.js";
 import { encoderFailureError } from "../encoderInterruption.js";
 import type { HdrLayeredCapturePlan } from "../capturePlan.js";
+import type { DeliveryEncoderOptions } from "../deliveryEncoder.js";
 
 export interface CaptureHdrStageInput {
   job: RenderJob;
@@ -107,6 +108,7 @@ export interface CaptureHdrStageInput {
   preset: ReturnType<typeof getEncoderPreset>;
   effectiveQuality: number;
   effectiveBitrate: string | undefined;
+  deliveryEncoder: DeliveryEncoderOptions;
 
   fileServer: FileServerHandle;
   buildCaptureOptions: () => CaptureOptions;
@@ -157,6 +159,7 @@ export async function runCaptureHdrStage(
     preset,
     effectiveQuality,
     effectiveBitrate,
+    deliveryEncoder,
     fileServer,
     buildCaptureOptions,
     createRenderVideoFrameInjector,
@@ -271,6 +274,7 @@ export async function runCaptureHdrStage(
         preset: preset.preset,
         quality: effectiveQuality,
         bitrate: effectiveBitrate,
+        ...deliveryEncoder,
         pixelFormat: preset.pixelFormat,
         hdr: preset.hdr,
         rawInputFormat: "rgb48le",

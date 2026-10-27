@@ -1496,6 +1496,9 @@ Quality and file size:
 | ---------------------- | --------------- | -------------------------------------------------------------------------------------------------------- |
 | `--crf`                | from `--quality`| Override MP4/WebM encoder CRF, 0–51. Lower is better quality. Not with `--video-bitrate`; rejected for MOV. |
 | `--video-bitrate`      | from `--quality`| Target MP4/WebM bitrate, e.g. `10M` or `5000k`. Not with `--crf`; rejected for MOV.                       |
+| `--keyframe-interval`  | encoder default | MP4 only. A keyframe at least every N seconds, e.g. `2`, so a player can seek or switch rendition at that spacing. |
+| `--max-bitrate`        | uncapped        | MP4 only. Peak video bitrate cap, e.g. `8M`, held alongside the `--crf` or `--quality` target rather than replacing it. |
+| `--buffer-size`        | 2 × `--max-bitrate` | MP4 only. Buffer the cap is measured over, e.g. `16M`. Needs `--max-bitrate`. |
 | `--vp9-cpu-used`       | encoder default | libvpx-vp9 speed/quality trade-off for WebM, -8 to 8. Env: `PRODUCER_VP9_CPU_USED`.                       |
 | `--gif-loop`           | `0`             | GIF loop count, `0` for forever. Range 0–65535, `--format gif` only.                                     |
 | `--hls-segment-seconds`| `4`             | HLS target segment length in whole seconds, 1–60. `--format hls` only. Also fixes the encoder GOP so every segment starts on a keyframe. |
@@ -2277,6 +2280,9 @@ And these drive `render` and `render-batch`:
 | `--chunk-size`          | auto                                | Frames per chunk. By default each chunk is sized to finish inside the Lambda timeout                              |
 | `--max-parallel-chunks` | auto                                | Chunks per render. By default one wave across the deploy's `--concurrency` (or 90% of the account's unreserved concurrency), widened when a chunk would outrun the Lambda timeout |
 | `--target-chunk-frames` | —                                   | Ceiling on frames per chunk. The planner adds chunks — up to `--max-parallel-chunks` — to stay under it, and short videos still collapse to fewer. Ignored when `--chunk-size` is set. |
+| `--keyframe-interval`   | —                                   | MP4 only. Longest gap between keyframes, in seconds. Chunk joins add keyframes, so this is a maximum; with a chunk shorter than the interval the chunk length wins. |
+| `--max-bitrate`         | —                                   | MP4 only. Peak video bitrate cap, e.g. `8M`. Each chunk is capped on its own, so a join between two chunks can burst up to one `--buffer-size`. |
+| `--buffer-size`         | 2 × `--max-bitrate`                 | MP4 only. Buffer for the cap, e.g. `16M`. Needs `--max-bitrate`. |
 | `--variables`           | —                                   | JSON object reaching every chunk worker as `window.__hfVariables`                                                  |
 | `--variables-file`      | —                                   | Read those from a JSON file                                                                                       |
 | `--strict-variables`    | off                                 | Fail instead of warn on an undeclared or mistyped key                                                             |
