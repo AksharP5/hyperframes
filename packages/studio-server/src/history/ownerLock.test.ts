@@ -22,11 +22,15 @@ vi.mock("node:fs", async (importOriginal) => {
     ...actual,
     linkSync: vi.fn(actual.linkSync),
     renameSync: vi.fn(actual.renameSync),
+    writeFileSync: vi.fn(actual.writeFileSync),
   };
 });
 
-const { linkSync: realLinkSync, renameSync: realRenameSync } =
-  await vi.importActual<typeof import("node:fs")>("node:fs");
+const {
+  linkSync: realLinkSync,
+  renameSync: realRenameSync,
+  writeFileSync: realWriteFileSync,
+} = await vi.importActual<typeof import("node:fs")>("node:fs");
 
 const platform = process.platform;
 const homes: string[] = [];
@@ -36,6 +40,7 @@ const canRefuseRead = process.platform !== "win32" && process.getuid?.() !== 0;
 afterEach(() => {
   vi.mocked(linkSync).mockImplementation(realLinkSync);
   vi.mocked(renameSync).mockImplementation(realRenameSync);
+  vi.mocked(writeFileSync).mockImplementation(realWriteFileSync);
   Object.defineProperty(process, "platform", { value: platform });
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
@@ -238,3 +243,24 @@ describe("takeHistoryOwnership publishing its url on Windows", () => {
     release();
   });
 });
+
+// Windows records no start time, so there is no record to fail to write there.
+describe.skipIf(process.platform === "win32")(
+  "takeHistoryOwnership when the start record cannot be written",
+  () => {
+    it("gives the lock back instead of keeping a file nobody would release", async () => {
+      vi.mocked(writeFileSync).mockImplementation((...args) => {
+        if (String(args[0]).endsWith(".start")) {
+          throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+        }
+        return realWriteFileSync(...args);
+      });
+      const home = newHome();
+      await expect(takeHistoryOwnership(home, 1_000)).rejects.toThrow(/ENOSPC/);
+      expect(readdirSync(home)).toEqual([]);
+      vi.mocked(writeFileSync).mockImplementation(realWriteFileSync);
+      const release = await takeHistoryOwnership(home, 100);
+      release();
+    });
+  },
+);

@@ -113,14 +113,15 @@ function claim(file: string): boolean {
   const draft = `${file}-${process.pid}-${randomUUID()}.tmp`;
   writeFileSync(draft, String(process.pid));
   try {
-    linkSync(draft, file);
-    recordStart(file);
-    return true;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code ?? "";
-    if (code === "EEXIST") return false;
-    if (!NO_HARD_LINKS.has(code)) throw error;
-    return createExclusively(file);
+    try {
+      linkSync(draft, file);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (code === "EEXIST") return false;
+      if (!NO_HARD_LINKS.has(code)) throw error;
+      return createExclusively(file);
+    }
+    return recordOwnership(file);
   } finally {
     rmSync(draft, { force: true });
   }
@@ -129,11 +130,20 @@ function claim(file: string): boolean {
 function createExclusively(file: string): boolean {
   try {
     writeFileSync(file, String(process.pid), { flag: "wx" });
-    recordStart(file);
-    return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     return false;
+  }
+  return recordOwnership(file);
+}
+
+function recordOwnership(file: string): true {
+  try {
+    recordStart(file);
+    return true;
+  } catch (error) {
+    releaseOwn(file);
+    throw error;
   }
 }
 
