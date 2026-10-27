@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +14,7 @@ vi.mock("../utils/psnrFilterAvailability.js", async (importOriginal) => ({
 }));
 
 const { runFfmpeg } = await import("../utils/runFfmpeg.js");
-const { extractVideoFramesRange } = await import("./videoFrameExtractor.js");
+const { extractAllVideoFrames, extractVideoFramesRange } = await import("./videoFrameExtractor.js");
 
 describe.skipIf(process.platform === "win32")("extraction decode on the Mac's media engine", () => {
   const dir = mkdtempSync(join(tmpdir(), "hf-extract-media-engine-"));
@@ -90,6 +90,40 @@ describe.skipIf(process.platform === "win32")("extraction decode on the Mac's me
   it("never asks for VideoToolbox off macOS", async () => {
     const { args } = await extractOn("linux", clips.h264, "linux");
     expect(hwaccel(args)).toBeNull();
+  });
+
+  it("gives a failed decode's last stderr lines without its paths or URLs", async () => {
+    probe.hasVideoToolbox = false;
+    // With spaces in the name, only the exact path hides all of it.
+    const clip = join(dir, "Screen Recording 1.mp4");
+    copyFileSync(clips.h264, clip);
+    const signed = "https://media.example.com/clip.mp4?X-Amz-Signature=0123abcd";
+    const stderr = [
+      "[h264 @ 0x2] Invalid NAL unit size (1714 > 1100).",
+      `[https @ 0x1] Opening '${signed}' for reading`,
+      `${clip}: Invalid data found when processing input`,
+      "Error opening output C:\\Users\\someone\\frames\\frame_%05d.jpg",
+    ].join("\n");
+    const real = vi.mocked(runFfmpeg).getMockImplementation()!;
+    vi.mocked(runFfmpeg).mockImplementation(async (args, options) =>
+      args.includes("-vf")
+        ? { success: false, exitCode: 1, stderr, durationMs: 1, terminationReason: "exit" }
+        : real(args, options),
+    );
+    let errors: Awaited<ReturnType<typeof extractAllVideoFrames>>["errors"] = [];
+    try {
+      const video = { id: "failed", src: clip, start: 0, end: 1, mediaStart: 0 };
+      ({ errors } = await extractAllVideoFrames([{ ...video, loop: false, hasAudio: false }], dir, {
+        fps: 10,
+        outputDir: join(dir, "failed"),
+      }));
+    } finally {
+      vi.mocked(runFfmpeg).mockImplementation(real);
+    }
+    expect(errors.map((failure) => failure.kind)).toEqual(["ffmpeg_failed"]);
+    expect(errors[0]?.ffmpegReason).toBe(
+      "[https @ 0x1] Opening '<url>' for reading | <path>: Invalid data found when processing input | Error opening output <path>",
+    );
   });
 
   it("decodes in software when the media engine refuses a picture", async () => {

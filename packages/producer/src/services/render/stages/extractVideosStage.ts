@@ -232,10 +232,12 @@ export class VideoExtractionStageError extends Error {
         affectedElementCount: failure.count,
       })),
     ),
+    ffmpegReason?: string,
   ) {
     const total = failures.reduce((sum, failure) => sum + failure.count, 0);
     const breakdown = failures.map((failure) => `${failure.kind}=${failure.count}`).join(",");
-    super(`Video extraction failed for ${total} source(s) [${code}; ${breakdown}]`);
+    const reason = ffmpegReason ? `: ffmpeg said: ${ffmpegReason}` : "";
+    super(`Video extraction failed for ${total} source(s) [${code}; ${breakdown}]${reason}`);
     this.name = "VideoExtractionStageError";
     this.publicMetadata = { extractionFailure };
   }
@@ -275,6 +277,7 @@ function buildVideoExtractionStageError(
     retryable,
     failures,
     extractionFailureMetadataFromResult(result),
+    result.errors.find((failure) => failure.ffmpegReason)?.ffmpegReason,
   );
 }
 

@@ -8,7 +8,7 @@
 
 import { audioGroupsById, isMemberGroupHidden, isSelfOrAncestorHidden } from "./mediaHidden.js";
 import { copyFileSync, existsSync, linkSync, mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { basename, join } from "path";
 import { cpus } from "os";
 import { createConcurrencyLimit } from "../utils/concurrencyLimit.js";
 import { parseHTML } from "linkedom";
@@ -421,6 +421,8 @@ export interface VideoExtractionFailure {
    * can contain a local path or a signed source URL.
    */
   error: string;
+  /** ffmpeg's last stderr lines, without paths or URLs: what a producer-facing error may say. */
+  ffmpegReason?: string;
 }
 
 export type VideoExtractionFailureStatusClass =
@@ -496,10 +498,30 @@ export class VideoSourceExtractionError extends Error {
     readonly retryable: boolean,
     message: string,
     readonly diagnostic: string = message,
+    readonly ffmpegReason?: string,
   ) {
     super(message);
     this.name = "VideoSourceExtractionError";
   }
+}
+
+const FFMPEG_REASON_LINES = 3;
+const FFMPEG_REASON_CHARS = 300;
+
+/** ffmpeg's last stderr lines for an error that leaves this host: no local path, file name or URL. */
+function ffmpegReasonFrom(stderr: string, paths: readonly string[]): string {
+  let text = stderr;
+  for (const known of paths.filter(Boolean).sort((a, b) => b.length - a.length))
+    text = text.split(known).join("<path>");
+  return text
+    .replace(/[a-z][a-z\d+.-]*:\/\/[^\s'"]+/gi, "<url>")
+    .replace(/(?:[a-z]:)?(?:[\\/][^\s\\/:'"]+){2,}/gi, "<path>")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-FFMPEG_REASON_LINES)
+    .join(" | ")
+    .slice(-FFMPEG_REASON_CHARS);
 }
 
 export function isVideoSourceExtractionError(error: unknown): error is VideoSourceExtractionError {
@@ -1238,12 +1260,18 @@ async function extractVideoFramesRangeUnredacted(
     const diagnostic =
       `${hdrPrefix}FFmpeg exited with code ${processResult.exitCode}${timeoutSuffix}: ` +
       processResult.stderr.slice(-500);
+    const ffmpegReason = ffmpegReasonFrom(processResult.stderr, [
+      videoPath,
+      basename(videoPath),
+      videoOutputDir,
+    ]);
     if (timedOut) {
       throw new VideoSourceExtractionError(
         "ffmpeg_timeout",
         true,
         "Video frame extraction timed out",
         diagnostic,
+        ffmpegReason,
       );
     }
     const transientIo =
@@ -1257,6 +1285,7 @@ async function extractVideoFramesRangeUnredacted(
         ? "Video frame extraction hit a transient I/O failure"
         : "Video source could not be decoded",
       diagnostic,
+      ffmpegReason,
     );
   }
 
@@ -1960,13 +1989,9 @@ export async function extractAllVideoFrames(
       }
       resolvedVideos.push({ video, videoPath });
     } catch (err) {
-      const classified = classifyVideoExtractionError(err);
       errors.push({
-        videoId: video.id,
-        kind: classified.kind,
-        retryable: classified.retryable,
+        ...extractionError(video.id, err),
         ...(err instanceof UrlDownloadError ? { group: downloadFailureGroup(video.src, err) } : {}),
-        error: classified.diagnostic,
       });
     }
   }
@@ -2169,6 +2194,7 @@ export async function extractAllVideoFrames(
       kind: classified.kind,
       retryable: classified.retryable,
       error: classified.diagnostic,
+      ...(classified.ffmpegReason ? { ffmpegReason: classified.ffmpegReason } : {}),
     };
   }
 
@@ -2636,12 +2662,7 @@ export async function extractAllVideoFrames(
         ? `[shared extraction, leader ${outcome.error.videoId}] ${outcome.error.error}`
         : outcome.error.error;
       results.push({
-        error: {
-          videoId: prepared.work.video.id,
-          kind: outcome.error.kind,
-          retryable: outcome.error.retryable,
-          error: message,
-        },
+        error: { ...outcome.error, videoId: prepared.work.video.id, error: message },
       });
       continue;
     }
