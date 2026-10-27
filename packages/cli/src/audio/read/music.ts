@@ -26,6 +26,9 @@ const FADE_WINDOW = 3;
 const ENERGY_WINDOW = 30;
 const LEADING_SHARE = 0.2;
 const TONAL_SHARE = 0.4;
+const DENSE_WINDOW = 2;
+const DENSE_SHARE = 0.5;
+const STEADY = 0.5;
 
 export interface MusicInput {
   /** Every pitched stem, by name: bass, guitar, piano, other. */
@@ -120,6 +123,54 @@ function runs(db: Float32Array): { segments: Run[]; breaks: Run[] } {
     segments: settled.filter((s) => !s.quiet),
     breaks: settled.filter((s) => s.quiet && s.start > 0 && s.end < db.length * HOP),
   };
+}
+
+function soundShare(fine: Float32Array, run: Run): Float32Array {
+  const a = Math.round(run.start / HOP);
+  const b = Math.min(fine.length, Math.round(run.end / HOP));
+  const heard = new Float64Array(b - a + 1);
+  for (let f = a; f < b; f++) heard[f - a + 1] = heard[f - a]! + (fine[f]! >= ABSENT_DB ? 1 : 0);
+  const half = Math.round(DENSE_WINDOW / 2 / HOP);
+  const out = new Float32Array(b - a);
+  for (let f = a; f < b; f++) {
+    const lo = Math.max(a, f - half);
+    const hi = Math.min(b, f + half + 1);
+    out[f - a] = (heard[hi - a]! - heard[lo - a]!) / (hi - lo);
+  }
+  return out;
+}
+
+function steadyEdges(fine: Float32Array, part: Span): Span {
+  const steady = Math.round(STEADY / HOP);
+  const a = Math.round(part.start / HOP);
+  const b = Math.min(fine.length, Math.round(part.end / HOP));
+  const holds = (f: number) => {
+    for (let k = f; k < f + steady; k++) if (k >= b || fine[k]! < ABSENT_DB) return false;
+    return true;
+  };
+  let start = a;
+  while (start < b && !holds(start)) start++;
+  let end = b;
+  while (end > start && !holds(end - steady)) end--;
+  return start < end ? { ...part, start: start * HOP, end: end * HOP } : part;
+}
+
+function sustainedParts(fine: Float32Array, run: Run): Run[] {
+  if (run.end - run.start <= DENSE_WINDOW) {
+    const a = Math.round(run.start / HOP);
+    const b = Math.max(a + 1, Math.min(fine.length, Math.round(run.end / HOP)));
+    let heard = 0;
+    for (let f = a; f < b; f++) if (fine[f]! >= ABSENT_DB) heard++;
+    return heard / (b - a) >= DENSE_SHARE ? [run] : [];
+  }
+  const dense = soundShare(fine, run);
+  const a = Math.round(run.start / HOP);
+  const sparse = new Uint8Array(fine.length);
+  dense.forEach((share, i) => (sparse[a + i] = share < DENSE_SHARE ? 1 : 0));
+  return candidates(sparse, a, a + dense.length)
+    .filter((part) => !part.quiet)
+    .map((part) => steadyEdges(fine, part))
+    .map(({ start, end }) => ({ start, end: Math.min(end, run.end) }));
 }
 
 function chromaOf(chroma: Float64Array[], fps: number, run: Run): Float64Array {
@@ -288,8 +339,10 @@ export function readMusic(input: MusicInput): {
   const melodic = mixed(Object.values(input.stems));
   const db = levels(melodic, input.sampleRate, HOP, LEVEL_WINDOW);
   const duration = melodic.length / input.sampleRate;
-  const { segments: found, breaks } = runs(db);
-  for (const run of found) run.end = Math.min(run.end, duration);
+  const fine = levels(melodic, input.sampleRate, HOP, HOP);
+  const { segments: whole, breaks } = runs(db);
+  for (const run of whole) run.end = Math.min(run.end, duration);
+  const found = whole.flatMap((run) => sustainedParts(fine, run));
   const frames = bandFramesOf(asSignal(melodic, input.sampleRate));
   const rhythmic = asSignal(
     input.drums ? mixed([melodic, input.drums]) : melodic,

@@ -7,6 +7,7 @@ import type {
   Entry,
   Music,
   MusicSegment,
+  Pause,
   ReadAudio,
   Sentence,
   Voice,
@@ -15,6 +16,8 @@ import type {
 const PITCH_NOTE_SEMITONES = 3;
 const KIND_WIDTH = 8;
 const QUIET_DB = -45;
+const SILENT_DB = -55;
+const LEVEL_DB = 0.5;
 
 interface Line {
   start: number;
@@ -25,9 +28,28 @@ interface Line {
 
 const s = (t: number) => t.toFixed(1);
 const signed = (db: number) => `${db >= 0 ? "+" : ""}${db} dB`;
+const dbfs = (db: number) => `${db} dBFS`;
+const lufs = (db: number) => `${Math.round(db)} LUFS`;
 
 function when(line: Line): string {
   return line.end === null ? s(line.start) : `${s(line.start)}–${s(line.end)}`;
+}
+
+function marginOf({ voiceLufs, musicLufs }: { voiceLufs: number; musicLufs: number }): string {
+  const margin = voiceLufs - musicLufs;
+  const apart = Math.max(1, Math.abs(Math.round(voiceLufs) - Math.round(musicLufs)));
+  const verdict =
+    Math.abs(margin) < LEVEL_DB
+      ? "level with each other"
+      : margin > 0
+        ? `voice ${apart} dB over music`
+        : `music ${apart} dB over voice`;
+  return `voice ${lufs(voiceLufs)}, music ${lufs(musicLufs)}: ${verdict}`;
+}
+
+function closing(sentence: Sentence): string[] {
+  const parts = sentence.ending && sentence.ending !== "level" ? [`${sentence.ending} end`] : [];
+  return sentence.againstMusic ? [...parts, marginOf(sentence.againstMusic)] : parts;
 }
 
 function voiceLine(sentence: Sentence, voice: Voice): Line {
@@ -41,7 +63,7 @@ function voiceLine(sentence: Sentence, voice: Voice): Line {
     Math.abs(semitones(sentence.pitchHz, medianPitchHz)) >= PITCH_NOTE_SEMITONES
   )
     parts.push(`pitch ${sentence.pitchHz} Hz (median ${medianPitchHz})`);
-  if (sentence.ending && sentence.ending !== "level") parts.push(`${sentence.ending} end`);
+  parts.push(...closing(sentence));
   return { start: sentence.start, end: sentence.end, kind: "voice", text: parts.join("  ") };
 }
 
@@ -50,17 +72,19 @@ function placeOf(t: number, pauses: readonly Span[]): string | null {
   return pause ? `${(t - pause.start).toFixed(1)} s into the pause` : null;
 }
 
-function standing(effect: Effect, musicRead: boolean): string {
-  if (effect.overMusicDb !== null) return `${signed(effect.overMusicDb)} over music`;
-  return musicRead ? "while the music is out" : `${signed(effect.riseDb)} over what played before`;
+function standing(effect: Effect): string {
+  const peak = `peak ${dbfs(effect.peakDb)}`;
+  if (effect.overMusicDb !== null) return `${peak}, ${signed(effect.overMusicDb)} over music`;
+  if (effect.riseDb === null) return `${peak}, out of silence`;
+  return `${peak}, ${signed(effect.riseDb)} over what played before`;
 }
 
-function effectLine(effect: Effect, pauses: readonly Span[], musicRead: boolean): Line {
+function effectLine(effect: Effect, pauses: readonly Span[]): Line {
   const parts = [
     `${effect.kind}${effect.count > 1 ? ` ×${effect.count}` : ""} (${effect.group}): ${effect.band}`,
     `attack ${effect.attackMs} ms`,
     `tail ${effect.tail.toFixed(1)} s`,
-    standing(effect, musicRead),
+    standing(effect),
   ];
   const place = placeOf(effect.t, pauses);
   if (place) parts.push(place);
@@ -91,6 +115,38 @@ function musicLine(segment: MusicSegment, analysis: ReadAudio): Line {
     kind: "music",
     text: `piece ${piece.id}${about ? ` (${about})` : ""}${ENTRY[segment.entry]}${afterBreak}${fade}`,
   };
+}
+
+function effectsIn(events: readonly Effect[]): string | null {
+  if (!events.length) return null;
+  const counts = new Map<string, number>();
+  for (const e of events) counts.set(e.kind, (counts.get(e.kind) ?? 0) + e.count);
+  const kinds = [...counts].map(([kind, n]) => (n > 1 ? `${kind} ×${n}` : kind)).join(", ");
+  const total = events.reduce((n, e) => n + e.count, 0);
+  return `${total} ${total === 1 ? "effect" : "effects"} (${kinds})`;
+}
+
+function pauseLine(pause: Pause, analysis: ReadAudio): Line {
+  const inside = (start: number, end: number) => start < pause.end && end > pause.start;
+  const clip = (start: number, end: number) =>
+    `${s(Math.max(start, pause.start))}–${s(Math.min(end, pause.end))}`;
+  const beds = [
+    ...(analysis.music?.segments
+      .filter((m) => inside(m.start, m.end))
+      .map((m) => `music ${clip(m.start, m.end)}`) ?? []),
+    ...(analysis.ambience
+      ?.filter((a) => inside(a.start, a.end))
+      .map((a) => `ambience ${clip(a.start, a.end)}`) ?? []),
+  ];
+  if (!beds.length && pause.recordingDb >= SILENT_DB)
+    beds.push(`sound continues at ${dbfs(pause.recordingDb)}`);
+  const effects = effectsIn(
+    analysis.effects?.events.filter((e) => e.t >= pause.start && e.t < pause.end) ?? [],
+  );
+  const heard = [...(effects ? [effects] : []), ...beds];
+  const length = `${(pause.end - pause.start).toFixed(1)} s`;
+  const text = heard.length ? `${length}; during it: ${heard.join(", ")}` : `${length}, silent`;
+  return { start: pause.start, end: pause.end, kind: "pause", text };
 }
 
 function ambienceLine(ambience: Ambience): Line {
@@ -155,13 +211,8 @@ export function formatRead(analysis: ReadAudio, range?: [number, number]): strin
   const pauses = voice?.pauses ?? [];
   const lines: Line[] = [
     ...(voice?.sentences.map((x) => voiceLine(x, voice)) ?? []),
-    ...pauses.map((p) => ({
-      start: p.start,
-      end: p.end,
-      kind: "pause",
-      text: `${(p.end - p.start).toFixed(1)} s`,
-    })),
-    ...(effects?.events.map((e) => effectLine(e, pauses, analysis.music !== null)) ?? []),
+    ...pauses.map((p) => pauseLine(p, analysis)),
+    ...(effects?.events.map((e) => effectLine(e, pauses)) ?? []),
     ...(analysis.music?.segments.map((m) => musicLine(m, analysis)) ?? []),
     ...(analysis.music?.breaks.map((b) => ({
       start: b.start,

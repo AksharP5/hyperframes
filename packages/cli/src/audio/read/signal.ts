@@ -74,3 +74,11 @@ export const round = (n: number, places = 2) => {
   const k = 10 ** places;
   return Math.round(n * k) / k;
 };
+
+export function spanDb(samples: Float32Array, sampleRate: number, start: number, end: number) {
+  const a = Math.max(0, Math.round(start * sampleRate));
+  const b = Math.min(samples.length, Math.round(end * sampleRate));
+  let sum = 0;
+  for (let i = a; i < b; i++) sum += samples[i]! ** 2;
+  return b > a && sum > 0 ? Math.max(SILENT_DB, 10 * Math.log10(sum / (b - a))) : SILENT_DB;
+}

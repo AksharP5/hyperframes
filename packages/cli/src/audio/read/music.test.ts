@@ -67,6 +67,23 @@ describe("readMusic", () => {
     }
   });
 
+  it("starts the music where it is sustained, not at a tone and clicks that bridge into it", () => {
+    const tick = (at: number) => (t: number) =>
+      t >= at && t < at + 0.004 ? 0.09 * Math.exp(-(t - at) / 0.001) * noise() : 0;
+    const beep = (t: number) => (t >= 2.9 && t < 3.1 ? 0.2 * Math.sin(2 * Math.PI * 1000 * t) : 0);
+    const clicks = [3, 3.5, 4, 4.5].map(tick);
+    const samples = piano(12, [[5, 12, C_MAJOR]]).map(
+      (v, i) => v + beep(i / READ_RATE) + clicks.reduce((n, c) => n + c(i / READ_RATE), 0),
+    );
+    const { music, ambience } = readMusic({
+      stems: { other: samples },
+      drums: null,
+      sampleRate: READ_RATE,
+    });
+    expect(music.segments.map((m) => [m.start, m.end])).toEqual([[5, 12]]);
+    expect(ambience).toEqual([]);
+  });
+
   it("splits the bed at its cut-outs and tells a new piece from one that returns", () => {
     const stem = piano(26, [
       [0, 8, C_MAJOR],
