@@ -7,6 +7,7 @@ import { isTextFile } from "./textFile.js";
 
 // Leaf commands that read extra positionals from `args._` on purpose, by command path.
 export const ACCEPTS_EXTRA_POSITIONALS = new Set([
+  "audio",
   "compare",
   "figma asset",
   "skills update",
