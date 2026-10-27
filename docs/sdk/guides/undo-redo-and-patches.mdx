@@ -3,7 +3,7 @@ title: "Undo, Redo & Patches"
 description: "Use the SDK's built-in undo stack, subscribe to patch events, and integrate with a host application's own history."
 ---
 
-The SDK ships undo/redo by default for standalone sessions and emits RFC 6902 JSON patches on every change. Patch events are the integration seam for host application history, collaborative editing, audit logs, and embedded override mode.
+The SDK ships undo/redo by default for standalone sessions and emits versioned patch events on every change. Hosts use these events for their own history, collaborative editing, audit logs, and embedded override mode.
 
 ## Built-in Undo and Redo
 
@@ -65,7 +65,9 @@ Every committed change emits a `patch` event. Subscribe to mirror SDK edits into
 
 ```typescript
 const off = comp.on("patch", ({ formatVersion, patches, inversePatches, origin, opTypes }) => {
-  if (formatVersion !== 1) throw new Error("Unexpected patch format version");
+  if (formatVersion !== 1 && formatVersion !== 2) {
+    throw new Error("Unexpected patch format version");
+  }
   saveToDB({ patches, inversePatches, origin, opTypes });
 });
 
@@ -75,8 +77,10 @@ off();
 
 ### PatchEvent fields
 
-<ResponseField name="formatVersion" type="1">
-  Always `1` in the current SDK. Check this and reject unknown versions — a bump means a breaking change.
+<ResponseField name="formatVersion" type="1 | 2">
+  Version `1` uses ordinary JSON patches. Version `2` adds selective style inverses to restore
+  repeated CSS declarations without reverting unrelated edits made afterward. Integrations that
+  support only version `1` must reject version `2` before processing its operations.
 </ResponseField>
 <ResponseField name="patches" type="JsonPatchOp[]">
   Forward patches that were applied: the add/remove/replace ops describing how the document changed.
@@ -100,10 +104,15 @@ interface JsonPatchOp {
   op: "add" | "remove" | "replace";
   path: string;   // JSON Pointer (RFC 6901), e.g. "/elements/hf-title/style/color"
   value?: unknown;
+  restoreStyleProperties?: readonly string[];
 }
 ```
 
 The SDK never emits `move`, `copy`, or `test` ops, and `applyPatches()` ignores them if passed.
+
+For version `2`, keep `restoreStyleProperties` when storing inverse patches and pass the full
+operations to `applyPatches()`. That SDK-specific list limits a style-attribute inverse to the
+edited properties. A generic RFC 6902 applier does not implement these selective semantics.
 
 ---
 

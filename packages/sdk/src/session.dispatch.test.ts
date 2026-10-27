@@ -49,6 +49,7 @@ describe("dispatch emits patch event", () => {
     comp.setStyle("hf-title", { color: "#e63946" });
 
     expect(events).toHaveLength(1);
+    expect(events[0]?.formatVersion).toBe(1);
     expect(events[0]!.patches[0]).toMatchObject({
       op: "replace",
       path: "/elements/hf-title/inlineStyles/color",
@@ -59,6 +60,21 @@ describe("dispatch emits patch event", () => {
       path: "/elements/hf-title/inlineStyles/color",
       value: "#fff",
     });
+  });
+
+  it("versions selective fallback inverses so legacy hosts can reject them", async () => {
+    const { comp, events } = await withPatch(
+      '<span data-hf-id="hf-title" style="display:-moz-box !important;display:block">hello</span>',
+    );
+    comp.setStyle("hf-title", { display: "flex" });
+    expect(events[0]?.formatVersion).toBe(2);
+    expect(events[0]?.inversePatches).toContainEqual({
+      op: "replace",
+      path: "/elements/hf-title/attributes/style",
+      value: "display:-moz-box !important;display:block",
+      restoreStyleProperties: ["display"],
+    });
+    comp.dispose();
   });
 
   it("no-op dispatch (same value) fires change; patch may be empty", async () => {
