@@ -1115,6 +1115,10 @@ export function trackCheckReport(props: {
   launchSettleMs: number;
   seekLoopMs: number;
   contrastMs: number;
+  gridMs: number;
+  craftMs: number;
+  overlapMs: number;
+  durationSec: number;
   gridPoints: number;
   contrastPoints: number;
   ok: boolean;
@@ -1141,6 +1145,10 @@ export function trackCheckReport(props: {
     launch_settle_ms: props.launchSettleMs,
     seek_loop_ms: props.seekLoopMs,
     contrast_ms: props.contrastMs,
+    grid_ms: props.gridMs,
+    craft_ms: props.craftMs,
+    overlap_ms: props.overlapMs,
+    composition_s: props.durationSec,
     grid_points: props.gridPoints,
     contrast_points: props.contrastPoints,
     ok: props.ok,

@@ -293,6 +293,9 @@ interface GridSamples {
   contrastEntries: ContrastAuditEntry[];
   screenshots: CheckScreenshot[];
   contrastMs: number;
+  gridMs: number;
+  craftMs: number;
+  overlapMs: number;
   /** One visible-state fingerprint and seek clock per layout sample (#U10 frozen-sweep guard). */
   layoutStateSignatures: { time: number; signature: string; clock: SeekClock[] }[];
   /** Every rotatable element's geometry at each layout sample; grouped by
@@ -454,6 +457,9 @@ function emptyGridSamples(): GridSamples {
     contrastEntries: [],
     screenshots: [],
     contrastMs: 0,
+    gridMs: 0,
+    craftMs: 0,
+    overlapMs: 0,
     layoutStateSignatures: [],
     rotationSamples: [],
     indicatorFrames: [],
@@ -541,6 +547,7 @@ async function collectGridSamples(
     contrast: new Set(grid.contrastSamples),
     canvas: geometryEnabled ? await driver.getCanvas() : null,
   };
+  const gridStart = performance.now();
   const times = mergeSampleTimes(grid.layoutSamples, motion.times);
   const pending = times.map((_, index) => index);
   const perTime: GridSamples[] = [];
@@ -592,6 +599,7 @@ async function collectGridSamples(
   driver.markSamples?.("end");
   const collected = emptyGridSamples();
   for (const samples of perTime) appendGridSamples(collected, samples);
+  collected.gridMs = Math.round(performance.now() - gridStart);
   enter("overlap");
   await collectMotionOverlapSamples(
     driver,
@@ -743,6 +751,7 @@ async function collectMotionOverlapSamples(
   const shiftedTimes = await denseOverlapTimes(driver, grid, range);
   // Before the grid: a seek after it would overwrite the span the grid stamps on what its samples queue.
   if (craft) {
+    const craftStart = performance.now();
     // The render's last frame lands before the duration, where the runtime has already unmounted clips.
     const craftTimes = buildCraftSampleTimes(grid.duration).filter((time) => time < grid.duration);
     for (const [index, time] of craftTimes.entries()) {
@@ -751,7 +760,9 @@ async function collectMotionOverlapSamples(
       progress();
       report("craft", index + 1, craftTimes.length);
     }
+    collected.craftMs = Math.round(performance.now() - craftStart);
   }
+  const overlapStart = performance.now();
   const probeHold = holdProber(driver, collected, range ? range[1] : grid.duration);
   const gridTimes = shiftedTimes.filter((t) => !baseTimes.has(t));
   const gridIssues = await collectOverlapGridInBatches(driver, gridTimes, progress, report);
@@ -763,6 +774,7 @@ async function collectMotionOverlapSamples(
     await probeHold(time, shiftedTimes[index + 1] ?? Number.POSITIVE_INFINITY, issues);
     progress();
   }
+  collected.overlapMs = Math.round(performance.now() - overlapStart);
 }
 
 // Craft times how long a line shows, so it keeps 8 fps past the overlap pass's ceiling, up to ~75 s.
@@ -1607,7 +1619,14 @@ export async function runAuditGrid(
     contrastPassed: contrast.passed,
     craft,
     screenshots: collected.screenshots,
-    timings: { launchSettleMs: 0, seekLoopMs, contrastMs: collected.contrastMs },
+    timings: {
+      launchSettleMs: 0,
+      seekLoopMs,
+      contrastMs: collected.contrastMs,
+      gridMs: collected.gridMs,
+      craftMs: collected.craftMs,
+      overlapMs: collected.overlapMs,
+    },
     skipped: false,
   };
 }
@@ -2046,6 +2065,10 @@ function buildReport(
     launchSettleMs: browser.timings.launchSettleMs,
     seekLoopMs: browser.timings.seekLoopMs,
     contrastMs: browser.timings.contrastMs,
+    gridMs: browser.timings.gridMs,
+    craftMs: browser.timings.craftMs,
+    overlapMs: browser.timings.overlapMs,
+    durationSec: browser.duration,
     gridPoints: browser.layoutSamples.length,
     contrastPoints: browser.contrastChecked,
     ok: report.ok,
@@ -2171,7 +2194,14 @@ function emptyBrowserResult(): CheckBrowserResult {
     contrastPassed: 0,
     craft: disabledCraft(),
     screenshots: [],
-    timings: { launchSettleMs: 0, seekLoopMs: 0, contrastMs: 0 },
+    timings: {
+      launchSettleMs: 0,
+      seekLoopMs: 0,
+      contrastMs: 0,
+      gridMs: 0,
+      craftMs: 0,
+      overlapMs: 0,
+    },
     skipped: true,
   };
 }

@@ -241,7 +241,11 @@ it("carries raw browser geometry through the page driver and pipeline", async ()
       time: 5,
     }),
   ]);
-  expect(result.timings).toEqual({ launchSettleMs: 60, seekLoopMs: 40, contrastMs: 0 });
+  expect(result.timings).toMatchObject({ launchSettleMs: 60, seekLoopMs: 40, contrastMs: 0 });
+  // Each pass inside the seek loop reports its own time.
+  for (const pass of [result.timings.gridMs, result.timings.craftMs, result.timings.overlapMs]) {
+    expect(pass).toBeGreaterThanOrEqual(0);
+  }
   expect(mocks.serverClose).toHaveBeenCalledOnce();
 });
 

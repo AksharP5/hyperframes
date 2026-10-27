@@ -3398,7 +3398,7 @@ describe("check report telemetry", () => {
       noMotion(),
     );
 
-    expect(result.timings).toEqual({ launchSettleMs: 0, seekLoopMs: 20, contrastMs: 5 });
+    expect(result.timings).toMatchObject({ launchSettleMs: 0, seekLoopMs: 20, contrastMs: 5 });
   });
 });
 
