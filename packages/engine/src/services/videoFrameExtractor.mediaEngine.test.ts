@@ -92,6 +92,29 @@ describe.skipIf(process.platform === "win32")("extraction decode on the Mac's me
     expect(hwaccel(args)).toBeNull();
   });
 
+  it("decodes in software when the media engine refuses a picture", async () => {
+    const real = vi.mocked(runFfmpeg).getMockImplementation()!;
+    vi.mocked(runFfmpeg).mockImplementation(async (args, options) =>
+      args.includes("-hwaccel")
+        ? {
+            success: false,
+            exitCode: 69,
+            stderr: "[h264 @ 0x1] hardware accelerator failed to decode picture",
+            durationMs: 0,
+            terminationReason: "exit",
+          }
+        : real(args, options),
+    );
+    try {
+      const { frames } = await extractOn("darwin", clips.h264, "mac-vt-refuses");
+      const runs = vi.mocked(runFfmpeg).mock.calls.map(([callArgs]) => hwaccel(callArgs));
+      expect(runs).toEqual(["videotoolbox", null]);
+      expect(frames).toHaveLength(10);
+    } finally {
+      vi.mocked(runFfmpeg).mockImplementation(real);
+    }
+  });
+
   it.runIf(realPlatform === "darwin")("writes the same frames as software decode", async () => {
     const engine = await extractOn("darwin", clips.h264, "same-engine");
     probe.hasVideoToolbox = false;

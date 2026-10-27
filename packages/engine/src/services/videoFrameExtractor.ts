@@ -1100,9 +1100,6 @@ async function extractVideoFramesRangeUnredacted(
   }
 
   const args: string[] = urlInputArgs(videoPath);
-  if (decodeWithVideoToolbox) {
-    args.push("-hwaccel", "videotoolbox");
-  }
   // Always force the alpha-aware decoder on codecs that can carry alpha. The
   // alternative — gating on `metadata.hasAlpha` — relies on tag detection that
   // has at least three known failure modes: case-sensitivity across ffmpeg
@@ -1184,10 +1181,10 @@ async function extractVideoFramesRangeUnredacted(
   // emits that last slot: the fps filter ends a `-t` window at the nearest slot. A
   // decimal rate counts zero frames here and keeps the `-t` window.
   const boundVfrFrameCount = metadata.isVFR && totalFrames > 0;
-  const processResult =
+  const extract = (hwaccel: string[]) =>
     sampleAtOutputFps && (options.frameRanges || boundVfrFrameCount || totalFrames > segmentFrames)
-      ? await runSegmentedExtraction({
-          decodeArgs,
+      ? runSegmentedExtraction({
+          decodeArgs: [...hwaccel, ...decodeArgs],
           filterAndEncodeArgs: (seek) => [...filterArgsFor(seek), ...encodeArgs],
           videoPath,
           startTime,
@@ -1199,10 +1196,21 @@ async function extractVideoFramesRangeUnredacted(
           ),
           runOptions,
         })
-      : await inExtractionSlot(
-          () => runFfmpeg([...args, ...filterArgsFor(startTime), ...encodeArgs], runOptions),
+      : inExtractionSlot(
+          () =>
+            runFfmpeg(
+              [...hwaccel, ...args, ...filterArgsFor(startTime), ...encodeArgs],
+              runOptions,
+            ),
           signal,
         );
+  let processResult = await extract(decodeWithVideoToolbox ? ["-hwaccel", "videotoolbox"] : []);
+  const ffmpegExitedFailing =
+    processResult.terminationReason === "exit" &&
+    !processResult.success &&
+    !processResult.failureReason;
+  const videoToolboxWasOptional = decodeWithVideoToolbox && !keepsHdrForChrome;
+  if (ffmpegExitedFailing && videoToolboxWasOptional) processResult = await extract([]);
   if (processResult.failureReason === "external_interruption") {
     throw new VideoSourceExtractionError(
       "external_interruption",
