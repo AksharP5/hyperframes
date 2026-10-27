@@ -914,7 +914,7 @@ export function createFileServer(options: FileServerOptions): Promise<FileServer
     }
   });
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     // Track open connections so we can force-destroy them on close.
     // Without this, server.close() waits for keep-alive connections to
     // drain, holding the Node.js event loop open indefinitely.
@@ -947,6 +947,7 @@ export function createFileServer(options: FileServerOptions): Promise<FileServer
       connections.add(socket);
       socket.on("close", () => connections.delete(socket));
     });
+    server.on("error", reject);
   });
 }
 
