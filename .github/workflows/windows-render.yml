@@ -43,7 +43,7 @@ jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 8
     permissions:
       actions: read
       contents: read
@@ -53,18 +53,11 @@ jobs:
       # Force git-based change detection instead of the pull_request REST API.
       # The API path can fail the workflow on transient listFiles timeouts
       # before the Windows render jobs even start.
-      # A history fetch now and then stalls until the job's limit; a second fetch gets through.
-      - id: checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        timeout-minutes: 1
-        continue-on-error: true
-        with:
-          fetch-depth: 0
-      - if: steps.checkout.outcome != 'success'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        timeout-minutes: 1
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        timeout-minutes: 3
+      - name: Fetch the history the diffs read
+        timeout-minutes: 2
+        uses: ./.github/actions/fetch-history
       - name: Check whether this commit already passed before a title or body edit
         id: edit
         uses: ./.github/actions/edit-already-passed
