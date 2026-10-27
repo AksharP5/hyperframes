@@ -845,6 +845,7 @@ describe("findBrowser — cache resolution", () => {
   });
 
   it("withInstallLock does not let a second caller run concurrently with a slow-but-alive holder", async () => {
+    vi.useFakeTimers();
     const paths = installFsMocks({ existing: new Set([CACHE_ROOT]) });
 
     const { withInstallLock } = await import("./manager.js");
@@ -860,9 +861,10 @@ describe("findBrowser — cache resolution", () => {
     };
 
     const first = withInstallLock(() => trackConcurrency("first", 120), TEST_LOCK_TIMINGS);
-    await new Promise((resolve) => setTimeout(resolve, 5)); // let `first` acquire the lock
+    await vi.advanceTimersByTimeAsync(5); // let `first` acquire the lock
     const second = withInstallLock(() => trackConcurrency("second", 10), TEST_LOCK_TIMINGS);
 
+    await vi.advanceTimersByTimeAsync(400);
     await expect(Promise.all([first, second])).resolves.toEqual(["first", "second"]);
     expect(maxConcurrent).toBe(1);
     expect(paths.has(HF_LOCK)).toBe(false);
