@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { realpath } from "./safePath.js";
 
@@ -25,6 +25,23 @@ export function isAtomicTempPath(path: string): boolean {
   return TEMP_SUFFIX.test(path);
 }
 
+/** With HF_WRITE_TRACE naming a file, one JSON line per replaced .html: its hash, size and caller. */
+function traceWrite(filePath: string, content: string | Uint8Array): void {
+  const out = process.env.HF_WRITE_TRACE;
+  if (!out || !filePath.endsWith(".html")) return;
+  const text = typeof content === "string" ? content : Buffer.from(content).toString("utf8");
+  const hash = createHash("sha256").update(text).digest("hex").slice(0, 8);
+  const stack = (new Error().stack ?? "")
+    .split("\n")
+    .slice(2, 7)
+    .map((line) => line.trim());
+  const file = basename(filePath);
+  fs.appendFileSync(
+    out,
+    `${JSON.stringify({ t: Date.now(), kind: "write", file, hash, size: text.length, stack })}\n`,
+  );
+}
+
 /** Replace a file only after the complete sibling temp file is written. No mode: the default one. */
 export function replaceFileAtomically(
   filePath: string,
@@ -32,6 +49,7 @@ export function replaceFileAtomically(
   mode?: number,
   operations: SiblingFileSystem & Pick<typeof fs, "renameSync"> = fs,
 ): void {
+  traceWrite(filePath, content);
   // Node fs.rename uses libuv uv_fs_rename; win32 calls MoveFileExW with MOVEFILE_REPLACE_EXISTING.
   publishSibling(filePath, content, mode, operations, (tempPath) =>
     renameWithRetry(operations, tempPath, filePath),

@@ -510,3 +510,31 @@ describe.skipIf(process.platform === "win32")("resolveWritePath", () => {
     );
   });
 });
+
+describe("HF_WRITE_TRACE", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("records one line per replaced .html when it names a file, and nothing when unset", () => {
+    const dir = mkdtempSync(join(tmpdir(), "hf-write-trace-"));
+    const trace = join(dir, "trace.log");
+    try {
+      replaceFileAtomically(join(dir, "a.html"), "<p>one</p>");
+      expect(fs.existsSync(trace)).toBe(false);
+
+      vi.stubEnv("HF_WRITE_TRACE", trace);
+      replaceFileAtomically(join(dir, "a.html"), "<p>two</p>");
+      replaceFileAtomically(join(dir, "data.json"), "{}");
+
+      const lines = readFileSync(trace, "utf8").trim().split("\n");
+      expect(lines).toHaveLength(1);
+      const line = JSON.parse(lines[0]!);
+      expect(line).toMatchObject({ kind: "write", file: "a.html", size: 10 });
+      expect(line.hash).toBe(
+        crypto.createHash("sha256").update("<p>two</p>").digest("hex").slice(0, 8),
+      );
+      expect(line.stack[0]).toContain("replaceFileAtomically");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
