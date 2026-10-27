@@ -1,9 +1,9 @@
+import { oneProcessOverPipe } from "@hyperframes/engine";
 import {
   rethrowAfterBrowserCleanup,
   launchManagedBrowser,
   resolveManagedGpuMode,
 } from "../browser/launch.js";
-import { oneProcessOverPipe } from "../browser/sandboxDenied.js";
 import { spawn } from "node:child_process";
 import type { Browser, Page } from "puppeteer-core";
 import type { InProcessRequest, InProcessResponse } from "../utils/staticProjectServer.js";

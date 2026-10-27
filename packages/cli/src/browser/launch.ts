@@ -1,4 +1,12 @@
 import type { ChildProcess } from "node:child_process";
+import {
+  inAgentSandbox,
+  isOneProcessOverPipe,
+  machServiceDenied,
+  oneProcessOverPipe,
+  pipeLaunchClosedOnMac,
+  sandboxDeniedRemediation,
+} from "@hyperframes/engine";
 import { explainChromeLaunchFailure } from "@hyperframes/engine/chrome-startup";
 import type { Browser, LaunchOptions, PuppeteerNode } from "puppeteer-core";
 import { withHyperframesBrowserMarker } from "@hyperframes/core/browser-marker";
@@ -12,14 +20,6 @@ import { requestCliExit } from "../utils/commandResult.js";
 import { processIsAlive } from "../utils/processTree.js";
 import { chromeDescendants, reapChromeTree } from "./chromeTree.js";
 import { watchChromeTree, type ChromeWatchdog } from "./windowsChromeWatchdog.js";
-import {
-  inAgentSandbox,
-  isOneProcessOverPipe,
-  pipeLaunchClosedOnMac,
-  machServiceDenied,
-  oneProcessOverPipe,
-  sandboxDeniedRemediation,
-} from "./sandboxDenied.js";
 
 export class BrowserCleanupError extends AggregateError {}
 

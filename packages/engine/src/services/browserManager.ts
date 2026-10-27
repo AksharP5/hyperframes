@@ -8,6 +8,13 @@
 
 import { explainChromeLaunchFailure } from "./chromeStartup.js";
 import { withHyperframesBrowserMarker } from "@hyperframes/core/browser-marker";
+import {
+  inAgentSandbox,
+  machServiceDenied,
+  oneProcessOverPipe,
+  pipeLaunchClosedOnMac,
+  sandboxDeniedRemediation,
+} from "./sandboxLaunch.js";
 import { scanHtmlOpeningTags } from "@hyperframes/parsers/html-attribute-spans";
 import type { Browser, LaunchOptions, Page, PuppeteerNode } from "puppeteer-core";
 import { execSync } from "child_process";
@@ -889,6 +896,19 @@ export async function acquireBrowser(
   return browserLeasePool.acquire(createBrowserLaunchFingerprint(chromeArgs, config), enablePool);
 }
 
+/** An agent's macOS seatbelt allows one launch shape only: Chrome in one process over a pipe. */
+async function launchInsideSandbox(ppt: PuppeteerNode, options: LaunchOptions): Promise<Browser> {
+  const sandboxed = inAgentSandbox();
+  try {
+    return await ppt.launch(sandboxed ? oneProcessOverPipe(options) : options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const refused = machServiceDenied(message) || pipeLaunchClosedOnMac(error);
+    if (process.platform !== "darwin" || sandboxed || !refused) throw error;
+    return ppt.launch(oneProcessOverPipe(options));
+  }
+}
+
 // fallow-ignore-next-line complexity
 async function launchBrowser(
   fingerprint: Readonly<BrowserLaunchFingerprint>,
@@ -898,24 +918,26 @@ async function launchBrowser(
   let captureMode = fingerprint.requestedCaptureMode;
   let browser: Browser | undefined;
   const launch = (args: readonly string[]) =>
-    ppt
-      .launch({
-        ...ownedLaunchOptions(),
+    launchInsideSandbox(ppt, {
+      ...ownedLaunchOptions(),
+      headless: true,
+      args: withHyperframesBrowserMarker(args),
+      defaultViewport: null,
+      executablePath: fingerprint.executablePath,
+      env,
+      timeout: fingerprint.browserTimeoutMs,
+      protocolTimeout: fingerprint.protocolTimeoutMs,
+    }).catch(async (error: unknown) => {
+      const remediation =
+        process.platform === "darwin" &&
+        sandboxDeniedRemediation(error instanceof Error ? error.message : "");
+      if (remediation) throw new Error(remediation, { cause: error });
+      const defaults = await ppt.defaultArgs({
         headless: true,
         args: withHyperframesBrowserMarker(args),
-        defaultViewport: null,
-        executablePath: fingerprint.executablePath,
-        env,
-        timeout: fingerprint.browserTimeoutMs,
-        protocolTimeout: fingerprint.protocolTimeoutMs,
-      })
-      .catch(async (error: unknown) => {
-        const defaults = await ppt.defaultArgs({
-          headless: true,
-          args: withHyperframesBrowserMarker(args),
-        });
-        throw await explainChromeLaunchFailure(error, fingerprint.executablePath, defaults);
       });
+      throw await explainChromeLaunchFailure(error, fingerprint.executablePath, defaults);
+    });
   const probe = (target: Browser, timeoutMs?: number) =>
     probeBeginFrameSupport(target, timeoutMs).catch((error) => ({
       supported: true,

@@ -128,7 +128,6 @@ import {
 import { chromeLaunchRemediation } from "../browser/linuxDeps.js";
 import { macosOldChromeCrashRemediation } from "../browser/macosOldChromeCrash.js";
 import { windowsChromeCrashRemediation } from "../browser/windowsCrash.js";
-import { sandboxDeniedRemediation } from "../browser/sandboxDenied.js";
 import { killOrphanedProcessesForRender } from "../utils/orphanCleanup.js";
 import { createRenderCancellationScope } from "../utils/renderCancellation.js";
 import {
@@ -137,7 +136,11 @@ import {
   runPostRenderStepAsync,
 } from "../utils/render-success-state.js";
 import type { ProducerLogger, RenderJob, RenderPerfSummary } from "@hyperframes/producer";
-import { EXTRACT_CACHE_DIR_DISABLED_ALIASES, type VideoFrameFormat } from "@hyperframes/engine";
+import {
+  EXTRACT_CACHE_DIR_DISABLED_ALIASES,
+  sandboxDeniedRemediation,
+  type VideoFrameFormat,
+} from "@hyperframes/engine";
 import {
   checkOutputResolutionCompatibility,
   suggestMatchingPreset,

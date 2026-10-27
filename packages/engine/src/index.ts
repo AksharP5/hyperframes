@@ -495,3 +495,12 @@ export {
   DrawElementCaptureError,
   isDrawElementCaptureError,
 } from "./services/drawElementCaptureError.js";
+
+export {
+  inAgentSandbox,
+  isOneProcessOverPipe,
+  machServiceDenied,
+  oneProcessOverPipe,
+  pipeLaunchClosedOnMac,
+  sandboxDeniedRemediation,
+} from "./services/sandboxLaunch.js";
