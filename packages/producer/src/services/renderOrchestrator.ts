@@ -1259,6 +1259,7 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
   /** Mutated in place: the workers' page-error console lines, for the render's error count. */
   pageErrorLines?: string[];
   openAttempt?: OpenStallAttempt;
+  verifyFirstSession?: (session: CaptureSession) => Promise<void>;
 }): Promise<CaptureAttemptSummary[]> {
   const attempts: CaptureAttemptSummary[] = [];
   let currentWorkers = options.initialWorkerCount;
@@ -1337,6 +1338,7 @@ export async function executeDiskCaptureWithAdaptiveRetry(options: {
               : undefined,
             undefined,
             options.cfg,
+            { verifyFirstSession: options.verifyFirstSession },
           );
           pushWorkerDedupPerfs(workerResults, options.dedupPerfs);
           if (options.pageErrorLines) pushWorkerPageErrors(workerResults, options.pageErrorLines);

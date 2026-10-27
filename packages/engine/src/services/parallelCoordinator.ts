@@ -852,6 +852,7 @@ async function executeWorkerTask(
   onFailure?: (failure: CaptureFailure) => void,
   onWorkerPhase?: (diagnostic: ParallelWorkerPhaseDiagnostic) => void,
   onWorkerOperation?: (diagnostic: ParallelWorkerPhaseDiagnostic) => void,
+  gate?: FirstSessionGate,
 ): Promise<WorkerResult> {
   const startTime = Date.now();
   let framesCaptured = 0;
@@ -920,6 +921,7 @@ async function executeWorkerTask(
         await assertSwiftShader(activeSession.page, readWebGlVendorInfoFromCanvas);
       }
       await initializeSession(activeSession);
+      if (gate) await (task.workerId === 0 ? gate.verify(activeSession) : gate.wait());
     });
     canvasDrawElement = activeSession.captureMode === "drawelement";
     gpuBackend = activeSession.gpuRenderer ?? "unknown";
@@ -954,6 +956,7 @@ async function executeWorkerTask(
       pageErrorLines: pageErrorLinesOf(activeSession),
     };
   } catch (error) {
+    if (task.workerId === 0) gate?.fail(error);
     const diagnostics = session ? selectWorkerDiagnostics(session.browserConsoleBuffer) : [];
     const workerDiagnostic: CaptureWorkerDiagnostic = {
       workerId: task.workerId,
@@ -1028,6 +1031,35 @@ export interface ParallelCaptureHooks {
    */
   onWorkerFailure?: (failure: CaptureFailure) => void;
   onWorkerOperation?: (diagnostic: ParallelWorkerPhaseDiagnostic) => void;
+  /** Worker 0 runs this on its initialised session; the other workers wait for it. A rejection fails the pool. */
+  verifyFirstSession?: (session: CaptureSession) => Promise<void>;
+}
+
+interface FirstSessionGate {
+  verify: (session: CaptureSession) => Promise<void>;
+  wait: () => Promise<void>;
+  fail: (error: unknown) => void;
+}
+
+function createFirstSessionGate(
+  verify: (session: CaptureSession) => Promise<void>,
+): FirstSessionGate {
+  let fail!: (error: unknown) => void;
+  let pass!: () => void;
+  const settled = new Promise<void>((resolve, reject) => {
+    pass = resolve;
+    fail = reject;
+  });
+  settled.catch(() => {});
+  return {
+    verify: (session) =>
+      verify(session).then(pass, (error: unknown) => {
+        fail(error);
+        throw error;
+      }),
+    wait: () => settled,
+    fail,
+  };
 }
 
 function pageErrorLinesOf(session: CaptureSession): string[] {
@@ -1145,6 +1177,7 @@ export async function executeParallelCapture(
     hooks,
   });
   const onFailure = failureHandler.onFailure;
+  const gate = hooks?.verifyFirstSession && createFirstSessionGate(hooks.verifyFirstSession);
   const results = await Promise.all(
     tasks.map((task) =>
       executeWorkerTask(
@@ -1160,6 +1193,7 @@ export async function executeParallelCapture(
         onFailure,
         onWorkerPhase,
         hooks?.onWorkerOperation,
+        gate,
       ),
     ),
   );
