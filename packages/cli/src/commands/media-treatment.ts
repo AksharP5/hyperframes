@@ -33,6 +33,7 @@ import { failCommand } from "../utils/commandResult.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { readOptionalString } from "../utils/pathArgs.js";
 import { projectCompositionFiles } from "../utils/mountedCompositions.js";
+import { readJsonFlag } from "../utils/jsonFlag.js";
 import { resolveProject } from "../utils/project.js";
 import { withMeta } from "../utils/updateCheck.js";
 import { analyzeMediaTreatment } from "./media-treatment-analysis.js";
@@ -577,11 +578,7 @@ function parseGrading(
     throw new Error("Use --apply with --grading <json> or --clear");
   }
   if (raw === undefined) throw new Error("--apply requires --grading <json>");
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`Could not parse --grading JSON: ${normalizeErrorMessage(error)}`);
-  }
+  return readJsonFlag("--grading", raw);
 }
 
 function mutationVerb(action: "apply" | "clear", changed: boolean, dryRun: boolean): string {
@@ -811,7 +808,10 @@ export const mediaTreatmentCommand = defineCommand({
       type: "string",
       description: "Zero-based match index to patch only one of several matches",
     },
-    grading: { type: "string", description: "Canonical color-grading JSON patch" },
+    grading: {
+      type: "string",
+      description: "Canonical color-grading JSON patch, a path to a JSON file, or - for stdin",
+    },
     apply: {
       type: "boolean",
       description: "Apply the validated grading patch (explicit agent form)",

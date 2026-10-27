@@ -662,6 +662,42 @@ describe("applyMediaTreatmentToHtml", () => {
     }
   });
 
+  it("takes --grading from a file, and tells a quote-stripped value to use one", async () => {
+    const project = mkdtempSync(join(tmpdir(), "hf-media-grading-file-"));
+    writeFileSync(join(project, "index.html"), VIDEO);
+    writeFileSync(join(project, "g.json"), '{"preset":"warm-daylight","intensity":0.8}');
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const run = (grading: string) =>
+      runCommand(mediaTreatmentCommand, {
+        rawArgs: [
+          "--project",
+          project,
+          "--selector",
+          "#hero",
+          "--grading",
+          grading,
+          "--dry-run",
+          "--json",
+        ],
+      });
+    try {
+      await run(join(project, "g.json"));
+      expect(JSON.parse(String(log.mock.calls.at(-1)?.[0]))).toMatchObject({
+        ok: true,
+        changed: true,
+      });
+      await expect(run("{preset:warm-daylight,intensity:0.8}")).rejects.toThrow(CliRuntimeError);
+      expect(JSON.stringify([...error.mock.calls, ...log.mock.calls])).toContain(
+        "--grading payload.json",
+      );
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
   it("finds a clip inside a mounted scene and edits it in its own file", async () => {
     const project = mkdtempSync(join(tmpdir(), "hf-media-scene-"));
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);

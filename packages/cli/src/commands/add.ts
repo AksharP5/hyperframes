@@ -42,6 +42,7 @@ import {
   createProjectConfig,
 } from "../utils/projectConfig.js";
 import { copyToClipboard } from "../utils/clipboard.js";
+import { readJsonFlag } from "../utils/jsonFlag.js";
 import { trackRegistryItemAdded } from "../telemetry/events.js";
 
 // ── Target-path resolution ──────────────────────────────────────────────────
@@ -161,15 +162,17 @@ export function tagAddJson(
   };
 }
 
-/** `--vars` is JSON an agent or the catalog page produced; a malformed one is
- *  worth a clear error rather than a snippet that silently drops the values. */
+/** `--vars` is JSON, a file or `-`; a malformed one is an error, not a snippet that drops the values. */
 export function parseVariableValues(raw: string | undefined): Record<string, unknown> | null {
   if (raw === undefined) return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new AddError("--vars must be a JSON object of variable values", "invalid-vars");
+    parsed = readJsonFlag("--vars", raw);
+  } catch (error: unknown) {
+    throw new AddError(
+      `--vars must be a JSON object of variable values (${error instanceof Error ? error.message : String(error)})`,
+      "invalid-vars",
+    );
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new AddError("--vars must be a JSON object of variable values", "invalid-vars");
@@ -478,7 +481,7 @@ export default defineCommand({
     vars: {
       type: "string",
       description:
-        "JSON of variable values to bake into the printed snippet, as copied from a catalog page",
+        "JSON of variable values to bake into the printed snippet, as copied from a catalog page; or a JSON file path, or - for stdin",
     },
     force: {
       type: "boolean",
