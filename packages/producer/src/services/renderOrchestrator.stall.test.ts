@@ -19,6 +19,16 @@ const capture = vi.hoisted(() => ({
   blocked: 0,
 }));
 
+// The 250 ms memory sampler is a faked interval: left running it is the next timer on every jump.
+vi.mock("./render/shared.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./render/shared.js")>()),
+  createMemorySampler: () => ({
+    peakRssBytes: () => 0,
+    peakHeapUsedBytes: () => 0,
+    stop: () => {},
+  }),
+}));
+
 type ScriptedFrame = { dir: string; index: number };
 
 function listFrames(tasks: WorkerTask[]): ScriptedFrame[] {
@@ -286,14 +296,21 @@ async function untilHeld(outcome: () => unknown, budget: { ms: number }): Promis
   budget.ms -= performance.now() - started;
 }
 
-/** Advances fake time a second at a time while the scripted attempt waits, with real IO between steps. */
+/** Jumps fake time to the next timer while the scripted attempt waits, with real IO between steps. */
 async function runFor(ms: number, outcome: () => unknown): Promise<void> {
   const budget = { ms: 1_000 };
   await untilHeld(outcome, budget);
-  for (let elapsed = 0; elapsed < ms && outcome() === PENDING; elapsed += 1_000) {
+  for (let elapsed = 0; elapsed < ms && outcome() === PENDING; ) {
     await ioTurns();
     await untilHeld(outcome, budget);
-    await vi.advanceTimersByTimeAsync(1_000);
+    const before = Date.now();
+    await vi.advanceTimersToNextTimerAsync();
+    const jumped = Date.now() - before;
+    if (jumped > 0) elapsed += jumped;
+    else {
+      await vi.advanceTimersByTimeAsync(1_000);
+      elapsed += 1_000;
+    }
   }
   await ioTurns();
 }
