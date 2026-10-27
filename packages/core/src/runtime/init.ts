@@ -5507,6 +5507,18 @@ export function initSandboxRuntimeModular(): void {
     return longest;
   };
 
+  const STARVED_AUDIO_HOLD_MS = 3000;
+  let starvedAudio: { el: HTMLMediaElement; sinceMs: number } | null = null;
+
+  const audioMayDrivePlayhead = (el: HTMLMediaElement): boolean => {
+    if (el.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+      starvedAudio = null;
+      return true;
+    }
+    if (starvedAudio?.el !== el) starvedAudio = { el, sinceMs: performance.now() };
+    return performance.now() - starvedAudio.sinceMs < STARVED_AUDIO_HOLD_MS;
+  };
+
   function refreshTransportClockSource(): void {
     // Audio-master clock: three tiers of timing precision.
     // 1. WebAudio (AudioContext.currentTime) while it plays a decoded buffer: ~21µs, sample-accurate
@@ -5525,7 +5537,9 @@ export function initSandboxRuntimeModular(): void {
         }
       } else {
         const source = followedOrLongestRunningAudio(clock.audioElement());
-        if (source && !source.el.paused) {
+        if (source && !audioMayDrivePlayhead(source.el)) {
+          if (clock.hasAudioSource()) clock.detachAudioSource();
+        } else if (source && !source.el.paused) {
           clock.attachAudioSource({
             el: source.el,
             compositionStart: source.start,
@@ -5540,8 +5554,9 @@ export function initSandboxRuntimeModular(): void {
           clock.detachAudioSource();
         }
       }
-    } else if (clock.hasAudioSource()) {
-      clock.detachAudioSource();
+    } else {
+      starvedAudio = null;
+      if (clock.hasAudioSource()) clock.detachAudioSource();
     }
   }
 
