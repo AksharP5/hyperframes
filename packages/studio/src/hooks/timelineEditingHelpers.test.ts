@@ -10,6 +10,7 @@ import {
   patchIframeDomTiming,
   persistElementAttribute,
   persistTimelineBatchEdit,
+  persistTimelineEdit,
   type PersistTimelineBatchChange,
 } from "./timelineEditingHelpers";
 import type { TimelineElement } from "../player/store/playerStore";
@@ -411,6 +412,64 @@ describe("persistTimelineBatchEdit", () => {
     await expect(
       persistTimelineBatchEdit(batchInput([moveMember("ghost", 3, 0, 2)], writes)),
     ).rejects.toThrow("Unable to patch timeline element ghost in index.html");
+    expect(writes).toHaveLength(0);
+  });
+});
+
+describe("persistTimelineEdit", () => {
+  const SOURCE = `<div id="root"><video id="a" class="clip" data-start="1" data-duration="3"></video></div>`;
+
+  async function runEdit(id: string, start: number) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => ({ content: SOURCE }) })),
+    );
+    const writes: Array<[string, string]> = [];
+    const pending = new Set<string>();
+    const element = el({ id, tag: "video", domId: id, start: 1, duration: 3 });
+    const done = persistTimelineEdit({
+      projectId: "p1",
+      element,
+      activeCompPath: "index.html",
+      label: "Resize timeline clip",
+      buildPatches: (original, target) =>
+        buildTimelineResizeTimingPatch(original, target, element, {
+          start,
+          duration: 3,
+          playbackStart: undefined,
+        }),
+      writeProjectFile: async (path, content) => {
+        writes.push([path, content]);
+      },
+      recordEdit: async () => {},
+      pendingTimelineEditPathRef: { current: pending },
+    });
+    return { done, writes, pending };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("saves nothing and says nothing when the clip already holds the values (a resize that lands where it began)", async () => {
+    // 1.0000001 is a different number from the clip's 1, so the gesture sees a change; the file writes "1" either way.
+    const { done, writes, pending } = await runEdit("a", 1.0000001);
+    await expect(done).resolves.toBeUndefined();
+    expect(writes).toHaveLength(0);
+    expect(pending.size).toBe(0);
+  });
+
+  it("writes a real change and marks its file", async () => {
+    const { done, writes, pending } = await runEdit("a", 2);
+    await done;
+    expect(writes).toHaveLength(1);
+    expect(writes[0]![1]).toContain('data-start="2"');
+    expect([...pending]).toEqual(["index.html"]);
+  });
+
+  it("still throws for a clip the file does not hold", async () => {
+    const { done, writes } = await runEdit("ghost", 2);
+    await expect(done).rejects.toThrow("Unable to patch timeline element ghost in index.html");
     expect(writes).toHaveLength(0);
   });
 });

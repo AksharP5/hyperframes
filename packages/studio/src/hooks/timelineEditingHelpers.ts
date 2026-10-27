@@ -351,7 +351,6 @@ export async function persistTimelineEdit(input: PersistTimelineEditInput): Prom
     throw new Error(`Timeline element ${input.element.id} is missing a patchable target`);
   }
 
-  input.pendingTimelineEditPathRef.current.add(targetPath);
   await saveProjectFilesWithHistory({
     projectId: input.projectId,
     label: input.label,
@@ -359,10 +358,10 @@ export async function persistTimelineEdit(input: PersistTimelineEditInput): Prom
     coalesceMs: input.coalesceMs,
     files: {
       [targetPath]: (current) => {
-        const patched = input.buildPatches(current, patchTarget);
-        if (patched === current) {
-          throw new Error(`Unable to patch timeline element ${input.element.id} in ${targetPath}`);
-        }
+        const patched = patchTimelineChangesInSource(current, targetPath, [
+          { element: input.element, buildPatches: input.buildPatches },
+        ]);
+        if (patched !== current) input.pendingTimelineEditPathRef.current.add(targetPath);
         return patched;
       },
     },
