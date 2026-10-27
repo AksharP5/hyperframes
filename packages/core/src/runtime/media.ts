@@ -258,6 +258,7 @@ export function evictMediaSyncState(el: HTMLMediaElement): void {
   seekLoadRetried.delete(el);
   lastRuntimeAppliedVolume.delete(el);
   forgetSteering(el);
+  heldAhead.delete(el);
 }
 
 /** Test-only seam: whether any per-source sync state is still tracked for `el`. */
@@ -320,6 +321,11 @@ function prepareUpcomingMedia(
 // Chromium refuses a slower playbackRate (NotSupportedError).
 const MIN_NATIVE_PLAYBACK_RATE = 1 / 16;
 
+// A video this far ahead of the playhead, or at its out-point, is held until the playhead reaches it:
+// steering a lead of a few hundred ms takes seconds and shows frames past the cut.
+const VIDEO_LEAD_HOLD_SECONDS = 0.1;
+const heldAhead = new WeakSet<HTMLMediaElement>();
+
 // fallow-ignore-next-line complexity
 export function syncRuntimeMedia(params: {
   clips: RuntimeMediaClip[];
@@ -363,6 +369,8 @@ export function syncRuntimeMedia(params: {
    * unity; do not mistake that transport write for an authored volume edit. */
   isWebAudioRouted?: (el: HTMLMediaElement) => boolean;
   forceSync?: boolean;
+  /** False while the playhead is not moving (audio output has not started): a paused video waits for it. */
+  clockAdvancing?: boolean;
   /** How far the next tick will move the playhead: an audio clip due within it starts now. */
   cueAheadSeconds?: number;
   /** Seeks a sounding element under a gain dip; false when it has no dip stage and the sync seeks it plainly. */
@@ -571,6 +579,19 @@ export function syncRuntimeMedia(params: {
       // seek→freeze→drift→seek stutter) and jumps sounding audio (a click). So playing media skips
       // strict and force sync and is steered by rate; hard sync (>0.5s) and audio past its steer
       // limit seek. A paused transport pauses it below, so a seek that pauses mid-playback lands it.
+      if (el.tagName === "VIDEO" && !isHeldVideoTail) {
+        // A loop's playhead wraps before its element, so its offset jumps by a lap: steering owns loops.
+        const ahead =
+          !clip.loop &&
+          (offset < -VIDEO_LEAD_HOLD_SECONDS ||
+            currentElTime >= mediaSourceTimeAt(clip, clip.end) - MEDIA_SYNC_TOLERANCE_SECONDS);
+        if (!playing || (!ahead && offset >= -MEDIA_SYNC_TOLERANCE_SECONDS)) heldAhead.delete(el);
+        else if (ahead && !el.paused) {
+          heldAhead.add(el);
+          el.pause();
+        }
+      }
+      const holdingAhead = heldAhead.has(el);
       const isPlayingMedia = !el.paused && playing;
       // Only apply strict sync when offset has stabilized (not growing).
       // During initial buffering, offset grows ~16ms/tick as the timeline
@@ -582,6 +603,7 @@ export function syncRuntimeMedia(params: {
       let strictSync = false;
       if (
         !isPlayingMedia &&
+        !holdingAhead &&
         !hardSync &&
         !firstTickOfClip &&
         offsetStabilized &&
@@ -596,7 +618,7 @@ export function syncRuntimeMedia(params: {
       } else if (drift <= MEDIA_SYNC_TOLERANCE_SECONDS) {
         strictDriftSamples.set(el, 0);
       }
-      const forceSync = !isPlayingMedia && params.forceSync && drift > 0.02;
+      const forceSync = !isPlayingMedia && !holdingAhead && params.forceSync && drift > 0.02;
       const steered =
         isPlayingMedia && !hardSync ? steerMedia(el, offset, baseRate, offsetStabilized) : null;
       const steerSeeks = steered?.seek === true;
@@ -642,12 +664,20 @@ export function syncRuntimeMedia(params: {
           holdSeekBarrierUntilVideoLands(el);
         }
         playRequested.delete(el);
+        heldAhead.delete(el);
       } else if (!playing) {
         holdSeekBarrierUntilVideoLands(el);
       }
       if (isHeldVideoTail) {
         if (!el.paused) el.pause();
-      } else if (playing && el.paused && !playRequested.has(el) && !isUnplayable(el)) {
+      } else if (
+        playing &&
+        !heldAhead.has(el) &&
+        params.clockAdvancing !== false &&
+        el.paused &&
+        !playRequested.has(el) &&
+        !isUnplayable(el)
+      ) {
         // `HTMLMediaElement.play()` is spec'd to queue playback and resolve
         // once enough data is buffered, so we can unconditionally call it —
         // no need to gate on `readyState` or defer to a `canplay` listener.

@@ -1984,6 +1984,76 @@ describe("syncRuntimeMedia", () => {
     expect(clip.el.currentTime).toBe(mediaElementTime(5));
   });
 
+  describe("play start and lead hold", () => {
+    function videoClip(overrides: Partial<RuntimeMediaClip>) {
+      const clip = createMockClip({ mediaStart: 5, ...overrides });
+      Object.defineProperty(clip.el, "readyState", { value: 4, writable: true });
+      clip.el.muted = true;
+      return clip;
+    }
+    const tick = (clip: RuntimeMediaClip, timeSeconds: number, clockAdvancing = true) =>
+      syncRuntimeMedia({
+        clips: [clip],
+        timeSeconds,
+        playing: true,
+        playbackRate: 1,
+        clockAdvancing,
+        getCompositionDuration: () => 30,
+      });
+
+    it("does not start a video while the playhead is held", () => {
+      const clip = videoClip({ start: 0, end: 10 });
+      tick(clip, 0, false);
+      expect(clip.el.play).not.toHaveBeenCalled();
+      tick(clip, 0.016);
+      expect(clip.el.play).toHaveBeenCalledTimes(1);
+    });
+
+    it("holds a video that runs ahead of the playhead until the playhead reaches it", () => {
+      const clip = videoClip({ start: 0, end: 20, mediaStart: 0 });
+      const el = clip.el;
+      Object.defineProperty(el, "paused", { value: false, writable: true, configurable: true });
+      el.pause = vi.fn(() =>
+        Object.defineProperty(el, "paused", { value: true, writable: true, configurable: true }),
+      );
+      el.currentTime = 5.3;
+      tick(clip, 5);
+      expect(el.pause).toHaveBeenCalledTimes(1);
+      tick(clip, 5.1);
+      expect(el.play).not.toHaveBeenCalled();
+      expect(el.currentTime).toBe(5.3);
+      tick(clip, 5.28);
+      expect(el.play).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops a video at its out-point while the playhead is still before it", () => {
+      const clip = videoClip({ start: 0, end: 10, mediaStart: 0 });
+      const el = clip.el;
+      Object.defineProperty(el, "paused", { value: false, writable: true, configurable: true });
+      el.pause = vi.fn(() =>
+        Object.defineProperty(el, "paused", { value: true, writable: true, configurable: true }),
+      );
+      el.currentTime = 9.97; // inside one sync tolerance of the out-point: the next frame is past it
+      tick(clip, 9.95);
+      expect(el.pause).toHaveBeenCalledTimes(1);
+      tick(clip, 9.99);
+      expect(el.play).not.toHaveBeenCalled();
+    });
+
+    it("keeps a looping video playing when the playhead wraps a lap before it", () => {
+      const clip = videoClip({ start: 0, end: 10, mediaStart: 0, loop: true, sourceDuration: 0.4 });
+      const el = clip.el;
+      Object.defineProperty(el, "paused", { value: false, writable: true, configurable: true });
+      el.pause = vi.fn();
+      for (let tickIndex = 0; tickIndex < 100; tickIndex++) {
+        const timeSeconds = 0.3 + tickIndex * 0.004;
+        el.currentTime = Math.min(timeSeconds, 0.39); // the element lags at the end of each lap
+        tick(clip, timeSeconds);
+      }
+      expect(el.pause).not.toHaveBeenCalled();
+    });
+  });
+
   describe("playing media drift", () => {
     function playingVideoAt(
       currentTime: number,
@@ -2158,13 +2228,6 @@ describe("syncRuntimeMedia", () => {
         expect(seekUnderDip).not.toHaveBeenCalled();
         expect(clip.el.playbackRate).toBeCloseTo(1.1, 9);
       });
-    });
-
-    it("steers a video that is far ahead slower, by the same steps", () => {
-      const clip = playingVideoAt(5.2);
-      tick(clip, 5);
-      tick(clip, 5);
-      expect(clip.el.playbackRate).toBeCloseTo(0.9, 9);
     });
 
     it("scales the steer with the transport rate", () => {
