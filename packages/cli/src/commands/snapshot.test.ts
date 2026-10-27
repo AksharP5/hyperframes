@@ -97,6 +97,17 @@ describe("tailFrameTime", () => {
   it("never goes negative", () => {
     expect(tailFrameTime(0)).toBe(0);
   });
+
+  it("stays within 250ms of the end of a long composition", () => {
+    // 3% of 634 s is 19 s; the cap keeps the end frame 250 ms from the end.
+    expect(tailFrameTime(634)).toBeCloseTo(633.75, 5);
+    expect(computeSnapshotTimes(634, { frames: 5 }).times.at(-1)).toBeCloseTo(633.75, 5);
+  });
+
+  it("appends the end frame to --at times on a long composition at its own tail", () => {
+    const { times } = computeSnapshotTimes(634, { frames: 5, at: [100] });
+    expect(times).toEqual([100, 633.75]);
+  });
 });
 
 describe("transparent snapshot capture", () => {

@@ -565,16 +565,17 @@ export function parseZoomScale(value: unknown): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ZOOM_SCALE;
 }
 
-/**
- * Seeking the timeline to EXACTLY `data-duration` renders blank — the runtime
- * treats t >= clip-end as past-end and unmounts the clip (verified on a V4 3D
- * artifact: t=8.0 of an 8s clip was pure white, t=7.76 showed the final hero).
- * So the "final frame" must be sampled just-before-end. The blank tail observed
- * spanned the last ~2.5% of the timeline, hence a 3%-of-duration nudge (floored
- * at 50ms so very short clips still back off a readable amount).
- */
+// Seeking to exactly the end renders blank, so the tail frame backs off 3% of the duration,
+// by at least 50 ms and at most 250 ms.
+const TAIL_BACKOFF_MIN_SECONDS = 0.05;
+const TAIL_BACKOFF_MAX_SECONDS = 0.25;
+
 export function tailFrameTime(duration: number): number {
-  return Math.max(0, duration - Math.max(0.05, duration * 0.03));
+  const backoff = Math.min(
+    TAIL_BACKOFF_MAX_SECONDS,
+    Math.max(TAIL_BACKOFF_MIN_SECONDS, duration * 0.03),
+  );
+  return Math.max(0, duration - backoff);
 }
 
 /**
