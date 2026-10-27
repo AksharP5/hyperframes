@@ -377,6 +377,22 @@ describe("hasVariableBoundMedia", () => {
     expect(hasVariableBoundMedia(audio, { title: "Row 02" })).toBe(false);
     expect(hasVariableBoundMedia(image, { hero_src: "row-02.png" })).toBe(true);
   });
+
+  it("requires a browser probe when the mount sets the variable, with no render variables", () => {
+    const mount = (values: string) =>
+      `<div data-composition-id="clip" data-variable-values='${values}'>` +
+      `<video id="v" src="placeholder.mp4" data-var-src="src"></video></div>`;
+
+    expect(hasVariableBoundMedia(mount('{"src":"clip.mp4"}'), undefined)).toBe(true);
+    expect(hasVariableBoundMedia(mount('{"title":"Row 02"}'), undefined)).toBe(false);
+  });
+
+  it("requires a browser probe when the variable has a declared default", () => {
+    const declared = `<html data-composition-variables='[{"id":"src","type":"string","default":"clip.mp4"}]'><body>`;
+    const video = `<video id="v" src="placeholder.mp4" data-var-src="src"></video>`;
+
+    expect(hasVariableBoundMedia(`${declared}${video}</body></html>`, undefined)).toBe(true);
+  });
 });
 
 describe("runProbeStage — forceScreenshot threading", () => {
