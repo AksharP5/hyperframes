@@ -8,14 +8,14 @@ import {
   sandboxDeniedRemediation,
 } from "@hyperframes/engine";
 import { explainChromeLaunchFailure } from "@hyperframes/engine/chrome-startup";
-import type { Browser, LaunchOptions, PuppeteerNode } from "puppeteer-core";
+import type { Browser, LaunchOptions, Page, PuppeteerNode } from "puppeteer-core";
 import { withHyperframesBrowserMarker } from "@hyperframes/core/browser-marker";
 import {
   resolveCaptureBrowserGpuMode,
   type BrowserGpuMode,
   type ResolvedBrowserGpuMode,
 } from "./gpuPolicy.js";
-import { normalizeErrorMessage } from "../utils/errorMessage.js";
+import { normalizeErrorMessage, notePageCrash } from "../utils/errorMessage.js";
 import { requestCliExit } from "../utils/commandResult.js";
 import { processIsAlive } from "../utils/processTree.js";
 import { chromeDescendants, reapChromeTree } from "./chromeTree.js";
@@ -196,6 +196,8 @@ async function launchOwnedBrowser(
     if (watchdog) watchdogs.set(browser, watchdog);
     gracefulClose.set(browser, browser.close.bind(browser));
     browser.close = () => closeManagedBrowser(browser);
+    const newPage = browser.newPage;
+    browser.newPage = async (...args) => closeOnRendererCrash(await newPage.apply(browser, args));
     child.once("exit", () => {
       browsers.delete(browser);
       destroyBrowserPipes(child);
@@ -206,6 +208,14 @@ async function launchOwnedBrowser(
     clearTimeout(slow);
     pending.delete(launch);
   }
+}
+
+function closeOnRendererCrash(page: Page): Page {
+  page.once("error", () => {
+    notePageCrash();
+    page.close().catch(() => undefined);
+  });
+  return page;
 }
 
 function untilLaunchOrAbort(launch: Promise<Browser>, signal: AbortSignal): Promise<Browser> {

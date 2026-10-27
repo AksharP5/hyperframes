@@ -74,6 +74,7 @@ function fakeBrowser() {
     evaluate: vi.fn(async () => undefined),
     setRequestInterception: vi.fn(async (_on: boolean) => undefined),
     on: vi.fn((_event: string, _handler: (request: unknown) => void) => undefined),
+    once: vi.fn((_event: string, _handler: () => void) => undefined),
   };
   return {
     browser: {

@@ -1,5 +1,19 @@
+let pageCrashed = false;
+
+export function notePageCrash(): void {
+  pageCrashed = true;
+}
+
+const CLOSED_AFTER_CRASH = /Target closed|detached Frame|Session closed/;
+
+function namedAfterCrash(message: string): string {
+  return pageCrashed && CLOSED_AFTER_CRASH.test(message)
+    ? `The browser page crashed, most likely out of memory: ${message}`
+    : message;
+}
+
 export function normalizeErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
+  if (error instanceof Error) return namedAfterCrash(error.message);
   if (typeof error === "string") return error;
   if (typeof error === "object" && error !== null) {
     const msg = (error as Record<string, unknown>).message;
