@@ -44,6 +44,7 @@ import { isKnownInactiveTimelineWindow } from "./mediaTimelineWindow.js";
 import {
   extractFinalVideoFrameTimestamp,
   extractMediaMetadata,
+  keyframeGapSeconds,
   mediaFileIdentity,
   readMetadataCache,
   readStoredFinalFrame,
@@ -943,6 +944,24 @@ export function sdrCanvasColourFilters(metadata: VideoMetadata, toneMappedToSdr 
  * frames are byte-identical to it.
  */
 const EXTRACTION_SEGMENT_SECONDS = 120;
+/** Slowest decode rate the stall clock allows while ffmpeg discards frames from a keyframe up to the seek point. */
+const SKIP_DECODE_FPS_FLOOR = 30;
+async function leadInSecondsUnlessAborted(
+  videoPath: string,
+  seek: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  try {
+    return await keyframeGapSeconds(videoPath, seek, signal);
+  } catch (error) {
+    // Aborted: let runFfmpeg report the abort, so a segment stopped by another's failure reads as stopped.
+    if (signal?.aborted) return 0;
+    throw error;
+  }
+}
+function stallTimeoutMs(baseMs: number, skippedSeconds: number, sourceFps: number): number {
+  return baseMs + Math.ceil((skippedSeconds * sourceFps * 1000) / SKIP_DECODE_FPS_FLOOR);
+}
 /** Frame times since file start are `PTS*TB + seek`; snapping them to `lead + k/FR` gives every process one grid. */
 function undoTickRoundingOnTheSourceFrameGrid(seek: number, lead: number): string[] {
   const sinceFileStart = `(PTS*TB+${seek}-${lead})`;
@@ -964,6 +983,7 @@ interface SegmentedExtraction {
   videoPath: string;
   startTime: number;
   fps: number;
+  sourceFps: number;
   segments: readonly FrameRange[];
   gate: typeof inExtractionSlot;
   runOptions: { signal?: AbortSignal; timeout: number };
@@ -984,7 +1004,8 @@ function splitFrameRanges(ranges: readonly FrameRange[], segmentFrames: number):
 }
 
 async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmpegResult> {
-  const { decodeArgs, filterAndEncodeArgs, videoPath, startTime, fps, segments, gate } = job;
+  const { decodeArgs, filterAndEncodeArgs, videoPath, startTime, fps, sourceFps, segments, gate } =
+    job;
   const segmentCount = segments.length;
   // One failed segment fails the range, so stop the others instead of finishing them.
   const failed = new AbortController();
@@ -999,7 +1020,7 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
       const { firstFrame, frames } = segments[index]!;
       const seek = startTime + firstFrame / fps;
       const result = await gate(
-        () =>
+        async () =>
           runFfmpeg(
             [
               ...decodeArgs,
@@ -1017,7 +1038,15 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
               String(firstFrame + 1),
               ...filterAndEncodeArgs(seek),
             ],
-            { ...job.runOptions, signal },
+            {
+              ...job.runOptions,
+              signal,
+              timeout: stallTimeoutMs(
+                job.runOptions.timeout,
+                await leadInSecondsUnlessAborted(videoPath, seek, signal),
+                sourceFps,
+              ),
+            },
           ),
         signal,
       );
@@ -1026,7 +1055,10 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
     }
   };
   const workers = Math.min(segmentCount, EXTRACTION_SLOTS);
-  await Promise.all(Array.from({ length: workers }, worker));
+  await Promise.all(Array.from({ length: workers }, worker)).catch((error) => {
+    failed.abort();
+    throw error;
+  });
   const ran = results.filter(Boolean);
   // Report the segment that failed, not the ones stopped because of it.
   const failure =
@@ -1211,6 +1243,7 @@ async function extractVideoFramesRangeUnredacted(
           videoPath,
           startTime,
           fps,
+          sourceFps: metadata.fps,
           gate: options.tailProbe ? inTailProbeSlot : inExtractionSlot,
           segments: splitFrameRanges(
             options.frameRanges ?? [{ firstFrame: 0, frames: totalFrames }],
@@ -1219,11 +1252,17 @@ async function extractVideoFramesRangeUnredacted(
           runOptions,
         })
       : inExtractionSlot(
-          () =>
-            runFfmpeg(
-              [...hwaccel, ...args, ...filterArgsFor(startTime), ...encodeArgs],
-              runOptions,
-            ),
+          async () =>
+            runFfmpeg([...hwaccel, ...args, ...filterArgsFor(startTime), ...encodeArgs], {
+              ...runOptions,
+              timeout: stallTimeoutMs(
+                ffmpegProcessTimeout,
+                options.finalFrameOnly
+                  ? startTime
+                  : await leadInSecondsUnlessAborted(videoPath, startTime, signal),
+                metadata.fps,
+              ),
+            }),
           signal,
         );
   let processResult = await extract(decodeWithVideoToolbox ? ["-hwaccel", "videotoolbox"] : []);
