@@ -2,11 +2,12 @@ import { swallow } from "./diagnostics";
 import { isClipVisibleAt, isInClipWindow } from "./clipWindow";
 import { mediaElementTime } from "./mediaClock";
 import { sameInstant } from "../clipFacts";
-import { interpolateVolumeGain, type VolumeKeyframe } from "./mediaVolumeEnvelope.js";
+import { interpolateVolumeGain } from "./mediaVolumeEnvelope.js";
 import { elementVolumeLaneGain } from "./audioAutomationVolume.js";
-import { fadeGain, NO_FADES, readElementFades, type AudioFades } from "../audioFade.js";
+import { fadeGain, NO_FADES, readElementFades } from "../audioFade.js";
 import { readElementPlaybackRate, readElementRateSpec, readMediaStart } from "./playbackRate.js";
-import { rateAt, sourceTimeAt, timeAtSourceTime, type RateSpec } from "../speedRamp.js";
+import { rateAt, sourceTimeAt, timeAtSourceTime } from "../speedRamp.js";
+import type { RuntimeMediaClip } from "./types.js";
 import { clampAudioGain, clipGain, gainTimesLane } from "../audioGain.js";
 import { isMemberGroupHidden } from "../audioGroups.js";
 import { findInjectedRenderFrame } from "./renderFrameSibling.js";
@@ -16,10 +17,12 @@ import { cutToHostSlots, type HostSlot } from "../mediaTiming.js";
 import {
   forgetSteering,
   isSteering,
+  MEDIA_HARD_SYNC_SECONDS,
   MEDIA_SYNC_TOLERANCE_SECONDS,
   steerMedia,
 } from "./mediaSteer.js";
 export { MEDIA_SYNC_TOLERANCE_SECONDS } from "./mediaSteer.js";
+export type { RuntimeMediaClip } from "./types.js";
 export {
   readElementPlaybackRate,
   readElementRateSpec,
@@ -84,32 +87,6 @@ export function resolveRuntimeMediaClipDuration(params: {
   ).filter((value): value is number => value != null && Number.isFinite(value) && value >= 0);
   return candidates.length > 0 ? Math.min(...candidates) : null;
 }
-
-export type RuntimeMediaClip = {
-  el: HTMLVideoElement | HTMLAudioElement;
-  start: number;
-  /** The clip's own t=0 when a host's in-point cut its head; source time, lanes and fades run from it. */
-  origin?: number;
-  mediaStart: number;
-  duration: number;
-  end: number;
-  volume: number | null;
-  playbackRate: number;
-  /** The rate lane when the clip has one; otherwise `playbackRate`. */
-  rate?: RateSpec;
-  loop: boolean;
-  /** Source media duration in seconds (from el.duration). Used for loop wrapping. */
-  sourceDuration: number | null;
-  /**
-   * Probed volume keyframes from the GSAP timeline (same probe the renderer
-   * uses). When present, `syncRuntimeMedia` drives volume from the envelope
-   * rather than from `data-volume` + GSAP-change tracking, eliminating the
-   * race between the 60 Hz transport tick and GSAP's own seek.
-   */
-  volumeKeyframes?: VolumeKeyframe[];
-  /** Clip-edge fades from `data-fade-in` / `data-fade-out`; see audioFade.ts. */
-  fades?: AudioFades;
-};
 
 export function refreshRuntimeMediaCache(params?: {
   resolveStartSeconds?: (element: Element) => number;
@@ -273,7 +250,6 @@ export function hasMediaSyncStateForTest(el: HTMLMediaElement): boolean {
   );
 }
 
-export const MEDIA_HARD_SYNC_SECONDS = 0.5;
 export const MEDIA_PRESEEK_SECONDS = 1.5;
 
 export function mediaSourceTimeAt(clip: RuntimeMediaClip, timeSeconds: number): number {

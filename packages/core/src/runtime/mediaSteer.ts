@@ -1,5 +1,6 @@
 /** Drift a playing element may carry before sync pulls it back onto the playhead. */
 export const MEDIA_SYNC_TOLERANCE_SECONDS = 0.04;
+export const MEDIA_HARD_SYNC_SECONDS = 0.5;
 
 // Steered by rate, not seeked (a seek resets a video's decoder and clicks in audio); steps keep rate writes rare.
 const MEDIA_STEER = 0.03;
