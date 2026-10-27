@@ -239,6 +239,11 @@ export function evictMediaSyncState(el: HTMLMediaElement): void {
   videoStarts.delete(el);
 }
 
+/** Whether the clip is inside its window at the playhead right now: the sync tick keeps its time while it is. */
+export function isActiveAtPlayhead(el: HTMLMediaElement): boolean {
+  return lastRelativeTime.has(el);
+}
+
 /** Test-only seam: whether any per-source sync state is still tracked for `el`. */
 export function hasMediaSyncStateForTest(el: HTMLMediaElement): boolean {
   return (

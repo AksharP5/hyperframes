@@ -1190,6 +1190,25 @@ describe("resolveProxy", () => {
       await expect(staying).resolves.toBeTruthy();
     });
 
+    it("makes the copy asked for last first, and moves a copy to the front each time it is asked again", async () => {
+      const { calls, resolveProxy, projectDir } = await oneSlot();
+      const clip = clips(projectDir, ["running", "c", "d", "f"]);
+      const ask = (name: string) =>
+        resolveProxy(projectDir, clip[name]!, "h264", undefined, { priority: true });
+
+      const running = resolveProxy(projectDir, clip.running!);
+      await flush();
+      const asks = [ask("c"), ask("d"), ask("f"), ask("c")];
+      succeed(calls[0]!);
+      await running;
+      for (const next of ["c", "f", "d"]) {
+        await flush(12);
+        expect(clipOf(calls[calls.length - 1]!)).toBe(next);
+        succeed(calls[calls.length - 1]!);
+      }
+      await expect(Promise.all(asks)).resolves.toHaveLength(4);
+    });
+
     it("makes the copy when the preview asks in the same moment the last thumbnail leaves", async () => {
       const { calls, resolveProxy, projectDir } = await oneSlot();
       const clip = clips(projectDir, ["running", "handoff"]);

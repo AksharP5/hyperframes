@@ -22,6 +22,7 @@ import {
 import {
   PREVIEW_PROXY_BOX_PARAM,
   PREVIEW_PROXY_LIGHT_PARAM,
+  PREVIEW_PROXY_PRIORITY_HEADER,
   PREVIEW_PROXY_PROGRESS_HEADER,
   PREVIEW_PROXY_RETRY_PARAM,
   parsePreviewProxyBox,
@@ -762,7 +763,11 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
         if (c.req.query(PREVIEW_PROXY_RETRY_PARAM) !== undefined) {
           retryProxyCopy(project.dir, file, proxyVariant, proxyBox);
         }
-        servedPath = await waitForProxy(resolveProxy(project.dir, file, proxyVariant, proxyBox), 0);
+        const priority = c.req.header(PREVIEW_PROXY_PRIORITY_HEADER) === "1";
+        servedPath = await waitForProxy(
+          resolveProxy(project.dir, file, proxyVariant, proxyBox, { priority }),
+          0,
+        );
       } catch (err) {
         if (err instanceof ProxyWaitTimeoutError) {
           const progress = proxyCopyProgress(project.dir, file, proxyVariant, proxyBox);

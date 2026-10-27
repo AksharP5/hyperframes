@@ -594,6 +594,43 @@ describe("waiting for the proxy copy", () => {
     expect(el.load).toHaveBeenCalledTimes(1);
   });
 
+  it("asks for its copy ahead of the rest only while the video is at the playhead", async () => {
+    vi.useFakeTimers();
+    const route = stubProxyRoute(202, 202, 206);
+    const el = createVideo("/video.mp4");
+    const tickAt = (timeSeconds: number) =>
+      syncRuntimeMedia({
+        clips: [
+          {
+            el,
+            start: 0,
+            mediaStart: 0,
+            duration: 10,
+            end: 10,
+            volume: null,
+            playbackRate: 1,
+            loop: false,
+            sourceDuration: null,
+          },
+        ],
+        timeSeconds,
+        playing: false,
+        playbackRate: 1,
+      });
+    tickAt(1);
+    swapToProxy(el, HEVC_ENTRY, "proactive");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(route.mock.calls[0]![1]).toEqual(
+      expect.objectContaining({ headers: { Range: "bytes=0-0", "X-HF-Proxy-Priority": "1" } }),
+    );
+
+    tickAt(20);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(route.mock.calls[1]![1]).toEqual(
+      expect.objectContaining({ headers: { Range: "bytes=0-0" } }),
+    );
+  });
+
   it("ignores the original's own metadata and error while the copy is being made", async () => {
     vi.useFakeTimers();
     window.__HF_MEDIA_CODEC_MAP__ = {};

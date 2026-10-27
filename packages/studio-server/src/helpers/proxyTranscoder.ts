@@ -250,9 +250,8 @@ let activeTranscodes = 0;
 const waitQueue: ProxyJob[] = [];
 
 function enqueue(job: ProxyJob): void {
-  const firstNormal = job.priority ? waitQueue.findIndex((queued) => !queued.priority) : -1;
-  if (firstNormal === -1) waitQueue.push(job);
-  else waitQueue.splice(firstNormal, 0, job);
+  if (job.priority) waitQueue.unshift(job);
+  else waitQueue.push(job);
 }
 
 function dequeue(job: ProxyJob): void {
@@ -293,7 +292,6 @@ function releaseSlot(): void {
 }
 
 function prioritize(job: ProxyJob): void {
-  if (job.priority) return;
   job.priority = true;
   if (!job.queued) return;
   dequeue(job);

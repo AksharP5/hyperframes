@@ -1580,6 +1580,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "clip.mp4"),
         "h264",
         undefined,
+        { priority: false },
       );
 
       const ranged = await app.request(
@@ -1591,6 +1592,32 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
       expect(ranged.status).toBe(206);
       expect(await ranged.text()).toBe("0123456789");
       expect(ranged.headers.get("Content-Range")).toBe("bytes 0-9/20");
+    });
+
+    it("puts the copy ahead of the queue when the request says the video is at the playhead", async () => {
+      const projectDir = createProjectDir();
+      writeFileSync(join(projectDir, "clip.mp4"), "original-hevc-bytes");
+      const resolveProxyMock = vi.fn(async () => {
+        const proxyPath = join(projectDir, "proxy.mp4");
+        writeFileSync(proxyPath, "proxybytes");
+        return proxyPath;
+      });
+      const { registerPreviewRoutes: register } = await loadPreviewModule({
+        resolveProxyImpl: resolveProxyMock,
+      });
+      const app = new Hono();
+      register(app, createAdapter(projectDir));
+
+      await app.request("http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264", {
+        headers: { "X-HF-Proxy-Priority": "1" },
+      });
+      expect(resolveProxyMock).toHaveBeenCalledWith(
+        projectDir,
+        join(projectDir, "clip.mp4"),
+        "h264",
+        undefined,
+        { priority: true },
+      );
     });
 
     it("honors If-None-Match on a repeat request with a 304, without re-invoking resolveProxy", async () => {
@@ -1650,6 +1677,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "clip.mp4"),
         "h264",
         { width: 1448, height: 2048 },
+        { priority: false },
       );
       const full = await app.request(
         "http://localhost/projects/demo/preview/clip.mp4?hf-proxy=h264",
@@ -1659,6 +1687,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "clip.mp4"),
         "h264",
         undefined,
+        { priority: false },
       );
       expect(sized.headers.get("ETag")).toBeTruthy();
       expect(sized.headers.get("ETag")).not.toBe(full.headers.get("ETag"));
@@ -1699,6 +1728,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
           join(projectDir, "clip.mp4"),
           "h264",
           { width: 724, height: 362 },
+          { priority: false },
         );
       });
 
@@ -1853,6 +1883,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "clip.mov"),
         "vp8",
         undefined,
+        { priority: false },
       );
     });
 
@@ -2136,6 +2167,7 @@ describe("hf-proxy negotiation and media codec map injection (U3)", () => {
         join(projectDir, "assets", "shared", "clip.mov"),
         "h264",
         undefined,
+        { priority: false },
       );
     });
 
