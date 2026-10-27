@@ -776,10 +776,20 @@ describe("handler dispatch", () => {
     const captures = logged
       .filter((line) => line.includes('"chunk_capture"'))
       .map((line) => JSON.parse(line));
-    expect(captures).toEqual([
-      { event: "chunk_capture", chunkIndex: 0, workers: 5, captureMode: "beginframe" },
-      { event: "chunk_capture", chunkIndex: 0, workers: 5, captureMode: "beginframe" },
-    ]);
+    const capture = {
+      event: "chunk_capture",
+      chunkIndex: 0,
+      workers: 5,
+      captureMode: "beginframe",
+      setupMs: expect.any(Number),
+      chromeMs: expect.any(Number),
+      planHashMs: 1,
+      sessionBootMs: 1,
+      captureStageMs: 1,
+      encodeStageMs: 1,
+      durationMs: 1,
+    };
+    expect(captures).toEqual([capture, capture]);
   });
 
   it("rejects renderChunk when event.PlanHash diverges from plan.json", async () => {

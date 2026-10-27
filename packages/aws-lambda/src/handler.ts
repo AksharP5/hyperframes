@@ -620,7 +620,9 @@ async function handleRenderChunk(
   const started = Date.now();
   const s3 = deps?.s3 ?? getS3Client();
   const primitive = deps?.primitives?.renderChunk ?? renderChunk;
+  const chromeStarted = Date.now();
   await ensureChromePath(deps);
+  const chromeMs = Date.now() - chromeStarted;
 
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-chunk-"));
   const planTar = join(work, "plan.tar.gz");
@@ -645,6 +647,7 @@ async function handleRenderChunk(
         : `chunk-${pad(event.ChunkIndex)}${formatExtension(event.Format)}`,
     );
 
+    const primitiveStarted = Date.now();
     const result: ChunkResult = await primitive(planDir, event.ChunkIndex, chunkOutputBase, {
       maxCaptureWorkers: lambdaMaxCaptureWorkers(),
       interleaveCapture: true,
@@ -654,6 +657,7 @@ async function handleRenderChunk(
       chunkIndex: event.ChunkIndex,
       workers: result.workers,
       captureMode: result.captureMode,
+      ...chunkStageTimings(result, primitiveStarted - started, chromeMs),
     });
 
     const chunkUri = await uploadChunkOutput(
@@ -687,7 +691,9 @@ async function handleRenderChunkV2(
   const started = Date.now();
   const s3 = deps?.s3 ?? getS3Client();
   const primitive = deps?.primitives?.renderChunk ?? renderChunk;
+  const chromeStarted = Date.now();
   await ensureChromePath(deps);
+  const chromeMs = Date.now() - chromeStarted;
   const work = mkdtempSync(join(deps?.tmpRoot ?? tmpdir(), "hf-lambda-chunk-v2-"));
   try {
     const { planDir } = await downloadAndMaterializePlanV2(
@@ -702,6 +708,7 @@ async function handleRenderChunkV2(
         ? `chunk-${pad(event.ChunkIndex)}`
         : `chunk-${pad(event.ChunkIndex)}${formatExtension(event.Format)}`,
     );
+    const primitiveStarted = Date.now();
     const result = await primitive(planDir, event.ChunkIndex, chunkOutputBase, {
       maxCaptureWorkers: lambdaMaxCaptureWorkers(),
       interleaveCapture: true,
@@ -711,6 +718,7 @@ async function handleRenderChunkV2(
       chunkIndex: event.ChunkIndex,
       workers: result.workers,
       captureMode: result.captureMode,
+      ...chunkStageTimings(result, primitiveStarted - started, chromeMs),
     });
     const chunkUri = await uploadChunkOutput(
       s3,
@@ -730,6 +738,19 @@ async function handleRenderChunkV2(
   } finally {
     cleanupDir(work);
   }
+}
+
+function chunkStageTimings(result: ChunkResult, setupMs: number, chromeMs: number) {
+  const { planHashMs, sessionBootMs, captureStageMs, encodeStageMs, durationMs } = result;
+  return {
+    setupMs,
+    chromeMs,
+    planHashMs,
+    sessionBootMs,
+    captureStageMs,
+    encodeStageMs,
+    durationMs,
+  };
 }
 
 async function uploadChunkOutput(
