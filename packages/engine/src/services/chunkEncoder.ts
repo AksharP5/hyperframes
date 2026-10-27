@@ -857,8 +857,9 @@ export async function muxVideoWithAudio(
   const outputDir = dirname(outputPath);
   if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 
-  const isWebm = outputPath.endsWith(".webm");
-  const isMov = outputPath.endsWith(".mov");
+  const outputExtension = extname(outputPath).toLowerCase();
+  const isWebm = outputExtension === ".webm";
+  const isMov = outputExtension === ".mov";
   const shouldCopyAudio = isWebm ? false : await shouldCopyAacSidecar(audioPath, config);
   const args = [...(config?.videoInputArgs ?? ["-i", videoPath]), "-i", audioPath, "-c:v", "copy"];
 
