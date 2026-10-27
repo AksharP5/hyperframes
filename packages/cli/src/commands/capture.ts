@@ -37,6 +37,10 @@ export const examples: Example[] = [
     "hyperframes capture --video ./linear-video --index 0",
   ],
   [
+    "Send all capture traffic through an egress proxy",
+    "HYPERFRAMES_CAPTURE_PROXY=http://127.0.0.1:3128 hyperframes capture https://example.com",
+  ],
+  [
     "List videos referenced in the captured manifest",
     "hyperframes capture --video ./linear-video --list",
   ],
@@ -107,6 +111,14 @@ export default defineCommand({
   },
   // fallow-ignore-next-line complexity
   async run({ args }) {
+    const { captureUpstreamProxy } = await import("../capture/upstreamProxy.js");
+    try {
+      captureUpstreamProxy();
+    } catch (error) {
+      console.error(normalizeErrorMessage(error));
+      failCommand();
+    }
+
     if (args.video) {
       const { runVideoMode } = await import("./capture/video.js");
       await runVideoMode({

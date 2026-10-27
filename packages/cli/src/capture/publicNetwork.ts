@@ -1,9 +1,16 @@
 import { execFile, type ChildProcess } from "node:child_process";
 import { promises as dns } from "node:dns";
 import { readFile } from "node:fs/promises";
-import { isIP } from "node:net";
+import { isIP, type Socket } from "node:net";
 import { request as httpRequest, type IncomingMessage, type ClientRequest } from "node:http";
-import { request as httpsRequest } from "node:https";
+import { request as httpsRequest, type RequestOptions } from "node:https";
+import { connect as tlsConnect } from "node:tls";
+import {
+  captureUpstreamProxy,
+  connectAuthority,
+  openUpstreamTunnel,
+  type UpstreamProxy,
+} from "./upstreamProxy.js";
 
 const DNS_TIMEOUT_MS = 10_000;
 const CARES_TIMEOUT_MS = 5_000;
@@ -40,8 +47,7 @@ export function isPublicIPv4(address: string): boolean {
   return !NON_PUBLIC_RANGES.some(({ start, end }) => value >= start && value < end);
 }
 
-/** Validate every A answer, then return a numeric peer that callers must dial directly. */
-export async function resolvePublicAddress(hostname: string): Promise<string> {
+export function assertPublicHostname(hostname: string): string {
   const host = hostname.toLowerCase().replace(/\.$/, "");
   if (isIP(host) === 4) {
     if (!isPublicIPv4(host)) throw new Error("Capture requires a public IPv4 address");
@@ -55,6 +61,13 @@ export async function resolvePublicAddress(hostname: string): Promise<string> {
   ) {
     throw new Error("Capture requires a public hostname");
   }
+  return host;
+}
+
+/** Validate every A answer, then return a numeric peer that callers must dial directly. */
+export async function resolvePublicAddress(hostname: string): Promise<string> {
+  const host = assertPublicHostname(hostname);
+  if (isIP(host) === 4) return host;
   const answers = await resolveIPv4(host);
   const first = answers[0];
   if (!first || !answers.every(isPublicIPv4)) {
@@ -161,7 +174,51 @@ function killLiveLookups(): void {
   for (const child of liveLookups) child.kill("SIGKILL");
 }
 
-/** Pinned asset transport; redirects are returned for caller validation. */
+type Route = { options: RequestOptions; tunnel?: Socket };
+
+async function pinnedRoute(target: URL, signal: AbortSignal): Promise<Route> {
+  const address = await new Promise<string>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    resolvePublicAddress(target.hostname)
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
+  signal.throwIfAborted();
+  return {
+    options: {
+      hostname: address,
+      port: target.port || undefined,
+      agent: false,
+      servername: target.hostname,
+      rejectUnauthorized: true,
+    },
+  };
+}
+
+async function upstreamRoute(
+  target: URL,
+  proxy: UpstreamProxy,
+  headers: Headers,
+  signal: AbortSignal,
+): Promise<Route> {
+  assertPublicHostname(target.hostname);
+  if (target.protocol === "http:") {
+    if (proxy.authorization) headers.set("proxy-authorization", proxy.authorization);
+    const path = `${target.origin}${target.pathname}${target.search}`;
+    return { options: { hostname: proxy.host, port: proxy.port, agent: false, path } };
+  }
+  const tunnel = await openUpstreamTunnel(proxy, connectAuthority(target), { signal });
+  return {
+    tunnel,
+    options: {
+      createConnection: () =>
+        tlsConnect({ socket: tunnel, servername: target.hostname, rejectUnauthorized: true }),
+    },
+  };
+}
+
+/** Pinned asset transport, or the opt-in upstream proxy; redirects are returned for caller validation. */
 export async function publicRequest(url: string | URL, init: RequestInit = {}): Promise<Response> {
   const target = new URL(url);
   if (!["http:", "https:"].includes(target.protocol) || target.username || target.password) {
@@ -173,14 +230,6 @@ export async function publicRequest(url: string | URL, init: RequestInit = {}): 
   }
   // Video callers budget the entire body transfer; a default must not shorten it.
   const signal = init.signal ?? AbortSignal.timeout(30_000);
-  signal.throwIfAborted();
-  const address = await new Promise<string>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-    resolvePublicAddress(target.hostname)
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener("abort", onAbort));
-  });
   signal.throwIfAborted();
   const headers = new Headers(init.headers);
   for (const name of [
@@ -194,19 +243,19 @@ export async function publicRequest(url: string | URL, init: RequestInit = {}): 
     headers.delete(name);
   headers.set("host", target.host);
   headers.set("accept-encoding", "identity");
+  const proxy = captureUpstreamProxy();
+  const { options, tunnel } = proxy
+    ? await upstreamRoute(target, proxy, headers, signal)
+    : await pinnedRoute(target, signal);
   return new Promise<Response>((resolve, reject) => {
     const request = target.protocol === "https:" ? httpsRequest : httpRequest;
     const req = request(
       {
         protocol: target.protocol,
-        hostname: address,
-        port: target.port || undefined,
         path: `${target.pathname}${target.search}`,
+        ...options,
         method,
         headers: Object.fromEntries(headers),
-        agent: false,
-        servername: target.hostname,
-        rejectUnauthorized: true,
         signal,
       },
       (incoming) => {
@@ -218,7 +267,10 @@ export async function publicRequest(url: string | URL, init: RequestInit = {}): 
         }
       },
     );
-    req.once("error", reject);
+    req.once("error", (error) => {
+      tunnel?.destroy();
+      reject(error);
+    });
     req.end();
   });
 }
