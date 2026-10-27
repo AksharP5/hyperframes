@@ -128,6 +128,66 @@ describe("registerPreviewRoutes", () => {
     expect(authored).not.toContain('<base href="/api/projects/demo/preview/">');
   });
 
+  it("maps root module paths to the project on the page and in a sub-composition, as render serves them", async () => {
+    const projectDir = createProjectDir();
+    mkdirSync(join(projectDir, "compositions"), { recursive: true });
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!doctype html><html><head></head><body><script type="module">await import("/assets/scene.js");</script></body></html>`,
+    );
+    writeFileSync(
+      join(projectDir, "compositions/scene.html"),
+      `<template><section data-composition-id="scene" data-width="1280" data-height="720"></section></template>`,
+    );
+    const app = new Hono();
+    registerPreviewRoutes(app, createAdapter(projectDir));
+    const base = "/api/projects/demo/preview/";
+    for (const path of ["", "/comp/compositions/scene.html"]) {
+      const html = await (
+        await app.request(`http://localhost/projects/demo/preview${path}`)
+      ).text();
+      const maps = [...html.matchAll(/<script type="importmap">([^<]*)<\/script>/g)];
+      expect(maps.map((map) => JSON.parse(map[1] ?? ""))).toEqual([
+        { imports: { "/": base, [base]: base } },
+      ]);
+    }
+  });
+
+  it("adds no module import of its own, so the root-path map reaches only the composition's", async () => {
+    const projectDir = createProjectDir();
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!doctype html><html><head>
+        <script data-authored src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
+      </head><body><div id="card" class="clip"></div>
+        <script data-authored>
+          const tl = gsap.timeline({ paused: true });
+          tl.to("#card", { motionPath: { path: [{ x: 0, y: 0 }, { x: 100, y: 50 }] }, duration: 1 }, 0);
+          window.__timelines = { index: tl };
+        </script>
+      </body></html>`,
+    );
+    mkdirSync(join(projectDir, ".hyperframes"), { recursive: true });
+    writeFileSync(
+      join(projectDir, ".hyperframes/studio-motion.json"),
+      `{"version":1,"motions":[{"kind":"gsap-motion","target":{"sourceFile":"index.html","id":"card"},"start":0,"duration":1,"ease":"power2.out","from":{"y":32},"to":{"y":0}}]}`,
+    );
+    const app = new Hono();
+    registerPreviewRoutes(app, createAdapter(projectDir));
+    const html = await (await app.request("http://localhost/projects/demo/preview")).text();
+    const added = [...parseHTML(html).document.querySelectorAll("script")].filter(
+      (script) =>
+        !script.hasAttribute("data-authored") && script.getAttribute("type") !== "importmap",
+    );
+    expect(added.map((script) => script.getAttribute("src") ?? "inline")).toEqual(
+      expect.arrayContaining(["/api/runtime.js", expect.stringContaining("MotionPathPlugin")]),
+    );
+    for (const script of added) {
+      expect(script.getAttribute("type")).not.toBe("module");
+      expect(script.textContent).not.toMatch(/\bimport\s*\(|^\s*import[\s{*"']/m);
+    }
+  });
+
   it("encodes the project name in <base>, so a '#' or '\"' in it keeps assets in its own folder", async () => {
     const projectDir = createProjectDir();
     writeFileSync(join(projectDir, "scene.html"), "<template><section></section></template>");

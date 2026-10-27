@@ -43,6 +43,7 @@ import {
 } from "../helpers/safePath.js";
 import { getMimeType } from "../helpers/mime.js";
 import { buildSubCompositionHtml, hasBaseElement } from "../helpers/subComposition.js";
+import { withRootImportMap } from "../helpers/rootImportMap.js";
 import {
   htmlHasGsapCore,
   insertGsapCoreBeforeHeadPlugin,
@@ -440,10 +441,11 @@ export const PREVIEW_BUNDLE_OPTIONS = {
 const previewBaseHref = (projectId: string) =>
   `/api/projects/${encodeURIComponent(projectId)}/preview/`;
 
-const withPreviewBase = (html: string, projectId: string) =>
-  hasBaseElement(html)
-    ? html
-    : injectTagsAtHeadStart(html, `<base href="${previewBaseHref(projectId)}">`);
+const withPreviewBase = (html: string, projectId: string) => {
+  const base = previewBaseHref(projectId);
+  const mapped = withRootImportMap(html, base);
+  return hasBaseElement(mapped) ? mapped : injectTagsAtHeadStart(mapped, `<base href="${base}">`);
+};
 
 function resolvePreviewGsapBaseUrl(adapter: PreviewApiAdapter): string {
   const configured = process.env.HYPERFRAMES_GSAP_BASE_URL;
@@ -664,6 +666,7 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
       gsapBaseUrl,
     );
     if (!html) return c.text("not found", 404);
+    html = withRootImportMap(html, baseHref);
     recordPreviewReferences(project.dir, html);
     html = ensureHfIds(await transformPreviewHtml(html, adapter, project, compPath));
     html = injectStudioPreviewAugmentations(html, adapter, project.dir, compPath, {
