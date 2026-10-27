@@ -153,6 +153,31 @@ describe("registerPreviewRoutes", () => {
     }
   });
 
+  it("serves the composition's root-path media and CSS from the project, as render does, and keeps the server's own", async () => {
+    const projectDir = createProjectDir();
+    mkdirSync(join(projectDir, "compositions"), { recursive: true });
+    writeFileSync(
+      join(projectDir, "index.html"),
+      `<!doctype html><html><head><style>h1 { background: url(/bg.png) }</style></head><body><div data-composition-id="main">
+        <audio id="vo-1" class="clip" src="/assets/vo-1.mp3" data-start="0" data-duration="2"></audio></div></body></html>`,
+    );
+    writeFileSync(
+      join(projectDir, "compositions/scene.html"),
+      `<template><section data-composition-id="scene"><img src="/assets/still.png"></section></template>`,
+    );
+    const app = new Hono();
+    registerPreviewRoutes(app, createAdapter(projectDir));
+    const page = await (await app.request("http://localhost/projects/demo/preview")).text();
+    expect(page).toContain('src="assets/vo-1.mp3"');
+    expect(page).toContain("url(bg.png)");
+    expect(page).toContain('src="/api/runtime.js"');
+    const scene = await (
+      await app.request("http://localhost/projects/demo/preview/comp/compositions/scene.html")
+    ).text();
+    expect(scene).toContain('src="assets/still.png"');
+    expect(scene).toContain('src="/api/runtime.js"');
+  });
+
   it("adds no module import of its own, so the root-path map reaches only the composition's", async () => {
     const projectDir = createProjectDir();
     writeFileSync(

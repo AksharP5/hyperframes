@@ -44,6 +44,7 @@ import {
 import { getMimeType } from "../helpers/mime.js";
 import { buildSubCompositionHtml, hasBaseElement } from "../helpers/subComposition.js";
 import { withRootImportMap } from "../helpers/rootImportMap.js";
+import { withRootPathsRelative } from "../helpers/rootPaths.js";
 import {
   htmlHasGsapCore,
   insertGsapCoreBeforeHeadPlugin,
@@ -443,7 +444,7 @@ const previewBaseHref = (projectId: string) =>
 
 const withPreviewBase = (html: string, projectId: string) => {
   const base = previewBaseHref(projectId);
-  const mapped = withRootImportMap(html, base);
+  const mapped = withRootImportMap(withRootPathsRelative(html, base), base);
   return hasBaseElement(mapped) ? mapped : injectTagsAtHeadStart(mapped, `<base href="${base}">`);
 };
 
@@ -508,12 +509,10 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
         bundled = ensureHfIds(diskMain.html);
         mainCompositionPath = diskMain.compositionPath;
       }
-      bundled = withPreviewRuntime(bundled, adapter.runtimeUrl);
+      // <base> and root paths under it, before the runtime adds the server's own root path
+      bundled = withPreviewRuntime(withPreviewBase(bundled, project.id), adapter.runtimeUrl);
       recordPreviewReferences(project.dir, bundled);
       recordPreviewBuilt(project.dir);
-
-      // Inject <base> for relative asset resolution
-      bundled = withPreviewBase(bundled, project.id);
 
       // Also covers elements the adapter injected; ids already present are kept.
       bundled = injectStudioPreviewAugmentations(
@@ -542,9 +541,9 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
       // not the pre-request snapshot that may have been saved over.
       const fallback = resolveProjectMainHtml(project.dir, project.id);
       if (fallback) {
-        const fallbackHtml = withPreviewBase(
-          withPreviewRuntime(ensureHfIds(fallback.html), adapter.runtimeUrl),
-          project.id,
+        const fallbackHtml = withPreviewRuntime(
+          withPreviewBase(ensureHfIds(fallback.html), project.id),
+          adapter.runtimeUrl,
         );
         let fallbackAugmented = injectStudioPreviewAugmentations(
           await transformPreviewHtml(fallbackHtml, adapter, project, fallback.compositionPath),

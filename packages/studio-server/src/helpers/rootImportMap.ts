@@ -1,9 +1,9 @@
 import { findStartTags, injectTagsAtHeadStart } from "@hyperframes/core/compiler/html-document";
+import { underBase } from "./rootPaths.js";
 
 type Entries = Record<string, string>;
 type ImportMap = { imports?: Entries; scopes?: Record<string, Entries> };
 
-const ROOT_PATH = /^\/(?!\/)/;
 const IMPORT_MAP_TYPE = /\btype\s*=\s*["']?importmap["']?(?=[\s/>])/i;
 
 /** The first import map's JSON and where it sits; templates, comments and raw text are skipped. */
@@ -35,8 +35,7 @@ export function withRootImportMap(html: string, base: string): string {
     return html;
   }
   if (!map || typeof map !== "object") return html;
-  const under = (path: string) =>
-    ROOT_PATH.test(path) && !path.startsWith(base) ? base + path.slice(1) : path;
+  const under = (path: string) => underBase(path, base);
   const moved = (entries: Entries = {}) =>
     Object.fromEntries(
       Object.entries(entries).map(([key, target]) => [key, under(String(target))]),

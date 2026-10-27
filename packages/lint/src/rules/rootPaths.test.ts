@@ -17,26 +17,20 @@ async function hints(html: string, compSrcPath?: string) {
 }
 
 describe("root paths the preview cannot find", () => {
-  it("names each with its relative form: tags, inline and block CSS, fetch and new URL", async () => {
+  it("names each script-built root path with its relative form", async () => {
     expect(
       await hints(
-        page(`<img src="/assets/logo.png"><div style="background: url('/assets/bg.png')"></div>
-          <style>.card { background: url(/assets/card.png); }</style>
-          <script>fetch("/data/words.json"); new URL("/assets/clip.mp4", location.href);</script>`),
+        page(
+          `<script>fetch("/data/words.json"); new URL("/assets/clip.mp4", location.href);</script>`,
+        ),
       ),
-    ).toEqual([
-      'Use "assets/logo.png" instead.',
-      'Use "assets/bg.png" instead.',
-      'Use "assets/card.png" instead.',
-      'Use "data/words.json" instead.',
-      'Use "assets/clip.mp4" instead.',
-    ]);
+    ).toEqual(['Use "data/words.json" instead.', 'Use "assets/clip.mp4" instead.']);
   });
 
   it("gives a sub-composition the project path too, and a stylesheet file the path from its own folder", async () => {
-    expect(await hints(page(`<img src="/assets/logo.png">`), "compositions/intro.html")).toEqual([
-      'Use "assets/logo.png" instead.',
-    ]);
+    expect(
+      await hints(page(`<script>fetch("/data/words.json");</script>`), "compositions/intro.html"),
+    ).toEqual(['Use "data/words.json" instead.']);
     const result = await lintHyperframeHtml(page(""), {
       externalStyles: [
         {
@@ -53,10 +47,12 @@ describe("root paths the preview cannot find", () => {
     ).toEqual(['Use "../assets/bg.png" instead.']);
   });
 
-  it("leaves module imports (the preview maps them), relative paths, other hosts and links alone", async () => {
+  it("leaves what the preview moves (markup paths, module imports), relative paths, other hosts and links alone", async () => {
     expect(
       await hints(
-        page(`<img src="assets/logo.png"><img src="//cdn.example/x.png"><a href="/">home</a>
+        page(`<img src="/assets/logo.png"><div style="background: url('/assets/bg.png')"></div>
+          <style>.card { background: url(/assets/card.png); }</style>
+          <img src="assets/logo.png"><img src="//cdn.example/x.png"><a href="/">home</a>
           <script type="module">const scene = await import("/assets/scene.js"); import("/lib/x.js");</script>
           <script>fetch("https://api.example/x"); fetch(\`/\${name}.json\`);</script>`),
       ),
