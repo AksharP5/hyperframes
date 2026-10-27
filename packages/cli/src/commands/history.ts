@@ -1,16 +1,3 @@
-import { spawnSync } from "node:child_process";
-import {
-  closeSync,
-  fstatSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  readSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
 import { defineCommand, type ArgsDef } from "citty";
 import {
   HISTORY_START,
@@ -25,6 +12,7 @@ import {
 import type { Example } from "./_examples.js";
 import { trackHistoryAction } from "../telemetry/events.js";
 import { setCommandExitCode } from "../utils/commandResult.js";
+import { unifiedDiff } from "../utils/unifiedDiff.js";
 import {
   Refusal,
   endTurn,
@@ -204,48 +192,18 @@ function print(json: boolean, data: object, text: string): void {
 }
 
 async function textDiff(reader: Reader, entry: HistoryEntry): Promise<string> {
-  const work = mkdtempSync(join(tmpdir(), "hf-history-diff-"));
-  try {
-    const out: string[] = [];
-    for (const file of entry.files) {
-      const sides = await Promise.all(
-        [file.before, file.after].map((hash) => (hash ? reader.blob(hash) : Buffer.alloc(0))),
-      );
-      if (sides.some((bytes) => bytes.subarray(0, 8000).includes(0))) {
-        out.push(`Binary ${file.path} changed`);
-        continue;
-      }
-      const [a, b] = ["a", "b"].map((side, index) => {
-        const path = join(side, file.path);
-        mkdirSync(dirname(join(work, path)), { recursive: true });
-        writeFileSync(join(work, path), sides[index]!);
-        return path;
-      });
-      const outputPath = join(work, "diff");
-      const outputFd = openSync(outputPath, "w+", 0o600);
-      try {
-        const diff = spawnSync("git", ["diff", "--no-index", "--no-color", "--no-prefix", a!, b!], {
-          cwd: work,
-          encoding: "utf-8",
-          stdio: ["ignore", outputFd, "pipe"],
-        });
-        if (diff.error) throw new Refusal("--diff needs git on PATH");
-        const output = Buffer.alloc(fstatSync(outputFd).size);
-        let offset = 0;
-        while (offset < output.length) {
-          const count = readSync(outputFd, output, offset, output.length - offset, offset);
-          if (count === 0) break;
-          offset += count;
-        }
-        out.push(output.subarray(0, offset).toString("utf-8").trimEnd());
-      } finally {
-        closeSync(outputFd);
-      }
+  const out: string[] = [];
+  for (const file of entry.files) {
+    const sides = await Promise.all(
+      [file.before, file.after].map((hash) => (hash ? reader.blob(hash) : Buffer.alloc(0))),
+    );
+    if (sides.some((bytes) => bytes.subarray(0, 8000).includes(0))) {
+      out.push(`Binary ${file.path} changed`);
+      continue;
     }
-    return out.join("\n");
-  } finally {
-    rmSync(work, { recursive: true, force: true });
+    out.push(unifiedDiff(file.path, sides[0]!.toString("utf-8"), sides[1]!.toString("utf-8")));
   }
+  return out.join("\n");
 }
 
 /** `again` is the command to run once more with a choice: `undo <id>`, or `undo --who <name>` for a whole turn. */
