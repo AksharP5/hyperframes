@@ -1,6 +1,7 @@
 // fallow-ignore-file code-duplication
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1531,6 +1532,21 @@ describe("forceReleaseBrowser", () => {
 
     expect(killFn).toHaveBeenCalledWith("SIGKILL");
     expect(disconnectFn).toHaveBeenCalled();
+  });
+
+  it("absorbs the CDP pipes' late ECONNRESET so the killed browser cannot crash the process", () => {
+    const pipe = new EventEmitter();
+    const puppeteerListener = () => {};
+    pipe.on("error", puppeteerListener);
+    const mockBrowser = {
+      process: () => ({ kill: vi.fn(() => true), killed: false, stdio: [null, null, null, pipe] }),
+      // Puppeteer's own pipe listeners go away on disconnect; the pipe still errors afterwards.
+      disconnect: () => pipe.off("error", puppeteerListener),
+    } as any;
+
+    forceReleaseBrowser(mockBrowser);
+
+    expect(() => pipe.emit("error", new Error("read ECONNRESET"))).not.toThrow();
   });
 
   it("tolerates an already-killed process", () => {

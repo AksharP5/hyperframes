@@ -946,9 +946,14 @@ async function launchBrowser(
 function forceCloseBrowserProcess(browser: Browser): void {
   const proc = (
     browser as unknown as {
-      process?: () => { kill: (signal?: NodeJS.Signals) => boolean; killed?: boolean } | null;
+      process?: () => {
+        kill: (signal?: NodeJS.Signals) => boolean;
+        killed?: boolean;
+        stdio?: ReadonlyArray<NodeJS.EventEmitter | null | undefined>;
+      } | null;
     }
   ).process?.();
+  for (const stream of proc?.stdio ?? []) stream?.on("error", () => {});
   if (proc && !proc.killed) {
     try {
       proc.kill("SIGKILL");

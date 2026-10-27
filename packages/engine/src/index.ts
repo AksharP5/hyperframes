@@ -308,6 +308,7 @@ export {
   type WorkerSizingBound,
   type LandedFrame,
   type ParallelProgress,
+  type ParallelWorkerPhaseDiagnostic,
 } from "./services/parallelCoordinator.js";
 
 // ── File server ────────────────────────────────────────────────────────────────
