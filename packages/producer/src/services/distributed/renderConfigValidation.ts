@@ -164,6 +164,19 @@ export function validateDistributedRenderConfig(
     );
   }
 
+  try {
+    validateDeliveryEncoderConfig({
+      format: config.format,
+      fps: { num: config.fps, den: 1 },
+      proresProfile: config.proresProfile,
+    });
+  } catch (error) {
+    throw new InvalidConfigError(
+      "config.proresProfile",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
   if (config.chunkSize !== undefined) {
     if (!Number.isInteger(config.chunkSize) || config.chunkSize < 1) {
       throw new InvalidConfigError(

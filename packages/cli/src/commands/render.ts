@@ -139,6 +139,7 @@ import type { ProducerLogger, RenderJob, RenderPerfSummary } from "@hyperframes/
 import {
   EXTRACT_CACHE_DIR_DISABLED_ALIASES,
   sandboxDeniedRemediation,
+  type ProresProfile,
   type VideoFrameFormat,
 } from "@hyperframes/engine";
 import {
@@ -191,7 +192,7 @@ export default defineCommand({
       type: "string",
       alias: "q",
       description:
-        "Quality: draft, looks, delivery, or standard/high. looks is the default (CRF 16). delivery is high. MOV always uses the fixed alpha-preserving ProRes 4444 profile.",
+        "Quality: draft, looks, delivery, or standard/high. looks is the default (CRF 16). delivery is high. MOV uses ProRes 4444 with alpha unless --prores-profile picks a 422 profile.",
       default: "looks",
     },
     skill: {
@@ -522,6 +523,7 @@ export interface RenderOptions {
   vp9CpuUsed?: number;
   videoBitrate?: string;
   keyframeIntervalSeconds?: number;
+  proresProfile?: ProresProfile;
   maxBitrate?: string;
   bufferSize?: string;
   videoFrameFormat?: VideoFrameFormat;
@@ -855,6 +857,7 @@ async function renderDocker(
       vp9CpuUsed: options.vp9CpuUsed,
       videoBitrate: options.videoBitrate,
       keyframeIntervalSeconds: options.keyframeIntervalSeconds,
+      proresProfile: options.proresProfile,
       maxBitrate: options.maxBitrate,
       bufferSize: options.bufferSize,
       videoFrameFormat: options.videoFrameFormat,
@@ -1137,6 +1140,7 @@ async function executeLocalRender(
       crf: options.crf,
       videoBitrate: options.videoBitrate,
       keyframeIntervalSeconds: options.keyframeIntervalSeconds,
+      proresProfile: options.proresProfile,
       maxBitrate: options.maxBitrate,
       bufferSize: options.bufferSize,
       videoFrameFormat: options.videoFrameFormat,

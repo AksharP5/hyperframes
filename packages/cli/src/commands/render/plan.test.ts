@@ -166,7 +166,19 @@ describe("createRenderPlan", () => {
     );
     expect(vi.mocked(console.error).mock.calls.flat().join("\n")).toContain(flag);
     expect(vi.mocked(console.error).mock.calls.flat().join("\n")).toContain(
-      "fixed alpha-preserving ProRes 4444",
+      "MOV rate is set by the ProRes profile",
+    );
+  });
+
+  it("takes --prores-profile on MOV only", () => {
+    expect(
+      createRenderPlan({ dir: projectDir, format: "mov", "prores-profile": "hq" }).proresProfile,
+    ).toBe("hq");
+    expect(() =>
+      createRenderPlan({ dir: projectDir, format: "mp4", "prores-profile": "hq" }),
+    ).toThrow(CliUsageError);
+    expect(vi.mocked(console.error).mock.calls.flat().join("\n")).toContain(
+      "ProRes profile applies to MOV",
     );
   });
 

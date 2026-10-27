@@ -49,6 +49,25 @@ describe("validateDeliveryEncoderConfig", () => {
   });
 });
 
+describe("validateDeliveryEncoderConfig proresProfile", () => {
+  it("accepts every profile on a mov render", () => {
+    for (const proresProfile of ["4444", "hq", "422", "lt", "proxy"]) {
+      expect(() =>
+        validateDeliveryEncoderConfig({ format: "mov", fps, proresProfile }),
+      ).not.toThrow();
+    }
+  });
+
+  it("refuses an unknown name with the list, and any profile outside mov", () => {
+    expect(() =>
+      validateDeliveryEncoderConfig({ format: "mov", fps, proresProfile: "422hq" }),
+    ).toThrow("must be one of 4444, hq, 422, lt, proxy");
+    expect(() =>
+      validateDeliveryEncoderConfig({ format: "mp4", fps, proresProfile: "hq" }),
+    ).toThrow("applies to mov renders, not mp4");
+  });
+});
+
 describe("chunkGopFrames", () => {
   it("uses the chunk when no interval is set or the interval is longer", () => {
     expect(chunkGopFrames(120)).toBe(120);

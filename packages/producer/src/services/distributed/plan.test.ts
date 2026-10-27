@@ -1142,6 +1142,32 @@ describe.skipIf(spawnSync(getFfmpegBinary(), ["-version"]).status !== 0)(
       }
     }, 60_000);
 
+    it("locks each ProRes profile's preset and pixel format into a mov plan", async () => {
+      const project = audioProject("project-prores-profiles");
+      const config = { fps: 30, width: 320, height: 240, format: "mov" } as const;
+      const locked: Record<string, unknown> = {};
+      for (const proresProfile of [undefined, "4444", "hq", "422", "lt", "proxy"] as const) {
+        const dir = join(runRoot, `plan-prores-${proresProfile ?? "default"}`);
+        await buildLocalExecutionPlan(project, { ...config, proresProfile }, dir, {
+          deferAudio: true,
+        });
+        const {
+          preset,
+          pixelFormat,
+          proresProfile: lockedProfile,
+        } = JSON.parse(readFileSync(join(dir, "meta", "encoder.json"), "utf-8"));
+        locked[proresProfile ?? "default"] = { preset, pixelFormat, lockedProfile };
+      }
+      expect(locked).toEqual({
+        default: { preset: "4444", pixelFormat: "yuva444p10le" },
+        "4444": { preset: "4444", pixelFormat: "yuva444p10le" },
+        hq: { preset: "3", pixelFormat: "yuv422p10le", lockedProfile: "hq" },
+        "422": { preset: "2", pixelFormat: "yuv422p10le", lockedProfile: "422" },
+        lt: { preset: "1", pixelFormat: "yuv422p10le", lockedProfile: "lt" },
+        proxy: { preset: "0", pixelFormat: "yuv422p10le", lockedProfile: "proxy" },
+      });
+    }, 120_000);
+
     for (const slot of [
       { name: "starts on the timeline", start: 0, duration: 1 },
       { name: "starts before the timeline", start: -0.5, duration: 1.5 },

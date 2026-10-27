@@ -2,6 +2,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { CanvasResolution, OutputResolutionIssueKind } from "@hyperframes/core";
+import { PRORES_PROFILES } from "@hyperframes/engine";
 import { c } from "../../ui/colors.js";
 import { errorBox, formatBytes } from "../../ui/format.js";
 import { formatLintStartupMessage } from "../../utils/lintFormat.js";
@@ -118,6 +119,12 @@ export async function executeRenderPlan(
     reportVariableIssues(issues, { strict: plan.strictVariables, quiet: plan.quiet });
   }
 
+  if (plan.proresProfile && !PRORES_PROFILES[plan.proresProfile].alpha && !plan.quiet) {
+    console.log(
+      c.dim(`ProRes ${plan.proresProfile} has no alpha channel: transparent areas render black.`),
+    );
+  }
+
   const options = renderOptionsFromPlan(plan, browserPath, variables);
   const execute = plan.useDocker ? dependencies.renderDocker : dependencies.renderLocal;
   await execute(plan.project.dir, plan.outputPath, options, cancellation);
@@ -153,6 +160,7 @@ export function renderOptionsFromPlan(
     vp9CpuUsed: plan.vp9CpuUsed,
     videoBitrate: plan.videoBitrate,
     keyframeIntervalSeconds: plan.keyframeIntervalSeconds,
+    proresProfile: plan.proresProfile,
     maxBitrate: plan.maxBitrate,
     bufferSize: plan.bufferSize,
     videoFrameFormat: plan.videoFrameFormat,
@@ -361,6 +369,7 @@ export function batchRowRenderOptions(
     vp9CpuUsed: plan.vp9CpuUsed,
     videoBitrate: plan.videoBitrate,
     keyframeIntervalSeconds: plan.keyframeIntervalSeconds,
+    proresProfile: plan.proresProfile,
     maxBitrate: plan.maxBitrate,
     bufferSize: plan.bufferSize,
     videoFrameFormat: plan.videoFrameFormat,

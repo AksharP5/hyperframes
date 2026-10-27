@@ -1,8 +1,10 @@
 import {
+  PRORES_PROFILE_NAMES,
   isVideoFrameFormat,
   resolveConfig,
   validateEngineConfigSnapshot,
   type EngineConfig,
+  type ProresProfile,
   type VideoFrameFormat,
 } from "@hyperframes/engine";
 import {
@@ -57,6 +59,7 @@ export interface RenderRequestOptions {
   crf?: number;
   videoBitrate?: string;
   keyframeIntervalSeconds?: number;
+  proresProfile?: ProresProfile;
   maxBitrate?: string;
   bufferSize?: string;
   videoFrameFormat?: VideoFrameFormat;
@@ -192,6 +195,7 @@ function assertRequestOptionScalars(options: Record<string, unknown>): void {
   for (const field of ["entryFile", "videoBitrate", "maxBitrate", "bufferSize"] as const) {
     assertOptionalString(options, field);
   }
+  assertOptionalEnum(options, "proresProfile", PRORES_PROFILE_NAMES);
   assertOptionalEnum(options, "strictness", ["strict", "best-effort"]);
   assertOptionalEnum(options, "hdrMode", ["auto", "force-hdr", "force-sdr"]);
   assertOptionalEnum(options, "pageMotionBlur", ["off"]);
@@ -315,6 +319,7 @@ export function distributedConfigFromRequest(
     pageMotionBlur: options.pageMotionBlur,
     bitrate: options.videoBitrate,
     keyframeIntervalSeconds: options.keyframeIntervalSeconds,
+    proresProfile: options.proresProfile,
     maxBitrate: options.maxBitrate,
     bufferSize: options.bufferSize,
     videoFrameFormat: options.videoFrameFormat,
@@ -374,6 +379,7 @@ export function renderRequestFromDistributedConfig(input: {
     ...optionalProperty("pageMotionBlur", config.pageMotionBlur),
     ...optionalProperty("videoBitrate", config.bitrate),
     ...optionalProperty("keyframeIntervalSeconds", config.keyframeIntervalSeconds),
+    ...optionalProperty("proresProfile", config.proresProfile),
     ...optionalProperty("maxBitrate", config.maxBitrate),
     ...optionalProperty("bufferSize", config.bufferSize),
     ...optionalProperty("videoFrameFormat", config.videoFrameFormat),

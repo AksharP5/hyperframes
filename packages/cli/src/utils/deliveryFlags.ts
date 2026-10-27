@@ -1,4 +1,5 @@
-import { appendRateCapArgs } from "@hyperframes/engine";
+import { PRORES_PROFILE_NAMES, appendRateCapArgs, isProresProfile } from "@hyperframes/engine";
+import type { ProresProfile } from "@hyperframes/engine";
 import { errorBox } from "../ui/format.js";
 import { failUsage } from "./commandResult.js";
 
@@ -18,18 +19,24 @@ export const deliveryFlagArgs = {
     type: "string",
     description: "Buffer for --max-bitrate, such as 16M (default: twice --max-bitrate).",
   },
+  "prores-profile": {
+    type: "string",
+    description: `MOV ProRes profile: ${PRORES_PROFILE_NAMES.join(", ")} (default 4444, keeps alpha; the others drop it).`,
+  },
 } as const;
 
 export interface DeliveryFlagValues {
   keyframeIntervalSeconds?: number;
   maxBitrate?: string;
   bufferSize?: string;
+  proresProfile?: ProresProfile;
 }
 
 interface DeliveryFlagArgs {
   "keyframe-interval"?: string;
   "max-bitrate"?: string;
   "buffer-size"?: string;
+  "prores-profile"?: string;
 }
 
 /** Parse the delivery flags, exiting with a usage error on a value the encoder would refuse. */
@@ -48,6 +55,17 @@ export function parseDeliveryFlags(args: DeliveryFlagArgs): DeliveryFlagValues {
       failUsage();
     }
     values.keyframeIntervalSeconds = seconds;
+  }
+  const profile = args["prores-profile"]?.trim();
+  if (profile !== undefined) {
+    if (!isProresProfile(profile)) {
+      errorBox(
+        "Invalid prores-profile",
+        `Got "${profile}". Must be one of ${PRORES_PROFILE_NAMES.join(", ")}.`,
+      );
+      failUsage();
+    }
+    values.proresProfile = profile;
   }
   if (maxBitrate !== undefined) values.maxBitrate = maxBitrate;
   if (bufferSize !== undefined) values.bufferSize = bufferSize;

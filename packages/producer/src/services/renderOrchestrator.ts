@@ -77,6 +77,7 @@ import {
   type BeforeCaptureHook,
   createVideoFrameInjector,
   getEncoderPreset,
+  type ProresProfile,
   distributeFrames,
   distributeFramesInterleaved,
   executeParallelCapture,
@@ -417,6 +418,8 @@ export interface RenderConfig {
   videoBitrate?: string;
   /** Keyframe every N seconds (mp4). A maximum where chunks join, as on Lambda. */
   keyframeIntervalSeconds?: number;
+  /** MOV only: ProRes profile. Default `4444` keeps alpha; the 422 profiles drop it. */
+  proresProfile?: ProresProfile;
   /** Peak bitrate cap (e.g. "8M", mp4) alongside CRF. */
   maxBitrate?: string;
   /** Rate-cap buffer; defaults to twice `maxBitrate`. */
@@ -4536,7 +4539,12 @@ async function executeRenderPipeline(input: {
     // are never written to ffmpeg in the png-sequence path.
     const presetFormat: "mp4" | "webm" | "mov" =
       outputFormat === "webm" || outputFormat === "mov" ? outputFormat : "mp4";
-    const preset = getEncoderPreset(job.config.quality, presetFormat, encoderHdr);
+    const preset = getEncoderPreset(
+      job.config.quality,
+      presetFormat,
+      encoderHdr,
+      job.config.proresProfile,
+    );
 
     // CLI overrides (--crf, --video-bitrate) flow through job.config and must
     // win over the preset-derived defaults. The CLI enforces mutual exclusivity

@@ -927,7 +927,12 @@ export async function renderChunk(
       const presetFormat: "mp4" | "mov" | "webm" = isPngSequence
         ? "mp4"
         : (plan.dimensions.format as "mp4" | "mov" | "webm");
-      const basePreset = getEncoderPreset(job.config.quality, presetFormat, undefined);
+      const basePreset = getEncoderPreset(
+        job.config.quality,
+        presetFormat,
+        undefined,
+        encoder.proresProfile,
+      );
       const preset = resolvePresetForLockedEncoder(basePreset, encoder.encoder);
       const effectiveQuality = encoder.crf ?? preset.quality;
       const effectiveBitrate = encoder.crf != null ? undefined : encoder.bitrate;

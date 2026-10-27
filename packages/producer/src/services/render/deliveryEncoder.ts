@@ -1,6 +1,11 @@
 /** Delivery encoder options: their fail-fast gate and the one resolved value every encoder path spreads. */
 
-import { appendRateCapArgs, keyframeIntervalToGopSize } from "@hyperframes/engine";
+import {
+  PRORES_PROFILE_NAMES,
+  appendRateCapArgs,
+  isProresProfile,
+  keyframeIntervalToGopSize,
+} from "@hyperframes/engine";
 import type { Fps } from "@hyperframes/core";
 import { resolveHlsEncoderGopLock } from "./hlsConfig.js";
 
@@ -11,6 +16,7 @@ export interface DeliveryEncoderConfig {
   keyframeIntervalSeconds?: number;
   maxBitrate?: string;
   bufferSize?: string;
+  proresProfile?: string;
 }
 
 /** The `EncoderOptions` fields the delivery config sets, ready to spread into any encoder input. */
@@ -21,9 +27,25 @@ export interface DeliveryEncoderOptions {
   gopSize: number | undefined;
 }
 
+function validateProresProfile(
+  format: string | undefined,
+  proresProfile: string | undefined,
+): void {
+  if (proresProfile === undefined) return;
+  if (!isProresProfile(proresProfile)) {
+    throw new Error(
+      `proresProfile must be one of ${PRORES_PROFILE_NAMES.join(", ")}; got ${JSON.stringify(proresProfile)}`,
+    );
+  }
+  if (format !== undefined && format !== "mov") {
+    throw new Error(`proresProfile applies to mov renders, not ${format}`);
+  }
+}
+
 /** Reject what the encoders cannot honor, before any frame is captured. */
 export function validateDeliveryEncoderConfig(config: DeliveryEncoderConfig): void {
-  const { keyframeIntervalSeconds, maxBitrate, bufferSize, format } = config;
+  const { keyframeIntervalSeconds, maxBitrate, bufferSize, format, proresProfile } = config;
+  validateProresProfile(format, proresProfile);
   if (keyframeIntervalSeconds === undefined && maxBitrate === undefined && bufferSize === undefined)
     return;
   if (keyframeIntervalSeconds !== undefined) {

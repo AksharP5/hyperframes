@@ -901,6 +901,32 @@ describe("getEncoderPreset", () => {
     expect(preset.pixelFormat).toBe("yuva444p10le");
   });
 
+  it.each([
+    ["4444", "4444", "yuva444p10le"],
+    ["hq", "3", "yuv422p10le"],
+    ["422", "2", "yuv422p10le"],
+    ["lt", "1", "yuv422p10le"],
+    ["proxy", "0", "yuv422p10le"],
+  ] as const)("maps ProRes profile %s to -profile:v %s and %s", (name, profile, pixelFormat) => {
+    const preset = getEncoderPreset("standard", "mov", undefined, name);
+    expect(preset).toMatchObject({ codec: "prores", preset: profile, pixelFormat });
+    const args = buildEncoderArgs(
+      {
+        fps: { num: 30, den: 1 },
+        width: 1920,
+        height: 1080,
+        codec: "prores",
+        preset: preset.preset,
+        quality: 23,
+        pixelFormat,
+      },
+      ["-framerate", "30", "-i", "frames/%04d.png"],
+      "out.mov",
+    );
+    expect(args[args.indexOf("-profile:v") + 1]).toBe(profile);
+    expect(args[args.indexOf("-pix_fmt") + 1]).toBe(pixelFormat);
+  });
+
   it("uses prores 4444 for all mov quality levels", () => {
     for (const q of ["draft", "standard", "high"] as const) {
       const preset = getEncoderPreset(q, "mov");

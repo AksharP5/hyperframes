@@ -22,6 +22,11 @@ describe("parseDeliveryFlags", () => {
     ).toEqual({ keyframeIntervalSeconds: 2.5, maxBitrate: "8M", bufferSize: "12M" });
   });
 
+  it("reads the ProRes profile and rejects an unknown name before any render starts", () => {
+    expect(parseDeliveryFlags({ "prores-profile": " hq " })).toEqual({ proresProfile: "hq" });
+    expect(() => parseDeliveryFlags({ "prores-profile": "422hq" })).toThrow(CliUsageError);
+  });
+
   it.each([["0"], ["-1"], ["abc"], [""]])("rejects keyframe interval %j", (value) => {
     expect(() => parseDeliveryFlags({ "keyframe-interval": value })).toThrow(CliUsageError);
   });

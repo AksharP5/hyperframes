@@ -363,6 +363,7 @@ export function buildLambdaBatchRenderConfig(
     maxParallelChunks: args.maxParallelChunks,
     targetChunkFrames: args.targetChunkFrames,
     keyframeIntervalSeconds: args.keyframeIntervalSeconds,
+    proresProfile: args.proresProfile,
     maxBitrate: args.maxBitrate,
     bufferSize: args.bufferSize,
     workerConcurrency,
