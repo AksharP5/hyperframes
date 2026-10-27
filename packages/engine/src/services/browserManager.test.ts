@@ -714,6 +714,21 @@ describe("resolveBrowserGpuMode", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("does not keep a probe its own caller cancelled as the answer for the process", async () => {
+    setMockWebGlProbe({ hasWebGL: true, vendor: "NVIDIA", renderer: "NVIDIA" });
+    const cancelled = {
+      launch: async () => {
+        throw new DOMException("This operation was aborted", "AbortError");
+      },
+      close: vi.fn(),
+    };
+    const first = resolveBrowserGpuMode("auto", { probeLifecycle: cancelled });
+    const second = resolveBrowserGpuMode("auto");
+    await expect(second).resolves.toBe("hardware");
+    await first;
+    await expect(resolveBrowserGpuMode("auto")).resolves.toBe("hardware");
+  });
+
   it("passes 'software' through unchanged without probing", async () => {
     const mode = await resolveBrowserGpuMode("software");
     expect(mode).toBe("software");
