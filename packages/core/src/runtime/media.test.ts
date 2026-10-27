@@ -7,6 +7,7 @@ import {
   readElementPlaybackRate,
   readElementPlaybackStart,
   refreshRuntimeMediaCache,
+  resetVideoStartLatency,
   resolveRuntimeMediaClipDuration,
   syncRuntimeMedia as syncRuntimeMediaWithDuration,
 } from "./media";
@@ -2051,6 +2052,105 @@ describe("syncRuntimeMedia", () => {
         tick(clip, timeSeconds);
       }
       expect(el.pause).not.toHaveBeenCalled();
+    });
+
+    describe("start latency", () => {
+      afterEach(() => resetVideoStartLatency());
+
+      // Plays `clip` at `playAt`, then has its element `lag` s behind the playhead at `sampleAt`.
+      const startWithLag = (
+        clip: RuntimeMediaClip,
+        playAt: number,
+        sampleAt: number,
+        lag: number,
+      ) => {
+        tick(clip, playAt);
+        expect(clip.el.play).toHaveBeenCalledTimes(1);
+        Object.defineProperty(clip.el, "paused", {
+          value: false,
+          writable: true,
+          configurable: true,
+        });
+        clip.el.currentTime = clip.mediaStart + (sampleAt - clip.start) - lag;
+        tick(clip, sampleAt);
+      };
+
+      it("does not start an upcoming video early before any start is measured", () => {
+        const clip = videoClip({ start: 10, end: 20, mediaStart: 0 });
+        tick(clip, 9.99);
+        expect(clip.el.play).not.toHaveBeenCalled();
+      });
+
+      it("starts an upcoming video early by the start latency measured on earlier ones", () => {
+        startWithLag(videoClip({ start: 0, end: 10, mediaStart: 0 }), 0, 0.3, 0.06);
+        const due50ms = videoClip({ start: 10, end: 20, mediaStart: 0 });
+        tick(due50ms, 9.95);
+        expect(due50ms.el.play).toHaveBeenCalledTimes(1);
+        const due70ms = videoClip({ start: 10, end: 20, mediaStart: 0 });
+        tick(due70ms, 9.93);
+        expect(due70ms.el.play).not.toHaveBeenCalled();
+      });
+
+      it("starts an upcoming video on the tick nearest its lead", () => {
+        startWithLag(videoClip({ start: 0, end: 10, mediaStart: 0 }), 0, 0.3, 0.06);
+        const due75ms = videoClip({ start: 10, end: 20, mediaStart: 0 });
+        // Now is 15 ms earlier than the 60 ms lead; the next tick, 40 ms on, would be 25 ms late.
+        syncRuntimeMedia({
+          clips: [due75ms],
+          timeSeconds: 9.925,
+          playing: true,
+          playbackRate: 1,
+          cueAheadSeconds: 0.04,
+          getCompositionDuration: () => 30,
+        });
+        expect(due75ms.el.play).toHaveBeenCalledTimes(1);
+      });
+
+      it("learns from a video seeked and started in the same tick", () => {
+        const seeked = videoClip({ start: 0, end: 10, mediaStart: 0 });
+        seeked.el.currentTime = 0;
+        startWithLag(seeked, 5, 5.3, 0.06);
+        const due25ms = videoClip({ start: 10, end: 20, mediaStart: 0 });
+        tick(due25ms, 9.975);
+        expect(due25ms.el.play).toHaveBeenCalledTimes(1);
+      });
+
+      it("keeps its lead when an early start lands on time", () => {
+        startWithLag(videoClip({ start: 0, end: 10, mediaStart: 0 }), 0, 0.3, 0.06);
+        startWithLag(videoClip({ start: 10, end: 20, mediaStart: 0 }), 9.945, 10.3, 0.005);
+        const due58ms = videoClip({ start: 20, end: 30, mediaStart: 0 });
+        tick(due58ms, 19.942);
+        expect(due58ms.el.play).toHaveBeenCalledTimes(1);
+      });
+
+      it("caps the learned start delay at 100 ms", () => {
+        startWithLag(videoClip({ start: 0, end: 10, mediaStart: 0 }), 0, 0.3, 0.3);
+        const due150ms = videoClip({ start: 10, end: 20, mediaStart: 0 });
+        tick(due150ms, 9.85);
+        expect(due150ms.el.play).not.toHaveBeenCalled();
+      });
+
+      it("does not learn from a looping video sampled across a lap wrap", () => {
+        startWithLag(videoClip({ start: 0, end: 10, mediaStart: 0 }), 0, 0.3, 0.06);
+        const loop = videoClip({
+          start: 10,
+          end: 20,
+          mediaStart: 0,
+          loop: true,
+          sourceDuration: 0.2,
+        });
+        tick(loop, 10);
+        Object.defineProperty(loop.el, "paused", {
+          value: false,
+          writable: true,
+          configurable: true,
+        });
+        loop.el.currentTime = 0.19; // the playhead has wrapped to 0.06, the element not yet
+        tick(loop, 10.26);
+        const due50ms = videoClip({ start: 30, end: 40, mediaStart: 0 });
+        tick(due50ms, 29.95);
+        expect(due50ms.el.play).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

@@ -236,6 +236,7 @@ export function evictMediaSyncState(el: HTMLMediaElement): void {
   lastRuntimeAppliedVolume.delete(el);
   forgetSteering(el);
   heldAhead.delete(el);
+  videoStarts.delete(el);
 }
 
 /** Test-only seam: whether any per-source sync state is still tracked for `el`. */
@@ -302,6 +303,26 @@ const MIN_NATIVE_PLAYBACK_RATE = 1 / 16;
 const VIDEO_LEAD_HOLD_SECONDS = 0.1;
 const heldAhead = new WeakSet<HTMLMediaElement>();
 
+// A muted video's clock is its audio track, which starts tens of ms after play(), so an upcoming
+// video starts that early, hidden, by the delay learned from earlier starts.
+let videoStartLatency: number | null = null;
+const videoStarts = new WeakMap<HTMLMediaElement, { offset: number; lead: number; at: number }>();
+
+/** Test-only seam. */
+export function resetVideoStartLatency(): void {
+  videoStartLatency = null;
+}
+
+/** A quarter second in: its lag plus how early it started, capped at 0.1 s. */
+function learnVideoStartLatency(el: HTMLMediaElement, time: number, offset: number, rate: number) {
+  const start = videoStarts.get(el);
+  if (!start || time < start.at) return;
+  videoStarts.delete(el);
+  const sample = (offset - start.offset) / rate + start.lead;
+  const averaged = videoStartLatency === null ? sample : (videoStartLatency + sample) / 2;
+  videoStartLatency = Math.min(0.1, Math.max(0, averaged));
+}
+
 // fallow-ignore-next-line complexity
 export function syncRuntimeMedia(params: {
   clips: RuntimeMediaClip[];
@@ -364,15 +385,18 @@ export function syncRuntimeMedia(params: {
     const isNonLoopVideo = el.tagName === "VIDEO" && !clip.loop;
     const inWindow = isInClipWindow(params.timeSeconds, clip.start, clip.end);
     const dueIn = clip.start - params.timeSeconds;
+    const cueAhead =
+      el.tagName === "AUDIO"
+        ? (params.cueAheadSeconds ?? 0)
+        : params.playing && videoStartLatency !== null
+          ? // Half a tick: it starts on the tick nearest its lead.
+            videoStartLatency * params.playbackRate + (params.cueAheadSeconds ?? 0) / 2
+          : 0;
     const startsEarly =
-      el.tagName === "AUDIO" &&
       !inWindow &&
       dueIn > 0 &&
       dueIn * Math.max(1, rateAt(clipRate, clip.start - origin)) <=
-        Math.max(
-          params.cueAheadSeconds ?? 0,
-          startedEarly.has(el) ? MEDIA_SYNC_TOLERANCE_SECONDS : 0,
-        );
+        Math.max(cueAhead, startedEarly.has(el) ? MEDIA_SYNC_TOLERANCE_SECONDS : 0);
     if (startsEarly) startedEarly.add(el);
     else startedEarly.delete(el);
     // A video that runs to the composition end stays the visible frame at and past it, so it
@@ -569,6 +593,7 @@ export function syncRuntimeMedia(params: {
       }
       const holdingAhead = heldAhead.has(el);
       const isPlayingMedia = !el.paused && playing;
+      if (isPlayingMedia) learnVideoStartLatency(el, params.timeSeconds, offset, baseRate);
       // Only apply strict sync when offset has stabilized (not growing).
       // During initial buffering, offset grows ~16ms/tick as the timeline
       // advances while media stays at 0. Accumulated drift from pause/play
@@ -641,6 +666,7 @@ export function syncRuntimeMedia(params: {
         }
         playRequested.delete(el);
         heldAhead.delete(el);
+        videoStarts.delete(el);
       } else if (!playing) {
         holdSeekBarrierUntilVideoLands(el);
       }
@@ -666,6 +692,13 @@ export function syncRuntimeMedia(params: {
         // fire between `load()` and `addEventListener` attachment, wedging
         // the element waiting for a callback that never came.
         markPlayRequested(el);
+        // Offset read after any seek above; a loop could wrap a lap before the sample.
+        if (isNonLoopVideo)
+          videoStarts.set(el, {
+            offset: relTime - (el.currentTime || 0),
+            lead: Math.max(0, clip.start - params.timeSeconds) / params.playbackRate,
+            at: Math.max(params.timeSeconds, clip.start) + 0.25 * params.playbackRate,
+          });
         void el.play().catch((err: unknown) => {
           // If play() rejects — e.g. autoplay blocked, element removed
           // mid-flight — drop the in-flight flag so a future sync tick can
