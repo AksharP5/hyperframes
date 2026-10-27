@@ -9,6 +9,7 @@ import {
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { requestCliExit } from "../utils/commandResult.js";
 import { processIsAlive } from "../utils/processTree.js";
+import { chromeDescendants, reapChromeTree } from "./chromeTree.js";
 import { watchChromeTree, type ChromeWatchdog } from "./windowsChromeWatchdog.js";
 import {
   inAgentSandbox,
@@ -259,10 +260,16 @@ async function closeBrowser(browser: Browser): Promise<void> {
   }
 }
 
+async function descendantsToReap(pid: number | undefined) {
+  if (pid === undefined || process.platform === "win32") return [];
+  return chromeDescendants(pid).catch(() => []);
+}
+
 async function closedWithoutKill(browser: Browser): Promise<boolean> {
   const child = browser.process();
   if (!child) throw new Error("A managed browser lost its owned process.");
   if (child.exitCode !== null || child.signalCode !== null) return false;
+  const tree = await descendantsToReap(child.pid);
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   let timer: NodeJS.Timeout | undefined;
   let poll: NodeJS.Timeout | undefined;
@@ -289,6 +296,7 @@ async function closedWithoutKill(browser: Browser): Promise<boolean> {
       }, EXIT_POLL_MS);
     });
     await Promise.race([exited, goneBeforeExitEvent, exitLimit]);
+    await reapChromeTree(tree).catch(() => undefined);
     return clean;
   } finally {
     clearTimeout(timer);
