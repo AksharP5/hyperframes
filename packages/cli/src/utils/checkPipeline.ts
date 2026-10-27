@@ -536,7 +536,7 @@ async function collectGridSamples(
   grid: SampleGrid,
   motion: MotionPlan,
   helpers: Promise<CheckAuditDriver[]>,
-  enter: (phase: CheckPhase) => void,
+  enter: (phase: CheckPhase, detail?: string) => void,
   report: CheckProgress,
   keep: (read: () => Partial<CheckBrowserResult>) => void,
 ): Promise<GridSamples> {
@@ -567,6 +567,7 @@ async function collectGridSamples(
     for (let index = pending.shift(); index !== undefined; index = pending.shift()) {
       taken.push(index);
       const time = times[index] ?? 0;
+      enter("samples", `layout sample at ${time}s`);
       perTime[index] = await collectSampleAt(worker, options, grid, motion, sets, time);
       enter("samples");
       report("samples", ++finished, times.length);
@@ -607,7 +608,7 @@ async function collectGridSamples(
     collected,
     options.range,
     craftEnabled(driver, options),
-    () => enter("overlap"),
+    (detail) => enter("overlap", detail),
     report,
   );
   enter("samples");
@@ -725,12 +726,13 @@ async function denseOverlapTimes(
 async function collectOverlapGridInBatches(
   driver: CheckAuditDriver,
   times: number[],
-  progress: () => void,
+  progress: (detail?: string) => void,
   report: CheckProgress,
 ): Promise<AnchoredLayoutIssue[][]> {
   const issues: AnchoredLayoutIssue[][] = [];
   const batches = Math.ceil(times.length / OVERLAP_BATCH);
   for (let from = 0; from < times.length; from += OVERLAP_BATCH) {
+    progress(`overlap probes from ${times[from]}s`);
     issues.push(...(await driver.collectOverlapGrid(times.slice(from, from + OVERLAP_BATCH))));
     progress();
     report("overlap", from / OVERLAP_BATCH + 1, batches);
@@ -744,7 +746,7 @@ async function collectMotionOverlapSamples(
   collected: GridSamples,
   range: [number, number] | undefined,
   craft: boolean,
-  progress: () => void,
+  progress: (detail?: string) => void,
   report: CheckProgress,
 ): Promise<void> {
   const baseTimes = new Set(grid.layoutSamples);
@@ -755,6 +757,7 @@ async function collectMotionOverlapSamples(
     // The render's last frame lands before the duration, where the runtime has already unmounted clips.
     const craftTimes = buildCraftSampleTimes(grid.duration).filter((time) => time < grid.duration);
     for (const [index, time] of craftTimes.entries()) {
+      progress(`craft frame at ${time}s`);
       await driver.seekGeometry(time);
       collected.craftFrames.push(...(await collectCraftFrame(driver, time)));
       progress();
@@ -1506,7 +1509,7 @@ export async function runAuditGrid(
   options: CheckOptions,
   motion: MotionSpecResolution,
   helpers: Promise<CheckAuditDriver[]> = Promise.resolve([]),
-  enter: (phase: CheckPhase) => void = () => {},
+  enter: (phase: CheckPhase, detail?: string) => void = () => {},
   report: CheckProgress = () => {},
   keep: (read: () => Partial<CheckBrowserResult>) => void = () => {},
 ): Promise<CheckBrowserResult> {

@@ -16,3 +16,17 @@ export function normalizeErrorMessage(error: unknown): string {
   }
   return String(error ?? "unknown error");
 }
+
+const PROTOCOL_TIMEOUT_ADVICE =
+  / Increase the 'protocolTimeout' setting in launch\/connect calls[^.]*\./;
+
+export async function atStep<T>(step: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof Error && !error.message.includes(` (while ${step})`)) {
+      error.message = error.message.replace(PROTOCOL_TIMEOUT_ADVICE, "") + ` (while ${step})`;
+    }
+    throw error;
+  }
+}

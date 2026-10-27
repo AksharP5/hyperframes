@@ -52,7 +52,7 @@ export class CheckDeadline {
   private readonly expiry: Promise<never>;
   private rejectExpiry!: (error: Error) => void;
   private phase: "waiting" | "started" | "closed" = "waiting";
-  private work: { phase: CheckPhase; since: number } | undefined;
+  private work: { phase: CheckPhase; since: number; detail?: string } | undefined;
   private readonly spent = new Map<CheckPhase, number>();
   private readonly partials: Array<() => Partial<CheckBrowserResult>> = [];
 
@@ -70,11 +70,11 @@ export class CheckDeadline {
     return Object.assign({}, ...this.partials.map((read) => read()));
   }
 
-  enter = (phase: CheckPhase): void => {
+  enter = (phase: CheckPhase, detail?: string): void => {
     if (this.expired) return;
     const now = Date.now();
     if (this.work) this.spend(this.work.phase, now - this.work.since);
-    this.work = { phase, since: now };
+    this.work = { phase, since: now, detail };
     this.spend(phase, 0);
     this.rearm();
   };
@@ -90,7 +90,7 @@ export class CheckDeadline {
       const seconds = ((phase === this.work?.phase ? ms + open : ms) / 1000).toFixed(1);
       return `${PHASE_LABELS[phase]} ${seconds}${BEFORE_DEADLINE.has(phase) ? " (before the deadline)" : ""}`;
     });
-    return ` (no progress for ${CHECK_IDLE_MS / 1000} s after Chrome was ready), while ${PHASE_LABELS[this.work.phase]}. Seconds per phase: ${parts.join(", ")}.`;
+    return ` (no progress for ${CHECK_IDLE_MS / 1000} s after Chrome was ready), while ${PHASE_LABELS[this.work.phase]}${this.work.detail ? ` (${this.work.detail})` : ""}. Seconds per phase: ${parts.join(", ")}.`;
   }
 
   start = (): void => {

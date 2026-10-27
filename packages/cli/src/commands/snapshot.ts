@@ -71,7 +71,7 @@ import {
   lintProject,
 } from "../utils/lintProject.js";
 import { formatLintFindings } from "../utils/lintFormat.js";
-import { normalizeErrorMessage } from "../utils/errorMessage.js";
+import { normalizeErrorMessage, atStep } from "../utils/errorMessage.js";
 import { describeSharpLoadFailure } from "../utils/sharpLoadFailure.js";
 import { serveStaticProjectHtml } from "../utils/staticProjectServer.js";
 import { c } from "../ui/colors.js";
@@ -879,7 +879,9 @@ async function captureSnapshots(
         const time = positions[i]!;
 
         const seekOptions = { exactTime: true, waitForImagesMs: SCREENSHOT_IMAGE_WAIT_MS };
-        await seekCompositionTimelineOnly(page, time, seekOptions);
+        await atStep(`seeking to ${time}s, frame ${i + 1} of ${positions.length}`, () =>
+          seekCompositionTimelineOnly(page, time, seekOptions),
+        );
 
         if (cameraExpr) await page.evaluate(cameraExpr);
 
@@ -1065,7 +1067,9 @@ async function captureSnapshots(
         } else {
           writeCaptureFileSync(
             framePath,
-            await page.screenshot({ type: "png", omitBackground: true }),
+            await atStep(`capturing the frame at ${time}s`, () =>
+              page.screenshot({ type: "png", omitBackground: true }),
+            ),
           );
         }
         artifacts.push({

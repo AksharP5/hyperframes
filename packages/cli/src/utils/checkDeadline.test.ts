@@ -176,3 +176,20 @@ it("a stop ends the check at once, keeping what it already found", async () => {
     await deadline.close();
   }
 });
+
+it("an expired check names the step it was on", async () => {
+  vi.useFakeTimers();
+  const deadline = new CheckDeadline();
+  deadline.start();
+  try {
+    deadline.enter("samples", "layout sample at 2.5s");
+    const sample = deadline.run(() => rejectOnAbort(deadline.signal));
+    const failed = expect(sample).rejects.toThrow(
+      "while checking samples (layout sample at 2.5s). Seconds per phase",
+    );
+    await vi.advanceTimersByTimeAsync(120_000);
+    await failed;
+  } finally {
+    await deadline.close();
+  }
+});
