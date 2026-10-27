@@ -1,4 +1,4 @@
-import { execFile, type ChildProcess } from "node:child_process";
+import { execFile, type ChildProcess, type ExecFileException } from "node:child_process";
 import { promises as dns } from "node:dns";
 import { readFile } from "node:fs/promises";
 import { isIP, type Socket } from "node:net";
@@ -138,6 +138,13 @@ const SYSTEM_LOOKUP = `require("node:dns").lookup(process.argv[1], { all: true, 
 
 const liveLookups = new Set<ChildProcess>();
 
+function helperEnded(error: ExecFileException | null): string {
+  if (!error) return "the lookup helper printed no answer";
+  return error.signal
+    ? `the lookup helper was ended by ${error.signal}`
+    : `the lookup helper exited with code ${error.code}`;
+}
+
 export function systemLookupInKillableChild(host: string, timeoutMs: number): Promise<string[]> {
   if (!process.listeners("exit").includes(killLiveLookups)) process.on("exit", killLiveLookups);
   const answers = new Promise<string[]>((resolve, reject) => {
@@ -152,7 +159,7 @@ export function systemLookupInKillableChild(host: string, timeoutMs: number): Pr
       },
       (error, stdout, stderr) => {
         if (error?.killed) reject(new Error("Capture DNS timed out"));
-        else if (!stdout) reject(new Error(`Capture DNS failed: ${stderr || error?.message}`));
+        else if (!stdout) reject(new Error(`Capture DNS failed: ${stderr || helperEnded(error)}`));
         else {
           try {
             resolve(JSON.parse(stdout) as string[]);

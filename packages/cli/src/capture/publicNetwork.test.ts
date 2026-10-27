@@ -91,6 +91,23 @@ describe("public address policy", () => {
       "Capture DNS failed: ENOTFOUND",
     );
   });
+  it.each([
+    [{ code: 3221225794 }, "Capture DNS failed: the lookup helper exited with code 3221225794"],
+    [
+      { code: null, signal: "SIGKILL" },
+      "Capture DNS failed: the lookup helper was ended by SIGKILL",
+    ],
+  ])(
+    "names how the system lookup helper ended when it says nothing (%j)",
+    async (ended, message) => {
+      mocks.resolve4.mockRejectedValue(new Error("queryA ENOTFOUND"));
+      mocks.execFile.mockImplementation((_file, _args, _options, callback) => {
+        callback(Object.assign(new Error("Command failed"), ended), "", "");
+        return liveChild();
+      });
+      await expect(resolvePublicAddress("helper-died.example.org")).rejects.toThrow(message);
+    },
+  );
   it("checks a system answer like a DNS one, and asks the system once per host", async () => {
     mocks.resolve4.mockRejectedValue(new Error("queryA ENOTFOUND"));
     systemLookupPrints('["127.0.0.1"]');
