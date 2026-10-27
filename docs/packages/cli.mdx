@@ -295,6 +295,8 @@ thin with counts on it was cut short.
 | `--skip-vision`     | Do not run AI image captioning                                                                                                                    |
 | `--max-screenshots` | Maximum page-capture files, including the full-page plate; derived contact sheets are excluded. Positive integer; default 21. A value of 1 captures only the top viewport.                                                                              |
 | `--json`            | Structured output for programmatic use                                                                                                             |
+| `--local-file`      | Capture a local HTML file, or a directory's `index.html`, instead of a URL. See [Local HTML files](#local-html-files).                                       |
+| `--local-root`      | With `--local-file`: the directory the page may read local files from. Default: the file's directory.                                                |
 | `--video <folder>`  | Switch to video-download mode against a captured folder's manifest. Pair with `--list`, `--index`, or `--video-url`.                               |
 
 You get `AGENTS.md`, `CLAUDE.md`, `meta.json`, scroll screenshots, extracted
@@ -314,6 +316,33 @@ For AI image descriptions, set `GEMINI_API_KEY` in a `.env` file
 (~$0.001/image), or `OPENROUTER_API_KEY` to route any vision model through
 [OpenRouter](https://openrouter.ai) — it wins if both are set, and
 `HYPERFRAMES_OPENROUTER_MODEL` overrides the model.
+
+#### Local HTML files
+
+`--local-file` captures an HTML file on disk instead of a URL, for example a
+page someone uploaded. Pass a directory to open its `index.html`.
+
+```bash
+npx hyperframes capture --local-file ./upload/index.html -o upload-capture --json
+npx hyperframes capture --local-file ./site/pages/about.html --local-root ./site
+```
+
+The URL argument still accepts only public HTTP(S) URLs; a `file://` URL there
+is refused as before. With `--local-file`, the CLI serves the file's directory
+(or `--local-root`, which must contain the file) on a loopback port for the
+length of the capture, and Chrome loads the page from it. Only regular files
+whose real path is inside that root are served, the HTML file included: `../`
+paths and symlinks that leave it answer 404, a symlinked HTML file that points
+outside is refused, and the page cannot read `file://` URLs. Every other
+request, remote or private, goes through the capture proxy and the
+public-address policy above, so a reference to a private address stays refused
+and counts as `unavailable`. Local images, fonts and stylesheets are copied
+into the capture like remote ones; `--skip-assets` skips images and SVGs
+exactly as it does for a URL. The temporary server never appears in the
+output: `url` in the JSON result, `meta.json` (`source`, and an `id` named after
+the file or its folder), `AGENTS.md` and the extracted files all use `file://`
+URLs of the same paths inside the root. With `HYPERFRAMES_CAPTURE_PROXY` set,
+local files are still read directly; every other request goes to that proxy.
 
 ### `transcribe`
 

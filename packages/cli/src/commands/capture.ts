@@ -32,6 +32,11 @@ export const examples: Example[] = [
   ["Capture a website into ./capture/", "hyperframes capture https://stripe.com"],
   ["Capture to a different directory", "hyperframes capture https://linear.app -o linear-video"],
   ["JSON output for AI agents", "hyperframes capture https://example.com --json"],
+  ["Capture a local HTML file", "hyperframes capture --local-file ./site/index.html -o site-video"],
+  [
+    "Let a local page read files from a parent directory",
+    "hyperframes capture --local-file ./site/pages/about.html --local-root ./site",
+  ],
   [
     "Pull a video from the captured manifest by index",
     "hyperframes capture --video ./linear-video --index 0",
@@ -54,8 +59,18 @@ export default defineCommand({
   args: {
     url: {
       type: "positional",
-      description: "Website URL to capture (omit when using --video)",
+      description: "Website URL to capture (omit when using --local-file or --video)",
       required: false,
+    },
+    "local-file": {
+      type: "string",
+      description:
+        "Capture a local HTML file (or a directory's index.html) instead of a URL; remote subresources still go through the public-address policy",
+    },
+    "local-root": {
+      type: "string",
+      description:
+        "(--local-file) Directory the page may read local files from (default: the HTML file's directory)",
     },
     output: {
       type: "string",
@@ -130,19 +145,38 @@ export default defineCommand({
       return;
     }
 
-    const url = args.url as string | undefined;
-    if (!url) {
-      console.error(
-        "Missing URL. Pass a website URL, or use --video <project> for video download.",
-      );
-      failCommand();
-    }
-
-    try {
-      new URL(url);
-    } catch {
-      console.error(`Invalid URL: ${url}`);
-      failCommand();
+    const localFile = args["local-file"] as string | undefined;
+    const localRoot = args["local-root"] as string | undefined;
+    let url = args.url as string | undefined;
+    if (localFile !== undefined) {
+      if (url) {
+        console.error("Pass either a URL or --local-file, not both.");
+        failCommand();
+      }
+      const { resolveLocalCaptureTarget } = await import("../capture/localPage.js");
+      try {
+        url = resolveLocalCaptureTarget(localFile, localRoot).fileUrl;
+      } catch (err) {
+        console.error(normalizeErrorMessage(err));
+        failCommand();
+      }
+    } else {
+      if (localRoot !== undefined) {
+        console.error("--local-root requires --local-file.");
+        failCommand();
+      }
+      if (!url) {
+        console.error(
+          "Missing URL. Pass a website URL, --local-file <path>, or --video <project> for video download.",
+        );
+        failCommand();
+      }
+      try {
+        new URL(url);
+      } catch {
+        console.error(`Invalid URL: ${url}`);
+        failCommand();
+      }
     }
 
     const captureBudgetMs = parsePositiveInteger(
@@ -195,6 +229,8 @@ export default defineCommand({
       const result = await captureWebsite(
         {
           url,
+          localFile,
+          localRoot,
           outputDir,
           skipAssets: args["skip-assets"] as boolean,
           skipVision: args["skip-vision"] as boolean,

@@ -72,6 +72,7 @@ describe("capture navigation retry launch", () => {
       true,
       expect.anything(),
       expect.anything(),
+      undefined,
     );
     expect(actual.warnings).toContain("Navigation timed out; retrying once with WebGL disabled");
     expect(phases).toContain("webgl-disabled-retry");

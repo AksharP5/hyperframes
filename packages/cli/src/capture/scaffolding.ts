@@ -5,6 +5,7 @@
  * (index.html, meta.json, AGENTS.md, CLAUDE.md).
  */
 
+import { captureSiteName } from "./localPage.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { applyDotEnv, CAPTURE_ENV_KEYS } from "../utils/dotEnv.js";
@@ -61,7 +62,7 @@ export async function generateProjectScaffold(
   // valid compositions, playing two audio tracks offset in time.
   const metaPath = join(outputDir, "meta.json");
   if (!existsSync(metaPath)) {
-    const hostname = new URL(url).hostname.replace(/^www\./, "");
+    const hostname = captureSiteName(url);
     writeNewFileSync(
       metaPath,
       JSON.stringify({ id: hostname + "-video", name: tokens.title || hostname }, null, 2),
