@@ -1044,6 +1044,10 @@
   "navbar": {
     "links": [
       {
+        "label": "Lessons",
+        "href": "https://hyperframes.heygen.com/lessons"
+      },
+      {
         "type": "github",
         "href": "https://github.com/heygen-com/hyperframes"
       }
