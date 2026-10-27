@@ -1145,11 +1145,11 @@ async function captureSnapshots(
         if (opts.against) {
           // Frame-exact reference frame beside the render, so a rebuild can be
           // checked against its footage without hand-rolled ffmpeg + montage.
+          const warned = warnings.length;
           const refPng = await extractVideoFrameOrWarn(warnings, opts.against, time);
           if (!refPng) {
-            console.error(
-              `   ${c.warn("⚠")} --against has no frame at ${timeLabel} — reference pair skipped`,
-            );
+            const why = warnings.length > warned ? "" : ` has no frame at ${timeLabel}`;
+            console.error(`   ${c.warn("⚠")} --against${why} — reference pair skipped`);
           } else {
             const refPath = join(snapshotDir, `ref-${slot}.png`);
             writeCaptureFileSync(refPath, refPng);
