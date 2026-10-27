@@ -79,16 +79,17 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      code: ${{ (github.event_name == 'workflow_dispatch' && inputs.catalog_publish) && 'true' || steps.filter.outputs.code }}
+      release_only: ${{ steps.release.outputs.release_only }}
+      code: ${{ (github.event_name == 'workflow_dispatch' && inputs.catalog_publish) && 'true' || steps.release.outputs.release_only == 'true' && 'false' || steps.filter.outputs.code }}
       docs_catalog: ${{ steps.filter.outputs.docs_catalog }}
-      cli: ${{ steps.filter.outputs.cli }}
-      cli_bundle: ${{ steps.filter.outputs.cli_bundle }}
-      skills: ${{ steps.filter.outputs.skills }}
-      catalog_index: ${{ steps.filter.outputs.catalog_index }}
+      cli: ${{ steps.release.outputs.release_only == 'true' && 'false' || steps.filter.outputs.cli }}
+      cli_bundle: ${{ steps.release.outputs.release_only == 'true' && 'false' || steps.filter.outputs.cli_bundle }}
+      skills: ${{ steps.release.outputs.release_only == 'true' && 'false' || steps.filter.outputs.skills }}
+      catalog_index: ${{ steps.release.outputs.release_only == 'true' && 'false' || steps.filter.outputs.catalog_index }}
       codex_plugin: ${{ steps.filter.outputs.codex_plugin }}
-      gcp_beginframe: ${{ steps.filter.outputs.gcp_beginframe }}
-      studio: ${{ steps.filter.outputs.studio }}
-      edit_accuracy: ${{ steps.edit_accuracy_filter.outputs.edit_accuracy }}
+      gcp_beginframe: ${{ steps.release.outputs.release_only == 'true' && 'false' || steps.filter.outputs.gcp_beginframe }}
+      studio: ${{ steps.release.outputs.release_only == 'true' && 'false' || steps.filter.outputs.studio }}
+      edit_accuracy: ${{ steps.release.outputs.release_only == 'true' && 'false' || steps.edit_accuracy_filter.outputs.edit_accuracy }}
     steps:
       # Force git-based change detection instead of the pull_request REST API.
       # The API path can fail the whole workflow on transient listFiles
@@ -125,6 +126,9 @@ jobs:
         env:
           BASE_SHA: ${{ steps.base.outputs.sha }}
         run: sh scripts/check-large-files.sh --range "$BASE_SHA" HEAD
+      - name: Find a release-only diff
+        id: release
+        uses: ./.github/actions/release-only-diff
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
         id: filter
         if: steps.edit.outputs.passed != 'true'
@@ -272,6 +276,20 @@ jobs:
               - "!**/{__tests__,__fixtures__}/**"
               - "!**/*.md"
 
+  # A release PR changes versions and notes only (scripts/ci/release-only-diff.mjs), so heavy suites skip it.
+  # Build still packs the manifests and keeps the tarballs; this job checks the release is consistent.
+  release-checks:
+    name: Release checks
+    needs: changes
+    if: ${{ needs.changes.outputs.release_only == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - run: node scripts/ci/release-only-diff.mjs --verify
+
   gcp-beginframe-contract:
     name: GCP BeginFrame image contract
     needs: changes
@@ -306,7 +324,7 @@ jobs:
     name: Build
     needs: changes
     # A skipped required check passes, so a broken change detection must fail it instead.
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true' || needs.changes.outputs.cli_bundle == 'true' || needs.changes.outputs.edit_accuracy == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true' || needs.changes.outputs.cli_bundle == 'true' || needs.changes.outputs.edit_accuracy == 'true' || needs.changes.outputs.release_only == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
