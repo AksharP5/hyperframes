@@ -8,6 +8,8 @@
 import type { InferenceSession, Tensor } from "onnxruntime-node";
 import type sharpType from "sharp";
 import { loadOptionalPackage, loadSharp } from "../utils/optionalPackages.js";
+import { registerBrowserSessionCleanup } from "../browser/launch.js";
+import { trackCoreMlTemp } from "./coremlTemp.js";
 import { ensureModel, selectProviders, type Device, type ModelId } from "./manager.js";
 
 const INPUT_SIZE = 320;
@@ -71,6 +73,9 @@ export async function createSession(options: CreateSessionOptions = {}): Promise
       graphOptimizationLevel: "all",
     });
 
+  const coreMlTemp = choice.label === "CoreML" ? trackCoreMlTemp() : undefined;
+  // A signal stops the run through the CLI's shutdown, which releases the session so CoreML removes its temp files.
+  const unregister = coreMlTemp && registerBrowserSessionCleanup(async () => session?.release());
   let session: InferenceSession;
   let providerUsed = choice.label;
   try {
@@ -80,8 +85,13 @@ export async function createSession(options: CreateSessionOptions = {}): Promise
     options.onProgress?.(
       `${choice.label} provider failed (${(err as Error).message}); falling back to CPU.`,
     );
-    session = await tryCreate(["cpu"]);
+    session = await tryCreate(["cpu"]).catch((error: unknown) => {
+      unregister?.();
+      throw error;
+    });
     providerUsed = "CPU";
+  } finally {
+    coreMlTemp?.record();
   }
 
   const inputName = session.inputNames[0];
@@ -145,7 +155,9 @@ export async function createSession(options: CreateSessionOptions = {}): Promise
       );
     },
     async close() {
+      unregister?.();
       await session.release();
+      coreMlTemp?.forget();
     },
   };
 }
