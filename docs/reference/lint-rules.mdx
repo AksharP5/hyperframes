@@ -192,6 +192,12 @@ Source: `packages/lint/src/rules/composition.ts`.
 
 **Fix:** Set the sub-composition's `data-duration` to fill the host window, or cover the gap with another clip.
 
+### `subcomposition_linked_style_names_root_id`
+
+**Warning.** A stylesheet linked from a sub-composition has a rule on `#<root id>`, the id of the sub-composition's root. When the composition is compiled the root is merged into its host, so that selector matches nothing. The same rule in an inline `<style>` is rewritten and works.
+
+**Fix:** Move the rule into a `<style>` inside the `<template>`, or select a child element of the root in the linked file instead of the root itself.
+
 ### `subcomposition_root_styled_by_class`
 
 **Error.** A sub-composition's root element is styled through class selectors, but at render every rule is scoped to `[data-composition-id=...]`, so the class-keyed styles stop applying.
