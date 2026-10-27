@@ -42,7 +42,7 @@ import {
 } from "../../hdrCompositor.js";
 import type { HdrDiagnostics, RenderJob } from "../../renderOrchestrator.js";
 import type { CompositionMetadata } from "../shared.js";
-import { createHdrFrameWindows } from "../../hdrFrameWindows.js";
+import { createHdrFrameWindows, type HdrFrameWindows } from "../../hdrFrameWindows.js";
 import { encoderFailureError } from "../encoderInterruption.js";
 
 function tempDirSafePrefix(id: string): string {
@@ -531,14 +531,15 @@ export async function extractHdrVideoFrames(args: {
       }
       first.release();
       if (video.loop) (await windows.lease(totalFrames - 1))?.release();
+      const held = holdFirstFrameUntilStreamStarts(windows, firstTick);
       out.set(videoId, {
         dir: frameDir,
-        windows,
+        windows: held,
         width: dims.width,
         height: dims.height,
         frameSize,
         get frameCount() {
-          return windows.totalFrames;
+          return held.totalFrames;
         },
         scratch: Buffer.allocUnsafe(frameSize),
         loop: video.loop,
@@ -561,8 +562,9 @@ export async function extractHdrVideoFrames(args: {
 }
 
 /**
- * One window as one FFmpeg pass on the clip's own tick grid: seek to a whole second before the
- * window (so timestamp rounding matches the clip's), pin `fps` to the clip's first tick, trim the lead-in.
+ * One window as one FFmpeg pass on the clip's own tick grid: seek to a whole second before the window
+ * (so timestamp rounding matches the clip's), pin `fps` to the clip's first tick, trim the lead-in,
+ * and write only the frames the graph emits (CFR sync would pad from pts 0 with the window's first).
  */
 function hdrWindowFfmpegArgs(a: {
   srcPath: string;
@@ -581,8 +583,21 @@ function hdrWindowFfmpegArgs(a: {
   if (trim > 0) filters.push(`trim=start_frame=${trim}`);
   return [
     ...["-ss", (a.mediaStart + seekFrame / a.fps).toFixed(6), "-i", a.srcPath],
-    ...["-vf", filters.join(","), "-frames:v", String(a.frames)],
+    ...["-vf", filters.join(","), "-frames:v", String(a.frames), "-fps_mode", "passthrough"],
   ];
+}
+
+function holdFirstFrameUntilStreamStarts(
+  windows: HdrFrameWindows,
+  firstTick: number,
+): HdrFrameWindows {
+  return {
+    get totalFrames() {
+      return firstTick + windows.totalFrames;
+    },
+    lease: (frameIndex) => windows.lease(Math.max(0, frameIndex - firstTick)),
+    close: () => windows.close(),
+  };
 }
 
 /**
