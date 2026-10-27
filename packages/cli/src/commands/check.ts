@@ -38,6 +38,7 @@ import {
 import type { CaptionZoneOptions, FrameCheckOptions, LayoutOptions } from "../utils/checkTypes.js";
 import { resolveLocalBrowserGpuMode } from "../browser/gpuPolicy.js";
 import { preResolveHostileMediaProxies, type PreparedMediaFile } from "../utils/checkBrowser.js";
+import { parseTimeoutMs } from "../utils/timeoutArg.js";
 
 export const examples: Example[] = [
   ["Run the full verification gate", "hyperframes check"],
@@ -207,7 +208,7 @@ const CHECK_COMMAND_ARGS = {
   timeout: {
     type: "string",
     description:
-      "Initial render-ready timeout in ms; also sets the navigation minimum (10s floor, default: 3000)",
+      "Initial render-ready timeout in ms, or with a unit (45s, 2m); also sets the navigation minimum (10s floor, default: 3000)",
     default: "3000",
   },
   contrast: {
@@ -391,7 +392,7 @@ function parseCheckOptions(args: Record<string, unknown>): CheckOptions {
     maxIssues: positiveInteger(args["max-issues"], DEFAULT_CHECK_OPTIONS.maxIssues),
     collapseStatic: args["collapse-static"] !== false,
     tolerance: nonNegativeNumber(args.tolerance, DEFAULT_CHECK_OPTIONS.tolerance),
-    timeout: Math.max(500, positiveInteger(args.timeout, DEFAULT_CHECK_OPTIONS.timeout)),
+    timeout: parseTimeoutMs(args.timeout, DEFAULT_CHECK_OPTIONS.timeout, 500),
     contrast: args.contrast !== false,
     ...(checkReview()?.skipContrastInMotion ? { skipContrastInMotion: true } : {}),
     strict: args.strict === true,

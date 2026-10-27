@@ -5,6 +5,7 @@ import {
   extractMediaMetadata,
   sdrCanvasColourFilters,
 } from "@hyperframes/engine";
+import { parseTimeoutMs } from "../utils/timeoutArg.js";
 import type { Page } from "puppeteer-core";
 import { reportArtifacts } from "../utils/toolContext.js";
 import { withProjectLock } from "../utils/projectLock.js";
@@ -1456,7 +1457,7 @@ export default defineCommand({
       }
       failCommand();
     }
-    const timeout = parseInt(args.timeout as string, 10) || RENDER_READY_TIMEOUT_MS;
+    const timeout = parseTimeoutMs(args.timeout, RENDER_READY_TIMEOUT_MS);
     const describePrompt = resolveDescribePrompt(args.describe);
 
     const camera = args.angle ? parseAngle(String(args.angle)) : undefined;
