@@ -57,6 +57,7 @@ import {
   HTML_BODY_CSS_WIDTH_FIRST_RE,
   VIEWPORT_META_SIZE_RE,
 } from "@hyperframes/parsers";
+import { decodableAudioStream } from "@hyperframes/parsers/media-streams";
 
 function resolveScaffoldTemplateId(exampleFlag: string | undefined, hasMediaFile: boolean): string {
   const example = exampleFlag === "agent" ? "blank" : exampleFlag;
@@ -144,7 +145,7 @@ function probeVideo(filePath: string): VideoMeta | undefined {
     const videoStream = streams.find((s) => s.codec_type === "video");
     if (!videoStream) return undefined;
 
-    const hasAudio = streams.some((s) => s.codec_type === "audio");
+    const hasAudio = decodableAudioStream(streams) !== null;
 
     let fps = 30;
     const fpsStr = videoStream.avg_frame_rate ?? videoStream.r_frame_rate;

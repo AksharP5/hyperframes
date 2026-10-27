@@ -8,6 +8,7 @@ import {
 } from "@hyperframes/core";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
 import { videoStreamHasAlpha } from "@hyperframes/parsers/media-alpha";
+import { decodableAudioStream, type FfprobeStreamCodec } from "@hyperframes/parsers/media-streams";
 
 export interface FfprobeRunResult {
   status: number | null;
@@ -73,8 +74,9 @@ export interface MediaColorMetadata {
 export interface MediaMetadata {
   kind: "video" | "image" | "audio" | "unknown";
   color: MediaColorMetadata;
-  /** Video audio stream, when probed. Absent means the drop path stays muted. */
+  /** Video audio stream ffmpeg can decode, when probed. Absent means the drop path stays muted. */
   hasAudio?: boolean;
+  audioStream?: number;
   /** Video stream carries alpha (pix_fmt or the VP8/VP9 alpha_mode tag). */
   hasAlpha?: boolean;
   durationSeconds?: number;
@@ -234,6 +236,11 @@ type ProbeOutput = {
   format?: { duration?: string; bit_rate?: string };
 };
 
+function audioOf(streams: FfprobeStream[]): Pick<MediaMetadata, "hasAudio" | "audioStream"> {
+  const audioStream = decodableAudioStream(streams);
+  return audioStream === null ? { hasAudio: false } : { hasAudio: true, audioStream };
+}
+
 function metadataFromProbe(kind: MediaMetadata["kind"], parsed: ProbeOutput): MediaMetadata {
   const stream = parsed.streams?.find((item) => {
     if (kind === "image") return item.codec_type === "video";
@@ -245,13 +252,33 @@ function metadataFromProbe(kind: MediaMetadata["kind"], parsed: ProbeOutput): Me
     streams: (parsed.streams ?? []).slice(0, STREAM_SUMMARY_MAX).map(summarizeStream),
   };
   if (kind === "video") {
-    metadata.hasAudio = (parsed.streams ?? []).some((item) => item.codec_type === "audio");
+    Object.assign(metadata, audioOf(parsed.streams ?? []));
     metadata.hasAlpha = stream !== undefined && videoStreamHasAlpha(stream);
     const duration = Number(parsed.format?.duration);
     if (Number.isFinite(duration) && duration > 0) metadata.durationSeconds = duration;
     metadata.source = sourceFactsOf(stream, parsed.format?.bit_rate);
   }
   return metadata;
+}
+
+/** The audio track ffmpeg can decode in a file, with its channel count; null when it has none. */
+export async function probeAudioTrack(
+  filePath: string,
+  runner: FfprobeRunner = execFileRunner,
+): Promise<{ stream: number; channels: number } | null> {
+  const result = await runner(
+    findFfBinary("ffprobe") ?? "ffprobe",
+    [
+      ...["-v", "error", "-select_streams", "a"],
+      ...["-show_entries", "stream=codec_type,codec_name,channels", "-of", "json", "--", filePath],
+    ],
+    { timeout: 30_000 },
+  );
+  if (result.status !== 0) return null;
+  type Probed = { streams?: (FfprobeStreamCodec & { channels?: number })[] };
+  const streams = (JSON.parse(String(result.stdout || "{}")) as Probed).streams ?? [];
+  const stream = decodableAudioStream(streams);
+  return stream === null ? null : { stream, channels: streams[stream]?.channels ?? 0 };
 }
 
 export async function probeMediaMetadata(

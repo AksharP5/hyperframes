@@ -27,6 +27,7 @@ import {
   resolveLocalAssetCandidates,
 } from "@hyperframes/parsers/asset-resolution";
 import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg.js";
+import { probeAudio } from "../audio/analysis/decode.js";
 import { formatBytes } from "../ui/format.js";
 import { type PlayedSegment, planTrim } from "./offloadTrim.js";
 import {
@@ -293,22 +294,6 @@ function hdrColorArgs({ color }: VideoProbe): string[] {
   ];
 }
 
-async function hasAudioStream(ffprobe: string, path: string): Promise<boolean> {
-  const { stdout } = await execFileAsync(ffprobe, [
-    "-v",
-    "error",
-    "-select_streams",
-    "a",
-    "-show_entries",
-    "stream=index",
-    "-of",
-    "csv=p=0",
-    "--",
-    path,
-  ]);
-  return stdout.trim() !== "";
-}
-
 // Seconds floored to the microsecond, so a frame-aligned cut never rounds past its first frame.
 const seconds = (t: number) => (Math.floor(t * 1e6) / 1e6).toFixed(6);
 
@@ -317,32 +302,48 @@ async function segmentArgs(
   sourcePath: string,
   decoder: string[],
   segments: PlayedSegment[] | undefined,
-  audioOnly: boolean,
+  media: "audio" | "image" | "video",
 ): Promise<string[]> {
-  if (!segments?.length) return [...decoder, "-i", sourcePath];
-  const inputs = segments.flatMap((s) => [
-    ...decoder,
-    "-ss",
-    seconds(s.start),
-    "-t",
-    seconds(s.end - s.start),
-    "-i",
-    sourcePath,
-  ]);
-  if (segments.length === 1) return inputs;
-  const audio = audioOnly || (await hasAudioStream(findFFprobe()!, sourcePath));
-  return [...inputs, ...concatArgs(segments.length, !audioOnly, audio)];
+  if (media === "image") return [...decoder, "-i", sourcePath];
+  const audio = await keptAudio(sourcePath, media);
+  const cuts = segments?.length ? segments : [undefined];
+  const inputs = cuts.flatMap((s) => [...decoder, ...seekArgs(s), "-i", sourcePath]);
+  const video = media === "video";
+  return [
+    ...inputs,
+    ...(cuts.length > 1 ? concatArgs(cuts.length, video, audio) : streamMaps(video, audio)),
+  ];
 }
 
-function concatArgs(count: number, video: boolean, audio: boolean): string[] {
-  const pad = (i: number) => (video ? `[${i}:v]` : "") + (audio ? `[${i}:a]` : "");
+async function keptAudio(sourcePath: string, media: "audio" | "video"): Promise<number | null> {
+  const audio = (await probeAudio(sourcePath))?.audioStream ?? null;
+  if (media === "audio" && audio === null) {
+    throw new Error("the file has no audio track ffmpeg can decode");
+  }
+  return audio;
+}
+
+const seekArgs = (s: PlayedSegment | undefined) =>
+  s ? ["-ss", seconds(s.start), "-t", seconds(s.end - s.start)] : [];
+
+const streamMaps = (video: boolean, audio: number | null) => [
+  ...(video ? ["-map", "0:V:0"] : []),
+  ...(audio === null ? [] : ["-map", `0:a:${audio}`]),
+];
+
+const mediaOf = (preset: PresetName) =>
+  preset === "audio" || preset === "image" ? preset : ("video" as const);
+
+function concatArgs(count: number, video: boolean, audio: number | null): string[] {
+  const pad = (i: number) =>
+    (video ? `[${i}:v]` : "") + (audio === null ? "" : `[${i}:a:${audio}]`);
   const pads = Array.from({ length: count }, (_, i) => pad(i)).join("");
-  const flags = `n=${count}:v=${video ? 1 : 0}:a=${audio ? 1 : 0}`;
+  const flags = `n=${count}:v=${video ? 1 : 0}:a=${audio === null ? 0 : 1}`;
   return [
     "-filter_complex",
-    `${pads}concat=${flags}${video ? "[v]" : ""}${audio ? "[a]" : ""}`,
+    `${pads}concat=${flags}${video ? "[v]" : ""}${audio === null ? "" : "[a]"}`,
     ...(video ? ["-map", "[v]"] : []),
-    ...(audio ? ["-map", "[a]"] : []),
+    ...(audio === null ? [] : ["-map", "[a]"]),
   ];
 }
 
@@ -366,7 +367,7 @@ async function ffmpegReencode(
         "-v",
         "error",
         "-y",
-        ...(await segmentArgs(sourcePath, decoder, segments, presetName === "audio")),
+        ...(await segmentArgs(sourcePath, decoder, segments, mediaOf(presetName))),
         ...preset.args,
         ...color,
         ...preset.audio,

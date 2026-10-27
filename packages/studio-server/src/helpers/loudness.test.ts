@@ -34,7 +34,7 @@ describe("audioTags playback offsets", () => {
     const [tag] = audioTags(html);
     expect(tag).toBeDefined();
     if (!tag) throw new Error("missing video");
-    const args = loudnessMeasureArgs("talk.mp4", tag);
+    const args = loudnessMeasureArgs("talk.mp4", tag, 0);
     expect(args.slice(args.indexOf("-ss"), args.indexOf("-i"))).toEqual(["-ss", "4", "-t", "4"]);
   });
 
@@ -129,9 +129,20 @@ describe("audioTags with HTML character references", () => {
   });
 });
 
+describe("loudnessMeasureArgs track", () => {
+  it("measures the audio track it is given, not ffmpeg's first", () => {
+    const args = loudnessMeasureArgs("phone.mov", { mediaStart: 0, duration: null }, 1);
+    expect(args.slice(args.indexOf("-map"), args.indexOf("-map") + 2)).toEqual(["-map", "0:a:1"]);
+  });
+});
+
 describe("loudnessMeasureArgs with a playback rate", () => {
   it("measures the source span a sped-up clip actually plays", () => {
-    const args = loudnessMeasureArgs("clip.mp4", { mediaStart: 0, duration: 4, playbackRate: 2 });
+    const args = loudnessMeasureArgs(
+      "clip.mp4",
+      { mediaStart: 0, duration: 4, playbackRate: 2 },
+      0,
+    );
     expect(args.slice(args.indexOf("-t"), args.indexOf("-t") + 2)).toEqual(["-t", "8"]);
   });
 

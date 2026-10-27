@@ -706,6 +706,10 @@ async function runFfmpeg(
   const videoFilter = await buildVideoFilter(ffmpegPath, sourcePath, metadata, keepsAlpha, box);
   const alphaDecoder = keepsAlpha ? alphaDecoderFor(metadata.color.codecName) : null;
   const decoderArgs = alphaDecoder ? ["-c:v", alphaDecoder] : [];
+  const streamArgs = [
+    ...["-map", "0:V:0"],
+    ...(metadata.audioStream === undefined ? [] : ["-map", `0:a:${metadata.audioStream}`]),
+  ];
   const totalSeconds = metadata.durationSeconds;
   // libvpx scales poorly across threads, so alpha pieces run side by side with the cores shared out.
   const gate = keepsAlpha ? ALPHA_PIECE_GATE : UNGATED;
@@ -725,6 +729,7 @@ async function runFfmpeg(
         ...decoderArgs,
         "-i",
         sourcePath,
+        ...streamArgs,
         ...(range ? ["-t", String(range.lengthSeconds)] : []),
         "-vf",
         videoFilter,

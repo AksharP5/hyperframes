@@ -8,7 +8,7 @@ describe("read signal boundaries", () => {
   it.each([NaN, Infinity, -Infinity])("rejects decoded non-finite PCM (%s)", async (value) => {
     vi.mocked(decodeAudio).mockResolvedValue({
       signal: { channels: [Float32Array.of(0, value, 0)], sampleRate: READ_RATE },
-      stream: { channels: 1, sampleRate: READ_RATE, duration: 3 / READ_RATE },
+      stream: { audioStream: 0, channels: 1, sampleRate: READ_RATE, duration: 3 / READ_RATE },
     });
     await expect(decodeMono("invalid.wav")).rejects.toThrow("non-finite audio samples");
   });

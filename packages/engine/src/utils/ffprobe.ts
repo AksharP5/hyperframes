@@ -12,6 +12,7 @@ import {
   videoStreamHasAlpha,
 } from "@hyperframes/parsers/media-alpha";
 import { urlInputArgs } from "./urlInput.js";
+import { decodableAudioStream } from "@hyperframes/parsers/media-streams";
 import { runFfmpeg } from "./runFfmpeg.js";
 import { FFPROBE_PATH_ENV, getFfprobeBinary } from "./ffmpegBinaries.js";
 import { ManagedChildProcess } from "./managedChildProcess.js";
@@ -243,6 +244,8 @@ export interface AudioMetadata {
   latestStreamLeadSeconds?: number;
   audioStreamLeadSeconds?: number;
   audioStreamCount?: number;
+  /** The track read for these facts and for the mix, by its place among the audio streams (decodableAudioStream). */
+  audioStream: number;
 }
 
 interface FFProbeStream {
@@ -634,7 +637,7 @@ export async function probeMediaProfile(
     }
     return {
       hasVideoStream: videoStreams.length > 0,
-      hasAudioStream: output.streams.some((stream) => stream.codec_type === "audio"),
+      hasAudioStream: decodableAudioStream(output.streams) !== null,
       visualKind: isStillImage ? "still" : hasMovingVideoStream ? "moving" : "none",
     };
   } catch (error) {
@@ -1002,7 +1005,7 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
       height: videoStream.height || stillImage()?.height || 0,
       fps,
       videoCodec: videoStream.codec_name || "unknown",
-      hasAudio: output?.streams.some((s) => s.codec_type === "audio") ?? false,
+      hasAudio: decodableAudioStream(output?.streams ?? []) !== null,
       isVFR,
       hasAlpha,
       ...(alphaPlaneDecoded === undefined ? {} : { alphaPlaneDecoded }),
@@ -1209,8 +1212,10 @@ export async function extractAudioMetadata(
 
 async function probeAudioMetadata(filePath: string, signal?: AbortSignal): Promise<AudioMetadata> {
   const output = await probeMediaOutput(filePath, signal);
-  const audioStream = output.streams.find((s) => s.codec_type === "audio");
-  if (!audioStream) throw new Error("[FFmpeg] No audio stream found");
+  const audioStreams = output.streams.filter((s) => s.codec_type === "audio");
+  const audioStreamIndex = decodableAudioStream(output.streams);
+  const audioStream = audioStreamIndex === null ? undefined : audioStreams[audioStreamIndex];
+  if (audioStreamIndex === null || !audioStream) throw new Error("[FFmpeg] No audio stream found");
 
   let durationSeconds = output.format.duration ? parseFloat(output.format.duration) : 0;
   const streamDuration = audioStream.duration ? parseFloat(audioStream.duration) : undefined;
@@ -1221,6 +1226,7 @@ async function probeAudioMetadata(filePath: string, signal?: AbortSignal): Promi
   if (sampleRate > 0) {
     const decoded = await probeDecodedAudioDuration(
       filePath,
+      audioStreamIndex,
       sampleRate,
       audioStartSeconds(audioStream, output.format),
       durationSeconds,
@@ -1240,7 +1246,8 @@ async function probeAudioMetadata(filePath: string, signal?: AbortSignal): Promi
     bitrate: output.format.bit_rate ? parseInt(output.format.bit_rate) : undefined,
     latestStreamLeadSeconds: latestStreamLeadSeconds(output),
     audioStreamLeadSeconds: streamLeadSeconds(output, audioStream),
-    audioStreamCount: output.streams.filter((s) => s.codec_type === "audio").length,
+    audioStreamCount: audioStreams.length,
+    audioStream: audioStreamIndex,
   };
 }
 
@@ -1291,6 +1298,7 @@ function reconcileAudioDuration(
  */
 async function probeDecodedAudioDuration(
   filePath: string,
+  audioStream: number,
   sampleRate: number,
   startSeconds: number,
   containerDurationSeconds: number,
@@ -1301,7 +1309,7 @@ async function probeDecodedAudioDuration(
   ): Promise<{ timestamp: number; nbSamples: number } | undefined> => {
     const args = [
       "-select_streams",
-      "a:0",
+      `a:${audioStream}`,
       "-show_entries",
       "frame=best_effort_timestamp_time,nb_samples",
       "-of",

@@ -62,7 +62,12 @@ async function silentPart(
   const decoded = await decodeAudio(
     path,
     { from, seconds },
-    { sampleRate: probed.sampleRate, channels: probed.channels, duration: probed.durationSeconds },
+    {
+      audioStream: probed.audioStream,
+      sampleRate: probed.sampleRate,
+      channels: probed.channels,
+      duration: probed.durationSeconds,
+    },
     { mono: true, sampleRate: SILENCE_SAMPLE_RATE },
   );
   const samples = decoded?.signal.channels[0]?.length ?? 0;
