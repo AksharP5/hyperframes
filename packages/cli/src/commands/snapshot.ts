@@ -3,6 +3,7 @@ import {
   buildZeroDurationDiagnostic,
   evaluateHfDiagnostic,
   extractMediaMetadata,
+  isHdrColorSpace,
   sdrCanvasColourFilters,
 } from "@hyperframes/engine";
 import { parseTimeoutMs } from "../utils/timeoutArg.js";
@@ -57,8 +58,11 @@ import {
   type ZoomTarget,
 } from "../capture/captureCompositionFrame.js";
 import {
+  firstFrameColourArgs,
+  hdrToSdrToneMapFilter,
   isClipVisibleAt,
   isInClipWindow,
+  parseFirstFrameColour,
   readElementRateSpec,
   sourceTimeAt,
   timeAtSourceTime,
@@ -459,6 +463,16 @@ function warnColourUnknownOnce(): void {
   );
 }
 
+let warnedNoHdrFilters = false;
+
+function warnNoHdrFiltersOnce(): void {
+  if (warnedNoHdrFilters) return;
+  warnedNoHdrFilters = true;
+  console.warn(
+    `   ${c.warn("⚠")} A video in this project is HDR, but this ffmpeg has no zscale/tonemap (libzimg), so the still shows it as the browser does and will not match an SDR export. Install an ffmpeg with libzimg.`,
+  );
+}
+
 class FrameExtractTimeoutError extends Error {}
 
 export async function extractVideoFrameToBuffer(
@@ -478,24 +492,50 @@ export async function extractVideoFrameToBuffer(
       holdLastFrame,
     );
     if (seek === null) return null;
-    const args = ["-hide_banner", "-loglevel", "error"];
-    if (useVp9AlphaDecoder) args.push("-c:v", "libvpx-vp9");
-    if (seek.seek !== undefined) args.push("-ss", String(seek.seek));
-    args.push("-i", videoPath, "-map", "0:v:0");
-    const filters: string[] = [];
-    if (seek.select !== undefined) filters.push(`select=gte(t-start_t\\,${seek.select})`);
     const metadata = findFFprobe() ? await extractMediaMetadata(videoPath) : null;
-    if (metadata) filters.push(...sdrCanvasColourFilters(metadata));
-    else warnColourUnknownOnce();
-    // Shrink so the short side still covers the displayed box at any rotation or fit; never enlarge.
-    if (displayedPixels > 0) {
-      filters.push(
-        `scale='min(iw,${displayedPixels})':'min(ih,${displayedPixels})':force_original_aspect_ratio=increase`,
-      );
+    if (!metadata) warnColourUnknownOnce();
+    // HDR footage takes the tone map the SDR export uses, so a still matches the render.
+    const toneMap =
+      metadata && isHdrColorSpace(metadata.colorSpace)
+        ? hdrToSdrToneMapFilter(
+            metadata.colorSpace ?? {},
+            parseFirstFrameColour(
+              (
+                await runFfmpegOnce(
+                  ffmpegPath,
+                  firstFrameColourArgs(videoPath),
+                  FFMPEG_EXTRACT_TIMEOUT_MS,
+                )
+              ).stderr,
+            ),
+          )
+        : null;
+    const frameArgs = (toneMapFilter: string | null): string[] => {
+      const args = ["-hide_banner", "-loglevel", "error"];
+      if (useVp9AlphaDecoder) args.push("-c:v", "libvpx-vp9");
+      if (seek.seek !== undefined) args.push("-ss", String(seek.seek));
+      args.push("-i", videoPath, "-map", "0:v:0");
+      const filters: string[] = [];
+      if (seek.select !== undefined) filters.push(`select=gte(t-start_t\\,${seek.select})`);
+      if (metadata) {
+        if (toneMapFilter) filters.push(toneMapFilter);
+        filters.push(...sdrCanvasColourFilters(metadata, toneMapFilter !== null));
+      }
+      // Shrink so the short side still covers the displayed box at any rotation or fit; never enlarge.
+      if (displayedPixels > 0) {
+        filters.push(
+          `scale='min(iw,${displayedPixels})':'min(ih,${displayedPixels})':force_original_aspect_ratio=increase`,
+        );
+      }
+      if (filters.length > 0) args.push("-vf", filters.join(","));
+      args.push("-frames:v", "1", "-q:v", "2", "-y", outPath);
+      return args;
+    };
+    let result = await runFfmpegOnce(ffmpegPath, frameArgs(toneMap), FFMPEG_EXTRACT_TIMEOUT_MS);
+    if (toneMap && result.code !== 0 && /no such filter/i.test(result.stderr)) {
+      warnNoHdrFiltersOnce();
+      result = await runFfmpegOnce(ffmpegPath, frameArgs(null), FFMPEG_EXTRACT_TIMEOUT_MS);
     }
-    if (filters.length > 0) args.push("-vf", filters.join(","));
-    args.push("-frames:v", "1", "-q:v", "2", "-y", outPath);
-    const result = await runFfmpegOnce(ffmpegPath, args, FFMPEG_EXTRACT_TIMEOUT_MS);
     if (result.timedOut) {
       throw new FrameExtractTimeoutError(
         `FFmpeg timed out after ${FFMPEG_EXTRACT_TIMEOUT_MS / 1000}s extracting the frame of ${videoPath} at ${timeSeconds.toFixed(2)}s`,
