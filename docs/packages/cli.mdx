@@ -672,6 +672,9 @@ npx hyperframes beats [dir]
 npx hyperframes beats [dir] --json   # { ok, file, count, bpm }
 ```
 
+`beats` takes the project folder, not a media file. For the beats of one audio
+or video file, run `npx hyperframes audio <file> --only beats --json`.
+
 `beats` finds the music track — an `<audio>` element with
 `data-timeline-role="music"`, or an id like `music`, `bgm`, or `soundtrack` —
 decodes it with ffmpeg, runs the same beat tracker Studio uses, and writes
