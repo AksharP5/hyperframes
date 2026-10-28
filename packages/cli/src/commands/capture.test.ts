@@ -169,7 +169,7 @@ describe("capture command — vision control", () => {
             json: true,
           },
         } as never),
-      ).rejects.toBeInstanceOf(CliRuntimeError);
+      ).rejects.toBeInstanceOf(CliUsageError);
 
       expect(captureWebsiteMock).not.toHaveBeenCalled();
     },
@@ -189,7 +189,7 @@ describe("capture command — vision control", () => {
             json: true,
           },
         } as never),
-      ).rejects.toBeInstanceOf(CliRuntimeError);
+      ).rejects.toBeInstanceOf(CliUsageError);
       expect(error).toHaveBeenCalledWith("--max-screenshots must be a positive integer.");
       expect(captureWebsiteMock).not.toHaveBeenCalled();
     },
@@ -232,7 +232,7 @@ describe("capture command — vision control", () => {
       captureCommand.run!({
         args: { ...target, output: "/tmp/hf-local-refused", json: true },
       } as never),
-    ).rejects.toThrow("local-root" in target ? CliUsageError : CliRuntimeError);
+    ).rejects.toThrow("url" in target ? CliUsageError : CliRuntimeError);
     expect(error.mock.calls.flat().join("\n")).toContain(message);
     expect(captureWebsiteMock).not.toHaveBeenCalled();
   });

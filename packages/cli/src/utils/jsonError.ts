@@ -3,6 +3,7 @@ import {
   CliRuntimeError,
   CliUsageError,
   failCommand,
+  failUsage,
   type CommandResult,
 } from "./commandResult.js";
 
@@ -22,7 +23,7 @@ export function jsonFailure(code: string, message: string, hint?: string): JsonF
   return { ok: false, error: hint ? { code, message, hint } : { code, message } };
 }
 
-/** Reports a caught failure as the --json envelope or one line on stderr, then fails the command. */
+/** Reports a caught failure as the --json envelope or one stderr line; exit 2 if usage, else 1. */
 export function failCaught(
   error: unknown,
   json: boolean,
@@ -30,8 +31,10 @@ export function failCaught(
   print: (payload: object) => void = (payload) => console.log(JSON.stringify(payload)),
 ): never {
   const message = failureMessage(error);
-  if (json) print(jsonFailure("runtime_error", message));
+  const usage = error instanceof CliUsageError;
+  if (json) print(jsonFailure(usage ? error.code : "runtime_error", message));
   else console.error(line(message));
+  if (usage) failUsage();
   failCommand();
 }
 

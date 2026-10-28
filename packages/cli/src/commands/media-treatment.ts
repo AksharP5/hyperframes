@@ -29,7 +29,7 @@ import { lintHyperframeHtml } from "@hyperframes/lint";
 import { parseHTML } from "linkedom";
 import type { Example } from "./_examples.js";
 import { c } from "../ui/colors.js";
-import { failCommand } from "../utils/commandResult.js";
+import { CliUsageError, failCommand, failUsage } from "../utils/commandResult.js";
 import { readOptionalString } from "../utils/pathArgs.js";
 import { projectCompositionFiles } from "../utils/mountedCompositions.js";
 import { readJsonFlag } from "../utils/jsonFlag.js";
@@ -528,7 +528,7 @@ function parseSelectorIndex(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 0) {
-    throw new Error("--selector-index must be a non-negative integer");
+    throw new CliUsageError("--selector-index must be a non-negative integer");
   }
   return value;
 }
@@ -569,15 +569,15 @@ function parseGrading(
 ): unknown {
   if (clear) {
     if (raw !== undefined || apply) {
-      throw new Error("Use either --apply with --grading or --clear, not both");
+      throw new CliUsageError("Use either --apply with --grading or --clear, not both");
     }
     return undefined;
   }
   if (!apply && !dryRun) {
-    if (raw !== undefined) throw new Error("--grading requires --apply or --dry-run");
-    throw new Error("Use --apply with --grading <json> or --clear");
+    if (raw !== undefined) throw new CliUsageError("--grading requires --apply or --dry-run");
+    throw new CliUsageError("Use --apply with --grading <json> or --clear");
   }
-  if (raw === undefined) throw new Error("--apply requires --grading <json>");
+  if (raw === undefined) throw new CliUsageError("--apply requires --grading <json>");
   return readJsonFlag("--grading", raw);
 }
 
@@ -613,9 +613,10 @@ function runCapabilityQuery(args: MediaTreatmentCommandArgs): void {
     args.apply,
     args.analyze,
   ].some(Boolean);
-  if (hasMutationOption) throw new Error("--capabilities cannot be combined with mutation options");
+  if (hasMutationOption)
+    throw new CliUsageError("--capabilities cannot be combined with mutation options");
   if (args.all === true && capability)
-    throw new Error("Use either --all or --capability, not both");
+    throw new CliUsageError("Use either --all or --capability, not both");
 
   let capabilities: unknown = getMediaTreatmentCapabilityOverview();
   if (args.all === true) capabilities = getHfColorGradingCapabilities();
@@ -647,7 +648,7 @@ function resolveMutationFile(args: MediaTreatmentCommandArgs, selector: string |
     (selector ? fileDeclaringSelector(project.dir, selector) : "index.html");
   const filePath = resolve(project.dir, fileArg);
   if (!isPathInside(filePath, project.dir) || !filePath.toLowerCase().endsWith(".html")) {
-    throw new Error("--file must be an HTML file inside the project");
+    throw new CliUsageError("--file must be an HTML file inside the project");
   }
   if (!existsSync(filePath)) throw new Error(`Composition file not found: ${fileArg}`);
   return { project, filePath };
@@ -656,14 +657,14 @@ function resolveMutationFile(args: MediaTreatmentCommandArgs, selector: string |
 function analyzeTarget(args: MediaTreatmentCommandArgs) {
   const selector = readOptionalString(args.selector);
   const { project, filePath } = resolveMutationFile(args, selector);
-  if (!selector) throw new Error("--selector is required");
+  if (!selector) throw new CliUsageError("--selector is required");
   if (
     readOptionalString(args.grading) ||
     args.clear === true ||
     args.apply === true ||
     args["dry-run"] === true
   ) {
-    throw new Error("--analyze cannot be combined with mutation options");
+    throw new CliUsageError("--analyze cannot be combined with mutation options");
   }
   const selectorIndex = parseSelectorIndex(readOptionalString(args["selector-index"]));
   const { element, tag } = selectMediaElement(
@@ -689,7 +690,7 @@ function analyzeTarget(args: MediaTreatmentCommandArgs) {
 async function prepareMutation(args: MediaTreatmentCommandArgs) {
   const selector = readOptionalString(args.selector);
   const { project, filePath } = resolveMutationFile(args, selector);
-  if (!selector) throw new Error("--selector is required");
+  if (!selector) throw new CliUsageError("--selector is required");
   const clear = args.clear === true;
   const apply = args.apply === true;
   const dryRun = args["dry-run"] === true;
@@ -770,8 +771,13 @@ async function printMutation(args: MediaTreatmentCommandArgs): Promise<void> {
 
 function printFailure(error: unknown, json: boolean): void {
   const message = failureMessage(error);
-  if (json) console.log(JSON.stringify(withMeta(jsonFailure("runtime_error", message))));
-  else console.error(`${c.error("✗")} ${message}`);
+  const usage = error instanceof CliUsageError;
+  if (json) {
+    console.log(
+      JSON.stringify(withMeta(jsonFailure(usage ? error.code : "runtime_error", message))),
+    );
+  } else console.error(`${c.error("✗")} ${message}`);
+  if (usage) failUsage();
   failCommand(1, error);
 }
 

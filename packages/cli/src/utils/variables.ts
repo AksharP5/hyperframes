@@ -1,4 +1,4 @@
-import { failCommand } from "./commandResult.js";
+import { failCommand, failUsage } from "./commandResult.js";
 /**
  * Shared `--variables` / `--variables-file` / `--strict-variables` parsing
  * and validation helpers used by both `hyperframes render` (in-process) and
@@ -135,6 +135,9 @@ export function resolveVariablesArg(
   if (!result.ok) {
     const { title, message } = variablesErrorMessage(result.error);
     errorBox(title, message);
+    const { kind } = result.error;
+    const flagsAreWrong = kind === "conflict" || (inline != null && kind !== "read-error");
+    if (flagsAreWrong) failUsage();
     failCommand();
   }
   return result.value;

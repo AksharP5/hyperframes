@@ -1,4 +1,4 @@
-import { failCommand } from "../utils/commandResult.js";
+import { failUsage } from "../utils/commandResult.js";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { defineCommand } from "../utils/defineCommand.js";
@@ -174,15 +174,15 @@ function reportRating(
   const rating = raw === undefined ? undefined : parseFeedbackRating(raw);
   if (rating === null) {
     console.error(c.error("Rating must be an integer between 0 and 10"));
-    failCommand();
+    failUsage();
   }
   if (rating === undefined && !comment?.trim()) {
     console.error(c.error("Give a --rating (an integer from 0 to 10), a --comment, or both"));
-    failCommand();
+    failUsage();
   }
   if (rating === undefined && fileIssue) {
     console.error(c.error("--file-issue needs a --rating"));
-    failCommand();
+    failUsage();
   }
   return rating;
 }
@@ -279,7 +279,7 @@ export default defineCommand({
     const source = parseFeedbackSource(args.source);
     if (source === null) {
       console.error(c.error('Source must be "person" or "agent"'));
-      failCommand();
+      failUsage();
     }
 
     if (!shouldTrack()) {

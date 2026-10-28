@@ -24,7 +24,7 @@ function parsePositiveInteger(
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     console.error(`${flag} must be a positive integer${unit}.`);
-    failCommand();
+    failUsage();
   }
   return parsed;
 }
@@ -152,7 +152,7 @@ export default defineCommand({
     if (localFile !== undefined) {
       if (url) {
         console.error("Pass either a URL or --local-file, not both.");
-        failCommand();
+        failUsage();
       }
       const { resolveLocalCaptureTarget } = await import("../capture/localPage.js");
       try {
@@ -176,7 +176,7 @@ export default defineCommand({
         new URL(url);
       } catch {
         console.error(`Invalid URL: ${url}`);
-        failCommand();
+        failUsage();
       }
     }
 

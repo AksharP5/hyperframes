@@ -190,6 +190,79 @@ describe("agent-mode contract", () => {
     expect(run.code, run.stderr).toBe(2);
   });
 
+  // A bad flag value or flag combination a command checks itself is a usage error like any other:
+  // exit 2, and under --json a usage_error envelope that names the problem.
+  describe.concurrent("flag checks a command makes itself", () => {
+    it.each([
+      ["lambda render proj", "--width and --height are required"],
+      ["lambda render proj --width 1920 --height 1080 --fps 7", "--fps must be one of"],
+      ["lambda render proj --width 0 --height 1080", "--width must be a positive integer"],
+      ["lambda render proj --width 1920 --height 1080 --chunk-size 0", "--chunk-size must be"],
+      ["lambda render proj --width 1920 --height 1080 --format avi", "--format must be"],
+      ["lambda render proj --width 1920 --height 1080 --output-resolution 8k", "8k"],
+      ["lambda render-batch proj --batch b.jsonl", "--width and --height are required"],
+      ["lambda render-batch proj --batch b.jsonl --width 1920 --height 1080 --fps 7", "--fps"],
+      ["lambda deploy --concurrency 0", "--concurrency must be"],
+      ["lambda sites bogus", 'unknown verb "bogus"'],
+      ["lambda bogus", "Unknown subcommand"],
+      ["cloudrun render proj", "--width and --height are required"],
+      ["cloudrun render proj --width 1920 --height 1080 --fps 7", "--fps must be one of"],
+      ["cloudrun render proj --width 1920 --height 1080 --chunk-size 0", "--chunk-size must be"],
+      ["cloudrun render proj --width 1920 --height 1080 --wait-interval-ms 0", "--wait-interval"],
+      ["cloudrun render proj --width 1920 --height 1080 --variables {bad", "--variables"],
+      ["cloudrun render-batch proj --batch b.jsonl", "--width and --height are required"],
+      ["cloudrun render-batch proj --batch b.jsonl --width 1920 --height 1080 --fps 7", "--fps"],
+      ["cloudrun render-batch proj --batch b.jsonl --width 640 --height 360 --format avi", "avi"],
+      ["cloudrun sites bogus", 'unknown verb "bogus"'],
+      ["cloudrun bogus", "Unknown subcommand"],
+      ["capture https://example.com --max-screenshots 0", "--max-screenshots must be"],
+      ["capture https://example.com --capture-budget 0", "--capture-budget must be"],
+      ["capture https://example.com --local-file page.html", "not both"],
+      ["capture not-a-url", "Invalid URL"],
+      ["benchmark --runs 0", "Invalid runs"],
+      ["models bogus", "Unknown: models bogus"],
+      ["tts", "Provide text to speak"],
+      ["tts hello --speed 9", "Speed must be"],
+      ["cloud render --asset-id a --url https://example.com/p.zip", "Conflicting inputs"],
+      ["cloud delete render_1", "Confirmation required"],
+      ["snapshot --at 1 --range 0,1", "Use only one of"],
+      ["snapshot --at x", "--at must be"],
+      ["snapshot --frames abc", "--frames must be a positive integer"],
+      ["snapshot --frames -3", "--frames must be a positive integer"],
+      ["compare a.html", "need 2+ paths"],
+      ["compare a.html b.html --cols 0", "--cols must be"],
+      ["grade-compare --for frame.png", "Exactly one of --grades or --luts"],
+      ["check --range 5,1", "Invalid --range"],
+      ["normalize-audio --target music --tolerance=-1", "--tolerance must be"],
+      ["media-treatment --capabilities --all --capability x", "--all or --capability"],
+    ])("`%s` exits 2 with a usage_error envelope", async (args, message) => {
+      const run = await runAsAgent([...args.split(" "), "--json"]);
+      expectQuiet(run);
+      expect(run.code, run.stderr).toBe(2);
+      expectJsonFailure(run, "usage_error");
+      expect(JSON.parse(run.stdout).error.message).toContain(message);
+    });
+
+    it.each([
+      ["feedback --rating 99", "Rating must be an integer between 0 and 10"],
+      ["feedback", "Give a --rating"],
+      ["feedback --comment x --file-issue", "--file-issue needs a --rating"],
+      ["feedback --rating 5 --source bot", "Source must be"],
+      ["browser bogus", "Unknown subcommand"],
+      ["telemetry bogus", "Unknown subcommand"],
+      ["docs bogus", "Unknown topic"],
+      ["init demo --template x --non-interactive", "renamed to --example"],
+      ["init demo --video a.mp4 --audio b.mp3 --non-interactive", "--video and --audio"],
+      ["play --port 0", "--port must be"],
+      ["present --port 0", "--port must be"],
+    ])("`%s` has no JSON output and exits 2 naming the problem", async (args, message) => {
+      const run = await runAsAgent(args.split(" "));
+      expect(run.signal, "finished before the timeout").toBeNull();
+      expect(run.code, run.stderr).toBe(2);
+      expect(run.stdout + run.stderr).toContain(message);
+    });
+  });
+
   it.each([
     ["help", "Usage:"],
     ["help render", "USAGE hyperframes render"],
@@ -256,9 +329,9 @@ describe("agent-mode contract", () => {
     writeFileSync(join(project, "index.html"), "<!doctype html><html><body></body></html>");
     const run = await runAsAgent(["render", project, "--variables", "{bad", "--json"]);
     expectQuiet(run);
-    expect(run.code, run.stderr).toBe(1);
+    expect(run.code, run.stderr).toBe(2);
     expect(run.stdout.trim().split("\n")).toHaveLength(1);
-    expectJsonFailure(run, "runtime_error");
+    expectJsonFailure(run, "usage_error");
     expect(JSON.parse(run.stdout).error.message).toBe("Invalid JSON in --variables");
   });
 

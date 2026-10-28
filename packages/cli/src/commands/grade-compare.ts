@@ -29,6 +29,7 @@ import { trackCompareSheet } from "../telemetry/events.js";
 import { serveStaticProjectHtml } from "../utils/staticProjectServer.js";
 import { withMeta } from "../utils/updateCheck.js";
 import { failCaught } from "../utils/jsonError.js";
+import { CliUsageError } from "../utils/commandResult.js";
 
 const COMPOSITION_ID = "grade-compare";
 const COMPOSITION_DURATION = "1";
@@ -243,7 +244,7 @@ export function resolveLutCells(luts: string): GradeCompareCell[] {
     .map((part) => part.trim())
     .filter(Boolean);
   if (paths.length === 0) {
-    throw new Error("--luts must include at least one LUT path");
+    throw new CliUsageError("--luts must include at least one LUT path");
   }
   return paths.map((lutPath) =>
     validateCell(basename(lutPath, extname(lutPath)), { lut: { src: lutPath } }),
@@ -267,12 +268,12 @@ export function parseGradeCompareArgs(args: {
   timeout?: unknown;
 }): ParsedGradeCompareArgs {
   const frameArg = readOptionalString(args.for);
-  if (!frameArg) throw new Error("--for <path> is required");
+  if (!frameArg) throw new CliUsageError("--for <path> is required");
 
   const gradesArg = readOptionalString(args.grades);
   const lutsArg = readOptionalString(args.luts);
   if (Boolean(gradesArg) === Boolean(lutsArg)) {
-    throw new Error("Exactly one of --grades or --luts is required");
+    throw new CliUsageError("Exactly one of --grades or --luts is required");
   }
 
   const projectDir = resolve(readOptionalString(args.project) ?? process.cwd());

@@ -12,6 +12,7 @@ import { reportArtifacts } from "../utils/toolContext.js";
 import { withProjectLock } from "../utils/projectLock.js";
 import {
   parseSnapshotAt,
+  parseSnapshotFrames,
   parseSnapshotRange,
   sampleSnapshotRange,
   resolveSnapshotCompositionRange,
@@ -29,7 +30,7 @@ import {
 } from "@hyperframes/studio-server/history";
 import { pngDimensions } from "../utils/pngDimensions.js";
 import { runWithConcurrencyLimit } from "../utils/concurrency.js";
-import { CliRuntimeError, failCommand } from "../utils/commandResult.js";
+import { CliRuntimeError, CliUsageError, failCommand } from "../utils/commandResult.js";
 // fallow-ignore-file complexity
 import { defineCommand } from "../utils/defineCommand.js";
 import {
@@ -207,7 +208,7 @@ function assertDistinctKeepNames(times: number[]): void {
     const label = formatSnapshotTimestamp(time);
     const other = timeByLabel.get(label);
     if (other !== undefined && other !== time) {
-      throw new Error(
+      throw new CliUsageError(
         `--keep would name both ${other} and ${time} at-${label}.png; pass times at least 1 ms apart`,
       );
     }
@@ -1480,21 +1481,21 @@ export default defineCommand({
       failCommand();
     };
     if ([args.at, args.range, args.composition].filter((value) => value !== undefined).length > 1)
-      throw new Error("Use only one of --at, --range, or --composition");
+      throw new CliUsageError("Use only one of --at, --range, or --composition");
     const reviewMode = args.review === true;
     if (reviewMode) {
       const clash = (["at", "range", "zoom", "keep", "against"] as const).find(
         (flag) => args[flag] !== undefined && args[flag] !== false,
       );
-      if (clash) throw new Error(`--review picks its own frames; drop --${clash}`);
+      if (clash) throw new CliUsageError(`--review picks its own frames; drop --${clash}`);
     }
-    const frames = parseInt(args.frames as string, 10) || 5;
+    const frames = args.frames === undefined ? 5 : parseSnapshotFrames(String(args.frames));
     const range = args.range === undefined ? undefined : parseSnapshotRange(String(args.range));
     const atTimestamps = args.at === undefined ? undefined : parseSnapshotAt(String(args.at));
     if (args.keep === true && atTimestamps) assertDistinctKeepNames(atTimestamps);
     const composition =
       args.composition === undefined ? undefined : String(args.composition).trim();
-    if (composition === "") throw new Error("--composition requires a composition ID");
+    if (composition === "") throw new CliUsageError("--composition requires a composition ID");
     const project = resolveProject(args.dir);
     const lintResult = await lintProject(project.dir);
     if (hasDefinitiveEntryMismatch(lintResult)) {

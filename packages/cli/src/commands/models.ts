@@ -3,7 +3,7 @@ import * as clack from "../ui/prompts.js";
 import type { Example } from "./_examples.js";
 import { c } from "../ui/colors.js";
 import { formatBytes } from "../ui/format.js";
-import { failCommand, setCommandExitCode } from "../utils/commandResult.js";
+import { failCommand, failUsage, setCommandExitCode } from "../utils/commandResult.js";
 import { createRenderCancellationScope } from "../utils/renderCancellation.js";
 import { PARAKEET_INSTALL_COMMAND, PARAKEET_MODEL_LABEL } from "../whisper/parakeet.js";
 import type { ParakeetRunner } from "../whisper/parakeetRunner.js";
@@ -14,9 +14,11 @@ export const examples: Example[] = [
   ["Download the Parakeet speech model that transcribe uses", PARAKEET_INSTALL_COMMAND],
 ];
 
-function fail(message: string, json: boolean): never {
-  if (json) console.log(JSON.stringify(jsonFailure("runtime_error", message)));
+function fail(message: string, json: boolean, usage = false): never {
+  if (json)
+    console.log(JSON.stringify(jsonFailure(usage ? "usage_error" : "runtime_error", message)));
   else console.error(c.error(message));
+  if (usage) failUsage();
   failCommand();
 }
 
@@ -163,6 +165,7 @@ export default defineCommand({
       fail(
         `Unknown: models ${[args.action, args.name].filter(Boolean).join(" ")}. Try: hyperframes models list, or ${PARAKEET_INSTALL_COMMAND}`,
         args.json,
+        true,
       );
     }
     return installParakeet(args.json);

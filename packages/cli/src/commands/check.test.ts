@@ -48,7 +48,11 @@ import {
   type MotionSpecResolution,
 } from "../utils/checkPipeline.js";
 import { resolveCompositionViewportFromHtml } from "../utils/compositionViewport.js";
-import { consumeCommandResult, registerRootExitRequester } from "../utils/commandResult.js";
+import {
+  CliUsageError,
+  consumeCommandResult,
+  registerRootExitRequester,
+} from "../utils/commandResult.js";
 import { ambiguousIssue } from "../utils/motionAudit.js";
 import type { ProjectLintResult } from "../utils/lintProject.js";
 import type {
@@ -654,7 +658,9 @@ it("prints a dash-prefixed --frame-check value's parse failure exactly once, not
     withMeta: (value) => value,
   });
 
-  await runViaCli(command, { rawArgs: ["--frame-check=--json"] });
+  await expect(runViaCli(command, { rawArgs: ["--frame-check=--json"] })).rejects.toBeInstanceOf(
+    CliUsageError,
+  );
 
   expect(runPipeline).not.toHaveBeenCalled();
   const matching = errorLog.mock.calls.filter(
@@ -841,16 +847,20 @@ it("rejects malformed caption-zone specs instead of silently disabling the gate"
     withMeta: (value) => ({ ...value, _meta: { version: "test" } }),
   });
 
-  await runCommand(command, {
-    rawArgs: ["--json", "--caption-zone", "x0=0;y0=.8;x1=1;y1=1.2"],
-  });
+  await expect(
+    runCommand(command, {
+      rawArgs: ["--json", "--caption-zone", "x0=0;y0=.8;x1=1;y1=1.2"],
+    }),
+  ).rejects.toMatchObject({ result: { exitCode: 2, kind: "usage_error" } });
 
   expect(runPipeline).not.toHaveBeenCalled();
-  expect(consumeCommandResult().exitCode).toBe(1);
   expect(log).toHaveBeenCalledTimes(1);
   expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual({
     ok: false,
-    error: expect.objectContaining({ message: expect.stringContaining("Invalid --caption-zone") }),
+    error: expect.objectContaining({
+      code: "usage_error",
+      message: expect.stringContaining("Invalid --caption-zone"),
+    }),
     _meta: { version: "test" },
   });
 });

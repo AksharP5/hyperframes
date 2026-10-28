@@ -1,4 +1,4 @@
-import { failCommand } from "../../utils/commandResult.js";
+import { failCommand, failUsage } from "../../utils/commandResult.js";
 /**
  * `hyperframes cloud delete <render_id>` — soft-delete a cloud render.
  *
@@ -55,7 +55,7 @@ export default defineCommand({
           "delete cannot prompt for confirmation here: this run cannot answer a prompt, or --json was passed.",
           "Re-run with --no-confirm to acknowledge the irreversible delete.",
         );
-        failCommand();
+        failUsage();
       }
       const ok = await confirmDelete(args.id);
       if (!ok) {

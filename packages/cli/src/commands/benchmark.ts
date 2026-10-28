@@ -1,4 +1,4 @@
-import { failCommand, setCommandExitCode } from "../utils/commandResult.js";
+import { failCommand, failUsage, setCommandExitCode } from "../utils/commandResult.js";
 import { defineCommand } from "../utils/defineCommand.js";
 import type { Example } from "./_examples.js";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
@@ -59,15 +59,15 @@ export default defineCommand({
     json: { type: "boolean", description: "Output results as JSON", default: false },
   },
   async run({ args }) {
-    // ── Resolve project ──────────────────────────────────────────────────
-    const project = resolveProject(args.dir);
-
     // ── Parse runs ───────────────────────────────────────────────────────
     const runsPerConfig = parseInt(args.runs ?? "3", 10);
     if (isNaN(runsPerConfig) || runsPerConfig < 1 || runsPerConfig > 20) {
       errorBox("Invalid runs", `Got "${args.runs ?? "3"}". Must be between 1 and 20.`);
-      failCommand();
+      failUsage();
     }
+
+    // ── Resolve project ──────────────────────────────────────────────────
+    const project = resolveProject(args.dir);
 
     const jsonOutput = args.json ?? false;
 

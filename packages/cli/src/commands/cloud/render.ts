@@ -425,7 +425,7 @@ function resolveProjectInput(opts: {
   const count = Number(explicit.dir) + Number(explicit.assetId) + Number(explicit.url);
   if (count > 1) {
     errorBox("Conflicting inputs", "Pass only one of: project dir, --asset-id, --url.");
-    failCommand();
+    failUsage();
   }
   if (explicit.assetId) return { kind: "asset_id", assetId: opts.assetId };
   if (explicit.url) return { kind: "url", url: opts.url };

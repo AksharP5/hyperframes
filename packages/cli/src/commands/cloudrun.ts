@@ -1,5 +1,5 @@
 // fallow-ignore-file code-duplication
-import { failCommand, failUsage } from "../utils/commandResult.js";
+import { CliUsageError, failCommand, failUsage } from "../utils/commandResult.js";
 /**
  * `hyperframes cloudrun` — deploy + drive distributed renders on Google
  * Cloud Run + Cloud Workflows.
@@ -259,7 +259,7 @@ export default defineCommand({
         return runDestroy(args);
       default:
         console.error(`${c.error("Unknown subcommand:")} ${subcommand}\n${HELP}`);
-        failCommand();
+        failUsage();
     }
   },
 });
@@ -492,7 +492,7 @@ async function runSites(args: Record<string, unknown>): Promise<void> {
     console.error(
       `[cloudrun sites] unknown verb "${String(args.target)}". Only "create" is supported.`,
     );
-    failCommand();
+    failUsage();
   }
   const projectDir = args.extra as string | undefined;
   if (!projectDir) {
@@ -528,7 +528,7 @@ function resolveCloudRunFps(
   console.error(
     `[cloudrun ${command}] --fps must be one of ${DISTRIBUTED_FPS.join(", ")}; got ${fps}.`,
   );
-  failCommand();
+  failUsage();
 }
 
 // fallow-ignore-next-line complexity
@@ -544,12 +544,13 @@ async function runRender(args: Record<string, unknown>): Promise<void> {
   const height = parsePositiveInt(args.height, "--height");
   if (width === undefined || height === undefined) {
     console.error("[cloudrun render] --width and --height are required.");
-    failCommand();
+    failUsage();
   }
   const fps = resolveCloudRunFps(args, projectDir, "render");
-  const state = readState(args);
   const variables = resolveAndValidateVariables(args, resolve(projectDir));
   const config = buildRenderConfig(args, fps, width, height, variables);
+  const intervalMs = parsePositiveInt(args["wait-interval-ms"], "--wait-interval-ms") ?? 5000;
+  const state = readState(args);
 
   const { renderToCloudRun, getRenderProgress } = await loadCloudRunAdapter();
   const handle = await renderToCloudRun({
@@ -576,7 +577,6 @@ async function runRender(args: Record<string, unknown>): Promise<void> {
     return;
   }
 
-  const intervalMs = parsePositiveInt(args["wait-interval-ms"], "--wait-interval-ms") ?? 5000;
   let progress = await getRenderProgress({ executionName: handle.executionName });
   while (progress.status === "running") {
     await new Promise((r) => setTimeout(r, intervalMs));
@@ -650,9 +650,10 @@ async function runRenderBatch(args: Record<string, unknown>): Promise<void> {
   const height = parsePositiveInt(args.height, "--height");
   if (width === undefined || height === undefined) {
     console.error("[cloudrun render-batch] --width and --height are required.");
-    failCommand();
+    failUsage();
   }
   const fps = resolveCloudRunFps(args, projectDir, "render-batch");
+  buildRenderConfig(args, fps, width, height, undefined);
   if (!existsSync(resolve(batchPath))) {
     console.error(`[cloudrun render-batch] batch file not found: ${batchPath}`);
     failCommand();
@@ -674,9 +675,9 @@ async function runRenderBatch(args: Record<string, unknown>): Promise<void> {
     return;
   }
 
-  const state = readState(args);
   const maxConcurrent =
     parsePositiveInt(args["max-concurrent"], "--max-concurrent") ?? DEFAULT_BATCH_MAX_CONCURRENT;
+  const state = readState(args);
   const { deploySite, renderToCloudRun } = await loadCloudRunAdapter();
 
   // Upload the project once; every entry reuses the same content-addressed
@@ -898,7 +899,7 @@ function parsePositiveInt(raw: unknown, flagName: string): number | undefined {
   const n = parseIntFlag(raw);
   if (n === undefined) return undefined;
   if (!Number.isInteger(n) || n < 1) {
-    throw new Error(`[cloudrun] ${flagName} must be a positive integer; got ${n}`);
+    throw new CliUsageError(`[cloudrun] ${flagName} must be a positive integer; got ${n}`);
   }
   return n;
 }
@@ -912,7 +913,7 @@ function parseEnum<T extends string>(
   if (raw === undefined || raw === null || raw === "") return defaultValue;
   const s = String(raw);
   if ((allowed as readonly string[]).includes(s)) return s as T;
-  throw new Error(`${errorPrefix} must be ${allowed.join("|")}; got ${s}`);
+  throw new CliUsageError(`${errorPrefix} must be ${allowed.join("|")}; got ${s}`);
 }
 const FORMATS = ["mp4", "mov", "png-sequence", "webm"] as const;
 const CODECS = ["h264", "h265"] as const;

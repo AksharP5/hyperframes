@@ -1,4 +1,4 @@
-import { failCommand, failUsage } from "../utils/commandResult.js";
+import { CliUsageError, failCommand, failUsage } from "../utils/commandResult.js";
 /**
  * `hyperframes lambda` — top-level dispatcher for AWS Lambda subcommands.
  *
@@ -289,7 +289,7 @@ export default defineCommand({
           console.error(
             `[lambda sites] unknown verb "${String(args.target)}". Only "create" is supported.`,
           );
-          failCommand();
+          failUsage();
         }
         const projectDir = args.extra as string | undefined;
         if (!projectDir) {
@@ -319,14 +319,14 @@ export default defineCommand({
         const height = parsePositiveInt(args.height, "--height");
         if (width === undefined || height === undefined) {
           console.error("[lambda render] --width and --height are required.");
-          failCommand();
+          failUsage();
         }
         const fpsRaw = parseIntFlag(args.fps) ?? defaultCloudFps(projectDir);
         if (!isDistributedFps(fpsRaw)) {
           console.error(
             `[lambda render] --fps must be one of ${DISTRIBUTED_FPS.join(", ")}; got ${fpsRaw}.`,
           );
-          failCommand();
+          failUsage();
         }
         const { runRender } = await import("./lambda/render.js");
         const renderResolution = parseOutputResolution(args["output-resolution"]);
@@ -376,14 +376,14 @@ export default defineCommand({
         const height = parsePositiveInt(args.height, "--height");
         if (width === undefined || height === undefined) {
           console.error("[lambda render-batch] --width and --height are required.");
-          failCommand();
+          failUsage();
         }
         const fpsRaw = parseIntFlag(args.fps) ?? defaultCloudFps(projectDir);
         if (!isDistributedFps(fpsRaw)) {
           console.error(
             `[lambda render-batch] --fps must be one of ${DISTRIBUTED_FPS.join(", ")}; got ${fpsRaw}.`,
           );
-          failCommand();
+          failUsage();
         }
         const { runRenderBatch } = await import("./lambda/render-batch.js");
         const batchResolution = parseOutputResolution(args["output-resolution"]);
@@ -446,7 +446,7 @@ export default defineCommand({
       }
       default:
         console.error(`${c.error("Unknown subcommand:")} ${subcommand}\n${HELP}`);
-        failCommand();
+        failUsage();
     }
   },
 });
@@ -466,7 +466,7 @@ function parsePositiveInt(raw: unknown, flagName: string): number | undefined {
   const n = parseIntFlag(raw);
   if (n === undefined) return undefined;
   if (!Number.isInteger(n) || n < 1) {
-    throw new Error(`[lambda] ${flagName} must be a positive integer; got ${n}`);
+    throw new CliUsageError(`[lambda] ${flagName} must be a positive integer; got ${n}`);
   }
   return n;
 }
@@ -486,7 +486,7 @@ function parseEnum<T extends string>(
   if (raw === undefined || raw === null || raw === "") return defaultValue;
   const s = String(raw);
   if ((allowed as readonly string[]).includes(s)) return s as T;
-  throw new Error(`${errorPrefix} must be ${allowed.join("|")}; got ${s}`);
+  throw new CliUsageError(`${errorPrefix} must be ${allowed.join("|")}; got ${s}`);
 }
 
 const FORMATS = [

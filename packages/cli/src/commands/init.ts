@@ -802,7 +802,7 @@ export default defineCommand({
           `The --template flag was renamed to --example. Example:\n  npx hyperframes init ${args.name ?? "my-video"} --example "${args.template}"`,
         ),
       );
-      failCommand();
+      failUsage();
     }
     if (args["video-legacy"] !== undefined) {
       console.error(
@@ -810,7 +810,7 @@ export default defineCommand({
           `The -V short flag no longer maps to --video. Use --video (or -v). Example:\n  npx hyperframes init ${args.name ?? "my-video"} --video "${args["video-legacy"]}"`,
         ),
       );
-      failCommand();
+      failUsage();
     }
     const exampleFlag = args.example;
     const videoFlag = args.video;
@@ -864,7 +864,7 @@ export default defineCommand({
 
       if (videoFlag && audioFlag) {
         console.error(c.error("Cannot use --video and --audio together"));
-        failCommand();
+        failUsage();
       }
 
       // Validate source files before creating destDir so a failed run does

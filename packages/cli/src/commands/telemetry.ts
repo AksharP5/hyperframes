@@ -7,7 +7,7 @@ import {
 } from "../telemetry/config.js";
 import { effectiveTelemetryStatus, type TelemetryStatusSource } from "../telemetry/policy.js";
 import { c } from "../ui/colors.js";
-import { failCommand } from "../utils/commandResult.js";
+import { failCommand, failUsage } from "../utils/commandResult.js";
 import type { Example } from "./_examples.js";
 
 export const examples: Example[] = [
@@ -123,7 +123,7 @@ ${c.dim("You can also set")} ${c.accent("HYPERFRAMES_NO_TELEMETRY=1")} ${c.dim("
         console.error(
           `${c.error("Unknown subcommand:")} ${subcommand}\n\nRun ${c.accent("hyperframes telemetry --help")} for usage.`,
         );
-        failCommand();
+        failUsage();
     }
   },
 });

@@ -19,7 +19,7 @@ import { defineCommand } from "../utils/defineCommand.js";
 import { c } from "../ui/colors.js";
 import { projectCompositionFiles } from "../utils/mountedCompositions.js";
 import { resolveProject } from "../utils/project.js";
-import { failCommand } from "../utils/commandResult.js";
+import { CliUsageError, failCommand, failUsage } from "../utils/commandResult.js";
 import type { Example } from "./_examples.js";
 import { jsonFailure } from "../utils/jsonError.js";
 
@@ -35,8 +35,13 @@ export {
 const DEFAULT_TOLERANCE_LU = 0.5;
 
 function fail(message: string, json: boolean, cause?: unknown): never {
-  if (json) console.log(JSON.stringify(jsonFailure("runtime_error", message), null, 2));
-  else console.error(c.error(message));
+  const usage = cause instanceof CliUsageError;
+  if (json) {
+    console.log(
+      JSON.stringify(jsonFailure(usage ? cause.code : "runtime_error", message), null, 2),
+    );
+  } else console.error(c.error(message));
+  if (usage) failUsage();
   failCommand(1, cause);
 }
 
@@ -81,7 +86,7 @@ function selectedTags(tags: readonly ProjectAudioTag[], referenceId: string, tar
   const referenceTag = byId(tags, referenceId, "Reference");
   const targetTag = byId(tags, targetId, "Target");
   if (referenceTag.id === targetTag.id) {
-    throw new Error("Reference and target must be different audio elements");
+    throw new CliUsageError("Reference and target must be different audio elements");
   }
   return { referenceTag, targetTag };
 }
@@ -123,14 +128,15 @@ function writeAtomically(path: string, contents: string): void {
 function parsedTolerance(raw: string): number {
   const tolerance = Number(raw);
   if (!Number.isFinite(tolerance) || tolerance < 0) {
-    throw new Error("--tolerance must be a non-negative number");
+    throw new CliUsageError("--tolerance must be a non-negative number");
   }
   return tolerance;
 }
 
 function parsedLufs(raw: string): number {
   const lufs = Number(raw);
-  if (!Number.isFinite(lufs) || lufs >= 0) throw new Error("--lufs must be a negative number");
+  if (!Number.isFinite(lufs) || lufs >= 0)
+    throw new CliUsageError("--lufs must be a negative number");
   return lufs;
 }
 
@@ -173,9 +179,9 @@ async function plannedNormalization(
 }
 
 async function normalizeAudio(options: NormalizeAudioOptions): Promise<NormalizeAudioResult> {
+  const tolerance = parsedTolerance(options.tolerance);
   const project = resolveProject(options.dir);
   const tags = projectAudioTags(project.dir);
-  const tolerance = parsedTolerance(options.tolerance);
   const { targetTag, withinTolerance, plan } = await plannedNormalization(
     project.dir,
     tags,

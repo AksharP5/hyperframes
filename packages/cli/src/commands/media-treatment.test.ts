@@ -15,7 +15,7 @@ import {
   mediaTreatmentCommand,
   resolveMediaTreatmentSource,
 } from "./media-treatment.js";
-import { CliRuntimeError } from "../utils/commandResult.js";
+import { CliRuntimeError, CliUsageError } from "../utils/commandResult.js";
 import {
   COLOR_GRADING_TOP_LEVEL_KEYS,
   validateColorGradingContract,
@@ -812,7 +812,7 @@ describe("applyMediaTreatmentToHtml", () => {
         runCommand(mediaTreatmentCommand, {
           rawArgs: ["--project", project, "--selector", "#hero", "--grading", grading],
         }),
-      ).rejects.toThrow(CliRuntimeError);
+      ).rejects.toThrow(CliUsageError);
       expect(error).toHaveBeenLastCalledWith(expect.stringContaining("--grading requires --apply"));
       expect(readFileSync(file, "utf8")).toBe(VIDEO);
 

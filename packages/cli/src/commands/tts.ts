@@ -100,7 +100,7 @@ export default defineCommand({
     const input = args["text-file"] ?? args.input;
     if (!input) {
       console.error(c.error("Provide text to speak, or use --list to see available voices."));
-      failCommand();
+      failUsage();
     }
 
     let text: string;
@@ -126,7 +126,7 @@ export default defineCommand({
 
     if (!Number.isFinite(speed) || speed < 0.1 || speed > 3) {
       console.error(c.error("Speed must be a number between 0.1 and 3.0"));
-      failCommand();
+      failUsage();
     }
 
     const inferredLang = inferLangFromVoiceId(voice);
