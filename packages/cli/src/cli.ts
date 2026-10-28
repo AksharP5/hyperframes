@@ -92,7 +92,11 @@ import { defineCommand } from "./utils/defineCommand.js";
 import type { ArgsDef, CommandDef } from "citty";
 import { getRunId } from "./telemetry/runId.js";
 import { reportCommandFailure, trackCommandFailures } from "./utils/command-failure-tracking.js";
-import { isRenderSucceeded } from "./utils/render-success-state.js";
+import {
+  isRenderSucceeded,
+  isRunDelivered,
+  markCommandDelivered,
+} from "./utils/render-success-state.js";
 import { resolveCommandUsage, type ResolvedCommandUsage } from "./utils/commandUsageResolution.js";
 import { closestMatch } from "./utils/didYouMean.js";
 import { jsonErrorBody, watchOutput, writeJsonFailure } from "./utils/jsonError.js";
@@ -345,6 +349,7 @@ async function finalizeCli(result: CommandResult): Promise<void> {
   // here, once, is what those handlers cannot cover, and it keeps the exit
   // code and the telemetry record from disagreeing about the same run.
   const exitCode = isRenderSucceeded() ? 0 : result.exitCode;
+  if (exitCode === 0) markCommandDelivered();
   commandFailed ||= exitCode !== 0;
   await telemetryReady.catch(() => {});
   _trackCommandResult?.({
@@ -433,7 +438,7 @@ function reportPostRenderTerminationEvent(
   error: Error,
 ): void {
   process.stderr.write(
-    `  [hyperframes] Post-render ${label} (render already succeeded): ${error.message}\n`,
+    `  [hyperframes] Late ${label} (the command already delivered its result): ${error.message}\n`,
   );
   emitCliErrorEvent(kind, error);
 }
@@ -461,7 +466,7 @@ function exitAfterPostRenderTermination(
 // still queued (render_complete's eager flush() dies with the process) is
 // owned by the unconditional flushSync() in the `exit` handler below.
 function handleStreamEpipe(): never {
-  if (!isRenderSucceeded()) commandFailed = true;
+  if (!isRunDelivered()) commandFailed = true;
   process.exit(0);
 }
 
@@ -497,7 +502,7 @@ process.on("uncaughtException", (error) => {
   // into an exit-1 "no final error message" failure. The render command
   // sets `renderSucceeded` right after the producer resolves and the
   // artifact is committed.
-  if (isRenderSucceeded()) {
+  if (isRunDelivered()) {
     exitAfterPostRenderTermination("uncaughtException", "uncaught_exception", error);
   }
   exitAfterCliFailure("uncaught_exception", error);
@@ -512,7 +517,7 @@ process.on("unhandledRejection", (reason) => {
   // rejection during post-artifact-validated cleanup must not mark a valid
   // render as failed. `commandFailed` gates the success:true telemetry
   // field — keep it false when the render actually succeeded.
-  if (isRenderSucceeded()) {
+  if (isRunDelivered()) {
     reportPostRenderTerminationEvent("unhandledRejection", "unhandled_rejection", error);
     return;
   }
