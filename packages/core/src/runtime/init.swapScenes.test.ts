@@ -1952,6 +1952,21 @@ describe("the preview's scene window", () => {
     expect(parked()).toEqual(["s2"]);
   });
 
+  it("keeps each holder's scenes, so the inspector letting go leaves Studio's held scene mounted", async () => {
+    bootWindowed([S0, S1, S2], trackingRoot().root);
+    await tick();
+    await window.__hfHoldScenes!(["s2"]);
+    await window.__hfHoldScenes!(["s0", "s1", "s2"], "inspection");
+    expect(parked()).toEqual([]);
+    await window.__hfHoldScenes!([], "inspection");
+    await seekAndSettle(0.5);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual([]);
+    await window.__hfHoldScenes!([]);
+    for (let i = 0; i < 5; i++) await tick();
+    expect(parked()).toEqual(["s2"]);
+  });
+
   it("keeps a parked scene's clips on the timeline, at the time its scene puts them", async () => {
     bootWindowed([S0, S1, S2], trackingRoot().root);
     await tick();
