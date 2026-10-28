@@ -1,4 +1,3 @@
-import { failCommand } from "../utils/commandResult.js";
 import {
   copyFileSync,
   existsSync,
@@ -29,6 +28,7 @@ import { displayPathFromBase, readOptionalString, resolveFromBase } from "../uti
 import { trackCompareSheet } from "../telemetry/events.js";
 import { serveStaticProjectHtml } from "../utils/staticProjectServer.js";
 import { withMeta } from "../utils/updateCheck.js";
+import { failCaught } from "../utils/jsonError.js";
 
 const COMPOSITION_ID = "grade-compare";
 const COMPOSITION_DURATION = "1";
@@ -685,13 +685,12 @@ export default defineCommand({
         console.log(`\n${c.success("◇")}  Grade comparison saved to ${sheet}`);
       }
     } catch (err) {
-      const message = normalizeErrorMessage(err);
-      if (jsonRequested) {
-        printJson({ ok: false, error: message });
-      } else {
-        console.error(`\n${c.error("✗")} Grade compare failed: ${message}`);
-      }
-      failCommand();
+      failCaught(
+        err,
+        jsonRequested,
+        (m) => `\n${c.error("✗")} Grade compare failed: ${m}`,
+        printJson,
+      );
     } finally {
       if (preparedDir) {
         rmSync(preparedDir, { recursive: true, force: true });

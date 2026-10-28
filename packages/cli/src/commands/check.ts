@@ -40,6 +40,7 @@ import type { CaptionZoneOptions, FrameCheckOptions, LayoutOptions } from "../ut
 import { resolveLocalBrowserGpuMode } from "../browser/gpuPolicy.js";
 import { preResolveHostileMediaProxies, type PreparedMediaFile } from "../utils/checkBrowser.js";
 import { parseTimeoutMs } from "../utils/timeoutArg.js";
+import { failureMessage, jsonFailure } from "../utils/jsonError.js";
 
 export const examples: Example[] = [
   ["Run the full verification gate", "hyperframes check"],
@@ -302,10 +303,10 @@ export function createCheckCommand(
         }
         setCommandExitCode(checkExitCode(report));
       } catch (error) {
-        const message = normalizeErrorMessage(error);
+        const message = failureMessage(error);
         if (asJson) {
           console.log(
-            JSON.stringify(dependencies.withMeta({ ok: false, error: message }), null, 2),
+            JSON.stringify(dependencies.withMeta(jsonFailure("runtime_error", message)), null, 2),
           );
         } else {
           console.error(`${c.error("✗")} Check failed: ${message}`);

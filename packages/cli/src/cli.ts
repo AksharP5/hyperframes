@@ -95,6 +95,7 @@ import { reportCommandFailure, trackCommandFailures } from "./utils/command-fail
 import { isRenderSucceeded } from "./utils/render-success-state.js";
 import { resolveCommandUsage, type ResolvedCommandUsage } from "./utils/commandUsageResolution.js";
 import { closestMatch } from "./utils/didYouMean.js";
+import { jsonErrorBody, watchOutput, writeJsonFailure } from "./utils/jsonError.js";
 import { isDevMode } from "./utils/env.js";
 import {
   CliResultSignal,
@@ -218,6 +219,8 @@ const cliCommandArg = process.argv[2];
 // check), so its type can't be inferred from its own initializer.
 const command: string = cliCommandArg && cliCommandArg in subCommands ? cliCommandArg : "unknown";
 const hasJsonFlag = process.argv.includes("--json");
+// Under --json a failure always answers on stdout with the shared envelope (see executeCli).
+const jsonOutput = hasJsonFlag ? watchOutput() : undefined;
 
 // Captured references — populated when the lazy imports resolve.
 // Used in exit handlers where dynamic import() is unsafe (beforeExit loops,
@@ -539,7 +542,11 @@ async function unknownCommandError(requested: ResolvedCommandUsage): Promise<Cli
   if (match) console.error(`Did you mean '${group} ${match}'?`);
   console.error("");
   await showUsage(requested.command, requested.parent, console.error);
-  return new CliUsageError(`Unknown command: ${word}`, { presented: true });
+  return new CliUsageError(`Unknown command: ${word}`, {
+    presented: true,
+    code: "unknown_command",
+    hint: match ? `Did you mean '${group} ${match}'?` : undefined,
+  });
 }
 
 // A group like `timeline` also takes a project directory, so a word it does not know may be one.
@@ -598,6 +605,7 @@ function commandResultForError(error: unknown): CommandResult {
 // fallow-ignore-next-line complexity
 async function executeCli(): Promise<void> {
   let result: CommandResult = { exitCode: 0, kind: "success" };
+  let failure: unknown;
   try {
     if (isHelp) await showRequestedUsage(console.log);
     else {
@@ -608,6 +616,7 @@ async function executeCli(): Promise<void> {
     const error = isCittyError(caught, "E_UNKNOWN_COMMAND")
       ? await unknownCommandError(await resolveCommandUsage(main as CommandDef, argv))
       : caught;
+    failure = error;
     result = commandResultForError(error);
     if (!(error instanceof CliResultSignal)) {
       commandFailed = true;
@@ -623,6 +632,9 @@ async function executeCli(): Promise<void> {
   } finally {
     const pending = consumeCommandResult();
     if (pending.exitCode !== 0 || result.exitCode === 0) result = pending;
+    if (jsonOutput && result.exitCode !== 0 && !jsonOutput.wroteStdout()) {
+      writeJsonFailure(jsonErrorBody(failure, result, jsonOutput.stderrText()));
+    }
     await finalizeCli(result);
   }
 }

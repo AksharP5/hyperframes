@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,6 +101,18 @@ function expectQuiet(run: Run): void {
   expect(output).not.toMatch(NAG);
 }
 
+function declaresJson(command: CommandDef): boolean {
+  const args = command.args;
+  return typeof args === "object" && args !== null && "json" in args;
+}
+
+function expectJsonFailure(run: Run, code?: string): void {
+  const parsed = JSON.parse(run.stdout) as { ok?: unknown; error?: { code?: unknown } };
+  expect(parsed.ok).toBe(false);
+  expect(typeof parsed.error?.code).toBe("string");
+  if (code) expect(parsed.error?.code).toBe(code);
+}
+
 const commands = await registeredCommands();
 // From source, `preview` refuses to load until the studio packages are built; the test job does
 // not build them, so preview is only spawned where they are.
@@ -127,6 +139,31 @@ describe("agent-mode contract", () => {
         expectQuiet(run);
         expect(run.code, run.stderr).toBe(0);
         expect(run.stdout).toContain("USAGE");
+      },
+    );
+
+    it.each(
+      spawnable
+        .filter((c) => declaresJson(c.command))
+        .map((c) => [c.path.join(" "), c.path] as const),
+    )("%s --json answers a usage error with the JSON envelope", async (_label, path) => {
+      const run = await runAsAgent([...path, "--json", "--not-a-real-flag"]);
+      expectQuiet(run);
+      expect(run.code, run.stderr).toBe(2);
+      expectJsonFailure(run);
+    });
+
+    it.each(
+      spawnable
+        .filter((c) => !declaresJson(c.command))
+        .map((c) => [c.path.join(" "), c.path] as const),
+    )(
+      "%s has no JSON output, so --json is a usage error, answered as JSON",
+      async (_label, path) => {
+        const run = await runAsAgent([...path, "--json"]);
+        expectQuiet(run);
+        expect(run.code, run.stderr).toBe(2);
+        expectJsonFailure(run);
       },
     );
 
@@ -186,6 +223,67 @@ describe("agent-mode contract", () => {
       expect(run.stderr).toContain(hint);
     },
   );
+
+  it.each([["lint"], ["check"], ["info"], ["validate"], ["layout"], ["inspect"]])(
+    "%s --json in an empty directory names the real failure, and no notice",
+    async (name) => {
+      const run = await runAsAgent([name, "--json"]);
+      const parsed = JSON.parse(run.stdout) as { ok: boolean; error: { message: string } };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error.message).toContain("No composition found");
+      expect(parsed.error.message).not.toMatch(/Command failed|deprecated|anonymous usage/);
+    },
+  );
+
+  it("a missing argument under --json is a usage_error with the real message", async () => {
+    const run = await runAsAgent(["capture", "--json"]);
+    expect(run.code).toBe(2);
+    expectJsonFailure(run, "usage_error");
+    expect(JSON.parse(run.stdout).error.message).toContain("Missing URL");
+  });
+
+  it("a runtime failure under --json is an envelope that says why, not empty stdout", async () => {
+    const run = await runAsAgent(["info", "--json"]);
+    expectQuiet(run);
+    expect(run.code).toBe(1);
+    expectJsonFailure(run, "runtime_error");
+    expect(run.stdout).toContain("No composition found");
+  });
+
+  it("a render that fails under --json prints only the envelope on stdout", async () => {
+    const project = join(home, "render-json");
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(project, "index.html"), "<!doctype html><html><body></body></html>");
+    const run = await runAsAgent(["render", project, "--variables", "{bad", "--json"]);
+    expectQuiet(run);
+    expect(run.code, run.stderr).toBe(1);
+    expect(run.stdout.trim().split("\n")).toHaveLength(1);
+    expectJsonFailure(run, "runtime_error");
+    expect(JSON.parse(run.stdout).error.message).toBe("Invalid JSON in --variables");
+  });
+
+  it("a --strict lint abort under --json names the lint errors, on stdout and stderr", async () => {
+    const project = join(home, "render-strict");
+    mkdirSync(project, { recursive: true });
+    writeFileSync(
+      join(project, "index.html"),
+      '<!doctype html><html><body><div data-composition-id="main"></div></body></html>',
+    );
+    const run = await runAsAgent(["render", project, "--strict", "--json"]);
+    expectQuiet(run);
+    expect(run.code, run.stderr).toBe(1);
+    expectJsonFailure(run, "runtime_error");
+    const { message } = JSON.parse(run.stdout).error as { message: string };
+    expect(message).toMatch(/Aborting render due to lint issues in --strict mode: [1-9]\d* error/);
+    expect(run.stderr).toContain(message);
+  });
+
+  it("an unknown command under --json is an envelope with the suggestion", async () => {
+    const run = await runAsAgent(["rendr", "--json"]);
+    expect(run.code).toBe(2);
+    expectJsonFailure(run, "unknown_command");
+    expect(JSON.parse(run.stdout).error.hint).toBe("Did you mean 'hyperframes render'?");
+  });
 
   it("an unknown flag suggests the flag it most likely means", async () => {
     const run = await runAsAgent(["render", "--out", "x.mp4"]);

@@ -17,14 +17,16 @@ export const USAGE_EXIT_CODE = 2;
 export class CliUsageError extends Error {
   readonly result: CommandResult;
   readonly hint?: string;
+  readonly code: string;
 
   constructor(
     message = "Invalid command usage",
-    options: { exitCode?: number; presented?: boolean; hint?: string } = {},
+    options: { exitCode?: number; presented?: boolean; hint?: string; code?: string } = {},
   ) {
     super(message);
     this.name = "CliUsageError";
     this.hint = options.hint;
+    this.code = options.code ?? "usage_error";
     this.result = {
       exitCode: options.exitCode ?? USAGE_EXIT_CODE,
       kind: "usage_error",

@@ -46,9 +46,10 @@ default to the current directory: `npx hyperframes check ./my-video`. A few
 take it as a flag instead — `add`, `transcribe`, `feedback`, `skills`, `history`, and
 the `timeline` edit commands use `--dir`.
 
-**`--json` for agents and scripts.** Almost every command accepts it. The
-payload is wrapped with a `_meta` field so a script can spot an outdated CLI
-from any command's output, without a second call:
+**`--json` for agents and scripts.** Most commands accept it, and the ones
+that do not reject it with exit 2. The payload is wrapped with a `_meta` field
+so a script can spot an outdated CLI from any command's output, without a
+second call:
 
 ```json
 {
@@ -66,6 +67,23 @@ The version numbers come from a cache refreshed at most once a day, in a
 background process, and never under CI or `HYPERFRAMES_NO_UPDATE_CHECK=1`.
 `--json` never makes a network request of its own. Deprecated commands add
 `_meta.deprecated: true`.
+
+A failure under `--json` always prints one JSON object on stdout, with a
+machine-readable `code` and, when there is a next step, a `hint`:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "unknown_flag",
+    "message": "Unknown flag: --out",
+    "hint": "Did you mean --output? Run 'hyperframes render --help' to see its flags."
+  }
+}
+```
+
+Some commands add their own fields next to `error`, such as `findings` from
+`lint` or `reason` and `fix` from a refused `timeline` edit.
 
 **Flags, not prompts.** A missing required flag fails immediately with a usage
 example rather than waiting for input. Two commands are interactive on a TTY:

@@ -20,6 +20,7 @@ const cmd = {
     gifLoop: { type: "string" },
     docker: { type: "boolean" },
     workers: { type: "string", alias: ["w"] },
+    json: { type: "boolean" },
   },
 } as unknown as CommandDef<ArgsDef>;
 
@@ -55,6 +56,26 @@ describe("assertKnownFlags", () => {
     expect(ok(["--help"])).not.toThrow();
     expect(ok(["--json"])).not.toThrow();
     expect(ok(["--", "--anything-goes-here"])).not.toThrow();
+  });
+
+  it("rejects --json on a command that does not declare it, as a usage error", () => {
+    const plain = { args: { output: { type: "string" } } } as unknown as CommandDef<ArgsDef>;
+    expect(() => assertKnownFlags(plain, ["--json"], "preview")).toThrow(
+      expect.objectContaining({
+        message: "hyperframes preview has no JSON output.",
+        code: "json_unsupported",
+        result: expect.objectContaining({ exitCode: 2 }),
+      }),
+    );
+  });
+
+  it("suggests the declared flag an unknown one most likely means", () => {
+    expect(() => assertKnownFlags(cmd, ["--out", "x"], "render")).toThrow(
+      expect.objectContaining({
+        code: "unknown_flag",
+        hint: "Did you mean --output? Run 'hyperframes render --help' to see its flags.",
+      }),
+    );
   });
 
   it("checks each char of a combined short group", () => {
@@ -270,10 +291,13 @@ describe("guardSwallowedFlagValues end-to-end (via citty's real runCommand + the
     }
   });
 
-  it("leaves stdout genuinely empty on the real built CLI, not just presented:true internally", () => {
+  it("prints no usage on stdout, only the --json error envelope, on the real CLI", () => {
     const res = runCli(["catalog", "--query", "--json"]);
     expect(res.status).toBe(2);
     expect(res.stderr).toContain("Missing value for --query");
-    expect(res.stdout).toBe("");
+    expect(JSON.parse(res.stdout)).toMatchObject({
+      ok: false,
+      error: { code: "usage_error", message: expect.stringContaining("Missing value for --query") },
+    });
   });
 });

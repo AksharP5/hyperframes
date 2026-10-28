@@ -29,6 +29,7 @@ import {
 } from "../utils/historyOwner.js";
 import { AmbiguousPreviewServerError } from "../utils/studioSelectionClient.js";
 import { withMeta } from "../utils/updateCheck.js";
+import { jsonFailure } from "../utils/jsonError.js";
 
 export const examples: Example[] = [
   [
@@ -326,7 +327,7 @@ function guarded<A>(run: (args: A) => Promise<void>) {
         error instanceof HistoryBusyError
           ? `This project is open in another app (pid ${error.pid}), which keeps its history: undo, restore or pin there.`
           : (error as Error).message;
-      if ((args as { json?: boolean }).json) print(true, { ok: false, error: message }, message);
+      if ((args as { json?: boolean }).json) print(true, jsonFailure("refused", message), message);
       else console.error(message);
     }
   };

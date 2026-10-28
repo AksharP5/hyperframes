@@ -20,9 +20,7 @@ export { cancel, intro, isCancel, log, note, outro } from "@clack/prompts";
 export function confirmationRequired(command: string, hint: string): never {
   throw new CliUsageError(
     `${command} asks for confirmation, and this run cannot answer a prompt.`,
-    {
-      hint,
-    },
+    { hint, code: "confirmation_required" },
   );
 }
 
@@ -30,6 +28,7 @@ function assertCanPrompt(): void {
   if (!isUnattended()) return;
   throw new CliUsageError("This command asks a question, and this run cannot answer a prompt.", {
     hint: "Pass the answer as a flag; the command's --help lists them.",
+    code: "prompt_unavailable",
   });
 }
 

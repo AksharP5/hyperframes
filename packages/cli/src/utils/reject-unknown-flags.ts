@@ -8,8 +8,9 @@ import { closestMatch } from "./didYouMean.js";
 // dropped and the command falls back to its default — a silent wrong result. We
 // reject unknown flags up front with a clear message.
 
-// Global flags citty / the CLI understand on every command.
-const ALWAYS_KNOWN = new Set(["help", "h", "version", "v", "json"]);
+// Global flags citty / the CLI understand on every command. `--json` is not one: a command
+// supports it by declaring a `json` arg, and every other command rejects it.
+const ALWAYS_KNOWN = new Set(["help", "h", "version", "v"]);
 
 // A camelCase arg name (`gifLoop`) is passed as `--gif-loop`; a kebab name is
 // passed as-is. Accept both spellings so the validator matches citty's parsing.
@@ -67,11 +68,18 @@ function unknownFlagIn(tok: string, known: Set<string>): string | null {
 }
 
 function unknownFlagError(flag: string, known: Set<string>, path: string): CliUsageError {
+  const command = `hyperframes ${path ? `${path} ` : ""}`.trim();
+  if (flag === "--json") {
+    return new CliUsageError(`${command} has no JSON output.`, {
+      code: "json_unsupported",
+      hint: "Run it without --json.",
+    });
+  }
   const longNames = [...known].filter((name) => name.length > 1);
   const match = flag.startsWith("--") ? closestMatch(flag.slice(2), longNames) : undefined;
   const help = `Run 'hyperframes ${path ? `${path} ` : ""}--help' to see its flags.`;
   const hint = match ? `Did you mean --${match}? ${help}` : help;
-  return new CliUsageError(`Unknown flag: ${flag}`, { hint });
+  return new CliUsageError(`Unknown flag: ${flag}`, { hint, code: "unknown_flag" });
 }
 
 /**

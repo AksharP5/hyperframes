@@ -1,4 +1,3 @@
-import { failCommand } from "../utils/commandResult.js";
 import {
   cpSync,
   existsSync,
@@ -27,6 +26,7 @@ import { serveStaticProjectHtml } from "../utils/staticProjectServer.js";
 import { withMeta } from "../utils/updateCheck.js";
 import type { Example } from "./_examples.js";
 import { isPathInside } from "@hyperframes/parsers/asset-paths";
+import { failCaught } from "../utils/jsonError.js";
 
 const MAX_COMPARE_VARIANTS = 16;
 const MAX_COLUMNS = 4;
@@ -440,13 +440,7 @@ export default defineCommand({
         console.log(`\n${c.success("◇")}  Comparison sheet saved to ${payload.sheet}`);
       }
     } catch (err) {
-      const message = normalizeErrorMessage(err);
-      if (jsonRequested) {
-        printJson({ ok: false, error: message });
-      } else {
-        console.error(`\n${c.error("✗")} Compare failed: ${message}`);
-      }
-      failCommand();
+      failCaught(err, jsonRequested, (m) => `\n${c.error("✗")} Compare failed: ${m}`, printJson);
     }
   },
 });

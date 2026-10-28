@@ -7,6 +7,7 @@ import { failCommand, setCommandExitCode } from "../utils/commandResult.js";
 import { createRenderCancellationScope } from "../utils/renderCancellation.js";
 import { PARAKEET_INSTALL_COMMAND, PARAKEET_MODEL_LABEL } from "../whisper/parakeet.js";
 import type { ParakeetRunner } from "../whisper/parakeetRunner.js";
+import { jsonFailure } from "../utils/jsonError.js";
 
 export const examples: Example[] = [
   ["List the speech models transcribe can use", "hyperframes models list --json"],
@@ -14,7 +15,7 @@ export const examples: Example[] = [
 ];
 
 function fail(message: string, json: boolean): never {
-  if (json) console.log(JSON.stringify({ ok: false, error: message }));
+  if (json) console.log(JSON.stringify(jsonFailure("runtime_error", message)));
   else console.error(c.error(message));
   failCommand();
 }
@@ -22,7 +23,7 @@ function fail(message: string, json: boolean): never {
 /** A cancel is the user's choice, not a command failure: exit 130 without a cli_error. */
 function reportCancel(json: boolean): void {
   const message = "Parakeet install cancelled; nothing partial was kept.";
-  if (json) console.log(JSON.stringify({ ok: false, error: message }));
+  if (json) console.log(JSON.stringify(jsonFailure("cancelled", message)));
   else console.error(c.warn(message));
   setCommandExitCode(130);
 }

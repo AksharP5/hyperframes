@@ -1,6 +1,7 @@
 import type { ArgsDef, CommandDef } from "citty";
 import { CliUsageError } from "./commandResult.js";
 import { isTextFile } from "./textFile.js";
+import { jsonFailure } from "./jsonError.js";
 
 // citty binds each declared positional in order and leaves the rest in `args._`, where they were
 // silently dropped (`render ./proj out.mp4` rendered to the default path). Reject them up front.
@@ -72,7 +73,7 @@ export function resolveExtraPositionals(
     `Unexpected extra argument${plural} for hyperframes ${path}: ${extra.join(", ")}\n` +
     `Usage: ${usageLine(path, args)}` +
     (EXTRA_POSITIONAL_HINTS[path] ? `\n${EXTRA_POSITIONAL_HINTS[path]}` : "");
-  if (wantsJson(parsed?.json)) console.log(JSON.stringify({ ok: false, error: message }));
+  if (wantsJson(parsed?.json)) console.log(JSON.stringify(jsonFailure("usage_error", message)));
   else console.error(message);
   // Telemetry reads the thrown message: the command path and a count, never the arguments.
   throw new CliUsageError(

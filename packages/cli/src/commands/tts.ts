@@ -4,6 +4,7 @@ import { isTextFile } from "../utils/textFile.js";
 import { defineCommand } from "../utils/defineCommand.js";
 import type { Example } from "./_examples.js";
 import { readFileSync } from "node:fs";
+import { failureMessage, jsonFailure } from "../utils/jsonError.js";
 
 export const examples: Example[] = [
   ["Generate speech from text", 'hyperframes tts "Welcome to HyperFrames"'],
@@ -189,9 +190,9 @@ export default defineCommand({
         }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = failureMessage(err);
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: message }));
+        console.log(JSON.stringify(jsonFailure("runtime_error", message)));
       } else {
         spin?.stop(c.error(`Speech synthesis failed: ${message}`));
       }

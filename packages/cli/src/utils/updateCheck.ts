@@ -5,6 +5,7 @@ import { readConfig, readConfigFresh, writeConfig } from "../telemetry/config.js
 import { VERSION } from "../version.js";
 import { isCI, isUnattended } from "./attendedTerminal.js";
 import { isDevMode } from "./env.js";
+import { asNotice } from "./jsonError.js";
 import { hostAnswers } from "./hostAnswers.js";
 import { detectInstaller } from "./installerDetection.js";
 import { readPinnedHyperframesVersions } from "./projectPin.js";
@@ -158,8 +159,10 @@ export function withMeta<T extends object>(
  * output.
  */
 export function printDeprecationNotice(command: string): void {
-  process.stderr.write(
-    `'hyperframes ${command}' is deprecated and will be removed in a future release. Use 'hyperframes check' instead.\n`,
+  asNotice(() =>
+    process.stderr.write(
+      `'hyperframes ${command}' is deprecated and will be removed in a future release. Use 'hyperframes check' instead.\n`,
+    ),
   );
 }
 

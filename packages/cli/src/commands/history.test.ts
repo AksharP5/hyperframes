@@ -666,14 +666,14 @@ describe("hyperframes history, refusals", () => {
     expect((await hf("end", "--who", "codex")).code).toBe(0);
   });
 
-  it("--json refusals go to stdout as {ok: false, error}", async () => {
+  it("--json refusals go to stdout as {ok: false, error: expect.objectContaining({ message: error })}", async () => {
     const { hf } = project();
     await hf();
     const refused = await hf("show", "zzzz", "--json");
     expect(refused.code).toBe(2);
     expect(JSON.parse(refused.out)).toMatchObject({
       ok: false,
-      error: 'No entry "zzzz" in this history',
+      error: expect.objectContaining({ message: 'No entry "zzzz" in this history' }),
     });
     expect((await hf("--limit", "0")).code).toBe(2);
   });

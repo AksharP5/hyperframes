@@ -7,6 +7,7 @@ import { normalizeErrorMessage } from "../utils/errorMessage.js";
 import { diag } from "../ui/diagnostics.js";
 import type { CapturePhaseProgress } from "../capture/types.js";
 import { parseCaptureDeadline } from "../capture/captureWatchdog.js";
+import { jsonFailure } from "../utils/jsonError.js";
 
 const CAPTURE_PHASE_PREFIX = "HYPERFRAMES_CAPTURE_PHASE ";
 
@@ -347,7 +348,7 @@ export default defineCommand({
         /* best-effort */
       }
       if (isJson) {
-        console.log(JSON.stringify({ ok: false, error: errMsg }));
+        console.log(JSON.stringify(jsonFailure("runtime_error", errMsg)));
       } else {
         console.error(`\n  ✗ Capture failed: ${errMsg}\n`);
       }

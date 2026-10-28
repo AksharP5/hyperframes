@@ -850,7 +850,7 @@ it("rejects malformed caption-zone specs instead of silently disabling the gate"
   expect(log).toHaveBeenCalledTimes(1);
   expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual({
     ok: false,
-    error: expect.stringContaining("Invalid --caption-zone"),
+    error: expect.objectContaining({ message: expect.stringContaining("Invalid --caption-zone") }),
     _meta: { version: "test" },
   });
 });

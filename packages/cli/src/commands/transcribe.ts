@@ -14,6 +14,7 @@ import {
   type TranscribeEngineEvent,
   type TranscribeResult,
 } from "../api/transcribe.js";
+import { jsonFailure } from "../utils/jsonError.js";
 
 export const examples: Example[] = [
   ["Transcribe an audio file", "hyperframes transcribe audio.mp3"],
@@ -190,7 +191,7 @@ function showEngine(
 
 function failWith(message: string, json: boolean): never {
   if (json) {
-    console.log(JSON.stringify({ ok: false, error: message }));
+    console.log(JSON.stringify(jsonFailure("runtime_error", message)));
   } else {
     console.error(c.error(message));
   }
@@ -227,13 +228,13 @@ function reportRunFailure(
 ): void {
   if (err.code === "whisper_unavailable") return reportWhisperUnavailable(err, spin, opts);
   if (err.code === "cancelled" || err.code === "caption_write_failed") {
-    if (opts.json) console.log(JSON.stringify({ ok: false, error: err.message }));
+    if (opts.json) console.log(JSON.stringify(jsonFailure("runtime_error", err.message)));
     else spin?.stop(err.code === "cancelled" ? c.warn(err.message) : c.error(err.message));
     setCommandExitCode(err.code === "cancelled" ? 130 : 1);
     return;
   }
   if (opts.json) {
-    console.log(JSON.stringify({ ok: false, error: err.message }));
+    console.log(JSON.stringify(jsonFailure("runtime_error", err.message)));
   } else {
     spin?.stop(c.error(`Transcription failed: ${err.message}`));
   }

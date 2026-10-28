@@ -585,7 +585,7 @@ export function createRenderPlan(args: RenderCommandArgs, now = new Date()): Ren
     keepSegments: args["keep-segments"] ?? false,
     bestEffort: args["best-effort"] ?? true,
     batchJson,
-    effectiveQuiet: quiet || (batchPath != null && batchJson),
+    effectiveQuiet: quiet || batchJson,
     strictAll: args["strict-all"] ?? false,
     strictErrors: (args.strict ?? false) || (args["strict-all"] ?? false),
     crf,

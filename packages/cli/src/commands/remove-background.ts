@@ -15,6 +15,7 @@ import {
 import { DEFAULT_QUALITY, QUALITIES, isQuality } from "../background-removal/pipeline.js";
 import type { Example } from "./_examples.js";
 import { RemoveBackgroundError, removeBackground } from "../api/removeBackground.js";
+import { failureMessage, jsonFailure } from "../utils/jsonError.js";
 
 export const examples: Example[] = [
   [
@@ -176,9 +177,9 @@ export default defineCommand({
         );
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = failureMessage(err);
       if (args.json) {
-        console.log(JSON.stringify({ ok: false, error: message }));
+        console.log(JSON.stringify(jsonFailure("runtime_error", message)));
       } else {
         spin?.stop(c.error(`Background removal failed: ${message}`));
       }

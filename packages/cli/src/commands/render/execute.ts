@@ -91,12 +91,15 @@ export async function executeRenderPlan(
     }
   }
 
+  const variables = plan.batchPath
+    ? undefined
+    : resolveVariablesArg(plan.variablesArg, plan.variablesFileArg);
+  await runRenderLint(plan, lintProject, cancellation?.signal);
+  assertRenderActive(cancellation);
   if (!plan.useDocker) await refuseLowDiskBeforeBrowserDownload(plan);
   const browserPath = plan.useDocker
     ? undefined
     : await ensureRenderBrowser(plan, cancellation?.signal);
-  assertRenderActive(cancellation);
-  await runRenderLint(plan, lintProject, cancellation?.signal);
   assertRenderActive(cancellation);
   await runResolutionPreflight(plan, dependencies.checkResolution);
   assertRenderActive(cancellation);
@@ -113,13 +116,12 @@ export async function executeRenderPlan(
     return;
   }
 
-  const variables = resolveVariablesArg(plan.variablesArg, plan.variablesFileArg);
   if (variables && Object.keys(variables).length > 0) {
     const issues = validateVariablesAgainstProject(plan.renderTarget, variables);
-    reportVariableIssues(issues, { strict: plan.strictVariables, quiet: plan.quiet });
+    reportVariableIssues(issues, { strict: plan.strictVariables, quiet: plan.effectiveQuiet });
   }
 
-  if (plan.proresProfile && !PRORES_PROFILES[plan.proresProfile].alpha && !plan.quiet) {
+  if (plan.proresProfile && !PRORES_PROFILES[plan.proresProfile].alpha && !plan.effectiveQuiet) {
     console.log(
       c.dim(`ProRes ${plan.proresProfile} has no alpha channel: transparent areas render black.`),
     );
@@ -165,7 +167,7 @@ export function renderOptionsFromPlan(
     bufferSize: plan.bufferSize,
     videoFrameFormat: plan.videoFrameFormat,
     pageMotionBlur: plan.pageMotionBlur,
-    quiet: plan.quiet,
+    quiet: plan.effectiveQuiet,
     browserPath,
     debug: plan.debug,
     resumeSegments: plan.resumeSegments,
@@ -268,7 +270,7 @@ export async function runRenderLint(
   );
   presentRenderLintFindings(lintResult, plan.effectiveQuiet, plan.lintVerbose || willAbort);
   if (willAbort) {
-    presentRenderLintAbort(plan, definitiveEntryMismatch);
+    presentRenderLintAbort(plan, lintResult, definitiveEntryMismatch);
     failCommand();
   }
   presentRenderLintContinuation(plan);
@@ -303,17 +305,22 @@ function presentRenderLintFindings(
     console.log(line);
 }
 
-function presentRenderLintAbort(plan: RenderPlan, definitiveEntryMismatch: boolean): void {
-  if (plan.effectiveQuiet) return;
-  console.log("");
-  console.log(
-    c.error(
-      definitiveEntryMismatch
-        ? "  Aborting render because the default index.html entry is blank."
-        : `  Aborting render due to lint issues (${plan.strictAll ? "--strict-all" : "--strict"} mode).`,
-    ),
+function presentRenderLintAbort(
+  plan: RenderPlan,
+  lintResult: ProjectLintResult,
+  definitiveEntryMismatch: boolean,
+): void {
+  const mode = plan.strictAll ? "--strict-all" : "--strict";
+  const counts = `${lintResult.totalErrors} error(s), ${lintResult.totalWarnings} warning(s)`;
+  const findings = lintResult.results.flatMap((entry) => entry.result.findings);
+  const first = findings.find((finding) => finding.severity === "error") ?? findings[0];
+  errorBox(
+    definitiveEntryMismatch
+      ? "Aborting render because the default index.html entry is blank."
+      : `Aborting render due to lint issues in ${mode} mode: ${counts}`,
+    first ? `${first.code}: ${first.message}` : undefined,
+    "Run hyperframes lint for the full list.",
   );
-  console.log("");
 }
 
 function presentRenderLintContinuation(plan: RenderPlan): void {

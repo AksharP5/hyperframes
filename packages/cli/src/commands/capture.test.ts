@@ -386,7 +386,10 @@ describe("capture command — vision control", () => {
       const payload = log.mock.calls.at(-1)?.[0];
       expect(typeof payload).toBe("string");
       if (typeof payload !== "string") throw new Error("Expected JSON failure payload");
-      expect(JSON.parse(payload)).toMatchObject({ ok: false, error: "required extraction failed" });
+      expect(JSON.parse(payload)).toMatchObject({
+        ok: false,
+        error: expect.objectContaining({ message: "required extraction failed" }),
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

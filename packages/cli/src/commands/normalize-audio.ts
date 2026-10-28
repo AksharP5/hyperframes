@@ -21,6 +21,7 @@ import { projectCompositionFiles } from "../utils/mountedCompositions.js";
 import { resolveProject } from "../utils/project.js";
 import { failCommand } from "../utils/commandResult.js";
 import type { Example } from "./_examples.js";
+import { jsonFailure } from "../utils/jsonError.js";
 
 export {
   audioNormalizationPlan,
@@ -34,7 +35,7 @@ export {
 const DEFAULT_TOLERANCE_LU = 0.5;
 
 function fail(message: string, json: boolean, cause?: unknown): never {
-  if (json) console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+  if (json) console.log(JSON.stringify(jsonFailure("runtime_error", message), null, 2));
   else console.error(c.error(message));
   failCommand(1, cause);
 }
