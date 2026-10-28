@@ -196,16 +196,13 @@
   function isVisibleElement(element, opacityFloor, probeClipPath) {
     if (IGNORE_TAGS.has(element.tagName)) return false;
     if (hasIgnoreFlag(element)) return false;
-    if (
-      opacityFloor != null &&
-      typeof element.checkVisibility === "function" &&
-      !element.checkVisibility({
-        opacityProperty: true,
-        visibilityProperty: true,
-        contentVisibilityAuto: true,
-      })
-    ) {
-      return false;
+    if (typeof element.checkVisibility === "function") {
+      // Without a floor the plain call still drops content the page does not render, such as a closed <details>.
+      const options =
+        opacityFloor != null
+          ? { opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true }
+          : {};
+      if (!element.checkVisibility(options)) return false;
     }
     const style = getComputedStyle(element);
     if (

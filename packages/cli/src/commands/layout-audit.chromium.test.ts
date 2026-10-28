@@ -413,6 +413,20 @@ describe.runIf(executablePath)("layout audit in Chromium", () => {
     expect(codes.includes("content_overlap")).toBe(overlap);
   });
 
+  it.each([
+    { name: "closed", open: "", overlap: false },
+    { name: "open", open: " open", overlap: true },
+  ])("judges text inside a $name details element by what it renders", async ({ open, overlap }) => {
+    const codes = await auditCodes(`
+      <div data-composition-id="main" data-width="1920" data-height="1080" style="position:relative;width:1920px;height:1080px">
+        <button style="position:absolute;left:100px;top:100px;width:400px;height:100px;font:48px Arial">Continue</button>
+        <details${open} style="position:absolute;left:900px;top:600px"><summary>More</summary>
+          <p style="position:absolute;left:-780px;top:-480px;margin:0;font:48px Arial">Hidden words</p>
+        </details>
+      </div>`);
+    expect(codes.includes("content_overlap")).toBe(overlap);
+  });
+
   describe("craft sampling", () => {
     async function sample(body: string) {
       const page = await browser.newPage();
