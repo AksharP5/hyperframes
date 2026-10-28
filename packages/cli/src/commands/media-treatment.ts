@@ -90,7 +90,7 @@ export function getMediaTreatmentCapabilityOverview() {
   };
 }
 
-const FAMILY_PAYLOAD_KEY: Record<string, string> = { correction: "adjust" };
+const FAMILY_PAYLOAD_KEY: Record<string, string> = { correction: "adjust", presets: "preset" };
 
 function familyIdFor(name: string): string | undefined {
   const wanted = name.toLowerCase();

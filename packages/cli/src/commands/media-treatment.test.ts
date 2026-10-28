@@ -176,6 +176,12 @@ describe("applyMediaTreatmentToHtml", () => {
     );
   });
 
+  it("takes the payload key an agent copies from --grading as the area name", () => {
+    expect(getMediaTreatmentCapabilityDetail("preset")).toEqual(
+      getMediaTreatmentCapabilityDetail("presets"),
+    );
+  });
+
   it("lists the area ids the lookup accepts when a capability is unknown", () => {
     let message = "";
     try {
