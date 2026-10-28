@@ -2851,7 +2851,7 @@ function parseObjectPosition(value: string): { x: number; y: number } {
 }
 
 // fallow-ignore-next-line complexity
-function calculateObjectFitUv(
+export function calculateObjectFitUv(
   boxWidth: number,
   boxHeight: number,
   sourceWidth: number,
@@ -2882,7 +2882,8 @@ function calculateObjectFitUv(
   }
   const position = parseObjectPosition(objectPosition || "center");
   const offsetX = ((boxWidth - drawWidth) * position.x) / boxWidth;
-  const offsetY = ((boxHeight - drawHeight) * position.y) / boxHeight;
+  const positionFromBottom = 1 - position.y;
+  const offsetY = ((boxHeight - drawHeight) * positionFromBottom) / boxHeight;
   return {
     scaleX: drawWidth / boxWidth,
     scaleY: drawHeight / boxHeight,

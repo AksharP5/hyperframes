@@ -8,6 +8,7 @@ import {
 } from "../colorGrading";
 import { HF_COLOR_GROUP_ATTR, HF_COLOR_GROUP_TAG } from "../colorGroups";
 import {
+  calculateObjectFitUv,
   createColorGradingRuntime,
   installAuthoredOpacityCapture,
   type RuntimeColorGradingApi,
@@ -2617,5 +2618,51 @@ describe("installAuthoredOpacityCapture", () => {
     await Promise.resolve();
     expect(el.getAttribute("data-hf-authored-opacity")).toBe("0.9");
     el.remove();
+  });
+});
+
+describe("calculateObjectFitUv", () => {
+  // The shader reads uv = (v_uv - offset) / scale; v_uv.y and the flipped source
+  // texture both run bottom-up, so this reports the CSS-facing fraction from the top.
+  function sampledFromSourceTop(
+    uv: ReturnType<typeof calculateObjectFitUv>,
+    boxEdgeY: 0 | 1,
+  ): number {
+    return 1 - (boxEdgeY - uv.offsetY) / uv.scaleY;
+  }
+
+  function sampledFromSourceLeft(
+    uv: ReturnType<typeof calculateObjectFitUv>,
+    boxEdgeX: 0 | 1,
+  ): number {
+    return (boxEdgeX - uv.offsetX) / uv.scaleX;
+  }
+
+  it("shows the top of a covered portrait source at object-position 50% 6%", () => {
+    const uv = calculateObjectFitUv(1920, 1080, 1080, 1920, "cover", "50% 6%");
+
+    expect(sampledFromSourceTop(uv, 1)).toBeCloseTo(0.041, 3);
+    expect(sampledFromSourceTop(uv, 0)).toBeCloseTo(0.3574, 3);
+  });
+
+  it("shows the bottom of a covered portrait source at object-position 50% 94%", () => {
+    const uv = calculateObjectFitUv(1920, 1080, 1080, 1920, "cover", "50% 94%");
+
+    expect(sampledFromSourceTop(uv, 1)).toBeCloseTo(0.6426, 3);
+    expect(sampledFromSourceTop(uv, 0)).toBeCloseTo(0.959, 3);
+  });
+
+  it("shows the left of a covered landscape source at object-position 6% 50%", () => {
+    const uv = calculateObjectFitUv(1080, 1920, 1920, 1080, "cover", "6% 50%");
+
+    expect(sampledFromSourceLeft(uv, 0)).toBeCloseTo(0.041, 3);
+    expect(sampledFromSourceLeft(uv, 1)).toBeCloseTo(0.3574, 3);
+  });
+
+  it("centers a covered source when no object-position is set", () => {
+    const uv = calculateObjectFitUv(1920, 1080, 1080, 1920, "cover", "");
+
+    expect(sampledFromSourceTop(uv, 1)).toBeCloseTo(0.3415, 3);
+    expect(sampledFromSourceTop(uv, 0)).toBeCloseTo(0.6585, 3);
   });
 });
