@@ -455,6 +455,31 @@ describe.runIf(executablePath)("layout audit in Chromium", () => {
     },
   );
 
+  it.each([
+    {
+      name: "outline text (transparent fill, visible stroke)",
+      style: "color:transparent;-webkit-text-stroke:4px #fff",
+      flagged: false,
+    },
+    { name: "transparent text with no stroke", style: "color:transparent", flagged: true },
+    {
+      name: "transparent text with an invisible stroke",
+      style: "color:transparent;-webkit-text-stroke:4px transparent",
+      flagged: true,
+    },
+    {
+      name: "transparent text with a zero-width stroke",
+      style: "color:transparent;-webkit-text-stroke:0 #fff",
+      flagged: true,
+    },
+  ])("judges $name by what it paints", async ({ style, flagged }) => {
+    const codes = await auditCodes(`
+      <div data-composition-id="main" data-width="1920" data-height="1080" style="position:relative;width:1920px;height:1080px;background:#000">
+        <h1 style="position:absolute;left:120px;top:300px;margin:0;font:700 220px Arial;${style}">OUTLINE</h1>
+      </div>`);
+    expect(codes.includes("text_not_painted")).toBe(flagged);
+  });
+
   describe("craft sampling", () => {
     async function sample(body: string) {
       const page = await browser.newPage();

@@ -1870,6 +1870,11 @@
     // unset, so it is the effective fill directly.
     const fill = cs.webkitTextFillColor || cs.color;
     if (colorAlpha(fill) > 0.05) return null;
+    if (
+      Number.parseFloat(cs.webkitTextStrokeWidth) > 0 &&
+      colorAlpha(cs.webkitTextStrokeColor) > 0.05
+    )
+      return null;
     const clip = cs.webkitBackgroundClip || cs.backgroundClip || "";
     if (/text/i.test(clip)) {
       const bgImage = cs.backgroundImage || "none";
