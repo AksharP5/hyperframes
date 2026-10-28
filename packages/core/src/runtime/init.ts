@@ -2293,7 +2293,7 @@ export function initSandboxRuntimeModular(): void {
       // A successful clear must not leave the player seeking a killed timeline.
       state.capturedTimeline = null;
       childrenBound = false;
-      clock.setDuration(0);
+      clock.setDuration(getSafeTimelineDurationSeconds(null, 0));
       syncTimedElementVisibility(state.currentTime);
       return;
     }
@@ -4676,10 +4676,6 @@ export function initSandboxRuntimeModular(): void {
           state.currentTime = start;
           seekTimelineAndAdapters(start);
         }
-      } else {
-        const rootEl = resolveRootCompositionElement();
-        const declaredDur = Number(rootEl?.getAttribute("data-duration") ?? 0);
-        if (declaredDur > 0) clock.setDuration(declaredDur);
       }
       pauseTimelineIfPossible(tl);
       if (!clock.play()) return;
