@@ -744,7 +744,7 @@ async function extractAudioSegment(
           cyclePath,
           "-vn",
           "-acodec",
-          "pcm_s16le",
+          "pcm_f32le",
           "-ar",
           "48000",
           ...outputArgs,
@@ -799,7 +799,7 @@ async function extractAudioSegment(
     "-i",
     readFrom,
   ];
-  args.push("-vn", "-acodec", "pcm_s16le", "-ar", "48000", ...outputArgs);
+  args.push("-vn", "-acodec", "pcm_f32le", "-ar", "48000", ...outputArgs);
   if (normalizedPlaybackRate !== 1 || options?.padToDuration) args.push("-t", String(duration));
   args.push("-y", outputPath);
 
@@ -1671,7 +1671,7 @@ export async function processCompositionAudio(
             bakedEnvelope = fxResult.envelopeBaked;
           }
 
-          // Bake the envelope into the PCM samples; a non-16-bit WAV falls back to the ffmpeg expression.
+          // Bake the envelope into PCM; an unsupported WAV falls back to the ffmpeg expression.
           if (envelope && !bakedEnvelope) {
             bakedEnvelope = applyVolumeEnvelopeToWav(
               audioSrcPath,
