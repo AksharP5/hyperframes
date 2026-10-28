@@ -1,6 +1,6 @@
 import { createProgressWriter } from "../whisper/progress.js";
 import { failCommand, setCommandExitCode } from "../utils/commandResult.js";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import type { Example } from "./_examples.js";
 import * as clack from "@clack/prompts";
 import { c } from "../ui/colors.js";

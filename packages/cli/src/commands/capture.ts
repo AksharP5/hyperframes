@@ -1,6 +1,6 @@
 import { DEFAULT_MAX_SCREENSHOTS } from "../capture/types.js";
-import { failCommand, scheduleCliExit } from "../utils/commandResult.js";
-import { defineCommand } from "citty";
+import { failCommand, scheduleCliExit, failUsage } from "../utils/commandResult.js";
+import { defineCommand } from "../utils/defineCommand.js";
 import { resolve } from "node:path";
 import type { Example } from "./_examples.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";
@@ -163,13 +163,13 @@ export default defineCommand({
     } else {
       if (localRoot !== undefined) {
         console.error("--local-root requires --local-file.");
-        failCommand();
+        failUsage();
       }
       if (!url) {
         console.error(
           "Missing URL. Pass a website URL, --local-file <path>, or --video <project> for video download.",
         );
-        failCommand();
+        failUsage();
       }
       try {
         new URL(url);

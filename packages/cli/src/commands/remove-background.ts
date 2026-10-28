@@ -1,5 +1,5 @@
-import { failCommand } from "../utils/commandResult.js";
-import { defineCommand } from "citty";
+import { failCommand, failUsage } from "../utils/commandResult.js";
+import { defineCommand } from "../utils/defineCommand.js";
 import { existsSync } from "node:fs";
 import * as clack from "@clack/prompts";
 import { c } from "../ui/colors.js";
@@ -102,23 +102,23 @@ export default defineCommand({
           "Input file is required. Run `hyperframes remove-background --info` for providers.",
         ),
       );
-      failCommand();
+      failUsage();
     }
     if (!args.output) {
       console.error(c.error("--output (-o) is required. Use a .webm, .mov, or .png path."));
-      failCommand();
+      failUsage();
     }
     if (!isDevice(args.device)) {
       console.error(
         c.error(`Invalid --device '${String(args.device)}'. Use: ${DEVICES.join(", ")}.`),
       );
-      failCommand();
+      failUsage();
     }
     if (!isQuality(args.quality)) {
       console.error(
         c.error(`Invalid --quality '${String(args.quality)}'. Use: ${QUALITIES.join(", ")}.`),
       );
-      failCommand();
+      failUsage();
     }
 
     const spin = args.json ? null : clack.spinner();

@@ -272,7 +272,7 @@ describe("guardSwallowedFlagValues end-to-end (via citty's real runCommand + the
 
   it("leaves stdout genuinely empty on the real built CLI, not just presented:true internally", () => {
     const res = runCli(["catalog", "--query", "--json"]);
-    expect(res.status).toBe(1);
+    expect(res.status).toBe(2);
     expect(res.stderr).toContain("Missing value for --query");
     expect(res.stdout).toBe("");
   });

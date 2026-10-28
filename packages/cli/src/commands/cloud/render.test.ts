@@ -11,7 +11,7 @@ import {
   validateDryRunSource,
   type ProjectInputSource,
 } from "./render.js";
-import { CliRuntimeError } from "../../utils/commandResult.js";
+import { CliRuntimeError, CliUsageError } from "../../utils/commandResult.js";
 
 const cliEntry = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "cli.ts");
 
@@ -39,11 +39,11 @@ describe("validateDryRunSource", () => {
   it("accepts a local directory and rejects already-uploaded sources", () => {
     expect(() => validateDryRunSource({ kind: "dir", dir: "." }, true)).not.toThrow();
     expect(() => validateDryRunSource({ kind: "asset_id", assetId: "asst_123" }, true)).toThrow(
-      CliRuntimeError,
+      CliUsageError,
     );
     expect(() =>
       validateDryRunSource({ kind: "url", url: "https://example.com/project.zip" }, true),
-    ).toThrow(CliRuntimeError);
+    ).toThrow(CliUsageError);
   });
 });
 

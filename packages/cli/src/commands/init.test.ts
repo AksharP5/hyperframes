@@ -100,7 +100,7 @@ describe("hyperframes init flag rename", () => {
     const target = join(dir, "proj");
     try {
       const res = runInit([target, "--example", "--non-interactive"]);
-      expect(res.status).toBe(1);
+      expect(res.status).toBe(2);
       expect(res.stderr).toContain("Missing value for --example");
       expect(existsSync(target)).toBe(false);
     } finally {
@@ -682,7 +682,7 @@ describe("applyResolutionPreset", () => {
         "--non-interactive",
         "--skip-skills",
       ]);
-      expect(res.status).toBe(1);
+      expect(res.status).toBe(2);
       expect(res.stderr).toContain("Invalid --resolution");
       expect(existsSync(target)).toBe(false);
     } finally {

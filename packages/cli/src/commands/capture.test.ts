@@ -12,7 +12,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { CliRuntimeError, registerRootExitRequester } from "../utils/commandResult.js";
+import {
+  CliRuntimeError,
+  CliUsageError,
+  registerRootExitRequester,
+} from "../utils/commandResult.js";
 import { CAPTURE_PHASE_SCHEMA } from "../capture/types.js";
 
 const { captureWebsiteMock } = vi.hoisted(() => ({
@@ -228,7 +232,7 @@ describe("capture command — vision control", () => {
       captureCommand.run!({
         args: { ...target, output: "/tmp/hf-local-refused", json: true },
       } as never),
-    ).rejects.toThrow(CliRuntimeError);
+    ).rejects.toThrow("local-root" in target ? CliUsageError : CliRuntimeError);
     expect(error.mock.calls.flat().join("\n")).toContain(message);
     expect(captureWebsiteMock).not.toHaveBeenCalled();
   });

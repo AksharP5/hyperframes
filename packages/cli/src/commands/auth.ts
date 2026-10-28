@@ -11,7 +11,7 @@
  * when the user is doing auth work.
  */
 
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import type { Example } from "./_examples.js";
 import { c } from "../ui/colors.js";
 

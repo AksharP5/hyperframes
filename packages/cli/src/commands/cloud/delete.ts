@@ -6,7 +6,7 @@ import { failCommand } from "../../utils/commandResult.js";
  * shortly after. There's no undo from the CLI side.
  */
 
-import { defineCommand } from "citty";
+import { defineCommand } from "../../utils/defineCommand.js";
 import { createCloudClient } from "../../cloud/index.js";
 import { reportApiError } from "../../cloud/errors.js";
 import { withMeta } from "../../utils/updateCheck.js";

@@ -1,4 +1,4 @@
-import { setCommandExitCode } from "../../utils/commandResult.js";
+import { CliUsageError, failUsage, setCommandExitCode } from "../../utils/commandResult.js";
 /**
  * `hyperframes lambda policies role|user|validate` — IAM bootstrap.
  *
@@ -265,10 +265,9 @@ export async function runPolicies(args: PoliciesArgs): Promise<void> {
           "[lambda policies validate] usage: hyperframes lambda policies validate <policy.json>";
         if (args.json) {
           console.log(JSON.stringify({ ok: false, error: msg }, null, 2));
-          setCommandExitCode(1);
-          return;
+          failUsage();
         }
-        throw new Error(msg);
+        throw new CliUsageError(msg);
       }
       let result: ValidateResult;
       try {

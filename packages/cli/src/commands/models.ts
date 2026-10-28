@@ -1,4 +1,4 @@
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import * as clack from "@clack/prompts";
 import type { Example } from "./_examples.js";
 import { c } from "../ui/colors.js";

@@ -82,7 +82,8 @@ if (!captureEnv || process.env.HYPERFRAMES_NO_CAPTURE_DOTENV !== "1") {
 // Telemetry, update checks, and heavy modules are imported only when needed.
 // For --help we skip telemetry entirely.
 
-import { defineCommand, runCommand } from "citty";
+import { runCommand } from "citty";
+import { defineCommand } from "./utils/defineCommand.js";
 import type { ArgsDef, CommandDef } from "citty";
 import { getRunId } from "./telemetry/runId.js";
 import { reportCommandFailure, trackCommandFailures } from "./utils/command-failure-tracking.js";
@@ -93,6 +94,7 @@ import {
   CliResultSignal,
   CliRuntimeError,
   CliUsageError,
+  USAGE_EXIT_CODE,
   consumeCommandResult,
   outputWritten,
   registerRootExitCodeSanitizer,
@@ -520,9 +522,21 @@ async function showRequestedUsage(): Promise<void> {
   return showUsage(requested.command, requested.parent);
 }
 
+// citty's own parse errors (missing argument, bad enum value, unknown or missing subcommand).
+const CITTY_USAGE_CODES = new Set(["EARG", "E_UNKNOWN_COMMAND", "E_NO_COMMAND"]);
+
+function isCittyUsageError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === "CLIError" &&
+    CITTY_USAGE_CODES.has(String((error as { code?: unknown }).code))
+  );
+}
+
 function commandResultForError(error: unknown): CommandResult {
   if (error instanceof CliResultSignal) return error.result;
   if (error instanceof CliUsageError || error instanceof CliRuntimeError) return error.result;
+  if (isCittyUsageError(error)) return { exitCode: USAGE_EXIT_CODE, kind: "usage_error" };
   return { exitCode: 1, kind: "runtime_error" };
 }
 
@@ -540,10 +554,12 @@ async function executeCli(): Promise<void> {
       commandFailed = true;
       await reportCommandFailure(command, error);
       const typed = error instanceof CliUsageError || error instanceof CliRuntimeError;
-      if (error instanceof CliUsageError && !error.result.presented) await showRequestedUsage();
+      const usage = error instanceof CliUsageError && !error.result.presented;
+      if (usage && !error.hint) await showRequestedUsage();
       if (!typed || !error.result.presented) {
         console.error(error instanceof Error ? error.message : String(error));
       }
+      if (usage && error.hint) console.error(error.hint);
     }
   } finally {
     const pending = consumeCommandResult();

@@ -1,7 +1,7 @@
 import { join, posix, relative, resolve } from "node:path";
 import { failCommand, setCommandExitCode } from "../utils/commandResult.js";
 import { existsSync } from "node:fs";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import * as clack from "@clack/prompts";
 
 import type { Example } from "./_examples.js";

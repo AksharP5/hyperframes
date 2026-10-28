@@ -3,9 +3,10 @@
 // This branch only repointed the scaffolded npm scripts; the refactor is its
 // own task.
 // fallow-ignore-file complexity
-import { failCommand, finishCommand } from "../utils/commandResult.js";
+import { failCommand, finishCommand, failUsage } from "../utils/commandResult.js";
 import { writeNewFileSync } from "../utils/writeNewFile.js";
-import { defineCommand, runCommand } from "citty";
+import { runCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import type { Example } from "./_examples.js";
 import { patchMediaPlaceholders, type InitMediaOptions } from "./initMedia.js";
 
@@ -837,7 +838,7 @@ export default defineCommand({
               `(or aliases 1080p, 4k, uhd, 1080p-square, square-1080p, 4k-square).`,
           ),
         );
-        failCommand();
+        failUsage();
       }
     }
 

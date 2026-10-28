@@ -1,4 +1,4 @@
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import { trackEvent, flushSync } from "../telemetry/client.js";
 import { SKILL_SLUG } from "../telemetry/skill.js";
 

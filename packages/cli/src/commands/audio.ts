@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import type {
   AnalysisQuality,
   AudioCapability,

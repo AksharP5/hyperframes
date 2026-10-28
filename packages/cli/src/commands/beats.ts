@@ -1,5 +1,5 @@
 import { failCommand } from "../utils/commandResult.js";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import { existsSync, readFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import {

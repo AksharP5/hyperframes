@@ -31,7 +31,7 @@ import { pngDimensions } from "../utils/pngDimensions.js";
 import { runWithConcurrencyLimit } from "../utils/concurrency.js";
 import { CliRuntimeError, failCommand } from "../utils/commandResult.js";
 // fallow-ignore-file complexity
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import {
   existsSync,
   mkdtempSync,

@@ -1,7 +1,7 @@
 import { failCommand } from "../utils/commandResult.js";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import * as clack from "@clack/prompts";
 import open from "open";
 import type { Example } from "./_examples.js";

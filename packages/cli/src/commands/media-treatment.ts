@@ -24,7 +24,7 @@ import {
   parseSourceDocument as parseMutableSource,
 } from "@hyperframes/studio-server/source-mutation";
 import { ensureHfIds } from "@hyperframes/parsers/hf-ids";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import { lintHyperframeHtml } from "@hyperframes/lint";
 import { parseHTML } from "linkedom";
 import type { Example } from "./_examples.js";

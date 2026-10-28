@@ -15,7 +15,7 @@ import {
   type LoudnessLimit,
 } from "@hyperframes/studio-server/loudness";
 import { resolveAuthoredAssetFile } from "@hyperframes/parsers/asset-resolution";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import { c } from "../ui/colors.js";
 import { projectCompositionFiles } from "../utils/mountedCompositions.js";
 import { resolveProject } from "../utils/project.js";

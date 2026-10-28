@@ -12,17 +12,21 @@ let pendingResult: CommandResult = SUCCESS_RESULT;
 let rootExitRequester: ((exitCode: number) => void) | undefined;
 let rootExitCodeSanitizer: (() => void) | undefined;
 
+export const USAGE_EXIT_CODE = 2;
+
 export class CliUsageError extends Error {
   readonly result: CommandResult;
+  readonly hint?: string;
 
   constructor(
     message = "Invalid command usage",
-    options: { exitCode?: number; presented?: boolean } = {},
+    options: { exitCode?: number; presented?: boolean; hint?: string } = {},
   ) {
     super(message);
     this.name = "CliUsageError";
+    this.hint = options.hint;
     this.result = {
-      exitCode: options.exitCode ?? 1,
+      exitCode: options.exitCode ?? USAGE_EXIT_CODE,
       kind: "usage_error",
       presented: options.presented,
     };
@@ -61,7 +65,7 @@ export function failCommand(exitCode = 1, cause?: unknown): never {
   throw new CliRuntimeError("Command failed", { exitCode, presented: true, cause });
 }
 
-export function failUsage(exitCode = 1): never {
+export function failUsage(exitCode = USAGE_EXIT_CODE): never {
   throw new CliUsageError("Invalid command usage", { exitCode, presented: true });
 }
 

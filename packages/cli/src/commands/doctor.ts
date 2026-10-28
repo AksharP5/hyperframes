@@ -1,5 +1,5 @@
 // fallow-ignore-file complexity
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import { execFileSync, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import { existsSync } from "node:fs";

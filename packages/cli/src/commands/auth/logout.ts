@@ -8,7 +8,7 @@ import { failCommand } from "../../utils/commandResult.js";
  * `HEYGEN_ACCESS_TOKEN`) can't be cleared by this command — we tell the user to unset them.
  */
 
-import { defineCommand } from "citty";
+import { defineCommand } from "../../utils/defineCommand.js";
 import {
   ENV_CREDENTIAL_VAR,
   clearOAuth,

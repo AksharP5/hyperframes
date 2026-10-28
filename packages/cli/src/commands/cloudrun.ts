@@ -1,5 +1,5 @@
 // fallow-ignore-file code-duplication
-import { failCommand } from "../utils/commandResult.js";
+import { failCommand, failUsage } from "../utils/commandResult.js";
 /**
  * `hyperframes cloudrun` — deploy + drive distributed renders on Google
  * Cloud Run + Cloud Workflows.
@@ -18,7 +18,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import { type CanvasResolution } from "@hyperframes/core";
 import { parseOutputResolutionFlag } from "../utils/parseOutputResolution.js";
 import type { Example } from "./_examples.js";
@@ -327,7 +327,7 @@ async function runDeploy(args: Record<string, unknown>): Promise<void> {
   const project = args.project as string | undefined;
   if (!project) {
     console.error("[cloudrun deploy] --project <gcp-project-id> is required.");
-    failCommand();
+    failUsage();
   }
   const region = (args.region as string | undefined) ?? "us-central1";
   const repo = (args.repo as string | undefined) ?? "hyperframes";
@@ -355,7 +355,7 @@ async function runDeploy(args: Record<string, unknown>): Promise<void> {
       console.error(
         "[cloudrun deploy] --image is required when not running from a hyperframes checkout (no Dockerfile context found).",
       );
-      failCommand();
+      failUsage();
     }
     // Ensure the Artifact Registry repo exists.
     const exists =
@@ -497,7 +497,7 @@ async function runSites(args: Record<string, unknown>): Promise<void> {
   const projectDir = args.extra as string | undefined;
   if (!projectDir) {
     console.error("[cloudrun sites create] usage: hyperframes cloudrun sites create <projectDir>");
-    failCommand();
+    failUsage();
   }
   const state = readState(args);
   const { deploySite } = await loadCloudRunAdapter();
@@ -538,7 +538,7 @@ async function runRender(args: Record<string, unknown>): Promise<void> {
     console.error(
       "[cloudrun render] usage: hyperframes cloudrun render <projectDir> --width <px> --height <px>",
     );
-    failCommand();
+    failUsage();
   }
   const width = parsePositiveInt(args.width, "--width");
   const height = parsePositiveInt(args.height, "--height");
@@ -604,7 +604,7 @@ async function runProgress(args: Record<string, unknown>): Promise<void> {
   const executionName = args.target as string | undefined;
   if (!executionName) {
     console.error("[cloudrun progress] usage: hyperframes cloudrun progress <executionName>");
-    failCommand();
+    failUsage();
   }
   const { getRenderProgress } = await loadCloudRunAdapter();
   const progress = await getRenderProgress({ executionName });
@@ -644,7 +644,7 @@ async function runRenderBatch(args: Record<string, unknown>): Promise<void> {
     console.error(
       "[cloudrun render-batch] usage: hyperframes cloudrun render-batch <projectDir> --batch <file.jsonl> --width <px> --height <px>",
     );
-    failCommand();
+    failUsage();
   }
   const width = parsePositiveInt(args.width, "--width");
   const height = parsePositiveInt(args.height, "--height");
@@ -774,7 +774,7 @@ async function runDestroy(args: Record<string, unknown>): Promise<void> {
   const image = (args.image as string | undefined) ?? "unused:latest";
   if (!project) {
     console.error("[cloudrun destroy] --project is required (or deploy first to cache it).");
-    failCommand();
+    failUsage();
   }
   const vars = [
     "-var",

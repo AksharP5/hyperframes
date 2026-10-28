@@ -5,7 +5,7 @@ import { launchManagedBrowser, resolveManagedGpuMode } from "../browser/launch.j
 // window drifting as the file is edited, hence the file-level suppression.
 // fallow-ignore-file code-duplication
 import { failCommand, setCommandExitCode } from "../utils/commandResult.js";
-import { defineCommand } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";

@@ -15,7 +15,7 @@ import { failCommand, setCommandExitCode } from "../../utils/commandResult.js";
  * place instead of each workflow improvising its own.
  */
 
-import { defineCommand } from "citty";
+import { defineCommand } from "../../utils/defineCommand.js";
 import {
   ENV_CREDENTIAL_VAR,
   AuthClient,

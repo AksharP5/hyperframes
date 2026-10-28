@@ -1,4 +1,5 @@
-import { defineCommand, type ArgsDef } from "citty";
+import { type ArgsDef } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import {
   HISTORY_START,
   HistoryBusyError,

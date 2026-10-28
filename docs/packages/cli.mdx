@@ -71,6 +71,10 @@ example rather than waiting for input. Two commands are interactive on a TTY:
 `--non-interactive`, and `catalog --human-friendly` opens a picker. Nothing else
 prompts, apart from confirmations you can skip with `--yes` or `--no-confirm`.
 
+**Exit codes.** `0` means the command succeeded, `1` means it ran and failed, and
+`2` means the command line itself is wrong: an unknown command or flag, or a
+missing or invalid value.
+
 **Version notices.** An owned install (npm, bun, pnpm, brew) updates itself
 quietly in the background and prints one line on the next run:
 `hyperframes auto-updated to v0.1.5`. It never crosses a major version. Anywhere

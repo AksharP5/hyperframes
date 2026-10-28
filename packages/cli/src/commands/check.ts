@@ -12,7 +12,8 @@ import {
 import { formatFindingTimes } from "../utils/checkFindings.js";
 import { withProjectLock } from "../utils/projectLock.js";
 import { readToolContext, reportArtifacts, type ToolContext } from "../utils/toolContext.js";
-import { defineCommand, parseArgs } from "citty";
+import { parseArgs } from "citty";
+import { defineCommand } from "../utils/defineCommand.js";
 import type { ArgsDef } from "citty";
 import type { Example } from "./_examples.js";
 import { parseAt } from "./layout.js";
