@@ -374,6 +374,13 @@ describe("POST /projects/:id/render — crf", () => {
     expect(both.opts).toBeUndefined();
   });
 
+  it("forwards a ProRes profile for mov to the render adapter and refuses an unknown one", async () => {
+    expect((await post({ format: "mov", proresProfile: "hq" })).opts.proresProfile).toBe("hq");
+    const unknown = await post({ format: "mov", proresProfile: "422hq" });
+    expect(unknown.res.status).toBe(400);
+    expect(unknown.opts).toBeUndefined();
+  });
+
   it("forwards the keyframe interval and the rate cap to the render adapter", async () => {
     const { res, opts } = await post({
       format: "mp4",

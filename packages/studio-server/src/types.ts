@@ -183,6 +183,7 @@ export interface StudioApiAdapter {
     bufferSize?: string;
     videoFrameFormat?: "auto" | "jpg" | "png";
     hdrMode?: "auto" | "force-hdr" | "force-sdr";
+    proresProfile?: "4444" | "hq" | "422" | "lt" | "proxy";
     jobId: string;
     /**
      * The triggering browser profile has telemetry disabled (localStorage

@@ -41,6 +41,15 @@ describe("parseEncoderOptions", () => {
     expect(parseEncoderOptions({ hdrMode: "on" }, "mp4").ok).toBe(false);
   });
 
+  it("takes a ProRes profile for mov only, and rejects an unknown one", () => {
+    expect(parseEncoderOptions({ proresProfile: "hq" }, "mov")).toEqual({
+      ok: true,
+      options: { proresProfile: "hq" },
+    });
+    expect(parseEncoderOptions({ proresProfile: "hq" }, "mp4")).toEqual({ ok: true, options: {} });
+    expect(parseEncoderOptions({ proresProfile: "422hq" }, "mov").ok).toBe(false);
+  });
+
   it("accepts a keyframe interval and a rate cap for mp4", () => {
     expect(
       parseEncoderOptions(
