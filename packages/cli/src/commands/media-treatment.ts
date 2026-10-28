@@ -90,6 +90,16 @@ export function getMediaTreatmentCapabilityOverview() {
   };
 }
 
+const FAMILY_PAYLOAD_KEY: Record<string, string> = { correction: "adjust" };
+
+function familyIdFor(name: string): string | undefined {
+  const wanted = name.toLowerCase();
+  return getMediaTreatmentCapabilityOverview().families.find(
+    ({ id, label }) =>
+      id === wanted || label.toLowerCase() === wanted || FAMILY_PAYLOAD_KEY[id] === wanted,
+  )?.id;
+}
+
 export function getMediaTreatmentCapabilityDetail(id: string): unknown {
   const capabilities = getHfColorGradingCapabilities();
   const animation = (path: string) => {
@@ -306,6 +316,8 @@ export function getMediaTreatmentCapabilityDetail(id: string): unknown {
 
   const detail = Object.hasOwn(details, id) ? Reflect.get(details, id) : undefined;
   if (detail) return detail;
+  const family = familyIdFor(id);
+  if (family && family !== id) return getMediaTreatmentCapabilityDetail(family);
   const families = [...Object.keys(details), ...capabilities.effectFamilies.map((f) => f.id)];
   throw new Error(
     `Unknown media-treatment capability: ${id}. Available areas: ${families.join(", ")}.`,

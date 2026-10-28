@@ -165,10 +165,21 @@ describe("applyMediaTreatmentToHtml", () => {
     );
   });
 
+  it("resolves every name the overview prints for an area to that area", () => {
+    const correction = getMediaTreatmentCapabilityDetail("correction");
+    expect(correction).toMatchObject({ id: "correction" });
+    expect(getMediaTreatmentCapabilityDetail("Adjust")).toEqual(correction);
+    expect(getMediaTreatmentCapabilityDetail("adjust")).toEqual(correction);
+    expect(getMediaTreatmentCapabilityDetail("Color Grading")).toMatchObject({ id: "grading" });
+    expect(() => getMediaTreatmentCapabilityDetail("adjustments")).toThrow(
+      /Unknown media-treatment capability/,
+    );
+  });
+
   it("lists the area ids the lookup accepts when a capability is unknown", () => {
     let message = "";
     try {
-      getMediaTreatmentCapabilityDetail("adjust");
+      getMediaTreatmentCapabilityDetail("adjustments");
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
     }
