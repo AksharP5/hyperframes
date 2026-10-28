@@ -1082,6 +1082,45 @@ describe("editing duplicate inline declarations", () => {
   it.each([
     {
       property: "background",
+      value: "yellow",
+      originalStyle: "background-color:blue;opacity:1;background:red;background:green",
+      remoteStyle: "opacity:0.5;background-color:blue",
+      restoredStyle: "opacity: 0.5; background-color: blue; background: red; background: green",
+    },
+    {
+      property: "margin",
+      value: "30px",
+      originalStyle: "margin-left:5px;opacity:1;margin:10px;margin:20px",
+      remoteStyle: "opacity:0.5;margin-left:5px",
+      restoredStyle: "opacity: 0.5; margin-left: 5px; margin: 10px; margin: 20px",
+    },
+  ])(
+    "restores $property fallbacks after untouched declarations are reordered",
+    async ({ property, value, originalStyle, remoteStyle, restoredStyle }) => {
+      for (const update of [value, null]) {
+        const source = `<span data-hf-id="hf-title" style="${originalStyle}">hello</span>`;
+        const comp = await openComposition(source, { coalesceMs: 0 });
+        comp.setStyle("hf-title", { [property]: update });
+        comp.applyPatches([
+          {
+            op: "replace",
+            path: "/elements/hf-title/attributes/style",
+            value: remoteStyle + (update === null ? "" : `;${property}:${update}`),
+          },
+        ]);
+        comp.undo();
+        expect(comp.serialize()).toContain(`style="${restoredStyle}"`);
+        const reopened = await openComposition(source, { overrides: comp.getOverrides() });
+        expect(reopened.serialize()).toBe(comp.serialize());
+        reopened.dispose();
+        comp.dispose();
+      }
+    },
+  );
+
+  it.each([
+    {
+      property: "background",
       originalStyle:
         "background:red;opacity:1;background-color:blue;background-color:purple;background:green",
       remoteStyle: "opacity:1;background-color:blue;opacity:0.5;background-color:purple",

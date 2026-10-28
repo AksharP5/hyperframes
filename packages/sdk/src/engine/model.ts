@@ -416,6 +416,33 @@ function nextUntouchedStyleIndex(
   return index;
 }
 
+function groupStyleRestoreAnchors(
+  original: readonly [string, string][],
+  anchors: readonly { prop: string; end: number }[],
+  selected: ReadonlySet<string>,
+) {
+  const occurrences = new Map<string, { groups: number[]; index: number }>();
+  let group = 0;
+  for (const [prop] of original) {
+    const entry = occurrences.get(prop) ?? { groups: [], index: 0 };
+    entry.groups.push(group);
+    occurrences.set(prop, entry);
+    if (selected.has(prop)) group++;
+  }
+
+  const grouped: { group: number; end: number }[] = [];
+  for (const anchor of anchors) {
+    const entry = occurrences.get(anchor.prop);
+    if (!entry) continue;
+    const group = entry.groups[entry.index++];
+    if (group === undefined) continue;
+    const previous = grouped.at(-1);
+    if (previous?.group === group) previous.end = anchor.end;
+    else grouped.push({ group, end: anchor.end });
+  }
+  return grouped;
+}
+
 function findStyleRestoreAnchors(
   original: readonly [string, string][],
   current: readonly [string, string][],
@@ -439,7 +466,7 @@ function findStyleRestoreAnchors(
     remaining.set(prop, count - 1);
     anchors.push({ prop, end });
   }
-  return anchors;
+  return groupStyleRestoreAnchors(original, anchors, selected);
 }
 
 export function restoreElementStyleProperties(
@@ -467,14 +494,18 @@ export function restoreElementStyleProperties(
   const anchors = findStyleRestoreAnchors(original, current, selected);
   let index = 0;
   let anchorIndex = 0;
+  let group = 0;
   for (const declaration of original) {
     const anchor = anchors[anchorIndex];
-    if (anchor?.prop === declaration[0]) {
+    if (anchor?.group === group) {
       for (const retained of untouched.slice(index, anchor.end)) restored.push(retained);
       index = anchor.end;
       anchorIndex++;
     }
-    if (selected.has(declaration[0])) restored.push(declaration);
+    if (selected.has(declaration[0])) {
+      restored.push(declaration);
+      group++;
+    }
   }
   const serialized = serializeStyleAttr(restored.concat(untouched.slice(index)));
   el.setAttribute("style", serialized);
