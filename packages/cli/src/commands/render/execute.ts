@@ -217,7 +217,7 @@ async function ensureRenderBrowser(plan: RenderPlan, signal?: AbortSignal): Prom
     if (plan.effectiveQuiet) {
       return (await ensureBrowser({ preferManagedChrome: true, signal })).executablePath;
     }
-    const clack = await import("@clack/prompts");
+    const clack = await import("../../ui/prompts.js");
     browserSpinner = clack.spinner();
     browserSpinner.start("Checking browser...");
     const info = await ensureBrowser({

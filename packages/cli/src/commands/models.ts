@@ -1,5 +1,5 @@
 import { defineCommand } from "../utils/defineCommand.js";
-import * as clack from "@clack/prompts";
+import * as clack from "../ui/prompts.js";
 import type { Example } from "./_examples.js";
 import { c } from "../ui/colors.js";
 import { formatBytes } from "../ui/format.js";

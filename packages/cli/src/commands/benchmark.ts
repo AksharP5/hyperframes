@@ -14,7 +14,7 @@ import { resolveProject } from "../utils/project.js";
 import { loadProducer } from "../utils/producer.js";
 import { c } from "../ui/colors.js";
 import { formatBytes, formatDuration, errorBox } from "../ui/format.js";
-import * as clack from "@clack/prompts";
+import * as clack from "../ui/prompts.js";
 import { withMeta } from "../utils/updateCheck.js";
 import { fpsToFfmpegArg } from "@hyperframes/core";
 

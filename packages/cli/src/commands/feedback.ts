@@ -2,7 +2,7 @@ import { failCommand } from "../utils/commandResult.js";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { defineCommand } from "../utils/defineCommand.js";
-import * as clack from "@clack/prompts";
+import * as clack from "../ui/prompts.js";
 import open from "open";
 import type { Example } from "./_examples.js";
 import {
@@ -18,6 +18,7 @@ import { submitCatalogSearchMiss, submitFeedback } from "../utils/submitFeedback
 import { buildIssueUrl, HYPERFRAMES_REPO_URL } from "../utils/feedbackIssue.js";
 import { VERSION } from "../version.js";
 import { c } from "../ui/colors.js";
+import { isUnattended } from "../utils/attendedTerminal.js";
 import { parseFeedbackRating } from "../utils/feedbackRating.js";
 import { feedbackEmail, parseFeedbackSource } from "../utils/feedbackSource.js";
 import { lintFeedbackComment, type FeedbackLintInput } from "../utils/feedbackLint.js";
@@ -88,7 +89,7 @@ async function promptConfirm(): Promise<boolean> {
 async function confirmFileIssue(dir: string, yes: boolean): Promise<boolean> {
   printIssueConsent(dir);
   if (yes) return true;
-  if (!process.stdout.isTTY) {
+  if (isUnattended()) {
     console.log(`  ${c.dim("Re-run with --yes to publish the repro and file the issue.")}\n`);
     return false;
   }

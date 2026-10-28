@@ -1,7 +1,7 @@
 import { failCommand, failUsage } from "../utils/commandResult.js";
 import { defineCommand } from "../utils/defineCommand.js";
 import { existsSync } from "node:fs";
-import * as clack from "@clack/prompts";
+import * as clack from "../ui/prompts.js";
 import { c } from "../ui/colors.js";
 import {
   DEFAULT_MODEL,

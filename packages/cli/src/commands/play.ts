@@ -21,7 +21,7 @@ export const examples: Example[] = [
 import { resolve } from "node:path";
 import type { Hono } from "hono";
 import { requestSubPath } from "@hyperframes/studio-server";
-import * as clack from "@clack/prompts";
+import * as clack from "../ui/prompts.js";
 import { c } from "../ui/colors.js";
 import { resolveProject, type ProjectDir } from "../utils/project.js";
 import { resolveAutoProxy } from "../utils/projectConfig.js";

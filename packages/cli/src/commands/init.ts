@@ -33,8 +33,9 @@ import { copyDirSync } from "../utils/copyDir.js";
 import { resolve, basename, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawn } from "node:child_process";
-import * as clack from "@clack/prompts";
+import * as clack from "../ui/prompts.js";
 import { c } from "../ui/colors.js";
+import { isUnattended } from "../utils/attendedTerminal.js";
 import { printBanner } from "../ui/banner.js";
 import {
   BUNDLED_TEMPLATES,
@@ -825,7 +826,7 @@ export default defineCommand({
       modelFlag ?? DEFAULT_MODEL,
       languageFlag,
     );
-    const interactive = !nonInteractive && process.stdout.isTTY === true;
+    const interactive = !nonInteractive && !isUnattended();
 
     let resolutionPreset: CanvasResolution | undefined;
     if (args.resolution !== undefined) {

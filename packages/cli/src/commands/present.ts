@@ -11,7 +11,7 @@ export const examples: Example[] = [
   ["Open with a specific browser", "hyperframes present --browser-path /usr/bin/chromium"],
 ];
 import { resolve } from "node:path";
-import * as clack from "@clack/prompts";
+import * as clack from "../ui/prompts.js";
 import { c } from "../ui/colors.js";
 import { resolveProject, type ProjectDir } from "../utils/project.js";
 import { normalizeErrorMessage } from "../utils/errorMessage.js";

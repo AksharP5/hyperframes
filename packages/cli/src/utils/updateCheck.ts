@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { compareVersions } from "compare-versions";
 import { readConfig, readConfigFresh, writeConfig } from "../telemetry/config.js";
 import { VERSION } from "../version.js";
+import { isCI, isUnattended } from "./attendedTerminal.js";
 import { isDevMode } from "./env.js";
 import { hostAnswers } from "./hostAnswers.js";
 import { detectInstaller } from "./installerDetection.js";
@@ -165,7 +166,7 @@ export function printDeprecationNotice(command: string): void {
 /** True when the update check is off: dev mode, CI, or the HYPERFRAMES_NO_UPDATE_CHECK opt-out. */
 export function updateCheckDisabled(): boolean {
   if (isDevMode()) return true;
-  if (process.env["CI"] === "true" || process.env["CI"] === "1") return true;
+  if (isCI()) return true;
   return process.env["HYPERFRAMES_NO_UPDATE_CHECK"] === "1";
 }
 
@@ -174,7 +175,7 @@ export function updateCheckDisabled(): boolean {
  * terminal. Shared with the skills freshness notice so both honour the same gating.
  */
 export function updateNoticesSuppressed(): boolean {
-  return updateCheckDisabled() || !process.stderr.isTTY;
+  return updateCheckDisabled() || !process.stderr.isTTY || isUnattended();
 }
 
 /**
@@ -186,6 +187,7 @@ export function printUpdateNotice(): void {
 
   const meta = getUpdateMeta();
   if (!meta.updateAvailable || !meta.latestVersion) return;
+  if (readConfig().pendingUpdate?.version === meta.latestVersion) return;
 
   // Show the command that updates *this* install: the detected package
   // manager's upgrade for owned global installs (npm/bun/pnpm/brew), and the

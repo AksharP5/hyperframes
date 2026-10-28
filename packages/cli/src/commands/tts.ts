@@ -22,7 +22,7 @@ export const examples: Example[] = [
   ["List available voices", "hyperframes tts --list"],
 ];
 import { resolve } from "node:path";
-import * as clack from "@clack/prompts";
+import * as clack from "../ui/prompts.js";
 import { c } from "../ui/colors.js";
 import { errorBox } from "../ui/format.js";
 import {

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -151,5 +151,27 @@ describe("agent-mode contract", () => {
     const run = await runAsAgent(args.split(" "));
     expectQuiet(run);
     expect(run.code, run.stderr).toBe(2);
+  });
+
+  it.each([["publish"], ["upgrade"]])(
+    "%s without --yes refuses to prompt, names --yes, and exits 2",
+    async (name) => {
+      const run = await runAsAgent([name]);
+      expectQuiet(run);
+      expect(run.code, run.stderr).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("--yes");
+    },
+  );
+
+  it("only the prompt wrapper loads @clack/prompts, statically or dynamically", () => {
+    const offenders = (readdirSync(srcDir, { recursive: true }) as string[]).filter(
+      (file) =>
+        file.endsWith(".ts") &&
+        !file.endsWith(".test.ts") &&
+        file !== join("ui", "prompts.ts") &&
+        readFileSync(join(srcDir, file), "utf8").includes('"@clack/prompts"'),
+    );
+    expect(offenders).toEqual([]);
   });
 });

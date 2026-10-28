@@ -468,7 +468,7 @@ async function readAllWithTimeout(
 }
 
 async function promptForKey(): Promise<string> {
-  const clack = await import("@clack/prompts");
+  const clack = await import("../../ui/prompts.js");
   const value = await clack.password({
     message: "Enter HeyGen API key",
     validate: (v) => {
