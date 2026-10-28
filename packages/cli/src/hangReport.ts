@@ -1,3 +1,4 @@
+import "./utils/hideChildConsoles.js";
 import { writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 

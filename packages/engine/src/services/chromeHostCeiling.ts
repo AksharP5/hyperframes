@@ -69,8 +69,12 @@ export function shellStarts(binary: string, timeoutMs = 10_000): boolean {
   if (answer === undefined) {
     const probe = ["--no-sandbox", "--dump-dom", "about:blank"];
     answer =
-      spawnSync(binary, probe, { stdio: "ignore", timeout: timeoutMs, killSignal: "SIGKILL" })
-        ?.status === 0;
+      spawnSync(binary, probe, {
+        stdio: "ignore",
+        timeout: timeoutMs,
+        killSignal: "SIGKILL",
+        windowsHide: true,
+      })?.status === 0;
     if (!answer) debug("skipping %s: it did not start", binary);
     starts.set(binary, answer);
   }

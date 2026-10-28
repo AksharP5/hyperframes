@@ -474,7 +474,10 @@ function ffprobeMajor(): Promise<number | undefined> {
   runtimeFfprobeMajor ??= new Promise((resolve) => {
     let out = "";
     const binary = getFfprobeBinary();
-    const proc = spawn(binary, ["-version"], { stdio: ["ignore", "pipe", "ignore"] });
+    const proc = spawn(binary, ["-version"], {
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
     proc.stdout.on("data", (chunk) => (out += String(chunk)));
     proc.on("error", () => resolve(undefined));
     proc.on("close", () => resolve(Number(/version n?(\d+)/.exec(out)?.[1]) || undefined));

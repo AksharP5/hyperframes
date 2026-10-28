@@ -72,7 +72,7 @@ const openWithBundle = (bundleId: string, dir: string): boolean =>
 /** Single-instance app: a running copy is forwarded the folder. Only a refused spawn counts as failed. */
 function launchApp(executable: string, dir: string): boolean {
   try {
-    const child = spawn(executable, [dir], { detached: true, stdio: "ignore" });
+    const child = spawn(executable, [dir], { detached: true, stdio: "ignore", windowsHide: false });
     child.on("error", () => {});
     child.unref();
     return true;
