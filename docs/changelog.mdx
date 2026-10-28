@@ -9,6 +9,36 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.8.211"
+  description="Released - 2026-10-28"
+  tags={["Release", "CLI", "Dx", "Producer", "Codegen", "Core"]}
+>
+Graded clips now draw on real GPUs instead of showing a blank frame, including clips zoomed far past the screen. New blank projects also start on black, not grey.
+
+## Fixes
+
+- **CLI:** Local servers never bind a port Chromium refuses to load from ([bf7ebe961](https://github.com/heygen-com/hyperframes/commit/bf7ebe961e522533fbbd9b94384198d662935ef5), [#6620](https://github.com/heygen-com/hyperframes/pull/6620)).
+- **Dx:** Unblock lint and the Claude pre-commit hook on Windows ([310488b05](https://github.com/heygen-com/hyperframes/commit/310488b0501e17a6e92db646575cdef54251f880), [#6619](https://github.com/heygen-com/hyperframes/pull/6619)).
+- **CLI:** A new blank project starts on a black frame, not grey ([4f0bdfb52](https://github.com/heygen-com/hyperframes/commit/4f0bdfb520a7ccb54ca5a602936a3dd713089151), [#6614](https://github.com/heygen-com/hyperframes/pull/6614)).
+- **Core:** A graded clip's canvas no longer comes out blank on a real GPU ([9eaf9efb6](https://github.com/heygen-com/hyperframes/commit/9eaf9efb69f37de0d6d98324bda1c65c9a924f2f), [#6615](https://github.com/heygen-com/hyperframes/pull/6615)).
+- **Producer:** A path whose name starts with two dots now counts as inside its folder ([c8052fbda](https://github.com/heygen-com/hyperframes/commit/c8052fbdae3416f9db93ebd33f873228ce8996b6), [#5834](https://github.com/heygen-com/hyperframes/pull/5834)).
+
+## Performance
+
+- **CLI:** Check's craft pass skips clips the runtime has hidden ([815ff9ec8](https://github.com/heygen-com/hyperframes/commit/815ff9ec8d755b52c050943765bf15c9c9b1e88e), [#6627](https://github.com/heygen-com/hyperframes/pull/6627)).
+
+## Docs & Examples
+
+- **Audio:** Say the render sums tracks at unity and limits nothing ([8b1f88b3c](https://github.com/heygen-com/hyperframes/commit/8b1f88b3c06175f43fbdbe1af6e53933847cb195), [#5652](https://github.com/heygen-com/hyperframes/pull/5652)).
+
+## Internal
+
+- **Codegen:** Resync cloud client from EF 354b4cf4 ([32e171ca9](https://github.com/heygen-com/hyperframes/commit/32e171ca91487c27f8d7c8b1f455b7c844a23e08), [#6608](https://github.com/heygen-com/hyperframes/pull/6608)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.210...v0.8.211).
+</Update>
+
+<Update
   label="HyperFrames v0.8.210"
   description="Released - 2026-10-27"
   tags={["Release", "CLI", "Producer", "Engine"]}
