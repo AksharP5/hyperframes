@@ -498,6 +498,112 @@ describe("mediaUrlSourceOptions", () => {
     expect(repeated).toEqual([0.5, 1, null]);
   });
 
+  it("forgets a start's failures once a read from it ends cleanly, so a long-lived reader meeting it again retries", async () => {
+    const headers = { "Content-Range": "bytes 5000-6023/1000000" };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(new Response(new Uint8Array(1024), { status: 206, headers }))
+        .mockRejectedValue(new TypeError("Failed to fetch")),
+    );
+    const { fetchFn, getRetryDelay } = mediaUrlSourceOptions("thumbnail");
+    const read5000 = () => fetchFn(URL_WITH_PATH, { headers: { Range: "bytes=5000-" } });
+    const failAt5000 = async () => getRetryDelay(1, await read5000().catch((e: unknown) => e));
+    const early = [await failAt5000(), await failAt5000()];
+    await (await read5000()).arrayBuffer();
+    const later = [await failAt5000(), await failAt5000(), await failAt5000()];
+
+    expect(early).toEqual([0.5, 1]);
+    expect(later).toEqual([0.5, 1, null]);
+  });
+
+  it("forgets a start's failures when mediabunny stops a read from it at its target", async () => {
+    const headers = { "Content-Range": "bytes 5000-999999/1000000" };
+    const endless = () =>
+      new ReadableStream<Uint8Array>({ pull: (c) => c.enqueue(new Uint8Array(4096)) });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(new Response(endless(), { status: 206, headers }))
+        .mockRejectedValue(new TypeError("Failed to fetch")),
+    );
+    const { fetchFn, getRetryDelay } = mediaUrlSourceOptions("thumbnail");
+    const read5000 = (signal?: AbortSignal) =>
+      fetchFn(URL_WITH_PATH, { headers: { Range: "bytes=5000-" }, signal });
+    const failAt5000 = async () => getRetryDelay(1, await read5000().catch((e: unknown) => e));
+    const early = [await failAt5000(), await failAt5000()];
+    // what mediabunny's _runWorker does once a read reaches its target: abort the signal it passed
+    const target = new AbortController();
+    const reader = (await read5000(target.signal)).body!.getReader();
+    await reader.read();
+    target.abort();
+    await reader.read().catch(() => {});
+    const later = [await failAt5000(), await failAt5000(), await failAt5000()];
+
+    expect(early).toEqual([0.5, 1]);
+    expect(later).toEqual([0.5, 1, null]);
+  });
+
+  it("keeps a start's failures when its read broke before mediabunny stopped it", async () => {
+    const headers = { "Content-Range": "bytes 5000-999999/1000000" };
+    let sent = false;
+    const breaking = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) return controller.error(new TypeError("network error"));
+        sent = true;
+        controller.enqueue(new Uint8Array(4096));
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response(breaking, { status: 206, headers }))
+        .mockRejectedValue(new TypeError("Failed to fetch")),
+    );
+    const { fetchFn, getRetryDelay } = mediaUrlSourceOptions("thumbnail");
+    const target = new AbortController();
+    const reader = (
+      await fetchFn(URL_WITH_PATH, { headers: { Range: "bytes=5000-" }, signal: target.signal })
+    ).body!.getReader();
+    await reader.read();
+    const broken = await reader.read().catch((e: unknown) => e);
+    const delays = [getRetryDelay(1, broken)];
+    target.abort();
+    for (let i = 0; i < 2; i++) {
+      const failure = await fetchFn(URL_WITH_PATH, { headers: { Range: "bytes=5000-" } }).catch(
+        (e: unknown) => e,
+      );
+      delays.push(getRetryDelay(1, failure));
+    }
+
+    expect(delays).toEqual([0.5, 1, null]);
+  });
+
+  it("keeps counting a start's failures however far apart they come, while no read from it ends", async () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 9, 28, 9, 0, 0) });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const { fetchFn, getRetryDelay } = mediaUrlSourceOptions("thumbnail");
+    const delays = [];
+    for (let i = 0; i < 3; i++) {
+      const failure = await fetchFn(URL_WITH_PATH, { headers: { Range: "bytes=5000-" } }).catch(
+        (e: unknown) => e,
+      );
+      delays.push(getRetryDelay(1, failure));
+      // a slow server streaming for minutes before it breaks
+      vi.setSystemTime(Date.now() + 20 * 60_000);
+    }
+    vi.useRealTimers();
+
+    expect(delays).toEqual([0.5, 1, null]);
+  });
+
   it("does not retry a client error status", () => {
     const failure = new MediaFetchError("probe", 404, null);
 
