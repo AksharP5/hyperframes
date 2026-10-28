@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { createWriteStream, renameSync, unlinkSync } from "node:fs";
+import { createWriteStream, renameSync, statSync, unlinkSync } from "node:fs";
 import { get as httpsGet } from "node:https";
+import { once } from "node:events";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -43,12 +44,10 @@ function removePartialFile(path: string): void {
   }
 }
 
-function measureDownload(options: DownloadOptions, contentLength: string | undefined) {
-  const length = Number(contentLength);
-  const totalBytes = Number.isSafeInteger(length) && length >= 0 ? length : null;
-  let receivedBytes = 0;
+function measureDownload(options: DownloadOptions, startBytes: number, totalBytes: number | null) {
+  let receivedBytes = startBytes;
   let reportedAt = Date.now();
-  options.onProgress?.(0, totalBytes);
+  options.onProgress?.(receivedBytes, totalBytes);
   const stream = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       receivedBytes += chunk.byteLength;
@@ -64,94 +63,150 @@ function measureDownload(options: DownloadOptions, contentLength: string | undef
       callback(null, chunk);
     },
   });
-  return { stream, complete: () => options.onProgress?.(receivedBytes, totalBytes) };
+  return {
+    stream,
+    received: () => receivedBytes,
+    complete: () => options.onProgress?.(receivedBytes, totalBytes),
+  };
 }
 
 function getUrl(
   url: string,
   signal: AbortSignal | undefined,
+  offset: number,
   onResponse: (res: IncomingMessage) => void,
 ): ClientRequest {
-  return signal ? httpsGet(url, { signal }, onResponse) : httpsGet(url, onResponse);
+  const headers = offset > 0 ? { Range: `bytes=${offset}-` } : undefined;
+  if (!signal && !headers) return httpsGet(url, onResponse);
+  return httpsGet(
+    url,
+    { ...(signal ? { signal } : {}), ...(headers ? { headers } : {}) },
+    onResponse,
+  );
 }
 
-/**
- * Download a file from a URL, following redirects.
- * Uses atomic write (download to .tmp, rename on success) to prevent
- * corrupt partial files from persisting in the cache on interruption.
- *
- * Location headers are resolved against the URL that sent them, because they
- * are frequently relative: a host answering 307 with `/api/resolve-cache/...`
- * is normal, and passing that string back as a request target is not.
- *
- * The timeout is per request, so it re-arms on each hop of a redirect chain
- * rather than budgeting the whole chain. A stalled socket is what it exists to
- * catch, and without it the CLI waits forever.
- */
-export function downloadFile(
-  url: string,
-  dest: string,
-  options: DownloadOptions = {},
+function fileSize(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+
+function byteCount(value: string | undefined): number | null {
+  const n = Number(value);
+  return value !== undefined && Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
+/** Where a 206 body starts and the whole file's size, from `Content-Range: bytes start-end/total`. */
+function contentRange(header: string | undefined): { start: number; total: number | null } | null {
+  const match = /^bytes (\d+)-\d+\/(\d+|\*)$/.exec(header ?? "");
+  return match
+    ? { start: Number(match[1]), total: match[2] === "*" ? null : Number(match[2]) }
+    : null;
+}
+
+type ResponsePlan =
+  | { kind: "redirect"; location: string }
+  | { kind: "body"; start: number; total: number | null; append: boolean }
+  | { kind: "refuse"; status: number | undefined };
+
+/** What to do with a response to a request for the bytes from `offset` on. */
+function planResponse(res: IncomingMessage, offset: number): ResponsePlan {
+  const status = res.statusCode;
+  const location = res.headers.location;
+  if (status && REDIRECT_CODES.has(status) && location) return { kind: "redirect", location };
+  const range = status === 206 ? contentRange(res.headers["content-range"]) : null;
+  if (offset > 0 && range?.start === offset) {
+    return { kind: "body", start: offset, total: range.total, append: true };
+  }
+  // A 200, including one to a range request, is the whole file from byte 0.
+  if (status === 200) {
+    return {
+      kind: "body",
+      start: 0,
+      total: byteCount(res.headers["content-length"]),
+      append: false,
+    };
+  }
+  return { kind: "refuse", status };
+}
+
+/** Writes a response body to `tmp`, leaving `state.received` at the bytes that reached disk. */
+async function writeBody(
+  res: IncomingMessage,
+  tmp: string,
+  plan: Extract<ResponsePlan, { kind: "body" }>,
+  state: { received: number; total: number | null },
+  options: DownloadOptions,
 ): Promise<void> {
-  const tmp = `${dest}.${process.pid}.${randomUUID()}.tmp`;
+  state.received = plan.start;
+  state.total = plan.total;
+  const meter = measureDownload(options, plan.start, plan.total);
+  const file = createWriteStream(tmp, { flags: plan.append ? "a" : "w" });
+  try {
+    await pipeline(res, meter.stream, file);
+  } catch (error) {
+    // Chunks still buffered in the destroyed file stream never reach disk.
+    if (!file.closed) await once(file, "close").catch(() => {});
+    state.received = fileSize(tmp);
+    throw error;
+  }
+  state.received = meter.received();
+  meter.complete();
+}
+
+/** One request chain; `state.received` holds the bytes in `tmp` even when it rejects. */
+function downloadAttempt(
+  url: string,
+  tmp: string,
+  state: { received: number; total: number | null },
+  options: DownloadOptions,
+): Promise<void> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
+  const offset = state.received;
   return new Promise((resolve, reject) => {
     const follow = (u: string, hops = 0) => {
       let activeResponse: IncomingMessage | undefined;
       let responseDiscarded = false;
       let responsePipelineStarted = false;
       let requestError: Error | undefined;
-      let request: ClientRequest;
-      try {
-        request = getUrl(u, options.signal, (res) => {
-          activeResponse = res;
-          if (res.statusCode && REDIRECT_CODES.has(res.statusCode)) {
-            const location = res.headers.location;
-            if (location) {
-              responseDiscarded = true;
-              res.destroy();
-              if (hops >= MAX_REDIRECTS) {
-                removePartialFile(tmp);
-                reject(
-                  new Error(
-                    `Download failed: more than ${MAX_REDIRECTS} redirects from ${url.split("?")[0]}`,
-                  ),
-                );
-                return;
-              }
-              try {
-                follow(redirectTarget(location, u), hops + 1);
-              } catch (error) {
-                removePartialFile(tmp);
-                reject(error);
-              }
-              return;
+      const discard = (res: IncomingMessage) => {
+        responseDiscarded = true;
+        res.destroy();
+      };
+      const onResponse = (res: IncomingMessage) => {
+        activeResponse = res;
+        const plan = planResponse(res, offset);
+        if (plan.kind === "refuse") {
+          discard(res);
+          reject(new Error(`Download failed: HTTP ${plan.status}`));
+        } else if (plan.kind === "redirect") {
+          discard(res);
+          if (hops >= MAX_REDIRECTS) {
+            reject(
+              new Error(
+                `Download failed: more than ${MAX_REDIRECTS} redirects from ${url.split("?")[0]}`,
+              ),
+            );
+          } else {
+            try {
+              follow(redirectTarget(plan.location, u), hops + 1);
+            } catch (error) {
+              reject(error);
             }
           }
-          if (res.statusCode !== 200) {
-            responseDiscarded = true;
-            res.destroy();
-            removePartialFile(tmp);
-            reject(new Error(`Download failed: HTTP ${res.statusCode}`));
-            return;
-          }
-          const meter = measureDownload(options, res.headers["content-length"]);
-          const file = createWriteStream(tmp);
+        } else {
           responsePipelineStarted = true;
-          const transfer = pipeline(res, meter.stream, file);
-          transfer
-            .then(() => {
-              renameSync(tmp, dest);
-              meter.complete();
-              resolve();
-            })
-            .catch((err) => {
-              removePartialFile(tmp);
-              reject(requestError ?? err);
-            });
-        });
+          writeBody(res, tmp, plan, state, options).then(resolve, (err) =>
+            reject(requestError ?? err),
+          );
+        }
+      };
+      let request: ClientRequest;
+      try {
+        request = getUrl(u, options.signal, offset, onResponse);
       } catch (error) {
-        removePartialFile(tmp);
         reject(error);
         return;
       }
@@ -165,10 +220,38 @@ export function downloadFile(
           activeResponse?.destroy(err);
           return;
         }
-        removePartialFile(tmp);
         reject(err);
       });
     };
     follow(url);
   });
+}
+
+/** Some networks drop every connection at the same byte, so a retry resumes from the partial file. */
+export async function downloadFile(
+  url: string,
+  dest: string,
+  options: DownloadOptions = {},
+): Promise<void> {
+  const tmp = `${dest}.${process.pid}.${randomUUID()}.tmp`;
+  const state: { received: number; total: number | null } = { received: 0, total: null };
+  for (;;) {
+    const before = state.received;
+    try {
+      await downloadAttempt(url, tmp, state, options);
+      const size = fileSize(tmp);
+      if (state.total !== null && size !== state.total) {
+        state.received = size;
+        throw new Error(`Download incomplete: ${size} of ${state.total} bytes`);
+      }
+      renameSync(tmp, dest);
+      return;
+    } catch (error) {
+      const overLimit = error instanceof Error && error.message.startsWith("Download exceeded");
+      if (options.signal?.aborted || overLimit || state.received <= before) {
+        removePartialFile(tmp);
+        throw error;
+      }
+    }
+  }
 }
