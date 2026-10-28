@@ -84,6 +84,7 @@ import {
   injectDrawElementCanvas,
   captureDrawElementFrame,
   resolveDrawElementCaptureMode,
+  forcePreservedDrawingBuffer,
   instrumentAcceleratedCanvases,
   initDrawElementWorkerEncode,
   cleanupDrawElementWorkerEncode,
@@ -1639,6 +1640,7 @@ async function constructCaptureSession(
   // composites their live content via drawImage instead (see
   // instrumentAcceleratedCanvases). Must be registered before navigation.
   if (useDrawElement) {
+    await page.evaluateOnNewDocument(forcePreservedDrawingBuffer);
     await page.evaluateOnNewDocument(instrumentAcceleratedCanvases);
   }
   // The opacity → autoAlpha tween rewrite was RETIRED with the requestPaint

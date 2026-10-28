@@ -115,6 +115,7 @@ export {
 } from "./services/pageNavigationTimeoutErrorHint.js";
 
 // ── Frame capture pipeline ──────────────────────────────────────────────────────
+export { forcePreservedDrawingBuffer } from "./services/drawElementService.js";
 export {
   createCaptureSession,
   initializeSession,
