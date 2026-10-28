@@ -7,15 +7,18 @@ type ChildProcessModule = Record<string, unknown>;
 
 const ENTRY_POINTS = ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"];
 
-/** The call's arguments with `windowsHide: true` set unless the caller chose either way. */
+/** The call's arguments with `windowsHide: true` unless the caller chose; a taskkill's stderr is dropped too. */
 function hidden(command: string, rest: unknown[]): unknown[] {
+  const defaults = /^taskkill\s/i.test(command)
+    ? { windowsHide: true, stdio: "ignore" }
+    : { windowsHide: true };
   const args = [...rest];
   const at = args.findIndex((arg) => arg && typeof arg === "object" && !Array.isArray(arg));
   if (at >= 0) {
-    args[at] = { windowsHide: true, ...(args[at] as object) };
+    args[at] = { ...defaults, ...(args[at] as object) };
   } else {
     const callback = args.findIndex((arg) => typeof arg === "function");
-    args.splice(callback < 0 ? args.length : callback, 0, { windowsHide: true });
+    args.splice(callback < 0 ? args.length : callback, 0, defaults);
   }
   return [command, ...args];
 }

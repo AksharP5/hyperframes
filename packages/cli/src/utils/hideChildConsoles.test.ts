@@ -65,6 +65,15 @@ describe("hideChildConsoles", () => {
     expect(calls[3]?.at(-1)).toBe(callback);
   });
 
+  it("silences taskkill's stderr when its target is already gone", () => {
+    const calls = run("win32", (m) => {
+      m.execSync("taskkill /pid 1 /T /F");
+      m.execSync("echo hi");
+    });
+    expect(calls[0]?.[2]).toEqual({ windowsHide: true, stdio: "ignore" });
+    expect(calls[1]?.[2]).toEqual({ windowsHide: true });
+  });
+
   it("leaves a caller that wants the window alone", () => {
     const calls = run("win32", (m) =>
       m.spawn("browser", [], { windowsHide: false, detached: true }),
