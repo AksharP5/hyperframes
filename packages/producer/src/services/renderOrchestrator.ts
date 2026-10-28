@@ -3016,6 +3016,8 @@ async function executeRenderPipeline(input: {
   let captureCompositionHeight: number | undefined;
   let captureTotalFrames: number | undefined;
   const perfStages: Record<string, number> = {};
+  // The audio mix runs while capture sets up; a failure in between still waits for it.
+  let pendingAudio: Promise<unknown> | undefined;
   const hdrDiagnostics: HdrDiagnostics = {
     videoExtractionFailures: 0,
     imageDecodeFailures: 0,
@@ -3516,7 +3518,7 @@ async function executeRenderPipeline(input: {
       code: "process_audio",
     });
 
-    const audioResult = await observeRenderStage(
+    const audioStage = observeRenderStage(
       observability,
       "audio_process",
       { audioCount: composition.audios.length },
@@ -3536,40 +3538,7 @@ async function executeRenderPipeline(input: {
           log,
         }),
     );
-    const { audioOutputPath, hasAudio } = audioResult;
-    perfStages.audioProcessMs = audioResult.audioProcessMs;
-    recordLimiterAttenuation(job, audioResult.audioLoweredDb);
-    if (audioResult.audioError) {
-      const audioFailures = audioResult.audioFailures ?? [];
-      const failureOwner =
-        audioFailures.length === 0
-          ? undefined
-          : audioFailures.some((failure) => failure.owner === "system")
-            ? "system"
-            : "user";
-      const retryable =
-        audioFailures.length === 0
-          ? undefined
-          : audioFailures.every((failure) => failure.retryable);
-      applyRenderWarningPolicy(
-        job,
-        [
-          {
-            code: "audio_processing_failed",
-            message: `Audio mix failed; output would be video-only: ${audioResult.audioError}`,
-            details: {
-              mediaType: "audio",
-              audioFailures: audioFailureDiagnostics(audioFailures),
-              failureReasons: [...new Set(audioFailures.map((failure) => failure.reason))],
-              failureStages: [...new Set(audioFailures.map((failure) => failure.stage))],
-              failureOwner,
-              retryable,
-            },
-          },
-        ],
-        log,
-      );
-    }
+    pendingAudio = audioStage.catch(() => undefined);
 
     // ── Stage 4: Frame capture ──────────────────────────────────────────
     const stage4Start = Date.now();
@@ -4584,6 +4553,42 @@ async function executeRenderPipeline(input: {
     const effectiveQuality = job.config.crf ?? preset.quality;
     const effectiveBitrate = job.config.crf != null ? undefined : job.config.videoBitrate;
 
+    const audioResult = await audioStage;
+    const { audioOutputPath, hasAudio } = audioResult;
+    perfStages.audioProcessMs = audioResult.audioProcessMs;
+    recordLimiterAttenuation(job, audioResult.audioLoweredDb);
+    if (audioResult.audioError) {
+      const audioFailures = audioResult.audioFailures ?? [];
+      const failureOwner =
+        audioFailures.length === 0
+          ? undefined
+          : audioFailures.some((failure) => failure.owner === "system")
+            ? "system"
+            : "user";
+      const retryable =
+        audioFailures.length === 0
+          ? undefined
+          : audioFailures.every((failure) => failure.retryable);
+      applyRenderWarningPolicy(
+        job,
+        [
+          {
+            code: "audio_processing_failed",
+            message: `Audio mix failed; output would be video-only: ${audioResult.audioError}`,
+            details: {
+              mediaType: "audio",
+              audioFailures: audioFailureDiagnostics(audioFailures),
+              failureReasons: [...new Set(audioFailures.map((failure) => failure.reason))],
+              failureStages: [...new Set(audioFailures.map((failure) => failure.stage))],
+              failureOwner,
+              retryable,
+            },
+          },
+        ],
+        log,
+      );
+    }
+
     resetCaptureAttemptProgress(job);
 
     // ── Z-ordered multi-layer compositing ─────────────────────────────────
@@ -5488,6 +5493,7 @@ async function executeRenderPipeline(input: {
     updateJobStatus(job, "complete", "Render complete", 100, onProgress);
     await eventPublisher.flush();
   } catch (caught) {
+    await pendingAudio;
     const error = tooSlowError ?? caught;
     if (!tooSlowError && (error instanceof RenderCancelledError || executionSignal?.aborted)) {
       job.error = error instanceof Error ? error.message : "render_cancelled";
