@@ -2648,7 +2648,7 @@
 
   function craftTextParts(root, rootRect) {
     const candidates = [];
-    for (const element of Array.from(root.querySelectorAll("*"))) {
+    for (const element of elementsOnScreenScenes(root)) {
       if (!hasOwnTextCandidate(element, true) || !isVisibleElement(element, 0.05, false)) continue;
       const rect = unionRects(visibleTextClientRects(element, true));
       if (!rect || !intersectsRect(rect, rootRect)) continue;

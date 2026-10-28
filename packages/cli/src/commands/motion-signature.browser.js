@@ -26,6 +26,8 @@
     visibilityProperty: true,
     contentVisibilityAuto: true,
   };
+  // Core's timedClipHide hides these clips' whole subtrees; layout-audit skips them the same way.
+  const RUNTIME_HIDDEN_CLIP = "[data-hf-clip-hidden]";
   // Stand-in for the ::before/::after of an element whose contents are skipped:
   // no pseudo box exists, so nothing it declares (content, counter-*) paints.
   const NO_BOX = Object.freeze({ display: "none" });
@@ -365,14 +367,21 @@
     const skippedHosts = new Set();
     for (const element of [root, ...root.querySelectorAll("*")]) {
       if (IGNORE_TAGS.has(element.tagName)) continue;
-      const style = getComputedStyle(element);
       const parent = element.parentElement;
+      if (
+        unrenderedBelow.has(parent) ||
+        (element !== root && element.matches(RUNTIME_HIDDEN_CLIP))
+      ) {
+        unrenderedBelow.add(element);
+        continue;
+      }
+      const style = getComputedStyle(element);
       const platformDecides = typeof element.checkVisibility === "function";
       const noBox = platformDecides
         ? !element.checkVisibility(RENDERED_BOX_OPTIONS)
         : style.display === "none";
       const boxlessOwner = style.display === "contents" && !skippedHosts.has(parent);
-      if (unrenderedBelow.has(parent) || (noBox && !boxlessOwner)) {
+      if (noBox && !boxlessOwner) {
         unrenderedBelow.add(element);
         continue;
       }

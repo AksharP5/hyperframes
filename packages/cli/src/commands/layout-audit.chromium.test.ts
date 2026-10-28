@@ -431,6 +431,36 @@ describe.runIf(executablePath)("layout audit in Chromium", () => {
       }
     }
 
+    it("reads no style inside a clip the runtime hid, and still reads the text on screen", async () => {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(
+          `<body style="margin:0">${stage(
+            `<div data-hf-clip-hidden style="visibility:hidden"><h2 id="off">Off screen</h2></div>` +
+              heading(300, "On screen"),
+          )}</body>`,
+        );
+        await page.addScriptTag({ content: signatureScript });
+        await page.addScriptTag({ content: script });
+        const { reads, texts } = await page.evaluate(() => {
+          const off = document.getElementById("off");
+          const read = window.getComputedStyle;
+          let reads = 0;
+          window.getComputedStyle = (element, pseudo) => {
+            if (element === off) reads += 1;
+            return read(element, pseudo);
+          };
+          const frame = window.__hyperframesCraftSample();
+          return { reads, texts: frame.parts.map((part) => part.text) };
+        });
+
+        expect(texts).toEqual(["On screen"]);
+        expect(reads).toBe(0);
+      } finally {
+        await page.close();
+      }
+    });
+
     it("reads a headline split into inline word spans as one reading block", async () => {
       const { frame } = await sample(
         `<h1 id="title" style="position:absolute;left:100px;top:300px;margin:0;font-size:96px"><span style="display:inline-block">Ship</span> <span style="display:inline-block">it</span> <span style="display:inline-block">faster</span></h1>`,
