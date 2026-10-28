@@ -164,7 +164,7 @@ function preparedAudioOutputArgs(
   stream: string | null,
 ): string[] {
   const channelFilter = metadata?.channels === 1 ? STEREO_CHANNEL_FILTER : null;
-  const outputArgs = channelFilter ? [] : ["-ac", "2"];
+  const outputArgs = channelFilter ? [] : ["-ac", "2", "-rematrix_maxval", "1"];
   if (typeof playbackRate === "object") {
     const graph = buildRampFilterComplex(
       playbackRate,

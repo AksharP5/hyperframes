@@ -168,6 +168,63 @@ describe.skipIf(!HAS_FFMPEG)(
     });
 
     it.each([false, true])(
+      "preserves the normalized surround mix level (loop=%s)",
+      async (loop) => {
+        const dir = mkdtempSync(join(tmpdir(), "hf-surround-level-"));
+        tempDirs.push(dir);
+        const sourcePath = join(dir, "surround.wav");
+        const setup = spawnSync(getFfmpegBinary(), [
+          "-nostdin",
+          "-v",
+          "error",
+          "-f",
+          "lavfi",
+          "-i",
+          "aevalsrc=0.3*sin(2*PI*1000*t)|0.2*sin(2*PI*700*t)|0.1*sin(2*PI*400*t)|0|0|0:c=5.1:s=48000:d=1",
+          "-c:a",
+          "pcm_s16le",
+          sourcePath,
+        ]);
+        expect(setup.status, setup.stderr.toString()).toBe(0);
+        const control = spawnSync(getFfmpegBinary(), [
+          "-nostdin",
+          "-v",
+          "error",
+          "-i",
+          sourcePath,
+          "-ac",
+          "2",
+          "-c:a",
+          "pcm_s16le",
+          join(dir, "stereo.wav"),
+        ]);
+        expect(control.status, control.stderr.toString()).toBe(0);
+
+        const duration = loop ? 2 : 1;
+        const levels: number[] = [];
+        for (const name of ["surround", "stereo"]) {
+          const outputPath = join(dir, `${name}.m4a`);
+          const elements = parseAudioElements(
+            `<audio id="tone" src="${name}.wav" data-start="0" data-duration="${duration}" ${loop ? "loop" : ""}></audio>`,
+          );
+          const result = await processCompositionAudio(
+            elements,
+            dir,
+            join(dir, name),
+            outputPath,
+            duration,
+          );
+          expect(result.success, result.error).toBe(true);
+          levels.push(meanVolumeDb(outputPath));
+        }
+        const [surround, stereo] = levels;
+        if (surround === undefined || stereo === undefined)
+          throw new Error("Both mixes need levels");
+        expect(Math.abs(surround - stereo)).toBeLessThan(0.2);
+      },
+    );
+
+    it.each([false, true])(
       "preserves a boosted clip's waveform through a unity volume lane (loop=%s)",
       async (loop) => {
         const dir = mkdtempSync(join(tmpdir(), "hf-envelope-headroom-"));
