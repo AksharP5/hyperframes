@@ -9,6 +9,25 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.8.214"
+  description="Released - 2026-10-28"
+  tags={["Release", "Studio", "Core"]}
+>
+A lane of clips can now share one colour grade, so grading a camera means editing one element. A grade can also be baked into a 3D LUT that matches the preview.
+
+## Features
+
+- **Core:** Grade groups grade a whole lane from one hf-color-group ([09b129047](https://github.com/heygen-com/hyperframes/commit/09b12904748b71ab1777d335f20026d45d6944ca), [#6678](https://github.com/heygen-com/hyperframes/pull/6678)).
+- **Core:** Bake a colour grade into a 3D LUT (.cube) ([c9017f45f](https://github.com/heygen-com/hyperframes/commit/c9017f45f4b8c38e11396a70a3d05d3432c58b48), [#6679](https://github.com/heygen-com/hyperframes/pull/6679)).
+
+## Fixes
+
+- **Studio:** A tab's save keeps the newer video version another tab recorded ([348971c22](https://github.com/heygen-com/hyperframes/commit/348971c22285421a062ab5df45ad94bb4680bf9c), [#6682](https://github.com/heygen-com/hyperframes/pull/6682)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.213...v0.8.214).
+</Update>
+
+<Update
   label="HyperFrames v0.8.213"
   description="Released - 2026-10-28"
   tags={["Release", "Core", "CLI", "Studio"]}
