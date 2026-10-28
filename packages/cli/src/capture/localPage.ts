@@ -13,6 +13,7 @@ import type { Socket } from "node:net";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { listenOnBrowserSafePort } from "@hyperframes/engine";
 
 export interface LocalCaptureTarget {
   /** Real path of the directory the page may read from. */
@@ -165,10 +166,7 @@ export async function startLocalPageServer(target: LocalCaptureTarget): Promise<
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
   });
-  await new Promise<void>((resolveListen, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolveListen);
-  });
+  await listenOnBrowserSafePort(server, "127.0.0.1");
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Local page server did not bind");
   const origin = `http://127.0.0.1:${address.port}`;

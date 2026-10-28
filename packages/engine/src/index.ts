@@ -337,6 +337,12 @@ export {
   BROWSER_GPU_NOT_SOFTWARE,
 } from "./utils/assertSwiftShader.js";
 
+export {
+  isBrowserSafePort,
+  listenOnBrowserSafePort,
+  settleOnBrowserSafePort,
+} from "./utils/browserSafePort.js";
+
 export { readWebGlVendorInfoFromCanvas } from "./utils/readWebGlVendorInfoFromCanvas.js";
 
 export {

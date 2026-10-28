@@ -8,6 +8,7 @@ import {
   openUpstreamTunnel,
   type UpstreamProxy,
 } from "./upstreamProxy.js";
+import { listenOnBrowserSafePort } from "@hyperframes/engine";
 
 const CONNECTION_TIMEOUT_MS = 15_000;
 const HOP_HEADERS = new Set([
@@ -189,10 +190,7 @@ export async function startCaptureProxy(): Promise<{ url: string; close(): Promi
   server.headersTimeout = CONNECTION_TIMEOUT_MS;
   server.requestTimeout = 30_000;
   server.keepAliveTimeout = 1_000;
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
+  await listenOnBrowserSafePort(server, "127.0.0.1");
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Capture proxy did not bind");
   let closing: Promise<void> | undefined;
