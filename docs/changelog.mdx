@@ -9,11 +9,45 @@ Recent HyperFrames releases, including user-facing features, fixes, and migratio
 {/* New release entries are prepended by `bun run changelog:draft <version> --write`. */}
 
 <Update
+  label="HyperFrames v0.8.212"
+  description="Released - 2026-10-28"
+  tags={["Release", "CLI", "Inspector", "Studio"]}
+>
+A model download that stalls now resumes instead of failing. Failures with --json answer in one shape, and check shows progress as it runs.
+
+## Fixes
+
+- **CLI:** Exit 2 for remaining flag validation errors ([2d3033c71](https://github.com/heygen-com/hyperframes/commit/2d3033c719bc82ea4a82fe4d7141e0669ab9a14d), [#6639](https://github.com/heygen-com/hyperframes/pull/6639)).
+- **CLI:** Snapshot warns when a video on screen has no source to read a frame from ([b84762230](https://github.com/heygen-com/hyperframes/commit/b84762230f03dd182e950df93eb6849b86a12aec), [#6656](https://github.com/heygen-com/hyperframes/pull/6656)).
+- **CLI:** Every --json failure answers with one envelope, and --json only where supported ([85efaece7](https://github.com/heygen-com/hyperframes/commit/85efaece7e11a3e420fb4d93b85230781e805942), [#6622](https://github.com/heygen-com/hyperframes/pull/6622)).
+- **CLI:** A check page forces a WebGL drawing buffer but keeps no list of 2d canvases ([b6eaed7ca](https://github.com/heygen-com/hyperframes/commit/b6eaed7cae2a92e80955c1b8d40db129cb74230b), [#6650](https://github.com/heygen-com/hyperframes/pull/6650)).
+- **Inspector:** Live queries see every composition, wherever the playhead is ([205c1a31d](https://github.com/heygen-com/hyperframes/commit/205c1a31d3b4f031e7a10ef6dec8b7581c743d1a), [#6651](https://github.com/heygen-com/hyperframes/pull/6651)).
+- **CLI:** Resume a model download that stalls partway instead of failing ([ecad35a22](https://github.com/heygen-com/hyperframes/commit/ecad35a2254c98b84c9410072908c902eb3f7241), [#6649](https://github.com/heygen-com/hyperframes/pull/6649)).
+- **Studio:** A thumbnail reader forgets a start's failures after a minute ([a88751d9d](https://github.com/heygen-com/hyperframes/commit/a88751d9d68475c84542c2cbc3621742ddfccd76), [#6642](https://github.com/heygen-com/hyperframes/pull/6642)).
+- **Studio Server:** The render route passes a MOV ProRes profile to the render ([5a0179b88](https://github.com/heygen-com/hyperframes/commit/5a0179b88eb3da0e10797288b0c3ce2435e33d66), [#6644](https://github.com/heygen-com/hyperframes/pull/6644)).
+- **Engine:** A Windows browser that will not start says where and why ([7758d9b8f](https://github.com/heygen-com/hyperframes/commit/7758d9b8fd507384573eb56ba84cc62fb20444c6), [#6647](https://github.com/heygen-com/hyperframes/pull/6647)).
+- **CLI:** Add help [cmd], suggest the closest command or flag, and quiet the nags ([e2c915132](https://github.com/heygen-com/hyperframes/commit/e2c91513203ec9be1833840bcfb35183a3dcee8d), [#6621](https://github.com/heygen-com/hyperframes/pull/6621)).
+- **CLI:** Check prints a progress line as each pass after overlap begins ([3d1c0764a](https://github.com/heygen-com/hyperframes/commit/3d1c0764a018c5c0412c6273a54c87b6ce532ef7), [#6646](https://github.com/heygen-com/hyperframes/pull/6646)).
+
+## Internal
+
+- **Studio:** Wait for the first undo press before the edit that should block the second ([7112e4b6b](https://github.com/heygen-com/hyperframes/commit/7112e4b6bff935dcdcfc475e20b3719d7585251d), [#6652](https://github.com/heygen-com/hyperframes/pull/6652)).
+- Keep the bun cache warm and skip binary downloads in preflight ([0e32ee9b5](https://github.com/heygen-com/hyperframes/commit/0e32ee9b56bd0815c0dc23a1c3fbb81aa8c43a87), [#6648](https://github.com/heygen-com/hyperframes/pull/6648)).
+
+[View the full commit range](https://github.com/heygen-com/hyperframes/compare/v0.8.211...v0.8.212).
+</Update>
+
+<Update
   label="HyperFrames v0.8.211"
   description="Released - 2026-10-28"
-  tags={["Release", "CLI", "Dx", "Producer", "Codegen", "Core"]}
+  tags={["Release", "CLI", "Dx", "Producer", "Engine", "Studio", "Studio Server", "AWS Lambda", "Codegen", "Core"]}
 >
-Graded clips now draw on real GPUs instead of showing a blank frame, including clips zoomed far past the screen. New blank projects also start on black, not grey.
+Graded clips now draw on real GPUs instead of showing a blank frame, including clips zoomed far past the screen. New blank projects also start on black, not grey. Renders are faster in many places, and cloud renders stitch in parallel.
+
+## Features
+
+- **Core:** The preview says why a choppy stretch dropped frames.
+- **CLI:** Every command is defined the same way and tested as an agent would use it.
 
 ## Fixes
 
@@ -22,10 +56,25 @@ Graded clips now draw on real GPUs instead of showing a blank frame, including c
 - **CLI:** A new blank project starts on a black frame, not grey ([4f0bdfb52](https://github.com/heygen-com/hyperframes/commit/4f0bdfb520a7ccb54ca5a602936a3dd713089151), [#6614](https://github.com/heygen-com/hyperframes/pull/6614)).
 - **Core:** A graded clip's canvas no longer comes out blank on a real GPU ([9eaf9efb6](https://github.com/heygen-com/hyperframes/commit/9eaf9efb69f37de0d6d98324bda1c65c9a924f2f), [#6615](https://github.com/heygen-com/hyperframes/pull/6615)).
 - **Producer:** A path whose name starts with two dots now counts as inside its folder ([c8052fbda](https://github.com/heygen-com/hyperframes/commit/c8052fbdae3416f9db93ebd33f873228ce8996b6), [#5834](https://github.com/heygen-com/hyperframes/pull/5834)).
+- **Studio:** A slow thumbnail job no longer cuts off a clip that other clips still decode from.
+- **Studio Server:** Undo and redo on Windows work on a file another program holds open.
+- **CLI:** Commands never prompt or install anything when nobody is at the terminal.
+- **Engine:** A render on Windows opens no console windows.
+- **Studio:** The desktop card says the download opens hyperframes.studio.
+- **CLI:** Snapshot prints a progress line as each frame starts.
 
 ## Performance
 
 - **CLI:** Check's craft pass skips clips the runtime has hidden ([815ff9ec8](https://github.com/heygen-com/hyperframes/commit/815ff9ec8d755b52c050943765bf15c9c9b1e88e), [#6627](https://github.com/heygen-com/hyperframes/pull/6627)).
+- **Producer:** GPU renders encode while frames are still being captured.
+- **AWS Lambda:** Small-chunk cloud renders stitch their output in parallel.
+- **Engine:** A GPU render checks the GPU encoders once, not twice.
+- **Engine:** Macs with a hardware GPU render with more capture workers.
+- **Producer:** A remote video is downloaded once per render.
+- **Producer:** The audio mix runs while capture starts its browsers.
+- **Producer:** Films that draw elements keep their parallel workers instead of dropping to one.
+- **Producer:** Worker sizing measures screenshot capture and starts one browser fewer.
+- **Studio:** Timeline thumbnails share video sources and keep their frames.
 
 ## Docs & Examples
 
