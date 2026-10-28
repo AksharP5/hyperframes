@@ -1276,6 +1276,33 @@
   // An element hides text beneath it when it paints opaque pixels at near-full
   // opacity: raster content (img/video/canvas), a background image, or a solid
   // background colour. Low-opacity overlays (grain, scrims) do not occlude.
+  const canvasProbe = document.createElement("canvas");
+  canvasProbe.width = 1;
+  canvasProbe.height = 1;
+
+  // The drawn alpha under the point, or null when the canvas cannot be read (then it counts as opaque).
+  function canvasAlphaAt(element, x, y) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || !element.width || !element.height) return null;
+    const px = Math.min(
+      element.width - 1,
+      Math.max(0, Math.floor(((x - rect.left) / rect.width) * element.width)),
+    );
+    const py = Math.min(
+      element.height - 1,
+      Math.max(0, Math.floor(((y - rect.top) / rect.height) * element.height)),
+    );
+    try {
+      const context = canvasProbe.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.clearRect(0, 0, 1, 1);
+      context.drawImage(element, px, py, 1, 1, 0, 0, 1, 1);
+      return context.getImageData(0, 0, 1, 1).data[3] / 255;
+    } catch {
+      return null;
+    }
+  }
+
   function isOpaqueOccluder(element, x, y) {
     const opacity = opacityChain(element);
     if (opacity < OCCLUDING_ALPHA) return false;
@@ -1283,6 +1310,11 @@
     if (element.tagName === "IMG") {
       const alpha = imageAlphaAt(element, x, y);
       if (alpha !== null) return alpha * opacity >= OCCLUDING_ALPHA;
+    }
+    if (element.tagName === "CANVAS") {
+      const alpha = canvasAlphaAt(element, x, y);
+      if (alpha !== null)
+        return alpha * opacity >= OCCLUDING_ALPHA || hasOpaqueBackground(getComputedStyle(element));
     }
     const matte = matteFrameFor(element);
     if (matte) return matteOccludesAt(matte, x, y);
