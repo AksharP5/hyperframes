@@ -1,6 +1,7 @@
 import {
   DEFAULT_CONFIG,
   buildZeroDurationDiagnostic,
+  downloadToTemp,
   evaluateHfDiagnostic,
   extractMediaMetadata,
   isHdrColorSpace,
@@ -382,6 +383,17 @@ const processStderr = (error: unknown) =>
   error instanceof Error && "stderr" in error && typeof error.stderr === "string"
     ? error.stderr
     : "";
+
+const REMOTE_VIDEO_DIR = join(tmpdir(), "hyperframes-snapshot-media");
+
+/** A local copy of a remote clip, since an FFmpeg built without network protocols (the Desktop app's) reads no URL. */
+export async function remoteVideoInput(url: string, download = downloadToTemp): Promise<string> {
+  try {
+    return await download(url, REMOTE_VIDEO_DIR, FFMPEG_EXTRACT_TIMEOUT_MS);
+  } catch {
+    return url;
+  }
+}
 
 /** Keyframe seek plus the decoded-time threshold that selects the frame containing `time`, or null. */
 export async function probeContainingSourceFrameSeek(
@@ -1065,6 +1077,12 @@ async function captureSnapshots(
         );
       }
       const alphaDecoderCache = new Map<string, Promise<boolean>>();
+      const remoteCopies = new Map<string, Promise<string>>();
+      const localCopy = (href: string): Promise<string> => {
+        const copy = remoteCopies.get(href) ?? remoteVideoInput(href);
+        remoteCopies.set(href, copy);
+        return copy;
+      };
       const shouldUseVp9AlphaDecoder = (filePath: string): Promise<boolean> => {
         if (!extractMediaMetadata) return Promise.resolve(false);
         const cached = alphaDecoderCache.get(filePath);
@@ -1172,7 +1190,8 @@ async function captureSnapshots(
                   ffmpegInput = candidate;
                   inputIsLocal = true;
                 } else if (url.protocol === "http:" || url.protocol === "https:") {
-                  ffmpegInput = url.href;
+                  ffmpegInput = await localCopy(url.href);
+                  inputIsLocal = ffmpegInput !== url.href;
                 }
               } catch {
                 /* unresolvable src (e.g. blob:, data:) — skip */
