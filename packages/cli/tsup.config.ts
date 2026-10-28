@@ -44,6 +44,7 @@ var __dirname = __hf_dirname(__filename);`,
   },
   external: [
     "puppeteer-core",
+    "undici",
     "puppeteer",
     "@puppeteer/browsers",
     // Native module — its platform binary (@img/sharp-<os>-<arch>) must be

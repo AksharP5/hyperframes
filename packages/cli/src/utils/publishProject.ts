@@ -1,3 +1,4 @@
+import { envProxyEnabled } from "@hyperframes/core/env-proxy";
 import { basename, dirname, join, posix, relative, resolve } from "node:path";
 import {
   closeSync,
@@ -235,11 +236,7 @@ function proxySupportHint(): string {
   const proxyConfigured = ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"].some((key) =>
     Boolean(process.env[key]?.trim()),
   );
-  const proxyEnabled =
-    process.env["NODE_USE_ENV_PROXY"] === "1" ||
-    process.execArgv.includes("--use-env-proxy") ||
-    process.env["NODE_OPTIONS"]?.split(/\s+/u).includes("--use-env-proxy") === true;
-  if (!proxyConfigured || proxyEnabled) return "";
+  if (!proxyConfigured || envProxyEnabled()) return "";
   return (
     ". Proxy variables are set but ignored by Node fetch; if this network requires them, retry with " +
     "NODE_USE_ENV_PROXY=1 (Node 22.21+)"

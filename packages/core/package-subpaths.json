@@ -74,6 +74,12 @@
       "types": "./dist/removeTree.d.ts",
       "environments": ["bun", "node"]
     },
+    "./env-proxy": {
+      "source": "./src/envProxy.ts",
+      "runtime": "./dist/envProxy.js",
+      "types": "./dist/envProxy.d.ts",
+      "environments": ["bun", "node"]
+    },
     "./rename-retry": {
       "source": "./src/renameWithRetry.ts",
       "runtime": "./dist/renameWithRetry.js",

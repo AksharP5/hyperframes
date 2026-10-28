@@ -30,6 +30,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   applyConcreteGpuScreenshotClamp,
+  _setDownloadFetchForTests,
   buildChromeArgs,
   FFMPEG_PATH_ENV,
   getFfmpegBinary,
@@ -707,12 +708,11 @@ describe("plan() — golden planDir + planHash determinism", () => {
   <video id="hero" src="https://cdn.example/missing.mp4" data-start="0"></video>
 </div>`,
       );
-      const originalFetch = globalThis.fetch;
       let fetchCalls = 0;
-      globalThis.fetch = (async () => {
+      _setDownloadFetchForTests((async () => {
         fetchCalls += 1;
         return new Response(null, { status: 404, statusText: "Not Found" });
-      }) as typeof fetch;
+      }) as never);
 
       let caught: unknown;
       try {
@@ -724,7 +724,7 @@ describe("plan() — golden planDir + planHash determinism", () => {
       } catch (err) {
         caught = err;
       } finally {
-        globalThis.fetch = originalFetch;
+        _setDownloadFetchForTests();
       }
 
       expect(fetchCalls).toBeGreaterThan(0);
