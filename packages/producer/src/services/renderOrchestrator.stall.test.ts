@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveConfig, type WorkerTask } from "@hyperframes/engine";
 import { formatCaptureFrameName } from "../utils/paths.js";
 import { createRenderJob, executeRenderJob, type ProgressCallback } from "./renderOrchestrator.js";
+import { OrderedRenderEventPublisher } from "./render/renderEventPublisher.js";
 
 // Entry: executeRenderJob with the real disk capture stage and retry ladder. Each parallel attempt is
 // scripted: "stall" lands three frames then hangs until its signal aborts; a pace lands every frame.
@@ -221,7 +222,23 @@ vi.mock("./render/perfSummary.js", async (importOriginal) => ({
 
 const PENDING = Symbol("pending");
 const dirs: string[] = [];
+// A test over SLOW_TEST_MS prints where its real time went, so a slow CI run names the step.
+const SLOW_TEST_MS = 2_000;
+const spent = new Map<string, number>();
+let testStarted = 0;
+let budgetRanOut = 0;
+async function timed<T>(step: string, run: () => Promise<T>): Promise<T> {
+  const started = performance.now();
+  try {
+    return await run();
+  } finally {
+    spent.set(step, (spent.get(step) ?? 0) + performance.now() - started);
+  }
+}
 beforeEach(() => {
+  spent.clear();
+  testStarted = performance.now();
+  budgetRanOut = 0;
   capture.scripts = [];
   capture.calls = 0;
   capture.retriedWithWorkers = [];
@@ -233,7 +250,12 @@ beforeEach(() => {
     toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
   });
 });
-afterEach(() => {
+afterEach((context) => {
+  const total = performance.now() - testStarted;
+  if (total > SLOW_TEST_MS) {
+    const steps = [...spent].map(([step, ms]) => `${step} ${Math.round(ms)} ms`).join(", ");
+    console.warn(`[stall test] ${context.task.name}: ${Math.round(total)} ms (${steps})`);
+  }
   vi.useRealTimers();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -277,9 +299,11 @@ async function ioTurns(): Promise<void> {
 
 /** Real file IO after the last frame takes a varying number of turns: wait for the render to settle. */
 async function settled(outcome: () => unknown): Promise<unknown> {
-  for (let turn = 0; turn < 20_000 && outcome() === PENDING; turn++) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  await timed("settle", async () => {
+    for (let turn = 0; turn < 20_000 && outcome() === PENDING; turn++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  });
   return outcome();
 }
 
@@ -294,25 +318,26 @@ async function untilHeld(outcome: () => unknown, budget: { ms: number }): Promis
     await new Promise((resolve) => setImmediate(resolve));
   }
   budget.ms -= performance.now() - started;
+  if (outcome() === PENDING && capture.blocked === 0) budgetRanOut += 1;
 }
 
 /** Jumps fake time to the next timer while the scripted attempt waits, with real IO between steps. */
 async function runFor(ms: number, outcome: () => unknown): Promise<void> {
   const budget = { ms: 1_000 };
-  await untilHeld(outcome, budget);
+  await timed("wait for held", () => untilHeld(outcome, budget));
   for (let elapsed = 0; elapsed < ms && outcome() === PENDING; ) {
-    await ioTurns();
-    await untilHeld(outcome, budget);
+    await timed("io turns", ioTurns);
+    await timed("wait for held", () => untilHeld(outcome, budget));
     const before = Date.now();
-    await vi.advanceTimersToNextTimerAsync();
+    await timed("advance timers", () => vi.advanceTimersToNextTimerAsync());
     const jumped = Date.now() - before;
     if (jumped > 0) elapsed += jumped;
     else {
-      await vi.advanceTimersByTimeAsync(1_000);
+      await timed("advance timers", () => vi.advanceTimersByTimeAsync(1_000));
       elapsed += 1_000;
     }
   }
-  await ioTurns();
+  await timed("io turns", ioTurns);
 }
 
 it("retries a stalled attempt on fewer workers, with a fresh window, and the render completes", async () => {
@@ -376,7 +401,16 @@ it("fails an HDR capture that stops, the only attempt it has, and aborts that at
 it("completes even when the progress sink never drains", async () => {
   capture.scripts = [{ firstFrameAfterMs: 1_000, frameEveryMs: 1_000 }];
   const sinkNeverDrains: ProgressCallback = () => new Promise<void>(() => {});
+  // The render then waits out the flush's fake timeout: held, so fake time jumps to it at once.
+  const flush = OrderedRenderEventPublisher.prototype.flush;
+  const held = vi
+    .spyOn(OrderedRenderEventPublisher.prototype, "flush")
+    .mockImplementation(function (this: OrderedRenderEventPublisher) {
+      return block(flush.call(this));
+    });
+  onTestFinished(() => held.mockRestore());
   const outcome = startRender(sinkNeverDrains);
   await runFor(120_000, outcome);
   expect(await settled(outcome)).toBe("completed");
+  expect(budgetRanOut).toBe(0);
 });
