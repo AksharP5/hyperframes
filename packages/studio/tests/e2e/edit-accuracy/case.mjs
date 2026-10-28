@@ -321,8 +321,16 @@ async function hiddenTarget(page, selector = "#target") {
   return false;
 }
 
+// Studio's own word that the preview is about to change: a reload asked for, loading, or an undo or redo in flight.
+const previewChanging = (page) =>
+  Promise.resolve()
+    .then(() => page.evaluate(() => document.documentElement.hasAttribute("data-preview-changing")))
+    .catch(() => false);
+
 // Keyframed cases only: waiting out the swap lands a later undo in the preview's burst of requests.
-export const swapPending = (ctx) => Boolean(ctx.keys) && hiddenTarget(ctx.page, ctx.selector);
+export const swapPending = async (ctx) =>
+  Boolean(ctx.keys) &&
+  ((await previewChanging(ctx.page)) || (await hiddenTarget(ctx.page, ctx.selector)));
 
 // fallow-ignore-next-line complexity
 const netMoved = (start, now) =>
