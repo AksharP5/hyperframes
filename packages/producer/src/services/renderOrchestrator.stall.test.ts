@@ -9,7 +9,10 @@ import { OrderedRenderEventPublisher } from "./render/renderEventPublisher.js";
 
 // Entry: executeRenderJob with the real disk capture stage and retry ladder. Each parallel attempt is
 // scripted: "stall" lands three frames then hangs until its signal aborts; a pace lands every frame.
-type AttemptScript = "stall" | "spread" | { firstFrameAfterMs: number; frameEveryMs: number };
+type AttemptScript =
+  | "stall"
+  | "spread"
+  | { firstFrameAfterMs: number; frameEveryMs: number; tailMs?: number };
 const capture = vi.hoisted(() => ({
   scripts: [] as AttemptScript[],
   calls: 0,
@@ -90,6 +93,11 @@ async function landFrame(
   writeFrame(frame, extension);
 }
 
+/** Work after the last frame (closing workers, flushing) does not watch the abort. */
+async function holdTail(script: AttemptScript): Promise<void> {
+  if (typeof script === "object" && script.tailMs) await wait(script.tailMs);
+}
+
 async function runScriptedAttempt(
   tasks: WorkerTask[],
   extension: string,
@@ -109,6 +117,7 @@ async function runScriptedAttempt(
     if (pace) await wait(pace.frameEveryMs - 1_000);
   }
   if (!pace) await neverSettlesUntilAborted(signal);
+  await holdTail(script);
   return [];
 }
 
@@ -396,6 +405,21 @@ it("fails an HDR capture that stops, the only attempt it has, and aborts that at
   expect(capture.hdrSignal?.aborted).toBe(true);
   await runFor(60_000 + 10_000, outcome);
   expect(outcome()).toMatchObject({ code: "RENDER_STAGE_STALLED" });
+});
+
+it("does not fail a capture that landed every frame for the work that follows its last frame", async () => {
+  capture.scripts = [{ firstFrameAfterMs: 1_000, frameEveryMs: 1_000, tailMs: 130_000 }];
+  const outcome = startRender();
+  await runFor(40 * 1_000 + 130_000 + 10_000, outcome);
+  expect(capture.retriedWithWorkers).toEqual([]);
+  expect(await settled(outcome)).toBe("completed");
+});
+
+it("still fails a capture whose tail outlasts the tail budget", async () => {
+  capture.scripts = [{ firstFrameAfterMs: 1_000, frameEveryMs: 1_000, tailMs: 700_000 }];
+  const outcome = startRender();
+  await runFor(40 * 1_000 + 2 * 300_000 + 20_000, outcome);
+  expect(outcome()).toMatchObject({ code: "RENDER_STAGE_STALLED", retryable: false });
 });
 
 it("completes even when the progress sink never drains", async () => {

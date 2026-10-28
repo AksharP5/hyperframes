@@ -609,6 +609,10 @@ export interface StageStallRule {
   noProgressMs: number;
   /** Allowed silence before the current attempt's first change. */
   firstProgressMs: number;
+  /** True once every unit of work has landed: nothing more can change `progress()`, only the tail work runs. */
+  complete?: () => boolean;
+  /** Allowed silence once `complete()` holds; defaults to `noProgressMs`. */
+  tailMs?: number;
 }
 
 /**
@@ -642,6 +646,7 @@ function watchStall(phase: string, rule: StageStallRule) {
   let lastChangeAt = Date.now();
   let attempt: AbortController | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let inTail = false;
   const restartWindow = (ms: number) => {
     last = rule.progress();
     budgetMs = ms;
@@ -651,6 +656,10 @@ function watchStall(phase: string, rule: StageStallRule) {
     timer = setInterval(
       () => {
         const current = rule.progress();
+        if (rule.complete?.() && !inTail) {
+          inTail = true;
+          return restartWindow(rule.tailMs ?? rule.noProgressMs);
+        }
         if (current !== last) return restartWindow(rule.noProgressMs);
         if (Date.now() - lastChangeAt < budgetMs) return;
         const error = new RenderStageStalledError(phase, budgetMs, current);
@@ -666,6 +675,7 @@ function watchStall(phase: string, rule: StageStallRule) {
   });
   const openAttempt: OpenStallAttempt = (parent) => {
     attempt = new AbortController();
+    inTail = false;
     restartWindow(rule.firstProgressMs);
     return parent ? AbortSignal.any([parent, attempt.signal]) : attempt.signal;
   };
