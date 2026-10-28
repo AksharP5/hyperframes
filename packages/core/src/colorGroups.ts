@@ -27,10 +27,22 @@ export function colorGroupOf(el: Element): string | null {
 }
 
 /**
- * The `<hf-color-group>` for an id, or null. Tag-checked so an unrelated
+ * The `<hf-color-group>` for an id, or null. Ids are unique only per
+ * composition file, so a member's own composition is searched first, as audio
+ * groups pair per composition; then the document. Tag-checked so an unrelated
  * element sharing the id is never read as a lane's grade.
  */
-export function resolveColorGroupElement(root: GroupLookupRoot, groupId: string): Element | null {
+export function resolveColorGroupElement(
+  root: GroupLookupRoot,
+  groupId: string,
+  member?: Element,
+): Element | null {
+  const scope =
+    typeof member?.closest === "function" ? member.closest("[data-composition-id]") : null;
+  const scoped = scope
+    ? Array.from(scope.getElementsByTagName(HF_COLOR_GROUP_TAG)).find((g) => g.id === groupId)
+    : undefined;
+  if (scoped) return scoped;
   const el = root?.getElementById(groupId) ?? null;
   return el?.tagName.toLowerCase() === HF_COLOR_GROUP_TAG ? el : null;
 }
@@ -44,7 +56,7 @@ export function effectiveColorGrading(el: Element, root: GroupLookupRoot): strin
   if (own !== null) return own;
   const groupId = colorGroupOf(el);
   if (!groupId) return null;
-  return resolveColorGroupElement(root, groupId)?.getAttribute(HF_COLOR_GRADING_ATTR) ?? null;
+  return resolveColorGroupElement(root, groupId, el)?.getAttribute(HF_COLOR_GRADING_ATTR) ?? null;
 }
 
 /**

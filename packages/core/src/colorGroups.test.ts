@@ -113,3 +113,28 @@ describe("ensureColorGroupInertStyle", () => {
     expect(document.head.querySelectorAll("style")).toHaveLength(1);
   });
 });
+
+describe("group ids are scoped to their composition", () => {
+  it("pairs a member with the group in its own composition before one elsewhere with the same id", () => {
+    document.body.innerHTML = `
+      <div data-composition-id="scene-1">
+        <hf-color-group id="cam-a" data-color-grading='${LANE_GRADE}'></hf-color-group>
+        <video id="first" data-color-group="cam-a"></video>
+      </div>
+      <div data-composition-id="scene-2">
+        <hf-color-group id="cam-a" data-color-grading='${OWN_GRADE}'></hf-color-group>
+        <video id="second" data-color-group="cam-a"></video>
+      </div>
+    `;
+    expect(effectiveColorGrading(document.getElementById("first")!, document)).toBe(LANE_GRADE);
+    expect(effectiveColorGrading(document.getElementById("second")!, document)).toBe(OWN_GRADE);
+  });
+
+  it("falls back to the document when the member's composition declares no such group", () => {
+    document.body.innerHTML = `
+      <hf-color-group id="cam-a" data-color-grading='${LANE_GRADE}'></hf-color-group>
+      <div data-composition-id="scene-1"><video id="v" data-color-group="cam-a"></video></div>
+    `;
+    expect(effectiveColorGrading(document.getElementById("v")!, document)).toBe(LANE_GRADE);
+  });
+});

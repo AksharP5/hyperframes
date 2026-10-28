@@ -384,7 +384,13 @@ export async function measureVideoShownBoxes(
       const fullSize = new Set<string>();
       const gradedThroughGroup = (video: Element): boolean => {
         const groupId = video.getAttribute(groupAttr);
-        const group = groupId ? document.getElementById(groupId) : null;
+        if (!groupId) return false;
+        // the member's own composition first: ids are unique only per composition file
+        const scope = video.closest("[data-composition-id]");
+        const group =
+          (scope &&
+            Array.from(scope.getElementsByTagName(groupTag)).find((g) => g.id === groupId)) ||
+          document.getElementById(groupId);
         return group?.localName === groupTag && group.hasAttribute(gradingAttr);
       };
       const keepsFullSize = (video: Element): boolean => {
