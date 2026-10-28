@@ -133,6 +133,8 @@ export {
   writeCapturedFrame,
   discardWarmupCapture,
   getCompositionDuration,
+  getCompositionLengthSource,
+  type CompositionLengthSource,
   getCapturePerfSummary,
   percentileOf,
   prepareCaptureSessionForReuse,

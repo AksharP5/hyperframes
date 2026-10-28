@@ -127,9 +127,10 @@ import {
   MIN_VALID_TIMELINE_DURATION_SECONDS,
   readCompositionSize,
   resolveAuthoredCompositionFloorSeconds,
-  resolveCompositionLengthSeconds,
+  longestMediaWindow as longestMediaWindowIn,
+  resolveCompositionLength,
+  type CompositionLengthFrom,
   resolveContentDerivedDuration as resolveContentDerivedDurationFor,
-  resolveMediaWindowDurationSeconds as resolveMediaWindowDurationSecondsIn,
 } from "./compositionLength";
 import { createRuntimeStartTimeResolver } from "./startResolver";
 import { createClipTree } from "./clipTree";
@@ -1170,7 +1171,7 @@ export function initSandboxRuntimeModular(): void {
   // `getInferredDurationSeconds()` (third-party runtimes). Foreign code inside
   // a cache scope can touch the DOM between two resolves. This loop is DOM
   // reads only, so nothing can change under it.
-  const resolveMediaWindowDurationSeconds = (): number | null => {
+  const longestMediaWindow = (): ReturnType<typeof longestMediaWindowIn> => {
     const mediaNodes = Array.from(
       document.querySelectorAll("video[data-start], audio[data-start]"),
     ) as HTMLMediaElement[];
@@ -1178,7 +1179,7 @@ export function initSandboxRuntimeModular(): void {
     // this every tick, and it should not pay for a resolver it never uses.
     if (mediaNodes.length === 0) return null;
     return withTimingResolver(() =>
-      resolveMediaWindowDurationSecondsIn(document, {
+      longestMediaWindowIn(document, {
         mediaStart: resolveAbsoluteMediaStartSeconds,
         mediaDuration: resolveMediaElementDurationSeconds,
       }),
@@ -1237,6 +1238,19 @@ export function initSandboxRuntimeModular(): void {
     return contentDerivedCache.result;
   };
 
+  /** Which input set the composition's length; a media clip is named by tag, src and whether it is trimmed. */
+  const publishLengthSource = (from: CompositionLengthFrom, media: HTMLMediaElement | null) => {
+    window.__hf = window.__hf || {};
+    window.__hf.lengthSource = media
+      ? {
+          from: "media",
+          tag: media.tagName.toLowerCase(),
+          src: media.getAttribute("src") ?? media.currentSrc ?? "",
+          trimmed: media.hasAttribute("data-duration") || media.hasAttribute("data-end"),
+        }
+      : { from };
+  };
+
   /** Carries how a length that no timeline supplied was found, for render telemetry. */
   const publishDerivedDuration = (result: ReturnType<typeof resolveCompositionDuration>) => {
     window.__hf = window.__hf || {};
@@ -1253,8 +1267,12 @@ export function initSandboxRuntimeModular(): void {
     );
   };
 
-  const resolveMediaDurationFloorSeconds = (): number | null => {
-    const mediaWindowDuration = resolveMediaWindowDurationSeconds();
+  const resolveMediaDurationFloor = (): { seconds: number; element: HTMLMediaElement } | null => {
+    const longest = longestMediaWindow();
+    return longest && resolveMediaDurationFloorSeconds(longest.seconds) !== null ? longest : null;
+  };
+
+  const resolveMediaDurationFloorSeconds = (mediaWindowDuration: number | null): number | null => {
     if (
       typeof mediaWindowDuration !== "number" ||
       !Number.isFinite(mediaWindowDuration) ||
@@ -1348,7 +1366,11 @@ export function initSandboxRuntimeModular(): void {
   //     signature compared on read
   // The bias is deliberate: a redundant derivation is a missed optimisation,
   // a missed one is a wrong duration.
-  type DurationFloors = { media: number | null; authoredComposition: number | null };
+  type DurationFloors = {
+    media: number | null;
+    mediaElement: HTMLMediaElement | null;
+    authoredComposition: number | null;
+  };
   const DURATION_FLOOR_INPUT_ATTRIBUTES = [
     "data-start",
     "data-duration",
@@ -1419,10 +1441,14 @@ export function initSandboxRuntimeModular(): void {
     wakeTransport();
   };
 
-  const deriveDurationFloors = (): DurationFloors => ({
-    media: resolveMediaDurationFloorSeconds(),
-    authoredComposition: resolveAuthoredCompositionDurationFloorSeconds(),
-  });
+  const deriveDurationFloors = (): DurationFloors => {
+    const media = resolveMediaDurationFloor();
+    return {
+      media: media?.seconds ?? null,
+      mediaElement: media?.element ?? null,
+      authoredComposition: resolveAuthoredCompositionDurationFloorSeconds(),
+    };
+  };
 
   const readTimelineRegistrySignature = (): string => {
     const timelines = (window.__timelines ?? {}) as Record<string, RuntimeTimelineLike | undefined>;
@@ -1545,13 +1571,16 @@ export function initSandboxRuntimeModular(): void {
     timingRevision?: number,
   ): number => {
     let derivedDuration: ReturnType<typeof resolveContentDerivedDuration> | null = null;
-    const seconds = resolveCompositionLengthSeconds({
+    let mediaElement: HTMLMediaElement | null = null;
+    const length = resolveCompositionLength({
       declared: parseStrictFiniteTimingNumber(
         resolveRootCompositionElement()?.getAttribute("data-duration"),
       ),
       timeline: () => getTimelineDurationSeconds(timeline),
       floors: () => {
-        const { media, authoredComposition } = resolveDurationFloors(timingRevision);
+        const floors = resolveDurationFloors(timingRevision);
+        const { media, authoredComposition } = floors;
+        mediaElement = floors.mediaElement;
         // Deliberately NOT cached: adapters infer their duration from live animation objects
         // (CSS/WAAPI/Lottie), which can change without any DOM mutation to observe.
         return [media, authoredComposition, resolveAdapterDurationFloorSeconds()];
@@ -1565,7 +1594,8 @@ export function initSandboxRuntimeModular(): void {
     // The published source describes only a length that was derived; any other source clears it.
     if (derivedDuration) publishDerivedDuration(derivedDuration);
     else if (window.__hf?.durationSource) delete window.__hf.durationSource;
-    return seconds;
+    publishLengthSource(length.from, length.floorIndex === 0 ? mediaElement : null);
+    return length.seconds;
   };
 
   // Sub-composition timelines the runtime nested into the root: the host composition id, and where.

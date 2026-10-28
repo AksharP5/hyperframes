@@ -18,6 +18,7 @@ import {
   hasAutoStartVideos,
   hasScriptedAudioVolumeAutomation,
   hasVariableBoundMedia,
+  reportedLengthSource,
 } from "./probeStage.js";
 
 // ── Mocks for runProbeStage tests ────────────────────────────────────────────
@@ -160,6 +161,12 @@ mock.module("@hyperframes/engine", () => ({
     durationProbeSessions.push(session);
     return 5;
   },
+  getCompositionLengthSource: async () => ({
+    from: "media",
+    tag: "video",
+    src: "/private/customer/Full Source.mp4?token=x",
+    trimmed: false,
+  }),
   closeCaptureSession: async (session: MockSession) => {
     closeCaptureSessionCallCount++;
     closedSessions.push(session);
@@ -1455,5 +1462,25 @@ describe("runProbeStage — transient browser error retry (#1687)", () => {
     expect(closeCaptureSessionCallCount).toBe(0);
     expect(result.duration).toBe(5);
     expect(result.probeSession).not.toBeNull();
+  });
+});
+
+describe("reportedLengthSource", () => {
+  it("names a media clip by tag, trim and a hash of its file name, never its path", () => {
+    const reported = reportedLengthSource({
+      from: "media",
+      tag: "video",
+      src: "https://cdn.example/private/customer/Full Source.mp4?token=secret#t=2",
+      trimmed: false,
+    });
+    expect(reported).toEqual({
+      from: "media",
+      tag: "video",
+      trimmed: false,
+      srcHash: createHash("sha256").update("Full Source.mp4").digest("hex").slice(0, 12),
+    });
+    expect(JSON.stringify(reported)).not.toMatch(/customer|secret|Full Source/);
+    expect(reportedLengthSource({ from: "timeline" })).toEqual({ from: "timeline" });
+    expect(reportedLengthSource(null)).toBeNull();
   });
 });

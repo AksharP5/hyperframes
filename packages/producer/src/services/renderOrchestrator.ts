@@ -3429,6 +3429,14 @@ async function executeRenderPipeline(input: {
     }
     observability.checkpoint("browser_probe", "duration resolved", {
       durationSeconds: probeResult.duration,
+      lengthFrom: probeResult.lengthSource?.from ?? null,
+      ...(probeResult.lengthSource?.from === "media"
+        ? {
+            lengthTag: probeResult.lengthSource.tag,
+            lengthTrimmed: probeResult.lengthSource.trimmed,
+            lengthSrcHash: probeResult.lengthSource.srcHash,
+          }
+        : {}),
       totalFrames,
       compositionHash,
       beginFrameStalled: probeResult.beginFrameStalled,
