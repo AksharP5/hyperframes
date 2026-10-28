@@ -1,12 +1,27 @@
-import { randomUUID } from "node:crypto";
-import { createWriteStream, renameSync, statSync, unlinkSync } from "node:fs";
+import {
+  closeSync,
+  createWriteStream,
+  existsSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { get as httpsGet } from "node:https";
 import { once } from "node:events";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import { Transform } from "node:stream";
+import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as sleep } from "node:timers/promises";
+import { randomUUID } from "node:crypto";
 
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30_000;
+const LOCK_POLL_MS = 500;
 
 export interface DownloadOptions {
   /** Abort after this many milliseconds without network activity. */
@@ -16,6 +31,8 @@ export interface DownloadOptions {
   onProgress?: (receivedBytes: number, totalBytes: number | null) => void;
   /** Aborting it destroys the request and removes the partial file. */
   signal?: AbortSignal;
+  /** Checks the finished file before it replaces `dest`; a throw discards it. */
+  verify?: (path: string) => Promise<void>;
 }
 
 /** Every redirect a host may reasonably answer with, not just the two we saw first. */
@@ -74,9 +91,11 @@ function getUrl(
   url: string,
   signal: AbortSignal | undefined,
   offset: number,
+  etag: string | null,
   onResponse: (res: IncomingMessage) => void,
 ): ClientRequest {
-  const headers = offset > 0 ? { Range: `bytes=${offset}-` } : undefined;
+  const headers =
+    offset > 0 ? { Range: `bytes=${offset}-`, ...(etag ? { "If-Range": etag } : {}) } : undefined;
   if (!signal && !headers) return httpsGet(url, onResponse);
   return httpsGet(
     url,
@@ -104,6 +123,13 @@ function contentRange(header: string | undefined): { start: number; total: numbe
   return match
     ? { start: Number(match[1]), total: match[2] === "*" ? null : Number(match[2]) }
     : null;
+}
+
+interface DownloadState {
+  received: number;
+  total: number | null;
+  etag: string | null;
+  onFreshBody?: (etag: string | null) => void;
 }
 
 type ResponsePlan =
@@ -137,11 +163,16 @@ async function writeBody(
   res: IncomingMessage,
   tmp: string,
   plan: Extract<ResponsePlan, { kind: "body" }>,
-  state: { received: number; total: number | null },
+  state: DownloadState,
   options: DownloadOptions,
 ): Promise<void> {
   state.received = plan.start;
   state.total = plan.total;
+  if (!plan.append) {
+    const etag = res.headers.etag;
+    state.etag = typeof etag === "string" ? etag : null;
+    state.onFreshBody?.(state.etag);
+  }
   const meter = measureDownload(options, plan.start, plan.total);
   const file = createWriteStream(tmp, { flags: plan.append ? "a" : "w" });
   try {
@@ -160,7 +191,7 @@ async function writeBody(
 function downloadAttempt(
   url: string,
   tmp: string,
-  state: { received: number; total: number | null },
+  state: DownloadState,
   options: DownloadOptions,
 ): Promise<void> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
@@ -205,7 +236,7 @@ function downloadAttempt(
       };
       let request: ClientRequest;
       try {
-        request = getUrl(u, options.signal, offset, onResponse);
+        request = getUrl(u, options.signal, offset, state.etag, onResponse);
       } catch (error) {
         reject(error);
         return;
@@ -227,31 +258,188 @@ function downloadAttempt(
   });
 }
 
-/** Some networks drop every connection at the same byte, so a retry resumes from the partial file. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+// A lock names `<pid> <token>`; a token not held here means a past run that had this process's pid.
+const heldLocks = new Set<string>();
+
+function readLock(lock: string): string {
+  try {
+    return readFileSync(lock, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function lockIsStale(owner: string): boolean {
+  const pid = Number(owner.split(" ")[0]);
+  if (!(pid > 0)) return false;
+  return pid === process.pid ? !heldLocks.has(owner) : !processAlive(pid);
+}
+
+/** Takes `dest`'s download lock, waiting while another live process holds it. */
+async function acquireLock(
+  lock: string,
+  signal: AbortSignal | undefined,
+): Promise<{ owner: string; waited: boolean }> {
+  const owner = `${process.pid} ${randomUUID()}`;
+  let waited = false;
+  for (;;) {
+    try {
+      const fd = openSync(lock, "wx");
+      writeSync(fd, owner);
+      closeSync(fd);
+      heldLocks.add(owner);
+      return { owner, waited };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const seen = readLock(lock);
+    // Re-read before removing, so a waiter never removes the lock another waiter just took over.
+    if (lockIsStale(seen) && readLock(lock) === seen) {
+      removePartialFile(lock);
+      continue;
+    }
+    signal?.throwIfAborted();
+    waited = true;
+    await sleep(LOCK_POLL_MS);
+  }
+}
+
+/** Partial files from runs that named them by process (`<file>.<pid>.<uuid>.tmp`) and were stopped. */
+function removeStrayPartials(dest: string): void {
+  const prefix = `${basename(dest)}.`;
+  let names: string[] = [];
+  try {
+    names = readdirSync(dirname(dest));
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const pid =
+      name.startsWith(prefix) && name.endsWith(".tmp")
+        ? Number(name.slice(prefix.length).split(".")[0])
+        : 0;
+    if (pid > 0 && !processAlive(pid)) removePartialFile(join(dirname(dest), name));
+  }
+}
+
+function resumableEtag(meta: string, url: string): string | null {
+  try {
+    const recorded = JSON.parse(readFileSync(meta, "utf8")) as { url?: unknown; etag?: unknown };
+    return recorded.url === url && typeof recorded.etag === "string" ? recorded.etag : null;
+  } catch {
+    return null;
+  }
+}
+
+type FailureStep = "continue" | "restart" | "discard" | "keep";
+
+interface Attempt {
+  aborted: boolean;
+  progressed: boolean;
+  resumed: boolean;
+  resumable: boolean;
+}
+
+/** What a failed attempt means for the partial file. */
+function afterFailure(error: unknown, attempt: Attempt): FailureStep {
+  const message = error instanceof Error ? error.message : "";
+  if (attempt.aborted || message.startsWith("Download exceeded")) return "discard";
+  if (attempt.progressed) return "continue";
+  // The server refused the resume (a stale or already complete part): start over once.
+  if (attempt.resumed && message.startsWith("Download failed: HTTP")) return "restart";
+  return attempt.resumable ? "keep" : "discard";
+}
+
+function discardPart(part: string): void {
+  removePartialFile(part);
+  removePartialFile(`${part}.json`);
+}
+
+function openPart(url: string, dest: string): DownloadState {
+  const part = `${dest}.part`;
+  removeStrayPartials(dest);
+  const etag = resumableEtag(`${part}.json`, url);
+  if (!etag) removePartialFile(part);
+  return {
+    received: etag ? fileSize(part) : 0,
+    total: null,
+    etag,
+    onFreshBody: (fresh) => {
+      if (fresh) writeFileSync(`${part}.json`, JSON.stringify({ url, etag: fresh }));
+      else removePartialFile(`${part}.json`);
+    },
+  };
+}
+
+function assertComplete(part: string, state: DownloadState): void {
+  const size = fileSize(part);
+  if (state.total !== null && size !== state.total) {
+    state.received = size;
+    throw new Error(`Download incomplete: ${size} of ${state.total} bytes`);
+  }
+}
+
+async function publishPart(part: string, dest: string, options: DownloadOptions): Promise<void> {
+  try {
+    await options.verify?.(part);
+  } catch (error) {
+    discardPart(part);
+    throw error;
+  }
+  renameSync(part, dest);
+  removePartialFile(`${part}.json`);
+}
+
+async function downloadToPart(url: string, dest: string, options: DownloadOptions): Promise<void> {
+  const part = `${dest}.part`;
+  const state = openPart(url, dest);
+  for (;;) {
+    const before = state.received;
+    try {
+      await downloadAttempt(url, part, state, options);
+      assertComplete(part, state);
+      break;
+    } catch (error) {
+      const step = afterFailure(error, {
+        aborted: options.signal?.aborted === true,
+        progressed: state.received > before,
+        resumed: before > 0,
+        resumable: state.etag !== null && state.received > 0,
+      });
+      if (step === "continue") continue;
+      if (step !== "keep") discardPart(part);
+      if (step !== "restart") throw error;
+      state.received = 0;
+      state.etag = null;
+    }
+  }
+  await publishPart(part, dest, options);
+}
+
+/**
+ * Some networks drop every connection at the same byte, so a retry resumes from the partial file.
+ * The partial file and its validator survive a stopped run, so the next run resumes it too.
+ */
 export async function downloadFile(
   url: string,
   dest: string,
   options: DownloadOptions = {},
 ): Promise<void> {
-  const tmp = `${dest}.${process.pid}.${randomUUID()}.tmp`;
-  const state: { received: number; total: number | null } = { received: 0, total: null };
-  for (;;) {
-    const before = state.received;
-    try {
-      await downloadAttempt(url, tmp, state, options);
-      const size = fileSize(tmp);
-      if (state.total !== null && size !== state.total) {
-        state.received = size;
-        throw new Error(`Download incomplete: ${size} of ${state.total} bytes`);
-      }
-      renameSync(tmp, dest);
-      return;
-    } catch (error) {
-      const overLimit = error instanceof Error && error.message.startsWith("Download exceeded");
-      if (options.signal?.aborted || overLimit || state.received <= before) {
-        removePartialFile(tmp);
-        throw error;
-      }
-    }
+  const lock = `${dest}.lock`;
+  const { owner, waited } = await acquireLock(lock, options.signal);
+  try {
+    if (!(waited && existsSync(dest))) await downloadToPart(url, dest, options);
+  } finally {
+    heldLocks.delete(owner);
+    if (readLock(lock) === owner) removePartialFile(lock);
   }
 }
