@@ -4,6 +4,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { c } from "../ui/colors.js";
 import { errorBox } from "../ui/format.js";
 import { normalizeErrorMessage as errorMessage } from "../utils/errorMessage.js";
+import { decodeJsonText } from "../utils/jsonFlag.js";
 import {
   loadProjectVariableSchema,
   reportVariableIssues,
@@ -241,7 +242,7 @@ function reportBatchVariableIssues(
 
 export function prepareBatchRender(options: PrepareBatchRenderOptions): PreparedBatchRender {
   const batchPath = resolve(options.batchPath);
-  const read = options.readFile ?? ((path: string) => readFileSync(path, "utf8"));
+  const read = options.readFile ?? ((path: string) => decodeJsonText(readFileSync(path)));
   let raw: string;
   try {
     raw = read(batchPath);
