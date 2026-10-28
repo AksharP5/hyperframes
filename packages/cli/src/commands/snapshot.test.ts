@@ -58,6 +58,7 @@ vi.mock("../utils/staticProjectServer.js", () => ({
 
 import snapshotCommand, {
   extractVideoFrameToBuffer,
+  decodeFramesInOnePass,
   extractVideoFrameOrWarn,
   probeContainingSourceFrameSeek,
   containingSourceFrameIndex,
@@ -72,6 +73,7 @@ import snapshotCommand, {
   resolveSnapshotVideoRateSpec,
   tailFrameTime,
 } from "./snapshot.js";
+import type { PlannedFrame } from "./snapshotFrameBank.js";
 
 describe("formatSnapshotTimestamp", () => {
   it.each([
@@ -651,6 +653,95 @@ describe("extractVideoFrameToBuffer", () => {
         ]);
         const actual = await extractVideoFrameToBuffer(clip, 1056.5 / 30);
         expect(samePixels(actual, readFileSync(expected))).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(noProbe)(
+    "decodes several times of one video in one pass, frame for frame as each decodes alone",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-pass-"));
+      try {
+        const clip = join(dir, "one-keyframe.mp4");
+        // A single keyframe at 0, as a long screen recording has: every frame decodes from the start.
+        execFileSync(ffmpeg!, [
+          ...[
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=d=12:r=25:s=320x180",
+          ],
+          ...["-c:v", "libx264", "-g", "10000", "-keyint_min", "10000", "-sc_threshold", "0"],
+          ...["-pix_fmt", "yuv420p", clip],
+        ]);
+        const times = [6.2, 8.97, 11.5];
+        const frames: PlannedFrame[] = [];
+        for (const time of times) {
+          const plan = await probeContainingSourceFrameSeek(clip, time, false);
+          expect(plan?.decodesFrom, "decodes from the only keyframe").toBe(0);
+          frames.push({
+            time,
+            displayedPixels: 160,
+            holdLastFrame: false,
+            seek: plan!.seek!,
+            select: plan!.select!,
+            decodesFrom: plan!.decodesFrom!,
+          });
+        }
+        const together = await decodeFramesInOnePass(clip, frames);
+        for (const [i, time] of times.entries()) {
+          const alone = await extractVideoFrameToBuffer(clip, time, false, false, 160);
+          expect(samePixels(together[i]!, alone!), `the frame at ${time}s`).toBe(true);
+        }
+        expect(new Set(together.map((png) => png.toString("base64"))).size).toBe(times.length);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(noProbe)(
+    "gives two times inside one source frame the same frame, without decoding on",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-pass-same-"));
+      try {
+        const clip = join(dir, "one-keyframe.mp4");
+        execFileSync(ffmpeg!, [
+          ...[
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=d=60:r=25:s=320x180",
+          ],
+          ...["-c:v", "libx264", "-g", "10000", "-keyint_min", "10000", "-sc_threshold", "0"],
+          ...["-pix_fmt", "yuv420p", clip],
+        ]);
+        const frames: PlannedFrame[] = [];
+        for (const time of [8.97, 8.98]) {
+          const plan = await probeContainingSourceFrameSeek(clip, time, false);
+          frames.push({
+            time,
+            displayedPixels: 160,
+            holdLastFrame: false,
+            seek: plan!.seek!,
+            select: plan!.select!,
+            decodesFrom: plan!.decodesFrom!,
+          });
+        }
+        const startedAt = Date.now();
+        const [first, second] = await decodeFramesInOnePass(clip, frames);
+        expect(first!.equals(second!)).toBe(true);
+        expect(Date.now() - startedAt, "stops at the frame, not the end of the file").toBeLessThan(
+          4_000,
+        );
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

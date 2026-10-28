@@ -84,6 +84,7 @@ import { writeCaptureFileSync } from "../capture/captureFile.js";
 import { runCancellableProcess } from "../utils/cancellableProcess.js";
 import { findFFmpeg, findFFprobe, getFFmpegInstallHint } from "../browser/ffmpeg.js";
 import { parseAngle, type Camera } from "./motionShotLayout.js";
+import { createFrameBank, type FrameWant, type PlannedFrame } from "./snapshotFrameBank.js";
 import type { Example } from "./_examples.js";
 import { loadInstalledSharp, loadOptionalPackage } from "../utils/optionalPackages.js";
 import { resolveLocalBrowserGpuMode, type BrowserGpuMode } from "../browser/gpuPolicy.js";
@@ -98,6 +99,7 @@ import {
   type ReviewSheets,
 } from "./snapshotReview.js";
 import { withMeta } from "../utils/updateCheck.js";
+import { trackSnapshotRun } from "../telemetry/events.js";
 import { failureMessage, jsonFailure } from "../utils/jsonError.js";
 
 // Runs IN THE BROWSER (serialized into page.evaluate). Tilt the whole stage so
@@ -266,6 +268,58 @@ export function resolveSnapshotVideoRateSpec(input: {
   return readElementRateSpec({ getAttribute: (name) => attrs[name] ?? null });
 }
 
+export interface SnapshotVideoCandidate {
+  id: string;
+  src: string;
+  authoredStart: number;
+  authoredRate: string | undefined;
+  authoredAutomation: string | undefined;
+  defaultRate: number;
+  runtimeResolvedStart: number | null;
+  authoredDuration: number | null;
+  srcDuration: number;
+  mediaStart: number;
+  loop: boolean;
+  displayedSize: number;
+  devicePixelRatio: number;
+}
+
+/** The source frame a <video> shows at `time`, or null when the clip is not on screen then. */
+export function activeVideoAt(
+  candidate: SnapshotVideoCandidate,
+  time: number,
+  compositionDuration: number,
+) {
+  const start = resolveSnapshotVideoClipStart(candidate);
+  const playbackRate = resolveSnapshotVideoRateSpec(candidate);
+  const duration =
+    candidate.authoredDuration ??
+    (candidate.srcDuration > 0
+      ? Math.max(0, timeAtSourceTime(playbackRate, candidate.srcDuration - candidate.mediaStart))
+      : Number.POSITIVE_INFINITY);
+  let relTime = sourceTimeAt(playbackRate, time - start) + candidate.mediaStart;
+  if (
+    candidate.loop &&
+    candidate.srcDuration > candidate.mediaStart &&
+    relTime >= candidate.srcDuration
+  ) {
+    relTime =
+      candidate.mediaStart +
+      ((relTime - candidate.mediaStart) % (candidate.srcDuration - candidate.mediaStart));
+  }
+  const frameTime = resolveSnapshotVideoFrameTime({
+    globalTime: time,
+    clipStart: start,
+    clipDuration: duration,
+    relativeTime: relTime,
+    sourceDuration: candidate.srcDuration,
+    compositionDuration,
+  });
+  return frameTime === null
+    ? null
+    : { ...candidate, start, playbackRate, duration, relTime: frameTime };
+}
+
 export function requireSnapshotFfmpeg(ffmpegPath: string | undefined): string {
   if (ffmpegPath) return ffmpegPath;
   throw new Error(
@@ -334,7 +388,7 @@ export async function probeContainingSourceFrameSeek(
   videoPath: string,
   time: number,
   holdLastFrame: boolean,
-): Promise<{ seek?: number; select?: number } | null> {
+): Promise<{ seek?: number; select?: number; decodesFrom?: number } | null> {
   const ffprobe = findFFprobe();
   // Without ffprobe, fall back to a plain seek: the first frame at or after `time`.
   if (!ffprobe) return { seek: time };
@@ -427,16 +481,18 @@ export async function probeContainingSourceFrameSeek(
     if (landed <= 0 || landed > frame) continue;
     // An index that places this keyframe after its own time lands on the one before; an accurate seek
     // to the keyframe's time decodes from there and drops everything before it.
-    if (landed < candidate.pts - 1e-6) return { seek: candidate.pts, select: mid - candidate.pts };
+    if (landed < candidate.pts - 1e-6)
+      return { seek: candidate.pts, select: mid - candidate.pts, decodesFrom: candidate.pts };
     const again = Math.abs(landed - candidate.pts) < 1e-6 ? landed : await landing(landed);
     if (again !== null && Math.abs(again - landed) < 1e-6)
-      return { seek: landed, select: mid - landed };
+      return { seek: landed, select: mid - landed, decodesFrom: landed };
   }
   // No usable keyframe landing: an accurate seek to the gap before the frame decodes up to it and drops the rest.
   // An exact frame time keeps start_t at 0; a time between frames would shift the select by the gap to the next frame.
   const from = timestamps.filter((t) => t > 0 && t <= mid - FALLBACK_SEEK_LEAD_SECONDS).at(-1) ?? 0;
+  const keyframeBefore = packets.filter((packet) => packet.key && packet.pts <= from).at(-1);
   return from > 0
-    ? { seek: from, select: mid - from }
+    ? { seek: from, select: mid - from, decodesFrom: keyframeBefore?.pts ?? 0 }
     : { select: mid - (timestamps.find((t) => t >= 0) ?? frame) };
 }
 
@@ -484,6 +540,53 @@ function warnNoHdrFiltersOnce(): void {
   );
 }
 
+type VideoMetadata = Awaited<ReturnType<typeof extractMediaMetadata>>;
+
+/** The source's colour metadata and, for HDR footage, the SDR export's tone map, so a still matches the render. */
+async function videoColour(ffmpegPath: string, videoPath: string) {
+  const metadata: VideoMetadata | null = findFFprobe()
+    ? await extractMediaMetadata(videoPath)
+    : null;
+  if (!metadata) warnColourUnknownOnce();
+  const toneMap =
+    metadata && isHdrColorSpace(metadata.colorSpace)
+      ? hdrToSdrToneMapFilter(
+          metadata.colorSpace ?? {},
+          parseFirstFrameColour(
+            (
+              await runFfmpegOnce(
+                ffmpegPath,
+                firstFrameColourArgs(videoPath),
+                FFMPEG_EXTRACT_TIMEOUT_MS,
+              )
+            ).stderr,
+          ),
+        )
+      : null;
+  return { metadata, toneMap };
+}
+
+function frameFilters(
+  select: number | undefined,
+  displayedPixels: number,
+  metadata: VideoMetadata | null,
+  toneMapFilter: string | null,
+): string[] {
+  const filters: string[] = [];
+  if (select !== undefined) filters.push(`select=gte(t-start_t\\,${select})`);
+  if (metadata) {
+    if (toneMapFilter) filters.push(toneMapFilter);
+    filters.push(...sdrCanvasColourFilters(metadata, toneMapFilter !== null));
+  }
+  // Shrink so the short side still covers the displayed box at any rotation or fit; never enlarge.
+  if (displayedPixels > 0) {
+    filters.push(
+      `scale='min(iw,${displayedPixels})':'min(ih,${displayedPixels})':force_original_aspect_ratio=increase`,
+    );
+  }
+  return filters;
+}
+
 export async function extractVideoFrameToBuffer(
   videoPath: string,
   timeSeconds: number,
@@ -501,41 +604,13 @@ export async function extractVideoFrameToBuffer(
       holdLastFrame,
     );
     if (seek === null) return null;
-    const metadata = findFFprobe() ? await extractMediaMetadata(videoPath) : null;
-    if (!metadata) warnColourUnknownOnce();
-    // HDR footage takes the tone map the SDR export uses, so a still matches the render.
-    const toneMap =
-      metadata && isHdrColorSpace(metadata.colorSpace)
-        ? hdrToSdrToneMapFilter(
-            metadata.colorSpace ?? {},
-            parseFirstFrameColour(
-              (
-                await runFfmpegOnce(
-                  ffmpegPath,
-                  firstFrameColourArgs(videoPath),
-                  FFMPEG_EXTRACT_TIMEOUT_MS,
-                )
-              ).stderr,
-            ),
-          )
-        : null;
+    const { metadata, toneMap } = await videoColour(ffmpegPath, videoPath);
     const frameArgs = (toneMapFilter: string | null): string[] => {
       const args = ["-hide_banner", "-loglevel", "error"];
       if (useVp9AlphaDecoder) args.push("-c:v", "libvpx-vp9");
       if (seek.seek !== undefined) args.push("-ss", String(seek.seek));
       args.push("-i", videoPath, "-map", "0:v:0");
-      const filters: string[] = [];
-      if (seek.select !== undefined) filters.push(`select=gte(t-start_t\\,${seek.select})`);
-      if (metadata) {
-        if (toneMapFilter) filters.push(toneMapFilter);
-        filters.push(...sdrCanvasColourFilters(metadata, toneMapFilter !== null));
-      }
-      // Shrink so the short side still covers the displayed box at any rotation or fit; never enlarge.
-      if (displayedPixels > 0) {
-        filters.push(
-          `scale='min(iw,${displayedPixels})':'min(ih,${displayedPixels})':force_original_aspect_ratio=increase`,
-        );
-      }
+      const filters = frameFilters(seek.select, displayedPixels, metadata, toneMapFilter);
       if (filters.length > 0) args.push("-vf", filters.join(","));
       args.push("-frames:v", "1", "-q:v", "2", "-y", outPath);
       return args;
@@ -566,19 +641,94 @@ export async function extractVideoFrameToBuffer(
   }
 }
 
+/** The `select` that keeps the first frame at or after each of `offsets`: one stream, one frame per time. */
+export function selectFirstFrameAfterEach(offsets: number[]): string {
+  const sinceLast = "if(isnan(prev_selected_t)\\,-1\\,prev_selected_t-start_t)";
+  const open = offsets.map((offset) => `gte(t-start_t\\,${offset})*gt(${offset}\\,${sinceLast})`);
+  return `select=gt(${open.join("+")}\\,0)`;
+}
+
+/** One ffmpeg pass that writes every planned frame of a video: the source decodes from the earliest keyframe once.
+ * The frames share one displayed size. Throws unless each time got a frame of its own. */
+export async function decodeFramesInOnePass(
+  videoPath: string,
+  frames: PlannedFrame[],
+  useVp9AlphaDecoder = false,
+): Promise<Buffer[]> {
+  const tmp = mkdtempSync(join(tmpdir(), "hf-snapshot-frames-"));
+  try {
+    const ffmpegPath = requireSnapshotFfmpeg(findFFmpeg());
+    const { metadata, toneMap } = await videoColour(ffmpegPath, videoPath);
+    const start = Math.min(...frames.map((frame) => frame.seek));
+    // Times inside one source frame share an offset, and so a frame.
+    const byOffset = new Map<number, number[]>();
+    for (const [index, frame] of frames.entries()) {
+      const offset = Number((frame.seek + frame.select - start).toFixed(6));
+      byOffset.set(offset, [...(byOffset.get(offset) ?? []), index]);
+    }
+    const byTime = [...byOffset].sort(([a], [b]) => a - b);
+    const passArgs = (toneMapFilter: string | null): string[] => {
+      const rest = frameFilters(undefined, frames[0]!.displayedPixels, metadata, toneMapFilter);
+      const filters = [selectFirstFrameAfterEach(byTime.map(([offset]) => offset)), ...rest];
+      const args = ["-hide_banner", "-loglevel", "error"];
+      if (useVp9AlphaDecoder) args.push("-c:v", "libvpx-vp9");
+      args.push("-ss", String(start), "-i", videoPath, "-map", "0:v:0", "-vf", filters.join(","));
+      args.push("-fps_mode", "passthrough", "-frames:v", String(byTime.length));
+      args.push("-q:v", "2", "-y", join(tmp, "%d.png"));
+      return args;
+    };
+    // Each frame keeps the time limit it had when it decoded alone.
+    const timeoutMs = FFMPEG_EXTRACT_TIMEOUT_MS * frames.length;
+    let result = await runFfmpegOnce(ffmpegPath, passArgs(toneMap), timeoutMs);
+    if (toneMap && result.code !== 0 && /no such filter/i.test(result.stderr)) {
+      warnNoHdrFiltersOnce();
+      result = await runFfmpegOnce(ffmpegPath, passArgs(null), timeoutMs);
+    }
+    const what = `${frames.length} frames of ${videoPath}`;
+    if (result.timedOut) {
+      throw new FrameExtractError(`FFmpeg timed out after ${timeoutMs / 1000}s extracting ${what}`);
+    }
+    const written = (n: number) => join(tmp, `${n}.png`);
+    if (result.code !== 0 || !byTime.every((_, i) => existsSync(written(i + 1)))) {
+      throw new FrameExtractError(
+        `FFmpeg could not extract ${what}: ${lastLine(result.stderr) || `exit code ${result.code}`}`,
+      );
+    }
+    const buffers: Buffer[] = [];
+    for (const [i, [, indexes]] of byTime.entries()) {
+      const png = readFileSync(written(i + 1));
+      for (const index of indexes) buffers[index] = png;
+    }
+    return buffers;
+  } finally {
+    try {
+      rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
 /** A clip whose frame fails becomes a finding naming it and why, so the other frames of the snapshot still land. */
-export async function extractVideoFrameOrWarn(
+export async function frameOrWarn(
   warnings: string[],
-  ...args: Parameters<typeof extractVideoFrameToBuffer>
+  frame: () => Promise<Buffer | null>,
 ): Promise<Buffer | null> {
   try {
-    return await extractVideoFrameToBuffer(...args);
+    return await frame();
   } catch (error) {
     if (!(error instanceof FrameExtractError)) throw error;
     warnings.push(error.message);
     console.warn(`   ${c.warn("⚠")} ${error.message}`);
     return null;
   }
+}
+
+export function extractVideoFrameOrWarn(
+  warnings: string[],
+  ...args: Parameters<typeof extractVideoFrameToBuffer>
+): Promise<Buffer | null> {
+  return frameOrWarn(warnings, () => extractVideoFrameToBuffer(...args));
 }
 
 export const examples: Example[] = [
@@ -710,6 +860,7 @@ async function captureSnapshots(
     log?: (message: string) => void;
   },
 ): Promise<CapturedSnapshots> {
+  const startedAt = performance.now();
   const log = opts.log ?? ((message: string) => console.log(message));
   const { bundleWithLocalizedFonts } = await import("../utils/bundleWithLocalizedFonts.js");
 
@@ -930,14 +1081,30 @@ async function captureSnapshots(
         console.warn(`   ${c.warn("⚠")} No player API — seeks will be skipped`);
       }
 
+      const frameBank = createFrameBank({
+        probe: probeContainingSourceFrameSeek,
+        decode: async (path, frames) =>
+          decodeFramesInOnePass(
+            path,
+            frames,
+            /^https?:\/\//i.test(path) ? false : await shouldUseVp9AlphaDecoder(path),
+          ),
+      });
+      const plannedClips = new Set<string>();
+      const loopStartedAt = performance.now();
+      let seekMs = 0;
+      let videoMs = 0;
+
       for (let i = 0; i < positions.length; i++) {
         const time = positions[i]!;
         console.error(`[hyperframes] snapshot: frame ${i + 1}/${positions.length} at ${time}s`);
 
         const seekOptions = { exactTime: true, waitForImagesMs: SCREENSHOT_IMAGE_WAIT_MS };
+        const seekStartedAt = performance.now();
         await atStep(`seeking to ${time}s, frame ${i + 1} of ${positions.length}`, () =>
           seekCompositionTimelineOnly(page, time, seekOptions),
         );
+        seekMs += performance.now() - seekStartedAt;
 
         if (cameraExpr) await page.evaluate(cameraExpr);
 
@@ -976,45 +1143,18 @@ async function captureSnapshots(
               };
             });
           });
-          const compositionDuration = duration;
           let unreadable = 0;
           const active = candidates.flatMap((candidate) => {
-            const start = resolveSnapshotVideoClipStart(candidate);
-            const playbackRate = resolveSnapshotVideoRateSpec(candidate);
-            const duration =
-              candidate.authoredDuration ??
-              (candidate.srcDuration > 0
-                ? Math.max(
-                    0,
-                    timeAtSourceTime(playbackRate, candidate.srcDuration - candidate.mediaStart),
-                  )
-                : Number.POSITIVE_INFINITY);
-            let relTime = sourceTimeAt(playbackRate, time - start) + candidate.mediaStart;
-            if (
-              candidate.loop &&
-              candidate.srcDuration > candidate.mediaStart &&
-              relTime >= candidate.srcDuration
-            ) {
-              relTime =
-                candidate.mediaStart +
-                ((relTime - candidate.mediaStart) % (candidate.srcDuration - candidate.mediaStart));
-            }
-            const frameTime = resolveSnapshotVideoFrameTime({
-              globalTime: time,
-              clipStart: start,
-              clipDuration: duration,
-              relativeTime: relTime,
-              sourceDuration: candidate.srcDuration,
-              compositionDuration,
-            });
-            if (frameTime === null) return [];
+            const video = activeVideoAt(candidate, time, duration);
+            if (!video) return [];
             if (!candidate.id || !candidate.src) {
               unreadable += 1;
               return [];
             }
-            return [{ ...candidate, start, playbackRate, duration, relTime: frameTime }];
+            return [video];
           });
 
+          const videoStartedAt = performance.now();
           const extracted = await runWithConcurrencyLimit(
             active,
             VIDEO_FRAME_EXTRACT_CONCURRENCY,
@@ -1043,16 +1183,39 @@ async function captureSnapshots(
               const useVp9AlphaDecoder = inputIsLocal
                 ? await shouldUseVp9AlphaDecoder(ffmpegInput)
                 : false;
-              const png = await extractVideoFrameOrWarn(
+              const displayedPixels = Math.ceil(
+                v.displayedSize *
+                  (opts.zoom ? (opts.zoomScale ?? DEFAULT_ZOOM_SCALE) : v.devicePixelRatio),
+              );
+              const wantAt = (t: number): FrameWant | null => {
+                const shown = activeVideoAt(v, t, duration);
+                if (!shown) return null;
+                const holdLastFrame =
+                  shown.srcDuration > 0 && shown.relTime >= shown.srcDuration - 1;
+                return { time: Math.max(0, shown.relTime), displayedPixels, holdLastFrame };
+              };
+              // Every time this clip will be asked for is planned at its first request, so one pass decodes them.
+              const planKey = `${v.id}\0${ffmpegInput}`;
+              if (!plannedClips.has(planKey)) {
+                plannedClips.add(planKey);
+                await frameBank.plan(
+                  ffmpegInput,
+                  positions.slice(i).flatMap((t) => wantAt(t) ?? []),
+                );
+              }
+              const want = wantAt(time)!;
+              const banked = await frameBank.take(ffmpegInput, want);
+              const png = await frameOrWarn(
                 warnings,
-                ffmpegInput,
-                Math.max(0, v.relTime),
-                useVp9AlphaDecoder,
-                v.srcDuration > 0 && v.relTime >= v.srcDuration - 1,
-                Math.ceil(
-                  v.displayedSize *
-                    (opts.zoom ? (opts.zoomScale ?? DEFAULT_ZOOM_SCALE) : v.devicePixelRatio),
-                ),
+                async () =>
+                  banked ??
+                  extractVideoFrameToBuffer(
+                    ffmpegInput,
+                    want.time,
+                    useVp9AlphaDecoder,
+                    want.holdLastFrame,
+                    want.displayedPixels,
+                  ),
               );
               if (!png) return null;
               return { videoId: v.id, dataUri: `data:image/png;base64,${png.toString("base64")}` };
@@ -1084,6 +1247,7 @@ async function captureSnapshots(
               `   ${c.warn("⚠")} video frame injection failed at ${time.toFixed(1)}s — <video> elements will appear black/stale in this snapshot`,
             );
           }
+          videoMs += performance.now() - videoStartedAt;
         }
 
         warnUnsettledImages(await settleCompositionSeek(page, seekOptions), time, warnings);
@@ -1187,6 +1351,23 @@ async function captureSnapshots(
         const rel = relative(projectDir, framePath);
         savedPaths.push(rel.startsWith("..") || isAbsolute(rel) ? framePath : rel);
       }
+      const loopMs = performance.now() - loopStartedAt;
+      const stageMs = {
+        open: loopStartedAt - startedAt,
+        seek: seekMs,
+        video: videoMs,
+        capture: Math.max(0, loopMs - seekMs - videoMs),
+      };
+      trackSnapshotRun({
+        frames: positions.length,
+        videoFrames: frameBank.stats.frames,
+        decodePasses: frameBank.stats.passes,
+        sharedFrames: frameBank.stats.sharedFrames,
+        longestDecodeSeconds: frameBank.stats.longestDecodeSeconds,
+        slowStage: (Object.keys(stageMs) as (keyof typeof stageMs)[]).reduce((a, b) =>
+          stageMs[b] > stageMs[a] ? b : a,
+        ),
+      });
       completed = true;
     } finally {
       await chromeBrowser.close();

@@ -1079,6 +1079,28 @@ export function trackCatalogSearchMiss(props: {
   });
 }
 
+// Where a snapshot's time went and how far its video frames sat from a keyframe, so the slow runs
+// split by cause. Low-cardinality only: counts, a stage name and a distance bucket.
+export function trackSnapshotRun(props: {
+  frames: number;
+  videoFrames: number;
+  decodePasses: number;
+  sharedFrames: number;
+  longestDecodeSeconds: number;
+  slowStage: "open" | "seek" | "video" | "capture";
+}): void {
+  const seconds = props.longestDecodeSeconds;
+  trackEvent("cli_snapshot_run", {
+    frames: props.frames,
+    video_frames: props.videoFrames,
+    decode_passes: props.decodePasses,
+    shared_frames: props.sharedFrames,
+    keyframe_distance:
+      seconds <= 2 ? "to_2s" : seconds <= 10 ? "to_10s" : seconds <= 60 ? "to_60s" : "over_60s",
+    slow_stage: props.slowStage,
+  });
+}
+
 export function trackCommandResult(props: {
   command: string;
   success: boolean;
