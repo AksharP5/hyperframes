@@ -6,7 +6,8 @@
  */
 import { renderUsage } from "citty";
 import type { CommandDef } from "citty";
-import { c } from "./ui/colors.js";
+import { stripVTControlCharacters } from "node:util";
+import { c, isColorSupported } from "./ui/colors.js";
 import { VERSION } from "./version.js";
 
 // ── Root-level command groups ──────────────────────────────────────────────
@@ -190,7 +191,9 @@ function renderRootHelp(): string {
   }
   lines.push("");
 
-  lines.push(`Run ${c.cyan("hyperframes <command> --help")} for more information about a command.`);
+  lines.push(
+    `Run ${c.cyan("hyperframes help <command>")} (or ${c.cyan("<command> --help")}) for more information about a command.`,
+  );
 
   return lines.join("\n");
 }
@@ -209,15 +212,19 @@ function formatExamples(examples: Example[]): string {
 
 // ── Main showUsage override ────────────────────────────────────────────────
 // fallow-ignore-next-line complexity
-export async function showUsage(cmd: CommandDef, parent?: CommandDef): Promise<void> {
+export async function showUsage(
+  cmd: CommandDef,
+  parent?: CommandDef,
+  print: (text: string) => void = console.log,
+): Promise<void> {
   if (!parent) {
-    console.log(renderRootHelp() + "\n");
+    print(renderRootHelp() + "\n");
     return;
   }
 
   const meta = await (typeof cmd.meta === "function" ? cmd.meta() : cmd.meta);
   const usage = await renderUsage(cmd, parent);
-  console.log(usage + "\n");
+  print((isColorSupported ? usage : stripVTControlCharacters(usage)) + "\n");
 
   const name = meta?.name;
   if (name) {
@@ -225,7 +232,7 @@ export async function showUsage(cmd: CommandDef, parent?: CommandDef): Promise<v
     const parentName = parentMeta?.name;
     const examples = STATIC_EXAMPLES[name] ?? (await loadExamples(name, parentName));
     if (examples) {
-      console.log(formatExamples(examples) + "\n");
+      print(formatExamples(examples) + "\n");
     }
   }
 }

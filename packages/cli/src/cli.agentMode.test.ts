@@ -70,7 +70,7 @@ interface Run {
   stderr: string;
 }
 
-function runAsAgent(args: string[]): Promise<Run> {
+function runAsAgent(args: string[], { ci = true } = {}): Promise<Run> {
   return new Promise((resolve, reject) => {
     const child = spawn("bun", ["run", cliEntry, ...args], {
       cwd: home,
@@ -80,7 +80,7 @@ function runAsAgent(args: string[]): Promise<Run> {
         PATH: process.env.PATH,
         HOME: home,
         USERPROFILE: home,
-        CI: "1",
+        ...(ci ? { CI: "1" } : {}),
         CLAUDECODE: "1",
       },
     });
@@ -151,6 +151,46 @@ describe("agent-mode contract", () => {
     const run = await runAsAgent(args.split(" "));
     expectQuiet(run);
     expect(run.code, run.stderr).toBe(2);
+  });
+
+  it.each([
+    ["help", "Usage:"],
+    ["help render", "USAGE hyperframes render"],
+    ["help cloud render", "USAGE cloud render"],
+  ])("`%s` prints that help on stdout and exits 0", async (args, heading) => {
+    const run = await runAsAgent(args.split(" "));
+    expectQuiet(run);
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).toContain(heading);
+    expect(run.stderr).toBe("");
+  });
+
+  it("help stays plain inside an agent even without CI", async () => {
+    const run = await runAsAgent(["render", "--help"], { ci: false });
+    expectQuiet(run);
+    expect(run.code).toBe(0);
+  });
+
+  it.each([
+    ["rendr", "Did you mean 'hyperframes render'?"],
+    ["cloud rendr", "Did you mean 'hyperframes cloud render'?"],
+    ["help rendr", "Did you mean 'hyperframes render'?"],
+    ["help cloud rendr", "Did you mean 'hyperframes cloud render'?"],
+  ])(
+    "unknown command `%s` suggests the closest one, usage on stderr, exit 2",
+    async (args, hint) => {
+      const run = await runAsAgent(args.split(" "));
+      expectQuiet(run);
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain(hint);
+    },
+  );
+
+  it("an unknown flag suggests the flag it most likely means", async () => {
+    const run = await runAsAgent(["render", "--out", "x.mp4"]);
+    expect(run.code).toBe(2);
+    expect(run.stderr).toContain("Did you mean --output?");
   });
 
   it.each([["publish"], ["upgrade"]])(

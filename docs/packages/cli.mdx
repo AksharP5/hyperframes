@@ -8,7 +8,9 @@ This page lists every command and every flag. If you are still deciding which
 command you need, the [CLI guide](/developers/cli) is the shorter route.
 
 The installed version is always the authority. Run
-`npx hyperframes <command> --help` to see exactly what your copy accepts.
+`npx hyperframes help <command>` (or `npx hyperframes <command> --help`) to see
+exactly what your copy accepts. A mistyped command or flag exits 2 and suggests
+the closest one: `Did you mean 'hyperframes render'?`.
 
 ```bash
 # No install needed
@@ -95,6 +97,12 @@ Both stay silent in unattended runs, and the background install never starts
 there. While an install is underway, the notice is not shown.
 `HYPERFRAMES_NO_UPDATE_CHECK=1` turns off the check, the install, and the
 notice; `HYPERFRAMES_NO_AUTO_INSTALL=1` turns off only the install.
+
+**Skills notice.** When installed HyperFrames skills are out of date or missing,
+a command ends with one line on stderr naming `npx hyperframes skills update`.
+It shows at most once a day per project. In an unattended run it shows only when
+a core skill is missing. `HYPERFRAMES_SKIP_SKILLS=1` turns it off. No notice
+follows a usage error.
 
 ## Create a project
 

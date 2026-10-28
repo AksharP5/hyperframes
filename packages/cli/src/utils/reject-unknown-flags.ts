@@ -1,6 +1,7 @@
 import type { ArgDef, ArgsDef, CommandDef } from "citty";
 import { CliUsageError } from "./commandResult.js";
 import { c } from "../ui/colors.js";
+import { closestMatch } from "./didYouMean.js";
 
 // citty is permissive: an unrecognized flag (e.g. `render --out x` when the flag
 // is `--output`/`-o`) is silently ignored instead of rejected, so the value is
@@ -65,6 +66,14 @@ function unknownFlagIn(tok: string, known: Set<string>): string | null {
   return null;
 }
 
+function unknownFlagError(flag: string, known: Set<string>, path: string): CliUsageError {
+  const longNames = [...known].filter((name) => name.length > 1);
+  const match = flag.startsWith("--") ? closestMatch(flag.slice(2), longNames) : undefined;
+  const help = `Run 'hyperframes ${path ? `${path} ` : ""}--help' to see its flags.`;
+  const hint = match ? `Did you mean --${match}? ${help}` : help;
+  return new CliUsageError(`Unknown flag: ${flag}`, { hint });
+}
+
 /**
  * Throw on the first flag in `rawArgs` not declared by `cmd` (its args + aliases
  * + the global set). Only dash-prefixed tokens are inspected, so positionals and
@@ -81,10 +90,7 @@ export function assertKnownFlags(cmd: CommandDef<ArgsDef>, rawArgs: string[], pa
   for (const tok of rawArgs) {
     if (tok === "--") break;
     const bad = unknownFlagIn(tok, known);
-    if (bad) {
-      const hint = `Run 'hyperframes ${path ? `${path} ` : ""}--help' to see its flags.`;
-      throw new CliUsageError(`Unknown flag: ${bad}`, { hint });
-    }
+    if (bad) throw unknownFlagError(bad, known, path);
   }
 }
 
