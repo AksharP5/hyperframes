@@ -303,7 +303,8 @@ jobs:
           target: beginframe-contract
           push: false
           cache-from: type=gha,scope=gcp-beginframe-contract
-          cache-to: type=gha,mode=max,scope=gcp-beginframe-contract
+          # One writer (main): ~1 GB exports per PR run evict the bun cache, and a cold bun install can stall.
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,scope=gcp-beginframe-contract' || '' }}
 
   build:
     name: Build
