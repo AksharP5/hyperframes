@@ -44,11 +44,13 @@ import { isKnownInactiveTimelineWindow } from "./mediaTimelineWindow.js";
 import {
   extractFinalVideoFrameTimestamp,
   extractMediaMetadata,
+  ffmpegSeekSeconds,
   keyframeGapSeconds,
   mediaFileIdentity,
   readMetadataCache,
   readStoredFinalFrame,
   resolvePlayableVideoDuration,
+  videoStartOnMediaTimeline,
   writeMetadataCache,
   type MediaProbeCacheEntry,
   type VideoMetadata,
@@ -980,6 +982,7 @@ const inTailProbeSlot = createConcurrencyLimit(TAIL_PROBE_SLOTS);
 interface SegmentedExtraction {
   decodeArgs: string[];
   filterAndEncodeArgs: (seek: number) => string[];
+  ffmpegSeek: (mediaTime: number) => number;
   videoPath: string;
   startTime: number;
   fps: number;
@@ -1026,7 +1029,7 @@ async function runSegmentedExtraction(job: SegmentedExtraction): Promise<RunFfmp
               ...decodeArgs,
               "-noaccurate_seek",
               "-ss",
-              String(seek),
+              String(job.ffmpegSeek(seek)),
               "-i",
               videoPath,
               // Read one frame past the segment and keep exactly its own frames.
@@ -1167,16 +1170,17 @@ async function extractVideoFramesRangeUnredacted(
     args.push("-c:v", decoderForCodec(metadata.videoCodec));
   }
   const decodeArgs = [...args];
+  const ffmpegSeek = (mediaTime: number) => ffmpegSeekSeconds(metadata, mediaTime);
   if (options.finalFrameOnly) {
     // Output-side seek decodes from the start before selecting the final
     // sample. This is intentionally reserved for the one-frame path: input
     // seeking is faster, but valid unindexed transports (notably MPEG-TS with
     // a negative timestamp base) can seek to EOF and emit zero frames.
-    args.push("-i", videoPath, "-ss", String(startTime), "-frames:v", "1");
+    args.push("-i", videoPath, "-ss", String(Math.max(0, ffmpegSeek(startTime))), "-frames:v", "1");
   } else {
     // An accurate seek drops the frame on screen at startTime; the fps sampling below needs it.
     if (sampleAtOutputFps) args.push("-noaccurate_seek");
-    args.push("-ss", String(startTime), "-i", videoPath, "-t", String(duration));
+    args.push("-ss", String(ffmpegSeek(startTime)), "-i", videoPath, "-t", String(duration));
   }
 
   const vfFilters: string[] = [];
@@ -1191,7 +1195,7 @@ async function extractVideoFramesRangeUnredacted(
       ? [
           ...(metadata.isVFR
             ? []
-            : undoTickRoundingOnTheSourceFrameGrid(seek, metadata.videoStreamLeadSeconds ?? 0)),
+            : undoTickRoundingOnTheSourceFrameGrid(seek, videoStartOnMediaTimeline(metadata))),
           "settb=intb/2",
           "setpts=PTS-lte(TB\\,0.001)",
           `fps=${ffmpegFps}:start_time=0:round=up`,
@@ -1240,6 +1244,7 @@ async function extractVideoFramesRangeUnredacted(
       ? runSegmentedExtraction({
           decodeArgs: [...hwaccel, ...decodeArgs],
           filterAndEncodeArgs: (seek) => [...filterArgsFor(seek), ...encodeArgs],
+          ffmpegSeek,
           videoPath,
           startTime,
           fps,
@@ -1416,7 +1421,7 @@ function resolveSegmentDuration(
  * the container duration when ffprobe omits the stream duration; keep the
  * explicit fallback here for callers supplying older/manual metadata.
  */
-export { resolvePlayableVideoDuration };
+export { ffmpegSeekSeconds, resolvePlayableVideoDuration, videoStartOnMediaTimeline };
 
 export interface TimelineExtractionWindow {
   compositionStart: number;
@@ -1616,16 +1621,19 @@ export async function resolveFinalFrameExtractionWindow(
   if (!window.ensureFinalFrame) return window;
   const playableDuration = resolvePlayableVideoDuration(metadata);
   const videoStreamLead = metadata.videoStreamLeadSeconds ?? 0;
-  const finalFrameTimestamp =
-    videoStreamLead +
-    (await extractFinalVideoFrameTimestamp(
-      videoPath,
-      {
-        videoStreamDurationSeconds: playableDuration - videoStreamLead,
-        videoStreamStartSeconds: metadata.videoStreamStartSeconds,
-      },
-      signal,
-    ));
+  const lastInstantTheBrowserPlays = playableDuration - FINAL_FRAME_LOGICAL_DURATION_SECONDS;
+  const finalFrameTimestamp = Math.min(
+    lastInstantTheBrowserPlays,
+    videoStartOnMediaTimeline(metadata) +
+      (await extractFinalVideoFrameTimestamp(
+        videoPath,
+        {
+          videoStreamDurationSeconds: playableDuration - videoStreamLead,
+          videoStreamStartSeconds: metadata.videoStreamStartSeconds,
+        },
+        signal,
+      )),
+  );
   if (window.mediaStart < finalFrameTimestamp - 1e-9) return window;
 
   const sourceRemaining = playableDuration - video.mediaStart;
@@ -2443,7 +2451,7 @@ export async function extractAllVideoFrames(
             sourceFps: work.metadata.fps,
             finalFrameSeconds: storedFinalFrame.seconds,
             lastPacketSeconds: storedFinalFrame.lastPacketSeconds,
-            streamLeadSeconds: work.metadata.videoStreamLeadSeconds ?? 0,
+            streamLeadSeconds: videoStartOnMediaTimeline(work.metadata),
           });
     if (storedTailFrames !== null) {
       const totalFrames = firstTailFrame + storedTailFrames;
@@ -2748,12 +2756,11 @@ export async function extractAllVideoFrames(
 const BROWSER_SHOWS_UPCOMING_FIRST_FRAME_WITHIN_SECONDS = 1;
 
 export function isVideoHiddenBeforeStreamStart(
-  videoStreamLeadSeconds: number | undefined,
+  videoStartSeconds: number | undefined,
   mediaTime: number,
 ): boolean {
   return (
-    (videoStreamLeadSeconds ?? 0) - mediaTime >=
-    BROWSER_SHOWS_UPCOMING_FIRST_FRAME_WITHIN_SECONDS - 1e-6
+    (videoStartSeconds ?? 0) - mediaTime >= BROWSER_SHOWS_UPCOMING_FIRST_FRAME_WITHIN_SECONDS - 1e-6
   );
 }
 
@@ -2792,7 +2799,7 @@ function getFrameIndexAtTime(
   if (frameIndex < 0 || extracted.totalFrames <= 0) return null;
   if (
     isVideoHiddenBeforeStreamStart(
-      extracted.metadata.videoStreamLeadSeconds,
+      videoStartOnMediaTimeline(extracted.metadata),
       mediaStart + sourceTime,
     )
   ) {

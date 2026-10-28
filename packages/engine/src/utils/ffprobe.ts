@@ -207,6 +207,7 @@ export interface VideoMetadata {
   videoStreamStartSeconds?: number;
   /** Seconds after the file's media time 0 (its earliest audio/video stream start) at which video begins. */
   videoStreamLeadSeconds?: number;
+  mediaTimeOffsetSeconds?: number;
   width: number;
   height: number;
   fps: number;
@@ -243,6 +244,7 @@ export interface AudioMetadata {
   /** Seconds after the file's media time 0 at which its last audio or video stream starts. */
   latestStreamLeadSeconds?: number;
   audioStreamLeadSeconds?: number;
+  mediaTimeOffsetSeconds?: number;
   audioStreamCount?: number;
   /** The track read for these facts and for the mix, by its place among the audio streams (decodableAudioStream). */
   audioStream: number;
@@ -510,6 +512,19 @@ export async function buildProbeFactsText(filePath: string, signal?: AbortSignal
     if (signal?.aborted) throw signal.reason;
   }
   return JSON.stringify(facts);
+}
+
+export function videoStartOnMediaTimeline(
+  metadata: Pick<VideoMetadata, "videoStreamLeadSeconds" | "mediaTimeOffsetSeconds">,
+): number {
+  return (metadata.videoStreamLeadSeconds ?? 0) + (metadata.mediaTimeOffsetSeconds ?? 0);
+}
+
+export function ffmpegSeekSeconds(
+  metadata: Pick<VideoMetadata, "mediaTimeOffsetSeconds">,
+  mediaTime: number,
+): number {
+  return mediaTime - (metadata.mediaTimeOffsetSeconds ?? 0);
 }
 
 export function resolvePlayableVideoDuration(metadata: VideoMetadata): number {
@@ -1004,6 +1019,7 @@ export async function extractMediaMetadata(filePath: string): Promise<VideoMetad
       videoStreamDurationSeconds: effectiveStreamDuration,
       videoStreamStartSeconds: streamStart,
       videoStreamLeadSeconds: streamLeadSeconds(output, videoStream),
+      mediaTimeOffsetSeconds: mediaTimeOffsetSeconds(output),
       width: videoStream.width || stillImage()?.width || 0,
       height: videoStream.height || stillImage()?.height || 0,
       fps,
@@ -1249,12 +1265,13 @@ async function probeAudioMetadata(filePath: string, signal?: AbortSignal): Promi
     bitrate: output.format.bit_rate ? parseInt(output.format.bit_rate) : undefined,
     latestStreamLeadSeconds: latestStreamLeadSeconds(output),
     audioStreamLeadSeconds: streamLeadSeconds(output, audioStream),
+    mediaTimeOffsetSeconds: mediaTimeOffsetSeconds(output),
     audioStreamCount: audioStreams.length,
     audioStream: audioStreamIndex,
   };
 }
 
-/** Chrome's media time 0 is the earliest of these; a stream starting later plays that much in. */
+/** A stream starting after the earliest of these plays that much after it. */
 function audioVideoStreamStarts(output: FFProbeOutput | null): number[] {
   return (output?.streams ?? [])
     .filter(
@@ -1269,6 +1286,14 @@ function streamLeadSeconds(output: FFProbeOutput | null, stream: FFProbeStream):
   const starts = audioVideoStreamStarts(output);
   const start = parseFloat(stream.start_time ?? "");
   return Number.isFinite(start) && starts.length > 0 ? Math.max(0, start - Math.min(...starts)) : 0;
+}
+
+const BROWSER_PLAYS_FROM_TIMESTAMP_ZERO = /\b(mp4|webm)\b/;
+
+function mediaTimeOffsetSeconds(output: FFProbeOutput | null): number {
+  const starts = audioVideoStreamStarts(output);
+  const fromZero = BROWSER_PLAYS_FROM_TIMESTAMP_ZERO.test(output?.format.format_name ?? "");
+  return fromZero && starts.length > 0 ? Math.max(0, Math.min(...starts)) : 0;
 }
 
 function latestStreamLeadSeconds(output: FFProbeOutput): number {
