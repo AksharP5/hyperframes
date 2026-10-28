@@ -2842,6 +2842,24 @@ export function shouldClampDefaultDrawElement(args: {
   );
 }
 
+/**
+ * Calibration sizes a parallel render, and parallel workers capture by screenshot
+ * unless drawElement was opted into: measure that mode, without a drawElement init.
+ */
+export function calibrationCaptureConfig(
+  cfg: EngineConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): EngineConfig {
+  const parallelKeepsDrawElement = !shouldClampDefaultDrawElement({
+    useDrawElement: cfg.useDrawElement,
+    fastCaptureExplicitOptIn: env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE === "true",
+    useStreamingEncode: true,
+    workerCount: 2,
+    deParallelStreamVerified: env.HF_DE_PARALLEL_STREAM === "true",
+  });
+  return parallelKeepsDrawElement ? cfg : { ...cfg, useDrawElement: false };
+}
+
 export function resolveCaptureForceScreenshotForPageSideCompositing(args: {
   forceScreenshot: boolean;
   usePageSideCompositing: boolean;
@@ -4011,7 +4029,7 @@ async function executeRenderPipeline(input: {
         }),
         () =>
           runCaptureCalibration({
-            cfg,
+            cfg: calibrationCaptureConfig(cfg),
             fileServer: activeFileServer,
             workDir,
             log,

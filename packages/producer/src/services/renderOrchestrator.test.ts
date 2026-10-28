@@ -55,6 +55,7 @@ import {
   resolveAdaptersUsed,
   resolveDeShortBand,
   shouldClampDefaultDrawElement,
+  calibrationCaptureConfig,
   shouldPreferParallelDrawElement,
   shouldPreferSingleWorkerDrawElement,
   isCaptureParallelStreamRouterEnabled,
@@ -3635,6 +3636,22 @@ describe("shouldStreamParallelCapture (non-DE parallel streaming router)", () =>
 
   it("skips HDR-layered and shader-transition routes", () => {
     expect(shouldStreamParallelCapture({ ...eligible, layeredOrEffectRoute: true })).toBe(false);
+  });
+});
+
+describe("calibrationCaptureConfig", () => {
+  const drawElementCfg = () => ({ ...createConfig(), useDrawElement: true });
+
+  it("measures screenshot capture, the mode parallel workers use", () => {
+    const cfg = drawElementCfg();
+    expect(calibrationCaptureConfig(cfg, {}).useDrawElement).toBe(false);
+    expect(cfg.useDrawElement).toBe(true);
+  });
+
+  it("keeps drawElement when parallel drawElement was opted into", () => {
+    const cfg = drawElementCfg();
+    expect(calibrationCaptureConfig(cfg, { PRODUCER_EXPERIMENTAL_FAST_CAPTURE: "true" })).toBe(cfg);
+    expect(calibrationCaptureConfig(cfg, { HF_DE_PARALLEL_STREAM: "true" })).toBe(cfg);
   });
 });
 
