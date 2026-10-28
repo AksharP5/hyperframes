@@ -1,8 +1,12 @@
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { diagnoseChromeStartup, nameChromeExit } from "./chromeStartup.js";
+import {
+  diagnoseChromeStartup,
+  explainChromeLaunchFailure,
+  nameChromeExit,
+} from "./chromeStartup.js";
 
 function fakeBrowser(body: string): string {
   const path = join(mkdtempSync(join(tmpdir(), "hf-fake-chrome-")), "chrome");
@@ -80,5 +84,25 @@ describe.runIf(process.platform !== "win32")("diagnoseChromeStartup cancel and a
     expect(diagnosis).toContain("--headless=new");
     expect(diagnosis).toContain("--no-first-run");
     expect(diagnosis.match(/about:blank/g)).toHaveLength(1);
+  });
+});
+
+describe("explainChromeLaunchFailure for a browser Windows refuses to run", () => {
+  it("names the file, the error number and the usual causes, and never launches the browser again", async () => {
+    const marker = join(mkdtempSync(join(tmpdir(), "hf-refused-")), "launched");
+    const executablePath = fakeBrowser(
+      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "");`,
+    );
+    const refused = Object.assign(new Error("spawn UNKNOWN"), {
+      code: "UNKNOWN",
+      errno: -4094,
+      syscall: "spawn",
+    });
+    const explained = (await explainChromeLaunchFailure(refused, executablePath, [])) as Error;
+    expect(explained.message).toContain(executablePath);
+    expect(explained.message).toContain("error -4094");
+    expect(explained.message).toContain("browser ensure --force");
+    expect(explained.cause).toBe(refused);
+    expect(existsSync(marker)).toBe(false);
   });
 });
