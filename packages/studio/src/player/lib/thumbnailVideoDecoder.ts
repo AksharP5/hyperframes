@@ -79,7 +79,6 @@ interface DecodedResources {
   held: HeldFrame[];
   canvases: Set<HTMLCanvasElement | OffscreenCanvas>;
   releasedFrameBytes: number;
-  decodedByJob: number;
 }
 
 interface ThumbnailCanvasSink {
@@ -175,6 +174,7 @@ async function decodeFrames(
   slots: { slot: number; key: string; decodedAt?: number }[],
   signal: AbortSignal,
   resources: DecodedResources,
+  progress: ThumbnailSource["progress"],
 ): Promise<void> {
   let next = 0;
   for await (const wrapped of sink.canvasesAtTimestamps(times)) {
@@ -185,7 +185,7 @@ async function decodeFrames(
     const blob = await canvasToBlob(wrapped.canvas);
     throwIfAborted(signal);
     const frame = shareFrame(target.key, target.decodedAt, URL.createObjectURL(blob), blob.size);
-    resources.decodedByJob += 1;
+    progress.framesFromAnyJob += 1;
     resources.urls[target.slot] = frame.url;
     resources.held.push({ key: target.key, frame });
   }
@@ -232,7 +232,6 @@ export async function decodeVideoThumbnail(
     held: [],
     canvases: new Set(),
     releasedFrameBytes: budgets.sharedFrameCacheBytes,
-    decodedByJob: 0,
   };
   const entry = sourceInfos.get(request.source);
   const known = entry?.version === request.contentVersion ? entry?.info : undefined;
@@ -271,8 +270,9 @@ async function decodeMissingFrames(
     if (timedOut(signal)) reportMediaFetchFailure(timeoutWithoutProgress());
     throw error;
   }
+  const framesBefore = source.progress.framesFromAnyJob;
   const releaseOnAbort = () => {
-    const madeProgress = source.waitedForOpen || resources.decodedByJob > 0;
+    const madeProgress = source.waitedForOpen || source.progress.framesFromAnyJob > framesBefore;
     const failed = timedOut(signal) && !madeProgress;
     if (failed) reportMediaFetchFailure(timeoutWithoutProgress());
     source.release(failed);
@@ -307,7 +307,8 @@ async function decodeMissingFrames(
         fit: request.fit ?? "cover",
         poolSize: 1,
       });
-      await decodeFrames(sink, decodeTimesAtNearbyKeyframes(), slots, signal, resources);
+      const times = decodeTimesAtNearbyKeyframes();
+      await decodeFrames(sink, times, slots, signal, resources, source.progress);
     }
     const result = loadedResult(resources, info.aspect, budgets, timestamps.length);
     source.release(false);

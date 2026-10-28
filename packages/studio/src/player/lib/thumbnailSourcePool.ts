@@ -19,6 +19,7 @@ export interface ThumbnailSource extends OpenedSource {
   release(failed: boolean): void;
   /** The job waited for the reader to open: the open finishing was progress the job saw. */
   waitedForOpen: boolean;
+  progress: { framesFromAnyJob: number };
 }
 
 interface PooledSource {
@@ -28,6 +29,7 @@ interface PooledSource {
   ready: boolean;
   opened: Promise<OpenedSource>;
   users: number;
+  progress: { framesFromAnyJob: number };
   idleTimer: ReturnType<typeof setTimeout> | null;
   disposed: boolean;
 }
@@ -100,6 +102,7 @@ function pooledSource(source: string, version: string | undefined): PooledSource
     ready: false,
     opened: open(source, () => entry),
     users: 0,
+    progress: { framesFromAnyJob: 0 },
     idleTimer: null,
     disposed: false,
   };
@@ -150,7 +153,8 @@ export async function acquireThumbnailSource(
     }
   };
   try {
-    return { ...(await untilAborted(entry.opened, signal)), release, waitedForOpen };
+    const { progress } = entry;
+    return { ...(await untilAborted(entry.opened, signal)), release, waitedForOpen, progress };
   } catch (error) {
     // Timed out still waiting: the open made no progress in the job's whole run.
     release(!isAbortError(error) || timedOut(signal));

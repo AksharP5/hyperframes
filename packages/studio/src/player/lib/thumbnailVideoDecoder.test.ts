@@ -766,6 +766,32 @@ describe("decodeVideoThumbnail's shared source", () => {
     expect(input.getPrimaryVideoTrack).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the reader when a clip times out while another clip decodes frames from it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recordDecodes([]);
+    await decodeVideoThumbnail(clip(0), signal);
+    canvasesAtTimestamps.mockImplementationOnce(async function* () {
+      await new Promise(() => {});
+      yield null;
+    });
+    canvasesAtTimestamps.mockImplementationOnce(async function* (
+      timestamps: AsyncIterable<number>,
+    ) {
+      await timestamps[Symbol.asyncIterator]().next();
+      yield { canvas: document.createElement("canvas") };
+      await new Promise(() => {});
+    });
+    const controller = new AbortController();
+    void decodeVideoThumbnail(clip(6), controller.signal).catch(() => {});
+    void decodeVideoThumbnail(clip(12), new AbortController().signal).catch(() => {});
+    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(4));
+    controller.abort(timedOut());
+
+    expect(warn).not.toHaveBeenCalled();
+    await decodeVideoThumbnail(clip(18), signal);
+    expect(input.getPrimaryVideoTrack).toHaveBeenCalledTimes(1);
+  });
+
   it("fails a job that times out waiting for its source to open, and the next clip opens afresh", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const stalled = untilDisposed();
