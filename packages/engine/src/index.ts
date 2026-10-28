@@ -310,6 +310,7 @@ export {
   type WorkerResult,
   type WorkerSizing,
   type WorkerSizingBound,
+  type WorkerSizingConfig,
   type LandedFrame,
   type ParallelProgress,
   type ParallelWorkerPhaseDiagnostic,

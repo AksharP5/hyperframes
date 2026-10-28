@@ -167,6 +167,22 @@ describe("computeWorkerSizing", () => {
     expect(computeWorkerSizing(1300, undefined, { concurrency: "auto" }).workers).toBe(5);
   });
 
+  it("sizes Apple-GPU disk capture by its own heap and core budget", () => {
+    vi.mocked(cpus).mockReturnValue(
+      Array.from({ length: 14 }, () => ({}) as ReturnType<typeof cpus>[number]),
+    );
+    vi.mocked(totalmem).mockReturnValue(24 * 1024 ** 3);
+    vi.mocked(getHeapStatistics).mockReturnValue({
+      heap_size_limit: 4192 * 1024 ** 2,
+    } as ReturnType<typeof getHeapStatistics>);
+    const apple = { concurrency: "auto" as const, appleGpuDiskCapture: true };
+    const sizing = computeWorkerSizing(1300, undefined, apple);
+    expect(sizing.workers).toBe(8);
+    expect(sizing.boundBy).toBe("memory");
+    expect(sizing.exceedsHeapAdvisory).toBe(false);
+    expect(computeWorkerSizing(1300, undefined, { ...apple, coresPerWorker: 4 }).workers).toBe(3);
+  });
+
   it("matches calculateOptimalWorkers and reports every constraint", () => {
     const config = { concurrency: "auto" as const };
     const sizing = computeWorkerSizing(900, undefined, config);

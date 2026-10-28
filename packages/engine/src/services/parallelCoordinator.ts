@@ -131,6 +131,8 @@ export interface WorkerSizingConfig extends Partial<
    * than a plain DOM screenshot. Explicit --workers requests ignore this hint.
    */
   captureCostMultiplier?: number;
+  /** macOS, hardware GPU, screenshot frames written to disk (not streamed through this process). */
+  appleGpuDiskCapture?: boolean;
 }
 
 type WorkerBrowserPoolDecision = {
@@ -151,6 +153,10 @@ const HEAP_RESERVED_MB = 1024;
 // default heap ⇒ >~500MB/worker + base. Caps auto sizing; an explicit
 // `--workers N` is still the operator's call.
 const HEAP_PER_WORKER_MB = 640;
+// Apple-GPU disk capture measured ~15-25 MB parent heap per worker; 14 cores kept gaining to 8.
+const APPLE_DISK_HEAP_PER_WORKER_MB = 128;
+const APPLE_DISK_CORES_PER_WORKER = 1.75;
+const APPLE_DISK_MAX_WORKERS = 8;
 const MIN_WORKERS = 1;
 const MAX_WORKER_DIAGNOSTIC_LINES = 8;
 // Hard ceiling on explicit `--workers N` requests. Above this, the cost of
@@ -321,9 +327,13 @@ export function computeWorkerSizing(
   // is immediately reclaimable.
   const totalMemoryMb = getSystemTotalMb();
   const heapLimitMb = Math.round(getHeapStatistics().heap_size_limit / (1024 * 1024));
+  const appleDisk = config?.appleGpuDiskCapture === true;
   const heapBasedWorkers = Math.max(
     1,
-    Math.floor((heapLimitMb - HEAP_RESERVED_MB) / HEAP_PER_WORKER_MB),
+    Math.floor(
+      (heapLimitMb - HEAP_RESERVED_MB) /
+        (appleDisk ? APPLE_DISK_HEAP_PER_WORKER_MB : HEAP_PER_WORKER_MB),
+    ),
   );
   const cpuBasedWorkers = Math.max(1, cpuCount - 2);
   const memoryBasedWorkers = Math.max(1, Math.floor((totalMemoryMb * 0.5) / MEMORY_PER_WORKER_MB));
@@ -362,9 +372,15 @@ export function computeWorkerSizing(
     if (concurrency !== "auto") {
       return Math.max(MIN_WORKERS, Math.min(ABSOLUTE_MAX_WORKERS, Math.floor(concurrency)));
     }
-    return defaultSafeMaxWorkers();
+    return appleDisk
+      ? Math.max(defaultSafeMaxWorkers(), APPLE_DISK_MAX_WORKERS)
+      : defaultSafeMaxWorkers();
   })();
-  const effectiveCoresPerWorker = config?.coresPerWorker ?? DEFAULT_CONFIG.coresPerWorker;
+  const configuredCoresPerWorker = config?.coresPerWorker ?? DEFAULT_CONFIG.coresPerWorker;
+  const effectiveCoresPerWorker =
+    appleDisk && configuredCoresPerWorker === DEFAULT_CONFIG.coresPerWorker
+      ? APPLE_DISK_CORES_PER_WORKER
+      : configuredCoresPerWorker;
   const effectiveMinParallelFrames = config?.minParallelFrames ?? DEFAULT_CONFIG.minParallelFrames;
   const effectiveLargeRenderThreshold =
     config?.largeRenderThreshold ?? DEFAULT_CONFIG.largeRenderThreshold;
