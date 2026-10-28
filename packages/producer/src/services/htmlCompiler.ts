@@ -504,9 +504,10 @@ async function resolveMediaDuration(
   let filePath = src;
 
   if (isHttpUrl(src)) {
-    if (!existsSync(downloadDir)) mkdirSync(downloadDir, { recursive: true });
+    const remoteDir = join(downloadDir, REMOTE_MEDIA_SUBDIR);
+    if (!existsSync(remoteDir)) mkdirSync(remoteDir, { recursive: true });
     try {
-      filePath = await downloadToTemp(src, downloadDir, undefined, undefined, undefined, {
+      filePath = await downloadToTemp(src, remoteDir, undefined, undefined, undefined, {
         onTelemetry: logRemoteDownloadTelemetry,
       });
     } catch {
