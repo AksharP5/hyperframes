@@ -71,6 +71,8 @@ function measure(nowMs: number, fps: number, rate: number): void {
   const skipped = due > 0 ? 1 - Math.min(drawn, due) / due : 0;
   const waitingMs = samples.reduce((sum, s) => sum + (s.waiting ? s.gapMs : 0), 0);
   const droppedShare = Math.max(skipped, waitingMs / spanMs);
+  const gaps = samples.map((sample) => sample.gapMs).sort((a, b) => a - b);
+  const gapAt = (share: number) => Math.round(gaps[Math.ceil(share * gaps.length) - 1] ?? 0);
   posted = true;
   postedAtMs = nowMs;
   post({
@@ -79,6 +81,10 @@ function measure(nowMs: number, fps: number, rate: number): void {
     choppy: droppedShare >= PLAYBACK_HEALTH.choppyShare,
     fps: Math.round((drawn / (spanMs / 1000)) * 10) / 10,
     worstFrameMs: Math.round(Math.max(...samples.map((sample) => sample.gapMs))),
+    skippedShare: Math.round(skipped * 1000) / 1000,
+    waitingShare: Math.round((waitingMs / spanMs) * 1000) / 1000,
+    gapP50Ms: gapAt(0.5),
+    gapP95Ms: gapAt(0.95),
     mode: "play",
   });
 }

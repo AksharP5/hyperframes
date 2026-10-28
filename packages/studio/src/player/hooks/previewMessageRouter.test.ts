@@ -95,6 +95,10 @@ describe("preview quality messages", () => {
       choppy: true,
       fps: 18,
       worstFrameMs: 90,
+      skippedShare: 0.1,
+      waitingShare: 0.4,
+      gapP50Ms: 17,
+      gapP95Ms: 66,
       mode: "play",
     };
     routeMessage({ source: "hf-preview", type: "preview-health", health });

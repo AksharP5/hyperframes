@@ -14,7 +14,16 @@ import {
 const posted = vi.mocked(postRuntimeMessage);
 const FPS = 30;
 
-type Health = { droppedShare: number; choppy: boolean; fps: number; worstFrameMs: number } | null;
+type Health = {
+  droppedShare: number;
+  choppy: boolean;
+  fps: number;
+  worstFrameMs: number;
+  skippedShare: number;
+  waitingShare: number;
+  gapP50Ms: number;
+  gapP95Ms: number;
+} | null;
 const healths = (): Health[] =>
   posted.mock.calls.map(([message]) =>
     message.type === "preview-health" ? (message.health as Health) : null,
@@ -84,6 +93,22 @@ describe("playback health", () => {
   it("calls a film choppy when a playing video keeps waiting for data", () => {
     play(1000, 6, { waiting: true });
     expect(healths().at(-1)?.choppy).toBe(true);
+  });
+
+  it("names slow ticks as skipped frames with the tick gaps, and a waiting video as waiting", () => {
+    play(1000, 8, {}, 100);
+    const slow = healths().at(-1);
+    expect(slow?.skippedShare).toBeGreaterThan(0.5);
+    expect(slow?.waitingShare).toBe(0);
+    expect(slow?.gapP50Ms).toBe(100);
+    expect(slow?.gapP95Ms).toBe(100);
+    restartPlaybackHealth();
+    posted.mockClear();
+    play(20_000, 6, { waiting: true });
+    const waiting = healths().at(-1);
+    expect(waiting?.waitingShare).toBeGreaterThan(0.9);
+    expect(waiting?.skippedShare).toBeLessThan(0.05);
+    expect(waiting?.gapP95Ms).toBeLessThan(20);
   });
 
   it("does not count stalls in the first second after play starts", () => {

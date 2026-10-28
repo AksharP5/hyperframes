@@ -276,6 +276,10 @@ export type RuntimePreviewHealthMessage = {
     choppy: boolean;
     fps: number;
     worstFrameMs: number;
+    skippedShare: number;
+    waitingShare: number;
+    gapP50Ms: number;
+    gapP95Ms: number;
     mode: "play";
   } | null;
 };

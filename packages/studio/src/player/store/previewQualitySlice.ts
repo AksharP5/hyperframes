@@ -18,6 +18,10 @@ export interface PlaybackHealth {
   choppy: boolean;
   fps: number;
   worstFrameMs: number;
+  skippedShare?: number;
+  waitingShare?: number;
+  gapP50Ms?: number;
+  gapP95Ms?: number;
   mode: "play";
 }
 
@@ -104,8 +108,11 @@ export function parsePreviewCopies(value: unknown): PreviewCopies | null {
   };
 }
 
+const optionalNumber = (n: unknown) => (typeof n === "number" ? n : undefined);
+
 export function parsePlaybackHealth(value: unknown): PlaybackHealth | null {
   if (typeof value !== "object" || value === null) return null;
+  const extra = value as Record<string, unknown>;
   const { droppedShare, seconds, choppy, fps, worstFrameMs } = value as Record<string, unknown>;
   const numbers = [droppedShare, seconds, fps, worstFrameMs].every((n) => typeof n === "number");
   if (!numbers || typeof choppy !== "boolean") return null;
@@ -115,6 +122,10 @@ export function parsePlaybackHealth(value: unknown): PlaybackHealth | null {
     choppy,
     fps: fps as number,
     worstFrameMs: worstFrameMs as number,
+    skippedShare: optionalNumber(extra.skippedShare),
+    waitingShare: optionalNumber(extra.waitingShare),
+    gapP50Ms: optionalNumber(extra.gapP50Ms),
+    gapP95Ms: optionalNumber(extra.gapP95Ms),
     mode: "play",
   };
 }
