@@ -154,5 +154,32 @@ describe("stored thumbnails", () => {
     const saved = JSON.parse(localStorage.getItem("hf-thumbnails-index")!);
     expect(Object.keys(saved.caches)).toContain("hf-thumbnails:other:tab");
     expect(Object.keys(saved.caches)).toHaveLength(2);
+    expect(Object.values(saved.etags)).toEqual(['"two"']);
+  });
+
+  it("keep a newer version another tab saw of a source this tab only read at start", async () => {
+    await rememberVersion(v1);
+    await storeFrame(v1, "cover 1x1 0", 0, jpeg());
+    await vi.waitFor(() => expect(localStorage.getItem("hf-thumbnails-index")).toContain("bytes"), {
+      timeout: 3000,
+    });
+    resetStoredThumbnailsForTests();
+    // a new session reads the index, then another tab moves the source on to v2
+    await storeFrame({ source: "/other.mp4", etag: '"1"' }, "cover 1x1 0", 0, jpeg());
+    const other = JSON.parse(localStorage.getItem("hf-thumbnails-index")!);
+    const key = Object.keys(other.etags).find((k) => other.etags[k] === '"one"')!;
+    other.etags[key] = '"two"';
+    localStorage.setItem("hf-thumbnails-index", JSON.stringify(other));
+    await storeFrame({ source: "/other.mp4", etag: '"1"' }, "cover 1x1 1", 1, jpeg());
+
+    // this tab's save is the one that adds /other.mp4's cache to the index
+    await vi.waitFor(
+      () =>
+        expect(
+          Object.keys(JSON.parse(localStorage.getItem("hf-thumbnails-index")!).caches),
+        ).toHaveLength(2),
+      { timeout: 3000 },
+    );
+    expect(JSON.parse(localStorage.getItem("hf-thumbnails-index")!).etags[key]).toBe('"two"');
   });
 });

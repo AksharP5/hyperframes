@@ -24,6 +24,7 @@ interface Index {
 let index: Index | undefined;
 // caches this tab dropped since its last save, which another tab's older snapshot must not bring back
 const dropped = new Set<string>();
+const sourcesThisTabMovedOn = new Set<string>();
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let warned = false;
 
@@ -72,6 +73,13 @@ function laterOf(own: CacheEntry | undefined, theirs: CacheEntry): CacheEntry | 
   return { usedAt: theirs.usedAt, bytes: Math.max(theirs.bytes, own?.bytes ?? 0) };
 }
 
+function savedEtagsButThisTabsMoves(mine: Index["etags"], theirs: Index["etags"]): Index["etags"] {
+  const etags = { ...mine, ...theirs };
+  for (const key of sourcesThisTabMovedOn) etags[key] = mine[key]!;
+  sourcesThisTabMovedOn.clear();
+  return etags;
+}
+
 /** This tab's index with what other tabs saved since: each cache at its latest use, none this tab dropped. */
 function mergedIndex(): Index {
   const mine = loadIndex();
@@ -80,7 +88,7 @@ function mergedIndex(): Index {
     const later = dropped.has(name) ? undefined : laterOf(mine.caches[name], entry);
     if (later) mine.caches[name] = later;
   }
-  mine.etags = { ...theirs.etags, ...mine.etags };
+  mine.etags = savedEtagsButThisTabsMoves(mine.etags, theirs.etags);
   dropped.clear();
   return mine;
 }
@@ -122,6 +130,7 @@ export const rememberVersion = (stored: StoredSource) =>
     const saved = loadIndex();
     if (saved.etags[key] === stored.etag) return;
     saved.etags[key] = stored.etag;
+    sourcesThisTabMovedOn.add(key);
     saveIndexSoon();
     const keep = await cacheNameOf(stored);
     for (const name of await caches.keys()) {
@@ -209,4 +218,6 @@ export function resetStoredThumbnailsForTests(): void {
   saveTimer = undefined;
   index = undefined;
   warned = false;
+  dropped.clear();
+  sourcesThisTabMovedOn.clear();
 }
