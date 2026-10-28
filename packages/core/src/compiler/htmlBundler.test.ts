@@ -2589,6 +2589,26 @@ describe("bundleToSingleHtml", () => {
     }
   });
 
+  it("reads a font declared in a linked stylesheet, as hyperframes lint does", async () => {
+    const dir = makeTempProject({
+      "index.html": `<!doctype html><html><head><link rel="stylesheet" href="fonts.css"><style>#root { font-family: 'Hiragino Sans'; }</style></head><body>
+  <div id="root" data-composition-id="root" data-width="320" data-height="180" data-duration="1"></div>
+  <script>window.__timelines = {};</script>
+</body></html>`,
+      "fonts.css": `@font-face { font-family: 'Hiragino Sans'; src: local('Hiragino Sans W3'); }`,
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await bundleToSingleHtml(dir);
+      const guard = warnSpy.mock.calls
+        .map((call) => String(call[0] ?? ""))
+        .filter((line) => line.includes("[StaticGuard]"));
+      expect(guard).toEqual([]);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("runs the StaticGuard lint unless staticGuard is false", async () => {
     const dir = makeTempProject({
       "index.html": `<!doctype html><html><head></head><body>

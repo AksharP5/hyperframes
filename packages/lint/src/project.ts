@@ -137,7 +137,7 @@ function collectLocalStylesheets(
   return styles;
 }
 
-function collectExternalStyles(
+export function collectExternalStyles(
   projectDir: string,
   html: string,
   compSrcPath?: string,

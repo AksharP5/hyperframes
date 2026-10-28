@@ -1104,7 +1104,11 @@ async function bundleProject(projectDir: string, options?: BundleOptions): Promi
   const compiled = await compileHtml(rawHtml, sourceDir, options?.probeMediaDuration);
 
   if (options?.staticGuard !== false && !mountedShell) {
-    const staticGuard = await validateHyperframeHtmlContract(compiled);
+    const entryRel = relative(projectDir, indexPath).replace(/\\/g, "/");
+    const staticGuard = await validateHyperframeHtmlContract(compiled, {
+      dir: projectDir,
+      ...(entryRel !== "index.html" && { compSrcPath: entryRel }),
+    });
     if (!staticGuard.isValid) {
       console.warn(
         `[StaticGuard] Invalid HyperFrame contract: ${staticGuard.missingKeys.join("; ")}`,
