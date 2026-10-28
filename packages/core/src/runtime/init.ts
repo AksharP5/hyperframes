@@ -167,6 +167,7 @@ import {
 } from "./captureMotionBlur";
 import { TransportClock } from "./clock";
 import { WebAudioTransport } from "./webAudioTransport";
+import { watchAudioLoadErrors } from "./mediaLoadFailure";
 import {
   classifyWebAudioMediaRoute,
   isRouteSelectionSettled,
@@ -3601,6 +3602,7 @@ export function initSandboxRuntimeModular(): void {
   runtimeCleanupCallbacks.push(() => {
     document.removeEventListener("play", onMediaPlayWakeTransport, true);
   });
+  runtimeCleanupCallbacks.push(watchAudioLoadErrors(document));
 
   let lastVisibilityPassSeconds: number | null = null;
   const syncMediaForCurrentState = (timingRevision?: number) => {

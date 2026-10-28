@@ -1,5 +1,6 @@
 import type { StoreApi } from "zustand";
 import { isPreviewQuality, type PreviewQuality } from "@hyperframes/core/preview-quality";
+import type { MediaLoadFailure } from "@hyperframes/core/runtime/protocol";
 import { readStudioUiPreferences, writeStudioUiPreferences } from "../../utils/studioUiPreferences";
 
 /** The lighter copies of heavy videos the preview wants at its current quality. */
@@ -53,6 +54,8 @@ export interface PreviewQualitySlice {
   setPlaybackHealth: (health: PlaybackHealth | null) => void;
   previewFacts: PreviewFacts | null;
   setPreviewFacts: (facts: PreviewFacts | null) => void;
+  mediaLoadFailure: MediaLoadFailure | null;
+  setMediaLoadFailure: (failure: MediaLoadFailure | null) => void;
   /** Bumped by requestPreviewFacts; the preview owner forwards each bump and the answer lands in previewFacts. */
   previewFactsRequests: number;
   requestPreviewFacts: () => void;
@@ -87,6 +90,8 @@ export function createPreviewQualitySlice(
     setPlaybackHealth: (playbackHealth) => set({ playbackHealth }),
     previewFacts: null,
     setPreviewFacts: (previewFacts) => set({ previewFacts }),
+    mediaLoadFailure: null,
+    setMediaLoadFailure: (mediaLoadFailure) => set({ mediaLoadFailure }),
     previewFactsRequests: 0,
     requestPreviewFacts: () =>
       set((state) => ({ previewFactsRequests: state.previewFactsRequests + 1 })),

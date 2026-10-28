@@ -1776,6 +1776,7 @@ describe("WebAudioTransport", () => {
     }
     const el = (src: string) =>
       ({
+        tagName: "AUDIO",
         getAttribute: (name: string) => (name === "src" ? src : null),
         currentSrc: "",
       }) as unknown as HTMLMediaElement;

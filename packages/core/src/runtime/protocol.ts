@@ -2,6 +2,8 @@ export const RUNTIME_PROTOCOL_VERSION = 1 as const;
 
 export const RUNTIME_FILLER = "hf-runtime-filler";
 
+export const RUNTIME_MEDIA_LOAD_FAILED = "runtime_media_load_failed";
+
 export const RUNTIME_PROTOCOL_CAPABILITIES = [
   "seconds-time",
   "rational-fps",
@@ -104,5 +106,35 @@ export function inspectRuntimeProtocol(value: unknown, legacyFps = 30): RuntimeP
     status: "supported",
     fps,
     metadata: message as RuntimeProtocolV1,
+  };
+}
+
+const STAGES = ["fetch", "decode", "element"] as const;
+export type MediaLoadStage = (typeof STAGES)[number];
+
+export interface MediaLoadFailure {
+  elementId: string | null;
+  kind: string;
+  stage: MediaLoadStage;
+  code: number | null;
+  bytes: number | null;
+  extension: string | null;
+}
+
+const numberOrNull = (n: unknown) => (typeof n === "number" ? n : null);
+const stringOrNull = (s: unknown) => (typeof s === "string" ? s : null);
+
+export function parseMediaLoadFailure(value: unknown): MediaLoadFailure | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { elementId, kind, stage, code, bytes, extension } = value as Record<string, unknown>;
+  const known = STAGES.find((s) => s === stage);
+  if (!known || typeof kind !== "string") return null;
+  return {
+    elementId: stringOrNull(elementId),
+    kind,
+    stage: known,
+    code: numberOrNull(code),
+    bytes: numberOrNull(bytes),
+    extension: stringOrNull(extension),
   };
 }

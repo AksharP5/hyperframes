@@ -14,6 +14,10 @@ import type { ClipManifestClip, IframeWindow, PlaybackAdapter } from "../lib/pla
 import { hasTimelinePerformanceFixtureLease } from "../lib/timelinePerformanceFixture";
 import { acceptStudioRuntimeMessage, postRuntimeControlMessage } from "../lib/runtimeProtocol";
 import {
+  parseMediaLoadFailure,
+  RUNTIME_MEDIA_LOAD_FAILED,
+} from "@hyperframes/core/runtime/protocol";
+import {
   parsePlaybackHealth,
   parsePreviewCopies,
   parsePreviewFacts,
@@ -38,6 +42,8 @@ interface PreviewMessage {
   copies?: unknown;
   health?: unknown;
   facts?: unknown;
+  code?: unknown;
+  details?: unknown;
 }
 
 export interface PreviewMessageRouterDeps {
@@ -136,6 +142,12 @@ function applyStoreReport(data: PreviewMessage): boolean {
     case "preview-facts":
       store.setPreviewFacts(parsePreviewFacts(data.facts));
       return true;
+    case "diagnostic": {
+      if (data.code !== RUNTIME_MEDIA_LOAD_FAILED) return false;
+      const failure = parseMediaLoadFailure(data.details);
+      if (failure) store.setMediaLoadFailure(failure);
+      return true;
+    }
     default:
       return false;
   }
