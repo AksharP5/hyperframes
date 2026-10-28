@@ -930,6 +930,7 @@ async function captureSnapshots(
 
       for (let i = 0; i < positions.length; i++) {
         const time = positions[i]!;
+        console.error(`[hyperframes] snapshot: frame ${i + 1}/${positions.length} at ${time}s`);
 
         const seekOptions = { exactTime: true, waitForImagesMs: SCREENSHOT_IMAGE_WAIT_MS };
         await atStep(`seeking to ${time}s, frame ${i + 1} of ${positions.length}`, () =>
