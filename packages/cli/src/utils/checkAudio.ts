@@ -81,14 +81,30 @@ async function silentPart(
   );
 }
 
+function oncePerFile(dependencies: AudioCheckDependencies): AudioCheckDependencies {
+  const accepted = new Map<string, Promise<boolean | null>>();
+  const probed = new Map<string, Promise<AudioMetadata>>();
+  const once = <T>(cache: Map<string, Promise<T>>, path: string, ask: () => Promise<T>) => {
+    const known = cache.get(path) ?? ask();
+    cache.set(path, known);
+    return known;
+  };
+  return {
+    ...dependencies,
+    renderAccepts: (path) => once(accepted, path, () => dependencies.renderAccepts(path)),
+    probeAudio: (path) => once(probed, path, () => dependencies.probeAudio(path)),
+  };
+}
+
 /** Findings for the clips the render mixes: unreadable source, start past the file's end, silent
  * played part; or a film with no sound at all. */
 export async function inspectAudio(
   projectDir: string,
   sourceFile: string,
   media: ProjectMedia,
-  dependencies: AudioCheckDependencies = DEFAULT_DEPENDENCIES,
+  suppliedDependencies: AudioCheckDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<CheckFinding[]> {
+  const dependencies = oncePerFile(suppliedDependencies);
   const withSlot = createProbeGate(PROBE_CONCURRENCY);
   // Parsed only for a clip with a finding, to name the composition file it was written in.
   let bundled: Document | undefined;
