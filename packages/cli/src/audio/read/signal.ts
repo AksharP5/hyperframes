@@ -1,9 +1,9 @@
-import type { AudioSignal } from "@hyperframes/core/audio-analysis";
+import { PITCH_RATE, type AudioSignal } from "@hyperframes/core/audio-analysis";
 import { decodeAudio } from "../analysis/decode.js";
 
 /** Every layer is read from mono at this rate: enough for onsets and band shapes, small enough for a long episode. */
 export const READ_RATE = 22050;
-export const PITCH_RATE = 8000;
+export { PITCH_RATE };
 const SILENT_DB = -120;
 export const ABSENT_DB = -55;
 

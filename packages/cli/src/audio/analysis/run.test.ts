@@ -157,6 +157,71 @@ describe.skipIf(!ffmpeg)("analyzeTargets", () => {
     expect(hits.filter((t) => Math.abs(t - 2) >= 0.01)).toEqual([]);
   });
 
+  it("judges a clip's kind on all it plays, not on the slice a range query covers", async () => {
+    const bed = (t: number) =>
+      0.3 * Math.sin(2 * Math.PI * 220 * t) + 0.6 * hit(0)(t % 0.5) + 0.05 * noise();
+    const path = wav("music-bed.wav", 12, bed);
+    const target = (clip?: { from: number; seconds: number }) => ({
+      path,
+      file: "music-bed.wav",
+      ref: "#music",
+      kind: "audio" as const,
+      placement: null,
+      window: { from: 3, seconds: 1.7 },
+      ...(clip && { clip }),
+    });
+    const slice = await analyzeTargets([target()], { capabilities: ["kind"] });
+    expect((slice.items[0]!.kind as { value: string }).value).not.toBe("music");
+    const report = await analyzeTargets(
+      [target({ from: 0, seconds: 12 })],
+      {
+        capabilities: ["kind", "moments"],
+      },
+      true,
+    );
+    expect(report.items[0]!.kind).toMatchObject({ features: { duration: 12 } });
+    expect(report.items[0]!.ladder?.kind).toEqual([{ provider: "signal", outcome: "answered" }]);
+    const unavailable = await analyzeTargets(
+      [target({ from: 0, seconds: 12 })],
+      {
+        capabilities: ["kind"],
+        provider: { kind: "missing" },
+      },
+      true,
+    );
+    expect(unavailable.items[0]!.warnings.length).toBeGreaterThan(0);
+    expect(unavailable.items[0]!.ladder?.kind?.length).toBeGreaterThan(0);
+    expect((report.items[0]!.kind as { value: string }).value).toBe("music");
+    expect(report.items[0]!.window).toEqual({ from: 3, to: 4.7 });
+    const windowOnly = await analyzeTargets([target()], { capabilities: ["moments"] });
+    expect(report.items[0]!.moments).toEqual(windowOnly.items[0]!.moments);
+  });
+
+  it.each([
+    { from: 1, seconds: 8, duration: 8 },
+    { from: 11, seconds: 3, duration: 1 },
+  ])(
+    "keeps kind inside the played source span $from + $seconds, bounded by EOF",
+    async ({ from, seconds, duration }) => {
+      const path = wav("trimmed.wav", 12, (t) => 0.3 * Math.sin(2 * Math.PI * 200 * t));
+      const target = {
+        path,
+        file: "trimmed.wav",
+        ref: "#trimmed",
+        kind: "audio" as const,
+        placement: null,
+        clip: { from, seconds },
+        window: { from: from + 0.2, seconds: 0.3 },
+      };
+      const [whole, slice] = await Promise.all([
+        analyzeTargets([{ ...target, window: target.clip }], { capabilities: ["kind"] }),
+        analyzeTargets([target], { capabilities: ["kind"] }),
+      ]);
+      expect(slice.items[0]!.kind).toMatchObject({ features: { duration } });
+      expect(slice.items[0]!.kind).toEqual(whole.items[0]!.kind);
+    },
+  );
+
   it("reports a file it cannot read on that item and goes on to the next", async () => {
     const broken = join(dir, "notes.txt");
     writeFileSync(broken, "not audio");

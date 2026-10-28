@@ -85,6 +85,17 @@ Watch once with sound and once muted, then listen once without watching.
 - Nothing cuts off a word or a breath at a scene change.
 - The music ends on purpose, not at the end of the file.
 
+The audio analysis gives each sound a first guess of `voice`, `music` or `sfx`.
+Voice needs both a speech-like level pattern and voice-range pitch, so a hit
+with a speech-like tail is less likely to be mistaken for narration. These are
+guesses, not transcript labels. When you inspect a time range, kind uses the
+whole source span played by the clip; loudness, hits and the other measurements
+still describe the selected range. A short slice of a music bed therefore keeps
+the bed’s kind. Repeated range queries reuse that guess until the source or clip
+changes. If the whole clip cannot be analyzed, the result warns that kind uses
+only the selected range; the range’s other measurements are still returned.
+See [audio analysis](/packages/cli#audio) for the command and output.
+
 To dip the music only where the voice sits instead of turning it all down, use a
 [voiceover carve](/studio/audio-effects#make-music-sit-under-narration).
 
