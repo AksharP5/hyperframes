@@ -189,6 +189,7 @@ export {
   applyFaststart,
   packageHls,
   detectGpuEncoder,
+  getCachedGpuEncoder,
   ENCODER_PRESETS,
   getEncoderPreset,
   PRORES_PROFILES,

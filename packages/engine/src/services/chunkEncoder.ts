@@ -186,7 +186,7 @@ export function getEncoderPreset(
 }
 
 // Re-export GPU utilities so existing consumers that import from chunkEncoder still work.
-export { detectGpuEncoder, type GpuEncoder } from "../utils/gpuEncoder.js";
+export { detectGpuEncoder, getCachedGpuEncoder, type GpuEncoder } from "../utils/gpuEncoder.js";
 
 /** The `lockGopForChunkConcat` / `gopSize` pair, shared by every encoder entry point. */
 export interface LockedGopOptions {

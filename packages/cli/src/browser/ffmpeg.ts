@@ -1,4 +1,4 @@
-import { detectGpuEncoder } from "@hyperframes/engine";
+import { getCachedGpuEncoder } from "@hyperframes/engine";
 import { findFfBinary } from "@hyperframes/parsers/ff-binaries";
 import { detectLinuxDistro, ffmpegInstallCommand } from "./linuxDeps.js";
 import { runCancellableProcess } from "../utils/cancellableProcess.js";
@@ -40,7 +40,7 @@ export async function detectH264EncoderModeForRender(
   ffmpegPath: string,
   gpuRequested: boolean,
   signal: AbortSignal,
-  probeGpu: () => Promise<unknown> = detectGpuEncoder,
+  probeGpu: () => Promise<unknown> = getCachedGpuEncoder,
 ): Promise<H264EncoderMode> {
   const result = await runCancellableProcess(ffmpegPath, ["-hide_banner", "-encoders"], {
     signal,
