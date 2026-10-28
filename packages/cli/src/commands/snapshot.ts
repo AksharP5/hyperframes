@@ -976,6 +976,7 @@ async function captureSnapshots(
             });
           });
           const compositionDuration = duration;
+          let unreadable = 0;
           const active = candidates.flatMap((candidate) => {
             const start = resolveSnapshotVideoClipStart(candidate);
             const playbackRate = resolveSnapshotVideoRateSpec(candidate);
@@ -997,7 +998,6 @@ async function captureSnapshots(
                 candidate.mediaStart +
                 ((relTime - candidate.mediaStart) % (candidate.srcDuration - candidate.mediaStart));
             }
-            if (!candidate.id || !candidate.src) return [];
             const frameTime = resolveSnapshotVideoFrameTime({
               globalTime: time,
               clipStart: start,
@@ -1006,9 +1006,12 @@ async function captureSnapshots(
               sourceDuration: candidate.srcDuration,
               compositionDuration,
             });
-            return frameTime === null
-              ? []
-              : [{ ...candidate, start, playbackRate, duration, relTime: frameTime }];
+            if (frameTime === null) return [];
+            if (!candidate.id || !candidate.src) {
+              unreadable += 1;
+              return [];
+            }
+            return [{ ...candidate, start, playbackRate, duration, relTime: frameTime }];
           });
 
           const extracted = await runWithConcurrencyLimit(
@@ -1056,11 +1059,12 @@ async function captureSnapshots(
           );
           const updates = extracted.filter((update) => update !== null);
 
-          if (active.length > 0 && updates.length < active.length) {
-            const missed = active.length - updates.length;
+          const onScreen = active.length + unreadable;
+          if (updates.length < onScreen) {
+            const missed = onScreen - updates.length;
             warnings.push(`${missed} video frames missing at ${time}s`);
             console.warn(
-              `   ${c.warn("⚠")} ${missed}/${active.length} active <video> frame(s) could not be extracted at ${time.toFixed(1)}s — those videos will appear black/stale in this snapshot`,
+              `   ${c.warn("⚠")} ${missed}/${onScreen} active <video> frame(s) could not be extracted at ${time.toFixed(1)}s — those videos will appear black/stale in this snapshot`,
             );
           }
 
