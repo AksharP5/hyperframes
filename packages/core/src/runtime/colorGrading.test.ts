@@ -31,7 +31,11 @@ LUT_3D_SIZE 2
 `;
 
 function createMockWebGl(
-  options: { failMediaUpload?: boolean; halfFloatSupported?: boolean } = {},
+  options: {
+    failMediaUpload?: boolean;
+    halfFloatSupported?: boolean;
+    drawingBuffer?: { width: number; height: number };
+  } = {},
 ): WebGLRenderingContext {
   const shader = {};
   const program = {};
@@ -124,6 +128,12 @@ function createMockWebGl(
     drawArrays: vi.fn(),
     deleteTexture: vi.fn(),
     deleteBuffer: vi.fn(),
+    get drawingBufferWidth() {
+      return options.drawingBuffer?.width;
+    },
+    get drawingBufferHeight() {
+      return options.drawingBuffer?.height;
+    },
   } as unknown as WebGLRenderingContext;
 }
 
@@ -942,6 +952,66 @@ describe("createColorGradingRuntime", () => {
     expect(canvas.style.display).toBe("block");
     expect(video.style.getPropertyValue("opacity")).toBe("0");
     expect(video.style.getPropertyPriority("opacity")).toBe("important");
+  });
+
+  it("caps a clip shown far larger than the screen to what a GPU can draw, keeping its shape", () => {
+    vi.stubGlobal("devicePixelRatio", 1);
+    const video = makeDrawableVideo();
+    Object.defineProperty(video, "offsetWidth", { value: 6582, configurable: true });
+    Object.defineProperty(video, "offsetHeight", { value: 11520, configurable: true });
+
+    const { canvas } = startRuntimeWithVideo(video);
+
+    expect(canvas.width * canvas.height).toBeLessThanOrEqual(1 << 24);
+    expect(canvas.width / canvas.height).toBeCloseTo(6582 / 11520, 2);
+  });
+
+  it("leaves the source showing when the drawing buffer cannot hold the canvas", () => {
+    getContextSpy.mockImplementation((type: string) =>
+      type === "webgl"
+        ? createMockWebGl({ drawingBuffer: { width: 100, height: 100 } })
+        : type === "2d"
+          ? mock2d()
+          : null,
+    );
+
+    const { video } = startRuntimeWithVideo();
+
+    expect(video.style.getPropertyValue("opacity")).not.toBe("0");
+  });
+
+  it("gives a drawn clip back to its source when a later draw outgrows the drawing buffer", () => {
+    const drawingBuffer = { width: 4096, height: 4096 };
+    getContextSpy.mockImplementation((type: string) =>
+      type === "webgl" ? createMockWebGl({ drawingBuffer }) : type === "2d" ? mock2d() : null,
+    );
+    const { video, canvas } = startRuntimeWithVideo();
+    expect(video.style.getPropertyValue("opacity")).toBe("0");
+
+    drawingBuffer.width = 100;
+    drawingBuffer.height = 100;
+    Object.defineProperty(video, "offsetWidth", { value: 3000, configurable: true });
+    video.dispatchEvent(new Event("seeked"));
+
+    expect(video.style.getPropertyValue("opacity")).not.toBe("0");
+    expect(canvas.style.display).toBe("none");
+  });
+
+  it("draws a paused video again once its frame is presented, after the first draw sampled nothing", () => {
+    const presented: Array<() => void> = [];
+    const video = makeDrawableVideo();
+    Object.defineProperty(video, "paused", { value: true, configurable: true });
+    Object.defineProperty(video, "requestVideoFrameCallback", {
+      value: (callback: () => void) => presented.push(callback),
+      configurable: true,
+    });
+
+    startRuntimeWithVideo(video);
+    const drawsBefore = texImage2DCalls.length;
+    presented.shift()?.();
+
+    expect(texImage2DCalls.length).toBeGreaterThan(drawsBefore);
+    expect(presented).toHaveLength(0);
   });
 
   it("keeps the canvas visible when producer render-frame injection hides the source video", () => {

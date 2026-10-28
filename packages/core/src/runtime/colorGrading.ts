@@ -320,6 +320,8 @@ type LutCacheEntry =
 const LUT_CACHE = new Map<string, LutCacheEntry>();
 const COLOR_GRADING_CANVAS_ATTR = "data-hf-color-grading-canvas";
 const COLOR_GRADING_CANVAS_CLASS = "__hf_color_grading_canvas__";
+const MAX_GRADING_CANVAS_PIXELS = 1 << 24;
+const MAX_GRADING_CANVAS_SIDE = 8192;
 
 /** Captures authored media opacity before animation or grading can mutate it. */
 export function installAuthoredOpacityCapture(): void {
@@ -2900,6 +2902,16 @@ function resolvedLayoutSize(primary: number, fallback: number): number {
   return Math.max(0, Math.round(primary > 0 ? primary : fallback));
 }
 
+function fitToGpuLimits(width: number, height: number): { width: number; height: number } {
+  const scale = Math.min(
+    1,
+    Math.sqrt(MAX_GRADING_CANVAS_PIXELS / (width * height)),
+    MAX_GRADING_CANVAS_SIDE / Math.max(width, height),
+  );
+  const fitted = { width: Math.floor(width * scale), height: Math.floor(height * scale) };
+  return scale < 1 ? fitted : { width: Math.round(width), height: Math.round(height) };
+}
+
 function updateCanvasLayout(
   entry: ColorGradingEntry,
   styleSource: HTMLElement,
@@ -2932,8 +2944,7 @@ function updateCanvasLayout(
     return null;
   }
   const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
-  const width = Math.round(cssWidth * pixelRatio);
-  const height = Math.round(cssHeight * pixelRatio);
+  const { width, height } = fitToGpuLimits(cssWidth * pixelRatio, cssHeight * pixelRatio);
   if (canvas.width !== width) canvas.width = width;
   if (canvas.height !== height) canvas.height = height;
   return { width, height };
@@ -3497,6 +3508,11 @@ function renderGradedFrame(
     frameTime,
   );
   drawFullscreenQuad(gl, { quad: program.quad, position: shader.position });
+  if (gl.drawingBufferWidth < layout.width || gl.drawingBufferHeight < layout.height) {
+    restoreSourceElement(entry);
+    entry.canvas.style.display = "none";
+    throw new Error("The GPU's drawing buffer is smaller than the grading canvas");
+  }
   presentEntry(entry, layout);
 }
 
@@ -3772,10 +3788,14 @@ function installEntryListeners(entry: ColorGradingEntry): void {
   const redraw = () => {
     drawEntry(entry);
   };
+  const redrawOnPresentedFrame = () => {
+    drawEntry(entry);
+    scheduleVideoDraw(entry);
+  };
   addListener(entry, entry.element, "load", redraw);
   addListener(entry, entry.element, "loadedmetadata", redraw);
-  addListener(entry, entry.element, "loadeddata", redraw);
-  addListener(entry, entry.element, "seeked", redraw);
+  addListener(entry, entry.element, "loadeddata", redrawOnPresentedFrame);
+  addListener(entry, entry.element, "seeked", redrawOnPresentedFrame);
   addListener(entry, entry.element, "timeupdate", redraw);
   addListener(entry, window, "resize", redraw);
   if (isVideoElement(entry.element)) {
@@ -4007,7 +4027,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
     trackedElements.add(element);
     installEntryListeners(entry);
     drawEntry(entry);
-    if (isVideoElement(element) && !element.paused) scheduleVideoDraw(entry);
+    if (isVideoElement(element)) scheduleVideoDraw(entry);
     return true;
   };
 
