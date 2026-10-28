@@ -13,14 +13,14 @@ interface Options {
   copyFallback?: boolean;
 }
 
-function isRetryable(error: unknown, platform: NodeJS.Platform): boolean {
+export function isWindowsHold(error: unknown, platform = process.platform): boolean {
   if (platform !== "win32") return false;
   return RETRYABLE.has((error as NodeJS.ErrnoException | undefined)?.code ?? "");
 }
 
 /** What a refused rename does next: wait and try again, fall back to a copy, or give up with the error. */
 function nextStep(error: unknown, attempt: number, options: Options, platform: NodeJS.Platform) {
-  if (!isRetryable(error, platform)) return "throw";
+  if (!isWindowsHold(error, platform)) return "throw";
   if (attempt < BACKOFF_MS.length) return "wait";
   return options.copyFallback ? "copy" : "throw";
 }

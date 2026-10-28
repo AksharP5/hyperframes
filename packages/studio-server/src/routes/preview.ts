@@ -43,6 +43,7 @@ import {
   resolveWithinProject,
 } from "../helpers/safePath.js";
 import { getMimeType } from "../helpers/mime.js";
+import { serveWhileOpen } from "../helpers/servedFiles.js";
 import { buildSubCompositionHtml, hasBaseElement } from "../helpers/subComposition.js";
 import { withRootImportMap } from "../helpers/rootImportMap.js";
 import { withRootPathsRelative } from "../helpers/rootPaths.js";
@@ -807,7 +808,7 @@ export function registerPreviewRoutes(api: Hono, adapter: PreviewApiAdapter): vo
         : // Node's web stream type and the DOM one do not overlap for tsc on
           // every platform's lib set; the double cast is the documented bridge.
           (Readable.toWeb(
-            createReadStream(servedPath, { start, end }),
+            serveWhileOpen(servedPath, createReadStream(servedPath, { start, end })),
           ) as unknown as ReadableStream);
 
     // Support byte-range requests so browsers can seek audio/video elements.
