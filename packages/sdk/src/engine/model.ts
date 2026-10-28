@@ -416,26 +416,52 @@ function nextUntouchedStyleIndex(
   return index;
 }
 
-function groupStyleRestoreAnchors(
+function matchStyleRestoreAnchors(
   original: readonly [string, string][],
-  anchors: readonly { prop: string; end: number }[],
+  anchors: readonly { prop: string; value: string; end: number }[],
   selected: ReadonlySet<string>,
 ) {
-  const occurrences = new Map<string, { groups: number[]; index: number }>();
+  const occurrences = new Map<
+    string,
+    { groups: { group: number; value: string }[]; index: number }
+  >();
   let group = 0;
-  for (const [prop] of original) {
+  for (const [prop, value] of original) {
     const entry = occurrences.get(prop) ?? { groups: [], index: 0 };
-    entry.groups.push(group);
+    entry.groups.push({ group, value });
     occurrences.set(prop, entry);
     if (selected.has(prop)) group++;
   }
 
-  const grouped: { group: number; end: number }[] = [];
-  for (const anchor of anchors) {
+  return anchors.flatMap((anchor) => {
     const entry = occurrences.get(anchor.prop);
-    if (!entry) continue;
-    const group = entry.groups[entry.index++];
-    if (group === undefined) continue;
+    const occurrence = entry?.groups[entry.index++];
+    if (!occurrence) return [];
+    return [
+      {
+        group: occurrence.group,
+        end: anchor.end,
+        unchanged: !selected.has(anchor.prop) && occurrence.value === anchor.value,
+      },
+    ];
+  });
+}
+
+function groupStyleRestoreAnchors(anchors: ReturnType<typeof matchStyleRestoreAnchors>) {
+  // Changed declarations may have moved; keep unchanged anchors in their original intervals.
+  const followingGroups: number[] = [];
+  anchors.reduceRight((following, anchor, index) => {
+    const limit = anchor.unchanged ? Math.min(following, anchor.group) : following;
+    followingGroups[index] = limit;
+    return limit;
+  }, Infinity);
+
+  const grouped: { group: number; end: number }[] = [];
+  let preceding = -1;
+  for (const [index, anchor] of anchors.entries()) {
+    const { group } = anchor;
+    if (anchor.unchanged) preceding = Math.max(preceding, group);
+    else if (group < preceding || group > (followingGroups[index] ?? Infinity)) continue;
     const previous = grouped.at(-1);
     if (previous?.group === group) previous.end = anchor.end;
     else grouped.push({ group, end: anchor.end });
@@ -450,10 +476,10 @@ function findStyleRestoreAnchors(
 ) {
   const available = countStyleProperties(current);
   const remaining = countStyleProperties(original, available);
-  const anchors: { prop: string; end: number }[] = [];
+  const anchors: { prop: string; value: string; end: number }[] = [];
   let end = 0;
   let originalIndex = 0;
-  for (const [prop] of current) {
+  for (const [prop, value] of current) {
     if (!selected.has(prop)) end++;
     originalIndex = nextUntouchedStyleIndex(original, remaining, selected, originalIndex);
     const expected = original[originalIndex]?.[0];
@@ -464,9 +490,9 @@ function findStyleRestoreAnchors(
     if (prop !== expected && occurrences > count) continue;
     if (prop === expected) originalIndex++;
     remaining.set(prop, count - 1);
-    anchors.push({ prop, end });
+    anchors.push({ prop, value, end });
   }
-  return groupStyleRestoreAnchors(original, anchors, selected);
+  return groupStyleRestoreAnchors(matchStyleRestoreAnchors(original, anchors, selected));
 }
 
 export function restoreElementStyleProperties(
