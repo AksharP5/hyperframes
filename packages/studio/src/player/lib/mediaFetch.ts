@@ -177,6 +177,9 @@ export function mediaUrlSourceOptions(reader: MediaReader) {
   const failuresByStart = new Map<number | null, number>();
   const inFlightReads = new AbortController();
   let ranges: "unknown" | "readable" | "hidden" = reader === "thumbnail" ? "unknown" : "hidden";
+  let etag: string | undefined;
+  const noteEtag = (response: Response) =>
+    void (etag ??= response.headers.get("ETag") ?? undefined);
   const fetchFn = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const sent = ranges === "readable" ? boundedRange(init) : init;
     const asked = Number(rangeStart(sent, true) ?? 0);
@@ -187,6 +190,7 @@ export function mediaUrlSourceOptions(reader: MediaReader) {
     );
     const response = await typedFetch(reader, input, sent ?? {}, asked, request);
     if (ranges !== "hidden") ranges = rangesReadable(sent, response) ? "readable" : "hidden";
+    noteEtag(response);
     return typedResponse(response, asked, request);
   };
   const getRetryDelay = (_previousAttempts: number, error: unknown): number | null => {
@@ -201,8 +205,9 @@ export function mediaUrlSourceOptions(reader: MediaReader) {
   };
   const cancelReads = () =>
     inFlightReads.abort(new DOMException("Media reads cancelled", "AbortError"));
-  if (reader === "probe") return { fetchFn, getRetryDelay, cancelReads };
-  return { fetchFn, getRetryDelay, cancelReads, maxCacheSize: POOLED_READER_CACHE_BYTES };
+  const etagOf = () => etag;
+  if (reader === "probe") return { fetchFn, getRetryDelay, cancelReads, etagOf };
+  return { fetchFn, getRetryDelay, cancelReads, etagOf, maxCacheSize: POOLED_READER_CACHE_BYTES };
 }
 
 export function reportMediaFetchFailure(error: unknown): void {

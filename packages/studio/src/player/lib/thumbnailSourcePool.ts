@@ -12,6 +12,7 @@ interface OpenedSource {
   mediabunny: Mediabunny;
   track: InputVideoTrack;
   info: SourceInfo;
+  etag: string | undefined;
 }
 
 export interface ThumbnailSource extends OpenedSource {
@@ -88,7 +89,8 @@ async function open(source: string, pooled: () => PooledSource): Promise<OpenedS
   }
   const metadataDuration = await track.getDurationFromMetadata({ skipLiveWait: true });
   live();
-  return { mediabunny, track, info: { aspect: displayWidth / displayHeight, metadataDuration } };
+  const info = { aspect: displayWidth / displayHeight, metadataDuration };
+  return { mediabunny, track, info, etag: options.etagOf() };
 }
 
 function pooledSource(source: string, version: string | undefined): PooledSource {
