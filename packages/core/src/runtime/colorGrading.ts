@@ -25,6 +25,7 @@ import {
   COLOR_GRADING_SOURCE_HIDDEN_ATTR,
   COLOR_GRADING_AUTHORED_OPACITY_ATTR,
 } from "../colorGrading";
+import { effectiveColorGrading, HF_COLOR_GROUP_ATTR, HF_COLOR_GROUP_TAG } from "../colorGroups";
 import {
   compileHfColorCurve,
   compileHfHueCurve,
@@ -368,8 +369,9 @@ const ADVANCED_TEXTURE_MAX_X_GLSL = `${HF_COLOR_CURVE_LUT_SIZE - 1}.0`;
 const ADVANCED_TEXTURE_HEIGHT_GLSL = `${ADVANCED_TEXTURE_HEIGHT}.0`;
 const ADVANCED_CONFIG_Y_GLSL = `${(ADVANCED_CONFIG_ROW + 0.5) / ADVANCED_TEXTURE_HEIGHT}`;
 
+// The member's own grade, else its grade group's — normalized in the member's variable scope.
 function readColorGradingAttribute(element: Element): ResolvedHfColorGrading | null {
-  const raw = element.getAttribute(HF_COLOR_GRADING_ATTR);
+  const raw = effectiveColorGrading(element, element.ownerDocument);
   if (raw == null) return null;
   return normalizeHfColorGradingWithVariables(raw, readVariablesForElement(element));
 }
@@ -1626,9 +1628,10 @@ const KUWAHARA_RESOLVE_FRAGMENT_SHADER = [
   "}",
 ].join("\n");
 
-const COLOR_GRADING_SOURCE_SELECTOR = HF_COLOR_GRADING_SOURCE_TAGS.map(
-  (tag) => `${tag}[${HF_COLOR_GRADING_ATTR}]`,
-).join(", ");
+const COLOR_GRADING_SOURCE_SELECTOR = HF_COLOR_GRADING_SOURCE_TAGS.flatMap((tag) => [
+  `${tag}[${HF_COLOR_GRADING_ATTR}]`,
+  `${tag}[${HF_COLOR_GROUP_ATTR}]`,
+]).join(", ");
 
 function isColorGradingMediaElement(value: Element): value is ColorGradingMediaElement {
   return (
@@ -4298,8 +4301,10 @@ export function createColorGradingRuntime(pausedMediaLease?: {
   };
 
   if (document.body) {
-    const recordsTouchGrading = createRecordFilter(COLOR_GRADING_SOURCE_SELECTOR, (node) =>
-      Array.from(trackedElements).some((element) => node.contains(element)),
+    // A grade group's element joining or leaving regrades its members, so it counts too.
+    const recordsTouchGrading = createRecordFilter(
+      `${COLOR_GRADING_SOURCE_SELECTOR}, ${HF_COLOR_GROUP_TAG}`,
+      (node) => Array.from(trackedElements).some((element) => node.contains(element)),
     );
     observer = new MutationObserver((records) => {
       if (recordsTouchGrading(records)) refresh();
@@ -4308,7 +4313,7 @@ export function createColorGradingRuntime(pausedMediaLease?: {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: [HF_COLOR_GRADING_ATTR],
+      attributeFilter: [HF_COLOR_GRADING_ATTR, HF_COLOR_GROUP_ATTR],
     });
   }
 

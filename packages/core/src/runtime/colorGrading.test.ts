@@ -6,6 +6,7 @@ import {
   HF_COLOR_GRADING_EFFECT_KEYS,
   serializeHfColorGrading,
 } from "../colorGrading";
+import { HF_COLOR_GROUP_ATTR, HF_COLOR_GROUP_TAG } from "../colorGroups";
 import {
   createColorGradingRuntime,
   installAuthoredOpacityCapture,
@@ -2316,6 +2317,127 @@ describe("createColorGradingRuntime", () => {
     wrapper.remove();
     await Promise.resolve();
     expect(runtime!.isGraded(live)).toBe(false);
+  });
+
+  describe("a grade group", () => {
+    const grade = (exposure: number) => serializeHfColorGrading({ adjust: { exposure } });
+
+    function addGroup(id: string, exposure: number | null): HTMLElement {
+      const group = document.createElement(HF_COLOR_GROUP_TAG);
+      group.id = id;
+      if (exposure !== null) group.setAttribute(HF_COLOR_GRADING_ATTR, grade(exposure));
+      document.body.appendChild(group);
+      return group;
+    }
+
+    function addMember(id: string, groupId: string): HTMLVideoElement {
+      const video = makeDrawableVideo();
+      video.id = id;
+      video.removeAttribute(HF_COLOR_GRADING_ATTR);
+      video.setAttribute(HF_COLOR_GROUP_ATTR, groupId);
+      document.body.appendChild(video);
+      return video;
+    }
+
+    const exposureDraws = (exposure: number): number =>
+      (lastUniform1f?.mock.calls ?? []).filter(
+        ([name, value]) => name === "u_exposure" && value === exposure,
+      ).length;
+
+    it("grades a member through its group element", () => {
+      addGroup("tamer", 0.4);
+      const member = addMember("clip-1", "tamer");
+
+      runtime = createColorGradingRuntime();
+
+      expect(runtime.isGraded(member)).toBe(true);
+      expect(exposureDraws(0.4)).toBe(1);
+    });
+
+    it("re-grades every member when the group's grading changes", async () => {
+      const group = addGroup("tamer", 0.4);
+      const members = ["clip-1", "clip-2", "clip-3"].map((id) => addMember(id, "tamer"));
+      runtime = createColorGradingRuntime();
+      lastUniform1f?.mockClear();
+
+      group.setAttribute(HF_COLOR_GRADING_ATTR, grade(-0.3));
+      await Promise.resolve();
+
+      expect(members.every((member) => runtime!.isGraded(member))).toBe(true);
+      expect(exposureDraws(-0.3)).toBe(members.length);
+      expect(exposureDraws(0.4)).toBe(0);
+    });
+
+    it("draws only the members on screen, and grades a hidden one when it shows", async () => {
+      const group = addGroup("tamer", 0.4);
+      const shown = addMember("clip-1", "tamer");
+      const hidden = addMember("clip-2", "tamer");
+      hidden.style.display = "none";
+      runtime = createColorGradingRuntime();
+      lastUniform1f?.mockClear();
+
+      group.setAttribute(HF_COLOR_GRADING_ATTR, grade(-0.3));
+      await Promise.resolve();
+
+      expect(runtime.isGraded(shown)).toBe(true);
+      expect(runtime.isGraded(hidden)).toBe(false);
+      expect(exposureDraws(-0.3)).toBe(1);
+
+      hidden.style.display = "block";
+      expect(runtime.setSourceVisibility(hidden, true)).toBe(true);
+      expect(runtime.isGraded(hidden)).toBe(true);
+      expect(exposureDraws(-0.3)).toBe(2);
+    });
+
+    it("moves a member to the lane its data-color-group names", async () => {
+      addGroup("tamer", 0.4);
+      addGroup("guest", -0.3);
+      const member = addMember("clip-1", "tamer");
+      runtime = createColorGradingRuntime();
+      lastUniform1f?.mockClear();
+
+      member.setAttribute(HF_COLOR_GROUP_ATTR, "guest");
+      await Promise.resolve();
+      expect(runtime.isGraded(member)).toBe(true);
+      expect(exposureDraws(-0.3)).toBe(1);
+
+      member.setAttribute(HF_COLOR_GROUP_ATTR, "");
+      await Promise.resolve();
+      expect(runtime.isGraded(member)).toBe(false);
+    });
+
+    it("ungrades its members when its grading or the element goes", async () => {
+      const group = addGroup("tamer", 0.4);
+      const members = ["clip-1", "clip-2"].map((id) => addMember(id, "tamer"));
+      runtime = createColorGradingRuntime();
+
+      group.removeAttribute(HF_COLOR_GRADING_ATTR);
+      await Promise.resolve();
+      expect(members.some((member) => runtime!.isGraded(member))).toBe(false);
+
+      group.setAttribute(HF_COLOR_GRADING_ATTR, grade(0.4));
+      await Promise.resolve();
+      expect(members.every((member) => runtime!.isGraded(member))).toBe(true);
+
+      group.remove();
+      await Promise.resolve();
+      expect(members.some((member) => runtime!.isGraded(member))).toBe(false);
+    });
+
+    it("lets a member's own grading override its group's", async () => {
+      const group = addGroup("tamer", 0.4);
+      const member = addMember("clip-1", "tamer");
+      member.setAttribute(HF_COLOR_GRADING_ATTR, grade(-0.2));
+      runtime = createColorGradingRuntime();
+
+      expect(exposureDraws(-0.2)).toBe(1);
+      expect(exposureDraws(0.4)).toBe(0);
+
+      group.setAttribute(HF_COLOR_GRADING_ATTR, grade(0.9));
+      await Promise.resolve();
+      expect(exposureDraws(0.9)).toBe(0);
+      expect(runtime.isGraded(member)).toBe(true);
+    });
   });
 });
 

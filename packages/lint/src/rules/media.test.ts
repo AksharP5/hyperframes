@@ -245,6 +245,21 @@ describe("media rules", () => {
     expect(result.findings.filter((f) => f.code.startsWith("color_grading_"))).toEqual([]);
   });
 
+  it("accepts a grade group's grading and still validates it", async () => {
+    const lane = (grading: string) => `
+<html><body>
+  <div id="root" data-composition-id="c1" data-width="1920" data-height="1080">
+    <hf-color-group id="tamer" data-label="Tamer" data-color-grading='${grading}'></hf-color-group>
+    <video id="v1" data-color-group="tamer" data-start="0" data-duration="5" src="a.mp4" muted></video>
+  </div>
+  <script>window.__timelines = {};</script>
+</body></html>`;
+    const valid = await lintHyperframeHtml(lane('{"preset":"skin-soft"}'));
+    expect(valid.findings.filter((f) => f.code.startsWith("color_grading_"))).toEqual([]);
+    const broken = await lintHyperframeHtml(lane('{"preset":'));
+    expect(broken.findings.map((f) => f.code)).toContain("color_grading_invalid_json");
+  });
+
   it("reports warning for media with preload=none", async () => {
     const html = `
 <html><body>

@@ -594,9 +594,10 @@ Source: `packages/lint/src/rules/media.ts`.
 
 ### `color_grading_non_media`
 
-**Error.** `data-color-grading` is set on an element other than `<video>`, `<img>` or `<canvas>`, such as a
-wrapper or an element with a CSS background. The shader runtime only grades real `<video>`, `<img>` and
-`<canvas>` elements, so the attribute has no effect.
+**Error.** `data-color-grading` is set on an element other than `<video>`, `<img>`, `<canvas>` or
+`<hf-color-group>`, such as a wrapper or an element with a CSS background. The shader runtime only grades
+real `<video>`, `<img>` and `<canvas>` elements, plus the members of a
+[grade group](/reference/color-grading#grade-a-whole-lane), so the attribute has no effect.
 
 **Fix:** Move the attribute to the `<video>`, `<img>` or `<canvas>` element itself.
 

@@ -180,6 +180,7 @@ import {
   isMemberGroupHidden,
   readMasterFxChain,
 } from "../audioGroups";
+import { ensureColorGroupInertStyle } from "../colorGroups";
 import { clampNativeMediaVolume } from "../audioGain";
 import { quantizeTimeToFrame } from "../inline-scripts/parityContract";
 import { createManualEditGestureWatch } from "./manualEditGestureWatch";
@@ -545,6 +546,7 @@ export function initSandboxRuntimeModular(): void {
   // ensureAudioGroupInertStyle. Injected here, before timelines bind, so no
   // captured frame ever sees the group as a layout item.
   ensureAudioGroupInertStyle(document);
+  ensureColorGroupInertStyle(document);
   const exportRenderFps = resolveExportRenderFps();
   state.canonicalFps = exportRenderFps.fps ?? compositionFps() ?? state.canonicalFps;
   setRuntimeProtocolFps(state.canonicalFps);

@@ -13,6 +13,7 @@ import {
 } from "../utils";
 import {
   COLOR_GRADING_SOURCE_TAGS,
+  COLOR_GROUP_TAG,
   validateColorGradingContract,
 } from "@hyperframes/parsers/color-grading-contract";
 import { extractMediaSrcMutations } from "@hyperframes/parsers/composition";
@@ -558,7 +559,10 @@ export const mediaRules: Array<(ctx: LintContext) => HyperframeLintFinding[]> = 
           snippet: truncateSnippet(tag.raw),
         });
       };
-      if (!(COLOR_GRADING_SOURCE_TAGS as readonly string[]).includes(tag.name)) {
+      if (
+        tag.name !== COLOR_GROUP_TAG &&
+        !(COLOR_GRADING_SOURCE_TAGS as readonly string[]).includes(tag.name)
+      ) {
         report(
           "color_grading_non_media",
           `data-color-grading on <${tag.name}> has no effect. The shader runtime only grades real <video>, <img> and <canvas> elements.`,

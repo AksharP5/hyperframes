@@ -263,6 +263,14 @@ export {
   type ResolvedHfColorGrading,
 } from "./colorGrading";
 export {
+  colorGroupOf,
+  effectiveColorGrading,
+  ensureColorGroupInertStyle,
+  HF_COLOR_GROUP_ATTR,
+  HF_COLOR_GROUP_TAG,
+  resolveColorGroupElement,
+} from "./colorGroups";
+export {
   parseCubeLut,
   CubeLutParseError,
   type CubeLut3D,
