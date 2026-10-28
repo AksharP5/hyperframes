@@ -293,8 +293,8 @@ function videoEncoderOptions(input: EncodeStageInput, engineCfg: Pick<EngineConf
 }
 
 /**
- * Software libx264 from JPEG only: the streaming encoder then runs the disk encoder's
- * arguments (same bytes). Needs a core the capture workers leave free.
+ * h264 from JPEG only, software or GPU: the streaming encoder then runs the disk encoder's
+ * arguments. Needs a core the capture workers leave free.
  */
 export function canEncodeWhileCapturing(
   input: EncodeStageInput,
@@ -309,7 +309,6 @@ export function canEncodeWhileCapturing(
     !input.enableChunkedEncode &&
     input.preset.codec === "h264" &&
     !input.preset.hdr &&
-    input.job.config.useGpu !== true &&
     input.captureImageFormat === "jpeg"
   );
 }

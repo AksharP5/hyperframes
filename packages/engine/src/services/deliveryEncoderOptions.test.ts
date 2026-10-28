@@ -31,6 +31,18 @@ describe("keyframeIntervalToGopSize", () => {
   });
 });
 
+describe("GPU encoder args", () => {
+  it("are the same in the disk and streaming builders, from the codec on", () => {
+    const fromCodec = (args: string[]) => args.slice(args.indexOf("-c:v"));
+    const opts = { ...base, useGpu: true, quality: 18 };
+    for (const gpu of ["videotoolbox", "nvenc", "qsv", "vaapi", "amf"] as const) {
+      expect(fromCodec(buildStreamingArgs(opts, "/tmp/o.mp4", gpu))).toEqual(
+        fromCodec(buildEncoderArgs(opts, [], "/tmp/o.mp4", gpu)),
+      );
+    }
+  });
+});
+
 describe("rate cap args", () => {
   it("adds nothing without maxBitrate", () => {
     expect(buildEncoderArgs(base, [], "/tmp/o.mp4")).not.toContain("-maxrate");
