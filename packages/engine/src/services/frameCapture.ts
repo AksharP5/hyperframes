@@ -1309,6 +1309,7 @@ async function cssEffectRiskFrames(
       fps,
       totalFrames,
       totalFrames * MAX_RISK_FRAME_FRACTION,
+      { onProgress: session.options.onEffectScanProgress },
     );
     return live && withFramesAfterCallback(live, scan.callbackFrom, fps, totalFrames);
   } catch (error) {

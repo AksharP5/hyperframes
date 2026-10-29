@@ -3683,6 +3683,15 @@ async function executeRenderPipeline(input: {
       // sample frame indices from this so they land inside the drained range.
       compositionDurationSeconds: job.duration,
       deFrameFallback: true,
+      // A line per scanned chunk, so a long effect scan reads as preparing, not as a stall.
+      onEffectScanProgress: (scanned, total) =>
+        updateJobStatus(
+          job,
+          "rendering",
+          `Checking effects, ${scanned} of ${total} frames`,
+          25,
+          onProgress,
+        ),
       requiresWebGpu: compositionRequiresWebGpu(compiled.html),
       // Live route for Chrome memory (spec §5 Phase −1). The aggregate route
       // through CapturePerfSummary only exists on success; a mid-capture
