@@ -1362,6 +1362,12 @@
     return !!ctx && ctx === preserve3dContext(b);
   }
 
+  // A covering element marked to cover text, or inside a marked wrapper that does not also hold the text.
+  function allowsOcclusionOf(hit, element) {
+    const allowed = authoredElement(hit).closest("[data-layout-allow-occlusion]");
+    return !!allowed && !allowed.contains(element);
+  }
+
   // The opaque element painted over (x, y), or null when the topmost element
   // there is related to the text, non-opaque, sharing a 3D context with it, or
   // part of a transient crossfade overlap.
@@ -1377,7 +1383,7 @@
     for (const hit of stack) {
       if (!isForeignElement(element, hit)) return null;
       // Pair-specific exemptions excuse this hit only; keep walking for deeper occluders.
-      if (hasIgnoreFlag(hit)) continue;
+      if (hasIgnoreFlag(hit) || allowsOcclusionOf(hit, element)) continue;
       if (sharedPreserve3d(element, hit)) continue;
       if (isCrossSceneTransitionOverlap(element, hit)) continue;
       const matte = seenMattes && matteFrameFor(hit);
