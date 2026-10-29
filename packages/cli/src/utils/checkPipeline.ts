@@ -4,6 +4,7 @@ import {
   CheckDeadline,
   CheckDeadlineError,
   CheckStoppedError,
+  idleWindow,
   type CheckPhase,
 } from "./checkDeadline.js";
 import {
@@ -1691,7 +1692,7 @@ export async function runCheckPipeline(
           ]
         : [];
 
-    const deadline = new CheckDeadline();
+    const deadline = new CheckDeadline(idleWindow(options.timeout));
     const forgetStop = onStopSignal(deadline.stop);
     let outcome: { kind: "report"; report: CheckReport } | { kind: "failed"; error: unknown };
     try {

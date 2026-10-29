@@ -2267,6 +2267,42 @@ describe("check pipeline", () => {
     }
   });
 
+  it("a check given a long --timeout is not ended as idle after 120 s of waiting for its page", async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted!: AbortSignal;
+      const driver = fakeDriver({
+        collectOverlapGrid: vi.fn(
+          () =>
+            new Promise<never>((_, reject) =>
+              aborted.addEventListener("abort", () => reject(aborted.reason)),
+            ),
+        ),
+      });
+      const { deps } = dependencies(driver);
+      deps.runBrowserCheck = async (_project, options, motion, deadline) => {
+        aborted = deadline!.signal;
+        deadline!.start();
+        return runAuditGrid(driver, options, motion, undefined, deadline!.enter);
+      };
+      const pending = runCheckPipeline(
+        PROJECT,
+        { ...DEFAULT_CHECK_OPTIONS, timeout: 400_000 },
+        deps,
+      );
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(aborted.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(110_000);
+      const report = await pending;
+      const failure = report.runtime.findings.find(
+        (finding) => finding.code === "check_runtime_failure",
+      );
+      expect(failure?.message).toContain("no progress for 410 s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a deadline keeps the layout findings the finished samples already made", async () => {
     vi.useFakeTimers();
     try {
