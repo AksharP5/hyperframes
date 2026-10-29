@@ -98,7 +98,7 @@ import {
   markCommandDelivered,
 } from "./utils/render-success-state.js";
 import { resolveCommandUsage, type ResolvedCommandUsage } from "./utils/commandUsageResolution.js";
-import { closestMatch } from "./utils/didYouMean.js";
+import { closestMatch, synonymMatch } from "./utils/didYouMean.js";
 import { jsonErrorBody, watchOutput, writeJsonFailure } from "./utils/jsonError.js";
 import { isDevMode } from "./utils/env.js";
 import {
@@ -542,7 +542,10 @@ async function unknownCommandError(requested: ResolvedCommandUsage): Promise<Cli
   const group = ["hyperframes", ...requested.path].join(" ");
   const declared = requested.command.subCommands;
   const subCommands = typeof declared === "function" ? await declared() : await declared;
-  const match = closestMatch(word, Object.keys(subCommands ?? {}));
+  const names = Object.keys(subCommands ?? {});
+  const match =
+    (requested.path.length === 0 ? synonymMatch(word, names) : undefined) ??
+    closestMatch(word, names);
   console.error(`Unknown command: ${word}`);
   if (match) console.error(`Did you mean '${group} ${match}'?`);
   console.error("");

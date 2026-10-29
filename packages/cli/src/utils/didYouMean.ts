@@ -28,3 +28,17 @@ export function closestMatch(input: string, candidates: Iterable<string>): strin
   }
   return best;
 }
+
+const COMMAND_SYNONYMS: Record<string, string> = {
+  search: "catalog",
+  find: "catalog",
+  browse: "catalog",
+  registry: "catalog",
+  list: "catalog",
+  install: "add",
+};
+
+export function synonymMatch(input: string, candidates: Iterable<string>): string | undefined {
+  const target = COMMAND_SYNONYMS[input];
+  return target !== undefined && [...candidates].includes(target) ? target : undefined;
+}
