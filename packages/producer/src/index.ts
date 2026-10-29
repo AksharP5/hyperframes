@@ -24,6 +24,7 @@ export {
   type RenderPerfSummary,
   type ProgressCallback,
 } from "./services/renderOrchestrator.js";
+export { extractSafeRenderErrorCode } from "./services/safeRenderErrorCode.js";
 export {
   RENDER_JOB_DIR,
   createOwnedRenderDir,

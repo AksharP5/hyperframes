@@ -1,4 +1,8 @@
-import { RenderQualityError, type RenderJob } from "@hyperframes/producer";
+import {
+  RenderQualityError,
+  extractSafeRenderErrorCode,
+  type RenderJob,
+} from "@hyperframes/producer";
 import { CaptureFailure, audioFailureDiagnostics } from "@hyperframes/engine";
 
 const FILE_ERRORS = [
@@ -14,7 +18,6 @@ const FILE_ERRORS = [
   "EXDEV",
 ];
 const FILE_ERROR = new RegExp(`\\b(${FILE_ERRORS.join("|")})\\b`);
-const CLI_CODE = /\[(?!(?:DEBUG|INFO|WARN|ERROR)\b)([A-Z][A-Z0-9_]{2,63})[\];]/;
 
 function fileErrorOf(error: unknown, message: string): string | undefined {
   let seen: unknown = error;
@@ -24,6 +27,16 @@ function fileErrorOf(error: unknown, message: string): string | undefined {
     seen = seen.cause;
   }
   return FILE_ERROR.exec(message)?.[1];
+}
+
+function producerCodeOf(error: unknown): string | undefined {
+  let seen: unknown = error;
+  for (let depth = 0; depth < 5 && seen instanceof Error; depth++) {
+    const code = extractSafeRenderErrorCode(seen);
+    if (code) return code;
+    seen = seen.cause;
+  }
+  return undefined;
 }
 
 function captureCodeOf(error: unknown, message: string): string | undefined {
@@ -38,7 +51,7 @@ function renderFailureCode(error: unknown): string {
   if (error instanceof RenderQualityError && error.warnings[0])
     return error.warnings[0].code.toUpperCase();
   return (
-    CLI_CODE.exec(message)?.[1] ??
+    producerCodeOf(error) ??
     fileErrorOf(error, message) ??
     captureCodeOf(error, message) ??
     "RENDER_FAILED"

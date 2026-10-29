@@ -108,9 +108,12 @@ describe("render diagnostic wire", () => {
       "AUDIO_PROCESSING_FAILED",
     ],
     [
-      new Error(`Video extraction failed [VIDEO_SOURCE_UNRENDERABLE; source_missing=1] ${PRIVATE}`),
+      Object.assign(new Error(`Video extraction failed ${PRIVATE}`), {
+        code: "VIDEO_SOURCE_UNRENDERABLE",
+      }),
       "VIDEO_SOURCE_UNRENDERABLE",
     ],
+    [new Error(`[HDR] No Chrome binary found [ACME_LAUNCH] ${PRIVATE}`), "RENDER_FAILED"],
     [
       Object.assign(new Error(`ENOENT: no such file, open '${PRIVATE}'`), { code: "ENOENT" }),
       "ENOENT",
