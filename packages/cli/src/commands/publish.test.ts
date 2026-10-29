@@ -106,7 +106,7 @@ describe("publish default-entry preflight", () => {
     const output = await runEntryMismatch("compositions/brand/index.html");
 
     expect(output).toContain("blank_root_with_standalone_composition");
-    expect(output).not.toContain("run with --lint-verbose for full output");
+    expect(output).not.toContain("for full output");
   });
 });
 
