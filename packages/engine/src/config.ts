@@ -108,6 +108,8 @@ export interface EngineConfig {
    * the runtime probe fires). Not intended to be set by callers.
    */
   forceScreenshotExplicitlyOptedOut?: boolean;
+  /** How long a BeginFrame capture may take to draw its first frame before the render retries by screenshot. */
+  beginFrameFirstFrameDeadlineMs?: number;
   /**
    * Low-memory render profile. When `true`, the orchestrator collapses the
    * pipeline to its cheapest shape on memory-constrained hosts: it skips the
@@ -340,6 +342,7 @@ const OPTIONAL_ENGINE_CONFIG_FIELDS = [
   "expectedChromiumMajor",
   "pageSideCompositingAutoDisabled",
   "forceScreenshotExplicitlyOptedOut",
+  "beginFrameFirstFrameDeadlineMs",
   "streamingEncodeAutoDisabledOnWin32Compound",
   "runtimeManifestPath",
   "extractCacheDir",
@@ -449,6 +452,9 @@ function validateEngineConfigScalars(config: Record<string, unknown>): void {
   assertEngineConfigNumber(config, "jpegQuality", 0);
   if (typeof config.jpegQuality === "number" && config.jpegQuality > 100) {
     throw new Error("Engine config jpegQuality must be <= 100");
+  }
+  if (config.beginFrameFirstFrameDeadlineMs !== undefined) {
+    assertEngineConfigNumber(config, "beginFrameFirstFrameDeadlineMs", 1, true);
   }
 }
 

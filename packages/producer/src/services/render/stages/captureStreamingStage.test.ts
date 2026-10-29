@@ -14,6 +14,7 @@ import type { CaptureHdrStageInput } from "./captureHdrStage.js";
 type MinimalEngineConfig = {
   forceScreenshot: boolean;
   ffmpegStreamingTimeout: number;
+  beginFrameFirstFrameDeadlineMs?: number;
   lowMemoryMode?: boolean;
 };
 
@@ -51,7 +52,7 @@ let injectedWorkerFailure: Error | null = null;
 const reorderAbortCalls: unknown[] = [];
 let hangSequentialUntilStall = false;
 let sessionWorkerEncodeEnabled = false;
-let captureSessionMode: "drawelement" | "screenshot" = "drawelement";
+let captureSessionMode: "drawelement" | "screenshot" | "beginframe" = "drawelement";
 // Frames the drawElement session hands to a screenshot session, and the batches it was asked for.
 let sessionRiskFrames: Set<number> | undefined;
 let batchesRequested: number[][] | null = null;
@@ -833,6 +834,69 @@ describe("runCaptureStreamingStage", () => {
 
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).toContain("stalled");
+  });
+
+  describe("a BeginFrame capture that never draws its first frame", () => {
+    const sequential = async (mode: "beginframe" | "screenshot", stallMs: string) => {
+      hangSequentialUntilStall = true;
+      captureSessionMode = mode;
+      const prev = process.env.HF_DE_STALL_MS;
+      process.env.HF_DE_STALL_MS = stallMs;
+      const { runCaptureStreamingStage } = await import("./captureStreamingStage.js");
+      const cfg = {
+        forceScreenshot: false,
+        ffmpegStreamingTimeout: 3_600_000,
+        beginFrameFirstFrameDeadlineMs: 50,
+      };
+      try {
+        return await runCaptureStreamingStage({ ...createInput(cfg), totalFrames: 10 }).catch(
+          (error: unknown) => error,
+        );
+      } finally {
+        hangSequentialUntilStall = false;
+        captureSessionMode = "drawelement";
+        if (prev === undefined) delete process.env.HF_DE_STALL_MS;
+        else process.env.HF_DE_STALL_MS = prev;
+      }
+    };
+
+    it("gives up on frame 0 at the first-frame deadline, not the ten-minute stall budget", async () => {
+      const caught = await sequential("beginframe", "600000");
+      expect((caught as Error).message).toContain(
+        "BeginFrame capture stalled: no frame progress for 50ms",
+      );
+    });
+
+    it("leaves a screenshot capture on the stall budget", async () => {
+      const caught = await sequential("screenshot", "200");
+      expect((caught as Error).message).toContain("no frame progress for 200ms");
+    });
+
+    it("gives up on a parallel BeginFrame capture at the first-frame deadline", async () => {
+      hangParallelUntilAbort = true;
+      const prev = process.env.HF_DE_STALL_MS;
+      process.env.HF_DE_STALL_MS = "600000";
+      const { runCaptureStreamingStage } = await import("./captureStreamingStage.js");
+      const baseInput = createInput({
+        forceScreenshot: false,
+        ffmpegStreamingTimeout: 3_600_000,
+        beginFrameFirstFrameDeadlineMs: 50,
+      });
+      try {
+        const caught = await runCaptureStreamingStage({
+          ...baseInput,
+          totalFrames: 100,
+          plan: { ...baseInput.plan, workerCount: 2, forceParallelStream: true },
+          parallelCaptureLabel: "BeginFrame",
+        }).catch((error: unknown) => error);
+        expect((caught as Error).name).toBe("ParallelCaptureStallError");
+        expect((caught as Error).message).toContain("50ms");
+      } finally {
+        hangParallelUntilAbort = false;
+        if (prev === undefined) delete process.env.HF_DE_STALL_MS;
+        else process.env.HF_DE_STALL_MS = prev;
+      }
+    });
   });
 
   it("trips the stall watchdog on the single-worker plain capture loop when capture makes no progress", async () => {

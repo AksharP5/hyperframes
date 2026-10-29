@@ -846,6 +846,7 @@ describe("renderLocal browser GPU config", () => {
     expect(producerState.resolveConfigCalls).toContainEqual({
       browserGpuMode: "auto",
       forceScreenshot: false,
+      beginFrameFirstFrameDeadlineMs: 20_000,
     });
     expect(producerState.createdJobs[0]?.producerConfig).toMatchObject({
       browserGpuMode: "auto",
@@ -888,6 +889,9 @@ describe("renderLocal browser GPU config", () => {
 
     expect(producerState.resolveConfigCalls).toContainEqual({ browserGpuMode: "auto" });
     expect(producerState.resolveConfigCalls[0]).not.toHaveProperty("forceScreenshot");
+    expect(producerState.resolveConfigCalls[0]).not.toHaveProperty(
+      "beginFrameFirstFrameDeadlineMs",
+    );
   });
 
   it("passes an explicit hardware override for default local browser GPU", async () => {

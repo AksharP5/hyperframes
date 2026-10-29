@@ -661,6 +661,7 @@ export async function checkRenderResolutionPreflight(
 }
 
 const DOCKER_IMAGE_PREFIX = "hyperframes-renderer";
+const BEGIN_FRAME_FIRST_FRAME_DEADLINE_MS = 20_000;
 
 function dockerImageTag(version: string): string {
   return `${DOCKER_IMAGE_PREFIX}:${version}`;
@@ -1111,12 +1112,15 @@ async function executeLocalRender(
 
   const engineConfig = producer.resolveConfig({
     browserGpuMode: options.browserGpuMode ?? "software",
-    // Local auto opts out of the software-GPU screenshot clamp. Docker and
-    // --no-browser-gpu request software; --resolution supersamples via screenshot.
+    // Local auto opts out of the software-GPU screenshot clamp, and a BeginFrame that draws no first frame
+    // retries by screenshot. Docker and --no-browser-gpu request software; --resolution supersamples via screenshot.
     ...(options.browserGpuMode === "auto" &&
     options.outputResolution == null &&
     process.env.PRODUCER_FORCE_SCREENSHOT !== "true"
-      ? { forceScreenshot: false }
+      ? {
+          forceScreenshot: false,
+          beginFrameFirstFrameDeadlineMs: BEGIN_FRAME_FIRST_FRAME_DEADLINE_MS,
+        }
       : {}),
     ...(options.pageNavigationTimeoutMs != null
       ? { pageNavigationTimeout: options.pageNavigationTimeoutMs }
@@ -1756,6 +1760,26 @@ export function normalizeStageCode(stage: string): string {
   return slug || "unknown";
 }
 
+/**
+ * A Chrome launch failure is an environment problem, not a composition bug: the exact remediation for a Linux/WSL
+ * sandbox or shared-library failure, a macOS <13 dyld crash, or a Windows STATUS_STACK_BUFFER_OVERRUN, in that order.
+ */
+export function chromeLaunchFailure(
+  message: string,
+): { title: string; remediation: string } | null {
+  const detectors = [
+    sandboxDeniedRemediation,
+    chromeLaunchRemediation,
+    macosOldChromeCrashRemediation,
+  ];
+  const remediation = detectors.map((detect) => detect(message)).find(Boolean);
+  if (remediation) return { title: "Render failed — Chrome could not launch", remediation };
+  const windows = windowsChromeCrashRemediation(message);
+  return windows
+    ? { title: "Render failed — chrome-headless-shell crashed at launch", remediation: windows }
+    : null;
+}
+
 function handleRenderError(
   error: unknown,
   options: RenderOptions,
@@ -1801,40 +1825,9 @@ function handleRenderError(
   if (options.throwOnError) {
     throw new Error(message);
   }
-  // A `Failed to launch the browser process` / `libnss3.so cannot open ...`
-  // failure on Linux/WSL is an environment problem, not a composition bug.
-  // Replace the generic "Try --docker" hint with the exact per-distro
-  // remediation and a pointer at `doctor`.
-  const sandboxRemediation = sandboxDeniedRemediation(message);
-  if (sandboxRemediation) {
-    errorBox("Render failed — Chrome could not launch", message, sandboxRemediation);
-    failCommand();
-  }
-  const remediation = chromeLaunchRemediation(message);
-  if (remediation) {
-    errorBox("Render failed — Chrome could not launch", message, remediation);
-    failCommand();
-  }
-  // macOS <13 dyld Symbol-not-found on the pinned chrome-headless-shell
-  // build. Different remediation shape (older shell + env-var override)
-  // than the Linux shared-lib install, so it lives in its own detector.
-  const macosRemediation = macosOldChromeCrashRemediation(message);
-  if (macosRemediation) {
-    errorBox("Render failed — Chrome could not launch", message, macosRemediation);
-    failCommand();
-  }
-  // Windows chrome-headless-shell can crash at launch with
-  // STATUS_STACK_BUFFER_OVERRUN (exit 0xC0000409 / 3221225595). Same
-  // HYPERFRAMES_BROWSER_PATH remediation as the download-time hint (#2443)
-  // and the closed-with-invite arm64 macOS sibling (#2078). Field feedback
-  // ts=1784116246.
-  const windowsRemediation = windowsChromeCrashRemediation(message);
-  if (windowsRemediation) {
-    errorBox(
-      "Render failed — chrome-headless-shell crashed at launch",
-      message,
-      windowsRemediation,
-    );
+  const launch = chromeLaunchFailure(message);
+  if (launch) {
+    errorBox(launch.title, message, launch.remediation);
     failCommand();
   }
   errorBox("Render failed", message, hint);

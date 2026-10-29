@@ -151,6 +151,19 @@ export function resolveCaptureStallTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CAPTURE_STALL_MS;
 }
 
+/** The no-progress budget; a BeginFrame capture that has drawn nothing yet gets the config's first-frame deadline. */
+function stallBudgetMs(
+  stallTimeoutMs: number,
+  framesDone: number,
+  beginFrame: boolean,
+  cfg: Pick<EngineConfig, "beginFrameFirstFrameDeadlineMs">,
+): number {
+  const deadline = cfg.beginFrameFirstFrameDeadlineMs;
+  return beginFrame && framesDone === 0 && deadline
+    ? Math.min(stallTimeoutMs, deadline)
+    : stallTimeoutMs;
+}
+
 /**
  * Race a single sequential capture call against a stall deadline. Unlike the
  * parallel path (which threads an AbortSignal into executeParallelCapture),
@@ -815,14 +828,21 @@ export async function runCaptureStreamingStage(
             .map(([workerId, detail]) => `worker=${workerId} ${detail}`)
             .join("; ");
         let stalled = false;
+        const budget = () =>
+          stallBudgetMs(
+            stallTimeoutMs,
+            resumeFrom + lastCapturedFrames,
+            captureLabel === "BeginFrame",
+            cfg,
+          );
         const stallTimer = setInterval(
           () => {
-            if (!watchdogArmed || Date.now() - lastProgressAt <= stallTimeoutMs) return;
+            if (!watchdogArmed || Date.now() - lastProgressAt <= budget()) return;
             stalled = true;
             const stallErr = new ParallelCaptureStallError({
               variant: "drain",
               captureLabel,
-              stallTimeoutMs,
+              stallTimeoutMs: budget(),
               lastCapturedFrames: resumeFrom + lastCapturedFrames,
               totalFrames,
               phaseSummary: phaseSummary(),
@@ -830,7 +850,7 @@ export async function runCaptureStreamingStage(
             parallelReorder.abort(stallErr);
             stallController.abort();
           },
-          Math.min(stallTimeoutMs, DE_STALL_POLL_MS),
+          Math.min(budget(), DE_STALL_POLL_MS),
         );
 
         try {
@@ -926,7 +946,7 @@ export async function runCaptureStreamingStage(
             throw new ParallelCaptureStallError({
               variant: "pool",
               captureLabel,
-              stallTimeoutMs,
+              stallTimeoutMs: budget(),
               lastCapturedFrames: resumeFrom + lastCapturedFrames,
               totalFrames,
               phaseSummary: phaseSummary(),
@@ -1044,10 +1064,16 @@ export async function runCaptureStreamingStage(
           for (let i = 0; i < totalFrames; i++) {
             assertNotAborted();
             const time = (i * job.config.fps.den) / job.config.fps.num;
+            const budget = stallBudgetMs(
+              stallTimeoutMs,
+              i,
+              session.captureMode === "beginframe",
+              cfg,
+            );
             const { buffer } = await raceAgainstStall(
               captureFrameToBuffer(session, i, time),
-              stallTimeoutMs - (Date.now() - lastProgressAt),
-              { session, frameIndex: i, totalFrames, stallTimeoutMs },
+              budget - (Date.now() - lastProgressAt),
+              { session, frameIndex: i, totalFrames, stallTimeoutMs: budget },
               abortSignal,
             );
             await reorderBuffer.waitForFrame(i);
