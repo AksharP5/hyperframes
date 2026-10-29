@@ -18,6 +18,7 @@ const snapshotState = vi.hoisted(() => ({
   closeServer: vi.fn(async () => undefined),
   ffmpegTimesOut: false,
   ffmpegFails: false,
+  ffmpegKilled: false,
   noFfmpeg: false,
 }));
 
@@ -39,13 +40,15 @@ vi.mock("../capture/captureCompositionFrame.js", async (importOriginal) => {
     runFfmpegOnce: (...args: Parameters<typeof actual.runFfmpegOnce>) =>
       snapshotState.ffmpegTimesOut
         ? Promise.resolve({ code: null, timedOut: true, stderr: "" })
-        : snapshotState.ffmpegFails
-          ? Promise.resolve({
-              code: 1,
-              timedOut: false,
-              stderr: "\nError while decoding stream #0:0\n",
-            })
-          : actual.runFfmpegOnce(...args),
+        : snapshotState.ffmpegKilled
+          ? Promise.resolve({ code: 255, timedOut: false, stderr: "" })
+          : snapshotState.ffmpegFails
+            ? Promise.resolve({
+                code: 1,
+                timedOut: false,
+                stderr: "\nError while decoding stream #0:0\n",
+              })
+            : actual.runFfmpegOnce(...args),
   };
 });
 
@@ -756,6 +759,24 @@ describe("extractVideoFrameToBuffer", () => {
     ]);
     return clip;
   };
+
+  it.skipIf(noProbe)(
+    "says FFmpeg was stopped, not that a frame is bad, when it exits 255 with no output",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "hf-snapshot-killed-"));
+      snapshotState.ffmpegKilled = true;
+      try {
+        const warnings: string[] = [];
+        expect(await extractVideoFrameOrWarn(warnings, oneSecondClip(dir), 0.5)).toBeNull();
+        expect(warnings).toEqual([
+          expect.stringContaining("FFmpeg was stopped before it finished"),
+        ]);
+      } finally {
+        snapshotState.ffmpegKilled = false;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.skipIf(noProbe)(
     "records the clip, time and FFmpeg's reason when the extract fails",

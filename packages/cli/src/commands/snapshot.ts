@@ -379,6 +379,12 @@ export function containingSourceFrameIndex(timestamps: readonly number[], time: 
 class FrameExtractError extends Error {}
 
 const lastLine = (text: string) => text.trim().split("\n").at(-1) ?? "";
+
+const ffmpegFailure = (result: { stderr: string; code: number | null }) =>
+  lastLine(result.stderr) ||
+  (result.code === 255
+    ? "FFmpeg was stopped before it finished (exit code 255 with no error output means it was killed, such as by a time limit)"
+    : `exit code ${result.code}`);
 const processStderr = (error: unknown) =>
   error instanceof Error && "stderr" in error && typeof error.stderr === "string"
     ? error.stderr
@@ -639,9 +645,7 @@ export async function extractVideoFrameToBuffer(
       );
     }
     if (result.code !== 0 || !existsSync(outPath)) {
-      throw new FrameExtractError(
-        `FFmpeg could not extract ${frameOf}: ${lastLine(result.stderr) || `exit code ${result.code}`}`,
-      );
+      throw new FrameExtractError(`FFmpeg could not extract ${frameOf}: ${ffmpegFailure(result)}`);
     }
     return readFileSync(outPath);
   } finally {
@@ -702,9 +706,7 @@ export async function decodeFramesInOnePass(
     }
     const written = (n: number) => join(tmp, `${n}.png`);
     if (result.code !== 0 || !byTime.every((_, i) => existsSync(written(i + 1)))) {
-      throw new FrameExtractError(
-        `FFmpeg could not extract ${what}: ${lastLine(result.stderr) || `exit code ${result.code}`}`,
-      );
+      throw new FrameExtractError(`FFmpeg could not extract ${what}: ${ffmpegFailure(result)}`);
     }
     const buffers: Buffer[] = [];
     for (const [i, [, indexes]] of byTime.entries()) {
