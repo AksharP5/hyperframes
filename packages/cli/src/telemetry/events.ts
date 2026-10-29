@@ -674,6 +674,7 @@ export function trackRenderError(
     errorName?: string;
     /** failedStage normalized to a stable snake_case code. */
     failedStageCode?: string;
+    missingPathKind?: string;
     errorMessage?: string;
     elapsedMs?: number;
     peakMemoryMb?: number;
@@ -702,6 +703,7 @@ export function trackRenderError(
       failed_stage: props.failedStage,
       error_name: props.errorName,
       failed_stage_code: props.failedStageCode,
+      missing_path_kind: props.missingPathKind,
       error_message: props.errorMessage ? redactTelemetryMessage(props.errorMessage) : undefined,
       elapsed_ms: props.elapsedMs,
       ...renderOutputShapeEventProperties(props),
