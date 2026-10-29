@@ -65,22 +65,12 @@ if (rootVersionRequested) {
   process.exit(0);
 }
 
-// Capture treats CWD as project data too: its early loader must use the same
-// allowlist/opt-out as output ancestors, before browser selection can observe it.
-const { applyDotEnv, CAPTURE_ENV_KEYS } = await import("./utils/dotEnv.js");
+// The working directory is project data: load only the settings a project `.env` may supply,
+// before browser selection can observe the environment.
+const { loadProjectDotEnv } = await import("./utils/dotEnv.js");
 const captureEnv = argv[commandWordIndex(argv)] === "capture";
 if (!captureEnv || process.env.HYPERFRAMES_NO_CAPTURE_DOTENV !== "1") {
-  try {
-    const { readFileSync } = await import("node:fs");
-    const envPath = resolve(process.cwd(), ".env");
-    applyDotEnv(
-      readFileSync(envPath, "utf-8"),
-      process.env,
-      captureEnv ? CAPTURE_ENV_KEYS : undefined,
-    );
-  } catch {
-    /* .env not present — fine, env vars may be set another way */
-  }
+  loadProjectDotEnv(process.cwd(), process.env, (line) => console.error(line));
 }
 
 // ── Lazy imports ────────────────────────────────────────────────────────────
