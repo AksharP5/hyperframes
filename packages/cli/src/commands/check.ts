@@ -41,6 +41,8 @@ import { resolveLocalBrowserGpuMode } from "../browser/gpuPolicy.js";
 import { preResolveHostileMediaProxies, type PreparedMediaFile } from "../utils/checkBrowser.js";
 import { parseTimeoutMs } from "../utils/timeoutArg.js";
 import { failureMessage, jsonFailure } from "../utils/jsonError.js";
+import { recordLastCheck } from "../telemetry/config.js";
+import { failureCodes } from "../utils/checkFailureCodes.js";
 
 export const examples: Example[] = [
   ["Run the full verification gate", "hyperframes check"],
@@ -287,9 +289,15 @@ export function createCheckCommand(
           await runPrepareMedia(dependencies, project, options, asJson);
           return;
         }
+        recordLastCheck({ at: new Date().toISOString(), codes: {} });
         const report = await withProjectLock(project.dir, "check", () =>
           dependencies.runPipeline(project, options),
         );
+        recordLastCheck({
+          at: new Date().toISOString(),
+          exitCode: checkExitCode(report),
+          codes: failureCodes(report),
+        });
         if (asJson) {
           console.log(JSON.stringify(dependencies.withMeta(report), null, 2));
         } else {
@@ -303,6 +311,11 @@ export function createCheckCommand(
         }
         setCommandExitCode(checkExitCode(report));
       } catch (error) {
+        recordLastCheck({
+          at: new Date().toISOString(),
+          exitCode: 1,
+          codes: { [error instanceof CliUsageError ? error.code : "runtime_error"]: 1 },
+        });
         reportCheckFailure(error, asJson, (value) => dependencies.withMeta(value));
       } finally {
         reported.done();

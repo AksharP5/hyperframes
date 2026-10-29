@@ -12,6 +12,7 @@ vi.mock("../telemetry/events.js", () => ({
 
 import { contrastRatio, parseColorRGBA } from "./contrast-bg.js";
 import { createCheckCommand, parseCheckRange } from "./check.js";
+import { readConfig } from "../telemetry/config.js";
 import { CheckDeadlineError, CheckStoppedError } from "../utils/checkDeadline.js";
 import { trackCommandFailures } from "../utils/command-failure-tracking.js";
 import type { CommandDef } from "citty";
@@ -1587,6 +1588,55 @@ describe("check pipeline", () => {
     const said = log.mock.calls.map((call) => String(call[0])).join("\n");
     expect(said).toContain("Browser validation skipped because of the lint error above");
     expect(said).not.toContain("Browser session never ran");
+  });
+
+  describe("remembers the newest check for hyperframes feedback", () => {
+    const run = (runPipeline: () => Promise<CheckReport>) =>
+      runViaCli(
+        createCheckCommand({
+          resolveProject: () => PROJECT,
+          runPipeline: vi.fn(runPipeline),
+          prepareMedia: vi.fn(async () => []),
+          withMeta: (value) => value,
+        }),
+        { rawArgs: [] },
+      );
+
+    it("keeps the error codes of a failed check", async () => {
+      const lint = lintWith(
+        "error",
+        "root_missing_composition_id",
+        "Root needs data-composition-id.",
+      );
+      const { report } = await runScenario(fakeDriver(), {}, { lint });
+      await run(async () => report);
+
+      expect(readConfig().lastCheck).toMatchObject({
+        exitCode: 1,
+        codes: { root_missing_composition_id: 1 },
+      });
+    });
+
+    it("records a check that threw as a failure, not the check before it", async () => {
+      await run(async () => (await runScenario(fakeDriver(), {}, {})).report);
+      await run(async () => {
+        throw new Error("browser died");
+      });
+
+      expect(readConfig().lastCheck).toMatchObject({ exitCode: 1, codes: { runtime_error: 1 } });
+    });
+
+    it("leaves a check that never finished as unfinished, with when it started", async () => {
+      const { report } = await runScenario(fakeDriver(), {}, {});
+      await run(async () => report);
+      let finish!: (value: CheckReport) => void;
+      const running = run(() => new Promise<CheckReport>((resolve) => (finish = resolve)));
+      await vi.waitFor(() => expect(readConfig().lastCheck?.exitCode).toBeUndefined());
+
+      expect(readConfig().lastCheck?.at).toMatch(/^\d{4}-\d\d-\d\dT/);
+      finish(report);
+      await running;
+    });
   });
 
   it("marks browserSkipped true when the linter itself crashes", async () => {
