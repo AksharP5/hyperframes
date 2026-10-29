@@ -165,6 +165,8 @@ function startCopyHeartbeat(
 } {
   const startedAt = Date.now();
   const latest = new Map<number, ProxyProgress>();
+  const total = cached.filter((isCached) => !isCached).length;
+  let finished = 0;
   const timer = setInterval(() => {
     for (const [index, { doneSeconds, totalSeconds }] of latest) {
       if (cached[index]) continue;
@@ -172,14 +174,17 @@ function startCopyHeartbeat(
         ? `${Math.min(100, Math.floor((doneSeconds / totalSeconds) * 100))}%`
         : "";
       console.error(
-        `[hyperframes] browser-playable copy of ${sources[index]!.file}: ${done || `${Math.floor(doneSeconds)}s done`} (${elapsedText(Date.now() - startedAt)} so far)`,
+        `[hyperframes] making browser-playable copies: ${finished} of ${total} done. ${sources[index]!.file}: ${done || `${Math.floor(doneSeconds)}s done`} (${elapsedText(Date.now() - startedAt)} so far)`,
       );
     }
   }, COPY_HEARTBEAT_MS);
   timer.unref();
   return {
     progress: (index, progress) => void latest.set(index, progress),
-    settled: (index) => void latest.delete(index),
+    settled: (index) => {
+      latest.delete(index);
+      if (!cached[index]) finished += 1;
+    },
     stop: () => clearInterval(timer),
   };
 }

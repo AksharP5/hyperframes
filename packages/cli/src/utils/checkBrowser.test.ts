@@ -1502,7 +1502,7 @@ describe("preResolveHostileMediaProxies", () => {
       await pending;
 
       expect(errorSpy.mock.calls.map(([line]) => line)).toContain(
-        "[hyperframes] browser-playable copy of clip.mov: 25% (10s so far)",
+        "[hyperframes] making browser-playable copies: 0 of 1 done. clip.mov: 25% (10s so far)",
       );
     } finally {
       mocks.proxyProgress.feed = undefined;
@@ -1540,8 +1540,10 @@ describe("preResolveHostileMediaProxies", () => {
       await pending;
 
       const lines = errorSpy.mock.calls.map(([line]) => String(line));
-      expect(lines).toContain("[hyperframes] browser-playable copy of b.mov: 25% (10s so far)");
-      expect(lines.some((line) => line.includes("copy of a.mov"))).toBe(false);
+      expect(lines).toContain(
+        "[hyperframes] making browser-playable copies: 1 of 2 done. b.mov: 25% (10s so far)",
+      );
+      expect(lines.some((line) => line.includes(" a.mov: "))).toBe(false);
     } finally {
       mocks.proxyProgress.feed = undefined;
       vi.useRealTimers();
