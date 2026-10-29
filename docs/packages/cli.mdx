@@ -1294,6 +1294,26 @@ last 3 s (a held end card) or time when an element marked `data-hold` is on
 screen, and it stays quiet when `sweep_static` already reports the sweep or a
 whole-composition `keepsMoving` assertion sets its own limit.
 
+#### Audio findings
+
+The `audio` section checks the clips the render mixes. It runs even when lint
+stops the browser pass, and remote sources are not fetched.
+
+| Code                           | Severity | Triggers when                                                                                                | Fix                                                                                          |
+| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `audio_source_unreadable`      | error    | The file cannot be read as audio, so the render's mix fails and the render stops.                            | Point `src` at a file with an audio track, or re-export it.                                  |
+| `audio_source_rejected`        | error    | The file has no audio track, so render stops before it starts.                                               | Point `src` at a file with audio, or remove `data-has-audio="true"` from a `<video>`.        |
+| `audio_starts_past_source_end` | warning  | `data-media-start` is at or past the file's length, so the clip plays nothing.                               | Lower `data-media-start` below the file's length.                                            |
+| `audio_clip_silent`            | warning  | The file is silent for the whole part the clip plays.                                                        | Check the file has sound there, or move `data-media-start` to where it does.                 |
+| `audio_none`                   | info     | No clip plays audio and no unmuted `<video>` has an audio track.                                             | Nothing for a silent film; otherwise add the `<audio>`.                                      |
+| `audio_check_unavailable`      | info     | The audio check itself failed, and the message says why, so the clips were not checked.                      | Re-run; if it repeats, run `hyperframes doctor`.                                             |
+| `audio_src_not_found`          | error    | An `<audio src>` names a file that is not in the project, so the render is silent. Reported by `lint`.        | Add the file or fix the path.                                                                |
+
+Each file is probed once, with the same audio probe render uses. The check runs
+alongside the browser pass, up to four files at a time. A clip longer than 3 s
+is first sampled at three 1-second spots and decoded in full only if all three
+are silent.
+
 #### Mark intentional layout choices
 
 When the audit is wrong because the layout is deliberate, say so in the HTML and
