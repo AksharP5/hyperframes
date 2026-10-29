@@ -448,7 +448,7 @@ function matchStyleRestoreAnchors(
 }
 
 function groupStyleRestoreAnchors(anchors: ReturnType<typeof matchStyleRestoreAnchors>) {
-  // Changed declarations may have moved; keep unchanged anchors in their original intervals.
+  // Anchors cannot cross a following unchanged declaration's original interval.
   const followingGroups: number[] = [];
   anchors.reduceRight((following, anchor, index) => {
     const limit = anchor.unchanged ? Math.min(following, anchor.group) : following;
@@ -460,8 +460,8 @@ function groupStyleRestoreAnchors(anchors: ReturnType<typeof matchStyleRestoreAn
   let preceding = -1;
   for (const [index, anchor] of anchors.entries()) {
     const { group } = anchor;
+    if (group < preceding || group > (followingGroups[index] ?? Infinity)) continue;
     if (anchor.unchanged) preceding = Math.max(preceding, group);
-    else if (group < preceding || group > (followingGroups[index] ?? Infinity)) continue;
     const previous = grouped.at(-1);
     if (previous?.group === group) previous.end = anchor.end;
     else grouped.push({ group, end: anchor.end });

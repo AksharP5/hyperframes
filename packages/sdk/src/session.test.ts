@@ -1108,6 +1108,20 @@ describe("editing duplicate inline declarations", () => {
       remoteStyle: "opacity:0.5;margin-left:5px",
       restoredStyle: "opacity: 0.5; margin-left: 5px; margin: 10px; margin: 20px",
     },
+    {
+      property: "background",
+      value: "yellow",
+      originalStyle: "background-color:blue;background:red;background:green;opacity:1",
+      remoteStyle: "opacity:1;background-color:blue",
+      restoredStyle: "opacity: 1; background-color: blue; background: red; background: green",
+    },
+    {
+      property: "margin",
+      value: "30px",
+      originalStyle: "margin-left:5px;margin:10px;margin:20px;opacity:1",
+      remoteStyle: "opacity:1;margin-left:5px",
+      restoredStyle: "opacity: 1; margin-left: 5px; margin: 10px; margin: 20px",
+    },
   ])(
     "restores $property fallbacks after untouched declarations are reordered",
     async ({ property, value, originalStyle, remoteStyle, restoredStyle }) => {
