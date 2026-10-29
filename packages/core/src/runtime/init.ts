@@ -4580,6 +4580,7 @@ export function initSandboxRuntimeModular(): void {
     const wantedNow = (name: string) =>
       heldScenes.has(name) ||
       scenesWanted(windowScenes, state.currentTime, clock.isPlaying()).has(name);
+    const parkedBeforeStep = parkedNames.size;
     windowWork = (async () => {
       if (landed) await mountScene(landed.name);
       else if (toMount) {
@@ -4589,7 +4590,8 @@ export function initSandboxRuntimeModular(): void {
       } else for (const { name } of toRetire) retireScene(name);
     })().finally(() => {
       windowWork = null;
-      windowNear = "";
+      const stuckStepKeepsItsPlan = parkedNames.size === parkedBeforeStep;
+      windowNear = stuckStepKeepsItsPlan ? key : "";
       moveSceneWindow(state.currentTime);
     });
     // A seek is not done until the scene it lands in is mounted.
