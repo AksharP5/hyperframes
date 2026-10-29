@@ -1309,10 +1309,11 @@ stops the browser pass, and remote sources are not fetched.
 | `audio_check_unavailable`      | info     | The audio check itself failed, and the message says why, so the clips were not checked.                      | Re-run; if it repeats, run `hyperframes doctor`.                                             |
 | `audio_src_not_found`          | error    | An `<audio src>` names a file that is not in the project, so the render is silent. Reported by `lint`.        | Add the file or fix the path.                                                                |
 
-Each file is probed once, with the same audio probe render uses. The check runs
-alongside the browser pass, up to four files at a time. A clip longer than 3 s
-is first sampled at three 1-second spots and decoded in full only if all three
-are silent.
+Each media probe (the audio metadata render uses, and render's media-type rule)
+runs at most once per file; whether a `<video>` has sound is probed on each use.
+The check runs alongside the browser pass, up to four files at a time. A clip
+longer than 3 s is first sampled at three 1-second spots and decoded in full
+only if all three are silent.
 
 #### Mark intentional layout choices
 

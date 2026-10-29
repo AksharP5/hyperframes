@@ -61,7 +61,7 @@ One command, one Chrome boot. `check` runs the linter first and skips the browse
   - `audio_none` (info): no clip plays audio and no unmuted `<video>` has an audio track. Fine for a silent film; otherwise add the `<audio>`.
   - `audio_check_unavailable` (info): the audio check itself failed (the message says why), so the clips were not checked. Re-run; if it repeats, run `hyperframes doctor`.
   - `audio_src_not_found` (error, from `lint`): an `<audio src>` names a file not in the project, so the render is silent. Add the file or fix the path.
-  - Cost: each file is probed once, with the same audio probe render uses. The check runs alongside the browser pass, up to four files at a time. A clip longer than 3 s is first sampled at three 1-second spots and decoded in full only if all three are silent.
+  - Cost: each media probe (the audio metadata render uses, and render's media-type rule) runs at most once per file; whether a `<video>` has sound is probed on each use. The check runs alongside the browser pass, up to four files at a time. A clip longer than 3 s is first sampled at three 1-second spots and decoded in full only if all three are silent.
 
 Every finding carries a selector, the element's `data-*` identity, the composition source file, a bbox, and the sample time: jump straight from the JSON to the HTML you must edit and re-run.
 
