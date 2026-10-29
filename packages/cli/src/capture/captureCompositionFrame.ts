@@ -340,6 +340,7 @@ export async function openSettledCompositionPage(
       await import("@hyperframes/engine");
     await installMediaRenderIdBridge(page);
     await page.evaluateOnNewDocument(forcePreservedDrawingBuffer);
+    await page.evaluateOnNewDocument("window.__HF_REPLAY_SKIPPED_FRAMES = true");
     await page.setViewport(viewport);
     if (answer) await answerPageInProcess(page, url, answer);
     await options.beforeNavigate?.(page);

@@ -549,8 +549,9 @@ export function initSandboxRuntimeModular(): void {
   ensureAudioGroupInertStyle(document);
   ensureColorGroupInertStyle(document);
   const exportRenderFps = resolveExportRenderFps();
-  const renderFps = exportRenderFps.fps ?? undefined;
   state.canonicalFps = exportRenderFps.fps ?? compositionFps() ?? state.canonicalFps;
+  const renderFps =
+    exportRenderFps.fps ?? (window.__HF_REPLAY_SKIPPED_FRAMES ? state.canonicalFps : undefined);
   setRuntimeProtocolFps(state.canonicalFps);
   if (window.__HF_EXPORT_RENDER_SEEK_CONFIG) {
     const fpsDetail = JSON.stringify({
