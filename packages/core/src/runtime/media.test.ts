@@ -4,6 +4,7 @@ import { mediaElementTime } from "./mediaClock";
 import {
   evictMediaSyncState,
   hasMediaSyncStateForTest,
+  primeMediaForLaterStarts,
   readElementPlaybackRate,
   readElementPlaybackStart,
   refreshRuntimeMediaCache,
@@ -1820,6 +1821,34 @@ describe("syncRuntimeMedia", () => {
     Object.defineProperty(clip.el, "muted", { value: true, writable: true });
     syncRuntimeMedia({ clips: [clip], timeSeconds: 5, playing: true, playbackRate: 1 });
     expect(clip.el.muted).toBe(true);
+  });
+
+  describe("priming for iOS", () => {
+    const iPhone =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 26_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148";
+    afterEach(() => vi.restoreAllMocks());
+
+    it("plays then pauses every idle unmuted take so iOS lets it start after the tap", () => {
+      vi.spyOn(navigator, "userAgent", "get").mockReturnValue(iPhone);
+      const idle = createMockClip({ start: 20, end: 30 }).el;
+      const muted = createMockClip({ start: 20, end: 30 }).el;
+      const sounding = createMockClip({ start: 0, end: 10 }).el;
+      const order: string[] = [];
+      idle.play = vi.fn(() => (order.push("play"), Promise.resolve()));
+      idle.pause = vi.fn(() => void order.push("pause"));
+      muted.setAttribute("muted", "");
+      Object.defineProperty(sounding, "paused", { value: false });
+      primeMediaForLaterStarts([idle, muted, sounding]);
+      expect(order).toEqual(["play", "pause"]);
+      expect(muted.play).not.toHaveBeenCalled();
+      expect(sounding.pause).not.toHaveBeenCalled();
+    });
+
+    it("leaves every take parked where no tap is needed", () => {
+      const idle = createMockClip({ start: 20, end: 30 }).el;
+      primeMediaForLaterStarts([idle]);
+      expect(idle.play).not.toHaveBeenCalled();
+    });
   });
 
   it("fires onAutoplayBlocked when play() rejects with NotAllowedError", async () => {

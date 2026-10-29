@@ -3988,6 +3988,16 @@ describe("initSandboxRuntimeModular", () => {
     expect(startedAt[0]).toBeGreaterThanOrEqual(1 - 0.02);
   });
 
+  it("primes a clip that starts later inside the tap on iOS, so a late start is not refused", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 26_5 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+    );
+    const { sfx } = mountLateSfx();
+    window.__player?.play();
+    expect(sfx.play).toHaveBeenCalledTimes(1);
+    expect(sfx.pause).toHaveBeenCalledTimes(1);
+  });
+
   const setRate = (playbackRate: number) =>
     window.dispatchEvent(
       new MessageEvent("message", {
