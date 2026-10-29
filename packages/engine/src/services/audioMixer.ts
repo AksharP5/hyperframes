@@ -170,7 +170,7 @@ function preparedAudioOutputArgs(
       playbackRate,
       duration,
       headFilter,
-      channelFilter,
+      channelFilter ?? "aresample=out_chlayout=stereo:rematrix_maxval=1",
       stream ?? "0:a",
     );
     return ["-filter_complex", graph, "-map", "[out]", ...outputArgs];

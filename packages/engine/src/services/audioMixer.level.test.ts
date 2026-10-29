@@ -167,9 +167,14 @@ describe.skipIf(!HAS_FFMPEG)(
       expect(firstAudibleSeconds(outputPath)).toBeCloseTo(2, 2);
     });
 
-    it.each([false, true])(
-      "preserves the normalized surround mix level (loop=%s)",
-      async (loop) => {
+    it.each([
+      { loop: false, ramped: false },
+      { loop: true, ramped: false },
+      { loop: false, ramped: true },
+      { loop: true, ramped: true },
+    ])(
+      "preserves the normalized surround mix level (loop=$loop, ramped=$ramped)",
+      async ({ loop, ramped }) => {
         const dir = mkdtempSync(join(tmpdir(), "hf-surround-level-"));
         tempDirs.push(dir);
         const sourcePath = join(dir, "surround.wav");
@@ -207,6 +212,17 @@ describe.skipIf(!HAS_FFMPEG)(
           const elements = parseAudioElements(
             `<audio id="tone" src="${name}.wav" data-start="0" data-duration="${duration}" ${loop ? "loop" : ""}></audio>`,
           );
+          if (ramped) {
+            for (const element of elements) {
+              element.playbackRate = {
+                target: "rate",
+                points: [
+                  { t: 0, v: 0.7 },
+                  { t: duration, v: 1.2 },
+                ],
+              };
+            }
+          }
           const result = await processCompositionAudio(
             elements,
             dir,
