@@ -692,9 +692,11 @@ ChatGPT subscription. Openverse, theSVG, GitHub, favicons, color grades, and the
 local generators cost nothing. `doctor` exits 1 only when ffmpeg, ffprobe, or the
 bundled sounds are missing; HeyGen problems are listed with a fix but do not fail it.
 
-`media-use` sends anonymous usage events — the media type, which source won, and
+`media-use` sends usage events — the media type, which source won, and
 whether it reused a file, never your intent text or paths — and honors the same
-opt-outs as [`telemetry`](#telemetry).
+opt-outs as [`telemetry`](#telemetry). They are anonymous until you sign in to
+HeyGen; after that they are linked to your account, as described under
+[`telemetry`](#telemetry).
 
 See [Voice, sound, and captions](/guides/voice-and-audio) and
 [Color grading](/guides/media-effects#fix-and-grade-the-color) for the workflows around these assets, and
@@ -1672,7 +1674,7 @@ How it uses the machine, and when it gives up:
 | `--batch-concurrency` / `--batch-fail-fast`              | `1` / off                                  | Batch rows at once, and whether the first failure stops the rest                                                   |
 | `--debug`                                                | off                                        | Keep intermediates and write diagnostics under the Producer `.debug` directory                                     |
 | `--quiet`                                                | off                                        | Less output                                                                                                        |
-| `--skill`                                                | —                                          | Record which authoring workflow started this render, in anonymous telemetry                                        |
+| `--skill`                                                | —                                          | Record which authoring workflow started this render, in usage telemetry                                            |
 
 Low-memory detection reads **host** RAM, not cgroup or container limits, so
 containerised callers — including `--docker` — should set
@@ -1963,8 +1965,9 @@ Topics: `data-attributes`, `examples`, `rendering`, `gsap`, `troubleshooting`,
 
 ### `feedback`
 
-Send feedback about how it went. It is anonymous unless the app that launched
-the CLI attaches your email (below).
+Send feedback about how it went. It rides the same usage telemetry, so it is
+anonymous until you sign in to HeyGen and linked to your account after that. An
+app that launches the CLI can also attach your email (below).
 
 ```bash
 npx hyperframes feedback --rating 10
@@ -2018,10 +2021,16 @@ values are never collected, except short self-identifying names: `AGENT`,
 the `<app>/<version>/<channel>` tag an app that launches the CLI sets, sent as
 `client` so reports from that app can be told apart.
 
-Nothing personally identifying is collected until you sign in. When you run
-`hyperframes auth login`, your HeyGen account email — or username, if the
-account has no email — is linked to your usage, and your prior anonymous usage
-is stitched to it. Nothing else personal, and only once you choose to sign in.
+Nothing personally identifying is collected until you sign in. **Signed-in usage
+is not anonymous.** When you run `hyperframes auth login`, your usage is linked
+to your HeyGen account from then on: it is keyed on an id derived from your
+HeyGen username (the same id the HyperFrames web app and Desktop use), and your
+account email and username are stored with it. While you are signed in, every
+event carries that id and your username. Anonymous usage from before the first
+sign-in is merged in, unless an older CLI version had already linked the install
+to your email; that earlier history stays on its own profile. `media-use` links the same way when it finds a
+signed-in HeyGen account. Nothing else personal is added, and the opt-outs below
+still turn all of it off.
 
 Turn it all off with `HYPERFRAMES_NO_TELEMETRY=1` or the command above.
 [Feedback collection](/help#share-feedback) explains the post-render prompt and the
@@ -2147,8 +2156,9 @@ subcommands: `asset` (export an image or SVG), `tokens` (pull design tokens),
 and `component` (import an editable component). Run it bare for usage. See
 [Figma integration](/guides/figma) for setup and examples.
 
-`npx hyperframes events` lets an installed workflow skill emit an anonymous
-usage event (`--skill`, `--event`, `--outcome`). Nothing calls it by hand.
+`npx hyperframes events` lets an installed workflow skill emit a usage event
+(`--skill`, `--event`, `--outcome`). Like the rest of [`telemetry`](#telemetry),
+it is anonymous until you sign in. Nothing calls it by hand.
 
 ## hyperframes auth
 

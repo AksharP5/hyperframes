@@ -107,8 +107,8 @@ const GROUPS: Group[] = [
   {
     title: "Settings",
     commands: [
-      ["feedback", "Submit anonymous feedback about your experience"],
-      ["telemetry", "Manage anonymous usage telemetry"],
+      ["feedback", "Submit feedback about your experience"],
+      ["telemetry", "Manage usage telemetry"],
     ],
   },
 ];

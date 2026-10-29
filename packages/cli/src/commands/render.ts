@@ -199,7 +199,7 @@ export default defineCommand({
       type: "string",
       description:
         "Authoring skill that initiated this render (e.g. hyperframes). " +
-        "Recorded on anonymous render telemetry for per-skill usage breakdowns; ignored unless it is a slug.",
+        "Recorded on render telemetry for per-skill usage breakdowns; ignored unless it is a slug.",
     },
     format: {
       type: "string",
