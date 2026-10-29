@@ -1567,6 +1567,28 @@ describe("check pipeline", () => {
     expect(report.contrast).toMatchObject({ ok: true, errorCount: 0, findings: [] });
   });
 
+  it("says in plain words that a lint error is why the browser pass was skipped", async () => {
+    const lint = lintWith(
+      "error",
+      "root_missing_composition_id",
+      "Root needs data-composition-id.",
+    );
+    const { report } = await runScenario(fakeDriver(), {}, { lint });
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const command = createCheckCommand({
+      resolveProject: () => PROJECT,
+      runPipeline: vi.fn(async () => report),
+      prepareMedia: vi.fn(async () => []),
+      withMeta: (value) => value,
+    });
+
+    await runViaCli(command, { rawArgs: [] });
+
+    const said = log.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(said).toContain("Browser validation skipped because of the lint error above");
+    expect(said).not.toContain("Browser session never ran");
+  });
+
   it("marks browserSkipped true when the linter itself crashes", async () => {
     const { deps } = dependencies(fakeDriver());
     deps.lintProject = vi.fn(async () => {
