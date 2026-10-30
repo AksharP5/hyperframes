@@ -378,11 +378,16 @@ function outPointHoldTime(el: HTMLMediaElement, outPoint: number, watched: boole
 // A muted video's clock is its audio track, which starts tens of ms after play(), so an upcoming
 // video starts that early, hidden, by the delay learned from earlier starts.
 let videoStartLatency: number | null = null;
-const videoStarts = new WeakMap<HTMLMediaElement, { offset: number; lead: number; at: number }>();
+const videoStarts = new WeakMap<
+  HTMLMediaElement,
+  { offset: number; lead: number; at: number; weight: number }
+>();
+let playheadWasRunning = false;
 
 /** Test-only seam. */
 export function resetVideoStartLatency(): void {
   videoStartLatency = null;
+  playheadWasRunning = false;
 }
 
 /** A quarter second in: its lag plus how early it started, capped at 0.1 s. */
@@ -390,7 +395,7 @@ function learnVideoStartLatency(el: HTMLMediaElement, time: number, offset: numb
   const start = videoStarts.get(el);
   if (!start || time < start.at) return;
   videoStarts.delete(el);
-  const sample = (offset - start.offset) / rate + start.lead;
+  const sample = ((offset - start.offset) / rate + start.lead) * start.weight;
   const averaged = videoStartLatency === null ? sample : (videoStartLatency + sample) / 2;
   videoStartLatency = Math.min(0.1, Math.max(0, averaged));
 }
@@ -449,6 +454,9 @@ export function syncRuntimeMedia(params: {
   getCompositionDuration: () => number;
 }): void {
   const forceMuteAll = !!(params.outputMuted || params.userMuted);
+  // A start at Play also waits on the playhead's start, so it counts half.
+  const startWeight = playheadWasRunning ? 1 : 0.5;
+  playheadWasRunning = params.playing && params.clockAdvancing !== false;
   for (const clip of params.clips) {
     const { el } = clip;
     if (!el.isConnected) continue;
@@ -780,6 +788,7 @@ export function syncRuntimeMedia(params: {
         // Offset read after any seek above; a loop could wrap a lap before the sample.
         if (isNonLoopVideo)
           videoStarts.set(el, {
+            weight: startWeight,
             offset: relTime - (el.currentTime || 0),
             lead: Math.max(0, clip.start - params.timeSeconds) / params.playbackRate,
             at: Math.max(params.timeSeconds, clip.start) + 0.25 * params.playbackRate,

@@ -2169,7 +2169,16 @@ describe("syncRuntimeMedia", () => {
         playAt: number,
         sampleAt: number,
         lag: number,
+        playheadRunning = true,
       ) => {
+        if (playheadRunning)
+          syncRuntimeMedia({
+            clips: [],
+            timeSeconds: playAt,
+            playing: true,
+            playbackRate: 1,
+            getCompositionDuration: () => 30,
+          });
         tick(clip, playAt);
         expect(clip.el.play).toHaveBeenCalledTimes(1);
         Object.defineProperty(clip.el, "paused", {
@@ -2210,6 +2219,16 @@ describe("syncRuntimeMedia", () => {
           getCompositionDuration: () => 30,
         });
         expect(due75ms.el.play).toHaveBeenCalledTimes(1);
+      });
+
+      it("learns half the start delay of a video started by Play", () => {
+        startWithLag(videoClip({ start: 0, end: 10, mediaStart: 0 }), 0, 0.3, 0.074, false);
+        const due45ms = videoClip({ start: 10, end: 20, mediaStart: 0 });
+        tick(due45ms, 9.955);
+        expect(due45ms.el.play).not.toHaveBeenCalled();
+        const due35ms = videoClip({ start: 10, end: 20, mediaStart: 0 });
+        tick(due35ms, 9.965);
+        expect(due35ms.el.play).toHaveBeenCalledTimes(1);
       });
 
       it("learns from a video seeked and started in the same tick", () => {
