@@ -552,6 +552,16 @@ export default defineCommand({
     const json = args.json === true;
     const skipClipboard = args.clipboard === false;
 
+    if (!existsSync(projectDir)) {
+      failCaught(
+        new Error(
+          `Project folder not found: ${projectDir}. --dir is the project root, not where the block lands (that is its compositions/ folder), and it must already exist. Create one with \`hyperframes init <dir>\`.`,
+        ),
+        json,
+        c.error,
+      );
+    }
+
     const hasConfigBefore = existsSync(projectConfigPath(projectDir));
 
     const names = Array.isArray(args._) && args._.length > 1 ? args._.map(String) : [args.name];

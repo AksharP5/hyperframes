@@ -572,6 +572,21 @@ describe("add command run() — several names", () => {
     expect(existsSync(join(dir, "compositions", "my-block.html"))).toBe(true);
   });
 
+  it("says --dir is the project root when it does not exist", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const missing = join(dir, "compositions", "new-folder");
+
+    await expect(
+      runWrapped(["my-block", "--dir", missing, "--no-clipboard", "--json"]),
+    ).rejects.toMatchObject({ result: { exitCode: 1 } });
+
+    const out = JSON.parse(String(log.mock.calls[0]?.[0]));
+    expect(out.error.message).toContain(`Project folder not found: ${missing}`);
+    expect(out.error.message).toContain("--dir is the project root");
+    expect(out.error.message).toContain("hyperframes init");
+    expect(existsSync(missing)).toBe(false);
+  });
+
   it("still installs a single name the way it did", async () => {
     await expect(
       runWrapped(["my-block", "--dir", dir, "--no-clipboard", "--json"]),
