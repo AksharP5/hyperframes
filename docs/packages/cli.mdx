@@ -716,10 +716,11 @@ them.
 ```bash
 npx hyperframes beats [dir]
 npx hyperframes beats [dir] --json   # { ok, file, count, bpm }
+npx hyperframes beats <file> --json  # { ok, file, count, bpm, beatTimes }
 ```
 
-`beats` takes the project folder, not a media file. For the beats of one audio
-or video file, run `npx hyperframes audio <file> --only beats --json`.
+Given an audio or video file instead of a folder, `beats` analyses that file
+with the same tracker and prints the result; it writes nothing.
 
 `beats` finds the music track — an `<audio>` element with
 `data-timeline-role="music"`, or an id like `music`, `bgm`, or `soundtrack` —
