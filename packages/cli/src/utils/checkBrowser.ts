@@ -100,6 +100,7 @@ interface RuntimeDraft {
   line?: number;
   count?: number;
   abortedImage?: boolean;
+  networkChanged?: boolean;
   fixHint?: string;
 }
 
@@ -398,7 +399,7 @@ export async function runBrowserCheck(
     const rootAnchor = await resolveRootAnchor(page);
     deadline?.keepPartial(() => ({
       runtimeFindings: dropFailedProxyEchoes(
-        keepBrokenImageAborts(drafts, new Set()),
+        keepFailedNetworkChanges(keepBrokenImageAborts(drafts, new Set()), new Set()),
         failedPaths,
       ).map((draft) => runtimeFinding(draft, rootAnchor)),
     }));
@@ -433,12 +434,16 @@ export async function runBrowserCheck(
     const helper = await helperOpen?.catch(() => undefined);
     const merged = helper ? mergeHelperDrafts(sampleLog, helper.sampleLog) : drafts;
     const broken = await abortedImagesStillBroken(page, merged);
+    const unreachable = await networkChangesStillFailing(merged);
     return {
       ...result,
       timings: { ...result.timings, launchSettleMs },
       renderReadyTimedOut: session.renderReadyTimedOut,
       runtimeFindings: dropFailedProxyEchoes(
-        dropMotionBlurConsoleEcho(keepBrokenImageAborts(merged, broken), blur),
+        dropMotionBlurConsoleEcho(
+          keepFailedNetworkChanges(keepBrokenImageAborts(merged, broken), unreachable),
+          blur,
+        ),
         failedPaths,
       ).map((draft) => runtimeFinding(draft, rootAnchor)),
     };
@@ -811,6 +816,13 @@ function wireRuntimeListeners(page: Page, drafts: RuntimeDraft[], clock: Runtime
   wireNetworkListeners(page, drafts, clock);
 }
 
+export function keepFailedNetworkChanges(
+  drafts: RuntimeDraft[],
+  failing: Set<string>,
+): RuntimeDraft[] {
+  return drafts.filter((draft) => !draft.networkChanged || failing.has(draft.url ?? ""));
+}
+
 /** Check's scrubs cancel image loads: an aborted image failed only if an `<img>` shows it and its decode fails. */
 export function keepBrokenImageAborts(drafts: RuntimeDraft[], broken: Set<string>): RuntimeDraft[] {
   return drafts.filter((draft) => !draft.abortedImage || broken.has(draft.url ?? ""));
@@ -855,6 +867,27 @@ function decodedPath(url: URL | undefined): string | undefined {
 }
 
 const IMAGE_DECODE_CAP_MS = 5000;
+
+export async function networkChangesStillFailing(drafts: RuntimeDraft[]): Promise<Set<string>> {
+  const urls = [
+    ...new Set(drafts.filter((draft) => draft.networkChanged).map((draft) => draft.url ?? "")),
+  ];
+  const failing = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const response = await fetch(url, {
+          headers: { Range: "bytes=0-0" },
+          signal: AbortSignal.timeout(5000),
+        });
+        await response.body?.cancel();
+        return response.status >= 400;
+      } catch {
+        return true;
+      }
+    }),
+  );
+  return new Set(urls.filter((_, i) => failing[i]));
+}
 
 async function abortedImagesStillBroken(page: Page, drafts: RuntimeDraft[]): Promise<Set<string>> {
   const urls = drafts.filter((draft) => draft.abortedImage).map((draft) => draft.url ?? "");
@@ -902,6 +935,7 @@ function wireNetworkListeners(page: Page, drafts: RuntimeDraft[], clock: Runtime
       ...clock.now(),
       url,
       abortedImage: failure === "net::ERR_ABORTED" && request.resourceType() === "image",
+      networkChanged: failure === "net::ERR_NETWORK_CHANGED",
     });
   });
   page.on("response", (response) => {
