@@ -40,7 +40,10 @@ function isJsonScalar(text: string): boolean {
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function readJsonFlagText(value: string, partialIo: Partial<JsonFlagIO> = {}): string {
-  const io = { ...defaultIO, ...partialIo };
+  const io: JsonFlagIO = {
+    readFile: partialIo.readFile ?? defaultIO.readFile,
+    readStdin: partialIo.readStdin ?? defaultIO.readStdin,
+  };
   const trimmed = value.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[") || isJsonScalar(trimmed)) return value;
   const source = trimmed === "-" ? "stdin" : value;
