@@ -1472,6 +1472,19 @@ export function isVideoPastTimelineEnd(video: Pick<VideoElement, "start">, timel
   return video.start >= timelineEnd;
 }
 
+function alignClipStartToFirstOutputFrame(video: VideoElement, fps: number): void {
+  if (video.loop || !Number.isFinite(video.start) || video.start < 0 || !(fps > 0)) return;
+  const position = exportClipWindow(video.start, Infinity, fps).start * fps;
+  const firstFrame =
+    Math.abs(position - Math.round(position)) < 1e-6 ? Math.round(position) : Math.ceil(position);
+  const shift = firstFrame / fps - video.start;
+  if (shift === 0) return;
+  const playbackRate = normalizeRateSpec(video.playbackRate);
+  video.mediaStart += sourceTimeAt(playbackRate, shift);
+  video.playbackRate = shiftRateLane(playbackRate, shift);
+  video.start += shift;
+}
+
 /** Move a clip to its extraction window; a rate lane is shifted so it keeps integrating from the new origin. */
 export function rebaseVideoToWindow(video: VideoElement, window: TimelineExtractionWindow): void {
   if (window.preserveTimelinePhase) return;
@@ -2596,6 +2609,7 @@ export async function extractAllVideoFrames(
       }
       try {
         const metadata = videoMetadata[index] ?? (await extractMediaMetadata(videoPath));
+        alignClipStartToFirstOutputFrame(video, fps);
         const initialWindow = resolveVideoExtractionWindow(video, metadata, options.timelineEnd);
         const window = await resolveFinalFrameExtractionWindow(
           videoPath,
