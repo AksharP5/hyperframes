@@ -5163,6 +5163,15 @@ export function initSandboxRuntimeModular(): void {
       return false;
     }
   };
+  const sceneTimelines = () => {
+    const timelines = (window.__timelines ?? {}) as Record<string, RuntimeTimelineLike | undefined>;
+    const rootCompositionId =
+      resolveRootCompositionElement()?.getAttribute("data-composition-id") ?? null;
+    return Object.entries(timelines).filter(
+      (entry): entry is [string, RuntimeTimelineLike] =>
+        !!entry[1] && typeof entry[1] === "object" && entry[0] !== rootCompositionId,
+    );
+  };
   const seekStandaloneRegisteredTimelines = (
     timeSeconds: number,
     revision: number,
@@ -5172,12 +5181,7 @@ export function initSandboxRuntimeModular(): void {
       sceneClocks = new WeakMap();
       sceneClocksRevision = revision;
     }
-    const timelines = (window.__timelines ?? {}) as Record<string, RuntimeTimelineLike | undefined>;
-    const rootCompositionId =
-      resolveRootCompositionElement()?.getAttribute("data-composition-id") ?? null;
-    for (const [compositionId, timeline] of Object.entries(timelines)) {
-      if (!timeline || typeof timeline !== "object" || compositionId === rootCompositionId)
-        continue;
+    for (const [compositionId, timeline] of sceneTimelines()) {
       const scene = sceneClockOf(compositionId, timeline);
       if (!scene) continue;
       const sourceTime =
@@ -5291,9 +5295,9 @@ export function initSandboxRuntimeModular(): void {
     // Only clips holding a tween that renders for the first time on this seek need their authored style read.
     const firstRendered =
       firstRenders && tl ? clipsFirstRenderedIn(tl, tweensRenderedThrough.time, t) : null;
-    // An empty set means no tween draws for the first time: nothing to show, so no page-wide query.
+    // An empty set, or a page with no timeline, means no tween draws for the first time: no page-wide query.
     const hideClipsAgain =
-      firstRenders && firstRendered?.size !== 0
+      firstRenders && firstRendered?.size !== 0 && (tl || sceneTimelines().length > 0)
         ? showHiddenClips(firstRendered ? (el) => firstRendered.has(el) : undefined)
         : null;
     // Scenes first, each paused on its own clock, so the root's pass skips them and its later
