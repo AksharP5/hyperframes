@@ -816,6 +816,7 @@ Source: `packages/lint/src/rules/slideshow.ts`.
 **Error.** A slideshow island contains invalid JSON or a structure that does not match the manifest schema.
 
 **Fix:** Make the `<script type="application/hyperframes-slideshow+json">` block valid JSON matching the SlideshowManifest schema.
+If supplied, `startTime` and `endTime` must be finite JSON numbers. Quoted numbers such as `"0"`, `null`, and overflowing values such as `1e400` are invalid.
 
 ### `slideshow_unresolved_ref`
 
