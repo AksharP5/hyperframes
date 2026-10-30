@@ -4446,18 +4446,11 @@ describe.skipIf(!HAS_FFMPEG)("a clip stored on a non-square pixel grid", () => {
 
   it("keeps the display shape of a rotated clip, whose autorotate swaps the pixel aspect", async () => {
     const rotated = join(FIXTURE_DIR, "rotated.mp4");
-    const synth = await runFfmpeg([
-      "-y",
-      "-v",
-      "error",
-      "-display_rotation:v:0",
-      "90",
-      "-i",
-      SOURCE,
-      "-c",
-      "copy",
-      rotated,
-    ]);
+    // `-display_rotation` is an ffmpeg 6 input option; older builds take the same rotation as metadata.
+    const rotateWith = (args: string[]) =>
+      runFfmpeg(["-y", "-v", "error", ...args, "-c", "copy", rotated]);
+    let synth = await rotateWith(["-display_rotation:v:0", "90", "-i", SOURCE]);
+    if (!synth.success) synth = await rotateWith(["-i", SOURCE, "-metadata:s:v:0", "rotate=90"]);
     expect(synth.success).toBe(true);
     const outDir = join(FIXTURE_DIR, "out-rot");
     mkdirSync(outDir, { recursive: true });
