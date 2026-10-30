@@ -25,6 +25,16 @@ describe("readJsonFlag", () => {
     );
   });
 
+  it("points a value with its braces stripped, read as a missing file, at the file and stdin forms", () => {
+    expect(() => readJsonFlag("--grading", "preset:skin-soft", io)).toThrow(
+      /Could not read --grading: preset:skin-soft: ENOENT.*PowerShell.*--grading payload\.json/,
+    );
+  });
+
+  it("does not call a missing Windows drive path inline JSON", () => {
+    expect(() => readJsonFlag("--grading", "C:\\clips\\grade.json", io)).toThrow(/no such file$/);
+  });
+
   it("names the flag and path when the file cannot be read", () => {
     expect(() => readJsonFlag("--grading", "missing.json", io)).toThrow(
       /Could not read --grading: missing\.json: ENOENT/,
