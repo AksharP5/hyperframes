@@ -1069,7 +1069,13 @@ async function collectCraftFilm(page: Page): Promise<CraftFilm> {
 }
 
 const CRAFT_PART_NUMBERS = ["key", "block", "opacity", "fontPx"] as const;
-const CRAFT_PART_STRINGS = ["selector", "blockSelector", "sourceFile", "text"] as const;
+const CRAFT_PART_STRINGS = [
+  "selector",
+  "blockSelector",
+  "sourceFile",
+  "text",
+  "blockText",
+] as const;
 const CRAFT_RECT_NUMBERS = ["left", "top", "width", "height"] as const;
 
 function parseCraftTextPart(value: unknown): CraftTextPart[] {
