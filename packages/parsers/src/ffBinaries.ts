@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { accessSync, closeSync, constants, existsSync, openSync, readSync } from "node:fs";
 import { createRequire } from "node:module";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 
 /**
  * Shared FFmpeg/FFprobe binary resolution for every package that shells out
@@ -67,15 +67,16 @@ function runsOnThisMac(candidate: string): boolean {
     return true;
   }
   if (!isX86OnlyMachO(candidate)) return true;
-  skippedX86Binary ??= candidate;
+  const name = basename(candidate) as FfBinaryName;
+  if (!skippedX86Binaries.has(name)) skippedX86Binaries.set(name, candidate);
   return false;
 }
 
-let skippedX86Binary: string | undefined;
+const skippedX86Binaries = new Map<FfBinaryName, string>();
 
-/** The first x86_64-only binary skipped on this Mac, for naming in the "not found" hint. */
-export function getSkippedX86Binary(): string | undefined {
-  return skippedX86Binary;
+/** The first x86_64-only `name` binary skipped on this Mac, for naming in the "not found" hint. */
+export function getSkippedX86Binary(name: FfBinaryName): string | undefined {
+  return skippedX86Binaries.get(name);
 }
 
 function isExecutablePathCandidate(candidate: string): boolean {
@@ -143,7 +144,7 @@ function binaryFileName(name: FfBinaryName): string {
 
 function findInProjectLocalBin(name: FfBinaryName): string | undefined {
   const candidate = resolve(".hyperframes", "bin", binaryFileName(name));
-  return existsSync(candidate) ? candidate : undefined;
+  return existsSync(candidate) && runsOnThisMac(candidate) ? candidate : undefined;
 }
 
 function tryResolve(fromFile: string, request: string): string | undefined {
@@ -242,5 +243,5 @@ export function findFfBinary(
 export function clearFfBinaryLookupCache(): void {
   pathLookupCache.clear();
   lastMissAt.clear();
-  skippedX86Binary = undefined;
+  skippedX86Binaries.clear();
 }

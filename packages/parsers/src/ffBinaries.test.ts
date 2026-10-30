@@ -210,11 +210,14 @@ describe("findFfBinary", () => {
     return { project, binary };
   }
 
+  let skipped: { ffmpeg?: string; ffprobe?: string } = {};
+
   async function findInProjectDir(
     project: string,
     name: "ffmpeg" | "ffprobe",
     systemBinaries: string[] = [],
   ) {
+    skipped = {};
     vi.stubEnv("HYPERFRAMES_FFMPEG_PATH", "");
     vi.stubEnv("HYPERFRAMES_FFPROBE_PATH", "");
     process.env.PATH = "";
@@ -236,8 +239,10 @@ describe("findFfBinary", () => {
       return { ...mocked, default: mocked };
     });
     try {
-      const { findFfBinary } = await importFresh();
-      return findFfBinary(name);
+      const { findFfBinary, getSkippedX86Binary } = await importFresh();
+      const found = findFfBinary(name);
+      skipped = { ffmpeg: getSkippedX86Binary("ffmpeg"), ffprobe: getSkippedX86Binary("ffprobe") };
+      return found;
     } finally {
       vi.unstubAllEnvs();
       rmSync(project, { recursive: true, force: true });
@@ -292,6 +297,27 @@ describe("findFfBinary", () => {
       const { project } = installerProject("ffprobe", { content: machO(0x07) });
 
       expect(await findInProjectDir(project, "ffprobe")).toBeUndefined();
+    });
+
+    it("names the skipped binary under its own name only", async () => {
+      asAppleSilicon();
+      const { project, binary } = installerProject("ffprobe", { content: machO(0x07) });
+
+      await findInProjectDir(project, "ffprobe");
+
+      expect(skipped).toEqual({ ffprobe: binary });
+    });
+
+    it("skips an x86_64 binary in the project's .hyperframes/bin", async () => {
+      asAppleSilicon();
+      const project = realpathSync(mkdtempSync(join(tmpdir(), "hf-ff-local-")));
+      mkdirSync(join(project, ".hyperframes", "bin"), { recursive: true });
+      const binary = join(project, ".hyperframes", "bin", "ffprobe");
+      writeFileSync(binary, machO(0x07));
+      chmodSync(binary, 0o755);
+
+      expect(await findInProjectDir(project, "ffprobe")).toBeUndefined();
+      expect(skipped.ffprobe).toBe(binary);
     });
 
     it("keeps an arm64 installer binary", async () => {
