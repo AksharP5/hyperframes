@@ -134,7 +134,13 @@ import {
   resolveDeliveryEncoderOptions,
   validateDeliveryEncoderConfig,
 } from "./render/deliveryEncoder.js";
-import { createMemorySampler, type MemorySampler, updateJobStatus } from "./render/shared.js";
+import {
+  createMemorySampler,
+  describeWorkerPhases,
+  forgetWorkerPhases,
+  type MemorySampler,
+  updateJobStatus,
+} from "./render/shared.js";
 import { frameCacheOptions } from "./render/frameCacheBudget.js";
 import { buildRenderErrorDetails } from "./render/cleanup.js";
 import { publishRenderFailure } from "./render/renderEventPublisher.js";
@@ -1186,6 +1192,8 @@ export function frameStallRule(
     firstProgressMs: Math.max(FIRST_FRAME_STALL_MS, noProgressMs),
     complete: () => (job.framesRendered ?? 0) >= totalFrames,
     tailMs: Math.max(TAIL_STALL_MS, noProgressMs),
+    detail: () => describeWorkerPhases(job),
+    attemptOpened: () => forgetWorkerPhases(job),
   };
 }
 

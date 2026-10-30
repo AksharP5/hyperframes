@@ -366,7 +366,17 @@ export function reportAssembleProgress(
   );
 }
 
-const workerPhasesByJob = new WeakMap<RenderJob, Map<number, string>>();
+const workerPhasesByJob = new WeakMap<object, Map<number, string>>();
+
+export function forgetWorkerPhases(job: object): void {
+  workerPhasesByJob.delete(job);
+}
+
+export function describeWorkerPhases(job: object): string | undefined {
+  const phases = workerPhasesByJob.get(job);
+  if (!phases?.size) return undefined;
+  return `Last phase per worker: ${[...phases].map(([id, phase]) => `worker ${id} ${phase}`).join(", ")}.`;
+}
 
 /** Browser warm-up before the first frame, from the parallel workers' phase events. */
 export function reportWorkerStartup(

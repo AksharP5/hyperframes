@@ -2,6 +2,8 @@ import { describe, expect, it, setSystemTime } from "bun:test";
 import type { ParallelProgress } from "@hyperframes/engine";
 import type { RenderJob } from "../renderOrchestrator.js";
 import {
+  describeWorkerPhases,
+  forgetWorkerPhases,
   reportAssembleProgress,
   reportEncodeProgress,
   reportFrameProgress,
@@ -57,6 +59,30 @@ describe("reportWorkerStartup", () => {
       "Starting browsers (0/2 ready)",
       "Starting browsers (1/2 ready)",
     ]);
+  });
+});
+
+describe("describeWorkerPhases", () => {
+  it("names the last phase each worker reported, and nothing before any did", () => {
+    const job = { progress: 25 } as RenderJob;
+    expect(describeWorkerPhases(job)).toBeUndefined();
+    const phase = (workerId: number, name: string) =>
+      reportWorkerStartup(
+        job,
+        {
+          activeWorkers: 2,
+          latestWorkerPhase: { workerId, phase: name },
+        } as unknown as ParallelProgress,
+        undefined,
+      );
+    phase(0, "browser_launch");
+    phase(1, "session_init");
+    phase(0, "frame_capture");
+    expect(describeWorkerPhases(job)).toBe(
+      "Last phase per worker: worker 0 frame_capture, worker 1 session_init.",
+    );
+    forgetWorkerPhases(job);
+    expect(describeWorkerPhases(job)).toBeUndefined();
   });
 });
 
