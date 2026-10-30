@@ -1605,6 +1605,24 @@
     return false;
   }
 
+  // The global window [start, end) the element's own timed clip is on screen, or null when any timing
+  // up the chain is not a plain number. Only composition hosts shift their children's clock.
+  function clipLifetime(element) {
+    const own = element.closest("[data-start]");
+    if (!own) return null;
+    const start = Number(own.getAttribute("data-start"));
+    const duration = Number(own.getAttribute("data-duration"));
+    if (!Number.isFinite(start) || !(duration > 0)) return null;
+    let offset = 0;
+    for (let host = own.parentElement; host; host = host.parentElement) {
+      if (!host.hasAttribute("data-composition-id") || !host.hasAttribute("data-start")) continue;
+      const hostStart = Number(host.getAttribute("data-start"));
+      if (!Number.isFinite(hostStart)) return null;
+      offset += hostStart;
+    }
+    return { start: start + offset, end: start + duration + offset };
+  }
+
   // text_occluded: atomic labels flag at any hit; prose needs coveredFraction >= proseCoverageFloor (default 0.15).
   function occludedTextIssue(element, time, proseCoverageFloor, matteResults) {
     if (hasAllowOcclusionFlag(element)) return null;
@@ -1708,6 +1726,8 @@
       )
         continue;
       // Last: an opaque check reads a video's frame, which a backdrop under its content never needs.
+      const matte = matteFrameFor(cover);
+      if (matte && matteCoverage([rootRect], [matte]) < COVER_CANVAS_SHARE) continue;
       const rect = toRect(cover.getBoundingClientRect());
       if (!isOpaqueOccluder(cover, rect.left + rect.width / 2, rect.top + rect.height / 2))
         continue;
@@ -2550,7 +2570,11 @@
         if (clipped) issues.push(clipped);
         issues.push(...textOverflowIssues(element, root, rootRect, time, tolerance, clipped));
         const occluded = occludedTextIssue(element, time, proseCoverageFloor, matteResults);
-        if (occluded) issues.push(occluded);
+        if (occluded) {
+          const lifetime = clipLifetime(element);
+          if (lifetime) occluded.lifetime = lifetime;
+          issues.push(occluded);
+        }
         const invisible = invisibleTextIssue(element, time);
         if (invisible) issues.push(invisible);
       }
