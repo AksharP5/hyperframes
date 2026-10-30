@@ -40,6 +40,7 @@ import {
   lintVideoMediaStartPastEof,
 } from "./hevcPreviewLint.js";
 import { lintHyperframeHtml } from "./hyperframeLinter.js";
+import { collectGoogleFontFamilies, extractFontFaceFamilies } from "./rules/fonts.js";
 import { lintProjectShaderScripts } from "./projectShaders.js";
 import type {
   HyperframeLintFinding,
@@ -198,6 +199,48 @@ function resolveCssAssetCandidates(
   return resolveLocalAssetCandidates(projectDir, url);
 }
 
+function mountedSources(
+  projectDir: string,
+  rootHtml: string,
+  rootCompSrcPath?: string,
+): HtmlSource[] {
+  const sources: HtmlSource[] = [{ html: rootHtml, compSrcPath: rootCompSrcPath }];
+  const seen = new Set<string>();
+  for (const source of sources) {
+    const { document } = parseHTML(source.html);
+    for (const host of querySelectorAllIncludingTemplates(document, "[data-composition-src]")) {
+      const src = host.getAttribute("data-composition-src")?.trim();
+      if (!src || isUnresolvedAssetPlaceholder(src) || isRemoteOrInlineUrl(src)) continue;
+      const path = resolve(projectDir, src);
+      if (seen.has(path) || !isWithinProjectRoot(projectDir, path)) continue;
+      seen.add(path);
+      const read = readProjectFile(path);
+      if (read.kind !== "file") continue;
+      sources.push({
+        html: read.text,
+        compSrcPath: relative(resolve(projectDir), path).replace(/\\/g, "/"),
+      });
+    }
+  }
+  return sources;
+}
+
+function declaredProjectFontFamilies(projectDir: string, sources: HtmlSource[]): string[] {
+  const families = new Set<string>();
+  for (const { html, compSrcPath } of sources) {
+    const { document } = parseHTML(html);
+    const styles = [
+      ...querySelectorAllIncludingTemplates(document, "style").map((style) => ({
+        content: style.textContent ?? "",
+      })),
+      ...collectLocalStylesheets(projectDir, document, compSrcPath),
+    ];
+    for (const family of extractFontFaceFamilies(styles)) families.add(family);
+    for (const family of collectGoogleFontFamilies(html, styles)) families.add(family);
+  }
+  return [...families];
+}
+
 export async function lintProject(
   projectDir: string,
   entryFile?: string,
@@ -215,11 +258,16 @@ export async function lintProject(
   let totalInfos = 0;
 
   const rootHtml = readFileSync(indexPath, "utf-8");
+  const projectFontFamilies = declaredProjectFontFamilies(
+    projectDir,
+    mountedSources(projectDir, rootHtml, rootCompSrcPath),
+  );
   const rootResult = await lintHyperframeHtml(rootHtml, {
     ...hostOptions,
     filePath: indexPath,
     compSrcPath: rootFile,
     externalStyles: collectExternalStyles(projectDir, rootHtml, rootCompSrcPath),
+    projectFontFamilies,
   });
   results.push({ file: rootFile, result: rootResult, contentHash: contentDigest(rootHtml) });
   totalErrors += rootResult.errorCount;
@@ -262,6 +310,7 @@ export async function lintProject(
         isSubComposition: true,
         compSrcPath,
         externalStyles: collectExternalStyles(projectDir, html, compSrcPath),
+        projectFontFamilies,
       });
       results.push({
         file: `compositions/${file}`,
